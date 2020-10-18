@@ -55,7 +55,12 @@ class TinyBobNet:
 model = TinyBobNet()
 optim = optim.SGD([model.l1, model.l2], lr=0.001)
 
-# ... and complete like pytorch
+# ... and complete like pytorch, with (x,y) data
+
+out = model.forward(x)
+loss = out.mul(y).mean()
+loss.backward()
+optim.step()
 ```
 
 ### TODO (to make real neural network library)

@@ -41,14 +41,14 @@ for i in (t := trange(1000)):
   y = Tensor(y)
   
   # network
-  outs = model.forward(x)
+  out = model.forward(x)
 
   # NLL loss function
-  loss = outs.mul(y).mean()
+  loss = out.mul(y).mean()
   loss.backward()
   optim.step()
   
-  cat = np.argmax(outs.data, axis=1)
+  cat = np.argmax(out.data, axis=1)
   accuracy = (cat == Y).mean()
   
   # printing
