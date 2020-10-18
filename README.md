@@ -2,7 +2,9 @@
 
 For something in between a grad and a karpathy/micrograd
 
-The Tensor class is a wrapper around a numpy array
+This may not be the best deep learning framework, but it is a deep learning framework.
+
+The Tensor class is a wrapper around a numpy array, except it does Tensor things.
 
 ### Example
 
@@ -32,4 +34,10 @@ z.backward()
 print(x.grad)  # dz/dx
 print(y.grad)  # dz/dy
 ```
+
+
+### TODO (to make real neural network library)
+
+* Implement convolutions
+* Implement Adam optimizer
 

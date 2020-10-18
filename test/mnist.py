@@ -27,8 +27,15 @@ def layer_init(m, h):
   ret = np.random.uniform(-1., 1., size=(m,h))/np.sqrt(m*h)
   return ret.astype(np.float32)
 
-l1 = Tensor(layer_init(784, 128))
-l2 = Tensor(layer_init(128, 10))
+class TinyBobNet:
+  def __init__(self):
+    self.l1 = Tensor(layer_init(784, 128))
+    self.l2 = Tensor(layer_init(128, 10))
+
+  def forward(self, x):
+    return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
+
+model = TinyBobNet()
 
 lr = 0.01
 BS = 128
@@ -42,40 +49,33 @@ for i in (t := trange(1000)):
   y[range(y.shape[0]),Y] = -1.0
   y = Tensor(y)
   
-  x = x.dot(l1)
-  x = x.relu()
-  x = x_l2 = x.dot(l2)
-  x = x.logsoftmax()
-  x = x.mul(y)
-  x = x.mean()
-  x.backward()
+  # network
+  outs = model.forward(x)
+
+  # NLL loss function
+  loss = outs.mul(y).mean()
+  loss.backward()
   
-  loss = x.data
-  cat = np.argmax(x_l2.data, axis=1)
+  cat = np.argmax(outs.data, axis=1)
   accuracy = (cat == Y).mean()
   
   # SGD
-  l1.data = l1.data - lr*l1.grad
-  l2.data = l2.data - lr*l2.grad
+  model.l1.data = model.l1.data - lr*model.l1.grad
+  model.l2.data = model.l2.data - lr*model.l2.grad
   
+  # printing
+  loss = loss.data
   losses.append(loss)
   accuracies.append(accuracy)
   t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
 
-# numpy forward pass
-def forward(x):
-  x = x.dot(l1.data)
-  x = np.maximum(x, 0)
-  x = x.dot(l2.data)
-  return x
-
+# evaluate
 def numpy_eval():
-  Y_test_preds_out = forward(X_test.reshape((-1, 28*28)))
-  Y_test_preds = np.argmax(Y_test_preds_out, axis=1)
+  Y_test_preds_out = model.forward(Tensor(X_test.reshape((-1, 28*28))))
+  Y_test_preds = np.argmax(Y_test_preds_out.data, axis=1)
   return (Y_test == Y_test_preds).mean()
 
 accuracy = numpy_eval()
 print("test set accuracy is %f" % accuracy)
 assert accuracy > 0.95
-
 
