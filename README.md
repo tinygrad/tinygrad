@@ -38,6 +38,7 @@ print(y.grad)  # dz/dy
 
 ### TODO (to make real neural network library)
 
+* Implement gradcheck (numeric)
 * Implement convolutions
 * Implement Adam optimizer
 
