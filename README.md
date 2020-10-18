@@ -37,7 +37,11 @@ print(x.grad)  # dz/dx
 print(y.grad)  # dz/dy
 ```
 
-### You can even train neural networks with tinygrad (from test/mnist.py)
+### Neural networks?
+
+It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD and Adam implemented) from tinygrad.optim, write some boilerplate minibatching code, and you have all you need.
+
+### Neural network example (from test/mnist.py)
 
 ```python
 from tinygrad.tensor import Tensor
