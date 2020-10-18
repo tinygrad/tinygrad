@@ -40,5 +40,4 @@ print(y.grad)  # dz/dy
 
 * Implement gradcheck (numeric)
 * Implement convolutions
-* Implement Adam optimizer
 

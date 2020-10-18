@@ -28,6 +28,7 @@ class TinyBobNet:
 
 model = TinyBobNet()
 optim = optim.SGD([model.l1, model.l2], lr=0.01)
+#optim = optim.Adam([model.l1, model.l2], lr=0.001)
 
 BS = 128
 losses, accuracies = [], []
@@ -50,7 +51,6 @@ for i in (t := trange(1000)):
   
   cat = np.argmax(outs.data, axis=1)
   accuracy = (cat == Y).mean()
-  
   
   # printing
   loss = loss.data
