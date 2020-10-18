@@ -37,6 +37,25 @@ print(x.grad)  # dz/dx
 print(y.grad)  # dz/dy
 ```
 
+### You can even train neural networks with tinygrad (from test/mnist.py)
+
+```python
+from tinygrad.tensor import Tensor
+import tinygrad.optim as optim
+
+class TinyBobNet:
+  def __init__(self):
+    self.l1 = Tensor(layer_init(784, 128))
+    self.l2 = Tensor(layer_init(128, 10))
+
+  def forward(self, x):
+    return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
+
+model = TinyBobNet()
+optim = optim.SGD([model.l1, model.l2], lr=0.001)
+
+# ... and complete like pytorch
+```
 
 ### TODO (to make real neural network library)
 
