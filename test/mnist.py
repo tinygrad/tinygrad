@@ -3,17 +3,13 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.utils import layer_init_uniform, fetch_mnist
 import tinygrad.optim as optim
-
 from tqdm import trange
-
-# load the mnist dataset
-
-X_train, Y_train, X_test, Y_test = fetch_mnist()
-
-# train a model
-
 np.random.seed(1337)
 
+# load the mnist dataset
+X_train, Y_train, X_test, Y_test = fetch_mnist()
+
+# create a model
 class TinyBobNet:
   def __init__(self):
     self.l1 = Tensor(layer_init_uniform(784, 128))
@@ -21,8 +17,6 @@ class TinyBobNet:
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
-
-# optimizer
 
 model = TinyBobNet()
 optim = optim.SGD([model.l1, model.l2], lr=0.001)
