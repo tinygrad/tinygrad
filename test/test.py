@@ -33,8 +33,8 @@ def test_pytorch():
   return outx.detach().numpy(), x.grad, W.grad
 
 for x,y in zip(test_tinygrad(), test_pytorch()):
-	print(x,y)
-	np.testing.assert_allclose(x, y, atol=1e-6)
-	
+  print(x,y)
+  np.testing.assert_allclose(x, y, atol=1e-6)
+  
 
 
