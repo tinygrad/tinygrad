@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import numpy as np
-from tensor import Tensor
+from tinygrad.tensor import Tensor
 from tqdm import trange
 
 # load the mnist dataset
@@ -74,5 +74,8 @@ def numpy_eval():
   Y_test_preds = np.argmax(Y_test_preds_out, axis=1)
   return (Y_test == Y_test_preds).mean()
 
-print("test set accuracy is %f" % numpy_eval())
+accuracy = numpy_eval()
+print("test set accuracy is %f" % accuracy)
+assert accuracy > 0.95
+
 

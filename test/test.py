@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from tensor import Tensor
+from tinygrad.tensor import Tensor
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
