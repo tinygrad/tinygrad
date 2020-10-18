@@ -8,7 +8,7 @@ from tqdm import trange
 def fetch(url):
   import requests, gzip, os, hashlib, numpy
   fp = os.path.join("/tmp", hashlib.md5(url.encode('utf-8')).hexdigest())
-  if not os.path.isfile(fp):
+  if os.path.isfile(fp):
     with open(fp, "rb") as f:
       dat = f.read()
   else:
