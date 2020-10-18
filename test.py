@@ -14,7 +14,8 @@ def test_tinygrad():
   outr = out.relu()
   outl = outr.logsoftmax()
   outm = outl.mul(m)
-  outx = outm.sum()
+  outa = outm.add(m)
+  outx = outa.sum()
   outx.backward()
   return outx.data, x.grad, W.grad
 
@@ -26,7 +27,8 @@ def test_pytorch():
   outr = out.relu()
   outl = torch.nn.functional.log_softmax(outr, dim=1)
   outm = outl.mul(m)
-  outx = outm.sum()
+  outa = outm.add(m)
+  outx = outa.sum()
   outx.backward()
   return outx.detach().numpy(), x.grad, W.grad
 

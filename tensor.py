@@ -78,6 +78,15 @@ class Mul(Function):
     return y*grad_output, x*grad_output
 register('mul', Mul)
 
+class Add(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    return x+y
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return grad_output, grad_output
+register('add', Add)
     
 class ReLU(Function):
   @staticmethod
