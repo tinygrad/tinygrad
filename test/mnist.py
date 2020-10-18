@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.nn import layer_init, SGD
 from tinygrad.utils import fetch_mnist
+import tinygrad.optim as optim
 
 from tqdm import trange
 
@@ -11,6 +11,10 @@ from tqdm import trange
 X_train, Y_train, X_test, Y_test = fetch_mnist()
 
 # train a model
+
+def layer_init(m, h):
+  ret = np.random.uniform(-1., 1., size=(m,h))/np.sqrt(m*h)
+  return ret.astype(np.float32)
 
 class TinyBobNet:
   def __init__(self):
@@ -22,9 +26,8 @@ class TinyBobNet:
 
 # optimizer
 
-
 model = TinyBobNet()
-optim = SGD([model.l1, model.l2], lr=0.01)
+optim = optim.SGD([model.l1, model.l2], lr=0.01)
 
 BS = 128
 losses, accuracies = [], []
