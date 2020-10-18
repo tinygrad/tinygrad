@@ -35,9 +35,20 @@ class TinyBobNet:
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
 
-model = TinyBobNet()
+# optimizer
 
-lr = 0.01
+class SGD:
+  def __init__(self, tensors, lr):
+    self.tensors = tensors
+    self.lr = lr
+
+  def step(self):
+    for t in self.tensors:
+      t.data -= self.lr * t.grad
+
+model = TinyBobNet()
+optim = SGD([model.l1, model.l2], lr=0.01)
+
 BS = 128
 losses, accuracies = [], []
 for i in (t := trange(1000)):
@@ -55,13 +66,11 @@ for i in (t := trange(1000)):
   # NLL loss function
   loss = outs.mul(y).mean()
   loss.backward()
+  optim.step()
   
   cat = np.argmax(outs.data, axis=1)
   accuracy = (cat == Y).mean()
   
-  # SGD
-  model.l1.data = model.l1.data - lr*model.l1.grad
-  model.l2.data = model.l2.data - lr*model.l2.grad
   
   # printing
   loss = loss.data

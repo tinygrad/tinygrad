@@ -37,7 +37,8 @@ class Tensor:
       grads = [grads]
     for t,g in zip(self._ctx.parents, grads):
       if g.shape != t.data.shape:
-        print("grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.data.shape))
+        print("grad shape must match tensor shape in %r, %r != %r" %
+          (self._ctx, g.shape, t.data.shape))
         assert(False)
       t.grad = g
       t.backward(False)
@@ -46,7 +47,7 @@ class Tensor:
     div = Tensor(np.array([1/self.data.size]))
     return self.sum().mul(div)
 
-# The Function is the Context
+# An instantiation of the Function is the Context
 class Function:
   def __init__(self, *tensors):
     self.parents = tensors
