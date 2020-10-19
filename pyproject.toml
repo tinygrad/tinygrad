@@ -20,4 +20,4 @@ requires = ["poetry>=0.12"]
 build-backend = "poetry.masonry.api"
 
 [tool.pytest.ini_options]
-addopts = "-n auto"
+addopts = "-n 1"

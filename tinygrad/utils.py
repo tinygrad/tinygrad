@@ -27,9 +27,8 @@ def fetch_mnist():
         data = None
   if data is None:
     data = requests.get(url, timeout=10).content
-    with open(fp + ".lock", "wb") as f:
+    with open(fp, "wb") as f:
       f.write(data)
-    os.rename(fp + ".lock", fp)
   with np.load(fp, allow_pickle=True) as f:
     X_train, Y_train = f['x_train'], f['y_train']
     X_test, Y_test = f['x_test'], f['y_test']
