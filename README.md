@@ -2,7 +2,7 @@
 
 ![Unit Tests](https://github.com/geohot/tinygrad/workflows/Unit%20Tests/badge.svg)
 
-For something in between a grad and a karpathy/micrograd
+For something in between a pytorch and a karpathy/micrograd
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
