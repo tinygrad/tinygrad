@@ -19,21 +19,15 @@ class TinyBobNet:
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
 
 
-@pytest.fixture(scope="module")
-def minst_data():
-  # load the mnist dataset
-  return fetch_mnist()
-
-
 @pytest.mark.parametrize(
   "optim_class", [
     optim.SGD,
     optim.Adam,
   ]
 )
-def test_mnist(optim_class, minst_data):
+def test_mnist(optim_class):
 
-  X_train, Y_train, X_test, Y_test = minst_data
+  X_train, Y_train, X_test, Y_test = fetch_mnist()
 
   model = TinyBobNet()
   optim = optim_class([model.l1, model.l2], lr=0.001)
@@ -76,3 +70,7 @@ def test_mnist(optim_class, minst_data):
   accuracy = numpy_eval()
   print("test set accuracy is %f" % accuracy)
   assert accuracy > 0.95
+
+
+if __name__ == "__main__":
+  pytest.main([__file__])

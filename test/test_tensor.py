@@ -33,3 +33,8 @@ def test():
   for x,y in zip(tinygrad_data(), pytorch_data()):
     print(x,y)
     np.testing.assert_allclose(x, y, atol=1e-5)
+
+
+if __name__ == "__main__":
+  import pytest
+  pytest.main([__file__])

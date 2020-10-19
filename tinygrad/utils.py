@@ -1,23 +1,34 @@
+from hashlib import md5
+import os
+
 import numpy as np
+import requests
+
 
 def layer_init_uniform(m, h):
   ret = np.random.uniform(-1., 1., size=(m,h))/np.sqrt(m*h)
   return ret.astype(np.float32)
 
+
 def fetch_mnist():
-  def fetch(url):
-    import requests, gzip, os, hashlib, numpy
-    fp = os.path.join("/tmp", hashlib.md5(url.encode('utf-8')).hexdigest())
-    if os.path.isfile(fp):
-      with open(fp, "rb") as f:
-        dat = f.read()
-    else:
-      with open(fp, "wb") as f:
-        dat = requests.get(url, timeout=10).content
-        f.write(dat)
-    return numpy.frombuffer(gzip.decompress(dat), dtype=numpy.uint8).copy()
-  X_train = fetch("http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28, 28))
-  Y_train = fetch("http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz")[8:]
-  X_test = fetch("http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28, 28))
-  Y_test = fetch("http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz")[8:]
+  if hasattr(fetch_mnist, "data"):
+    return fetch_mnist.data
+  filename = "mnist.npz"
+  url = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/" + filename
+  md5_hash = "8a61469f7ea1b51cbae51d4f78837e45"
+  fp = os.path.join("/tmp", md5_hash)
+  data = None
+  if os.path.exists(fp):
+    with open(fp, "rb") as f:
+      data = f.read()
+      if md5(data).hexdigest() != md5_hash:
+        data = None
+  if data is None:
+    data = requests.get(url, timeout=10).content
+    with open(fp, "wb") as f:
+      f.write(data)
+  with np.load(fp, allow_pickle=True) as f:
+    X_train, Y_train = f['x_train'], f['y_train']
+    X_test, Y_test = f['x_test'], f['y_test']
+  fetch_mnist.data = (X_train, Y_train, X_test, Y_test)
   return X_train, Y_train, X_test, Y_test
