@@ -11,6 +11,7 @@ def layer_init_uniform(m, h):
 
 
 def fetch_mnist():
+  # Cache within session
   if hasattr(fetch_mnist, "data"):
     return fetch_mnist.data
   filename = "mnist.npz"
@@ -18,6 +19,7 @@ def fetch_mnist():
   md5_hash = "8a61469f7ea1b51cbae51d4f78837e45"
   fp = os.path.join("/tmp", md5_hash)
   data = None
+  # Cache across sessions
   if os.path.exists(fp):
     with open(fp, "rb") as f:
       data = f.read()
@@ -25,8 +27,9 @@ def fetch_mnist():
         data = None
   if data is None:
     data = requests.get(url, timeout=10).content
-    with open(fp, "wb") as f:
+    with open(fp + ".lock", "wb") as f:
       f.write(data)
+    os.rename(fp + ".lock", fp)
   with np.load(fp, allow_pickle=True) as f:
     X_train, Y_train = f['x_train'], f['y_train']
     X_test, Y_test = f['x_test'], f['y_test']
