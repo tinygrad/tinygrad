@@ -16,10 +16,9 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.8
+    - name: Install Poetry
+      run: curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python -
     - name: Install Dependencies
-      run: pip install ipython numpy tqdm requests torch
-    - name: Run mnist test
-      run: ipython3 test/mnist.py
-    - name: Run compare to torch test
-      run: ipython3 test/test.py
-
+      run: poetry install
+    - name: Run Tests
+      run: poetry run pytest -n auto

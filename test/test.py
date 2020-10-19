@@ -1,13 +1,13 @@
 import numpy as np
 import torch
-import unittest
+
 from tinygrad.tensor import Tensor, Conv2D
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-class TestTinygrad(unittest.TestCase):
+class TestTinygrad:
   def test_backward_pass(self):
     def test_tinygrad():
       x = Tensor(x_init)
