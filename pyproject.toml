@@ -14,10 +14,11 @@ pytest = "^6.1.1"
 torch = "^1.6.0"
 pytest-xdist = "^2.1.0"
 requests = "^2.24.0"
+filelock = "^3.0.12"
 
 [build-system]
 requires = ["poetry>=0.12"]
 build-backend = "poetry.masonry.api"
 
 [tool.pytest.ini_options]
-addopts = "-n 1"
+addopts = "-n auto"
