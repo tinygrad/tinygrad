@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "tinygrad"
+version = "0.1.0"
+description = "Something in between a pytorch and a karpathy/micrograd"
+authors = ["George Hotz <geohot@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+numpy = "^1.19.2"
+
+[tool.poetry.dev-dependencies]
+tqdm = "^4.50.2"
+pytest = "^6.1.1"
+torch = "^1.6.0"
+pytest-xdist = "^2.1.0"
+requests = "^2.24.0"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
