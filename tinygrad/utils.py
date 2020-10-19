@@ -13,7 +13,7 @@ def fetch_mnist():
         dat = f.read()
     else:
       with open(fp, "wb") as f:
-        dat = requests.get(url, timeout=1).content
+        dat = requests.get(url, timeout=10).content
         f.write(dat)
     return numpy.frombuffer(gzip.decompress(dat), dtype=numpy.uint8).copy()
   X_train = fetch("http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28, 28))
