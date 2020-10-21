@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.utils import layer_init_uniform, fetch_mnist
@@ -18,16 +19,35 @@ class TinyBobNet:
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
 
-model = TinyBobNet()
-optim = optim.SGD([model.l1, model.l2], lr=0.001)
-#optim = optim.Adam([model.l1, model.l2], lr=0.001)
+# create a model with a conv layer
+# perfect if you like slow speeds and very little accuracy gains
+class TinyConvNet:
+  def __init__(self):
+    self.chans = 4
+    self.c1 = Tensor(layer_init_uniform(self.chans,1,3,3))
+    self.l1 = Tensor(layer_init_uniform(26*26*self.chans, 128))
+    self.l2 = Tensor(layer_init_uniform(128, 10))
+
+  def forward(self, x):
+    x.data = x.data.reshape((-1, 1, 28, 28)) # hacks
+    x = x.conv2d(self.c1).reshape(Tensor(np.array((-1, 26*26*self.chans)))).relu()
+    return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
+
+if os.getenv("CONV") == "1":
+  model = TinyConvNet()
+  optim = optim.Adam([model.c1, model.l1, model.l2], lr=0.001)
+  steps = 400
+else:
+  model = TinyBobNet()
+  optim = optim.SGD([model.l1, model.l2], lr=0.001)
+  steps = 1000
 
 BS = 128
 losses, accuracies = [], []
-for i in (t := trange(1000)):
+for i in (t := trange(steps)):
   samp = np.random.randint(0, X_train.shape[0], size=(BS))
   
-  x = Tensor(X_train[samp].reshape((-1, 28*28)))
+  x = Tensor(X_train[samp].reshape((-1, 28*28)).astype(np.float32))
   Y = Y_train[samp]
   y = np.zeros((len(samp),10), np.float32)
   # correct loss for NLL, torch NLL loss returns one per row
