@@ -1,4 +1,6 @@
 import numpy as np
+
+from tinygrad.utils import mask_like
 from tinygrad.tensor import Tensor
 
 def jacobian(func, input):
@@ -17,11 +19,6 @@ def jacobian(func, input):
     for i, grad in enumerate(input.grad.reshape(-1)):
       J[o,i] = grad
   return J
-
-def mask_like(like, mask_inx, mask_value = 1.0):
-  mask = np.zeros_like(like).reshape(-1)
-  mask[mask_inx] = mask_value
-  return mask.reshape(like.shape)
 
 def numerical_jacobian(func, input, eps = 1e-6):
   output = func(input)
@@ -45,5 +42,4 @@ def numerical_jacobian(func, input, eps = 1e-6):
 def gradcheck(func, input, eps = 1e-06, atol = 1e-5, rtol = 0.001):
   NJ = numerical_jacobian(func, input, eps)
   J = jacobian(func, input)
-
   return np.allclose(J, NJ, atol=atol, rtol=rtol)
