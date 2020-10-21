@@ -33,12 +33,20 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_conv2d(self):
-    x = torch.randn((5,2,10,7))
-    w = torch.randn((4,2,3,3))
+    x = torch.randn((5,2,10,7), requires_grad=True)
+    w = torch.randn((4,2,3,3), requires_grad=True)
+    xt = Tensor(x.detach().numpy())
+    wt = Tensor(w.detach().numpy())
 
     out = torch.nn.functional.conv2d(x,w)
-    ret = Conv2D.apply(Conv2D, Tensor(x.numpy()), Tensor(w.numpy()))
-    np.testing.assert_allclose(ret.data, out.numpy(), atol=1e-5)
+    ret = Conv2D.apply(Conv2D, xt, wt)
+    np.testing.assert_allclose(ret.data, out.detach().numpy(), atol=1e-5)
+
+    out.mean().backward()
+    ret.mean().backward()
+
+    np.testing.assert_allclose(w.grad, wt.grad, atol=1e-5)
+    np.testing.assert_allclose(x.grad, xt.grad, atol=1e-5)
 
     
 if __name__ == '__main__':

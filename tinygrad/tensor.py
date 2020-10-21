@@ -157,6 +157,7 @@ register('logsoftmax', LogSoftmax)
 class Conv2D(Function):
   @staticmethod
   def forward(ctx, x, w):
+    ctx.save_for_backward(x, w)
     cout,cin,H,W = w.shape
     ret = np.zeros((x.shape[0], cout, x.shape[2]-(H-1), x.shape[3]-(W-1)), dtype=w.dtype)
     for j in range(H):
@@ -169,6 +170,19 @@ class Conv2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise Exception("please write backward pass for Conv2D")
+    x, w = ctx.saved_tensors
+    dx = np.zeros_like(x)
+    dw = np.zeros_like(w)
+    cout,cin,H,W = w.shape
+    for j in range(H):
+      for i in range(W):
+        tw = w[:, :, j, i]
+        for Y in range(grad_output.shape[2]):
+          for X in range(grad_output.shape[3]):
+            gg = grad_output[:, :, Y, X]
+            tx = x[:, :, Y+j, X+i]
+            dx[:, :, Y+j, X+i] += gg.dot(tw)
+            dw[:, :, j, i] += gg.T.dot(tx)
+    return dx, dw
 register('conv2d', Conv2D)
 
