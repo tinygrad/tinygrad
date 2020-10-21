@@ -78,13 +78,14 @@ class TestMNIST(unittest.TestCase):
 
     # evaluate
     def numpy_eval():
-      Y_test_preds_out = model.forward(Tensor(X_test.reshape((-1, 28*28))))
+      Y_test_preds_out = model.forward(Tensor(X_test.reshape((-1, 28*28)).astype(np.float32)))
       Y_test_preds = np.argmax(Y_test_preds_out.data, axis=1)
       return (Y_test == Y_test_preds).mean()
 
     accuracy = numpy_eval()
     print("test set accuracy is %f" % accuracy)
     assert accuracy > 0.95
+
 
 if __name__ == '__main__':
   unittest.main()
