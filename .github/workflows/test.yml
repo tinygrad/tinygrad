@@ -17,9 +17,6 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install ipython numpy tqdm requests torch
-    - name: Run mnist test
-      run: ipython3 test/mnist.py
-    - name: Run compare to torch test
-      run: ipython3 test/test.py
-
+      run: pip install pytest numpy tqdm requests torch
+    - name: Run Pytest
+      run: python -m pytest -s -v
