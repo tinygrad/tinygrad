@@ -70,5 +70,5 @@ optim.step()
 ### TODO (to make real neural network library)
 
 * Implement gradcheck (numeric)
-* Implement convolutions
+* Make convolutions not slow while removing lines of code (NO CYTHON!)
 
