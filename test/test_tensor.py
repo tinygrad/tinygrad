@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import unittest
 from tinygrad.tensor import Tensor, Conv2D
-from tinygrad.gradcheck import numerical_jacobian, gradcheck
+from tinygrad.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
@@ -40,18 +40,16 @@ class TestTinygrad(unittest.TestCase):
     torch_x = torch.tensor(x, requires_grad=True)
     torch_W = torch.tensor(W, requires_grad=True)
     torch_func = lambda x: torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
-    torch_out = torch_func(torch_x)
-
-    # autograd.grad computes the _sum_ of gradients of given tensors
-    J_sum = torch.autograd.grad(list(torch_out[0]), torch_x)[0].squeeze().numpy()
+    PJ = torch.autograd.functional.jacobian(torch_func, torch_x).squeeze().numpy()
 
     tiny_x = Tensor(x)
     tiny_W = Tensor(W)
     tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
+    J = jacobian(tiny_func, tiny_x)
     NJ = numerical_jacobian(tiny_func, tiny_x)
-    NJ_sum = NJ.sum(axis = -1)
 
-    np.testing.assert_allclose(J_sum, NJ_sum, atol = 1e-5)
+    np.testing.assert_allclose(PJ, J, atol = 1e-5)
+    np.testing.assert_allclose(PJ, NJ, atol = 1e-5)
 
   def test_gradcheck(self):
     class TinyModel:
