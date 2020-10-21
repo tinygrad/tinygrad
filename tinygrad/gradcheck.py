@@ -78,11 +78,8 @@ def gradcheck(model, input, eps = 1e-06, atol = 1e-5, rtol = 0.001):
 
   returns:
       test_passed : Bool, whether the test passed
-      J : Analytical Jacobian
-      NJ : Finite-Difference approx. Jacobian
   """
   NJ = numerical_jacobian(model, input, eps)
   J = jacobian(model, input)
 
-  test_passed = np.allclose(J, NJ, atol=atol, rtol=rtol)
-  return test_passed, J, NJ
+  return np.allclose(J, NJ, atol=atol, rtol=rtol)
