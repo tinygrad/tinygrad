@@ -33,6 +33,26 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  def test_jacobian(self):
+    W = np.random.RandomState(1337).random((10, 5))
+    x = np.random.RandomState(7331).random((1, 10)) - 0.5
+
+    torch_x = torch.tensor(x, requires_grad=True)
+    torch_W = torch.tensor(W, requires_grad=True)
+    torch_func = lambda x: torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
+    torch_out = torch_func(torch_x)
+
+    # autograd.grad computes the _sum_ of gradients of given tensors
+    J_sum = torch.autograd.grad(list(torch_out[0]), torch_x)[0].squeeze().numpy()
+
+    tiny_x = Tensor(x)
+    tiny_W = Tensor(W)
+    tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
+    NJ = numerical_jacobian(tiny_func, tiny_x)
+    NJ_sum = NJ.sum(axis = -1)
+
+    np.testing.assert_allclose(J_sum, NJ_sum, atol = 1e-5)
+
   def test_gradcheck(self):
     class TinyModel:
       def __init__(self, weights_init):
@@ -53,25 +73,16 @@ class TestTinygrad(unittest.TestCase):
 
     torch_input = torch.tensor(input_data, requires_grad = True)
     torch_model = TorchModel(layer_weights)
-    torch_out = torch_model(torch_input)
-    # autograd.grad computes the _sum_ of gradients of given tensors
-    J_sum = torch.autograd.grad(list(torch_out[0]), torch_input)[0].squeeze().numpy()
 
     tiny_model = TinyModel(layer_weights)
     tiny_input = Tensor(input_data)
-    tiny_out = tiny_model.forward(tiny_input)
-    NJ = numerical_jacobian(tiny_model, tiny_input)
-    NJ_sum = NJ.sum(axis = -1)
-
-    # checking the numerical approx. of J is close to the one provided autograd
-    np.testing.assert_allclose(J_sum, NJ_sum, atol = 1e-5)
 
     # test gradcheck
-    gradcheck_test, _, _ = gradcheck(tiny_model, tiny_input)
+    gradcheck_test, _, _ = gradcheck(tiny_model.forward, tiny_input)
     self.assertTrue(gradcheck_test)
 
     # coarse approx. since a "big" eps and the non-linearities of the model
-    gradcheck_test, j, nj = gradcheck(tiny_model, tiny_input, eps = 0.1)
+    gradcheck_test, j, nj = gradcheck(tiny_model.forward, tiny_input, eps = 0.1)
     self.assertFalse(gradcheck_test)
 
   def test_conv2d(self):
