@@ -1,5 +1,10 @@
 import numpy as np
 
+def mask_like(like, mask_inx, mask_value = 1.0):
+  mask = np.zeros_like(like).reshape(-1)
+  mask[mask_inx] = mask_value
+  return mask.reshape(like.shape)
+
 def layer_init_uniform(*x):
   ret = np.random.uniform(-1., 1., size=x)/np.sqrt(np.prod(x))
   return ret.astype(np.float32)
