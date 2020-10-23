@@ -2,12 +2,6 @@
 from functools import partialmethod
 import numpy as np
 
-# optional jit
-try:
-  from numba import jit
-except ImportError:
-  jit = lambda x: x
-
 # **** start with two base classes ****
 
 class Tensor:
@@ -180,42 +174,29 @@ register('logsoftmax', LogSoftmax)
 
 class Conv2D(Function):
   @staticmethod
-  @jit
-  def inner_forward(x, w):
+  def forward(ctx, x, w):
+    ctx.save_for_backward(x, w)
     cout,cin,H,W = w.shape
     ret = np.zeros((x.shape[0], cout, x.shape[2]-(H-1), x.shape[3]-(W-1)), dtype=w.dtype)
-    for j in range(H):
-      for i in range(W):
-        tw = w[:, :, j, i]
-        for Y in range(ret.shape[2]):
-          for X in range(ret.shape[3]):
-            ret[:, :, Y, X] += x[:, :, Y+j, X+i].dot(tw.T)
+    tw = w.reshape(w.shape[0], -1).T
+    for Y in range(ret.shape[2]):
+      for X in range(ret.shape[3]):
+        tx = x[:, :, Y:Y+H, X:X+W].reshape(x.shape[0], -1)
+        ret[:, :, Y, X] = tx.dot(tw)
     return ret
 
   @staticmethod
-  @jit
-  def inner_backward(grad_output, x, w):
-    dx = np.zeros_like(x)
-    dw = np.zeros_like(w)
-    cout,cin,H,W = w.shape
-    for j in range(H):
-      for i in range(W):
-        tw = w[:, :, j, i]
-        for Y in range(grad_output.shape[2]):
-          for X in range(grad_output.shape[3]):
-            gg = grad_output[:, :, Y, X]
-            tx = x[:, :, Y+j, X+i]
-            dx[:, :, Y+j, X+i] += gg.dot(tw)
-            dw[:, :, j, i] += gg.T.dot(tx)
-    return dx, dw
-
-  @staticmethod
-  def forward(ctx, x, w):
-    ctx.save_for_backward(x, w)
-    return Conv2D.inner_forward(x, w)
-
-  @staticmethod
   def backward(ctx, grad_output):
-    return Conv2D.inner_backward(grad_output, *ctx.saved_tensors)
+    x, w = ctx.saved_tensors
+    cout,cin,H,W = w.shape
+    dx, dw = np.zeros_like(x), np.zeros_like(w)
+    tw = w.reshape(w.shape[0], -1)
+    for Y in range(grad_output.shape[2]):
+      for X in range(grad_output.shape[3]):
+        gg = grad_output[:, :, Y, X]
+        tx = x[:, :, Y:Y+H, X:X+W].reshape(x.shape[0], -1)
+        dx[:, :, Y:Y+H, X:X+W] += gg.dot(tw).reshape(dx.shape[0], dx.shape[1], H, W)
+        dw += gg.T.dot(tx).reshape(dw.shape)
+    return dx, dw
 register('conv2d', Conv2D)
 
