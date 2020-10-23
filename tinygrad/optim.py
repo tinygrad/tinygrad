@@ -35,3 +35,19 @@ class Adam(Optimizer):
       vhat = self.v[i] / (1. - self.b2**self.t)
       t.data -= self.lr * mhat / (np.sqrt(vhat) + self.eps)
 
+# fill the 20% uncertainty of the above optim
+class RMSprop(Optimizer):
+  def __init__(self, params, lr=0.001, decay=0.9, eps=1e-6):
+    super(RMSprop, self).__init__(params)
+    self.lr = lr
+    self.decay = decay
+    self.eps = eps
+    self.t = 0
+
+    self.v = [np.zeros_like(t.data) for t in self.params]
+
+  def step(self):
+    self.t += 1
+    for i, t in enumerate(self.params):
+      self.v[i] = self.decay * self.v[i] + (1 - self.decay) * np.square(t.grad)
+      t.data -= (self.lr / np.sqrt(self.v[i] + self.eps)) * t.grad

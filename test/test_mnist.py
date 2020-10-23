@@ -44,7 +44,8 @@ class TestMNIST(unittest.TestCase):
       steps = 400
     else:
       model = TinyBobNet()
-      optim = tinygrad_optim.SGD([model.l1, model.l2], lr=0.001)
+      # optim = tinygrad_optim.SGD([model.l1, model.l2], lr=0.001)
+      optim = tinygrad_optim.RMSprop([model.l1, model.l2], lr=0.001)
       steps = 1000
 
     BS = 128
