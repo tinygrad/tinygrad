@@ -179,28 +179,79 @@ register('logsoftmax', LogSoftmax)
 class Conv2D(Function):
   @staticmethod
   def forward(ctx, x, w):
-    ctx.save_for_backward(x, w)
     cout,cin,H,W = w.shape
-    ret = np.zeros((x.shape[0], cout, x.shape[2]-(H-1), x.shape[3]-(W-1)), dtype=w.dtype)
-    tw = w.reshape(w.shape[0], -1).T
-    for Y in range(ret.shape[2]):
-      for X in range(ret.shape[3]):
-        tx = x[:, :, Y:Y+H, X:X+W].reshape(x.shape[0], -1)
+    tw = w.reshape(cout, -1).T
+    bs,oy,ox = x.shape[0], x.shape[2]-(H-1), x.shape[3]-(W-1)
+
+    ctx.save_for_backward(x, w)
+    ret = np.zeros((bs, cout, oy, ox), dtype=w.dtype)
+    for Y in range(oy):
+      for X in range(ox):
+        tx = x[:, :, Y:Y+H, X:X+W].reshape(bs, -1)
         ret[:, :, Y, X] = tx.dot(tw)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
+    bs,_,oy,ox = grad_output.shape
     x, w = ctx.saved_tensors
     cout,cin,H,W = w.shape
+    tw = w.reshape(cout, -1)
+
     dx, dw = np.zeros_like(x), np.zeros_like(w)
-    tw = w.reshape(w.shape[0], -1)
     for Y in range(grad_output.shape[2]):
       for X in range(grad_output.shape[3]):
         gg = grad_output[:, :, Y, X]
         tx = x[:, :, Y:Y+H, X:X+W].reshape(x.shape[0], -1)
-        dx[:, :, Y:Y+H, X:X+W] += gg.dot(tw).reshape(dx.shape[0], dx.shape[1], H, W)
         dw += gg.T.dot(tx).reshape(dw.shape)
+        dx[:, :, Y:Y+H, X:X+W] += gg.dot(tw).reshape(dx.shape[0], dx.shape[1], H, W)
     return dx, dw
-register('conv2d', Conv2D)
+#register('conv2d', Conv2D)
+
+class FastConv2D(Function):
+  @staticmethod
+  def forward(ctx, x, w):
+    cout,cin,H,W = w.shape
+    tw = w.reshape(cout, -1).T
+    bs,oy,ox = x.shape[0], x.shape[2]-(H-1), x.shape[3]-(W-1)
+
+    # im2col
+    tx = np.empty((oy, ox, bs, cin*W*H), dtype=x.dtype)
+    for Y in range(oy):
+      for X in range(ox):
+        tx[Y, X] = x[:, :, Y:Y+H, X:X+W].reshape(bs, -1)
+    tx = tx.reshape(-1, cin*W*H)
+
+    # save the im2col output
+    ctx.save_for_backward(tx, w)
+
+    # now the conv is a GEMM
+    ret = tx.dot(tw).reshape(oy, ox, bs, cout)
+
+    # order correctly
+    return np.moveaxis(ret, [0,1,2,3], [2,3,0,1])
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    bs,_,oy,ox = grad_output.shape
+    tx, w = ctx.saved_tensors
+    cout,cin,H,W = w.shape
+    tw = w.reshape(w.shape[0], -1)
+
+    # order correctly
+    gg = np.moveaxis(grad_output, [0,1,2,3], [2,3,0,1]).reshape(-1, cout)
+
+    # dw is easy
+    dw = gg.T.dot(tx).reshape(w.shape)
+
+    # dx is harder
+    dxi = gg.dot(tw).reshape(oy, ox, bs, cin, H, W)
+
+    # unim2col (is there a faster way to do this?)
+    dx = np.zeros((bs, cin, oy+(H-1), ox+(W-1)), dtype=dxi.dtype)
+    for Y in range(oy):
+      for X in range(ox):
+        dx[:, :, Y:Y+H, X:X+W] += dxi[Y, X]
+    return dx, dw
+register('conv2d', FastConv2D)
 

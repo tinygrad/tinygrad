@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor, Conv2D
+from tinygrad.tensor import Tensor
 from tinygrad.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -71,7 +71,7 @@ class TestTinygrad(unittest.TestCase):
     wt = Tensor(w.detach().numpy())
 
     out = torch.nn.functional.conv2d(x,w)
-    ret = Conv2D.apply(Conv2D, xt, wt)
+    ret = Tensor.conv2d(xt, wt)
     np.testing.assert_allclose(ret.data, out.detach().numpy(), atol=1e-5)
 
     out.mean().backward()

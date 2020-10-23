@@ -22,7 +22,7 @@ class TinyBobNet:
 # create a model with a conv layer
 class TinyConvNet:
   def __init__(self):
-    conv = 7
+    conv = 5
     chans = 16
     self.c1 = Tensor(layer_init_uniform(chans,1,conv,conv))
     self.l1 = Tensor(layer_init_uniform(((28-conv+1)**2)*chans, 128))
