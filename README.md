@@ -41,11 +41,11 @@ print(y.grad)  # dz/dy
 
 It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD and Adam implemented) from tinygrad.optim, write some boilerplate minibatching code, and you have all you need.
 
-### Neural network example (from test/mnist.py)
+### Neural network example (from test/test_mnist.py)
 
 ```python
 from tinygrad.tensor import Tensor
-import tinygrad.optim as optim
+import tinygrad.optim as tinygrad_optim
 from tinygrad.utils import layer_init_uniform
 
 class TinyBobNet:
@@ -57,7 +57,8 @@ class TinyBobNet:
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
 
 model = TinyBobNet()
-optim = optim.SGD([model.l1, model.l2], lr=0.001)
+optim = tinygrad_optim.SGD([model.l1, model.l2], lr=0.001) # or
+optim = tinygrad_optim.RMSprop([model.l1, model.l2], lr=0.001)
 
 # ... and complete like pytorch, with (x,y) data
 
