@@ -24,15 +24,18 @@ class TinyBobNet:
 # perfect if you like slow speeds and very little accuracy gains
 class TinyConvNet:
   def __init__(self):
-    conv = 7
+    conv = 5
     chans = 4
     self.c1 = Tensor(layer_init_uniform(chans,1,conv,conv))
-    self.l1 = Tensor(layer_init_uniform(((28-conv+1)**2)*chans, 128))
+    self.c2 = Tensor(layer_init_uniform(chans,chans,conv,conv))
+    self.l1 = Tensor(layer_init_uniform(64, 128))
     self.l2 = Tensor(layer_init_uniform(128, 10))
 
   def forward(self, x):
     x.data = x.data.reshape((-1, 1, 28, 28)) # hacks
-    x = x.conv2d(self.c1).reshape(Tensor(np.array((x.shape[0], -1)))).relu()
+    x = x.conv2d(self.c1).maxpool2x2().relu()
+    x = x.conv2d(self.c2).maxpool2x2().relu()
+    x = x.reshape(Tensor(np.array((x.shape[0], -1))))
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
 
 
