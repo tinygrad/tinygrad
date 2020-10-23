@@ -22,6 +22,10 @@ class Tensor:
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad)
 
+  @property
+  def shape(self):
+    return self.data.shape
+
   def backward(self, allow_fill=True):
     #print("running backward on", self)
     if self._ctx is None:

@@ -24,19 +24,19 @@ class TinyBobNet:
 # perfect if you like slow speeds and very little accuracy gains
 class TinyConvNet:
   def __init__(self):
+    conv = 7
     self.chans = 4
-    self.c1 = Tensor(layer_init_uniform(self.chans,1,3,3))
-    self.l1 = Tensor(layer_init_uniform(26*26*self.chans, 128))
+    self.c1 = Tensor(layer_init_uniform(self.chans,1,conv,conv))
+    self.l1 = Tensor(layer_init_uniform(((28-conv+1)**2)*self.chans, 128))
     self.l2 = Tensor(layer_init_uniform(128, 10))
 
   def forward(self, x):
     x.data = x.data.reshape((-1, 1, 28, 28)) # hacks
-    x = x.conv2d(self.c1).reshape(Tensor(np.array((-1, 26*26*self.chans)))).relu()
+    x = x.conv2d(self.c1).reshape(Tensor(np.array((x.shape[0], -1)))).relu()
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
 
 
 class TestMNIST(unittest.TestCase):
-
   def test_mnist(self):
     if os.getenv("CONV") == "1":
       model = TinyConvNet()
