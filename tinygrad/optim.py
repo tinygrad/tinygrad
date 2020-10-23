@@ -42,12 +42,10 @@ class RMSprop(Optimizer):
     self.lr = lr
     self.decay = decay
     self.eps = eps
-    self.t = 0
 
     self.v = [np.zeros_like(t.data) for t in self.params]
 
   def step(self):
-    self.t += 1
     for i, t in enumerate(self.params):
       self.v[i] = self.decay * self.v[i] + (1 - self.decay) * np.square(t.grad)
       t.data -= (self.lr / np.sqrt(self.v[i] + self.eps)) * t.grad
