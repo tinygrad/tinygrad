@@ -1,6 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from functools import partialmethod
 import numpy as np
+from tinygrad.utils import im2col, col2im
 
 # **** start with two base classes ****
 
@@ -25,6 +26,14 @@ class Tensor:
   @property
   def shape(self):
     return self.data.shape
+
+  @staticmethod
+  def zeros(*shape):
+    return Tensor(np.zeros(shape, dtype=np.float32))
+
+  @staticmethod
+  def randn(*shape):
+    return Tensor(np.random.randn(*shape).astype(np.float32))
 
   def backward(self, allow_fill=True):
     #print("running backward on", self)
@@ -216,13 +225,9 @@ class FastConv2D(Function):
     bs,oy,ox = x.shape[0], x.shape[2]-(H-1), x.shape[3]-(W-1)
 
     # im2col
-    tx = np.empty((oy, ox, bs, cin*W*H), dtype=x.dtype)
-    for Y in range(oy):
-      for X in range(ox):
-        tx[Y, X] = x[:, :, Y:Y+H, X:X+W].reshape(bs, -1)
-    tx = tx.reshape(-1, cin*W*H)
+    tx = im2col(x, H, W)
 
-    # save the im2col output
+    # save the im2col output (OMG it's bigger!)
     ctx.save_for_backward(tx, w)
 
     # now the conv is a GEMM
@@ -245,13 +250,11 @@ class FastConv2D(Function):
     dw = gg.T.dot(tx).reshape(w.shape)
 
     # dx is harder
-    dxi = gg.dot(tw).reshape(oy, ox, bs, cin, H, W)
+    dxi = gg.dot(tw)
 
-    # unim2col (is there a faster way to do this?)
-    dx = np.zeros((bs, cin, oy+(H-1), ox+(W-1)), dtype=dxi.dtype)
-    for Y in range(oy):
-      for X in range(ox):
-        dx[:, :, Y:Y+H, X:X+W] += dxi[Y, X]
+    # if we im2col on the forward, we col2im on the backward
+    dx = col2im(dxi, H, W, oy+(H-1), ox+(W-1))
+
     return dx, dw
 register('conv2d', FastConv2D)
 
