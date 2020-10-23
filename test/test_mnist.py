@@ -74,21 +74,21 @@ def evaluate(model):
   assert accuracy > 0.95
 
 class TestMNIST(unittest.TestCase):
-  def conv(self):
+  def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam([model.c1, model.l1, model.l2], lr=0.001)
     train(model, optimizer, steps=400)
     evaluate(model)
     
-  def sgd(self):
+  def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD([model.l1, model.l2], lr=0.001)
     train(model, optimizer, steps=1000)
     evaluate(model)
     
-  def rmsprop(self):
+  def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.RMSprop([model.l1, model.l2], lr=0.0002)
