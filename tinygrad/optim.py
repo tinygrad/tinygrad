@@ -37,7 +37,7 @@ class Adam(Optimizer):
 
 # fill the 20% uncertainty of the above optim
 class RMSprop(Optimizer):
-  def __init__(self, params, lr=0.001, decay=0.9, eps=1e-6):
+  def __init__(self, params, lr=0.001, decay=0.9, eps=1e-8):
     super(RMSprop, self).__init__(params)
     self.lr = lr
     self.decay = decay

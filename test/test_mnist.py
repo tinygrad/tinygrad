@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.utils import layer_init_uniform, fetch_mnist
-import tinygrad.optim as tinygrad_optim
+import tinygrad.optim as optim
 from tqdm import trange
 np.random.seed(1337)
 
@@ -78,20 +78,20 @@ class TestMNIST(unittest.TestCase):
 
     # models
     model = TinyConvNet()
-    optim = tinygrad_optim.Adam([model.c1, model.l1, model.l2], lr=0.001)
+    optimizer = optim.Adam([model.c1, model.l1, model.l2], lr=0.001)
     steps = 400
-    train(model, optim, steps)
+    train(model, optimizer, steps)
     evaluate(model)
     
     model = TinyBobNet()
-    optim = tinygrad_optim.SGD([model.l1, model.l2], lr=0.001)
     steps = 1000
-    train(model, optim, steps)
+    optimizer = optim.SGD([model.l1, model.l2], lr=0.001)
+    train(model, optimizer, steps)
     evaluate(model)
     
-    # RMSprop
-    optim = tinygrad_optim.RMSprop([model.l1, model.l2], lr=0.001)
-    train(model, optim, steps)
+    model = TinyBobNet()
+    optimizer = optim.RMSprop([model.l1, model.l2], lr=0.001)
+    train(model, optimizer, steps)
     evaluate(model)
 
 if __name__ == '__main__':
