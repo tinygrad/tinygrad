@@ -1,0 +1,7 @@
+numpy
+# util deps
+requests
+# testing deps
+torch
+pytest
+tqdm
