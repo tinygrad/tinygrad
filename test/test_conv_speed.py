@@ -96,6 +96,8 @@ class TestConvSpeed(unittest.TestCase):
   # get torch baseline
   @classmethod 
   def setUpClass(self):
+    torch.backends.mkldnn.enabled = False
+
     conv = 3
     inter_chan, out_chan = 32, 64
     c1 = torch.randn(inter_chan,1,conv,conv, requires_grad=True)
@@ -106,30 +108,33 @@ class TestConvSpeed(unittest.TestCase):
     mp = torch.nn.MaxPool2d((2,2))
     lsm = torch.nn.LogSoftmax(dim=1)
 
-    cnt = 5
-    fpt, bpt = 0.0, 0.0
-    for i in range(1+cnt):
-      et0 = time.time()
-      x = torch.randn(128, 1, 28, 28, requires_grad=True)
-      x = mp(c2d(x,c1).relu())
-      x = mp(c2d(x,c2).relu())
-      x = x.reshape(x.shape[0], -1)
-      out = lsm(x.matmul(l1))
-      out = out.mean()
-      et1 = time.time()
-      out.backward()
-      et2 = time.time()
-      if i == 0:
-        pr = start_profile()
-      else:
-        fpt += (et1-et0)
-        bpt += (et2-et1)
+    with torch.autograd.profiler.profile(record_shapes=True) as tprof:
+      cnt = 5
+      fpt, bpt = 0.0, 0.0
+      for i in range(1+cnt):
+        et0 = time.time()
+        x = torch.randn(128, 1, 28, 28, requires_grad=True)
+        x = mp(c2d(x,c1).relu())
+        x = mp(c2d(x,c2).relu())
+        x = x.reshape(x.shape[0], -1)
+        out = lsm(x.matmul(l1))
+        out = out.mean()
+        et1 = time.time()
+        out.backward()
+        et2 = time.time()
+        if i == 0:
+          pr = start_profile()
+        else:
+          fpt += (et1-et0)
+          bpt += (et2-et1)
 
     stop_profile(pr, sort='time')
     self.fpt_baseline = (fpt*1000/cnt)
     self.bpt_baseline = (bpt*1000/cnt)
     print("forward pass:  %.3f ms" % self.fpt_baseline)
     print("backward pass: %.3f ms" % self.bpt_baseline)
+
+    print(tprof.key_averages().table(sort_by="cpu_time", row_limit=20))
 
 
 if __name__ == '__main__':
