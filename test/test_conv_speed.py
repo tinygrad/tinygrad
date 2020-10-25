@@ -106,7 +106,7 @@ class TestConvSpeed(unittest.TestCase):
     print("torch forward pass:  %.3f ms" % fpt_baseline)
     print("torch backward pass: %.3f ms" % bpt_baseline)
 
-    print(tprof.key_averages().table(sort_by="cpu_time", row_limit=10))
+    print(tprof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
 
     # ****** tinygrad compare *******
 
