@@ -1,10 +1,6 @@
 #!/usr/bin/env python
-import time
-import cProfile
-import pstats
-import unittest
-from tinygrad.tensor import Tensor
 
+# if you'd like to use the line profiler
 try:
   import line_profiler
   prof = line_profiler.LineProfiler()
@@ -13,6 +9,12 @@ try:
   # add @profile decorator to probe
 except ImportError:
   prof = None
+
+import time
+import cProfile
+import pstats
+import unittest
+from tinygrad.tensor import Tensor
 
 def profile_conv(bs, chans, conv, cnt=10):
   img = Tensor.zeros(bs, 1, 28, 28)
