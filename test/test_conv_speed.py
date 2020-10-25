@@ -15,6 +15,7 @@ import cProfile
 import pstats
 import unittest
 import numpy as np
+import torch
 from tinygrad.tensor import Tensor
 
 def profile_conv(bs, chans, conv, cnt=10):
@@ -75,7 +76,8 @@ class TestConvSpeed(unittest.TestCase):
       x = x.conv2d(c1).relu().maxpool2x2()
       x = x.conv2d(c2).relu().maxpool2x2()
       x = x.reshape(Tensor(np.array((x.shape[0], -1))))
-      out = x.dot(l1).logsoftmax().mean()
+      out = x.dot(l1).logsoftmax()
+      out = out.mean()
       et1 = time.time()
       out.backward()
       et2 = time.time()
@@ -86,9 +88,48 @@ class TestConvSpeed(unittest.TestCase):
         bpt += (et2-et1)
 
     stop_profile(pr, sort='time')
+    fpt = (fpt*1000/cnt)
+    bpt = (bpt*1000/cnt)
+    print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/self.fpt_baseline, self.fpt_baseline))
+    print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/self.bpt_baseline, self.bpt_baseline))
 
-    print("forward pass:  %.3f ms" % (fpt*1000/cnt))
-    print("backward pass: %.3f ms" % (bpt*1000/cnt))
+  # get torch baseline
+  @classmethod 
+  def setUpClass(self):
+    conv = 3
+    inter_chan, out_chan = 32, 64
+    c1 = torch.randn(inter_chan,1,conv,conv, requires_grad=True)
+    c2 = torch.randn(out_chan,inter_chan,conv,conv, requires_grad=True)
+    l1 = torch.randn(out_chan*5*5, 10, requires_grad=True)
+
+    c2d = torch.nn.functional.conv2d
+    mp = torch.nn.MaxPool2d((2,2))
+    lsm = torch.nn.LogSoftmax(dim=1)
+
+    cnt = 5
+    fpt, bpt = 0.0, 0.0
+    for i in range(1+cnt):
+      et0 = time.time()
+      x = torch.randn(128, 1, 28, 28, requires_grad=True)
+      x = mp(c2d(x,c1).relu())
+      x = mp(c2d(x,c2).relu())
+      x = x.reshape(x.shape[0], -1)
+      out = lsm(x.matmul(l1))
+      out = out.mean()
+      et1 = time.time()
+      out.backward()
+      et2 = time.time()
+      if i == 0:
+        pr = start_profile()
+      else:
+        fpt += (et1-et0)
+        bpt += (et2-et1)
+
+    stop_profile(pr, sort='time')
+    self.fpt_baseline = (fpt*1000/cnt)
+    self.bpt_baseline = (bpt*1000/cnt)
+    print("forward pass:  %.3f ms" % self.fpt_baseline)
+    print("backward pass: %.3f ms" % self.bpt_baseline)
 
 
 if __name__ == '__main__':
