@@ -67,7 +67,7 @@ class TestTinygrad(unittest.TestCase):
 class TestOps(unittest.TestCase):
   def test_conv2d(self):
     x = torch.randn((5,2,10,7), requires_grad=True)
-    w = torch.randn((4,2,3,3), requires_grad=True)
+    w = torch.randn((4,2,3,2), requires_grad=True)
     xt = Tensor(x.detach().numpy())
     wt = Tensor(w.detach().numpy())
 
