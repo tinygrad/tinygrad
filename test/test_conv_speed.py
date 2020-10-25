@@ -67,17 +67,28 @@ class TestConvSpeed(unittest.TestCase):
     c2 = Tensor.randn(out_chan,inter_chan,conv,conv)
     l1 = Tensor.randn(out_chan*5*5, 10)
 
-    for i in range(6):
+    cnt = 5
+    fpt, bpt = 0.0, 0.0
+    for i in range(1+cnt):
+      et0 = time.time()
       x = Tensor.randn(128, 1, 28, 28)
       x = x.conv2d(c1).relu().maxpool2x2()
       x = x.conv2d(c2).relu().maxpool2x2()
       x = x.reshape(Tensor(np.array((x.shape[0], -1))))
-      out = x.dot(l1).logsoftmax()
-      out.mean().backward()
+      out = x.dot(l1).logsoftmax().mean()
+      et1 = time.time()
+      out.backward()
+      et2 = time.time()
       if i == 0:
         pr = start_profile()
+      else:
+        fpt += (et1-et0)
+        bpt += (et2-et1)
 
     stop_profile(pr, sort='time')
+
+    print("forward pass:  %.3f ms" % (fpt*1000/cnt))
+    print("backward pass: %.3f ms" % (bpt*1000/cnt))
 
 
 if __name__ == '__main__':
