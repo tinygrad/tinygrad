@@ -74,7 +74,6 @@ def evaluate(model):
   assert accuracy > 0.95
 
 class TestMNIST(unittest.TestCase):
-  @unittest.skip(reason="mad slow")
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
