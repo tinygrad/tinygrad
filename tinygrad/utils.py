@@ -34,20 +34,21 @@ def fetch_mnist():
 def im2col(x, H, W):
   bs,cin,oy,ox = x.shape[0], x.shape[1], x.shape[2]-(H-1), x.shape[3]-(W-1)
 
-  tx = np.empty((oy, ox, bs, cin*W*H), dtype=x.dtype)
+  tx = np.empty((bs, oy, ox, cin*W*H), dtype=x.dtype)
   for Y in range(oy):
     for X in range(ox):
-      tx[Y, X] = x[:, :, Y:Y+H, X:X+W].reshape(bs, -1)
+      tx[:, Y, X] = x[:, :, Y:Y+H, X:X+W].reshape(bs, -1)
+
   return tx.reshape(-1, cin*W*H)
 
 def col2im(tx, H, W, OY, OX):
   oy, ox = OY-(H-1), OX-(W-1)
   bs = tx.shape[0] // (oy * ox)
   cin = tx.shape[1] // (H * W)
-  tx = tx.reshape(oy, ox, bs, cin, H, W)
+  tx = tx.reshape(bs, oy, ox, cin, H, W)
 
   x = np.zeros((bs, cin, OY, OX), dtype=tx.dtype)
   for Y in range(oy):
     for X in range(ox):
-      x[:, :, Y:Y+H, X:X+W] += tx[Y, X]
+      x[:, :, Y:Y+H, X:X+W] += tx[:, Y, X]
   return x
