@@ -34,11 +34,11 @@ def fetch_mnist():
 def im2col(x, H, W):
   bs,cin,oy,ox = x.shape[0], x.shape[1], x.shape[2]-(H-1), x.shape[3]-(W-1)
 
+  # TODO: use something like np.take for speed
   tx = np.empty((bs, oy, ox, cin*W*H), dtype=x.dtype)
   for Y in range(oy):
     for X in range(ox):
       tx[:, Y, X] = x[:, :, Y:Y+H, X:X+W].reshape(bs, -1)
-
   return tx.reshape(-1, cin*W*H)
 
 def col2im(tx, H, W, OY, OX):

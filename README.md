@@ -67,8 +67,3 @@ loss.backward()
 optim.step()
 ```
 
-### TODO (to make real neural network library)
-
-* Implement gradcheck (numeric)
-* Make convolutions not slow while removing lines of code (NO CYTHON!)
-

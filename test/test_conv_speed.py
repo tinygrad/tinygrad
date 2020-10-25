@@ -6,7 +6,7 @@ try:
   builtins.__dict__['profile'] = prof
   # add @profile decorator to probe
 except ImportError:
-  pass
+  prof = None
 
 import cProfile
 import unittest
