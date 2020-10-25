@@ -76,10 +76,11 @@ class TestOps(unittest.TestCase):
 
           out = torch.nn.functional.conv2d(x,w)
           ret = Tensor.conv2d(xt, wt)
+          # TODO: why so inaccurate?
           np.testing.assert_allclose(ret.data, out.detach().numpy(), atol=1e-5)
 
-          out.mean().backward()
-          ret.mean().backward()
+          out.relu().mean().backward()
+          ret.relu().mean().backward()
 
           np.testing.assert_allclose(w.grad, wt.grad, atol=1e-7)
           np.testing.assert_allclose(x.grad, xt.grad, atol=1e-7)
