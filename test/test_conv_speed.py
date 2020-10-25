@@ -43,7 +43,7 @@ def stop_profile(pr, sort='cumtime'):
   ps = pstats.Stats(pr)
   ps.strip_dirs()
   ps.sort_stats(sort)
-  ps.print_stats(0.3)
+  ps.print_stats(0.2)
 
   if prof is not None:
     prof.print_stats()
@@ -64,38 +64,10 @@ class TestConvSpeed(unittest.TestCase):
     # https://keras.io/examples/vision/mnist_convnet/
     conv = 3
     inter_chan, out_chan = 32, 64
-    c1 = Tensor.randn(inter_chan,1,conv,conv)
-    c2 = Tensor.randn(out_chan,inter_chan,conv,conv)
-    l1 = Tensor.randn(out_chan*5*5, 10)
 
-    cnt = 5
-    fpt, bpt = 0.0, 0.0
-    for i in range(1+cnt):
-      et0 = time.time()
-      x = Tensor.randn(128, 1, 28, 28)
-      x = x.conv2d(c1).relu().maxpool2x2()
-      x = x.conv2d(c2).relu().maxpool2x2()
-      x = x.reshape(Tensor(np.array((x.shape[0], -1))))
-      out = x.dot(l1).logsoftmax()
-      out = out.mean()
-      et1 = time.time()
-      out.backward()
-      et2 = time.time()
-      if i == 0:
-        pr = start_profile()
-      else:
-        fpt += (et1-et0)
-        bpt += (et2-et1)
 
-    stop_profile(pr, sort='time')
-    fpt = (fpt*1000/cnt)
-    bpt = (bpt*1000/cnt)
-    print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/self.fpt_baseline, self.fpt_baseline))
-    print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/self.bpt_baseline, self.bpt_baseline))
-
-  # get torch baseline
-  @classmethod 
-  def setUpClass(self):
+    # ****** torch baseline *******
+    
     torch.backends.mkldnn.enabled = False
 
     conv = 3
@@ -129,12 +101,43 @@ class TestConvSpeed(unittest.TestCase):
           bpt += (et2-et1)
 
     stop_profile(pr, sort='time')
-    self.fpt_baseline = (fpt*1000/cnt)
-    self.bpt_baseline = (bpt*1000/cnt)
-    print("forward pass:  %.3f ms" % self.fpt_baseline)
-    print("backward pass: %.3f ms" % self.bpt_baseline)
+    fpt_baseline = (fpt*1000/cnt)
+    bpt_baseline = (bpt*1000/cnt)
+    print("torch forward pass:  %.3f ms" % fpt_baseline)
+    print("torch backward pass: %.3f ms" % bpt_baseline)
 
-    print(tprof.key_averages().table(sort_by="cpu_time", row_limit=20))
+    print(tprof.key_averages().table(sort_by="cpu_time", row_limit=10))
+
+    # ****** tinygrad compare *******
+
+    c1 = Tensor(c1.detach().numpy())
+    c2 = Tensor(c2.detach().numpy())
+    l1 = Tensor(l1.detach().numpy())
+
+    cnt = 5
+    fpt, bpt = 0.0, 0.0
+    for i in range(1+cnt):
+      et0 = time.time()
+      x = Tensor.randn(128, 1, 28, 28)
+      x = x.conv2d(c1).relu().maxpool2x2()
+      x = x.conv2d(c2).relu().maxpool2x2()
+      x = x.reshape(Tensor(np.array((x.shape[0], -1))))
+      out = x.dot(l1).logsoftmax()
+      out = out.mean()
+      et1 = time.time()
+      out.backward()
+      et2 = time.time()
+      if i == 0:
+        pr = start_profile()
+      else:
+        fpt += (et1-et0)
+        bpt += (et2-et1)
+
+    stop_profile(pr, sort='time')
+    fpt = (fpt*1000/cnt)
+    bpt = (bpt*1000/cnt)
+    print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
+    print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/bpt_baseline, bpt_baseline))
 
 
 if __name__ == '__main__':
