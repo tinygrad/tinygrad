@@ -43,6 +43,17 @@ def get_im2col_index(oy, ox, cin, H, W):
   idx = idxc * OY * OX + idxy * OX + idxx
   return idx
 
+@lru_cache
+def swizzle_col2im_index(oy, ox, cin, H, W):
+  idx = get_im2col_index(oy, ox, cin, H, W)
+  ridx = np.zeros((np.max(idx)+1, H*W), dtype=idx.dtype)-1
+  for i,x in enumerate(idx):
+    for j in range(H*W):
+      if ridx[x,j] == -1:
+        ridx[x,j] = i
+        break
+  return ridx
+
 def im2col(x, H, W):
   bs,cin,oy,ox = x.shape[0], x.shape[1], x.shape[2]-(H-1), x.shape[3]-(W-1)
 
@@ -64,19 +75,26 @@ def col2im(tx, H, W, OY, OX):
   bs = tx.shape[0] // (oy * ox)
   cin = tx.shape[1] // (H * W)
 
+  ridx = swizzle_col2im_index(oy, ox, cin, H, W)
+  # -1 has to be 0s
+  x = np.pad(tx.reshape(bs, -1), ((0,0),(0,1)))[:, ridx].sum(axis=2)
+
   """
-  # col2im is just im2col in reverse
+  # col2im is just im2col in reverse, but np.add.at is SLOW
+  idx = get_im2col_index(oy, ox, cin, H, W)
   x = np.zeros((bs, cin*OY*OX), dtype=tx.dtype)
   idx = get_im2col_index(oy, ox, cin, H, W)
   np.add.at(x, (slice(None), idx), tx.reshape(bs, -1))
   """
 
+  """
   # sadly, this is faster
   x = np.zeros((bs, cin, OY, OX), dtype=tx.dtype)
   tx = tx.reshape(bs, oy, ox, cin, H, W)
   for Y in range(oy):
     for X in range(ox):
       x[:, :, Y:Y+H, X:X+W] += tx[:, Y, X]
+  """
 
   return x.reshape(bs, cin, OY, OX)
 

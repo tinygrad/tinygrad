@@ -32,6 +32,10 @@ def profile_conv(bs, chans, conv, cnt=10):
 
 class TestConvSpeed(unittest.TestCase):
   def test_forward_backward_3x3(self):
+    # warmup
+    profile_conv(128, 16, 3, cnt=1)
+
+    # profile
     pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
     pr.enable()
     fpt, bpt = profile_conv(128, 16, 3)
