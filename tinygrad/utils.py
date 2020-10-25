@@ -68,6 +68,9 @@ def im2col(x, H, W):
       tx[:, Y, X] = x[:, :, Y:Y+H, X:X+W].reshape(bs, -1)
   """
 
+  # all the time is spent here
+  tx = tx.ravel()
+
   return tx.reshape(-1, cin*W*H)
 
 def col2im(tx, H, W, OY, OX):
