@@ -167,3 +167,27 @@ class FastConv2D(Function):
     return dx, dw
 register('conv2d', FastConv2D)
 
+# TODO: make this parameterizable
+class MaxPool2x2(Function):
+  @staticmethod
+  def forward(ctx, x):
+    stack = []
+    for Y in range(2):
+      for X in range(2):
+        stack.append(x[:, :, Y::2, X::2][None])
+    stack = np.concatenate(stack, axis=0)
+    idxs = np.argmax(stack, axis=0)
+    ctx.save_for_backward(idxs)
+    return np.max(stack, axis=0)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    idxs, = ctx.saved_tensors
+    s = grad_output.shape
+    ret = np.zeros((s[0], s[1], s[2]*2, s[3]*2), dtype=grad_output.dtype)
+    for Y in range(2):
+      for X in range(2):
+        ret[:, :, Y::2, X::2] = grad_output * (idxs == (Y*2+X))
+    return ret
+register('maxpool2x2', MaxPool2x2)
+
