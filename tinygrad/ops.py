@@ -174,23 +174,25 @@ register('conv2d', FastConv2D)
 class MaxPool2x2(Function):
   @staticmethod
   def forward(ctx, x):
+    my, mx = (x.shape[2]//2)*2, (x.shape[3]//2)*2
     stack = []
+    xup = x[:, :, :my, :mx]
     for Y in range(2):
       for X in range(2):
-        stack.append(x[:, :, Y::2, X::2][None])
+        stack.append(xup[:, :, Y::2, X::2][None])
     stack = np.concatenate(stack, axis=0)
     idxs = np.argmax(stack, axis=0)
-    ctx.save_for_backward(idxs)
+    ctx.save_for_backward(idxs, x.shape)
     return np.max(stack, axis=0)
 
   @staticmethod
   def backward(ctx, grad_output):
-    idxs, = ctx.saved_tensors
-    s = grad_output.shape
-    ret = np.zeros((s[0], s[1], s[2]*2, s[3]*2), dtype=grad_output.dtype)
+    idxs,s = ctx.saved_tensors
+    my, mx = (s[2]//2)*2, (s[3]//2)*2
+    ret = np.zeros(s, dtype=grad_output.dtype)
     for Y in range(2):
       for X in range(2):
-        ret[:, :, Y::2, X::2] = grad_output * (idxs == (Y*2+X))
+        ret[:, :, Y:my:2, X:mx:2] = grad_output * (idxs == (Y*2+X))
     return ret
 register('maxpool2x2', MaxPool2x2)
 
