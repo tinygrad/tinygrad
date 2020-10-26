@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.tensor import Function, register
+from .tensor import Function, register
 
 # ************* basic ops *************
 
