@@ -1,4 +1,8 @@
-# tinygrad
+<p align="center">
+  <img src="https://github.com/geohot/tinygrad/blob/master/docs/logo.png">
+</p>
+
+--------------------------------------------------------------------
 
 ![Unit Tests](https://github.com/geohot/tinygrad/workflows/Unit%20Tests/badge.svg)
 
