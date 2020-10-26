@@ -1,6 +1,5 @@
 import numpy as np
 from tinygrad.tensor import Function, register
-from tinygrad.utils import im2col, col2im
 
 class Reshape(Function):
   @staticmethod
@@ -123,53 +122,8 @@ class Conv2D(Function):
         dw += gg.T.dot(tx).reshape(dw.shape)
         dx[:, :, Y:Y+H, X:X+W] += gg.dot(tw).reshape(dx.shape[0], dx.shape[1], H, W)
     return dx, dw
-#register('conv2d', Conv2D)
+register('conv2d', Conv2D)
 
-class FastConv2D(Function):
-  @staticmethod
-  def forward(ctx, x, w):
-    cout,cin,H,W = w.shape
-    tw = w.reshape(cout, -1).T
-    bs,oy,ox = x.shape[0], x.shape[2]-(H-1), x.shape[3]-(W-1)
-
-    # im2col
-    tx = im2col(x, H, W)
-
-    # save the im2col output (OMG it's bigger!)
-    ctx.save_for_backward(tx, w)
-
-    # now the conv is a GEMM
-    ret = tx.dot(tw).reshape(bs, oy, ox, cout)
-
-    # order correctly
-    return np.moveaxis(ret, [0,1,2,3], [0,2,3,1])
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    bs,_,oy,ox = grad_output.shape
-    tx, w = ctx.saved_tensors
-    cout,cin,H,W = w.shape
-    # grad_output.shape = (bs, cout, oy, ox)
-    # tx.shape = (bs*oy*ox*cin, H*W)
-    tw = w.reshape(w.shape[0], -1)
-
-    # reshape correctly
-    ggt = np.moveaxis(grad_output, [0,1,2,3], [1,0,2,3]).reshape(cout, -1)
-
-    # dw is easy
-    dw = ggt.dot(tx).reshape(w.shape)
-
-    # dx is harder
-    dxi = ggt.T.dot(tw)
-
-    # if we im2col on the forward, we col2im on the backward
-    # dxi should be (bs, oy, ox, cin, H, W)
-    dx = col2im(dxi, H, W, oy+(H-1), ox+(W-1))
-
-    return dx, dw
-register('conv2d', FastConv2D)
-
-# TODO: make this parameterizable
 class MaxPool2x2(Function):
   @staticmethod
   def forward(ctx, x):
