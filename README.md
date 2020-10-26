@@ -70,3 +70,14 @@ loss.backward()
 optim.step()
 ```
 
+### The promise of small
+
+tinygrad, with tests, will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
+
+### TODO
+
+* Reduce code
+* Increase speed
+* Add features
+* In that order
+
