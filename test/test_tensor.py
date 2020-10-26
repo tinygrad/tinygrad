@@ -90,7 +90,7 @@ class TestOps(unittest.TestCase):
     xt = Tensor(x.detach().numpy())
 
     # in tinygrad
-    ret = xt.maxpool2x2()
+    ret = xt.max_pool2d()
     assert ret.shape == (5,2,10//2,8//2)
     ret.mean().backward()
 

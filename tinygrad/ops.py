@@ -124,7 +124,7 @@ class Conv2D(Function):
     return dx, dw
 register('conv2d', Conv2D)
 
-class MaxPool2x2(Function):
+class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, x):
     my, mx = (x.shape[2]//2)*2, (x.shape[3]//2)*2
@@ -147,5 +147,5 @@ class MaxPool2x2(Function):
       for X in range(2):
         ret[:, :, Y:my:2, X:mx:2] = grad_output * (idxs == (Y*2+X))
     return ret
-register('maxpool2x2', MaxPool2x2)
+register('max_pool2d', MaxPool2D)
 
