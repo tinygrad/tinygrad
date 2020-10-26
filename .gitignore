@@ -1,3 +1,6 @@
 __pycache__
 notebooks
 .*.swp
+build
+dist
+*.egg-info
