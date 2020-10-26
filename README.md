@@ -15,11 +15,10 @@ The Tensor class is a wrapper around a numpy array, except it does Tensor things
 ### Example
 
 ```python
-import numpy as np
 from tinygrad.tensor import Tensor
 
-x = Tensor(np.eye(3))
-y = Tensor(np.array([[2.0,0,-2.0]]))
+x = Tensor.eye(3)
+y = Tensor([[2.0,0,-2.0]])
 z = y.dot(x).sum()
 z.backward()
 

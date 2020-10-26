@@ -8,6 +8,8 @@ import numpy as np
 class Tensor:
   def __init__(self, data):
     #print(type(data), data)
+    if type(data) == list:
+      data = np.array(data, dtype=np.float32)
     if type(data) != np.ndarray:
       print("error constructing tensor with %r" % data)
       assert(False)
@@ -34,6 +36,10 @@ class Tensor:
   @staticmethod
   def randn(*shape):
     return Tensor(np.random.randn(*shape).astype(np.float32))
+
+  @staticmethod
+  def eye(dim):
+    return Tensor(np.eye(dim).astype(np.float32))
 
   def backward(self, allow_fill=True):
     #print("running backward on", self)
