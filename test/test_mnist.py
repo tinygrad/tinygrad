@@ -81,7 +81,7 @@ class TestMNIST(unittest.TestCase):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam([model.c1, model.c2, model.l1], lr=0.001)
-    train(model, optimizer, steps=400)
+    train(model, optimizer, steps=200)
     evaluate(model)
     
   def test_sgd(self):
