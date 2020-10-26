@@ -4,6 +4,10 @@
 
 For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
+```
+pip3 install tinygrad
+```
+
 This may not be the best deep learning framework, but it is a deep learning framework.
 
 The Tensor class is a wrapper around a numpy array, except it does Tensor things.
