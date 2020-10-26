@@ -135,8 +135,8 @@ def stack_for_pool(x, py, px):
 
 class MaxPool2D(Function):
   @staticmethod
-  def forward(ctx, x):
-    stack = stack_for_pool(x, 2, 2)
+  def forward(ctx, x, pool_size=(2, 2)):
+    stack = stack_for_pool(x, *pool_size)
     idxs = np.argmax(stack, axis=0)
     ctx.save_for_backward(idxs, x.shape)
     return np.max(stack, axis=0)
@@ -144,29 +144,30 @@ class MaxPool2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     idxs,s = ctx.saved_tensors
-    my, mx = (s[2]//2)*2, (s[3]//2)*2
+    py, px = ctx.pool_size
+    my, mx = (s[2]//py)*py, (s[3]//px)*px
     ret = np.zeros(s, dtype=grad_output.dtype)
-    for Y in range(2):
-      for X in range(2):
-        ret[:, :, Y:my:2, X:mx:2] = grad_output * (idxs == (Y*2+X))
+    for Y in range(py):
+      for X in range(px):
+        ret[:, :, Y:my:py, X:mx:px] = grad_output * (idxs == (Y*px+X))
     return ret
 register('max_pool2d', MaxPool2D)
 
 class AvgPool2D(Function):
   @staticmethod
-  def forward(ctx, x):
-    stack = stack_for_pool(x, 2, 2)
+  def forward(ctx, x, pool_size=(2, 2)):
+    stack = stack_for_pool(x, *pool_size)
     ctx.save_for_backward(x.shape)
     return np.mean(stack, axis=0)
 
   @staticmethod
   def backward(ctx, grad_output):
     s, = ctx.saved_tensors
-    my, mx = (s[2]//2)*2, (s[3]//2)*2
+    py, px = ctx.pool_size
+    my, mx = (s[2]//py)*py, (s[3]//px)*px
     ret = np.zeros(s, dtype=grad_output.dtype)
-    for Y in range(2):
-      for X in range(2):
-        ret[:, :, Y:my:2, X:mx:2] = grad_output/4
+    for Y in range(py):
+      for X in range(px):
+        ret[:, :, Y:my:py, X:mx:px] = grad_output/py/px
     return ret
 register('avg_pool2d', AvgPool2D)
-
