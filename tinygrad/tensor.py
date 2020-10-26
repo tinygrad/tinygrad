@@ -1,5 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from functools import partialmethod
+from inspect import signature
 import numpy as np
 
 # **** start with two base classes ****
@@ -74,7 +75,7 @@ class Function:
     self.saved_tensors.extend(x)
 
   # note that due to how partialmethod works, self and arg are switched
-  def apply(self, arg, *x):
+  def apply(self, arg, *x, **kwargs):
     # support the args in both orders
     if type(arg) == Tensor:
       op = self
@@ -83,7 +84,15 @@ class Function:
       op = arg
       x = [self]+list(x)
     ctx = op(*x)
-    ret = Tensor(op.forward(ctx, *[t.data for t in x]))
+    # use default params
+    params = signature(op.forward).parameters
+    for p in params.values():
+      if p.default is not p.empty:
+        setattr(ctx, p.name, p.default)
+    # overwrite with passed params
+    for k, v in kwargs.items():
+      setattr(ctx, k, v)
+    ret = Tensor(op.forward(ctx, *[t.data for t in x], **kwargs))
     ret._ctx = ctx
     return ret
 
