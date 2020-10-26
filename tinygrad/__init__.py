@@ -1,4 +1,3 @@
-from .optim import *
-from .ops import *
-from .tensor import *
-from .utils import *
+import tinygrad.optim
+import tinygrad.tensor
+import tinygrad.utils
