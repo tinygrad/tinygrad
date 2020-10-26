@@ -40,7 +40,6 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
               lambda x,w: Tensor.conv2d(x,w).relu(), atol=2e-5, grad_atol=2e-6)
 
-  @unittest.skip("please write stride support")
   def test_strided_conv2d(self):
     bs = 4
     cin = 3
