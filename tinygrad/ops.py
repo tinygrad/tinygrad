@@ -130,13 +130,13 @@ def stack_for_pool(x, py, px):
   xup = x[:, :, :my, :mx]
   for Y in range(py):
     for X in range(px):
-      stack.append(xup[:, :, Y::2, X::2][None])
+      stack.append(xup[:, :, Y::py, X::px][None])
   return np.concatenate(stack, axis=0)
 
 class MaxPool2D(Function):
   @staticmethod
-  def forward(ctx, x, pool_size=(2, 2)):
-    stack = stack_for_pool(x, *pool_size)
+  def forward(ctx, x, kernel_size=(2, 2)):
+    stack = stack_for_pool(x, *kernel_size)
     idxs = np.argmax(stack, axis=0)
     ctx.save_for_backward(idxs, x.shape)
     return np.max(stack, axis=0)
@@ -144,7 +144,7 @@ class MaxPool2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     idxs,s = ctx.saved_tensors
-    py, px = ctx.pool_size
+    py, px = ctx.kernel_size
     my, mx = (s[2]//py)*py, (s[3]//px)*px
     ret = np.zeros(s, dtype=grad_output.dtype)
     for Y in range(py):
@@ -155,15 +155,15 @@ register('max_pool2d', MaxPool2D)
 
 class AvgPool2D(Function):
   @staticmethod
-  def forward(ctx, x, pool_size=(2, 2)):
-    stack = stack_for_pool(x, *pool_size)
+  def forward(ctx, x, kernel_size=(2, 2)):
+    stack = stack_for_pool(x, *kernel_size)
     ctx.save_for_backward(x.shape)
     return np.mean(stack, axis=0)
 
   @staticmethod
   def backward(ctx, grad_output):
     s, = ctx.saved_tensors
-    py, px = ctx.pool_size
+    py, px = ctx.kernel_size
     my, mx = (s[2]//py)*py, (s[3]//px)*px
     ret = np.zeros(s, dtype=grad_output.dtype)
     for Y in range(py):
