@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/geohot/tinygrad/blob/master/docs/logo.png">
+  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/logo.png">
 </p>
 
 --------------------------------------------------------------------
