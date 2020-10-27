@@ -2,12 +2,13 @@ name: "Tinygrad Size Guarantee"
 on:
   pull_request:
   push:
+strategy:
+  max-parallel: 2
 jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - run: sudo apt-get install -y cargo
-    - run: cargo install tokei
-    - run: tokei . --output json
-    
+    - uses: bahmutov/npm-install@v1
+    - run: npm install sloc
+    - run: test $(sloc **/*.py | grep -i "source" | cut -d ":" -f 2 | xargs) -le 1000
