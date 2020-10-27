@@ -8,13 +8,15 @@
 
 For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
-```
-pip3 install tinygrad
-```
-
 This may not be the best deep learning framework, but it is a deep learning framework.
 
 The Tensor class is a wrapper around a numpy array, except it does Tensor things.
+
+### Installation
+
+```bash
+pip3 install tinygrad
+```
 
 ### Example
 
@@ -77,6 +79,12 @@ optim.step()
 ### The promise of small
 
 tinygrad, with tests, will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
+
+### Running tests
+
+```bash
+python -m pytest
+```
 
 ### TODO
 
