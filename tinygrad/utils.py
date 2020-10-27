@@ -26,3 +26,4 @@ def fetch_mnist():
   X_test = fetch("http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28, 28))
   Y_test = fetch("http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz")[8:]
   return X_train, Y_train, X_test, Y_test
+
