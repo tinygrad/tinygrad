@@ -16,6 +16,9 @@ class TinyBobNet:
     self.l1 = Tensor(layer_init_uniform(784, 128))
     self.l2 = Tensor(layer_init_uniform(128, 10))
 
+  def parameters(self):
+    return [self.l1, self.l2]
+
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
 
@@ -29,6 +32,9 @@ class TinyConvNet:
     self.c1 = Tensor(layer_init_uniform(inter_chan,1,conv,conv))
     self.c2 = Tensor(layer_init_uniform(out_chan,inter_chan,conv,conv))
     self.l1 = Tensor(layer_init_uniform(out_chan*5*5, 10))
+
+  def parameters(self):
+    return [self.l1, self.c1, self.c2]
 
   def forward(self, x):
     x.data = x.data.reshape((-1, 1, 28, 28)) # hacks
@@ -80,21 +86,21 @@ class TestMNIST(unittest.TestCase):
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
-    optimizer = optim.Adam([model.c1, model.c2, model.l1], lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, optimizer, steps=200)
     evaluate(model)
     
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = optim.SGD([model.l1, model.l2], lr=0.001)
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, optimizer, steps=1000)
     evaluate(model)
     
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = optim.RMSprop([model.l1, model.l2], lr=0.0002)
+    optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
     train(model, optimizer, steps=1000)
     evaluate(model)
 
