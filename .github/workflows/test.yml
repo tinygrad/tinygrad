@@ -6,7 +6,7 @@ on:
 
 jobs:
   lines:
-    name: Check for less than 1000 lines
+    name: Less than 1000 lines
     runs-on: ubuntu-latest
 
     steps:
@@ -15,7 +15,7 @@ jobs:
     - name: Install SLOCCount
       run: sudo apt install sloccount
     - name: Check <1000 lines
-      run: if [ $(sloccount test tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p') -gt 1000 ]; then exit 1; fi
+      run: if [ $(sloccount test tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
   test:
     name: Test
