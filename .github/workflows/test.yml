@@ -20,6 +20,10 @@ jobs:
       run: sudo apt install sloccount
     - name: Test sloccount output on actions
       run: sloccount test tinygrad
+    - name: Test sed output on actions
+      run: sloccount test tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p'
+    - name: Test test output on actions
+      run: test $(sloccount test tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p') -gt 1000 && echo "failed"
     - name: Check <1000 lines
       run: test $(sloccount test tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p') -gt 1000 && exit 1
     - name: Install Dependencies
