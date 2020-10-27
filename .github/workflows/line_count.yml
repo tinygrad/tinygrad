@@ -8,5 +8,5 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - uses: actions/setup-node@v2-beta
-    - run: npm install sloc
+    - run: sudo npm install -g sloc
     - run: test $(sloc **/*.py | grep -i "source" | cut -d ":" -f 2 | xargs) -le 1000
