@@ -8,7 +8,7 @@ x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-def test_tinygrad(optim, kwargs={}):
+def step_tinygrad(optim, kwargs={}):
   net = TinyNet()
   optim = optim([net.x, net.W], **kwargs)
   out = net.forward()
@@ -16,7 +16,7 @@ def test_tinygrad(optim, kwargs={}):
   optim.step()
   return net.x.data, net.W.data
 
-def test_pytorch(optim, kwargs={}):
+def step_pytorch(optim, kwargs={}):
   net = TorchNet()
   optim = optim([net.x, net.W], **kwargs)
   out = net.forward()
@@ -53,18 +53,18 @@ class TorchNet():
 
 class TestOptim(unittest.TestCase):
   def test_adam(self):
-    for x,y in zip(test_tinygrad(Adam),
-                   test_pytorch(torch.optim.Adam)):
+    for x,y in zip(step_tinygrad(Adam),
+                   step_pytorch(torch.optim.Adam)):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_sgd(self):
-    for x,y in zip(test_tinygrad(SGD, kwargs={'lr': 0.001}),
-                   test_pytorch(torch.optim.SGD, kwargs={'lr': 0.001})):
+    for x,y in zip(step_tinygrad(SGD, kwargs={'lr': 0.001}),
+                   step_pytorch(torch.optim.SGD, kwargs={'lr': 0.001})):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_rmsprop(self):
-    for x,y in zip(test_tinygrad(RMSprop, kwargs={'lr': 0.001, 'decay': 0.99}),
-                   test_pytorch(torch.optim.RMSprop,
+    for x,y in zip(step_tinygrad(RMSprop, kwargs={'lr': 0.001, 'decay': 0.99}),
+                   step_pytorch(torch.optim.RMSprop,
                                 kwargs={'lr': 0.001, 'alpha': 0.99})):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
