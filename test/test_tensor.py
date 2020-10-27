@@ -2,13 +2,11 @@ import numpy as np
 import torch
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.optim import Adam
 from tinygrad.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
-
 
 class TestTinygrad(unittest.TestCase):
   def test_backward_pass(self):
