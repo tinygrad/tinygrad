@@ -17,7 +17,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install SLOCCount
-      run: apt install sloccount
+      run: sudo apt install sloccount
     - name: Check <1000 lines
       run: test $(sloccount test tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p') -gt 1000 && exit 1
     - name: Install Dependencies
