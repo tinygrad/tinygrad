@@ -2,8 +2,6 @@ name: "Tinygrad Size Guarantee"
 on:
   pull_request:
   push:
-strategy:
-  max-parallel: 2
 jobs:
   tests:
     runs-on: ubuntu-latest
