@@ -17,7 +17,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install SLOCCount
-      run: sudo apt install sloccount test
+      run: sudo apt install sloccount
     - name: Test sloccount output on actions
       run: sloccount test tinygrad
     - name: Test sed output on actions
