@@ -24,6 +24,41 @@ class Add(Function):
   def backward(ctx, grad_output):
     return grad_output, grad_output
 register('add', Add)
+
+class Sub(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    return x-y
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    # this right?
+    return grad_output, -grad_output
+register('sub', Sub)
+
+class Div(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return x/y
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    # this right?
+    x,y = ctx.saved_tensors
+    return y/grad_output, x/grad_output
+register('div', Div)
+
+class Sqrt(Function):
+  @staticmethod
+  def forward(ctx, x):
+    ctx.save_for_backward(x)
+    return np.sqrt(x)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    raise Exception("write this")
+register('sqrt', Sqrt)
     
 class Dot(Function):
   @staticmethod
