@@ -68,6 +68,20 @@ class ReLU(Function):
     return grad_input
 register('relu', ReLU)
 
+class Sigmoid(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = 1/(1 + np.exp(-input))
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    grad_input = grad_output * (ret * (1 - ret))
+    return grad_input
+register('sigmoid', Sigmoid)
+
 class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
