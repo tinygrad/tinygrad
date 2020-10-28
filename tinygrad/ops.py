@@ -55,6 +55,16 @@ register('sum', Sum)
 
 # ************* nn ops *************
 
+class Pad2D(Function):
+  @staticmethod
+  def forward(ctx, x, padding=None):
+    return np.pad(x, ((0,0), (0,0), (padding[0], padding[1]), (padding[2], padding[3])))
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    raise Exception("write this")
+register('pad2d', Pad2D)
+
 class ReLU(Function):
   @staticmethod
   def forward(ctx, input):
@@ -116,11 +126,13 @@ register('logsoftmax', LogSoftmax)
 
 class Conv2D(Function):
   @staticmethod
-  def forward(ctx, x, w, stride=1):
+  def forward(ctx, x, w, stride=1, groups=1):
     if type(ctx.stride) == int:
       ctx.stride = (ctx.stride, ctx.stride)
 
     cout,cin,H,W = w.shape
+    if groups > 1:
+      w = np.repeat(w, groups, axis=1)
     tw = w.reshape(cout, -1).T
     ys,xs = ctx.stride
     bs,oy,ox = x.shape[0], (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
