@@ -167,7 +167,7 @@ class Conv2D(Function):
 
     cout,cin,H,W = w.shape
     if groups > 1:
-      w = np.repeat(w, groups, axis=1)
+      w = np.repeat(w, groups, axis=1) / groups
     tw = w.reshape(cout, -1).T
     ys,xs = ctx.stride
     bs,oy,ox = x.shape[0], (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
