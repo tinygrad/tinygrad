@@ -27,6 +27,8 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -r requirements.txt
+      run: |
+        pip install -r requirements.txt
+        pip install torch==1.6.0+cpu torchvision==0.7.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
     - name: Run Pytest
       run: python -m pytest -s -v
