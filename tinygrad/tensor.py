@@ -8,8 +8,8 @@ import numpy as np
 # **** start with two base classes ****
 
 class Tensor:
-    # internal variables used for autograd graph construction
-    _ctx = None
+  # internal variables used for autograd graph construction
+  _ctx = None
   
   def __init__(self, data):
     if isinstance(data, list):
