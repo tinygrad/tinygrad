@@ -27,10 +27,10 @@ def numerical_jacobian(func, input, eps = 1e-6):
   jo = output.data.reshape(-1).shape[-1]
   NJ = np.zeros((jo, ji), dtype=np.float32)
 
-  for o in range(jo):
-    for i in range(ji):
+  for i in range(ji):
+    eps_perturb = mask_like(input.data, i, mask_value = eps)
+    for o in range(jo):
 
-      eps_perturb = mask_like(input.data, i, mask_value = eps)
       output_perturb_add = func(Tensor(input.data + eps_perturb)).data.reshape(-1)[o]
       output_perturb_sub = func(Tensor(input.data - eps_perturb)).data.reshape(-1)[o]
 
