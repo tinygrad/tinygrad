@@ -108,7 +108,8 @@ class EfficientNet:
           mv = eval(mk.replace(".weight", ""))
         except AttributeError:
           mv = eval(mk.replace(".bias", "_bias"))
-      mv.data[:] = v.numpy() if k != '_fc.weight' else v.numpy().T
+      vnp = v.numpy().astype(np.float32)
+      mv.data[:] = vnp if k != '_fc.weight' else vnp.T
 
 if __name__ == "__main__":
   # instantiate my net
@@ -121,7 +122,7 @@ if __name__ == "__main__":
   img = img.resize((224, 224))
   img = np.moveaxis(np.array(img), [2,0,1], [0,1,2])
   img = img.astype(np.float32).reshape(1,3,224,224)
-  print(img.shape)
+  print(img.shape, img.dtype)
 
   # run the net
   out = model.forward(Tensor(img))

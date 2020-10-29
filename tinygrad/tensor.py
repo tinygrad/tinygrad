@@ -15,7 +15,7 @@ class Tensor:
       assert(False)
     if data.dtype != np.float32:
       # warning? float64 is actually needed for numerical jacobian
-      pass
+      print("warning, %r isn't float32" % (data.shape,))
 
     self.data = data
     self.grad = None
@@ -75,11 +75,11 @@ class Tensor:
     return self.sum().mul(div)
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape)+0.5)
+    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+0.5)
     return self.pow(root)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape)-1)
+    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1)
     return self.mul(y.pow(root))
 
 # An instantiation of the Function is the Context
