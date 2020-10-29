@@ -1,26 +1,27 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from functools import partialmethod
 from inspect import signature
+import logging
+
 import numpy as np
 
 # **** start with two base classes ****
 
 class Tensor:
+    # internal variables used for autograd graph construction
+    _ctx = None
+  
   def __init__(self, data):
-    #print(type(data), data)
-    if type(data) == list:
+    if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
-    if type(data) != np.ndarray:
-      print("error constructing tensor with %r" % data)
-      assert(False)
+    elif not isinstance(data, np.ndarray):
+      raise TypeError("Error constructing tensor with %r" % data)
+
     if data.dtype == np.float64:
-      #print("are you sure you want float64 in %r?" % data)
-      pass
+        logging.warning("Are you sure you want float64 in %r?" % data)
+
     self.data = data
     self.grad = None
-
-    # internal variables used for autograd graph construction
-    self._ctx = None
 
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad)
