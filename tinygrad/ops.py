@@ -3,18 +3,6 @@ from .tensor import Function, register
 
 # ************* basic ops *************
 
-class Mul(Function):
-  @staticmethod
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return x*y
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
-    return y*grad_output, x*grad_output
-register('mul', Mul)
-
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
@@ -36,30 +24,30 @@ class Sub(Function):
     return grad_output, -grad_output
 register('sub', Sub)
 
-class Div(Function):
+class Mul(Function):
   @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return x/y
+    return x*y
 
   @staticmethod
   def backward(ctx, grad_output):
-    # this right?
     x,y = ctx.saved_tensors
-    return y/grad_output, x/grad_output
-register('div', Div)
+    return y*grad_output, x*grad_output
+register('mul', Mul)
 
-class Sqrt(Function):
+class Pow(Function):
   @staticmethod
-  def forward(ctx, x):
-    ctx.save_for_backward(x)
-    return np.sqrt(x)
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return x ** y
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise Exception("write this")
-register('sqrt', Sqrt)
-    
+    x,y = ctx.saved_tensors
+    return y * (x**(y-1.0)) * grad_output, (x**y) * np.log(x) * grad_output
+register('pow', Pow)
+
 class Dot(Function):
   @staticmethod
   def forward(ctx, input, weight):

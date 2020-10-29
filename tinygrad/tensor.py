@@ -10,13 +10,12 @@ class Tensor:
     #print(type(data), data)
     if type(data) == list:
       data = np.array(data, dtype=np.float32)
-    if type(data) != np.ndarray:
+    elif type(data) != np.ndarray:
       print("error constructing tensor with %r" % data)
       assert(False)
-    if data.dtype == np.float64:
-      #print("are you sure you want float64 in %r?" % data)
-      pass
-    self.data = data
+
+    # only float32
+    self.data = data.astype(np.float32)
     self.grad = None
 
     # internal variables used for autograd graph construction
@@ -67,9 +66,19 @@ class Tensor:
       t.grad = g
       t.backward(False)
 
+  # ***** non first class ops *****
+
   def mean(self):
     div = Tensor(np.array([1/self.data.size], dtype=self.data.dtype))
     return self.sum().mul(div)
+
+  def sqrt(self):
+    root = Tensor(np.zeros(self.shape)+0.5)
+    return self.pow(root)
+
+  def div(self, y):
+    root = Tensor(np.zeros(self.shape)-1)
+    return self.mul(y.pow(root))
 
 # An instantiation of the Function is the Context
 class Function:
