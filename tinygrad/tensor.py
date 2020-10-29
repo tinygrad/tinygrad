@@ -13,9 +13,11 @@ class Tensor:
     elif type(data) != np.ndarray:
       print("error constructing tensor with %r" % data)
       assert(False)
+    if data.dtype != np.float32:
+      # warning? float64 is actually needed for numerical jacobian
+      pass
 
-    # only float32
-    self.data = data.astype(np.float32)
+    self.data = data
     self.grad = None
 
     # internal variables used for autograd graph construction
