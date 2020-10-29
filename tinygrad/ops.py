@@ -127,7 +127,7 @@ class Reshape(Function):
   @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
-    return grad_output.reshape(in_shape), None
+    return grad_output.reshape(in_shape)
 register('reshape', Reshape)
 
 class LogSoftmax(Function):
