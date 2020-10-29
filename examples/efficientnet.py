@@ -3,30 +3,15 @@
 # https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth
 # a rough copy of
 # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/model.py
+import io
+import numpy as np
+np.set_printoptions(suppress=True)
+
 from tinygrad.tensor import Tensor
 from tinygrad.utils import fetch
 
-def swish(x):
-  return x.mul(x.sigmoid())
-
-class BatchNorm2D:
-  def __init__(self, sz, eps=0.001):
-    self.eps = eps
-    self.weight = Tensor.zeros(sz)
-    self.bias = Tensor.zeros(sz)
-
-    # TODO: need running_mean and running_var
-    self.running_mean = Tensor.zeros(sz)
-    self.running_var = Tensor.zeros(sz)
-    self.num_batches_tracked = Tensor.zeros(0)
-
-  def __call__(self, x):
-    # this work at inference?
-    x = x.sub(self.running_mean.reshape(shape=[1, -1, 1, 1]))
-    x = x.mul(self.weight.reshape(shape=[1, -1, 1, 1]))
-    x = x.div(self.running_var.add(Tensor([self.eps])).reshape(shape=[1, -1, 1, 1]).sqrt())
-    x = x.add(self.bias.reshape(shape=[1, -1, 1, 1]))
-    return x
+# BatchNorm2D and swish
+from tinygrad.nn import *
 
 class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio):
@@ -105,30 +90,31 @@ class EfficientNet:
     #x = x.dropout(0.2)
     return swish(x.dot(self._fc).add(self._fc_bias))
 
+  def load_weights_from_torch(self):
+    # load b0
+    import torch
+    b0 = fetch("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
+    b0 = torch.load(io.BytesIO(b0))
+
+    for k,v in b0.items():
+      if '_blocks.' in k:
+        k = "%s[%s].%s" % tuple(k.split(".", 2))
+      mk = "self."+k
+      #print(k, v.shape)
+      try:
+        mv = eval(mk)
+      except AttributeError:
+        try:
+          mv = eval(mk.replace(".weight", ""))
+        except AttributeError:
+          mv = eval(mk.replace(".bias", "_bias"))
+      vnp = v.numpy().astype(np.float32)
+      mv.data[:] = vnp if k != '_fc.weight' else vnp.T
+
 if __name__ == "__main__":
-  import numpy as np
-  np.set_printoptions(suppress=True)
   # instantiate my net
   model = EfficientNet()
-
-  # load b0
-  import io, torch
-  b0 = fetch("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
-  b0 = torch.load(io.BytesIO(b0))
-
-  for k,v in b0.items():
-    if '_blocks.' in k:
-      k = "%s[%s].%s" % tuple(k.split(".", 2))
-    mk = "model."+k
-    #print(k, v.shape)
-    try:
-      mv = eval(mk)
-    except AttributeError:
-      try:
-        mv = eval(mk.replace(".weight", ""))
-      except AttributeError:
-        mv = eval(mk.replace(".bias", "_bias"))
-    mv.data[:] = v.numpy() if k != '_fc.weight' else v.numpy().T
+  model.load_weights_from_torch()
 
   # load cat image
   from PIL import Image
@@ -136,9 +122,9 @@ if __name__ == "__main__":
   img = img.resize((224, 224))
   img = np.moveaxis(np.array(img), [2,0,1], [0,1,2])
   img = img.astype(np.float32).reshape(1,3,224,224)
-  print(img.shape)
+  print(img.shape, img.dtype)
 
-  #b0 = pickle.loads(b0)
+  # run the net
   out = model.forward(Tensor(img))
   print(np.argmax(out.data), np.max(out.data))
 

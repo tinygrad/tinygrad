@@ -1,15 +1,13 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from functools import partialmethod
 from inspect import signature
-import logging
 
 import numpy as np
 
 # **** start with two base classes ****
 
 class Tensor:
-  # internal variables used for autograd graph construction
-  _ctx = None
+  
   
   def __init__(self, data):
     if isinstance(data, list):
@@ -17,11 +15,15 @@ class Tensor:
     elif not isinstance(data, np.ndarray):
       raise TypeError("Error constructing tensor with %r" % data)
 
-    if data.dtype == np.float64:
-        logging.warning("Are you sure you want float64 in %r?" % data)
+    if data.dtype != np.float32:
+      # warning? float64 is actually needed for numerical jacobian
+      print("warning, %r isn't float32" % (data.shape,))
 
     self.data = data
     self.grad = None
+
+    # internal variables used for autograd graph construction
+    self._ctx = None
 
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad)
@@ -68,9 +70,19 @@ class Tensor:
       t.grad = g
       t.backward(False)
 
+  # ***** non first class ops *****
+
   def mean(self):
     div = Tensor(np.array([1/self.data.size], dtype=self.data.dtype))
     return self.sum().mul(div)
+
+  def sqrt(self):
+    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+0.5)
+    return self.pow(root)
+
+  def div(self, y):
+    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1)
+    return self.mul(y.pow(root))
 
 # An instantiation of the Function is the Context
 class Function:
