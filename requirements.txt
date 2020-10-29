@@ -2,6 +2,6 @@ numpy
 # util deps
 requests
 # testing deps
-torch
+# torch
 pytest
 tqdm
