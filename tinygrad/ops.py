@@ -104,7 +104,10 @@ register('relu', ReLU)
 class Sigmoid(Function):
   @staticmethod
   def forward(ctx, input):
-    ret = 1/(1 + np.exp(-input))
+    # TODO: stable sigmoid? does the overflow matter?
+    with np.warnings.catch_warnings():
+      np.warnings.filterwarnings('ignore')
+      ret = 1/(1 + np.exp(-input))
     ctx.save_for_backward(ret)
     return ret
 
