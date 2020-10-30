@@ -7,12 +7,11 @@ import numpy as np
 
 class Tensor:
   def __init__(self, data):
-    #print(type(data), data)
-    if type(data) == list:
+    if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
-    elif type(data) != np.ndarray:
-      print("error constructing tensor with %r" % data)
-      assert(False)
+    elif not isinstance(data, np.ndarray):
+      raise TypeError("Error constructing tensor with %r" % data)
+
     if data.dtype != np.float32:
       # warning? float64 is actually needed for numerical jacobian
       print("warning, %r isn't float32" % (data.shape,))
