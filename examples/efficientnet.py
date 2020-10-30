@@ -128,6 +128,13 @@ if __name__ == "__main__":
   img -= np.array([0.485, 0.456, 0.406]).reshape((1,-1,1,1))
   img /= np.array([0.229, 0.224, 0.225]).reshape((1,-1,1,1))
 
+  # if you want to look at the cat
+  """
+  import matplotlib.pyplot as plt
+  plt.imshow(img[0].mean(axis=0))
+  plt.show()
+  """
+
   # category labels
   lbls = fetch("https://gist.githubusercontent.com/aaronpolhamus/964a4411c0906315deb9f4a3723aac57/raw/aa66dd9dbf6b56649fa3fab83659b2acbf3cbfd1/map_clsloc.txt")
   lbls = dict([(int(x.split(" ")[1]), x.split(" ")[2]) for x in lbls.decode('utf-8').split("\n")])
