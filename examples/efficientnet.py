@@ -119,8 +119,10 @@ if __name__ == "__main__":
   # load cat image and preprocess
   from PIL import Image
   img = Image.open(io.BytesIO(fetch("https://c.files.bbci.co.uk/12A9B/production/_111434467_gettyimages-1143489763.jpg")))
-  img = img.resize((224, 224))
-  img = np.moveaxis(np.array(img), [2,0,1], [0,1,2])
+  img = img.resize((398, 224))
+  img = np.array(img)
+  img = img[:, 87:-87]
+  img = np.moveaxis(img, [2,0,1], [0,1,2])
   img = img.astype(np.float32).reshape(1,3,224,224)
   img /= 256
   img -= np.array([0.485, 0.456, 0.406]).reshape((1,-1,1,1))
