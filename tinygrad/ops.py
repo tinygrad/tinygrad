@@ -162,9 +162,6 @@ class Conv2D(Function):
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
-    #testing
-    assert ctx.groups*rcout == cout
-
     ctx.save_for_backward(x, w)
 
     ret = np.zeros((bs, ctx.groups, rcout, oy, ox), dtype=w.dtype)
