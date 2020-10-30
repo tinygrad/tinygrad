@@ -165,15 +165,12 @@ class Conv2D(Function):
     ctx.save_for_backward(x, w)
 
     ret = np.zeros((bs, ctx.groups, rcout, oy, ox), dtype=w.dtype)
-    
     gw = w.reshape(groups,rcout, -1)
     for Y in range(oy):
       for X in range(ox):
         iY,iX = Y*ys, X*xs
         gx = x[:,:,iY:iY+H, iX:iX+W].reshape(bs,groups,-1)
         ret[:, :, :, Y, X] += np.einsum('igj,gkj -> igk',gx,gw)
-
-      
     return ret.reshape(bs, cout, oy, ox)
 
   @staticmethod
