@@ -162,17 +162,22 @@ class Conv2D(Function):
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
-    ctx.save_for_backward(x, w)
-    ret = np.zeros((bs, cout, oy, ox), dtype=w.dtype)
+    #testing
+    assert ctx.groups*rcout == cout
 
-    for g in range(ctx.groups):
-      tw = w[g*rcout:(g*rcout+rcout)].reshape(rcout, -1).T
-      for Y in range(oy):
-        for X in range(ox):
-          iY,iX = Y*ys, X*xs
-          tx = x[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W].reshape(bs, -1)
-          ret[:, g*rcout:(g*rcout+rcout), Y, X] += tx.dot(tw)
-    return ret
+    ctx.save_for_backward(x, w)
+
+    ret = np.zeros((bs, ctx.groups, rcout, oy, ox), dtype=w.dtype)
+    
+    gw = w.reshape(groups,rcout, -1)
+    for Y in range(oy):
+      for X in range(ox):
+        iY,iX = Y*ys, X*xs
+        gx = x[:,:,iY:iY+H, iX:iX+W].reshape(bs,groups,-1)
+        ret[:, :, :, Y, X] += np.einsum('igj,gkj -> igk',gx,gw)
+
+      
+    return ret.reshape(bs, cout, oy, ox)
 
   @staticmethod
   def backward(ctx, grad_output):
