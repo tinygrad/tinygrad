@@ -155,21 +155,23 @@ class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     if type(ctx.stride) == int:
       ctx.stride = (ctx.stride, ctx.stride)
-
     cout,cin,H,W = w.shape
-    if groups > 1:
-      w = np.repeat(w, groups, axis=1) / groups
-    tw = w.reshape(cout, -1).T
     ys,xs = ctx.stride
-    bs,oy,ox = x.shape[0], (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
+    bs,cin_,oy,ox = x.shape[0], x.shape[1], (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
+    assert cin*ctx.groups == cin_
+    assert cout % ctx.groups == 0
+    rcout = cout//ctx.groups
 
     ctx.save_for_backward(x, w)
     ret = np.zeros((bs, cout, oy, ox), dtype=w.dtype)
-    for Y in range(oy):
-      for X in range(ox):
-        iY,iX = Y*ys, X*xs
-        tx = x[:, :, iY:iY+H, iX:iX+W].reshape(bs, -1)
-        ret[:, :, Y, X] = tx.dot(tw)
+
+    for g in range(ctx.groups):
+      tw = w[g*rcout:(g*rcout+rcout)].reshape(rcout, -1).T
+      for Y in range(oy):
+        for X in range(ox):
+          iY,iX = Y*ys, X*xs
+          tx = x[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W].reshape(bs, -1)
+          ret[:, g*rcout:(g*rcout+rcout), Y, X] += tx.dot(tw)
     return ret
 
   @staticmethod
@@ -177,17 +179,19 @@ class Conv2D(Function):
     bs,_,oy,ox = grad_output.shape
     x, w = ctx.saved_tensors
     cout,cin,H,W = w.shape
-    tw = w.reshape(cout, -1)
     ys,xs = ctx.stride
+    rcout = cout//ctx.groups
 
     dx, dw = np.zeros_like(x), np.zeros_like(w)
-    for Y in range(grad_output.shape[2]):
-      for X in range(grad_output.shape[3]):
-        iY,iX = Y*ys, X*xs
-        gg = grad_output[:, :, Y, X]
-        tx = x[:, :, iY:iY+H, iX:iX+W].reshape(x.shape[0], -1)
-        dw += gg.T.dot(tx).reshape(dw.shape)
-        dx[:, :, iY:iY+H, iX:iX+W] += gg.dot(tw).reshape(dx.shape[0], dx.shape[1], H, W)
+    for g in range(ctx.groups):
+      tw = w[g*rcout:(g*rcout+rcout)].reshape(rcout, -1)
+      for Y in range(grad_output.shape[2]):
+        for X in range(grad_output.shape[3]):
+          iY,iX = Y*ys, X*xs
+          gg = grad_output[:, :, Y, X]
+          tx = x[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W].reshape(x.shape[0], -1)
+          dw += gg.T.dot(tx).reshape(dw.shape)
+          dx[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W] += gg.dot(tw).reshape(dx.shape[0], cin, H, W)
     return dx, dw
 register('conv2d', Conv2D)
 
