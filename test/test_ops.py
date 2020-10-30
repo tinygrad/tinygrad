@@ -18,8 +18,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7):
   out.mean().backward()
   ret.mean().backward()
 
-  #for t, tt in zip(ts, tst):
-  #  np.testing.assert_allclose(t.grad, tt.grad, atol=grad_atol)
+  for t, tt in zip(ts, tst):
+    np.testing.assert_allclose(t.grad, tt.grad, atol=grad_atol)
 
   # speed
   torch_fp = timeit.Timer(functools.partial(torch_fxn, *ts)).timeit(5) * 1000/5

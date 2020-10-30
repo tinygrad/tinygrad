@@ -188,9 +188,9 @@ class Conv2D(Function):
       for Y in range(grad_output.shape[2]):
         for X in range(grad_output.shape[3]):
           iY,iX = Y*ys, X*xs
-          gg = grad_output[:, :, Y, X]
+          gg = grad_output[:, g*rcout:(g*rcout+rcout), Y, X]
           tx = x[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W].reshape(x.shape[0], -1)
-          dw += gg.T.dot(tx).reshape(dw.shape)
+          dw[g*rcout:(g*rcout+rcout)] += gg.T.dot(tx).reshape((rcout,cin,H,W))
           dx[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W] += gg.dot(tw).reshape(dx.shape[0], cin, H, W)
     return dx, dw
 register('conv2d', Conv2D)
