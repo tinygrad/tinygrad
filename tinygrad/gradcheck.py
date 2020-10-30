@@ -29,14 +29,13 @@ def numerical_jacobian(func, input, eps = 1e-6):
 
   for i in range(ji):
     eps_perturb = mask_like(input.data, i, mask_value = eps)
-    for o in range(jo):
 
-      output_perturb_add = func(Tensor(input.data + eps_perturb)).data.reshape(-1)[o]
-      output_perturb_sub = func(Tensor(input.data - eps_perturb)).data.reshape(-1)[o]
+    output_perturb_add = func(Tensor(input.data + eps_perturb)).data.reshape(-1)
+    output_perturb_sub = func(Tensor(input.data - eps_perturb)).data.reshape(-1)
 
-      grad_approx = ((output_perturb_add) - (output_perturb_sub)) / (2*eps)
+    grad_approx = ((output_perturb_add) - (output_perturb_sub)) / (2*eps)
 
-      NJ[o,i] = grad_approx
+    NJ[:,i] = grad_approx
   return NJ
 
 def gradcheck(func, input, eps = 1e-06, atol = 1e-5, rtol = 0.001):
