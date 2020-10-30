@@ -125,6 +125,9 @@ if __name__ == "__main__":
   print(img.shape, img.dtype)
 
   # run the net
+  import time
+  st = time.time()
   out = model.forward(Tensor(img))
+  print("did inference in %.2f s" % (time.time()-st))
   print(np.argmax(out.data), np.max(out.data))
 
