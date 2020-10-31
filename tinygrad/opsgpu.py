@@ -5,7 +5,6 @@ import pyopencl as cl
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
-    print(x,y)
     res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, x.size)
     # TODO: precompile on import?
     prg = cl.Program(ctx.cl_ctx, """
@@ -16,7 +15,7 @@ class Add(Function):
       res_g[gid] = a_g[gid] + b_g[gid];
     }
     """).build()
-    prg.sum(ctx.cl_queue, [x.size], None, x, y, res_g)
+    prg.sum(ctx.cl_queue, [x.size//4], None, x, y, res_g)
     return res_g
 
   @staticmethod

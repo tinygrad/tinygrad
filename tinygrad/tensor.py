@@ -62,16 +62,17 @@ class Tensor:
     if self.gpu:
       data = np.empty(self.shape, dtype=np.float32)
       cl.enqueue_copy(cl_queue, data, self.data)
-      self.data = data
-      self.gpu = False
-    return self
+      return Tensor(data)
+    else:
+      return self
 
   def cuda(self):
     if not self.gpu:
       assert self.data.dtype == np.float32   # only float32 on GPU
-      self.data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
-      self.gpu = True
-    return self
+      data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
+      return Tensor(data)
+    else:
+      return self
     
   def backward(self, allow_fill=True):
     #print("running backward on", self)
