@@ -3,10 +3,7 @@ from .tensor import Function, register, Tensor
 import pyopencl as cl
 
 def buffer_new(ctx, shape):
-  sz = 4
-  for s in shape:
-    sz *= s
-  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, sz)
+  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, 4*np.prod(shape))
   res_g.shape = shape
   res_g.dtype = np.float32
   return res_g
