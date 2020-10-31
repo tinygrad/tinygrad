@@ -2,6 +2,13 @@
 from functools import partialmethod
 from inspect import signature
 import numpy as np
+try:
+  import pyopencl as cl
+  ctx = cl.create_some_context(answers=[0,2])  # change if you don't have mac
+  queue = cl.CommandQueue(ctx)
+except ImportError:
+  # no GPU support
+  pass
 
 # **** start with two base classes ****
 
@@ -20,17 +27,15 @@ class Tensor:
       Tensor.did_float_warning = True
 
     self.data = data
+    self.shape = data.shape
     self.grad = None
+    self.gpu = False
 
     # internal variables used for autograd graph construction
     self._ctx = None
 
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad)
-
-  @property
-  def shape(self):
-    return self.data.shape
 
   @staticmethod
   def zeros(*shape):
@@ -44,6 +49,21 @@ class Tensor:
   def eye(dim):
     return Tensor(np.eye(dim).astype(np.float32))
 
+  def cpu(self):
+    if self.gpu:
+      data = np.empty(self.shape, dtype=np.float32)
+      cl.enqueue_copy(queue, data, self.data)
+      self.data = data
+      self.gpu = False
+    return self
+
+  def cuda(self):
+    if not self.gpu:
+      assert self.data.dtype == np.float32   # only float32 on GPU
+      self.data = cl.Buffer(ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
+      self.gpu = True
+    return self
+    
   def backward(self, allow_fill=True):
     #print("running backward on", self)
     if self._ctx is None:
