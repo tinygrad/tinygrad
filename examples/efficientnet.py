@@ -127,8 +127,8 @@ if __name__ == "__main__":
   else:
     url = "https://c.files.bbci.co.uk/12A9B/production/_111434467_gettyimages-1143489763.jpg"
   img = Image.open(io.BytesIO(fetch(url)))
-  aspect_ratio = img.size[0] / img.size[1]
-  img = img.resize((int(224*aspect_ratio), 224))
+  #aspect_ratio = img.size[0] / img.size[1]
+  img = img.resize((224, 224))
   img = np.array(img)
   chapo = (img.shape[1]-224)//2
   img = img[:, chapo:chapo+224]
