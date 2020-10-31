@@ -48,6 +48,21 @@ class Pow(Function):
     return y * (x**(y-1.0)) * grad_output, (x**y) * np.log(x) * grad_output
 register('pow', Pow)
 
+class Sum(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return np.array([input.sum()])
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return grad_output * np.ones_like(input)
+register('sum', Sum)
+
+
+# ************* GEMM *************
+
 class Dot(Function):
   @staticmethod
   def forward(ctx, input, weight):
@@ -63,20 +78,8 @@ class Dot(Function):
 register('dot', Dot)
 register('matmul', Dot)
 
-class Sum(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return np.array([input.sum()])
 
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output * np.ones_like(input)
-register('sum', Sum)
-
-
-# ************* nn ops *************
+# ************* simple ops *************
 
 class Pad2D(Function):
   @staticmethod
@@ -87,6 +90,21 @@ class Pad2D(Function):
   def backward(ctx, grad_output):
     raise Exception("write this")
 register('pad2d', Pad2D)
+
+class Reshape(Function):
+  @staticmethod
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    return x.reshape(shape)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return grad_output.reshape(in_shape)
+register('reshape', Reshape)
+
+
+# ************* activation ops *************
 
 class ReLU(Function):
   @staticmethod
@@ -117,18 +135,6 @@ class Sigmoid(Function):
     grad_input = grad_output * (ret * (1 - ret))
     return grad_input
 register('sigmoid', Sigmoid)
-
-class Reshape(Function):
-  @staticmethod
-  def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    return x.reshape(shape)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return grad_output.reshape(in_shape)
-register('reshape', Reshape)
 
 class LogSoftmax(Function):
   @staticmethod

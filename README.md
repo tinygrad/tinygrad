@@ -88,8 +88,10 @@ python -m pytest
 
 ### TODO
 
+* Train an EfficientNet
+  * EfficientNet backward pass
+  * Tensors on GPU (GPU support, must support Mac)
 * Reduce code
 * Increase speed
 * Add features
-* In that order
 
