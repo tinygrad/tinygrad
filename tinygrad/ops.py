@@ -182,16 +182,29 @@ class Conv2D(Function):
     rcout = cout//ctx.groups
 
     dx, dw = np.zeros_like(x), np.zeros_like(w)
-    for g in range(ctx.groups):
-      tw = w[g*rcout:(g*rcout+rcout)].reshape(rcout, -1)
-      for Y in range(grad_output.shape[2]):
-        for X in range(grad_output.shape[3]):
+
+    gdx = dx.reshape(bs,ctx.groups,cin,x.shape[2],x.shape[3])
+    gdw = dw.reshape(ctx.groups,rcout, cin, H, W)
+
+    ggg = grad_output.reshape(grad_output.shape[0],ctx.groups,rcout,oy,ox)
+
+    gx = x.reshape(x.shape[0],ctx.groups,cin,x.shape[2],x.shape[3])
+    str_x = np.lib.stride_tricks.as_strided(
+                gx,
+                shape=(bs, ctx.groups, cin, oy, ox, H, W),
+                strides=(gx.strides[0], gx.strides[1], gx.strides[2], gx.strides[3]*ys, gx.strides[4]*xs, gx.strides[3], gx.strides[4]),
+                writeable=False, 
+            )
+
+    gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,str_x)
+   
+    #needs to be optimized
+    for Y in range(grad_output.shape[2]):
+      for X in range(grad_output.shape[3]):
           iY,iX = Y*ys, X*xs
-          gg = grad_output[:, g*rcout:(g*rcout+rcout), Y, X]
-          tx = x[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W].reshape(x.shape[0], -1)
-          dw[g*rcout:(g*rcout+rcout)] += gg.T.dot(tx).reshape((rcout,cin,H,W))
-          dx[:, g*cin:(g*cin+cin), iY:iY+H, iX:iX+W] += gg.dot(tw).reshape(dx.shape[0], cin, H, W)
-    return dx, dw
+          gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx',ggg[:,:,:,Y,X], w.reshape(ctx.groups,rcout, cin, H, W)) 
+    
+    return gdx.reshape(x.shape), gdw.reshape(w.shape)
 register('conv2d', Conv2D)
 
 
