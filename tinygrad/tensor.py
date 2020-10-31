@@ -73,6 +73,7 @@ class Tensor:
       assert self.data.dtype == np.float32   # only float32 on GPU
       data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
       data.shape = self.shape
+      data.dtype = self.data.dtype
       return Tensor(data)
     else:
       return self
@@ -85,14 +86,17 @@ class Tensor:
     if self.grad is None and allow_fill:
       # fill in the first grad with one
       # this is "implicit gradient creation"
-      assert self.data.size == 1
-      self.grad = np.ones_like(self.data)
+      assert self.data.shape == (1,)
+      self.grad = Tensor(np.ones(self.data.shape, dtype=self.data.dtype))
+      if self.gpu:
+        self.grad = self.grad.cuda()
 
     assert(self.grad is not None)
 
-    grads = self._ctx.backward(self._ctx, self.grad)
+    grads = self._ctx.backward(self._ctx, self.grad.data)
     if len(self._ctx.parents) == 1:
       grads = [grads]
+    grads = [Tensor(x) for x in grads]
     for t,g in zip(self._ctx.parents, grads):
       if g is None:
         continue
@@ -118,6 +122,8 @@ class Tensor:
 
   def mean(self):
     div = Tensor(np.array([1/self.data.size], dtype=self.data.dtype))
+    if self.gpu:
+      div = div.cuda()
     return self.sum().mul(div)
 
   def sqrt(self):
