@@ -20,7 +20,6 @@ class Tensor:
       data = np.array(data, dtype=np.float32)
     elif isinstance(data, cl._cl.Buffer):
       self.gpu = True
-      shape = [data.size//4]  # TODO: this is bad
     elif not isinstance(data, np.ndarray):
       raise TypeError("Error constructing tensor with %r" % data)
 
@@ -33,7 +32,6 @@ class Tensor:
       self.gpu = False
 
     self.data = data
-    self.shape = shape
     self.grad = None
 
     # internal variables used for autograd graph construction
@@ -41,6 +39,10 @@ class Tensor:
 
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad)
+
+  @property
+  def shape(self):
+    return self.data.shape
 
   @staticmethod
   def zeros(*shape):
@@ -70,6 +72,7 @@ class Tensor:
     if not self.gpu:
       assert self.data.dtype == np.float32   # only float32 on GPU
       data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
+      data.shape = self.shape
       return Tensor(data)
     else:
       return self

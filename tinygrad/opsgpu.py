@@ -5,7 +5,10 @@ import pyopencl as cl
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
+    # helper: buffer like?
     res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, x.size)
+    res_g.shape = x.shape
+
     # TODO: precompile on import?
     prg = cl.Program(ctx.cl_ctx, """
     __kernel void sum(
