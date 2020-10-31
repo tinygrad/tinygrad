@@ -48,11 +48,17 @@ class Mul(Function):
     }
     """).build()
     prg.mul(ctx.cl_queue, [ret.size//4], None, x, y, ret)
+    ctx.save_for_backward(x, y, prg)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output, grad_output
+    x,y,prg = ctx.saved_tensors
+    gx = buffer_like(ctx, x)
+    gy = buffer_like(ctx, y)
+    prg.mul(ctx.cl_queue, [gx.size//4], None, y, grad_output, gx)
+    prg.mul(ctx.cl_queue, [gy.size//4], None, x, grad_output, gy)
+    return gx, gy
 register('mul', Mul, gpu=True)
 
 class Sum(Function):
