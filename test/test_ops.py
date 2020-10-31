@@ -42,7 +42,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7, gpu
 
 class TestOps(unittest.TestCase):
   def test_add(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, "add")
+    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
   def test_add_gpu(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, "add", gpu=True)
   def test_sub(self):

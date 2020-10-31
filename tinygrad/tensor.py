@@ -1,5 +1,5 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-from functools import partial
+from functools import partial, partialmethod
 from inspect import signature
 import numpy as np
 try:
@@ -112,15 +112,14 @@ class Tensor:
   ops = {}
   opsgpu = {}
   def __getattr__(self, x):
-    try:
-      return eval("Tensor."+x)
-    except AttributeError:
-      pass
-    if self.gpu:
+    if x in Tensor.opsgpu and self.gpu:
       fxn = Tensor.opsgpu[x]
-    else:
+      return partial(fxn.apply, fxn, self)
+    elif x in Tensor.ops:
       fxn = Tensor.ops[x]
-    return partial(fxn.apply, fxn, self)
+      return partial(fxn.apply, fxn, self)
+    # fallback
+    return self.__dict__[x]
 
   # ***** non first class ops *****
 
@@ -173,6 +172,10 @@ def register(name, fxn, gpu=False):
     Tensor.opsgpu[name] = fxn
   else:
     Tensor.ops[name] = fxn
+  def dispatch(self, name, *x, **kwargs):
+    #print("dispatch", name, len(x))
+    return self.__getattr__(name)(*x, **kwargs)
+  setattr(Tensor, name, partialmethod(dispatch, name))
 
 # this registers all the operations
 import tinygrad.ops
