@@ -125,7 +125,7 @@ class Tensor:
   # ***** non first class ops *****
 
   def mean(self):
-    div = Tensor(np.array([1/self.data.size], dtype=self.data.dtype))
+    div = Tensor(np.array([1/np.prod(self.data.shape)], dtype=self.data.dtype))
     if self.gpu:
       div = div.cuda()
     return self.sum().mul(div)
