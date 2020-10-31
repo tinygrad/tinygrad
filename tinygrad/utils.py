@@ -11,7 +11,6 @@ def layer_init_uniform(*x):
 
 def fetch(url):
   import requests, os, hashlib, tempfile
-  if os.name == 'nt':
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())    
   if os.path.isfile(fp):
     with open(fp, "rb") as f:
