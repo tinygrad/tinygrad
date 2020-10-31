@@ -8,7 +8,7 @@ try:
   cl_queue = cl.CommandQueue(cl_ctx)
 except ImportError:
   # no GPU support
-  pass
+  cl_ctx, cl_queue = None, None
 
 # **** start with two base classes ****
 
