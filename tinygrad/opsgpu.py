@@ -6,7 +6,6 @@ def buffer_new(ctx, shape):
   sz = 4
   for s in shape:
     sz *= s
-  print(sz, shape)
   res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, sz)
   res_g.shape = shape
   res_g.dtype = np.float32

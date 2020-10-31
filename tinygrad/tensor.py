@@ -112,6 +112,10 @@ class Tensor:
   ops = {}
   opsgpu = {}
   def __getattr__(self, x):
+    try:
+      return eval("Tensor."+x)
+    except AttributeError:
+      pass
     if self.gpu:
       fxn = Tensor.opsgpu[x]
     else:
