@@ -139,11 +139,11 @@ if __name__ == "__main__":
   img /= np.array([0.229, 0.224, 0.225]).reshape((1,-1,1,1))
     
   # if you want to look at the cat
-  '''
+  """
   import matplotlib.pyplot as plt
   plt.imshow(img[0].mean(axis=0))
   plt.show()
-  '''
+  """
 
   # category labels
   import ast
