@@ -20,7 +20,7 @@ def require_init_gpu():
 class Tensor:
   did_float_warning = False
 
-  def __init__(self, data):
+  def __init__(self, data, gpu=False):
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif GPU and isinstance(data, cl._cl.Buffer):
@@ -37,6 +37,10 @@ class Tensor:
 
     self.data = data
     self.grad = None
+
+    if gpu:
+      self.data = self.cuda().data
+      self.gpu = True
 
     # internal variables used for autograd graph construction
     self._ctx = None
@@ -121,17 +125,15 @@ class Tensor:
   # ***** non first class ops *****
 
   def mean(self):
-    div = Tensor(np.array([1/np.prod(self.data.shape)], dtype=self.data.dtype))
-    if self.gpu:
-      div = div.cuda()
+    div = Tensor(np.array([1/np.prod(self.data.shape)], dtype=self.data.dtype), gpu=self.gpu)
     return self.sum().mul(div)
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+0.5)
+    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+0.5, gpu=self.gpu)
     return self.pow(root)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1)
+    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1, gpu=self.gpu)
     return self.mul(y.pow(root))
 
 # An instantiation of the Function is the Context
