@@ -188,7 +188,7 @@ class Conv2D(Function):
       ret = np.zeros((bs,ctx.groups,rcout,oy,ox),dtype=x.dtype)
       for g in range(ctx.groups):
         #ijYXyx,kjyx -> iYXk ->ikYX
-        ret[:,g,:,:,:]+=np.moveaxis(np.tensordot(tx[:,g,:,:,:,:,:], tw[g,:,:,:,:],((1,4,5),(1,2,3))),3,1)
+        ret[:,g]+=np.moveaxis(np.tensordot(tx[:,g], tw[g],((1,4,5),(1,2,3))),3,1)
     return ret.reshape(bs, cout, oy, ox) 
 
 
