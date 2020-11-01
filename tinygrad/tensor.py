@@ -39,8 +39,7 @@ class Tensor:
     self.grad = None
 
     if gpu:
-      self.data = self.cuda().data
-      self.gpu = True
+      self.cuda_()
 
     # internal variables used for autograd graph construction
     self._ctx = None
@@ -103,6 +102,10 @@ class Tensor:
       return Tensor(data)
     else:
       return self
+
+  def cuda_(self):
+    self.data = self.cuda().data
+    self.gpu = True
 
   def cuda(self):
     if not GPU:
