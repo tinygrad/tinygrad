@@ -197,15 +197,21 @@ class Conv2D(Function):
 
 
   @staticmethod
-  def backward(ctx, grad_output):
+  def backward(ctx, grad_output, use_einsum = False):
     bs,_,oy,ox = grad_output.shape
     tx, tw, x_shape = ctx.saved_tensors
     _,rcout,cin,H,W = tw.shape
     ys,xs = ctx.stride
     OY,OX = x_shape[2:4]
-
+    
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
-    gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
+    if use_einsum:
+        gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
+    else:
+        gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
+        for g in range(ctx.groups):
+            #'ikYX,ijYXyx -> kjyx'
+            gdw[g] += np.tensordot(ggg[:,g],tx[:,g], ((0,2,3),(0,2,3)))
    
     #needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
