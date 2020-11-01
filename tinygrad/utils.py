@@ -11,14 +11,9 @@ def layer_init_uniform(*x):
 
 def fetch(url):
   import requests, os, hashlib, tempfile
-  fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())    
-  if os.path.isfile(fp):
-    with open(fp, "rb") as f:
-      dat = f.read()
-  else:
-    with open(fp, "wb") as f:
-      dat = requests.get(url).content
-      f.write(dat)
+  f = tempfile.NamedTemporaryFile(delete=True, mode="wb")
+  dat = requests.get(url).content
+  f.write(dat)
   return dat
 
 def fetch_mnist():
