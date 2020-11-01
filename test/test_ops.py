@@ -11,10 +11,6 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7, gpu
   if gpu:
     tst = [x.cuda() for x in tst]
 
-  if type(tinygrad_fxn) == str:
-    lookup_fxn = tst[0].__getattr__(tinygrad_fxn)
-    tinygrad_fxn = lambda _,*x: lookup_fxn(*x)
-
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
 
@@ -44,18 +40,18 @@ class TestOps(unittest.TestCase):
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
   def test_add_gpu(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, "add", gpu=True)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=True)
   def test_sub(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x-y, "sub")
+    helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
   def test_mul(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, "mul")
+    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul)
   def test_mul_gpu(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, "mul", gpu=True)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul, gpu=True)
   def test_div(self):
     # TODO: why does this need more tolerance?
-    helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div, atol=5e-5, grad_atol=1e-5)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div, atol=1e-3, grad_atol=1e-3)
   def test_pow(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, "pow")
+    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow)
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt)
 
@@ -81,7 +77,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: x.conv2d(w,stride=(2,1)).relu(), atol=2e-5, grad_atol=2e-6)
 
   def test_maxpool2x2(self):
-    helper_test_op([(32,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, (2,2)), "max_pool2d")
+    helper_test_op([(32,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, (2,2)), Tensor.max_pool2d)
 
   def test_maxpool_sizes(self):
     for sz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
@@ -90,7 +86,7 @@ class TestOps(unittest.TestCase):
         lambda x: x.max_pool2d(kernel_size=sz))
 
   def test_avgpool2x2(self):
-    helper_test_op([(32,2,111,28)], lambda x: torch.nn.functional.avg_pool2d(x, (2,2)), "avg_pool2d")
+    helper_test_op([(32,2,111,28)], lambda x: torch.nn.functional.avg_pool2d(x, (2,2)), Tensor.avg_pool2d)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
