@@ -1,5 +1,4 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-from functools import partialmethod
 from inspect import signature
 import numpy as np
 try:
@@ -132,9 +131,6 @@ class Tensor:
 
 # An instantiation of the Function is the Context
 class Function:
-  cl_ctx = cl_ctx
-  cl_queue = cl_queue
-
   def __init__(self, *tensors):
     self.parents = tensors
     self.saved_tensors = []
@@ -160,15 +156,13 @@ class Function:
 def register(name, fxn, gpu=False):
   if gpu:
     Tensor.opsgpu[name] = fxn
+    fxn.cl_ctx, fxn.cl_queue = cl_ctx, cl_queue
   else:
     Tensor.ops[name] = fxn
-  def dispatch(self, name, *x, **kwargs):
-    if self.gpu:
-      f = Tensor.opsgpu[name]
-    else:
-      f = Tensor.ops[name]
+  def dispatch(self, *x, **kwargs):
+    f = (Tensor.opsgpu if self.gpu else Tensor.ops)[name]
     return f.apply(f, self, *x, **kwargs)
-  setattr(Tensor, name, partialmethod(dispatch, name))
+  setattr(Tensor, name, dispatch)
 
 # this registers all the operations
 import tinygrad.ops
