@@ -160,7 +160,7 @@ register('logsoftmax', LogSoftmax)
 
 class Conv2D(Function):
   @staticmethod
-  def forward(ctx, x, w, stride=1, groups=1, use_einsum = False):
+  def forward(ctx, x, w, stride=1, groups=1):
     if type(ctx.stride) == int:
       ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
@@ -179,21 +179,18 @@ class Conv2D(Function):
                     gx.strides[3], gx.strides[4]),
            writeable=False,
          )
-    #tx = np.ravel(tx).reshape(tx.shape)
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
-    if use_einsum:
-      ret = np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
-    else:
-      ret = np.zeros((bs,ctx.groups,rcout,oy,ox),dtype=x.dtype)
-      for g in range(ctx.groups):
-        #ijYXyx,kjyx -> iYXk ->ikYX
-        ret[:,g]+=np.moveaxis(np.tensordot(tx[:,g], tw[g],((1,4,5),(1,2,3))),3,1)
+    #ret = np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
+    ret = np.zeros((bs,ctx.groups,rcout,oy,ox),dtype=x.dtype)
+    for g in range(ctx.groups):
+      #ijYXyx,kjyx -> iYXk ->ikYX
+      ret[:,g]+=np.moveaxis(np.tensordot(tx[:,g], tw[g],((1,4,5),(1,2,3))),3,1)
     return ret.reshape(bs, cout, oy, ox) 
 
 
   @staticmethod
-  def backward(ctx, grad_output, use_einsum = False):
+  def backward(ctx, grad_output):
     bs,_,oy,ox = grad_output.shape
     tx, tw, x_shape = ctx.saved_tensors
     _,rcout,cin,H,W = tw.shape
@@ -201,14 +198,13 @@ class Conv2D(Function):
     OY,OX = x_shape[2:4]
     
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
-    if use_einsum:
-      gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
-    else:
-      gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
-      for g in range(ctx.groups):
-        #'ikYX,ijYXyx -> kjyx'
-        gdw[g] += np.tensordot(ggg[:,g],tx[:,g], ((0,2,3),(0,2,3)))
-   
+    
+    gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
+    #gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
+    for g in range(ctx.groups):
+      #'ikYX,ijYXyx -> kjyx'
+      gdw[g] += np.tensordot(ggg[:,g],tx[:,g], ((0,2,3),(0,2,3)))
+
     #needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
     for Y in range(grad_output.shape[2]):
