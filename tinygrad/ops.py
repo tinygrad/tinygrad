@@ -179,6 +179,7 @@ class Conv2D(Function):
                     gx.strides[3], gx.strides[4]),
            writeable=False,
          )
+    tx = np.ravel(tx).reshape(tx.shape)
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
     return np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
