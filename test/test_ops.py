@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 import timeit
 import functools
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, GPU
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7, gpu=False, forward_only=False):
   ts = [torch.rand(x, requires_grad=True) for x in shps]
@@ -39,12 +39,14 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7, gpu
 class TestOps(unittest.TestCase):
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
+  @unittest.skipUnless(GPU, "Requires GPU")
   def test_add_gpu(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=True)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
   def test_mul(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul)
+  @unittest.skipUnless(GPU, "Requires GPU")
   def test_mul_gpu(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul, gpu=True)
   def test_div(self):
