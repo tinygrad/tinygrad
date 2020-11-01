@@ -196,9 +196,9 @@ class Conv2D(Function):
     _,rcout,cin,H,W = tw.shape
     ys,xs = ctx.stride
     OY,OX = x_shape[2:4]
-    
+
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
-    
+
     gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
     #gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
     for g in range(ctx.groups):
