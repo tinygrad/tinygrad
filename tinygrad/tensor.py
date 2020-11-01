@@ -67,6 +67,34 @@ class Tensor:
   @staticmethod
   def eye(dim):
     return Tensor(np.eye(dim).astype(np.float32))
+    
+  def backward(self, allow_fill=True):
+    #print("running backward on", self)
+    if self._ctx is None:
+      return
+
+    if self.grad is None and allow_fill:
+      # fill in the first grad with one
+      # this is "implicit gradient creation"
+      assert self.data.shape == (1,)
+      self.grad = Tensor(np.ones(self.data.shape, dtype=self.data.dtype), gpu=self.gpu)
+
+    assert(self.grad is not None)
+
+    grads = self._ctx.backward(self._ctx, self.grad.data)
+    if len(self._ctx.parents) == 1:
+      grads = [grads]
+    for t,g in zip(self._ctx.parents, grads):
+      if g is None:
+        continue
+      if g.shape != t.data.shape:
+        print("grad shape must match tensor shape in %r, %r != %r" %
+          (self._ctx, g.shape, t.data.shape))
+        assert(False)
+      t.grad = Tensor(g)
+      t.backward(False)
+
+  # ***** tinygrad supports CPU and GPU *****
 
   def cpu(self):
     if self.gpu:
@@ -88,34 +116,6 @@ class Tensor:
       return Tensor(data)
     else:
       return self
-    
-  def backward(self, allow_fill=True):
-    #print("running backward on", self)
-    if self._ctx is None:
-      return
-
-    if self.grad is None and allow_fill:
-      # fill in the first grad with one
-      # this is "implicit gradient creation"
-      assert self.data.shape == (1,)
-      self.grad = Tensor(np.ones(self.data.shape, dtype=self.data.dtype))
-      if self.gpu:
-        self.grad = self.grad.cuda()
-
-    assert(self.grad is not None)
-
-    grads = self._ctx.backward(self._ctx, self.grad.data)
-    if len(self._ctx.parents) == 1:
-      grads = [grads]
-    for t,g in zip(self._ctx.parents, grads):
-      if g is None:
-        continue
-      if g.shape != t.data.shape:
-        print("grad shape must match tensor shape in %r, %r != %r" %
-          (self._ctx, g.shape, t.data.shape))
-        assert(False)
-      t.grad = Tensor(g)
-      t.backward(False)
 
   # ***** put ops in these dicts *****
 
@@ -125,7 +125,7 @@ class Tensor:
   # ***** non first class ops *****
 
   def mean(self):
-    div = Tensor(np.array([1/np.prod(self.data.shape)], dtype=self.data.dtype), gpu=self.gpu)
+    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.data.dtype), gpu=self.gpu)
     return self.sum().mul(div)
 
   def sqrt(self):
@@ -161,7 +161,6 @@ class Function:
     return ret
 
 def register(name, fxn, gpu=False):
-  fxn.gpu = gpu
   if gpu:
     Tensor.opsgpu[name] = fxn
   else:
