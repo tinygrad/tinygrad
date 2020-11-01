@@ -83,7 +83,9 @@ register('sum', Sum, gpu=True)
 class Dot(Function):
   # TODO: write me!
   @staticmethod
-  def forward(ctx, x, y):
+  def forward(ctx, input, weight):
+    ctx.save_for_backward(input, weight)
+
     pass
 
   @staticmethod
