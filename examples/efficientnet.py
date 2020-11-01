@@ -124,20 +124,20 @@ if __name__ == "__main__":
   img = img[:, 87:-87]
   img = np.moveaxis(img, [2,0,1], [0,1,2])
   img = img.astype(np.float32).reshape(1,3,224,224)
-  img /= 256
+  img /= 255.0
   img -= np.array([0.485, 0.456, 0.406]).reshape((1,-1,1,1))
   img /= np.array([0.229, 0.224, 0.225]).reshape((1,-1,1,1))
-
+    
   # if you want to look at the cat
-  """
   import matplotlib.pyplot as plt
   plt.imshow(img[0].mean(axis=0))
   plt.show()
-  """
 
   # category labels
   lbls = fetch("https://gist.githubusercontent.com/aaronpolhamus/964a4411c0906315deb9f4a3723aac57/raw/aa66dd9dbf6b56649fa3fab83659b2acbf3cbfd1/map_clsloc.txt")
   lbls = dict([(int(x.split(" ")[1]), x.split(" ")[2]) for x in lbls.decode('utf-8').split("\n")])
+
+  print(lbls)
 
   # run the net
   import time
@@ -145,4 +145,5 @@ if __name__ == "__main__":
   out = model.forward(Tensor(img))
   print("did inference in %.2f s" % (time.time()-st))
   print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
+  print(out.data[0,9])
 
