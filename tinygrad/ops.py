@@ -182,17 +182,13 @@ class Conv2D(Function):
     tx = np.ravel(tx).reshape(tx.shape)
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
-    ret = np.zeros((bs,ctx.groups,rcout,oy,ox),dtype=x.dtype)
     if use_einsum:
       ret = np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
     else:
+      ret = np.zeros((bs,ctx.groups,rcout,oy,ox),dtype=x.dtype)
       for g in range(ctx.groups):
         #ijYXyx,kjyx -> iYXk ->ikYX
         ret[:,g,:,:,:]+=np.moveaxis(np.tensordot(tx[:,g,:,:,:,:,:], tw[g,:,:,:,:],((1,4,5),(1,2,3))),3,1)
-        #for X in range(ox): 
-            #for Y in range(oy):
-                #ret[:,g,:,Y,X]+=np.einsum('ijyx,kjyx -> ik', tx[:,g,:,Y,X,:,:], tw[g,:,:,:,:])    
-                #ret[:,g,:,Y,X]+=np.tensordot(tx[:,g,:,Y,X,:,:], tw[g,:,:,:,:],((1,2,3),(1,2,3)))    
     return ret.reshape(bs, cout, oy, ox) 
 
 
@@ -206,12 +202,12 @@ class Conv2D(Function):
     
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
     if use_einsum:
-        gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
+      gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
     else:
-        gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
-        for g in range(ctx.groups):
-            #'ikYX,ijYXyx -> kjyx'
-            gdw[g] += np.tensordot(ggg[:,g],tx[:,g], ((0,2,3),(0,2,3)))
+      gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
+      for g in range(ctx.groups):
+        #'ikYX,ijYXyx -> kjyx'
+        gdw[g] += np.tensordot(ggg[:,g],tx[:,g], ((0,2,3),(0,2,3)))
    
     #needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
