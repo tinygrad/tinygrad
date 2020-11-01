@@ -1,5 +1,5 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-from functools import partial, partialmethod
+from functools import partialmethod
 from inspect import signature
 import numpy as np
 try:
@@ -26,7 +26,6 @@ class Tensor:
       raise TypeError("Error constructing tensor with %r" % data)
 
     if isinstance(data, np.ndarray):
-      shape = data.shape
       if data.dtype != np.float32 and not Tensor.did_float_warning:
         # warning? float64 is actually needed for numerical jacobian
         print("warning, %r isn't float32" % (data.shape,))
@@ -40,7 +39,7 @@ class Tensor:
     self._ctx = None
 
   def __repr__(self):
-    return "Tensor %r with grad %r" % (self.data, self.grad)
+    return "Tensor %r with grad %r" % (self.data, self.grad.data)
 
   @property
   def shape(self):
@@ -100,7 +99,6 @@ class Tensor:
     grads = self._ctx.backward(self._ctx, self.grad.data)
     if len(self._ctx.parents) == 1:
       grads = [grads]
-    grads = [Tensor(x) for x in grads]
     for t,g in zip(self._ctx.parents, grads):
       if g is None:
         continue
@@ -108,7 +106,7 @@ class Tensor:
         print("grad shape must match tensor shape in %r, %r != %r" %
           (self._ctx, g.shape, t.data.shape))
         assert(False)
-      t.grad = g
+      t.grad = Tensor(g)
       t.backward(False)
 
   # ***** put ops in these dicts *****
