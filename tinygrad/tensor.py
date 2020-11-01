@@ -20,7 +20,7 @@ class Tensor:
   def __init__(self, data):
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
-    elif isinstance(data, cl._cl.Buffer):
+    elif GPU and isinstance(data, cl._cl.Buffer):
       self.gpu = True
     elif not isinstance(data, np.ndarray):
       raise TypeError("Error constructing tensor with %r" % data)
