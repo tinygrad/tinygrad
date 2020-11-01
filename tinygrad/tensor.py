@@ -111,19 +111,10 @@ class Tensor:
       t.grad = g
       t.backward(False)
 
-  # ***** dispatcher *****
+  # ***** put ops in these dicts *****
 
   ops = {}
   opsgpu = {}
-  def __getattr__(self, x):
-    if x in Tensor.opsgpu and self.gpu:
-      fxn = Tensor.opsgpu[x]
-      return partial(fxn.apply, fxn, self)
-    elif x in Tensor.ops:
-      fxn = Tensor.ops[x]
-      return partial(fxn.apply, fxn, self)
-    # fallback
-    return self.__dict__[x]
 
   # ***** non first class ops *****
 
@@ -174,8 +165,11 @@ def register(name, fxn, gpu=False):
   else:
     Tensor.ops[name] = fxn
   def dispatch(self, name, *x, **kwargs):
-    #print("dispatch", name, len(x))
-    return self.__getattr__(name)(*x, **kwargs)
+    if self.gpu:
+      f = Tensor.opsgpu[name]
+    else:
+      f = Tensor.ops[name]
+    return f.apply(f, self, *x, **kwargs)
   setattr(Tensor, name, partialmethod(dispatch, name))
 
 # this registers all the operations
