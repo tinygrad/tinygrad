@@ -3,13 +3,17 @@ from inspect import signature
 import numpy as np
 try:
   import pyopencl as cl
-  cl_ctx = cl.create_some_context(answers=[0,2])  # change if you don't have mac
-  cl_queue = cl.CommandQueue(cl_ctx)
   GPU = True
 except ImportError:
   # no GPU support
-  cl_ctx, cl_queue = None, None
   GPU = False
+
+cl_ctx, cl_queue = None, None
+def require_init_gpu():
+  global cl_ctx, cl_queue
+  if cl_queue is None:
+    cl_ctx = cl.create_some_context(answers=[0,2])  # change if you don't have mac
+    cl_queue = cl.CommandQueue(cl_ctx)
 
 # **** start with two base classes ****
 
@@ -38,7 +42,7 @@ class Tensor:
     self._ctx = None
 
   def __repr__(self):
-    return "Tensor %r with grad %r" % (self.data, self.grad.data)
+    return "Tensor %r with grad %r" % (self.data, self.grad.data if self.grad else None)
 
   @property
   def shape(self):
@@ -72,6 +76,7 @@ class Tensor:
     if not GPU:
       raise Exception("No GPU Support")
     if not self.gpu:
+      require_init_gpu()
       assert self.data.dtype == np.float32   # only float32 on GPU
       data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
       data.shape = self.shape
@@ -154,13 +159,14 @@ class Function:
     return ret
 
 def register(name, fxn, gpu=False):
+  fxn.gpu = gpu
   if gpu:
     Tensor.opsgpu[name] = fxn
-    fxn.cl_ctx, fxn.cl_queue = cl_ctx, cl_queue
   else:
     Tensor.ops[name] = fxn
   def dispatch(self, *x, **kwargs):
     f = (Tensor.opsgpu if self.gpu else Tensor.ops)[name]
+    f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, self, *x, **kwargs)
   setattr(Tensor, name, dispatch)
 
