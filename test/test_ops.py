@@ -58,6 +58,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-5)
+  @unittest.skipUnless(GPU, "Requires GPU")
+  def test_dot_gpu(self):
+    helper_test_op([(3,4), (4,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-5, gpu=True)
 
   def test_conv2d(self):
     for bs in [1,8]:

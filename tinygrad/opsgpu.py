@@ -84,13 +84,72 @@ class Dot(Function):
   # TODO: write me!
   @staticmethod
   def forward(ctx, input, weight):
-    ctx.save_for_backward(input, weight)
+    assert input.shape[1] == weight.shape[0]
+    isize = np.int32(input.shape[0])
+    msize = np.int32(input.shape[1])
+    osize = np.int32(weight.shape[1])
+    one = np.int32(1)
+    ret = buffer_new(ctx, (isize, osize))
 
-    pass
+    prg = cl.Program(ctx.cl_ctx, """
+    __kernel void matmul(
+        __global const float *input,
+        __global const float *weight,
+        __global float *res,
+        int is0,
+        int is1,
+        int msize,
+        int ws0,
+        int ws1,
+        int osize
+        )
+    {
+      int X = get_global_id(0); // isize
+      int Y = get_global_id(1); // osize
+      
+      float ret = 0.0;
+      for (int x = 0; x < msize; x++) {
+        ret += input[X * is0 + x * is1] * weight[Y * ws0 + x * ws1];
+      }
+
+      res[X * osize + Y] = ret;
+    }
+    """).build()
+    ctx.save_for_backward(input, weight, prg)
+    # (isize,msize) x (msize,osize) = (isize,osize)
+    prg.matmul(ctx.cl_queue, [isize, osize], None,
+      input, weight, ret,
+      msize, one, msize, one, osize, osize)
+    return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    pass
+    input, weight, prg = ctx.saved_tensors
+    isize = np.int32(input.shape[0])
+    msize = np.int32(input.shape[1])
+    osize = np.int32(weight.shape[1])
+    one = np.int32(1)
+
+    grad_input = buffer_like(ctx, input)
+    grad_weight = buffer_like(ctx, weight)
+
+    # (isize,osize) x (msize,osize) = (isize,msize)
+    prg.matmul(ctx.cl_queue, [isize, msize], None,
+      grad_output, weight, grad_input,
+      osize, one, osize, osize, one, msize)
+
+    # (isize,msize) x (isize,osize) = (msize,osize)
+    prg.matmul(ctx.cl_queue, [msize, osize], None,
+      input, grad_output, grad_weight,
+      one, msize, isize, one, isize, osize)
+
+
+    #prg.matmul(ctx.cl_queue, [msize, osize], None,
+    #  input, grad_output, grad_weight,
+
+
+    return grad_input, grad_weight
 register('dot', Dot, gpu=True)
+register('matmul', Dot, gpu=True)
 
 
