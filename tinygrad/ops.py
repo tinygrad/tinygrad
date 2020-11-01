@@ -160,7 +160,7 @@ register('logsoftmax', LogSoftmax)
 
 class Conv2D(Function):
   @staticmethod
-  def forward(ctx, x, w, stride=1, groups=1):
+  def forward(ctx, x, w, stride=1, groups=1, use_einsum = False):
     if type(ctx.stride) == int:
       ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
@@ -182,7 +182,19 @@ class Conv2D(Function):
     tx = np.ravel(tx).reshape(tx.shape)
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
-    return np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
+    ret = np.zeros((bs,ctx.groups,rcout,oy,ox),dtype=x.dtype)
+    if use_einsum:
+      ret = np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
+    else:
+      for g in range(ctx.groups):
+        #ijYXyx,kjyx -> iYXk ->ikYX
+        ret[:,g,:,:,:]+=np.moveaxis(np.tensordot(tx[:,g,:,:,:,:,:], tw[g,:,:,:,:],((1,4,5),(1,2,3))),3,1)
+        #for X in range(ox): 
+            #for Y in range(oy):
+                #ret[:,g,:,Y,X]+=np.einsum('ijyx,kjyx -> ik', tx[:,g,:,Y,X,:,:], tw[g,:,:,:,:])    
+                #ret[:,g,:,Y,X]+=np.tensordot(tx[:,g,:,Y,X,:,:], tw[g,:,:,:,:],((1,2,3),(1,2,3)))    
+    return ret.reshape(bs, cout, oy, ox) 
+
 
   @staticmethod
   def backward(ctx, grad_output):
