@@ -1,8 +1,8 @@
-# TODO: implement BatchNorm2d and Swish
-# aka batch_norm, pad, swish, dropout
+# load weights from
 # https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth
 # a rough copy of
 # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/model.py
+import sys
 import io
 import numpy as np
 np.set_printoptions(suppress=True)
@@ -37,7 +37,8 @@ class MBConvBlock:
     self._project_conv = Tensor.zeros(output_filters, oup, 1, 1)
     self._bn2 = BatchNorm2D(output_filters)
 
-  def __call__(self, x):
+  def __call__(self, inputs):
+    x = inputs
     if self._expand_conv:
       x = swish(self._bn0(x.conv2d(self._expand_conv)))
     x = x.pad2d(padding=(self.pad, self.pad, self.pad, self.pad))
@@ -51,7 +52,9 @@ class MBConvBlock:
     x = x.mul(x_squeezed.sigmoid())
 
     x = self._bn2(x.conv2d(self._project_conv))
-    return swish(x)
+    if x.shape == inputs.shape:
+      x = x.add(inputs)
+    return x
 
 class EfficientNet:
   def __init__(self):
@@ -82,13 +85,14 @@ class EfficientNet:
   def forward(self, x):
     x = x.pad2d(padding=(0,1,0,1))
     x = swish(self._bn0(x.conv2d(self._conv_stem, stride=2)))
-    for b in self._blocks:
+    for block in self._blocks:
       print(x.shape)
-      x = b(x)
+      x = block(x)
     x = swish(self._bn1(x.conv2d(self._conv_head)))
-    x = x.avg_pool2d(kernel_size=x.shape[2:4]).reshape(shape=(-1, 1280))
+    x = x.avg_pool2d(kernel_size=x.shape[2:4])
+    x = x.reshape(shape=(-1, 1280))
     #x = x.dropout(0.2)
-    return swish(x.dot(self._fc).add(self._fc_bias))
+    return x.dot(self._fc).add(self._fc_bias)
 
   def load_weights_from_torch(self):
     # load b0
@@ -116,12 +120,18 @@ if __name__ == "__main__":
   model = EfficientNet()
   model.load_weights_from_torch()
 
-  # load cat image and preprocess
+  # load image and preprocess
   from PIL import Image
-  img = Image.open(io.BytesIO(fetch("https://c.files.bbci.co.uk/12A9B/production/_111434467_gettyimages-1143489763.jpg")))
-  img = img.resize((398, 224))
+  if len(sys.argv) > 1:
+    url = sys.argv[1]
+  else:
+    url = "https://c.files.bbci.co.uk/12A9B/production/_111434467_gettyimages-1143489763.jpg"
+  img = Image.open(io.BytesIO(fetch(url)))
+  aspect_ratio = img.size[0] / img.size[1]
+  img = img.resize((int(224*aspect_ratio), 224))
   img = np.array(img)
-  img = img[:, 87:-87]
+  chapo = (img.shape[1]-224)//2
+  img = img[:, chapo:chapo+224]
   img = np.moveaxis(img, [2,0,1], [0,1,2])
   img = img.astype(np.float32).reshape(1,3,224,224)
   img /= 255.0
@@ -134,8 +144,9 @@ if __name__ == "__main__":
   plt.show()
 
   # category labels
-  lbls = fetch("https://gist.githubusercontent.com/aaronpolhamus/964a4411c0906315deb9f4a3723aac57/raw/aa66dd9dbf6b56649fa3fab83659b2acbf3cbfd1/map_clsloc.txt")
-  lbls = dict([(int(x.split(" ")[1]), x.split(" ")[2]) for x in lbls.decode('utf-8').split("\n")])
+  import ast
+  lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
+  lbls = ast.literal_eval(lbls.decode('utf-8'))
 
   print(lbls)
 
@@ -143,7 +154,15 @@ if __name__ == "__main__":
   import time
   st = time.time()
   out = model.forward(Tensor(img))
+
+  # if you want to look at the outputs
+  """
+  import matplotlib.pyplot as plt
+  plt.plot(out.data[0])
+  plt.show()
+  """
+
   print("did inference in %.2f s" % (time.time()-st))
   print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
-  print(out.data[0,9])
+  #print("NOT", np.argmin(out.data), np.min(out.data), lbls[np.argmin(out.data)])
 

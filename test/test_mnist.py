@@ -2,7 +2,7 @@
 import os
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, GPU
 from tinygrad.utils import layer_init_uniform, fetch_mnist
 import tinygrad.optim as optim
 from tqdm import trange
@@ -43,17 +43,17 @@ class TinyConvNet:
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1).logsoftmax()
 
-def train(model, optim, steps, BS=128):
+def train(model, optim, steps, BS=128, gpu=False):
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
     
-    x = Tensor(X_train[samp].reshape((-1, 28*28)).astype(np.float32))
+    x = Tensor(X_train[samp].reshape((-1, 28*28)).astype(np.float32), gpu=gpu)
     Y = Y_train[samp]
     y = np.zeros((len(samp),10), np.float32)
     # correct loss for NLL, torch NLL loss returns one per row
     y[range(y.shape[0]),Y] = -10.0
-    y = Tensor(y)
+    y = Tensor(y, gpu=gpu)
     
     # network
     out = model.forward(x)
@@ -63,18 +63,18 @@ def train(model, optim, steps, BS=128):
     loss.backward()
     optim.step()
     
-    cat = np.argmax(out.data, axis=1)
+    cat = np.argmax(out.cpu().data, axis=1)
     accuracy = (cat == Y).mean()
     
     # printing
-    loss = loss.data
+    loss = loss.cpu().data
     losses.append(loss)
     accuracies.append(accuracy)
     t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
 
-def evaluate(model):
+def evaluate(model, gpu=False):
   def numpy_eval():
-    Y_test_preds_out = model.forward(Tensor(X_test.reshape((-1, 28*28)).astype(np.float32)))
+    Y_test_preds_out = model.forward(Tensor(X_test.reshape((-1, 28*28)).astype(np.float32), gpu=gpu)).cpu()
     Y_test_preds = np.argmax(Y_test_preds_out.data, axis=1)
     return (Y_test == Y_test_preds).mean()
 
@@ -89,6 +89,15 @@ class TestMNIST(unittest.TestCase):
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, optimizer, steps=200)
     evaluate(model)
+
+  @unittest.skipUnless(GPU, "Requires GPU")
+  def test_sgd_gpu(self):
+    np.random.seed(1337)
+    model = TinyBobNet()
+    [x.cuda_() for x in model.parameters()]
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
+    train(model, optimizer, steps=1000, gpu=True)
+    evaluate(model, gpu=True)
     
   def test_sgd(self):
     np.random.seed(1337)

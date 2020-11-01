@@ -18,7 +18,7 @@ class TestTinygrad(unittest.TestCase):
       out = out.logsoftmax()
       out = out.mul(m).add(m).sum()
       out.backward()
-      return out.data, x.grad, W.grad
+      return out.data, x.grad.data, W.grad.data
 
     def test_pytorch():
       x = torch.tensor(x_init, requires_grad=True)

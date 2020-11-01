@@ -48,21 +48,6 @@ class Pow(Function):
     return y * (x**(y-1.0)) * grad_output, (x**y) * np.log(x) * grad_output
 register('pow', Pow)
 
-class Dot(Function):
-  @staticmethod
-  def forward(ctx, input, weight):
-    ctx.save_for_backward(input, weight)
-    return input.dot(weight)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, weight = ctx.saved_tensors
-    grad_input = grad_output.dot(weight.T)
-    grad_weight = grad_output.T.dot(input).T
-    return grad_input, grad_weight
-register('dot', Dot)
-register('matmul', Dot)
-
 class Sum(Function):
   @staticmethod
   def forward(ctx, input):
@@ -76,17 +61,52 @@ class Sum(Function):
 register('sum', Sum)
 
 
-# ************* nn ops *************
+# ************* GEMM *************
+
+class Dot(Function):
+  @staticmethod
+  def forward(ctx, input, weight):
+    ctx.save_for_backward(input, weight)
+    return input.dot(weight)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, weight = ctx.saved_tensors
+    grad_input = grad_output.dot(weight.T)
+    grad_weight = input.T.dot(grad_output)
+    return grad_input, grad_weight
+register('dot', Dot)
+register('matmul', Dot)
+
+
+# ************* simple ops *************
 
 class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
-    return np.pad(x, ((0,0), (0,0), (padding[0], padding[1]), (padding[2], padding[3])))
+    return np.pad(x,
+      ((0,0), (0,0),
+       (padding[0], padding[1]), (padding[2], padding[3])))
 
   @staticmethod
   def backward(ctx, grad_output):
     raise Exception("write this")
 register('pad2d', Pad2D)
+
+class Reshape(Function):
+  @staticmethod
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    return x.reshape(shape)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return grad_output.reshape(in_shape)
+register('reshape', Reshape)
+
+
+# ************* activation ops *************
 
 class ReLU(Function):
   @staticmethod
@@ -118,18 +138,6 @@ class Sigmoid(Function):
     return grad_input
 register('sigmoid', Sigmoid)
 
-class Reshape(Function):
-  @staticmethod
-  def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    return x.reshape(shape)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return grad_output.reshape(in_shape)
-register('reshape', Reshape)
-
 class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
@@ -157,54 +165,44 @@ class Conv2D(Function):
       ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
-    bs,cin_,oy,ox = x.shape[0], x.shape[1], (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
+    bs,cin_ = x.shape[0], x.shape[1]
+    oy,ox = (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
-    ctx.save_for_backward(x, w)
-
     gx = x.reshape(bs,ctx.groups,cin,x.shape[2],x.shape[3])
-    str_x = np.lib.stride_tricks.as_strided(
-                gx,
-                shape=(bs, ctx.groups, cin, oy, ox, H, W),
-                strides=(gx.strides[0], gx.strides[1], gx.strides[2], gx.strides[3]*ys, gx.strides[4]*xs, gx.strides[3], gx.strides[4]),
-                writeable=False, 
-            )
-    return np.einsum('igjYXyx,gkjyx -> igkYX', str_x, w.reshape(ctx.groups,rcout, cin, H, W)).reshape(bs, cout, oy, ox)
+    tx = np.lib.stride_tricks.as_strided(gx,
+           shape=(bs, ctx.groups, cin, oy, ox, H, W),
+           strides=(gx.strides[0], gx.strides[1], gx.strides[2],
+                    gx.strides[3]*ys, gx.strides[4]*xs,
+                    gx.strides[3], gx.strides[4]),
+           writeable=False,
+         )
+    tx = np.ravel(tx).reshape(tx.shape)
+    tw = w.reshape(ctx.groups, rcout, cin, H, W)
+    ctx.save_for_backward(tx, tw, x.shape)
+    return np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
 
   @staticmethod
   def backward(ctx, grad_output):
     bs,_,oy,ox = grad_output.shape
-    x, w = ctx.saved_tensors
-    cout,cin,H,W = w.shape
+    tx, tw, x_shape = ctx.saved_tensors
+    _,rcout,cin,H,W = tw.shape
     ys,xs = ctx.stride
-    rcout = cout//ctx.groups
+    OY,OX = x_shape[2:4]
 
-    dx, dw = np.zeros_like(x), np.zeros_like(w)
-
-    gdx = dx.reshape(bs,ctx.groups,cin,x.shape[2],x.shape[3])
-    gdw = dw.reshape(ctx.groups,rcout, cin, H, W)
-
-    ggg = grad_output.reshape(grad_output.shape[0],ctx.groups,rcout,oy,ox)
-
-    gx = x.reshape(x.shape[0],ctx.groups,cin,x.shape[2],x.shape[3])
-    str_x = np.lib.stride_tricks.as_strided(
-                gx,
-                shape=(bs, ctx.groups, cin, oy, ox, H, W),
-                strides=(gx.strides[0], gx.strides[1], gx.strides[2], gx.strides[3]*ys, gx.strides[4]*xs, gx.strides[3], gx.strides[4]),
-                writeable=False, 
-            )
-
-    gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,str_x)
+    ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
+    gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
    
     #needs to be optimized
+    gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
     for Y in range(grad_output.shape[2]):
       for X in range(grad_output.shape[3]):
-          iY,iX = Y*ys, X*xs
-          gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx',ggg[:,:,:,Y,X], w.reshape(ctx.groups,rcout, cin, H, W)) 
-    
-    return gdx.reshape(x.shape), gdw.reshape(w.shape)
+        iY,iX = Y*ys, X*xs
+        gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx',ggg[:,:,:,Y,X], tw)
+
+    return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 register('conv2d', Conv2D)
 
 
