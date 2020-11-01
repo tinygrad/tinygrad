@@ -16,7 +16,7 @@ def jacobian(func, input):
     o_scalar = Tensor(mask_like(output.data, o, 1.)).mul(output).sum()
     o_scalar.backward()
 
-    for i, grad in enumerate(input.grad.reshape(-1)):
+    for i, grad in enumerate(input.grad.data.reshape(-1)):
       J[o,i] = grad
   return J
 
