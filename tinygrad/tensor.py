@@ -6,9 +6,11 @@ try:
   import pyopencl as cl
   cl_ctx = cl.create_some_context(answers=[0,2])  # change if you don't have mac
   cl_queue = cl.CommandQueue(cl_ctx)
+  GPU = True
 except ImportError:
   # no GPU support
   cl_ctx, cl_queue = None, None
+  GPU = False
 
 # **** start with two base classes ****
 
@@ -69,6 +71,8 @@ class Tensor:
       return self
 
   def cuda(self):
+    if not GPU:
+      raise Exception("No GPU Support")
     if not self.gpu:
       assert self.data.dtype == np.float32   # only float32 on GPU
       data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
@@ -149,11 +153,8 @@ class Function:
   def save_for_backward(self, *x):
     self.saved_tensors.extend(x)
 
-  # note that due to how partialmethod works, self and arg are switched
-  def apply(self, arg, *x, **kwargs):
-    # support the args in both orders
+  def apply(self, *x, **kwargs):
     op = self
-    x = [arg]+list(x)
     ctx = op(*x)
     # use default params
     params = signature(op.forward).parameters
@@ -179,5 +180,6 @@ def register(name, fxn, gpu=False):
 
 # this registers all the operations
 import tinygrad.ops
-import tinygrad.opsgpu
+if GPU:
+  import tinygrad.opsgpu
 
