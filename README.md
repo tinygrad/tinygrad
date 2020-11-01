@@ -88,7 +88,7 @@ python -m pytest
 
 ### TODO
 
-* Train an EfficientNet
+* Train an EfficientNet on ImageNet
   * Make broadcasting work on the backward pass (simple please)
   * EfficientNet backward pass
   * Tensors on GPU (GPU support, must support Mac)

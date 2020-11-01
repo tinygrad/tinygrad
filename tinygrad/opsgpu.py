@@ -89,5 +89,6 @@ class Dot(Function):
   @staticmethod
   def backward(ctx, grad_output):
     pass
+register('dot', Dot, gpu=True)
 
 
