@@ -128,32 +128,6 @@ class Tensor:
   ops = {}
   opsgpu = {}
 
-  # ***** basic ops *****
-
-  def __add__(self, x):
-    return self.add(x)
-
-  def __sub__(self, x):
-    return self.sub(x)
-
-  def __mul__(self, x):
-    return self.mul(x)
-
-  def __div__(self, x):
-    return self.div(x)
-
-  def __iadd__(self, x):
-    self.assign(self + x)
-
-  def __isub__(self, x):
-    self.assign(self - x)
-
-  def __imul__(self, x):
-    self.assign(self * x)
-
-  def __idiv__(self, x):
-    self.assign(self / x)
-
   # ***** non first class ops *****
 
   def mean(self):
@@ -202,6 +176,10 @@ def register(name, fxn, gpu=False):
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, self, *x, **kwargs)
   setattr(Tensor, name, dispatch)
+  if name in ['add', 'sub', 'mul', 'div']:
+    setattr(Tensor, "__%s__" % name, dispatch)
+    setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
+
 
 # this registers all the operations
 import tinygrad.ops
