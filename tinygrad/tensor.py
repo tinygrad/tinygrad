@@ -47,6 +47,9 @@ class Tensor:
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad.data if self.grad else None)
 
+  def assign(self, x):
+    self.data = x.data
+
   @property
   def shape(self):
     return self.data.shape
@@ -173,6 +176,10 @@ def register(name, fxn, gpu=False):
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, self, *x, **kwargs)
   setattr(Tensor, name, dispatch)
+  if name in ['add', 'sub', 'mul', 'div']:
+    setattr(Tensor, "__%s__" % name, dispatch)
+    setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
+
 
 # this registers all the operations
 import tinygrad.ops

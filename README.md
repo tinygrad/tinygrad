@@ -76,9 +76,24 @@ loss.backward()
 optim.step()
 ```
 
+### GPU Support?!
+
+tinygrad supports GPUs through PyOpenCL. Not all ops are supported yet.
+
+```python
+from tinygrad.tensor import Tensor
+(Tensor.ones(4,4).cuda() + Tensor.ones(4,4).cuda()).cpu()
+```
+
+### ImageNet inference (on the micrograd puppy)
+
+```bash
+python3 examples/efficientnet.py
+```
+
 ### The promise of small
 
-tinygrad, with tests, will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
+tinygrad will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
 
 ### Running tests
 
