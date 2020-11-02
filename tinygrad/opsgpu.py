@@ -16,7 +16,7 @@ def buffer_like(ctx, x):
 def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
-def in_place_op(ctx, code, x, y):
+def binary_op(ctx, code, x, y):
   ret = buffer_like(ctx, x)
   prg = clbuild(ctx.cl_ctx, """
   __kernel void add(
@@ -29,10 +29,23 @@ def in_place_op(ctx, code, x, y):
   prg.add(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
   return ret
 
+def unary_op(ctx, code, x):
+  ret = buffer_like(ctx, x)
+  prg = clbuild(ctx.cl_ctx, """
+  __kernel void relu(
+      __global const float *a_g, __global float *res_g)
+  {
+    int gid = get_global_id(0);
+    res_g[gid] = min(a_g[gid], (float)0.);
+  }
+  """)
+  prg.relu(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
+  return ret
+
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
-    return in_place_op(ctx, 'res_g[gid] = a_g[gid] + b_g[gid];', x, y)
+    return binary_op(ctx, 'res_g[gid] = a_g[gid] + b_g[gid];', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -42,7 +55,7 @@ register('add', Add, gpu=True)
 class Sub(Function):
   @staticmethod
   def forward(ctx, x, y):
-    return in_place_op(ctx, 'res_g[gid] = a_g[gid] - b_g[gid];', x, y)
+    return binary_op(ctx, 'res_g[gid] = a_g[gid] - b_g[gid];', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -57,9 +70,9 @@ class Mul(Function):
 
     # HACK
     if y.shape == (1,):
-      return in_place_op(ctx, 'res_g[gid] = a_g[gid] * b_g[0];', x, y)
+      return binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[0];', x, y)
     elif x.shape == y.shape:
-      return in_place_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', x, y)
+      return binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', x, y)
     else:
       raise Exception("mismatched shapes %r %r" % (x.shape, y.shape))
 
@@ -68,8 +81,8 @@ class Mul(Function):
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    return in_place_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', y, grad_output),\
-           in_place_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', x, grad_output)
+    return binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', y, grad_output),\
+           binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', x, grad_output)
 register('mul', Mul, gpu=True)
 
 class Sum(Function):
@@ -168,17 +181,7 @@ register('matmul', Dot, gpu=True)
 class ReLU(Function):
   @staticmethod
   def forward(ctx, x):
-    ret = buffer_like(ctx, x)
-    prg = clbuild(ctx.cl_ctx, """
-    __kernel void relu(
-        __global const float *a_g, __global float *res_g)
-    {
-      int gid = get_global_id(0);
-      res_g[gid] = min(a_g[gid], (float)0.);
-    }
-    """)
-    prg.relu(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
-    return ret
+    return unary_op(ctx, 'res_g[gid] = min(a_g[gid], (float)0.);', x)
 
   @staticmethod
   def backward(ctx, grad_output):
