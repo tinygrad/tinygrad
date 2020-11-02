@@ -1,9 +1,9 @@
 import numpy as np
-from .tensor import Function, register
+from .tensor import Function, Registered
 
 # ************* basic ops *************
 
-class Add(Function):
+class Add(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, y):
     return x+y
@@ -11,9 +11,8 @@ class Add(Function):
   @staticmethod
   def backward(ctx, grad_output):
     return grad_output, grad_output
-register('add', Add)
 
-class Sub(Function):
+class Sub(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, y):
     return x-y
@@ -22,9 +21,8 @@ class Sub(Function):
   def backward(ctx, grad_output):
     # this right?
     return grad_output, -grad_output
-register('sub', Sub)
 
-class Mul(Function):
+class Mul(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
@@ -34,9 +32,8 @@ class Mul(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return y*grad_output, x*grad_output
-register('mul', Mul)
 
-class Pow(Function):
+class Pow(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
@@ -46,9 +43,8 @@ class Pow(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return y * (x**(y-1.0)) * grad_output, (x**y) * np.log(x) * grad_output
-register('pow', Pow)
 
-class Sum(Function):
+class Sum(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
@@ -58,12 +54,11 @@ class Sum(Function):
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return grad_output * np.ones_like(input)
-register('sum', Sum)
 
 
 # ************* GEMM *************
 
-class Dot(Function):
+class Dot(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, input, weight):
     ctx.save_for_backward(input, weight)
@@ -75,13 +70,11 @@ class Dot(Function):
     grad_input = grad_output.dot(weight.T)
     grad_weight = input.T.dot(grad_output)
     return grad_input, grad_weight
-register('dot', Dot)
-register('matmul', Dot)
 
 
 # ************* simple ops *************
 
-class Pad2D(Function):
+class Pad2D(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, padding=None):
     return np.pad(x,
@@ -91,9 +84,8 @@ class Pad2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     raise Exception("write this")
-register('pad2d', Pad2D)
 
-class Reshape(Function):
+class Reshape(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
@@ -103,12 +95,11 @@ class Reshape(Function):
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
     return grad_output.reshape(in_shape)
-register('reshape', Reshape)
 
 
 # ************* activation ops *************
 
-class ReLU(Function):
+class ReLU(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
@@ -119,9 +110,8 @@ class ReLU(Function):
     input, = ctx.saved_tensors
     grad_input = grad_output * (input >= 0)
     return grad_input
-register('relu', ReLU)
 
-class Sigmoid(Function):
+class Sigmoid(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, input):
     # TODO: stable sigmoid? does the overflow matter?
@@ -136,9 +126,8 @@ class Sigmoid(Function):
     ret, = ctx.saved_tensors
     grad_input = grad_output * (ret * (1 - ret))
     return grad_input
-register('sigmoid', Sigmoid)
 
-class LogSoftmax(Function):
+class LogSoftmax(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, input):
     def logsumexp(x):
@@ -153,12 +142,11 @@ class LogSoftmax(Function):
   def backward(ctx, grad_output):
     output, = ctx.saved_tensors
     return grad_output - np.exp(output)*grad_output.sum(axis=1).reshape((-1, 1))
-register('logsoftmax', LogSoftmax)
 
 
 # ************* conv ops *************
 
-class Conv2D(Function):
+class Conv2D(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, w, stride=1, groups=1):
     if type(ctx.stride) == int:
@@ -215,8 +203,6 @@ class Conv2D(Function):
           gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-register('conv2d', Conv2D)
-
 
 # ************* pooling ops *************
 
@@ -239,7 +225,7 @@ def unstack_for_pool(fxn, s, py, px):
       ret[:, :, Y:my:py, X:mx:px] = ll
   return ret
 
-class MaxPool2D(Function):
+class MaxPool2D(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2)):
     stack = stack_for_pool(x, *kernel_size)
@@ -253,9 +239,8 @@ class MaxPool2D(Function):
     return unstack_for_pool(
       lambda idx: grad_output * (idxs == idx),
       s, *ctx.kernel_size)
-register('max_pool2d', MaxPool2D)
 
-class AvgPool2D(Function):
+class AvgPool2D(Function, metaclass=Registered):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2)):
     stack = stack_for_pool(x, *kernel_size)
@@ -269,5 +254,4 @@ class AvgPool2D(Function):
     return unstack_for_pool(
       lambda idx: grad_output/py/px,
       s, py, px)
-register('avg_pool2d', AvgPool2D)
 

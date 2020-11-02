@@ -1,5 +1,5 @@
 import numpy as np
-from .tensor import Function, register, Tensor
+from .tensor import Function, RegisteredGPU, Tensor
 import pyopencl as cl
 import functools
 
@@ -42,7 +42,7 @@ def unary_op(ctx, code, x):
   prg.relu(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
   return ret
 
-class Add(Function):
+class Add(Function, metaclass=RegisteredGPU):
   @staticmethod
   def forward(ctx, x, y):
     return binary_op(ctx, 'res_g[gid] = a_g[gid] + b_g[gid];', x, y)
@@ -50,9 +50,8 @@ class Add(Function):
   @staticmethod
   def backward(ctx, grad_output):
     return grad_output, grad_output
-register('add', Add, gpu=True)
 
-class Sub(Function):
+class Sub(Function, metaclass=RegisteredGPU):
   @staticmethod
   def forward(ctx, x, y):
     return binary_op(ctx, 'res_g[gid] = a_g[gid] - b_g[gid];', x, y)
@@ -61,9 +60,8 @@ class Sub(Function):
   def backward(ctx, grad_output):
     not_grad_output = unary_op(ctx, 'res_g[gid] = -a_g[gid];', grad_output)
     return grad_output, not_grad_output
-register('sub', Sub, gpu=True)
 
-class Mul(Function):
+class Mul(Function, metaclass=RegisteredGPU):
   @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
@@ -85,7 +83,7 @@ class Mul(Function):
            binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', x, grad_output)
 register('mul', Mul, gpu=True)
 
-class Sum(Function):
+class Sum(Function, metaclass=RegisteredGPU):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
@@ -106,9 +104,8 @@ class Sum(Function):
     input, = ctx.saved_tensors
     ret = Tensor(grad_output).cpu().data * np.ones(input.shape, dtype=input.dtype)
     return Tensor(ret).cuda().data
-register('sum', Sum, gpu=True)
 
-class Dot(Function):
+class Dot(Function, metaclass=RegisteredGPU):
   # TODO: write me!
   @staticmethod
   def forward(ctx, input, weight):
@@ -172,13 +169,11 @@ class Dot(Function):
       one, msize, isize, one, isize, osize)
 
     return grad_input, grad_weight
-register('dot', Dot, gpu=True)
-register('matmul', Dot, gpu=True)
 
 
 # *** these two are unfinished, optimizer fixed, fix this and TestMNIST.test_sgd_gpu should pass ***
 
-class ReLU(Function):
+class ReLU(Function, metaclass=RegisteredGPU):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
@@ -190,7 +185,7 @@ class ReLU(Function):
     return binary_op(ctx, 'res_g[gid] = a_g[gid] * (b_g[gid] >= 0);', grad_output, input)
 register('relu', ReLU, gpu=True)
 
-class LogSoftmax(Function):
+class LogSoftmax(Function, metaclass=RegisteredGPU):
   @staticmethod
   def forward(ctx, input):
     return input
@@ -198,6 +193,5 @@ class LogSoftmax(Function):
   @staticmethod
   def backward(ctx, grad_output):
     return grad_output
-register('logsoftmax', LogSoftmax, gpu=True)
 
 

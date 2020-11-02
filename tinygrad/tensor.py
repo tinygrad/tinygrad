@@ -180,6 +180,19 @@ def register(name, fxn, gpu=False):
     setattr(Tensor, "__%s__" % name, dispatch)
     setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
 
+class Registered(type):
+  def __new__(meta, name, bases, class_dict):
+      fxn = type.__new__(meta, name, bases, class_dict)
+      name = str(name).lower()
+      register(name, fxn)
+      return fxn
+
+class RegisteredGPU(type):
+  def __new__(meta, name, bases, class_dict):
+      fxn = type.__new__(meta, name, bases, class_dict)
+      name = str(name).lower()
+      register(name, fxn, gpu=True)
+      return fxn
 
 # this registers all the operations
 import tinygrad.ops
