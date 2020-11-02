@@ -128,10 +128,12 @@ if __name__ == "__main__":
     url = "https://raw.githubusercontent.com/karpathy/micrograd/master/puppy.jpg"
   img = Image.open(io.BytesIO(fetch(url)))
   aspect_ratio = img.size[0] / img.size[1]
-  img = img.resize((int(224*aspect_ratio), 224))
+  img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
+
   img = np.array(img)
-  chapo = (img.shape[1]-224)//2
-  img = img[:, chapo:chapo+224]
+  print(img.shape)
+  y0,x0=(np.asarray(img.shape)[:2]-224)//2
+  img = img[y0:y0+224, x0:x0+224]
   img = np.moveaxis(img, [2,0,1], [0,1,2])
   img = img.astype(np.float32).reshape(1,3,224,224)
   img /= 255.0
