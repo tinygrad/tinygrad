@@ -12,6 +12,8 @@ This may not be the best deep learning framework, but it is a deep learning fram
 
 The Tensor class is a wrapper around a numpy array, except it does Tensor things.
 
+Update: tinygrad also somewhat supports GPUs through pyopencl. Our end goal is to train an ImageNet EfficientNet-B0.
+
 ### Installation
 
 ```bash
@@ -74,6 +76,12 @@ out = model.forward(x)
 loss = out.mul(y).mean()
 loss.backward()
 optim.step()
+```
+
+### ImageNet inference (on the micrograd puppy)
+
+```bash
+python3 examples/examples/efficientnet.py
 ```
 
 ### The promise of small
