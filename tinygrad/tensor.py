@@ -47,6 +47,9 @@ class Tensor:
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad.data if self.grad else None)
 
+  def assign(self, x):
+    self.data = x.data
+
   @property
   def shape(self):
     return self.data.shape
@@ -124,6 +127,32 @@ class Tensor:
 
   ops = {}
   opsgpu = {}
+
+  # ***** basic ops *****
+
+  def __add__(self, x):
+    return self.add(x)
+
+  def __sub__(self, x):
+    return self.sub(x)
+
+  def __mul__(self, x):
+    return self.mul(x)
+
+  def __div__(self, x):
+    return self.div(x)
+
+  def __iadd__(self, x):
+    self.assign(self + x)
+
+  def __isub__(self, x):
+    self.assign(self - x)
+
+  def __imul__(self, x):
+    self.assign(self * x)
+
+  def __idiv__(self, x):
+    self.assign(self / x)
 
   # ***** non first class ops *****
 

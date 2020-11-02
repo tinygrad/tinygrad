@@ -1,6 +1,7 @@
 # sorted in order of increasing complexity
 
 import numpy as np
+from tinygrad.tensor import Tensor
 
 class Optimizer:
   def __init__(self, params):
@@ -9,11 +10,11 @@ class Optimizer:
 class SGD(Optimizer):
   def __init__(self, params, lr=0.001):
     super(SGD, self).__init__(params)
-    self.lr = lr
+    self.lr = Tensor([lr])
 
   def step(self):
     for t in self.params:
-      t.data -= self.lr * t.grad.data
+      t -= t.grad * self.lr
 
 class RMSprop(Optimizer):
   def __init__(self, params, lr=0.001, decay=0.9, eps=1e-8):
