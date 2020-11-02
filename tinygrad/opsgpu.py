@@ -23,7 +23,7 @@ class Add(Function):
       res_g[gid] = a_g[gid] + b_g[gid];
     }
     """).build()
-    prg.add(ctx.cl_queue, [ret.size//4], None, x, y, ret)
+    prg.add(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
     return ret
 
   @staticmethod
@@ -43,7 +43,7 @@ class Mul(Function):
       res_g[gid] = a_g[gid] * b_g[gid];
     }
     """).build()
-    prg.mul(ctx.cl_queue, [ret.size//4], None, x, y, ret)
+    prg.mul(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
     ctx.save_for_backward(x, y, prg)
     return ret
 
@@ -143,13 +143,41 @@ class Dot(Function):
       input, grad_output, grad_weight,
       one, msize, isize, one, isize, osize)
 
-
-    #prg.matmul(ctx.cl_queue, [msize, osize], None,
-    #  input, grad_output, grad_weight,
-
-
     return grad_input, grad_weight
 register('dot', Dot, gpu=True)
 register('matmul', Dot, gpu=True)
+
+
+# *** these two are unfinished, but until we fix the optimizer, it's useless ***
+
+class ReLU(Function):
+  @staticmethod
+  def forward(ctx, x):
+    ret = buffer_like(ctx, x)
+    prg = cl.Program(ctx.cl_ctx, """
+    __kernel void relu(
+        __global const float *a_g, __global float *res_g)
+    {
+      int gid = get_global_id(0);
+      res_g[gid] = min(a_g[gid], (float)0.);
+    }
+    """).build()
+    prg.relu(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return grad_output
+register('relu', ReLU, gpu=True)
+
+class LogSoftmax(Function):
+  @staticmethod
+  def forward(ctx, input):
+    return input
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return grad_output
+register('logsoftmax', LogSoftmax, gpu=True)
 
 
