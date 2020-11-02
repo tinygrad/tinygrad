@@ -10,7 +10,7 @@ class Optimizer:
 class SGD(Optimizer):
   def __init__(self, params, lr=0.001):
     super(SGD, self).__init__(params)
-    self.lr = Tensor([lr])
+    self.lr = Tensor([lr], gpu=params[0].gpu)
 
   def step(self):
     for t in self.params:

@@ -31,19 +31,55 @@ class Add(Function):
     return grad_output, grad_output
 register('add', Add, gpu=True)
 
-class Mul(Function):
+class Sub(Function):
   @staticmethod
   def forward(ctx, x, y):
     ret = buffer_like(ctx, x)
     prg = cl.Program(ctx.cl_ctx, """
-    __kernel void mul(
+    __kernel void sub(
         __global const float *a_g, __global const float *b_g, __global float *res_g)
     {
       int gid = get_global_id(0);
-      res_g[gid] = a_g[gid] * b_g[gid];
+      res_g[gid] = a_g[gid] - b_g[gid];
     }
     """).build()
-    prg.mul(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
+    prg.sub(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return grad_output, grad_output
+register('sub', Sub, gpu=True)
+
+class Mul(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    ret = buffer_like(ctx, x)
+
+    # HACK
+    if y.shape == (1,):
+      prg = cl.Program(ctx.cl_ctx, """
+      __kernel void mul(
+          __global const float *a_g, __global const float *b_g, __global float *res_g)
+      {
+        int gid = get_global_id(0);
+        res_g[gid] = a_g[gid] * b_g[0];
+      }
+      """).build()
+      prg.mul(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
+    elif x.shape == y.shape:
+      prg = cl.Program(ctx.cl_ctx, """
+      __kernel void mul(
+          __global const float *a_g, __global const float *b_g, __global float *res_g)
+      {
+        int gid = get_global_id(0);
+        res_g[gid] = a_g[gid] * b_g[gid];
+      }
+      """).build()
+      prg.mul(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
+    else:
+      raise Exception("mismatched shapes %r %r" % (x.shape, y.shape))
+
     ctx.save_for_backward(x, y, prg)
     return ret
 
