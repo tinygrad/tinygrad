@@ -180,12 +180,14 @@ register('matmul', Dot, gpu=True)
 
 class ReLU(Function):
   @staticmethod
-  def forward(ctx, x):
-    return unary_op(ctx, 'res_g[gid] = min(a_g[gid], (float)0.);', x)
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'res_g[gid] = max(a_g[gid], (float)0.);', input)
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'res_g[gid] = a_g[gid] * (b_g[gid] >= 0);', grad_output, input)
 register('relu', ReLU, gpu=True)
 
 class LogSoftmax(Function):
