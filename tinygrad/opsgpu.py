@@ -1,6 +1,7 @@
 import numpy as np
 from .tensor import Function, register, Tensor
 import pyopencl as cl
+import functools
 
 def buffer_new(ctx, shape):
   res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, 4*np.prod(shape))
@@ -11,16 +12,20 @@ def buffer_new(ctx, shape):
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
 
+@functools.lru_cache
+def clbuild(cl_ctx, prg):
+  return cl.Program(cl_ctx, prg).build()
+
 def in_place_op(ctx, code, x, y):
   ret = buffer_like(ctx, x)
-  prg = cl.Program(ctx.cl_ctx, """
+  prg = clbuild(ctx.cl_ctx, """
   __kernel void add(
       __global const float *a_g, __global const float *b_g, __global float *res_g)
   {
     int gid = get_global_id(0);
     """+code+"""
   }
-  """).build()
+  """)
   prg.add(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
   return ret
 
@@ -72,14 +77,14 @@ class Sum(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
     ret = buffer_new(ctx, (1,))
-    prg = cl.Program(ctx.cl_ctx, """
+    prg = clbuild(ctx.cl_ctx, """
     __kernel void sum(
         __global const float *a_g, __global float *res_g)
     {
       int gid = get_global_id(0);
       res_g[0] += a_g[gid];
     }
-    """).build()
+    """)
     prg.sum(ctx.cl_queue, [input.size//4], None, input, ret)
     return ret
 
@@ -101,7 +106,7 @@ class Dot(Function):
     one = np.int32(1)
     ret = buffer_new(ctx, (isize, osize))
 
-    prg = cl.Program(ctx.cl_ctx, """
+    prg = clbuild(ctx.cl_ctx, """
     __kernel void matmul(
         __global const float *input,
         __global const float *weight,
@@ -124,7 +129,7 @@ class Dot(Function):
 
       res[X * osize + Y] = ret;
     }
-    """).build()
+    """)
     ctx.save_for_backward(input, weight, prg)
     # (isize,msize) x (msize,osize) = (isize,osize)
     prg.matmul(ctx.cl_queue, [isize, osize], None,
@@ -158,20 +163,20 @@ register('dot', Dot, gpu=True)
 register('matmul', Dot, gpu=True)
 
 
-# *** these two are unfinished, but until we fix the optimizer, it's useless ***
+# *** these two are unfinished, optimizer fixed, fix this and TestMNIST.test_sgd_gpu should pass ***
 
 class ReLU(Function):
   @staticmethod
   def forward(ctx, x):
     ret = buffer_like(ctx, x)
-    prg = cl.Program(ctx.cl_ctx, """
+    prg = clbuild(ctx.cl_ctx, """
     __kernel void relu(
         __global const float *a_g, __global float *res_g)
     {
       int gid = get_global_id(0);
       res_g[gid] = min(a_g[gid], (float)0.);
     }
-    """).build()
+    """)
     prg.relu(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
     return ret
 
