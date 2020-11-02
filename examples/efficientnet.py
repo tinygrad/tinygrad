@@ -125,20 +125,21 @@ if __name__ == "__main__":
   if len(sys.argv) > 1:
     url = sys.argv[1]
   else:
-    url = "https://c.files.bbci.co.uk/12A9B/production/_111434467_gettyimages-1143489763.jpg"
+    url = "https://raw.githubusercontent.com/karpathy/micrograd/master/puppy.jpg"
   img = Image.open(io.BytesIO(fetch(url)))
   aspect_ratio = img.size[0] / img.size[1]
-  img = img.resize((int(224*aspect_ratio), 224))
+  img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
+
   img = np.array(img)
-  chapo = (img.shape[1]-224)//2
-  img = img[:, chapo:chapo+224]
+  y0,x0=(np.asarray(img.shape)[:2]-224)//2
+  img = img[y0:y0+224, x0:x0+224]
   img = np.moveaxis(img, [2,0,1], [0,1,2])
   img = img.astype(np.float32).reshape(1,3,224,224)
-  img /= 256
+  img /= 255.0
   img -= np.array([0.485, 0.456, 0.406]).reshape((1,-1,1,1))
   img /= np.array([0.229, 0.224, 0.225]).reshape((1,-1,1,1))
 
-  # if you want to look at the cat
+  # if you want to look at the micrograd puppy
   """
   import matplotlib.pyplot as plt
   plt.imshow(img[0].mean(axis=0))

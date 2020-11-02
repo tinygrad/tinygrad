@@ -179,10 +179,15 @@ class Conv2D(Function):
                     gx.strides[3], gx.strides[4]),
            writeable=False,
          )
-    tx = np.ravel(tx).reshape(tx.shape)
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
-    return np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
+    #ret = np.einsum('igjYXyx,gkjyx -> igkYX', tx, tw).reshape(bs, cout, oy, ox)
+    ret = np.zeros((bs,ctx.groups,rcout,oy,ox),dtype=x.dtype)
+    for g in range(ctx.groups):
+      #ijYXyx,kjyx -> iYXk ->ikYX
+      ret[:,g]+=np.moveaxis(np.tensordot(tx[:,g], tw[g],((1,4,5),(1,2,3))),3,1)
+    return ret.reshape(bs, cout, oy, ox) 
+
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -193,8 +198,13 @@ class Conv2D(Function):
     OY,OX = x_shape[2:4]
 
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
-    gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
-   
+
+    gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
+    #gdw = np.einsum('igkYX,igjYXyx -> gkjyx',ggg,tx)
+    for g in range(ctx.groups):
+      #'ikYX,ijYXyx -> kjyx'
+      gdw[g] += np.tensordot(ggg[:,g],tx[:,g], ((0,2,3),(0,2,3)))
+
     #needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
     for Y in range(grad_output.shape[2]):
