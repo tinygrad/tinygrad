@@ -78,7 +78,7 @@ optim.step()
 
 ### The promise of small
 
-tinygrad, with tests, will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
+tinygrad will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
 
 ### Running tests
 

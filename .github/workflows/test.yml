@@ -13,7 +13,7 @@ jobs:
     - name: Install SLOCCount
       run: sudo apt install sloccount
     - name: Check <1000 lines
-      run: sloccount tinygrad test examples; if [ $(sloccount test tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
+      run: sloccount tinygrad test examples; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
   test:
     name: Test
