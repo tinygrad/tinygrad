@@ -75,8 +75,8 @@ class TestConvSpeed(unittest.TestCase):
     for i in range(1+cnt):
       et0 = time.time()
       x = Tensor.randn(128, 1, 28, 28)
-      x = x.conv2d(c1).relu().avg_pool2d()
-      x = x.conv2d(c2).relu().max_pool2d()
+      x = x.conv2d(c1).relu().avgpool2d()
+      x = x.conv2d(c2).relu().maxpool2d()
       x = x.reshape(shape=(x.shape[0], -1))
       out = x.dot(l1).logsoftmax()
       out = out.mean()
