@@ -127,9 +127,7 @@ if __name__ == "__main__":
   else:
     url = "https://raw.githubusercontent.com/karpathy/micrograd/master/puppy.jpg"
   img = Image.open(io.BytesIO(fetch(url)))
-  aspect_ratio_landscape = img.size[0] / img.size[1]
-  aspect_ratio_portrait = img.size[1] / img.size[0]
-  aspect_ratio = max (aspect_ratio_landscape, aspect_ratio_portrait)
+  aspect_ratio = img.size[0] / img.size[1]
   img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
 
   img = np.array(img)
