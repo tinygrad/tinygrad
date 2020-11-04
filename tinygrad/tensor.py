@@ -112,7 +112,7 @@ class Tensor:
 
   def cuda(self):
     if not GPU:
-      raise Exception("No GPU Support")
+      raise Exception("No GPU Support, install pyopencl")
     if not self.gpu:
       require_init_gpu()
       assert self.data.dtype == np.float32   # only float32 on GPU
