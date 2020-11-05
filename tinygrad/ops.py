@@ -125,12 +125,10 @@ class Sigmoid(Function):
   @staticmethod
   def forward(ctx, input):
     with np.warnings.catch_warnings():
-        np.warnings.filterwarnings('ignore')
-        ret = np.where(
-            input >= 0,
-            1 / (1 + np.exp(-input)),
-            np.exp(input) / (1 + np.exp(input))
-        )
+      np.warnings.filterwarnings('ignore')
+      ret = np.where(
+          input >= 0,1/(1 + np.exp(-input)),np.exp(input)/(1 + np.exp(input))
+      )
     ctx.save_for_backward(ret)
     return ret
 
