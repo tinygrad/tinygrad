@@ -37,15 +37,15 @@ class Mul(Function):
 register('mul', Mul)
 
 class Div(Function):
-	@staticmethod
-	def forward(ctx, x, y):
-		ctx.save_for_backward(x, y)
-		return x / y
+  @staticmethod
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return x / y
 
-	@staticmethod
-	def backward(ctx, grad_output):
-		x,y = ctx.saved_tensors
-		return grad_output / y, -x * grad_output / y**2
+  @staticmethod
+  def backward(ctx, grad_output):
+    x,y = ctx.saved_tensors
+    return grad_output / y, -x * grad_output / y**2
 register('div', Div)
 
 class Pow(Function):
