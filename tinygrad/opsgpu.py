@@ -104,8 +104,7 @@ class Sum(Function):
   @staticmethod
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    ret = Tensor(grad_output).cpu().data * np.ones(input.shape, dtype=input.dtype)
-    return Tensor(ret).cuda().data
+    return binary_op(ctx, 'res_g[gid] = b_g[0];', input, grad_output)  # Quick hack for fill
 register('sum', Sum, gpu=True)
 
 class Dot(Function):
