@@ -45,7 +45,7 @@ class Pow(Function):
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    return y * (x**(y-1.0)) * grad_output, (x**y) * np.log(x) * grad_output
+    return y * (x**(y-1.0)) * grad_output, None
 register('pow', Pow)
 
 class Sum(Function):

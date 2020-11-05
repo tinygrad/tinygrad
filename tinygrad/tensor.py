@@ -135,12 +135,10 @@ class Tensor:
     return self.sum().mul(div)
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+0.5, gpu=self.gpu)
-    return self.pow(root)
+    return self.pow(0.5)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1, gpu=self.gpu)
-    return self.mul(y.pow(root))
+    return self.mul(y.pow(-1.0))
 
 # An instantiation of the Function is the Context
 class Function:
