@@ -48,7 +48,8 @@ class TestOps(unittest.TestCase):
     # TODO: why does this need more tolerance?
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div, atol=1e-3, grad_atol=1e-3, gpu=self.gpu)
   def test_pow(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, gpu=self.gpu)
+    for y in [0.5, -1.0]:
+      helper_test_op([(45,65)], lambda x: x**y, lambda x: x.pow(y), atol=1e-3, grad_atol=1e-3, gpu=self.gpu)
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, gpu=self.gpu)
   def test_relu(self):

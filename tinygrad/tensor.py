@@ -164,7 +164,7 @@ class Function:
     # overwrite with passed params
     for k, v in kwargs.items():
       setattr(ctx, k, v)
-    ret = Tensor(op.forward(ctx, *[t.data for t in x], **kwargs))
+    ret = Tensor(op.forward(ctx, *[t if isinstance(t, float) else t.data for t in x], **kwargs))
     ret._ctx = ctx
     return ret
 

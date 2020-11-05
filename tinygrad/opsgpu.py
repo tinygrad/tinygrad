@@ -88,17 +88,17 @@ register('mul', Mul, gpu=True)
 class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):
+    assert isinstance(y, float)
+    y=Tensor([y], gpu=True).data
     ctx.save_for_backward(x, y)
-    return binary_op(ctx, 'res_g[gid] = pow(a_g[gid], b_g[gid]);', x, y)
+    return binary_op(ctx, 'res_g[gid] = pow(a_g[gid], b_g[0]);', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     gradx = binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', grad_output,
-                      binary_op(ctx, 'res_g[gid] = b_g[gid] * (pow((float)a_g[gid], (float)(b_g[gid]-1.0)));', x, y))
-    grady = binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', grad_output,
-                      binary_op(ctx, 'res_g[gid] = pow((float)a_g[gid], (float)b_g[gid]) * log(a_g[gid]);', x, y))
-    return gradx, grady
+                      binary_op(ctx, 'res_g[gid] = b_g[0] * (pow((float)a_g[gid], (float)(b_g[0]-1.0)));', x, y))
+    return gradx, None
 register('pow', Pow, gpu=True)
 
 class Sum(Function):
