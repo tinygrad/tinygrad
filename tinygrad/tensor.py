@@ -12,7 +12,11 @@ cl_ctx, cl_queue = None, None
 def require_init_gpu():
   global cl_ctx, cl_queue
   if cl_queue is None:
-    cl_ctx = cl.create_some_context(answers=[0,2])  # change if you don't have mac
+    try:
+      # for Macbook 16 inch
+      cl_ctx = cl.create_some_context(answers=[0,2])
+    except cl._cl.RuntimeError:
+      cl_ctx = cl.create_some_context(answers=[0,0])
     cl_queue = cl.CommandQueue(cl_ctx)
 
 # **** start with two base classes ****
@@ -112,7 +116,7 @@ class Tensor:
 
   def cuda(self):
     if not GPU:
-      raise Exception("No GPU Support")
+      raise Exception("No GPU Support, install pyopencl")
     if not self.gpu:
       require_init_gpu()
       assert self.data.dtype == np.float32   # only float32 on GPU

@@ -85,10 +85,12 @@ from tinygrad.tensor import Tensor
 (Tensor.ones(4,4).cuda() + Tensor.ones(4,4).cuda()).cpu()
 ```
 
-### ImageNet inference (on the micrograd puppy)
+### ImageNet inference
+
+Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture to discover what it is.
 
 ```bash
-python3 examples/efficientnet.py
+python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
 
 ### The promise of small
