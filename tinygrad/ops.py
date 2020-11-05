@@ -36,6 +36,19 @@ class Mul(Function):
     return y*grad_output, x*grad_output
 register('mul', Mul)
 
+class Div(Function):
+	@staticmethod
+	# eps value too small?
+	def forward(ctx, x, y):
+		ctx.save_for_backward(x, y)
+		return x / (y+1e-15)
+
+	@staticmethod
+	def backward(ctx, grad_output):
+		x,y = ctx.saved_tensors
+		return grad_output / (y+1e-15), -x * grad_output / (y**2+1e-15)
+register('div', Div)
+
 class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):
