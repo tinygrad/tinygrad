@@ -53,6 +53,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, gpu=self.gpu)
   def test_relu(self):
     helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu, gpu=self.gpu)
+  def test_sigmoid(self):
+    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, gpu=self.gpu)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-5, gpu=self.gpu)
 
