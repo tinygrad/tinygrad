@@ -1,6 +1,8 @@
 import numpy as np
 from .tensor import Function, register, Tensor
 import pyopencl as cl
+import pyopencl.array as pycl_array
+from pyopencl.reduction import ReductionKernel
 import functools
 
 def buffer_new(ctx, shape):
@@ -15,6 +17,10 @@ def buffer_like(ctx, x):
 @functools.lru_cache
 def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
+
+@functools.lru_cache
+def cl_reduct_krnl_build(cl_ctx, *args, **kwargs):
+  return ReductionKernel(cl_ctx, *args, **kwargs)
 
 def binary_op(ctx, code, x, y):
   ret = buffer_like(ctx, x)
@@ -105,16 +111,11 @@ class Sum(Function):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    ret = buffer_new(ctx, (1,))
-    prg = clbuild(ctx.cl_ctx, """
-    __kernel void sum(
-        __global const float *a_g, __global float *res_g)
-    {
-      int gid = get_global_id(0);
-      res_g[0] += a_g[gid];
-    }
-    """)
-    prg.sum(ctx.cl_queue, [input.size//4], None, input, ret)
+    krnl = cl_reduct_krnl_build(ctx.cl_ctx, np.float32, neutral="0", reduce_expr="a+b", 
+      map_expr="x[i]", arguments="__global float *x")
+    ret = krnl(pycl_array.Array(ctx.cl_queue, input.size, dtype=np.float32, data=input)).data
+    ret.shape = (1,)
+    ret.dtype = np.float32
     return ret
 
   @staticmethod

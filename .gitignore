@@ -4,3 +4,4 @@ notebooks
 build
 dist
 *.egg-info
+/env

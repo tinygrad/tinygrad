@@ -57,6 +57,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, gpu=self.gpu)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-5, gpu=self.gpu)
+  def test_sum(self):
+    helper_test_op([(45,1)], lambda x: x.sum(), Tensor.sum, atol=1e-5, gpu=self.gpu)
 
   def test_conv2d(self):
     for bs in [1,8]:
