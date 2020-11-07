@@ -19,7 +19,7 @@ def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
 @functools.lru_cache
-def cl_reduct_krnl_build(cl_ctx, *args, **kwargs):
+def clreduce(cl_ctx, *args, **kwargs):
   return ReductionKernel(cl_ctx, *args, **kwargs)
 
 def binary_op(ctx, code, x, y):
@@ -111,9 +111,9 @@ class Sum(Function):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    krnl = cl_reduct_krnl_build(ctx.cl_ctx, np.float32, neutral="0", reduce_expr="a+b", 
+    krnl = clreduce(ctx.cl_ctx, np.float32, neutral="0", reduce_expr="a+b", 
       map_expr="x[i]", arguments="__global float *x")
-    ret = krnl(pycl_array.Array(ctx.cl_queue, input.size, dtype=np.float32, data=input)).data
+    ret = krnl(pycl_array.Array(ctx.cl_queue, input.size, dtype=input.dtype, data=input)).data
     ret.shape = (1,)
     ret.dtype = np.float32
     return ret
@@ -222,11 +222,64 @@ register('sigmoid', Sigmoid, gpu=True)
 class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
-    return input
+    lsum = buffer_new(ctx, (input.shape[0],))
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void logsoftmax(
+        __global const float *a_g, int sz, __global float *res_g)
+    {
+      int gid = get_global_id(0);
+      int gidsz = gid*sz;
+      // TODO: stability with max
+      float out = 0.0;
+      for (int x = 0; x < sz; x++) {
+        out += exp(a_g[gidsz+x]);
+      }
+      res_g[gid] = log(out);
+    }
+    """)
+    prg.logsoftmax(ctx.cl_queue, [input.shape[0]], None, input, np.int32(input.shape[1]), lsum)
+
+    output = buffer_like(ctx, input)
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void lsmsub(
+        __global const float *a_g, __global const float *b_g, int sz, __global float *res_g)
+    {
+      int gid = get_global_id(0);
+      int gid2 = get_global_id(1);
+
+      res_g[gid*sz + gid2] = a_g[gid*sz + gid2] - b_g[gid];
+    }
+    """)
+    prg.lsmsub(ctx.cl_queue, [input.shape[0], input.shape[1]], None, input, lsum, np.int32(input.shape[1]), output)
+    ctx.save_for_backward(output)
+    return output
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output
+    output, = ctx.saved_tensors
+
+    grad_input = buffer_like(ctx, grad_output)
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void lsmsub2(
+        __global const float *grad_output, __global const float *output, int sz, __global float *grad_input)
+    {
+      int gid = get_global_id(0);
+      int gidsz = gid*sz;
+      int gid2 = get_global_id(1);
+
+      // TODO: this is repeated in many kernels
+      float acc = 0.0;
+      for (int x = 0; x < sz; x++) {
+        acc += grad_output[gidsz + x];
+      }
+
+      grad_input[gidsz + gid2] = grad_output[gidsz + gid2] - exp(output[gidsz + gid2]) * acc;
+    }
+    """)
+    prg.lsmsub2(ctx.cl_queue, [grad_output.shape[0], grad_output.shape[1]], None,
+      grad_output, output, np.int32(grad_output.shape[1]), grad_input)
+
+    return grad_input
 register('logsoftmax', LogSoftmax, gpu=True)
 
 

@@ -166,7 +166,7 @@ class LogSoftmax(Function):
   @staticmethod
   def backward(ctx, grad_output):
     output, = ctx.saved_tensors
-    return grad_output - np.exp(output)*grad_output.sum(axis=1).reshape((-1, 1))
+    return grad_output - np.exp(output)*(grad_output.sum(axis=1).reshape((-1, 1)))
 register('logsoftmax', LogSoftmax)
 
 
