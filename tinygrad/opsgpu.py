@@ -58,20 +58,32 @@ def subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=0):
   return ret
 
 def binary_op(ctx, code, x, y):
+  assert len(x.shape) == len(y.shape)
+  xdiv = 1
+  ydiv = 1
   if x.shape != y.shape:
-    raise Exception("binary op shape mismatch: %r != %r" % (x.shape, y.shape))
+    # special case broadcasting
+    # TODO: make general
+    if len(y.shape) == 4 and x.shape[0:2] == y.shape[0:2] and y.shape[2] == 1 and y.shape[3] == 1:
+      ydiv = x.shape[2] * x.shape[3]
+    elif len(y.shape) == 4 and x.shape[0:2] == y.shape[0:2] and x.shape[2] == 1 and x.shape[3] == 1:
+      xdiv = y.shape[2] * y.shape[3]
+    elif np.prod(y.shape) == 1:
+      ydiv = np.prod(x.shape)
+    else:
+      raise Exception("binary op shape mismatch: %r != %r" % (x.shape, y.shape))
   ret = buffer_like(ctx, x)
   prg = clbuild(ctx.cl_ctx, """
   __kernel void binop(
-      __global const float *a_g, __global const float *b_g, __global float *res_g)
+      __global const float *a_g, __global const float *b_g, __global float *res_g, int xdiv, int ydiv)
   {
     int gid = get_global_id(0);
-    float a = a_g[gid];
-    float b = b_g[gid];
+    float a = a_g[gid/xdiv];
+    float b = b_g[gid/ydiv];
     res_g[gid] = """+code+""";
   }
   """)
-  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
+  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret, np.int32(xdiv), np.int32(ydiv))
   return ret
 
 def unary_op(ctx, code, x):

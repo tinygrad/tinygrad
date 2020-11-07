@@ -18,7 +18,7 @@ class BatchNorm2D:
     # this work at inference?
     x = x.sub(self.running_mean.reshape(shape=[1, -1, 1, 1]))
     x = x.mul(self.weight.reshape(shape=[1, -1, 1, 1]))
-    x = x.div(self.running_var.add(Tensor([self.eps])).reshape(shape=[1, -1, 1, 1]).sqrt())
+    x = x.div(self.running_var.add(Tensor([self.eps], gpu=x.gpu)).reshape(shape=[1, -1, 1, 1]).sqrt())
     x = x.add(self.bias.reshape(shape=[1, -1, 1, 1]))
     return x
 
