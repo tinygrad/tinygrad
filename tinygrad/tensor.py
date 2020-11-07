@@ -15,8 +15,8 @@ def require_init_gpu():
     try:
       # for Macbook 16 inch
       cl_ctx = cl.create_some_context(answers=[0,2])
-    except cl._cl.RuntimeError:
-      cl_ctx = cl.create_some_context(answers=[0,0])
+    except (cl._cl.RuntimeError, TypeError):
+      cl_ctx = cl.create_some_context(interactive=False)
     cl_queue = cl.CommandQueue(cl_ctx)
 
 # **** start with two base classes ****
@@ -73,7 +73,7 @@ class Tensor:
   @staticmethod
   def eye(dim):
     return Tensor(np.eye(dim).astype(np.float32))
-    
+
   def backward(self, allow_fill=True):
     #print("running backward on", self)
     if self._ctx is None:
