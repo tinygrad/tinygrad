@@ -14,7 +14,6 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7, gpu
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
 
-  # TODO: why so inaccurate?
   np.testing.assert_allclose(ret.cpu().data, out.detach().numpy(), atol=atol)
 
   if not forward_only:
@@ -66,11 +65,11 @@ class TestOps(unittest.TestCase):
     for bs in [1,8]:
       for cin in [1,3]:
         for groups in [1,3] if cin == 3 else [1]:
-          for H in [2,5]:
-            for W in [2,3,5]:
+          for H in [1,2,5]:
+            for W in [1,2,3,5]:
               helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
                 lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu)
+                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu, forward_only=self.gpu)
 
   def test_strided_conv2d(self):
     bs = 4
