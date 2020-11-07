@@ -25,13 +25,16 @@ def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
 def binary_op(ctx, code, x, y):
+  assert x.shape == y.shape
   ret = buffer_like(ctx, x)
   prg = clbuild(ctx.cl_ctx, """
   __kernel void add(
       __global const float *a_g, __global const float *b_g, __global float *res_g)
   {
     int gid = get_global_id(0);
-    """+code+"""
+    float a = a_g[gid];
+    float b = b_g[gid];
+    res_g[gid] = """+code+""";
   }
   """)
   prg.add(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
@@ -44,7 +47,8 @@ def unary_op(ctx, code, x):
       __global const float *a_g, __global float *res_g)
   {
     int gid = get_global_id(0);
-    """+code+"""
+    float a = a_g[gid];
+    res_g[gid] = """+code+""";
   }
   """)
   prg.relu(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
@@ -53,7 +57,7 @@ def unary_op(ctx, code, x):
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
-    return binary_op(ctx, 'res_g[gid] = a_g[gid] + b_g[gid];', x, y)
+    return binary_op(ctx, 'a+b', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -63,11 +67,11 @@ register('add', Add, gpu=True)
 class Sub(Function):
   @staticmethod
   def forward(ctx, x, y):
-    return binary_op(ctx, 'res_g[gid] = a_g[gid] - b_g[gid];', x, y)
+    return binary_op(ctx, 'a-b', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
-    not_grad_output = unary_op(ctx, 'res_g[gid] = -a_g[gid];', grad_output)
+    not_grad_output = unary_op(ctx, '-a', grad_output)
     return grad_output, not_grad_output
 register('sub', Sub, gpu=True)
 
@@ -75,37 +79,28 @@ class Mul(Function):
   @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-
-    # HACK
-    if y.shape == (1,):
-      return binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[0];', x, y)
-    elif x.shape == y.shape:
-      return binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', x, y)
-    else:
-      raise Exception("mismatched shapes %r %r" % (x.shape, y.shape))
-
-    return ret
+    return binary_op(ctx, 'a*b', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    return binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', y, grad_output),\
-           binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', x, grad_output)
+    return binary_op(ctx, 'a*b', y, grad_output),\
+           binary_op(ctx, 'a*b', x, grad_output)
 register('mul', Mul, gpu=True)
 
 class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return binary_op(ctx, 'res_g[gid] = pow(a_g[gid], b_g[gid]);', x, y)
+    return binary_op(ctx, 'pow(a,b)', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    gradx = binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', grad_output,
-                      binary_op(ctx, 'res_g[gid] = b_g[gid] * (pow((float)a_g[gid], (float)(b_g[gid]-1.0)));', x, y))
-    grady = binary_op(ctx, 'res_g[gid] = a_g[gid] * b_g[gid];', grad_output,
-                      binary_op(ctx, 'res_g[gid] = pow((float)a_g[gid], (float)b_g[gid]) * log(a_g[gid]);', x, y))
+    gradx = binary_op(ctx, 'a*b', grad_output,
+                      binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y))
+    grady = binary_op(ctx, 'a*b', grad_output,
+                      binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
     return gradx, grady
 register('pow', Pow, gpu=True)
 
@@ -132,7 +127,19 @@ class Sum(Function):
   @staticmethod
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    return binary_op(ctx, 'res_g[gid] = b_g[0];', input, grad_output)  # Quick hack for fill
+    ret = buffer_like(ctx, input)
+
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void fill(
+        __global const float *a_g, __global float *res_g)
+    {
+      int gid = get_global_id(0);
+      res_g[gid] = a_g[0];
+    }
+    """)
+    prg.fill(ctx.cl_queue, [np.prod(ret.shape)], None, grad_output, ret)
+    return ret
+
 register('sum', Sum, gpu=True)
 
 class Dot(Function):
@@ -260,25 +267,25 @@ class ReLU(Function):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return unary_op(ctx, 'res_g[gid] = max(a_g[gid], (float)0.);', input)
+    return unary_op(ctx, 'max(a, (float)0.)', input)
 
   @staticmethod
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    return binary_op(ctx, 'res_g[gid] = a_g[gid] * (b_g[gid] >= 0);', grad_output, input)
+    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
 register('relu', ReLU, gpu=True)
 
 class Sigmoid(Function):
   @staticmethod
   def forward(ctx, input):
-    ret = unary_op(ctx, 'res_g[gid] = 1./(1+exp(-a_g[gid]));', input)
+    ret = unary_op(ctx, '1./(1+exp(-a))', input)
     ctx.save_for_backward(ret)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
-    return binary_op(ctx, 'res_g[gid] = a_g[gid] * (b_g[gid] * (1 - b_g[gid]));', grad_output, ret)
+    return binary_op(ctx, 'a * (b * (1 - b));', grad_output, ret)
 register('sigmoid', Sigmoid, gpu=True)
 
 
