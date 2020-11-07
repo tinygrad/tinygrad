@@ -125,7 +125,6 @@ class Sum(Function):
 register('sum', Sum, gpu=True)
 
 class Dot(Function):
-  # TODO: write me!
   @staticmethod
   def forward(ctx, input, weight):
     assert input.shape[1] == weight.shape[0]
@@ -192,8 +191,6 @@ register('dot', Dot, gpu=True)
 register('matmul', Dot, gpu=True)
 
 
-# *** these two are unfinished, optimizer fixed, fix this and TestMNIST.test_sgd_gpu should pass ***
-
 class ReLU(Function):
   @staticmethod
   def forward(ctx, input):
@@ -205,6 +202,22 @@ class ReLU(Function):
     input, = ctx.saved_tensors
     return binary_op(ctx, 'res_g[gid] = a_g[gid] * (b_g[gid] >= 0);', grad_output, input)
 register('relu', ReLU, gpu=True)
+
+class Sigmoid(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = unary_op(ctx, 'res_g[gid] = 1./(1+exp(-a_g[gid]));', input)
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return binary_op(ctx, 'res_g[gid] = a_g[gid] * (b_g[gid] * (1 - b_g[gid]));', grad_output, ret)
+register('sigmoid', Sigmoid, gpu=True)
+
+
+# *** this is unfinished, fix this and TestMNIST.test_sgd_gpu should pass ***
 
 class LogSoftmax(Function):
   @staticmethod

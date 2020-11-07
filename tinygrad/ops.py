@@ -46,7 +46,8 @@ class Div(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return grad_output / y, -x * grad_output / y**2
-register('div', Div)
+# TODO: registering this breaks the default div on the GPU
+#register('div', Div)
 
 class Pow(Function):
   @staticmethod
