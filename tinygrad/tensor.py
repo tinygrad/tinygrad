@@ -106,7 +106,10 @@ class Tensor:
     if self.gpu:
       data = np.empty(self.shape, dtype=np.float32)
       cl.enqueue_copy(cl_queue, data, self.data)
-      return Tensor(data)
+      ret = Tensor(data)
+      if self.grad:
+        ret.grad = self.grad.cpu()
+      return ret
     else:
       return self
 
@@ -123,7 +126,10 @@ class Tensor:
       data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
       data.shape = self.shape
       data.dtype = self.data.dtype
-      return Tensor(data)
+      ret = Tensor(data)
+      if self.grad:
+        ret.grad = self.grad.cuda()
+      return ret
     else:
       return self
 

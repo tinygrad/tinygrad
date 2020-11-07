@@ -18,10 +18,6 @@ def buffer_like(ctx, x):
 def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
-@functools.lru_cache
-def clreduce(cl_ctx, *args, **kwargs):
-  return ReductionKernel(cl_ctx, *args, **kwargs)
-
 def binary_op(ctx, code, x, y):
   ret = buffer_like(ctx, x)
   prg = clbuild(ctx.cl_ctx, """
@@ -111,11 +107,20 @@ class Sum(Function):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    krnl = clreduce(ctx.cl_ctx, np.float32, neutral="0", reduce_expr="a+b", 
-      map_expr="x[i]", arguments="__global float *x")
-    ret = krnl(pycl_array.Array(ctx.cl_queue, input.size, dtype=input.dtype, data=input)).data
-    ret.shape = (1,)
-    ret.dtype = np.float32
+
+    ret = buffer_new(ctx, (1,))
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void sum(
+        __global const float *a_g, int sz, __global float *res_g)
+    {
+      float out = 0.0;
+      for (int x = 0; x < sz; x++) {
+        out += a_g[x];
+      }
+      res_g[0] = out;
+    }
+    """)
+    prg.sum(ctx.cl_queue, [input.shape[0]], None, input, np.int32(np.prod(input.shape)), ret)
     return ret
 
   @staticmethod
@@ -184,7 +189,7 @@ class Dot(Function):
     # (isize,msize) x (isize,osize) = (msize,osize)
     prg.matmul(ctx.cl_queue, [msize, osize], None,
       input, grad_output, grad_weight,
-      one, msize, isize, one, isize, osize)
+      one, msize, isize, one, osize, osize)
 
     return grad_input, grad_weight
 register('dot', Dot, gpu=True)

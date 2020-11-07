@@ -58,7 +58,7 @@ class TestOps(unittest.TestCase):
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-5, gpu=self.gpu)
   def test_sum(self):
-    helper_test_op([(45,1)], lambda x: x.sum(), Tensor.sum, atol=1e-5, gpu=self.gpu)
+    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, atol=1e-4, gpu=self.gpu)
   def test_logsoftmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-5, gpu=self.gpu)
 
