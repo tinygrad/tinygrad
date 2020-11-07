@@ -16,9 +16,11 @@ def fetch(url):
     with open(fp, "rb") as f:
       dat = f.read()
   else:
-    with open(fp, "wb") as f:
+    print("fetching %s" % url)
+    with open(fp+".tmp", "wb") as f:
       dat = requests.get(url).content
       f.write(dat)
+    os.rename(fp+".tmp", fp)
   return dat
 
 def fetch_mnist():
