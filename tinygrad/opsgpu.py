@@ -74,7 +74,7 @@ def binary_op(ctx, code, x, y):
       ydiv = np.prod(x.shape)
     else:
       raise Exception("binary op shape mismatch: %r != %r" % (x.shape, y.shape))
-  ret = buffer_like(ctx, x)
+  ret = buffer_like(ctx, x if np.prod(x.shape) >= np.prod(y.shape) else y)
   prg = clbuild(ctx.cl_ctx, """
   __kernel void binop(
       __global const float *a_g, __global const float *b_g, __global float *res_g, int xdiv, int ydiv)
