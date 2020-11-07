@@ -411,3 +411,52 @@ class Conv2D(Function):
 
 register('conv2d', Conv2D, gpu=True)
 
+# ************* pool ops *************
+
+class MaxPool2D(Function):
+  @staticmethod
+  def forward(ctx, x, kernel_size=(2, 2)):
+    pooled_output = buffer_new(ctx, (x.shape[2] // kernel_size[0], x.shape[3] // kernel_size[1]))
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void max_pool(const __global float* input, __global int* output,
+                       const int input_rows, const int out_rows, const int cols,
+                       const int pool, const int stride)
+    {
+        const int i = get_global_id(0);
+        if (i >= input_rows) return;
+        const int j = get_global_id(1);
+        if (j >= cols) return;
+
+        float max = input[i + input_rows * j];
+        int max_coeff = i + input_rows * j;
+
+        for (int p = 1; p < pool; ++p)
+        {
+            float m = input[i + stride * p + input_rows * j];
+
+            if (m > max)
+            {
+                max = m;
+                max_coeff = i + stride * p + input_rows * j;
+            }
+        }
+        output[i + out_rows * j] = max_coeff;
+    }
+    """)
+    prg.max_pool(
+            ctx.cl_queue,
+            [x.shape[2]], None,  # not sure what are this two args for
+            x,  pooled_output,
+            np.int32(x.shape[2]),
+            np.int32(x.shape[2] // kernel_size[0]),
+            np.int32(x.shape[3]),
+            np.int32(kernel_size[0]),
+            np.int32(kernel_size[0]),)
+
+    return pooled_output
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    raise ["Not Implemented"]
+
+register('max_pool2d', MaxPool2D, gpu=True)
