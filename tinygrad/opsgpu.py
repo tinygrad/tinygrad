@@ -18,6 +18,39 @@ def buffer_like(ctx, x):
 def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
+@functools.lru_cache
+def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
+  prg = """
+  __kernel void subsample(
+    __global float *output, __global const float *input, uint2 osize, uint2 isize, uint2 kernel_size, int nelem
+  ) {
+    int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
+    int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
+    float group_res = """+str(init_val)+""";
+    for (uint j=0; j<kernel_size.y; ++j) {
+      for (uint i=0; i<kernel_size.x; ++i) {
+        int iid  = (gid.x*kernel_size.x+i) + isize.x*((gid.y*kernel_size.y+j) + isize.y*gid.z);
+        if (iid < nelem)
+          """+iter_op+""";
+      }
+    }
+    output[oid] = """+result_op+""";
+  }
+  """
+  return clbuild(cl_ctx, prg)
+
+def subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=0):
+  N, C, Y, X = input.shape
+  ret = buffer_new(ctx, (N, C, Y//2, X//2))
+  osize = np.array((X//2, Y//2), dtype=cl.cltypes.uint2)
+  isize = np.array((X, Y), dtype=cl.cltypes.uint2)
+  ksize = np.array(kernel_size[::-1], dtype=cl.cltypes.uint2)
+  prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, init_val=init_val)
+  prg.subsample(ctx.cl_queue, (N*C, Y//2, X//2), None,
+                ret, input, osize, isize, ksize, np.int32(input.size))
+  ctx.data = np.empty((N, C, Y, X)) # set shape expectation on tensor instance
+  return ret
+
 def binary_op(ctx, code, x, y):
   ret = buffer_like(ctx, x)
   prg = clbuild(ctx.cl_ctx, """
@@ -238,6 +271,32 @@ class Sigmoid(Function):
     return binary_op(ctx, 'res_g[gid] = a_g[gid] * (b_g[gid] * (1 - b_g[gid]));', grad_output, ret)
 register('sigmoid', Sigmoid, gpu=True)
 
+class AvgPool2D(Function):
+  @staticmethod
+  def forward(ctx, input, kernel_size=(2, 2)):
+    iter_op = "group_res += input[iid]"
+    result_op = "group_res / (kernel_size.x * kernel_size.y)"
+    return subsample_op(ctx, input, kernel_size, iter_op, result_op)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    # TODO Finish this
+    pass
+register('avg_pool2d', AvgPool2D, gpu=True)
+
+class MaxPool2D(Function):
+  @staticmethod
+  def forward(ctx, input, kernel_size=(2, 2)):
+    init_val = "FLT_MIN"
+    iter_op = "group_res = max(group_res, input[iid])"
+    result_op = "group_res"
+    return subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=init_val)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    # TODO Finish this
+    pass
+register('max_pool2d', MaxPool2D, gpu=True)
 
 # *** this is unfinished, fix this and TestMNIST.test_sgd_gpu should pass ***
 
