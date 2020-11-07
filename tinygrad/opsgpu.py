@@ -25,10 +25,11 @@ def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
 def binary_op(ctx, code, x, y):
-  assert x.shape == y.shape
+  if x.shape != y.shape:
+    raise Exception("binary op shape mismatch: %r != %r" % (x.shape, y.shape))
   ret = buffer_like(ctx, x)
   prg = clbuild(ctx.cl_ctx, """
-  __kernel void add(
+  __kernel void binop(
       __global const float *a_g, __global const float *b_g, __global float *res_g)
   {
     int gid = get_global_id(0);
@@ -37,13 +38,13 @@ def binary_op(ctx, code, x, y):
     res_g[gid] = """+code+""";
   }
   """)
-  prg.add(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
+  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
   return ret
 
 def unary_op(ctx, code, x):
   ret = buffer_like(ctx, x)
   prg = clbuild(ctx.cl_ctx, """
-  __kernel void relu(
+  __kernel void unop(
       __global const float *a_g, __global float *res_g)
   {
     int gid = get_global_id(0);
@@ -51,7 +52,7 @@ def unary_op(ctx, code, x):
     res_g[gid] = """+code+""";
   }
   """)
-  prg.relu(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
+  prg.unop(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
   return ret
 
 class Add(Function):
@@ -251,7 +252,18 @@ class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
-    x.shape = shape
+    ss = list(shape)
+
+    # I'm sorry for this code
+    tsum = 1
+    for s in ss:
+      if s != -1:
+        tsum *= s
+    for i,s in enumerate(ss):
+      if s == -1:
+        ss[i] = np.prod(x.shape) // tsum
+    assert np.prod(x.shape) == np.prod(ss)
+    x.shape = tuple(ss)
     return x
 
   @staticmethod
