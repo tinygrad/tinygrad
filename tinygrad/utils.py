@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 def mask_like(like, mask_inx, mask_value = 1.0):
   mask = np.zeros_like(like).reshape(-1)
@@ -12,7 +13,7 @@ def layer_init_uniform(*x):
 def fetch(url):
   import requests, os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())    
-  if os.path.isfile(fp):
+  if os.path.isfile(fp) and os.stat(fp).st_size > 0:
     with open(fp, "rb") as f:
       dat = f.read()
   else:
