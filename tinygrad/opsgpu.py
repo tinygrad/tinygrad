@@ -11,6 +11,12 @@ def buffer_new(ctx, shape):
   res_g.dtype = np.float32
   return res_g
 
+def buffer_zeros(ctx, shape):
+  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np.zeros(shape))
+  res_g.shape = shape
+  res_g.dtype = np.float32
+  return res_g
+
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
 
@@ -196,6 +202,43 @@ register('dot', Dot, gpu=True)
 register('matmul', Dot, gpu=True)
 
 # ************* simple ops *************
+
+class Pad2D(Function):
+  @staticmethod
+  def forward(ctx, x, padding=None):
+    bs,cin,iy,ix = x.shape
+    oy,ox = iy+padding[0]+padding[1], ix+padding[2]+padding[3]
+    ret = buffer_zeros(ctx, (bs, cin, oy, ox))
+
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void pad2d(
+        __global const float *input, __global float *output,
+        int cin, int py, int px, int oy, int ox, int iy, int ix
+      )
+    {
+      int B = get_global_id(0);
+      int C = get_global_id(1);
+      int Y = get_global_id(2);
+
+      int iptr = B*cin*iy*ix + C*iy*ix + Y*ix;
+      int optr = B*cin*oy*ox + C*oy*ox + (Y+py)*ox + px;
+
+      for (int x = 0; x < ix; x++) {
+        output[optr+x] = input[iptr+x];
+      }
+    }
+    """)
+    prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
+        x, ret,
+        np.int32(cin), np.int32(padding[0]), np.int32(padding[2]),
+        np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
+      )
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    raise Exception("write this")
+register('pad2d', Pad2D, gpu=True)
 
 class Reshape(Function):
   @staticmethod
