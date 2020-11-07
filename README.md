@@ -93,7 +93,13 @@ Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture t
 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
 
-protip: Set "GPU=1" environment variable if you want this to go faster.
+Or, if you have a webcam and pygame+cv2 installed
+
+```bash
+python3 examples/efficientnet.py webcam
+```
+
+PROTIP: Set "GPU=1" environment variable if you want this to go faster.
 
 ### The promise of small
 
