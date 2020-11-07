@@ -191,8 +191,8 @@ if __name__ == "__main__":
       print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
   else:
     img = Image.open(io.BytesIO(fetch(url)))
-    out, _ = infer(model, img)
     st = time.time()
+    out, _ = infer(model, img)
     print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
     print("did inference in %.2f s" % (time.time()-st))
   #print("NOT", np.argmin(out.data), np.min(out.data), lbls[np.argmin(out.data)])
