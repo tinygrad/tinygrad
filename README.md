@@ -12,6 +12,8 @@ This may not be the best deep learning framework, but it is a deep learning fram
 
 The Tensor class is a wrapper around a numpy array, except it does Tensor things.
 
+Also a city in Russia.
+
 ### Installation
 
 ```bash
