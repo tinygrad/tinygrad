@@ -37,7 +37,7 @@ class TinyConvNet:
     return [self.l1, self.c1, self.c2]
 
   def forward(self, x):
-    x.data = x.data.reshape((-1, 1, 28, 28)) # hacks
+    x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
     x = x.conv2d(self.c1).relu().max_pool2d()
     x = x.conv2d(self.c2).relu().max_pool2d()
     x = x.reshape(shape=[x.shape[0], -1])
@@ -83,6 +83,15 @@ def evaluate(model, gpu=False):
   assert accuracy > 0.95
 
 class TestMNIST(unittest.TestCase):
+  @unittest.skipUnless(GPU, "Requires GPU")
+  def test_conv_gpu(self):
+    np.random.seed(1337)
+    model = TinyConvNet()
+    [x.cuda_() for x in model.parameters()]
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
+    train(model, optimizer, steps=1000, gpu=True)
+    evaluate(model, gpu=True)
+
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()

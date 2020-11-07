@@ -17,8 +17,8 @@ def fetch(url):
       dat = f.read()
   else:
     print("fetching %s" % url)
+    dat = requests.get(url).content
     with open(fp+".tmp", "wb") as f:
-      dat = requests.get(url).content
       f.write(dat)
     os.rename(fp+".tmp", fp)
   return dat

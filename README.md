@@ -109,6 +109,7 @@ python -m pytest
   * Make broadcasting work on the backward pass (simple please)
   * EfficientNet backward pass
   * Tensors on GPU (GPU support, must support Mac)
+* Make tinygrad work on comma two and run driving model
 * Reduce code
 * Increase speed
 * Add features
