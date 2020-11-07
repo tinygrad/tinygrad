@@ -78,7 +78,7 @@ optim.step()
 
 ### GPU Support?!
 
-tinygrad supports GPUs through PyOpenCL. Not all ops are supported yet.
+tinygrad supports GPUs through PyOpenCL. Not all ops are supported yet on the backward pass.
 
 ```python
 from tinygrad.tensor import Tensor
@@ -92,6 +92,8 @@ Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture t
 ```bash
 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
+
+protip: Set "GPU=1" environment variable if you want this to go faster.
 
 ### The promise of small
 
