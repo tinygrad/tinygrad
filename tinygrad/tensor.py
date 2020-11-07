@@ -123,7 +123,7 @@ class Tensor:
     if not self.gpu:
       require_init_gpu()
       assert self.data.dtype == np.float32   # only float32 on GPU
-      data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data)
+      data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data.ravel())
       data.shape = self.shape
       data.dtype = self.data.dtype
       ret = Tensor(data)

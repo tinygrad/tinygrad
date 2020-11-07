@@ -324,11 +324,13 @@ class Conv2D(Function):
 
     prg = clbuild(ctx.cl_ctx, """
     __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix) {
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs) {
 
       int B = get_global_id(0);  // range 0-bs
       int Y = get_global_id(1);  // range 0-oy
       int X = get_global_id(2);  // range 0-ox
+      int IY = Y*ys;
+      int IX = X*xs;
       
       // input  = (bs, groups, cin, iy, ix)
       // weight = (groups, rcout, cin, H, W)
@@ -337,10 +339,10 @@ class Conv2D(Function):
         for (int c = 0; c < rcout; c++) {
           float acc = 0.0;
           for (int ci = 0; ci < cin; ci++) {
-            for (int y = Y; y < Y+H; y++) {
-              for (int x = X; x < X+W; x++) {
+            for (int y = IY; y < IY+H; y++) {
+              for (int x = IX; x < IX+W; x++) {
                 acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
-                  weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-Y)*W + (x-X)];
+                  weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
               }
             }
           }
@@ -355,7 +357,8 @@ class Conv2D(Function):
       np.int32(H), np.int32(W),
       np.int32(groups), np.int32(rcout), np.int32(cin),
       np.int32(oy), np.int32(ox), 
-      np.int32(iy), np.int32(ix)
+      np.int32(iy), np.int32(ix),
+      np.int32(ys), np.int32(xs)
     )
     return ret
 
