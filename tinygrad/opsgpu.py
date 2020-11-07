@@ -47,18 +47,20 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
 
 def subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=0):
   N, C, Y, X = input.shape
-  ret = buffer_new(ctx, (N, C, Y//2, X//2))
-  osize = np.array((X//2, Y//2), dtype=cl.cltypes.uint2)
+  py,px = kernel_size
+  ret = buffer_new(ctx, (N, C, Y//py, X//px))
+  osize = np.array((X//px, Y//py), dtype=cl.cltypes.uint2)
   isize = np.array((X, Y), dtype=cl.cltypes.uint2)
-  ksize = np.array(kernel_size[::-1], dtype=cl.cltypes.uint2)
+  ksize = np.array((px,py), dtype=cl.cltypes.uint2)
   prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, init_val=init_val)
-  prg.subsample(ctx.cl_queue, (N*C, Y//2, X//2), None,
+  prg.subsample(ctx.cl_queue, (N*C, Y//py, X//px), None,
                 ret, input, osize, isize, ksize, np.int32(input.size))
   ctx.data = np.empty((N, C, Y, X)) # set shape expectation on tensor instance
   return ret
 
 def binary_op(ctx, code, x, y):
-  assert len(x.shape) == len(y.shape)
+  if len(x.shape) != len(y.shape):
+    raise Exception("shape mismatch in binop %s: %r %r" % (code, x.shape, y.shape))
   xdiv = 1
   ydiv = 1
   if x.shape != y.shape:

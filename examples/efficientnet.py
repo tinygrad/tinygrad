@@ -94,7 +94,7 @@ class EfficientNet:
     x = x.avg_pool2d(kernel_size=x.shape[2:4])
     x = x.reshape(shape=(-1, 1280))
     #x = x.dropout(0.2)
-    return x.dot(self._fc).add(self._fc_bias)
+    return x.dot(self._fc).add(self._fc_bias.reshape(shape=[1,-1]))
 
   def load_weights_from_torch(self):
     # load b0
@@ -159,7 +159,7 @@ if __name__ == "__main__":
   import time
   st = time.time()
   if GPU:
-    out = model.forward(Tensor(img).cuda())
+    out = model.forward(Tensor(img).cuda()).cpu()
   else:
     out = model.forward(Tensor(img))
 
