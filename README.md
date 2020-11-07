@@ -15,7 +15,7 @@ The Tensor class is a wrapper around a numpy array, except it does Tensor things
 ### Installation
 
 ```bash
-pip3 install tinygrad
+pip3 install tinygrad --upgrade
 ```
 
 ### Example
