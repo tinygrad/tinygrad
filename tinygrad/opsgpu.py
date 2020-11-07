@@ -58,6 +58,34 @@ def subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=0):
   ctx.data = np.empty((N, C, Y, X)) # set shape expectation on tensor instance
   return ret
 
+@functools.lru_cache
+def cl_supsample_krnl_build(cl_ctx, result_op):
+  prg = """
+  __kernel void supsample(
+    __global float *output, __global const float *input, uint2 osize, uint2 isize, uint2 kernel_size, int nelem
+  ) {
+    int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
+    int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
+    int iid  = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
+    if (iid < nelem)
+      output[oid] = """+result_op+""";
+  }
+  """
+  return clbuild(cl_ctx, prg)
+
+def supersample_op(ctx, input, out_shape, kernel_size, result_op):
+  (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
+  py,px = kernel_size
+  ret = buffer_new(ctx, out_shape)
+  osize = np.array((Xout, Yout), dtype=cl.cltypes.uint2)
+  isize = np.array((Xin, Yin), dtype=cl.cltypes.uint2)
+  ksize = np.array((px, py), dtype=cl.cltypes.uint2)
+  prg = cl_supsample_krnl_build(ctx.cl_ctx, result_op)
+  prg.supsample(ctx.cl_queue, (N*C, Yout, Xout), None,
+                ret, input, osize, isize, ksize, np.int32(input.size))
+  ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
+  return ret
+
 def binary_op(ctx, code, x, y):
   if len(x.shape) != len(y.shape):
     raise Exception("shape mismatch in binop %s: %r %r" % (code, x.shape, y.shape))
@@ -352,12 +380,15 @@ class AvgPool2D(Function):
   def forward(ctx, input, kernel_size=(2, 2)):
     iter_op = "group_res += input[iid]"
     result_op = "group_res / (kernel_size.x * kernel_size.y)"
-    return subsample_op(ctx, input, kernel_size, iter_op, result_op)
+    ret = subsample_op(ctx, input, kernel_size, iter_op, result_op)
+    ctx.save_for_backward(kernel_size, input.shape)
+    return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    # TODO Finish this
-    pass
+    kernel_size, orig_shape = ctx.saved_tensors
+    result_op = "input[iid] / (float)(kernel_size.x * kernel_size.y)"
+    return supersample_op(ctx, grad_output, orig_shape, kernel_size, result_op)
 register('avg_pool2d', AvgPool2D, gpu=True)
 
 class MaxPool2D(Function):
@@ -469,7 +500,7 @@ class Conv2D(Function):
       int X = get_global_id(2);  // range 0-ox
       int IY = Y*ys;
       int IX = X*xs;
-      
+
       // input  = (bs, groups, cin, iy, ix)
       // weight = (groups, rcout, cin, H, W)
       // output = (bs, groups, rcout, oy, ox)
@@ -490,7 +521,7 @@ class Conv2D(Function):
       x, w, ret,
       np.int32(H), np.int32(W),
       np.int32(groups), np.int32(rcout), np.int32(cin),
-      np.int32(oy), np.int32(ox), 
+      np.int32(oy), np.int32(ox),
       np.int32(iy), np.int32(ix),
       np.int32(ys), np.int32(xs)
     )
