@@ -97,13 +97,15 @@ register('matmul', Dot)
 class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
+    ctx.save_for_backward(padding)
     return np.pad(x,
       ((0,0), (0,0),
        (padding[0], padding[1]), (padding[2], padding[3])))
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise Exception("write this")
+    padding, = ctx.saved_tensors
+    return grad_output[..., padding[0]:-padding[1], padding[2]:-padding[3]]
 register('pad2d', Pad2D)
 
 class Reshape(Function):
