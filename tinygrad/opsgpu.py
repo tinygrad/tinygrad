@@ -386,14 +386,14 @@ class AvgPool2D(Function):
     iter_op = "group_res += input[iid]"
     result_op = "group_res / (kernel_size.x * kernel_size.y)"
     ret = subsample_op(ctx, input, kernel_size, stride, iter_op, result_op)
-    ctx.save_for_backward(kernel_size, input.shape)
+    ctx.save_for_backward(input.shape)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    kernel_size, orig_shape = ctx.saved_tensors
+    orig_shape, = ctx.saved_tensors
     result_op = "input[iid] / (kernel_size.x * kernel_size.y)"
-    return supersample_op(ctx, grad_output, orig_shape, kernel_size, result_op)
+    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size, result_op)
 register('avg_pool2d', AvgPool2D, gpu=True)
 
 class MaxPool2D(Function):
