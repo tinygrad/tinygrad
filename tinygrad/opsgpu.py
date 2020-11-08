@@ -382,7 +382,7 @@ class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2), stride=None):
     if not stride:
-      stride = kernel_size
+      ctx.stride = stride = kernel_size
     iter_op = "group_res += input[iid]"
     result_op = "group_res / (kernel_size.x * kernel_size.y)"
     ret = subsample_op(ctx, input, kernel_size, stride, iter_op, result_op)
@@ -400,7 +400,7 @@ class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2), stride=None):
     if not stride:
-      stride = kernel_size
+      ctx.stride = stride = kernel_size
     init_val = "FLT_MIN"
     iter_op = "group_res = max(group_res, input[iid])"
     result_op = "group_res"

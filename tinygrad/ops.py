@@ -259,7 +259,7 @@ class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2), stride=None):
     if not stride:
-      stride = kernel_size
+      ctx.stride = stride = kernel_size
     stack, (my, mx) = stack_for_pool(x, kernel_size, stride, fill_value=-np.inf)
     idxs = np.nanargmax(stack, axis=0)[..., :my, :mx]
     ctx.save_for_backward(idxs, x.shape)
@@ -277,7 +277,7 @@ class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2), stride=None):
     if not stride:
-      stride = kernel_size
+      ctx.stride = stride = kernel_size
     stack, (my, mx) = stack_for_pool(x, kernel_size, stride, fill_value=np.nan)
     ctx.save_for_backward(x.shape)
     with warnings.catch_warnings():
