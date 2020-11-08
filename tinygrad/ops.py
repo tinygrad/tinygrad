@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 from .tensor import Function, register
 
@@ -236,47 +237,54 @@ register('conv2d', Conv2D)
 
 # ************* pooling ops *************
 
-def stack_for_pool(x, py, px):
-  my, mx = (x.shape[2]//py)*py, (x.shape[3]//px)*px
-  stack = []
-  xup = x[:, :, :my, :mx]
-  for Y in range(py):
-    for X in range(px):
-      stack.append(xup[:, :, Y::py, X::px][None])
-  return np.concatenate(stack, axis=0)
+def stack_for_pool(x, kernel_size, stride, fill_value=0):
+  (ky, kx), (py, px) = kernel_size, stride
+  my, mx = (x.shape[2]-ky)//py+1, (x.shape[3]-kx)//px+1
+  stack = fill_value*np.ones((ky, kx, *x.shape[:2], my+ky, mx+kx), dtype=x.dtype)
+  for Y in range(ky):
+    for X in range(kx):
+      sl = x[..., Y:Y+my*py+ky:py, X:X+mx*px+kx:px]
+      stack[Y, X, ..., :sl.shape[2], :sl.shape[3]] = sl
+  return stack.reshape(-1, *stack.shape[2:]), (my, mx)
 
-def unstack_for_pool(fxn, s, py, px):
-  my, mx = (s[2]//py)*py, (s[3]//px)*px
-  for Y in range(py):
-    for X in range(px):
-      ll = fxn(Y*px+X)
+def unstack_for_pool(fxn, s, kernel_size, stride):
+  (ky, kx), (py, px) = kernel_size, stride
+  for Y in range(ky):
+    for X in range(kx):
+      ll = fxn(Y*kx+X)
       if X == 0 and Y == 0:
-        ret = np.zeros(s, dtype=ll.dtype)
-      ret[:, :, Y:my:py, X:mx:px] = ll
-  return ret
+        ret = np.zeros((*s[:2], s[2]+ky, s[3]+kx), dtype=ll.dtype)
+      ret[..., Y:Y+ll.shape[2]*py:py, X:X+ll.shape[3]*px:px] = ll
+  return ret[..., :s[2], :s[3]]
 
 class MaxPool2D(Function):
   @staticmethod
-  def forward(ctx, x, kernel_size=(2, 2)):
-    stack = stack_for_pool(x, *kernel_size)
-    idxs = np.argmax(stack, axis=0)
+  def forward(ctx, x, kernel_size=(2, 2), stride=None):
+    if not stride:
+      ctx.stride = stride = kernel_size
+    stack, (my, mx) = stack_for_pool(x, kernel_size, stride, fill_value=-np.inf)
+    idxs = np.nanargmax(stack, axis=0)[..., :my, :mx]
     ctx.save_for_backward(idxs, x.shape)
-    return np.max(stack, axis=0)
+    return np.amax(stack, axis=0)[..., :my, :mx]
 
   @staticmethod
   def backward(ctx, grad_output):
     idxs,s = ctx.saved_tensors
     return unstack_for_pool(
       lambda idx: grad_output * (idxs == idx),
-      s, *ctx.kernel_size)
+      s, ctx.kernel_size, ctx.stride)
 register('max_pool2d', MaxPool2D)
 
 class AvgPool2D(Function):
   @staticmethod
-  def forward(ctx, x, kernel_size=(2, 2)):
-    stack = stack_for_pool(x, *kernel_size)
+  def forward(ctx, x, kernel_size=(2, 2), stride=None):
+    if not stride:
+      ctx.stride = stride = kernel_size
+    stack, (my, mx) = stack_for_pool(x, kernel_size, stride, fill_value=np.nan)
     ctx.save_for_backward(x.shape)
-    return np.mean(stack, axis=0)
+    with warnings.catch_warnings():
+      warnings.simplefilter("ignore")
+      return np.nanmean(stack, axis=0)[...,:my, :mx]
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -284,6 +292,6 @@ class AvgPool2D(Function):
     py, px = ctx.kernel_size
     return unstack_for_pool(
       lambda idx: grad_output/py/px,
-      s, py, px)
+      s, ctx.kernel_size, ctx.stride)
 register('avg_pool2d', AvgPool2D)
 
