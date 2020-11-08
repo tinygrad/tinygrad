@@ -9,12 +9,20 @@ import io
 import time
 import numpy as np
 np.set_printoptions(suppress=True)
+# Fix local imports
+sys.path.append(os.getcwd())
 
 from tinygrad.tensor import Tensor
 from tinygrad.utils import fetch
 
 # BatchNorm2D and swish
 from tinygrad.nn import *
+
+# Check to see that we have 1 argument only
+if len(sys.argv) != 2:
+  print ("Usage: python3 examples/efficientnet.py <argument>")
+  print ("Where <argument> can be either https://url.to/image.jpeg or webcam")
+  sys.exit(0)
 
 class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio):

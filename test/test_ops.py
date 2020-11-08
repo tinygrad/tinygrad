@@ -3,6 +3,11 @@ import numpy as np
 import unittest
 import timeit
 import functools
+# Fix local imports
+import os
+import sys
+sys.path.append(os.getcwd())
+
 from tinygrad.tensor import Tensor, GPU
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7, gpu=False, forward_only=False):

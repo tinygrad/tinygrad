@@ -1,6 +1,11 @@
 import numpy as np
 import torch
 import unittest
+# Fix local imports
+import os
+import sys
+sys.path.append(os.getcwd())
+
 from tinygrad.tensor import Tensor
 from tinygrad.gradcheck import numerical_jacobian, jacobian, gradcheck
 

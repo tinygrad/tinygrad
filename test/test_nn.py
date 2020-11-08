@@ -1,6 +1,11 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+# Fix local imports
+import os
+import sys
+sys.path.append(os.getcwd())
+
 from tinygrad.nn import *
 import torch
 

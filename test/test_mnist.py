@@ -2,6 +2,10 @@
 import os
 import unittest
 import numpy as np
+# Fix local imports
+import sys
+sys.path.append(os.getcwd())
+
 from tinygrad.tensor import Tensor, GPU
 from tinygrad.utils import layer_init_uniform, fetch_mnist
 import tinygrad.optim as optim
