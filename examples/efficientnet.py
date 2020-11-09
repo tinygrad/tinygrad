@@ -127,7 +127,7 @@ def infer(model, img):
 
   img = np.array(img)
   y0,x0=(np.asarray(img.shape)[:2]-224)//2
-  img = img[y0:y0+224, x0:x0+224]
+  retimg = img = img[y0:y0+224, x0:x0+224]
 
   # if you want to look at the image
   """
@@ -155,7 +155,7 @@ def infer(model, img):
   plt.plot(out.data[0])
   plt.show()
   """
-  return out
+  return out, retimg
 
 if __name__ == "__main__":
   # instantiate my net
@@ -175,10 +175,11 @@ if __name__ == "__main__":
     cap = cv2.VideoCapture(0)
     while 1:
       ret, frame = cap.read()
-      cv2.imshow('capture', frame)
       img = Image.fromarray(frame[:, :, [2,1,0]])
-      out = infer(model, img)
+      out, retimg = infer(model, img)
       print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
+      retimg = cv2.cvtColor(retimg, cv2.COLOR_RGB2BGR)
+      cv2.imshow('capture', retimg)
       if cv2.waitKey(1) & 0xFF == ord('q'):
         break
     cap.release()
@@ -186,7 +187,7 @@ if __name__ == "__main__":
   else:
     img = Image.open(io.BytesIO(fetch(url)))
     st = time.time()
-    out = infer(model, img)
+    out, _ = infer(model, img)
     print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
     print("did inference in %.2f s" % (time.time()-st))
   #print("NOT", np.argmin(out.data), np.min(out.data), lbls[np.argmin(out.data)])
