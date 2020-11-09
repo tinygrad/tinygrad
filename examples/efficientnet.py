@@ -125,9 +125,8 @@ def infer(model, img):
   aspect_ratio = img.size[0] / img.size[1]
   img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
 
-  img = np.array(img)
   y0,x0=(np.asarray(img.shape)[:2]-224)//2
-  retimg = img = img[y0:y0+224, x0:x0+224]
+  img = img[y0:y0+224, x0:x0+224]
 
   # if you want to look at the image
   """
@@ -155,7 +154,7 @@ def infer(model, img):
   plt.plot(out.data[0])
   plt.show()
   """
-  return out, retimg
+  return out
 
 if __name__ == "__main__":
   # instantiate my net
@@ -177,7 +176,7 @@ if __name__ == "__main__":
       ret, frame = cap.read()
       cv2.imshow('capture', frame)
       img = Image.fromarray(frame[:, :, [2,1,0]])
-      out, retimg = infer(model, img)
+      out = infer(model, img)
       print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
       if cv2.waitKey(1) & 0xFF == ord('q'):
         break
@@ -186,7 +185,7 @@ if __name__ == "__main__":
   else:
     img = Image.open(io.BytesIO(fetch(url)))
     st = time.time()
-    out, _ = infer(model, img)
+    out = infer(model, img)
     print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
     print("did inference in %.2f s" % (time.time()-st))
   #print("NOT", np.argmin(out.data), np.min(out.data), lbls[np.argmin(out.data)])
