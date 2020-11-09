@@ -171,24 +171,21 @@ if __name__ == "__main__":
   from PIL import Image
   url = sys.argv[1]
   if url == 'webcam':
-    import pygame
-    pygame.init()
-    SCALE = 3
-    screen = pygame.display.set_mode((224*SCALE, 224*SCALE))
-    pygame.display.set_caption("capture")
-
     import cv2
     cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     while 1:
+      _ = cap.grab() # discard one frame to circumvent capture buffering
       ret, frame = cap.read()
-      frame = Image.fromarray(frame[:, :, [2,1,0]])
-      out, retimg = infer(model, frame)
-      simg = cv2.resize(retimg, (224*SCALE, 224*SCALE))
-      pygame.surfarray.blit_array(screen, np.array(simg).swapaxes(0,1))
-      pygame.display.update()
-      for e in pygame.event.get():
-        pass
+      img = Image.fromarray(frame[:, :, [2,1,0]])
+      out, retimg = infer(model, img)
       print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
+      retimg = cv2.cvtColor(retimg, cv2.COLOR_RGB2BGR)
+      cv2.imshow('capture', retimg)
+      if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+    cap.release()
+    cv2.destroyAllWindows()
   else:
     img = Image.open(io.BytesIO(fetch(url)))
     st = time.time()
