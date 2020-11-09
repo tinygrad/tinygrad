@@ -173,7 +173,9 @@ if __name__ == "__main__":
   if url == 'webcam':
     import cv2
     cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     while 1:
+      _ = cap.grab() # discard one frame to circumvent capture buffering
       ret, frame = cap.read()
       img = Image.fromarray(frame[:, :, [2,1,0]])
       out, retimg = infer(model, img)
