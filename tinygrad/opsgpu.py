@@ -393,6 +393,9 @@ class AvgPool2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
+    # TODO implement for stride != kernel_size
+    if ctx.kernel_size != ctx.stride:
+      raise NotImplementedError("GPU AvgPool2D.backward() with stride != kernel_size not implemented")
     orig_shape, = ctx.saved_tensors
     result_op = "input[iid] / (kernel_size.x * kernel_size.y)"
     return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size, result_op)
@@ -410,8 +413,8 @@ class MaxPool2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    # TODO Finish this
-    pass
+    # TODO implement with stride support
+    raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
 register('max_pool2d', MaxPool2D, gpu=True)
 
 # *** this is unfinished, fix this and TestMNIST.test_sgd_gpu should pass ***
