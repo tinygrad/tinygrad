@@ -301,14 +301,14 @@ class Pad2D(Function):
     prg = clbuild(ctx.cl_ctx, """
     __kernel void pad2d(
         __global const float *input, __global float *output,
-        int cin, int py, int px, int ipy, int ipx, int oy, int ox, int iy, int ix
+        int cin, int py, int px, int oy, int ox, int iy, int ix
       )
     {
       int B = get_global_id(0);
       int C = get_global_id(1);
       int Y = get_global_id(2);
 
-      int iptr = B*cin*iy*ix + C*iy*ix + (Y+ipy)*ix + ipx;
+      int iptr = B*cin*iy*ix + C*iy*ix + Y*ix;
       int optr = B*cin*oy*ox + C*oy*ox + (Y+py)*ox + px;
 
       for (int x = 0; x < ix; x++) {
@@ -319,7 +319,7 @@ class Pad2D(Function):
     ctx.save_for_backward(prg, padding)
     prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
         x, ret,
-        np.int32(cin), np.int32(padding[0]), np.int32(padding[2]), np.int32(0), np.int32(0),
+        np.int32(cin), np.int32(padding[0]), np.int32(padding[2]),
         np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
       )
     return ret
@@ -330,9 +330,27 @@ class Pad2D(Function):
     bs, cin, iy, ix = grad_output.shape
     oy, ox = iy - padding[0] - padding[1], ix - padding[2] - padding[3]
     ret = buffer_new(ctx, (bs, cin, oy, ox))
-    prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void pad2d(
+        __global const float *input, __global float *output,
+        int cin, int py, int px, int oy, int ox, int iy, int ix
+      )
+    {
+      int B = get_global_id(0);
+      int C = get_global_id(1);
+      int Y = get_global_id(2);
+
+      int iptr = B*cin*iy*ix + C*iy*ix + (Y+py)*ix + px;
+      int optr = B*cin*oy*ox + C*oy*ox + Y*ox;
+
+      for (int x = 0; x < ox; x++) {
+        output[optr+x] = input[iptr+x];
+      }
+    }
+    """)
+    prg.pad2d(ctx.cl_queue, [bs, cin, oy], None,
               grad_output, ret,
-              np.int32(cin), np.int32(0), np.int32(0), np.int32(padding[0]), np.int32(padding[2]),
+              np.int32(cin), np.int32(padding[0]), np.int32(padding[2]),
               np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
               )
     return ret
