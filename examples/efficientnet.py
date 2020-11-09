@@ -180,7 +180,9 @@ if __name__ == "__main__":
       img = Image.fromarray(frame[:, :, [2,1,0]])
       out, retimg = infer(model, img)
       print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
-      retimg = cv2.cvtColor(retimg, cv2.COLOR_RGB2BGR)
+      SCALE = 3
+      simg = cv2.resize(retimg, (224*SCALE, 224*SCALE))
+      retimg = cv2.cvtColor(simg, cv2.COLOR_RGB2BGR)
       cv2.imshow('capture', retimg)
       if cv2.waitKey(1) & 0xFF == ord('q'):
         break
