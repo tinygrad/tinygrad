@@ -316,7 +316,7 @@ class Pad2D(Function):
       }
     }
     """)
-    ctx.save_for_backward(prg, padding)
+    ctx.save_for_backward(padding)
     prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
         x, ret,
         np.int32(cin), np.int32(padding[0]), np.int32(padding[2]),
@@ -326,7 +326,7 @@ class Pad2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    prg, padding = ctx.saved_tensors
+    padding, = ctx.saved_tensors
     bs, cin, iy, ix = grad_output.shape
     oy, ox = iy - padding[0] - padding[1], ix - padding[2] - padding[3]
     ret = buffer_new(ctx, (bs, cin, oy, ox))
