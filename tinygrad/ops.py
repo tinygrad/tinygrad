@@ -269,6 +269,9 @@ class MaxPool2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
+    # TODO implement for stride != kernel_size
+    if ctx.kernel_size != ctx.stride:
+      raise NotImplementedError("CPU MaxPool2D.backward() with stride != kernel_size not implemented")
     idxs,s = ctx.saved_tensors
     return unstack_for_pool(
       lambda idx: grad_output * (idxs == idx),
@@ -288,6 +291,9 @@ class AvgPool2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
+    # TODO implement for stride != kernel_size
+    if ctx.kernel_size != ctx.stride:
+      raise NotImplementedError("CPU AvgPool2D.backward() with stride != kernel_size not implemented")
     s, = ctx.saved_tensors
     py, px = ctx.kernel_size
     return unstack_for_pool(

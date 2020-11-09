@@ -37,8 +37,9 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
     for (uint j=0; j<kernel_size.y; ++j) {
       for (uint i=0; i<kernel_size.x; ++i) {
         int iid  = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
-        if (iid < nelem)
+        if (gid.x*stride.x+i < isize.x && gid.y*stride.y+j < isize.y) {
           """+iter_op+""";
+        }
       }
     }
     output[oid] = """+result_op+""";
@@ -69,9 +70,10 @@ def cl_supsample_krnl_build(cl_ctx, result_op):
   ) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    int iid  = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
-    if (iid < nelem)
+    int iid = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
+    if (gid.x/kernel_size.x < isize.x && gid.y/kernel_size.y < isize.y) {
       output[oid] = """+result_op+""";
+    }
   }
   """
   return clbuild(cl_ctx, prg)
@@ -391,6 +393,9 @@ class AvgPool2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
+    # TODO implement for stride != kernel_size
+    if ctx.kernel_size != ctx.stride:
+      raise NotImplementedError("GPU AvgPool2D.backward() with stride != kernel_size not implemented")
     orig_shape, = ctx.saved_tensors
     result_op = "input[iid] / (kernel_size.x * kernel_size.y)"
     return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size, result_op)
@@ -408,8 +413,8 @@ class MaxPool2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    # TODO Finish this
-    pass
+    # TODO implement with stride support
+    raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
 register('max_pool2d', MaxPool2D, gpu=True)
 
 # *** this is unfinished, fix this and TestMNIST.test_sgd_gpu should pass ***
