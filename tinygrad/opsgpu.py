@@ -37,8 +37,9 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
     for (uint j=0; j<kernel_size.y; ++j) {
       for (uint i=0; i<kernel_size.x; ++i) {
         int iid  = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
-        if (iid < nelem)
+        if (gid.x*stride.x+i < isize.x && gid.y*stride.y+j < isize.y) {
           """+iter_op+""";
+        }
       }
     }
     output[oid] = """+result_op+""";
@@ -69,9 +70,10 @@ def cl_supsample_krnl_build(cl_ctx, result_op):
   ) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    int iid  = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
-    if (iid < nelem)
+    int iid = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
+    if (gid.x/kernel_size.x < isize.x && gid.y/kernel_size.y < isize.y) {
       output[oid] = """+result_op+""";
+    }
   }
   """
   return clbuild(cl_ctx, prg)
