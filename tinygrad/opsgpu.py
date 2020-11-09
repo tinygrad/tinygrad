@@ -496,6 +496,8 @@ class Conv2D(Function):
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
+    
+    ctx.save_for_backward(x,w)
 
     # output buffer
     ret = buffer_new(ctx, (bs, cout, oy, ox))
@@ -541,7 +543,84 @@ class Conv2D(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise Exception("not implemented")
+    bs,_,oy,ox = grad_output.shape
+    
+    #_,rcout,cin,H,W = tw.shape
+
+    x, w = ctx.saved_tensors
+
+    cout,cin,H,W = w.shape
+    ys,xs = ctx.stride
+    bs,cin_,iy,ix = x.shape
+    oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
+    assert cin*ctx.groups == cin_
+    assert cout % ctx.groups == 0
+    rcout = cout//ctx.groups
+
+
+    ys,xs = ctx.stride
+    OY,OX = x_shape[2:4]
+
+    dx = buffer_new(ctx, (bs, ctx.groups*cin, OY, OX))
+    dw = buffer_new(ctx, (ctx.groups*rcout, cin, H, W))
+    '''
+    ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
+
+    gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
+    for g in range(ctx.groups):
+      #'ikYX,ijYXyx -> kjyx'
+      gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
+
+    # needs to be optimized
+    gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
+    for Y in range(grad_output.shape[2]):
+      for X in range(grad_output.shape[3]):
+        iY,iX = Y*ys, X*xs
+        #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
+        for g in range(ctx.groups):
+          tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
+          gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
+    '''
+
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs) {
+
+      int B = get_global_id(0)/(groups*rcout);  // range 0-bs
+      int g = (get_global_id(0)/rcout)%groups;
+      int c = get_global_id(0) % rcout;
+
+      int Y = get_global_id(1);  // range 0-oy
+      int X = get_global_id(2);  // range 0-ox
+      int IY = Y*ys;
+      int IX = X*xs;
+
+      // input  = (bs, groups, cin, iy, ix)
+      // weight = (groups, rcout, cin, H, W)
+      // output = (bs, groups, rcout, oy, ox)
+      float acc = 0.0;
+      for (int ci = 0; ci < cin; ci++) {
+        for (int y = IY; y < IY+H; y++) {
+          for (int x = IX; x < IX+W; x++) {
+            acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
+              weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
+          }
+        }
+      }
+      output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
+    }
+    """)
+
+    prg.conv(ctx.cl_queue, [bs*groups*rcout, oy, ox], None,
+      x, w, dx, dw,
+      np.int32(H), np.int32(W),
+      np.int32(groups), np.int32(rcout), np.int32(cin),
+      np.int32(oy), np.int32(ox),
+      np.int32(iy), np.int32(ix),
+      np.int32(ys), np.int32(xs)
+    )
+
+    return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 
 register('conv2d', Conv2D, gpu=True)
 
