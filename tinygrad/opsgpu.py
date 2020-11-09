@@ -95,17 +95,16 @@ def binary_op(ctx, code, x, y):
   xdiv = 1
   ydiv = 1
   if x.shape != y.shape:
-    # special case broadcasting
-    # TODO: make general
-    if len(y.shape) == 4 and x.shape[0:2] == y.shape[0:2] and y.shape[2] == 1 and y.shape[3] == 1:
-      ydiv = x.shape[2] * x.shape[3]
-    elif len(y.shape) == 4 and x.shape[0:2] == y.shape[0:2] and x.shape[2] == 1 and x.shape[3] == 1:
-      xdiv = y.shape[2] * y.shape[3]
-    elif np.prod(y.shape) == 1:
-      ydiv = np.prod(x.shape)
-    else:
-      raise Exception("binary op shape mismatch: %r != %r" % (x.shape, y.shape))
-  ret = buffer_like(ctx, x if np.prod(x.shape) >= np.prod(y.shape) else y)
+    for axis, mismatch in enumerate(np.where(x.shape != y.shape, x.shape, y.shape)):
+      if mismatch:
+        if x.shape[axis] == 1:
+          xdiv *= y.shape[axis]
+        elif y.shape[axis] == 1:
+          ydiv *= x.shape[axis]
+        else:
+          raise Exception("binary op unbroadcastable shape mismatch: %r != %r" % (x.shape, y.shape))
+
+  ret = buffer_new(ctx, np.maximum(x.shape, y.shape))
   prg = clbuild(ctx.cl_ctx, """
   __kernel void binop(
       __global const float *a_g, __global const float *b_g, __global float *res_g, int xdiv, int ydiv)
