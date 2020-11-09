@@ -28,16 +28,18 @@ def clbuild(cl_ctx, prg):
 def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
   prg = """
   __kernel void subsample(
-    __global float *output, __global const float *input, uint2 osize, uint2 isize, uint2 kernel_size, int nelem
+    __global float *output, __global const float *input, uint2 osize, uint2 isize, uint2 kernel_size,
+    uint2 stride, int nelem
   ) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
     float group_res = """+str(init_val)+""";
     for (uint j=0; j<kernel_size.y; ++j) {
       for (uint i=0; i<kernel_size.x; ++i) {
-        int iid  = (gid.x*kernel_size.x+i) + isize.x*((gid.y*kernel_size.y+j) + isize.y*gid.z);
-        if (iid < nelem)
+        int iid  = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
+        if (gid.x*stride.x+i < isize.x && gid.y*stride.y+j < isize.y) {
           """+iter_op+""";
+        }
       }
     }
     output[oid] = """+result_op+""";
@@ -45,17 +47,19 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
   """
   return clbuild(cl_ctx, prg)
 
-def subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=0):
-  N, C, Y, X = input.shape
-  py,px = kernel_size
-  ret = buffer_new(ctx, (N, C, Y//py, X//px))
-  osize = np.array((X//px, Y//py), dtype=cl.cltypes.uint2)
-  isize = np.array((X, Y), dtype=cl.cltypes.uint2)
-  ksize = np.array((px,py), dtype=cl.cltypes.uint2)
+def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=0):
+  py, px = stride
+  N, C, Yin, Xin = input.shape
+  Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
+  ret = buffer_new(ctx, (N, C, Yout, Xout))
+  osize = np.array((Xout, Yout), dtype=cl.cltypes.uint2)
+  isize = np.array((Xin, Yin), dtype=cl.cltypes.uint2)
+  ksize = np.array(kernel_size[::-1], dtype=cl.cltypes.uint2)
+  strd  = np.array((px, py), dtype=cl.cltypes.uint2)
   prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, init_val=init_val)
-  prg.subsample(ctx.cl_queue, (N*C, Y//py, X//px), None,
-                ret, input, osize, isize, ksize, np.int32(input.size))
-  ctx.data = np.empty((N, C, Y, X)) # set shape expectation on tensor instance
+  prg.subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
+                ret, input, osize, isize, ksize, strd, np.int32(input.size))
+  ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
 @functools.lru_cache()
@@ -66,9 +70,10 @@ def cl_supsample_krnl_build(cl_ctx, result_op):
   ) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    int iid  = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
-    if (iid < nelem)
+    int iid = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
+    if (gid.x/kernel_size.x < isize.x && gid.y/kernel_size.y < isize.y) {
       output[oid] = """+result_op+""";
+    }
   }
   """
   return clbuild(cl_ctx, prg)
@@ -377,32 +382,39 @@ register('sigmoid', Sigmoid, gpu=True)
 
 class AvgPool2D(Function):
   @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2)):
+  def forward(ctx, input, kernel_size=(2, 2), stride=None):
+    if not stride:
+      ctx.stride = stride = kernel_size
     iter_op = "group_res += input[iid]"
     result_op = "group_res / (kernel_size.x * kernel_size.y)"
-    ret = subsample_op(ctx, input, kernel_size, iter_op, result_op)
-    ctx.save_for_backward(kernel_size, input.shape)
+    ret = subsample_op(ctx, input, kernel_size, stride, iter_op, result_op)
+    ctx.save_for_backward(input.shape)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    kernel_size, orig_shape = ctx.saved_tensors
-    result_op = "input[iid] / (float)(kernel_size.x * kernel_size.y)"
-    return supersample_op(ctx, grad_output, orig_shape, kernel_size, result_op)
+    # TODO implement for stride != kernel_size
+    if ctx.kernel_size != ctx.stride:
+      raise NotImplementedError("GPU AvgPool2D.backward() with stride != kernel_size not implemented")
+    orig_shape, = ctx.saved_tensors
+    result_op = "input[iid] / (kernel_size.x * kernel_size.y)"
+    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size, result_op)
 register('avg_pool2d', AvgPool2D, gpu=True)
 
 class MaxPool2D(Function):
   @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2)):
+  def forward(ctx, input, kernel_size=(2, 2), stride=None):
+    if not stride:
+      ctx.stride = stride = kernel_size
     init_val = "FLT_MIN"
     iter_op = "group_res = max(group_res, input[iid])"
     result_op = "group_res"
-    return subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=init_val)
+    return subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=init_val)
 
   @staticmethod
   def backward(ctx, grad_output):
-    # TODO Finish this
-    pass
+    # TODO implement with stride support
+    raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
 register('max_pool2d', MaxPool2D, gpu=True)
 
 # *** this is unfinished, fix this and TestMNIST.test_sgd_gpu should pass ***

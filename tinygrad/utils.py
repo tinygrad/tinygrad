@@ -1,5 +1,4 @@
 import numpy as np
-import os
 
 def mask_like(like, mask_inx, mask_value = 1.0):
   mask = np.zeros_like(like).reshape(-1)
