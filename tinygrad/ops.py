@@ -260,6 +260,8 @@ def unstack_for_pool(fxn, s, kernel_size, stride):
 class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2), stride=None):
+    if np.amax(kernel_size) > 10:
+      raise ValueError("%s doesn't support kernel_size > 10 on any axis" % __class__.__name__)
     if not stride:
       ctx.stride = stride = kernel_size
     stack, (my, mx) = stack_for_pool(x, kernel_size, stride, fill_value=-np.inf)
@@ -281,6 +283,8 @@ register('max_pool2d', MaxPool2D)
 class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2), stride=None):
+    if np.amax(kernel_size) > 10:
+      raise ValueError("%s doesn't support kernel_size > 10 on any axis" % __class__.__name__)
     if not stride:
       ctx.stride = stride = kernel_size
     stack, (my, mx) = stack_for_pool(x, kernel_size, stride, fill_value=np.nan)

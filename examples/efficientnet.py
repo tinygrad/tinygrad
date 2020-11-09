@@ -49,7 +49,9 @@ class MBConvBlock:
     x = swish(self._bn1(x))
 
     # has_se
-    x_squeezed = x.avg_pool2d(kernel_size=x.shape[2:4])
+    # TODO: replace with global average pooling op
+    x_squeezed = Tensor(x.data)
+    x_squeezed.data = np.mean(x.data, axis=(2,3), keepdims=True, dtype=x.data.dtype)
     x_squeezed = swish(x_squeezed.conv2d(self._se_reduce).add(self._se_reduce_bias.reshape(shape=[1, -1, 1, 1])))
     x_squeezed = x_squeezed.conv2d(self._se_expand).add(self._se_expand_bias.reshape(shape=[1, -1, 1, 1]))
     x = x.mul(x_squeezed.sigmoid())
