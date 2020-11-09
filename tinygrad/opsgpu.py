@@ -20,11 +20,11 @@ def buffer_zeros(ctx, shape):
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
 
-@functools.lru_cache
+@functools.lru_cache()
 def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
-@functools.lru_cache
+@functools.lru_cache()
 def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
   prg = """
   __kernel void subsample(
@@ -58,7 +58,7 @@ def subsample_op(ctx, input, kernel_size, iter_op, result_op, init_val=0):
   ctx.data = np.empty((N, C, Y, X)) # set shape expectation on tensor instance
   return ret
 
-@functools.lru_cache
+@functools.lru_cache()
 def cl_supsample_krnl_build(cl_ctx, result_op):
   prg = """
   __kernel void supsample(

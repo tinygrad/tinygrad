@@ -14,7 +14,7 @@ def require_init_gpu():
   if cl_queue is None:
     try:
       # for Macbook 16 inch
-      cl_ctx = cl.create_some_context(answers=[0,2])
+      cl_ctx = cl.create_some_context(answers=[0,1])
     except (cl._cl.RuntimeError, TypeError):
       cl_ctx = cl.create_some_context(interactive=False)
     cl_queue = cl.CommandQueue(cl_ctx)
