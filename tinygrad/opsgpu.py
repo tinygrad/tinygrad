@@ -45,15 +45,14 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
       }
     }
     output[oid] = """+result_op+""";
-  }
-  """
+  }"""
   return clbuild(cl_ctx, prg)
 
 def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=0):
   py, px = stride
   N, C, Yin, Xin = input.shape
   Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
-  ret = buffer_new(ctx, (N, C, Yout, Xout))
+  ret = buffer_zeros(ctx, (N, C, Yout, Xout))
   prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, init_val=init_val)
   prg.subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
                 ret, input, uint2(Xout, Yout), uint2(Xin, Yin),
