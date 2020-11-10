@@ -589,8 +589,8 @@ class Conv2D(Function):
 
       int rcin = cin/groups;
       int B = get_global_id(0)/(groups*cin);  // range 0-bs
-      int g = (get_global_id(0)/cin)%groups;
-      int ci = get_global_id(0) % (groups*cin);
+      int g = (get_global_id(0)/cin) %groups; // range 0-groups
+      int ci = get_global_id(0) % cin;        // range 0-cin
 
       int y = get_global_id(1);  // range 0-W
       int x = get_global_id(2);  // range 0-H
@@ -599,21 +599,19 @@ class Conv2D(Function):
       // tensw = (groups*rcout, cin, H, W)
       // ggg = (bs, groups*rout, oy, ox)
       float acc = 0.0;
-      
-      //'ikYX,ijYXyx -> kjyx'
-
-      for (int co = 0; co < rcout; co++) {
+      for (int c = 0; c < rcout; c++) {
+        acc = 0.0;
         for (int Y = 0; Y < oy; Y++) {
           for (int X = 0; X < ox; X++) {
-            dw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*W + x]  += ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix 
+            acc += ggg[B*groups*rcout*oy*ox + 
+            +g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix 
             + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
-            //gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
             dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + 
              (Y*ys+y)*ix + X*xs+x]+= 
-              ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*W + x];
-             
+            ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
           }
         }
+        dw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] = acc;
       }
     }
     """)
