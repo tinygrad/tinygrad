@@ -14,5 +14,15 @@ if __name__ == "__main__":
   st = time.time()
   out = model.forward(Tensor(img))
   et = time.time()
-  print("%.2f s" % (et-st))
+  print("forward %.2f s" % (et-st))
+
+  y = np.zeros((BS,1000), np.float32)
+  y[range(y.shape[0]),Y] = -1000.0
+  y = Tensor(y)
+  loss = out.logsoftmax().mul(y).mean()
+
+  st = time.time()
+  loss.backward()
+  et = time.time()
+  print("backward %.2f s" % (et-st))
 
