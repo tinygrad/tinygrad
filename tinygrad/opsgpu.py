@@ -81,7 +81,7 @@ def cl_supsample_krnl_build(cl_ctx, result_op):
 def supersample_op(ctx, input, out_shape, kernel_size, result_op):
   (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
   py,px = kernel_size
-  ret = buffer_new(ctx, out_shape)
+  ret = buffer_zeros(ctx, out_shape)
   osize = np.array((Xout, Yout), dtype=cl.cltypes.uint2)
   isize = np.array((Xin, Yin), dtype=cl.cltypes.uint2)
   ksize = np.array((px, py), dtype=cl.cltypes.uint2)
