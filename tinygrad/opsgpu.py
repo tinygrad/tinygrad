@@ -580,24 +580,6 @@ class Conv2D(Function):
 
     dx = buffer_new(ctx, (bs, cin_, iy, ix))
     dw = buffer_new(ctx, (cout, cin, H, W))
-    '''
-    ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
-
-    gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
-    for g in range(ctx.groups):
-      #'ikYX,ijYXyx -> kjyx'
-      gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
-
-    # needs to be optimized
-    gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
-    for Y in range(grad_output.shape[2]):
-      for X in range(grad_output.shape[3]):
-        iY,iX = Y*ys, X*xs
-        #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
-        for g in range(ctx.groups):
-          tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
-          gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
-    '''
 
     prg = clbuild(ctx.cl_ctx, """
     __kernel void conv(__global const float *tensx, 
