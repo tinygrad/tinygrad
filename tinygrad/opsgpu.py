@@ -1,8 +1,6 @@
 import numpy as np
 from .tensor import Function, register, Tensor
 import pyopencl as cl
-import pyopencl.array as pycl_array
-from pyopencl.reduction import ReductionKernel
 import functools
 
 def buffer_new(ctx, shape):

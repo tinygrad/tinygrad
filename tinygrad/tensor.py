@@ -1,7 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from inspect import signature
 import numpy as np
-import time
 import os
 try:
   import pyopencl as cl
@@ -13,7 +12,7 @@ except ImportError:
 # **** profiler, 10 lines too long ****
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
-  import collections, atexit
+  import collections, atexit, time
   debug_counts = collections.defaultdict(int)
   debug_times = collections.defaultdict(float)
   def print_debug_exit():
