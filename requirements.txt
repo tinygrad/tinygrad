@@ -1,5 +1,4 @@
 numpy
-pyopencl
 # util deps
 requests
 # testing deps
