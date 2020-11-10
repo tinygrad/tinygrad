@@ -132,6 +132,26 @@ def unary_op(ctx, code, x):
   prg.unop(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
   return ret
 
+def reduce_op(ctx, code, code2, input, osize):
+  ret = buffer_new(ctx, osize)
+  prg = clbuild(ctx.cl_ctx, """
+  __kernel void sum(
+      __global const float *a_g, int sz, __global float *res_g)
+  {
+    int gid = get_global_id(0);
+    float out = 0.0;
+    for (int x = 0; x < sz; x++) {
+      float a = a_g[gid*sz + x];
+      """+code+""";
+    }
+    res_g[gid] = """+code2+""";
+  }
+  """)
+  prg.sum(ctx.cl_queue, osize, None, input, np.int32(np.prod(input.shape) // np.prod(osize)), ret)
+  return ret
+
+# ***** now for the ops themselves *****
+
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
@@ -186,21 +206,7 @@ class Sum(Function):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
-
-    ret = buffer_new(ctx, (1,))
-    prg = clbuild(ctx.cl_ctx, """
-    __kernel void sum(
-        __global const float *a_g, int sz, __global float *res_g)
-    {
-      float out = 0.0;
-      for (int x = 0; x < sz; x++) {
-        out += a_g[x];
-      }
-      res_g[0] = out;
-    }
-    """)
-    prg.sum(ctx.cl_queue, [input.shape[0]], None, input, np.int32(np.prod(input.shape)), ret)
-    return ret
+    return reduce_op(ctx, "out += a", "out", input, (1,))
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -433,22 +439,8 @@ register('max_pool2d', MaxPool2D, gpu=True)
 class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
-    lsum = buffer_new(ctx, (input.shape[0],))
-    prg = clbuild(ctx.cl_ctx, """
-    __kernel void logsoftmax(
-        __global const float *a_g, int sz, __global float *res_g)
-    {
-      int gid = get_global_id(0);
-      int gidsz = gid*sz;
-      // TODO: stability with max
-      float out = 0.0;
-      for (int x = 0; x < sz; x++) {
-        out += exp(a_g[gidsz+x]);
-      }
-      res_g[gid] = log(out);
-    }
-    """)
-    prg.logsoftmax(ctx.cl_queue, [input.shape[0]], None, input, np.int32(input.shape[1]), lsum)
+    # TODO: stability?
+    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, (input.shape[0],))
 
     output = buffer_like(ctx, input)
     prg = clbuild(ctx.cl_ctx, """
