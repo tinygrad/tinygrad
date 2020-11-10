@@ -81,7 +81,7 @@ def cl_supsample_krnl_build(cl_ctx, result_op):
 def supersample_op(ctx, input, out_shape, kernel_size, result_op):
   (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
   py,px = kernel_size
-  ret = buffer_new(ctx, out_shape)
+  ret = buffer_zeros(ctx, out_shape)
   osize = np.array((Xout, Yout), dtype=cl.cltypes.uint2)
   isize = np.array((Xin, Yin), dtype=cl.cltypes.uint2)
   ksize = np.array((px, py), dtype=cl.cltypes.uint2)
@@ -295,7 +295,7 @@ class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
     bs,cin,iy,ix = x.shape
-    oy,ox = iy+padding[0]+padding[1], ix+padding[2]+padding[3]
+    oy,ox = iy+padding[2]+padding[3], ix+padding[0]+padding[1]
     ret = buffer_zeros(ctx, (bs, cin, oy, ox))
 
     prg = clbuild(ctx.cl_ctx, """
@@ -316,16 +316,44 @@ class Pad2D(Function):
       }
     }
     """)
+    ctx.save_for_backward(padding)
     prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
         x, ret,
-        np.int32(cin), np.int32(padding[0]), np.int32(padding[2]),
+        np.int32(cin), np.int32(padding[2]), np.int32(padding[0]),
         np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
       )
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise Exception("write this")
+    padding, = ctx.saved_tensors
+    bs, cin, iy, ix = grad_output.shape
+    oy, ox = iy - padding[2] - padding[3], ix - padding[0] - padding[1]
+    ret = buffer_new(ctx, (bs, cin, oy, ox))
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void pad2d(
+        __global const float *input, __global float *output,
+        int cin, int py, int px, int oy, int ox, int iy, int ix
+      )
+    {
+      int B = get_global_id(0);
+      int C = get_global_id(1);
+      int Y = get_global_id(2);
+
+      int iptr = B*cin*iy*ix + C*iy*ix + (Y+py)*ix + px;
+      int optr = B*cin*oy*ox + C*oy*ox + Y*ox;
+
+      for (int x = 0; x < ox; x++) {
+        output[optr+x] = input[iptr+x];
+      }
+    }
+    """)
+    prg.pad2d(ctx.cl_queue, [bs, cin, oy], None,
+              grad_output, ret,
+              np.int32(cin), np.int32(padding[2]), np.int32(padding[0]),
+              np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
+              )
+    return ret
 register('pad2d', Pad2D, gpu=True)
 
 class Reshape(Function):
@@ -382,20 +410,15 @@ register('sigmoid', Sigmoid, gpu=True)
 
 class AvgPool2D(Function):
   @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2), stride=None):
-    if not stride:
-      ctx.stride = stride = kernel_size
+  def forward(ctx, input, kernel_size=(2, 2)):
     iter_op = "group_res += input[iid]"
     result_op = "group_res / (kernel_size.x * kernel_size.y)"
-    ret = subsample_op(ctx, input, kernel_size, stride, iter_op, result_op)
+    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op, result_op)
     ctx.save_for_backward(input.shape)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    # TODO implement for stride != kernel_size
-    if ctx.kernel_size != ctx.stride:
-      raise NotImplementedError("GPU AvgPool2D.backward() with stride != kernel_size not implemented")
     orig_shape, = ctx.saved_tensors
     result_op = "input[iid] / (kernel_size.x * kernel_size.y)"
     return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size, result_op)
@@ -403,17 +426,14 @@ register('avg_pool2d', AvgPool2D, gpu=True)
 
 class MaxPool2D(Function):
   @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2), stride=None):
-    if not stride:
-      ctx.stride = stride = kernel_size
+  def forward(ctx, input, kernel_size=(2, 2)):
     init_val = "FLT_MIN"
     iter_op = "group_res = max(group_res, input[iid])"
     result_op = "group_res"
-    return subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=init_val)
+    return subsample_op(ctx, input, kernel_size, kernel_size, iter_op, result_op, init_val=init_val)
 
   @staticmethod
   def backward(ctx, grad_output):
-    # TODO implement with stride support
     raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
 register('max_pool2d', MaxPool2D, gpu=True)
 
