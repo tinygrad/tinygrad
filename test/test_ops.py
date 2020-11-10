@@ -97,28 +97,12 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz), gpu=self.gpu, forward_only=self.gpu)
 
-  def test_maxpool2d_strided_fwd(self):
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
-      for strd in [(1,1), (2,1), (2,2), (4,2)]:
-        with self.subTest(kernel_size=ksz, stride=strd):
-          helper_test_op([(32,2,110,28)],
-            lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, stride=strd),
-            lambda x: Tensor.max_pool2d(x, kernel_size=ksz, stride=strd), gpu=self.gpu, forward_only=True)
-
   def test_avgpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,111,28)],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu)
-
-  def test_avgpool2d_strided_fwd(self):
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
-      for strd in [(1,1), (2,1), (2,2), (4,2)]:
-        with self.subTest(kernel_size=ksz, stride=strd):
-          helper_test_op([(32,2,111,28)],
-            lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, stride=strd),
-            lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, stride=strd), gpu=self.gpu, forward_only=True)
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu, forward_only=self.gpu)
 
 if GPU:
   class TestOpsGPU(TestOps):
