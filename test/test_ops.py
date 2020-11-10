@@ -61,6 +61,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, gpu=self.gpu)
   def test_logsoftmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, gpu=self.gpu)
+  def test_tanh(self):
+    helper_test_op([(45,65)], lambda x: torch.nn.Tanh()(x), Tensor.tanh, atol=1e-7, grad_atol=1e-7, gpu=self.gpu)
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,1,1,1)), lambda x: x.pad2d(padding=(1,1,1,1)), gpu=self.gpu)

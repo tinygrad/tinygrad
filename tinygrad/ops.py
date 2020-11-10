@@ -155,6 +155,23 @@ class Sigmoid(Function):
     return grad_input
 register('sigmoid', Sigmoid)
 
+class Tanh(Function):
+  @staticmethod
+  def forward(ctx, input):
+    with np.warnings.catch_warnings():
+      np.warnings.filterwarnings('ignore')
+      # ret = np.tanh(input)
+      ret = (np.exp(input) - np.exp(-input)) / ((np.exp(input) + np.exp(-input)))
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    grad_input = grad_output * (1 - ret ** 2)
+    return grad_input
+register('tanh', Tanh)
+
 class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
