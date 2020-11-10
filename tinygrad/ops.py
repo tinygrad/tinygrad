@@ -102,12 +102,12 @@ class Pad2D(Function):
     ctx.save_for_backward(padding)
     return np.pad(x,
       ((0,0), (0,0),
-       (padding[0], padding[1]), (padding[2], padding[3])))
+       (padding[2], padding[3]), (padding[0], padding[1])))
 
   @staticmethod
   def backward(ctx, grad_output):
     padding, = ctx.saved_tensors
-    return grad_output[..., padding[0]:-padding[1], padding[2]:-padding[3]]
+    return grad_output[..., padding[2]:-padding[3], padding[0]:-padding[1]]
 register('pad2d', Pad2D)
 
 class Reshape(Function):

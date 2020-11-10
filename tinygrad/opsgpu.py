@@ -295,7 +295,7 @@ class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
     bs,cin,iy,ix = x.shape
-    oy,ox = iy+padding[0]+padding[1], ix+padding[2]+padding[3]
+    oy,ox = iy+padding[2]+padding[3], ix+padding[0]+padding[1]
     ret = buffer_zeros(ctx, (bs, cin, oy, ox))
 
     prg = clbuild(ctx.cl_ctx, """
@@ -319,7 +319,7 @@ class Pad2D(Function):
     ctx.save_for_backward(padding)
     prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
         x, ret,
-        np.int32(cin), np.int32(padding[0]), np.int32(padding[2]),
+        np.int32(cin), np.int32(padding[2]), np.int32(padding[0]),
         np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
       )
     return ret
@@ -328,7 +328,7 @@ class Pad2D(Function):
   def backward(ctx, grad_output):
     padding, = ctx.saved_tensors
     bs, cin, iy, ix = grad_output.shape
-    oy, ox = iy - padding[0] - padding[1], ix - padding[2] - padding[3]
+    oy, ox = iy - padding[2] - padding[3], ix - padding[0] - padding[1]
     ret = buffer_new(ctx, (bs, cin, oy, ox))
     prg = clbuild(ctx.cl_ctx, """
     __kernel void pad2d(
@@ -350,7 +350,7 @@ class Pad2D(Function):
     """)
     prg.pad2d(ctx.cl_queue, [bs, cin, oy], None,
               grad_output, ret,
-              np.int32(cin), np.int32(padding[0]), np.int32(padding[2]),
+              np.int32(cin), np.int32(padding[2]), np.int32(padding[0]),
               np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
               )
     return ret
