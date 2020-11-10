@@ -22,6 +22,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v2
+    - name: Install OpenCL
+      run: sudo apt install ocl-icd-opencl-dev
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
