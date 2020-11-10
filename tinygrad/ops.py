@@ -278,7 +278,8 @@ class AvgPool2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     s, = ctx.saved_tensors
-    return pool(s, *ctx.kernel_size,
+    py, px = ctx.kernel_size
+    return pool(s, py, px,
       fxn=lambda idx: grad_output/py/px
       )
 register('avg_pool2d', AvgPool2D)
