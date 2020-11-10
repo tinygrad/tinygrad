@@ -27,7 +27,6 @@ def clbuild(cl_ctx, prg):
 def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
 
-@functools.lru_cache
 def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
   prg = """
   __kernel void subsample(
@@ -62,7 +61,6 @@ def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=0
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
-@functools.lru_cache
 def cl_supsample_krnl_build(cl_ctx, result_op):
   prg = """
   __kernel void supsample(
@@ -137,7 +135,7 @@ def unary_op(ctx, code, x):
 def reduce_op(ctx, code, code2, input, osize):
   ret = buffer_new(ctx, osize)
   prg = clbuild(ctx.cl_ctx, """
-  __kernel void sum(
+  __kernel void reduce(
       __global const float *a_g, int sz, __global float *res_g)
   {
     int gid = get_global_id(0);
@@ -149,7 +147,7 @@ def reduce_op(ctx, code, code2, input, osize):
     res_g[gid] = """+code2+""";
   }
   """)
-  prg.sum(ctx.cl_queue, osize, None, input, np.int32(np.prod(input.shape) // np.prod(osize)), ret)
+  prg.reduce(ctx.cl_queue, osize, None, input, np.int32(np.prod(input.shape) // np.prod(osize)), ret)
   return ret
 
 # ***** now for the ops themselves *****
@@ -317,6 +315,7 @@ class Pad2D(Function):
       }
     }
     """)
+    ctx.save_for_backward(padding)
     prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
         x, ret,
         np.int32(cin), np.int32(padding[2]), np.int32(padding[0]),
