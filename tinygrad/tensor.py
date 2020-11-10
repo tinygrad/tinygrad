@@ -16,7 +16,7 @@ if DEBUG:
   debug_times = collections.defaultdict(float)
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
-      print("%20s : %3d  %5.2f ms" % (name, debug_counts[name], debug_times[name]))
+      print("%20s : %3d  %10.2f ms" % (name, debug_counts[name], debug_times[name]))
   atexit.register(print_debug_exit)
 
 cl_ctx, cl_queue = None, None
@@ -101,7 +101,17 @@ class Tensor:
 
     assert(self.grad is not None)
 
+    if DEBUG:
+      st = time.time()
     grads = self._ctx.backward(self._ctx, self.grad.data)
+    if DEBUG:
+      global debug_counts, debug_times
+      name = "back_"+self._ctx.__class__.__name__
+      et = (time.time()-st)*1000.
+      debug_counts[name] += 1
+      debug_times[name] += et
+      print("%20s : %7.2f ms" % (name, et))
+
     if len(self._ctx.parents) == 1:
       grads = [grads]
     for t,g in zip(self._ctx.parents, grads):
@@ -206,7 +216,7 @@ def register(name, fxn, gpu=False):
       et = (time.time()-st)*1000.
       debug_counts[name] += 1
       debug_times[name] += et
-      print("%20s : %5.2f ms  %s" % (name, et, [y.shape for y in x]))
+      print("%20s : %7.2f ms  %s" % (name, et, [y.shape for y in x]))
     return ret
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'div']:
