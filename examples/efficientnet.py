@@ -92,8 +92,9 @@ class EfficientNet:
     def round_repeats(repeats):
       return int(math.ceil(global_params[1] * repeats))
 
-    self._conv_stem = Tensor.zeros(32, 3, 3, 3)
-    self._bn0 = BatchNorm2D(32)
+    out_channels = round_filters(32)
+    self._conv_stem = Tensor.zeros(out_channels, 3, 3, 3)
+    self._bn0 = BatchNorm2D(out_channels)
     blocks_args = [
       [1, 3, (1,1), 1, 32, 16, 0.25],
       [2, 3, (2,2), 6, 16, 24, 0.25],
@@ -136,10 +137,15 @@ class EfficientNet:
   def load_weights_from_torch(self):
     # load b0
     import torch
+    # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/utils.py#L551
     if self.number == 0:
       b0 = fetch("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
     elif self.number == 2:
       b0 = fetch("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b2-8bb594d6.pth")
+    elif self.number == 4:
+      b0 = fetch("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b4-6ed6700e.pth")
+    elif self.number == 7:
+      b0 = fetch("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b7-dcc49843.pth")
     else:
       raise Exception("no pretrained weights")
     b0 = torch.load(io.BytesIO(b0))
@@ -200,7 +206,7 @@ def infer(model, img):
 
 if __name__ == "__main__":
   # instantiate my net
-  model = EfficientNet(0)
+  model = EfficientNet(int(os.getenv("NUM", "0")))
   model.load_weights_from_torch()
 
   # category labels
