@@ -551,7 +551,7 @@ class Conv2D(Function):
 
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
-    print(ys,xs,ctx.groups)
+    #print(ys,xs,ctx.groups)
     bs,cin_,iy,ix = x.shape
     oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
     assert cin*ctx.groups == cin_
@@ -590,14 +590,14 @@ class Conv2D(Function):
       int rcin = cin/groups;
       int B = get_global_id(0)/(groups*cin);  // range 0-bs
       int g = (get_global_id(0)/cin)%groups;
-      int ci = get_global_id(0) % groups*cin;
+      int ci = get_global_id(0) % (groups*cin);
 
       int y = get_global_id(1);  // range 0-W
       int x = get_global_id(2);  // range 0-H
 
       // tensx  = (bs, groups*cin, iy, ix)
       // tensw = (groups*rcout, cin, H, W)
-      // ggg = (bs, cout, oy, ox)
+      // ggg = (bs, groups*rout, oy, ox)
       float acc = 0.0;
       
       //'ikYX,ijYXyx -> kjyx'
@@ -605,12 +605,12 @@ class Conv2D(Function):
       for (int co = 0; co < rcout; co++) {
         for (int Y = 0; Y < oy; Y++) {
           for (int X = 0; X < ox; X++) {
-            dw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*H + x]  += ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix 
+            dw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*W + x]  += ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix 
             + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
             //gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
             dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + 
              (Y*ys+y)*ix + X*xs+x]+= 
-              ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*H + x];
+              ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*W + x];
              
           }
         }
