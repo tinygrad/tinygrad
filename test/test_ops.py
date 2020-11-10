@@ -74,7 +74,7 @@ class TestOps(unittest.TestCase):
               with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
                 helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), gpu=self.gpu, grad_rtol=1e-5, forward_only=False)
+                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), gpu=self.gpu, grad_rtol=1e-5)
 
   def test_strided_conv2d(self):
     bs = 4
