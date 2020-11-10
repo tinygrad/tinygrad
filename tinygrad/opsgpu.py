@@ -24,6 +24,9 @@ def buffer_like(ctx, x):
 def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
+def uint2(x, y):
+  return np.array((x,y), dtype=cl.cltypes.uint2)
+
 @functools.lru_cache
 def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
   prg = """
@@ -52,13 +55,10 @@ def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=0
   N, C, Yin, Xin = input.shape
   Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
   ret = buffer_new(ctx, (N, C, Yout, Xout))
-  osize = np.array((Xout, Yout), dtype=cl.cltypes.uint2)
-  isize = np.array((Xin, Yin), dtype=cl.cltypes.uint2)
-  ksize = np.array(kernel_size[::-1], dtype=cl.cltypes.uint2)
-  strd  = np.array((px, py), dtype=cl.cltypes.uint2)
   prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, init_val=init_val)
   prg.subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-                ret, input, osize, isize, ksize, strd, np.int32(input.size))
+                ret, input, uint2(Xout, Yout), uint2(Xin, Yin),
+                uint2(*kernel_size[::-1]), uint2(px, py), np.int32(input.size))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
@@ -82,12 +82,9 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op):
   (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
   py,px = kernel_size
   ret = buffer_zeros(ctx, out_shape)
-  osize = np.array((Xout, Yout), dtype=cl.cltypes.uint2)
-  isize = np.array((Xin, Yin), dtype=cl.cltypes.uint2)
-  ksize = np.array((px, py), dtype=cl.cltypes.uint2)
   prg = cl_supsample_krnl_build(ctx.cl_ctx, result_op)
   prg.supsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-                ret, input, osize, isize, ksize, np.int32(input.size))
+                ret, input, uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py), np.int32(input.size))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
