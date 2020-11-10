@@ -235,13 +235,9 @@ class Dot(Function):
         __global const float *input,
         __global const float *weight,
         __global float *res,
-        int is0,
-        int is1,
-        int msize,
-        int ws0,
-        int ws1,
-        int osize
-        )
+        int is0, int is1, int msize,
+        int ws0, int ws1, int osize
+      )
     {
       int X = get_global_id(0); // isize
       int Y = get_global_id(1); // osize
@@ -433,8 +429,6 @@ class MaxPool2D(Function):
   def backward(ctx, grad_output):
     raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
 register('max_pool2d', MaxPool2D, gpu=True)
-
-# *** this is unfinished, fix this and TestMNIST.test_sgd_gpu should pass ***
 
 class LogSoftmax(Function):
   @staticmethod
