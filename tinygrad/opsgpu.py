@@ -411,20 +411,14 @@ register('sigmoid', Sigmoid, gpu=True)
 class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):
-    ctx.stride = stride = ctx.kernel_size
     iter_op = "group_res += input[iid]"
     result_op = "group_res / (kernel_size.x * kernel_size.y)"
-    ret = subsample_op(ctx, input, kernel_size, stride, iter_op, result_op)
+    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op, result_op)
     ctx.save_for_backward(input.shape)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise NotImplementedError("GPU AvgPool2D.backward() is broken")
-
-    # TODO implement for stride != kernel_size
-    if ctx.kernel_size != ctx.stride:
-      raise NotImplementedError("GPU AvgPool2D.backward() with stride != kernel_size not implemented")
     orig_shape, = ctx.saved_tensors
     result_op = "input[iid] / (kernel_size.x * kernel_size.y)"
     return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size, result_op)
@@ -433,15 +427,13 @@ register('avg_pool2d', AvgPool2D, gpu=True)
 class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):
-    ctx.stride = stride = ctx.kernel_size
     init_val = "FLT_MIN"
     iter_op = "group_res = max(group_res, input[iid])"
     result_op = "group_res"
-    return subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=init_val)
+    return subsample_op(ctx, input, kernel_size, kernel_size, iter_op, result_op, init_val=init_val)
 
   @staticmethod
   def backward(ctx, grad_output):
-    # TODO implement with stride support
     raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
 register('max_pool2d', MaxPool2D, gpu=True)
 
