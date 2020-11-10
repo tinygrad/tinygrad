@@ -2,13 +2,14 @@
 from inspect import signature
 import numpy as np
 import time
+import os
 try:
   import pyopencl as cl
   GPU = True
 except ImportError:
   # no GPU support
   GPU = False
-DEBUG = False
+DEBUG = os.getenv("DEBUG", None) is not None
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
