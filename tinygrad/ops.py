@@ -22,7 +22,6 @@ class Sub(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    # this right?
     return grad_output, -grad_output
 register('sub', Sub)
 
@@ -143,8 +142,9 @@ class Sigmoid(Function):
   def forward(ctx, input):
     with np.warnings.catch_warnings():
       np.warnings.filterwarnings('ignore')
-      ret = np.where(
-          input >= 0,1/(1 + np.exp(-input)),np.exp(input)/(1 + np.exp(input))
+      ret = np.where(input >= 0,
+        1/(1 + np.exp(-input)),
+        np.exp(input)/(1 + np.exp(input))
       )
     ctx.save_for_backward(ret)
     return ret
