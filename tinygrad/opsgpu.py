@@ -334,8 +334,10 @@ class Reshape(Function):
   @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
-    grad_output.shape = in_shape
-    return grad_output
+    ret = new_buffer(in_shape)
+    ret = unary_op(ctx, 'a', grad_output)
+    #ret.shape = in_shape
+    return ret
 register('reshape', Reshape, gpu=True)
 
 # ************* activation ops *************
@@ -490,9 +492,7 @@ class Conv2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     bs,_,oy,ox = grad_output.shape
-
     x, w = ctx.saved_tensors
-
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
     bs,cin_,iy,ix = x.shape
@@ -501,19 +501,16 @@ class Conv2D(Function):
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
-    dx = buffer_new(ctx, (bs, cin_, iy, ix))
+    dx = buffer_zeros(ctx, (bs, cin_, iy, ix))
     dw = buffer_new(ctx, (cout, cin, H, W))
 
     prg = clbuild(ctx.cl_ctx, """
-    __kernel void convw(__global const float *tensx, 
-                       __global const float *ggg, 
-                       __global float *dw,
+    __kernel void convw(__global const float *tensx, __global const float *ggg, __global float *dw,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
 
       int g = get_global_id(0)/(rcout*cin) ; // range 0-groups
       int c = (get_global_id(0)/(cin)) %rcout; // range 0-rcout
       int ci = get_global_id(0) % cin;        // range 0-cin
-
       int y = get_global_id(1);  // range 0-H
       int x = get_global_id(2);  // range 0-W
 
@@ -524,28 +521,19 @@ class Conv2D(Function):
       for (int Y = 0; Y < oy; Y++) {
         for (int X = 0; X < ox; X++) {
           for (int B = 0; B < bs; B++) {
-            acc += ggg[B*groups*rcout*oy*ox + 
-            +g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix 
-            + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
+            acc += ggg[B*groups*rcout*oy*ox + +g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
           }
         }
       }
-      dw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] = acc;
+      dw[get_global_id(0)*H*W + y*W + x] = acc;
     }
-    __kernel void convx(__global const float *tensw, 
-                       __global const float *ggg, 
-                       __global float *dx,
+    __kernel void convx(__global const float *tensw, __global const float *ggg, __global float *dx,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
       
       int B = get_global_id(0);
       int g = get_global_id(1);
       int ci = get_global_id(2);
 
-      for (int y = 0; y < iy; y++) {
-        for (int x = 0; x < ix; x++) {
-          dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix +x] = 0.0;
-        }
-      }
       for (int c = 0; c < rcout; c++) {
         for (int Y = 0; Y < oy; Y++) {
           for (int X = 0; X < ox; X++) {
@@ -560,24 +548,7 @@ class Conv2D(Function):
     }
     """)
 
-    prg.convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None,
-      x, grad_output, dw,
-      np.int32(H), np.int32(W),
-      np.int32(ctx.groups), np.int32(rcout), np.int32(cin),
-      np.int32(oy), np.int32(ox),
-      np.int32(iy), np.int32(ix),
-      np.int32(ys), np.int32(xs),
-      np.int32(bs)
-    )
-    prg.convx(ctx.cl_queue, [bs, ctx.groups, cin], None,
-      w, grad_output, dx,
-      np.int32(H), np.int32(W),
-      np.int32(ctx.groups), np.int32(rcout), np.int32(cin),
-      np.int32(oy), np.int32(ox),
-      np.int32(iy), np.int32(ix),
-      np.int32(ys), np.int32(xs),
-      np.int32(bs)
-    )
-    
+    prg.convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x, grad_output, dw, np.int32(H), np.int32(W), np.int32(ctx.groups), np.int32(rcout), np.int32(cin), np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix), np.int32(ys), np.int32(xs), np.int32(bs))
+    prg.convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w, grad_output, dx, np.int32(H), np.int32(W), np.int32(ctx.groups), np.int32(rcout), np.int32(cin), np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix), np.int32(ys), np.int32(xs), np.int32(bs))
     return dx, dw
 register('conv2d', Conv2D, gpu=True)
