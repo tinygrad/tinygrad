@@ -22,10 +22,10 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v2
-    - name: CpuInfo
-      run: cat /proc/cpuinfo
     - name: Install OpenCL
-      run: sudo apt-get install intel-opencl-icd
+      run: sudo apt-get install intel-opencl-icd clinfo
+    - name: ClInfo
+      run: clinfo
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
