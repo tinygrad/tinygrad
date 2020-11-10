@@ -100,6 +100,8 @@ def binary_op(ctx, code, x, y):
       ydiv = x.shape[2] * x.shape[3]
     elif len(y.shape) == 4 and x.shape[0:2] == y.shape[0:2] and x.shape[2] == 1 and x.shape[3] == 1:
       xdiv = y.shape[2] * y.shape[3]
+    elif len(x.shape) == 2 and x.shape[0] == y.shape[0] and y.shape[1] == 1:
+      ydiv = x.shape[1]
     elif np.prod(y.shape) == 1:
       ydiv = np.prod(x.shape)
     else:
@@ -315,7 +317,6 @@ class Pad2D(Function):
       }
     }
     """)
-    ctx.save_for_backward(padding)
     prg.pad2d(ctx.cl_queue, [bs, cin, iy], None,
         x, ret,
         np.int32(cin), np.int32(padding[2]), np.int32(padding[0]),
@@ -440,20 +441,8 @@ class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
     # TODO: stability?
-    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, (input.shape[0],))
-
-    output = buffer_like(ctx, input)
-    prg = clbuild(ctx.cl_ctx, """
-    __kernel void lsmsub(
-        __global const float *a_g, __global const float *b_g, int sz, __global float *res_g)
-    {
-      int gid = get_global_id(0);
-      int gid2 = get_global_id(1);
-
-      res_g[gid*sz + gid2] = a_g[gid*sz + gid2] - b_g[gid];
-    }
-    """)
-    prg.lsmsub(ctx.cl_queue, [input.shape[0], input.shape[1]], None, input, lsum, np.int32(input.shape[1]), output)
+    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, (input.shape[0],1))
+    output = binary_op(ctx, 'a-b', input, lsum)
     ctx.save_for_backward(output)
     return output
 
