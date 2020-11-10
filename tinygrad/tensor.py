@@ -10,6 +10,14 @@ except ImportError:
   # no GPU support
   GPU = False
 DEBUG = os.getenv("DEBUG", None) is not None
+if DEBUG:
+  import collections, atexit
+  debug_counts = collections.defaultdict(int)
+  debug_times = collections.defaultdict(float)
+  def print_debug_exit():
+    for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
+      print("%20s : %3d  %5.2f ms" % (name, debug_counts[name], debug_times[name]))
+  atexit.register(print_debug_exit)
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -194,8 +202,11 @@ def register(name, fxn, gpu=False):
       st = time.time()
     ret = f.apply(f, *x, **kwargs)
     if DEBUG:
-      et = time.time()-st
-      print("%20s : %5.2f ms  %s" % (name, et*1000.0, [y.shape for y in x]))
+      global debug_counts, debug_times
+      et = (time.time()-st)*1000.
+      debug_counts[name] += 1
+      debug_times[name] += et
+      print("%20s : %5.2f ms  %s" % (name, et, [y.shape for y in x]))
     return ret
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'div']:
