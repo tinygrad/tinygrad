@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   lines:
     name: Less than 1000 lines
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
@@ -17,15 +17,15 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v2
     - name: Install OpenCL
-      run: sudo apt-get install intel-opencl-icd clinfo
+      run: sudo apt-get install pocl-opencl-icd clinfo
     - name: ClInfo
-      run: sudo clinfo
+      run: clinfo
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
