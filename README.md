@@ -118,8 +118,9 @@ python -m pytest
 * Train an EfficientNet on ImageNet
   * Make broadcasting work on the backward pass (simple please)
   * EfficientNet backward pass
-  * Tensors on GPU (GPU support, must support Mac)
-* Make tinygrad work on comma two and run driving model
+  * Tensors on GPU (a few more backward)
+* Add a language model. BERT?
+* Add a detection model. EfficientDet?
 * Reduce code
 * Increase speed
 * Add features

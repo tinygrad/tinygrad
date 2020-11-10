@@ -1,12 +1,23 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from inspect import signature
 import numpy as np
+import time
+import os
 try:
   import pyopencl as cl
   GPU = True
 except ImportError:
   # no GPU support
   GPU = False
+DEBUG = os.getenv("DEBUG", None) is not None
+if DEBUG:
+  import collections, atexit
+  debug_counts = collections.defaultdict(int)
+  debug_times = collections.defaultdict(float)
+  def print_debug_exit():
+    for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
+      print("%20s : %3d  %10.2f ms" % (name, debug_counts[name], debug_times[name]))
+  atexit.register(print_debug_exit)
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -15,7 +26,7 @@ def require_init_gpu():
     try:
       # for Macbook 16 inch
       cl_ctx = cl.create_some_context(answers=[0,2])
-    except (cl._cl.RuntimeError, TypeError):
+    except (cl._cl.RuntimeError, cl._cl.LogicError, TypeError):
       cl_ctx = cl.create_some_context(interactive=False)
     cl_queue = cl.CommandQueue(cl_ctx)
 
@@ -23,8 +34,11 @@ def require_init_gpu():
 
 class Tensor:
   did_float_warning = False
+  default_gpu = False
 
-  def __init__(self, data, gpu=False):
+  def __init__(self, data, gpu=None):
+    if gpu is None:
+      gpu = Tensor.default_gpu
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif GPU and isinstance(data, cl._cl.Buffer):
@@ -87,9 +101,18 @@ class Tensor:
 
     assert(self.grad is not None)
 
+    if DEBUG:
+      st = time.time()
     grads = self._ctx.backward(self._ctx, self.grad.data)
     if len(self._ctx.parents) == 1:
       grads = [grads]
+    if DEBUG:
+      global debug_counts, debug_times
+      name = "back_"+self._ctx.__class__.__name__
+      et = (time.time()-st)*1000.
+      debug_counts[name] += 1
+      debug_times[name] += et
+      print("%20s : %7.2f ms  %s" % (name, et, [y.shape for y in grads]))
     for t,g in zip(self._ctx.parents, grads):
       if g is None:
         continue
@@ -181,10 +204,19 @@ def register(name, fxn, gpu=False):
     Tensor.opsgpu[name] = fxn
   else:
     Tensor.ops[name] = fxn
-  def dispatch(self, *x, **kwargs):
-    f = (Tensor.opsgpu if self.gpu else Tensor.ops)[name]
+  def dispatch(*x, **kwargs):
+    f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
-    return f.apply(f, self, *x, **kwargs)
+    if DEBUG:
+      st = time.time()
+    ret = f.apply(f, *x, **kwargs)
+    if DEBUG:
+      global debug_counts, debug_times
+      et = (time.time()-st)*1000.
+      debug_counts[name] += 1
+      debug_times[name] += et
+      print("%20s : %7.2f ms  %s" % (name, et, [y.shape for y in x]))
+    return ret
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'div']:
     setattr(Tensor, "__%s__" % name, dispatch)
