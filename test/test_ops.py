@@ -90,7 +90,6 @@ class TestOps(unittest.TestCase):
         lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), gpu=self.gpu, forward_only=self.gpu)
 
   def test_maxpool2d(self):
-    # TODO merge into test_maxpool2d_strided when backward() is implemented
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
@@ -98,11 +97,12 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz), gpu=self.gpu, forward_only=self.gpu)
 
   def test_avgpool2d(self):
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
+    shape = (32,2,111,28)
+    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1), shape[2:]]:
       with self.subTest(kernel_size=ksz):
-        helper_test_op([(32,2,111,28)],
+        helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu, forward_only=self.gpu)
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu)
 
 if GPU:
   class TestOpsGPU(TestOps):
