@@ -225,7 +225,8 @@ class Conv2D(Function):
 
     # needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
-    for Y, X in itertools.product(range(grad_output.shape[2]),range(grad_output.shape[3])):
+    for Y in range(grad_output.shape[2]):
+      for X in range(grad_output.shape[3]):
         iY,iX = Y*ys, X*xs
         #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
         for g in range(ctx.groups):
@@ -263,9 +264,7 @@ class MaxPool2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     idxs,s = ctx.saved_tensors
-    return pool(s, *ctx.kernel_size,
-      fxn = lambda idx: grad_output * (idxs == idx)
-      )
+    return pool(s, *ctx.kernel_size,fxn=lambda idx: grad_output*(idxs == idx))
 register('max_pool2d', MaxPool2D)
 
 class AvgPool2D(Function):
@@ -279,8 +278,6 @@ class AvgPool2D(Function):
   def backward(ctx, grad_output):
     s, = ctx.saved_tensors
     py, px = ctx.kernel_size
-    return pool(s, py, px,
-      fxn=lambda idx: grad_output/py/px
-      )
+    return pool(s, py, px,fxn=lambda idx: grad_output/py/px)
 register('avg_pool2d', AvgPool2D)
 
