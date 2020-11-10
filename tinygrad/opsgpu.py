@@ -82,7 +82,7 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op):
   return ret
 
 def binary_op(ctx, code, x, y):
-  if len(x.shape) != len(y.shape):
+  if len(x.shape) != len(y.shape) and y.shape != (1,):
     raise Exception("shape mismatch in binop %s: %r %r" % (code, x.shape, y.shape))
   xdiv = 1
   ydiv = 1
