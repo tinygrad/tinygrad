@@ -580,8 +580,4 @@ class Conv2D(Function):
     )
     
     return dx, dw
-
-
 register('conv2d', Conv2D, gpu=True)
-"""
-"""
