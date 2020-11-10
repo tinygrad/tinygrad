@@ -188,6 +188,9 @@ class Tensor:
     root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1, gpu=self.gpu)
     return self.mul(y.pow(root))
 
+  def swish(self):
+    return self.mul(self.sigmoid())
+
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, *tensors):
