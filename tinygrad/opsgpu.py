@@ -551,18 +551,15 @@ class Conv2D(Function):
 
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
+    print(ys,xs,ctx.groups)
     bs,cin_,iy,ix = x.shape
     oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
-
-    ys,xs = ctx.stride
-    OY,OX = x_shape[2:4]
-
-    dx = buffer_new(ctx, (bs, ctx.groups*cin, OY, OX))
-    dw = buffer_new(ctx, (ctx.groups*rcout, cin, H, W))
+    dx = buffer_new(ctx, (bs, cin_, iy, ix))
+    dw = buffer_new(ctx, (cout, cin, H, W))
     '''
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
 
@@ -583,44 +580,54 @@ class Conv2D(Function):
     '''
 
     prg = clbuild(ctx.cl_ctx, """
-    __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
+    __kernel void conv(__global const float *tensx, 
+                       __global const float *tensw, 
+                       __global const float *ggg, 
+                       __global float *dx,
+                       __global float *dw,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs) {
 
-      int B = get_global_id(0)/(groups*rcout);  // range 0-bs
-      int g = (get_global_id(0)/rcout)%groups;
-      int c = get_global_id(0) % rcout;
+      int rcin = cin/groups;
+      int B = get_global_id(0)/(groups*cin);  // range 0-bs
+      int g = (get_global_id(0)/cin)%groups;
+      int ci = get_global_id(0) % groups*cin;
 
-      int Y = get_global_id(1);  // range 0-oy
-      int X = get_global_id(2);  // range 0-ox
-      int IY = Y*ys;
-      int IX = X*xs;
+      int y = get_global_id(1);  // range 0-W
+      int x = get_global_id(2);  // range 0-H
 
-      // input  = (bs, groups, cin, iy, ix)
-      // weight = (groups, rcout, cin, H, W)
-      // output = (bs, groups, rcout, oy, ox)
+      // tensx  = (bs, groups*cin, iy, ix)
+      // tensw = (groups*rcout, cin, H, W)
+      // ggg = (bs, cout, oy, ox)
       float acc = 0.0;
-      for (int ci = 0; ci < cin; ci++) {
-        for (int y = IY; y < IY+H; y++) {
-          for (int x = IX; x < IX+W; x++) {
-            acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
-              weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
+      
+      //'ikYX,ijYXyx -> kjyx'
+
+      for (int co = 0; co < rcout; co++) {
+        for (int Y = 0; Y < oy; Y++) {
+          for (int X = 0; X < ox; X++) {
+            dw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*H + x]  += ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix 
+            + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
+            //gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
+            dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + 
+             (Y*ys+y)*ix + X*xs+x]+= 
+              ggg[B*rcout*oy*ox + co*oy*ox + Y*ox + X]*tensw[g*rcout*cin*H*W + co*cin*H*W + ci*H*W + y*H + x];
+             
           }
         }
       }
-      output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
     }
     """)
 
-    prg.conv(ctx.cl_queue, [bs*groups*rcout, oy, ox], None,
-      x, w, dx, dw,
+    prg.conv(ctx.cl_queue, [bs*ctx.groups*cin, H, W], None,
+      x, w, grad_output, dx, dw,
       np.int32(H), np.int32(W),
-      np.int32(groups), np.int32(rcout), np.int32(cin),
+      np.int32(ctx.groups), np.int32(rcout), np.int32(cin),
       np.int32(oy), np.int32(ox),
       np.int32(iy), np.int32(ix),
       np.int32(ys), np.int32(xs)
     )
+    return dx, dw
 
-    return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 
 register('conv2d', Conv2D, gpu=True)
 
