@@ -27,15 +27,15 @@ def uint2(x, y):
 def i32(x):
   return np.int32(x)
 
-def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
+def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, decls=''):
   prg = """
   __kernel void subsample(__global float *output, __global const float *input, uint2 osize, uint2 isize,
-                          uint2 kernel_size, uint2 stride, int nelem) {
+                          uint2 ksz, uint2 stride) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    float group_res = """+str(init_val)+""";
-    for (uint j=0; j<kernel_size.y; ++j) {
-      for (uint i=0; i<kernel_size.x; ++i) {
+    """+decls+""";
+    for (uint j=0; j<ksz.y; ++j) {
+      for (uint i=0; i<ksz.x; ++i) {
         int iid  = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
         if (gid.x*stride.x+i < isize.x && gid.y*stride.y+j < isize.y) {
           """+iter_op+""";
@@ -46,38 +46,39 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
   }"""
   return clbuild(cl_ctx, prg)
 
-def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=0):
+def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, decls=''):
   py, px = stride
   N, C, Yin, Xin = input.shape
   Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
   ret = buffer_zeros(ctx, (N, C, Yout, Xout))
-  prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, init_val=init_val)
+  prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, decls=decls)
   prg.subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
                 ret, input, uint2(Xout, Yout), uint2(Xin, Yin),
-                uint2(*kernel_size[::-1]), uint2(px, py), i32(input.size))
+                uint2(*kernel_size[::-1]), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
-def cl_supsample_krnl_build(cl_ctx, result_op):
+def cl_supsample_krnl_build(cl_ctx, result_op, decls=''):
   prg = """
-  __kernel void supsample(__global float *output, __global const float *input, uint2 osize, uint2 isize,
-                          uint2 kernel_size, int nelem) {
+  __kernel void supsample(__global float *output, __global const float *input, __global const void *input2,
+                          uint2 osize, uint2 isize, uint2 ksz) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    int iid = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
-    if (gid.x/kernel_size.x < isize.x && gid.y/kernel_size.y < isize.y) {
+    int iid = (gid.x/ksz.x) + isize.x*((gid.y/ksz.y) + isize.y*gid.z);
+    """+decls+""";
+    if (gid.x/ksz.x < isize.x && gid.y/ksz.y < isize.y) {
       output[oid] = """+result_op+""";
     }
   }"""
   return clbuild(cl_ctx, prg)
 
-def supersample_op(ctx, input, out_shape, kernel_size, result_op):
+def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', input2=None):
   (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
   py,px = kernel_size
   ret = buffer_zeros(ctx, out_shape)
-  prg = cl_supsample_krnl_build(ctx.cl_ctx, result_op)
+  prg = cl_supsample_krnl_build(ctx.cl_ctx, result_op, decls=decls)
   prg.supsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-                ret, input, uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py), i32(input.size))
+                ret, input, input2, uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
@@ -363,8 +364,8 @@ register('sigmoid', Sigmoid, gpu=True)
 class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):
-    ret = subsample_op(ctx, input, kernel_size, kernel_size,
-      iter_op="group_res += input[iid]", result_op="group_res / (kernel_size.x * kernel_size.y)")
+    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op="sumval += input[iid]",
+      result_op="sumval / (ksz.x * ksz.y)", decls="float sumval=0.f")
     ctx.save_for_backward(input.shape)
     return ret
 
@@ -372,19 +373,27 @@ class AvgPool2D(Function):
   def backward(ctx, grad_output):
     orig_shape, = ctx.saved_tensors
     return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
-      result_op="input[iid] / (kernel_size.x * kernel_size.y)")
+      result_op="input[iid] / (ksz.x * ksz.y)")
 register('avg_pool2d', AvgPool2D, gpu=True)
 
 class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):
+    idxs = subsample_op(ctx, input, kernel_size, kernel_size,
+      iter_op="if (input[iid]>maxval) { maxval = input[iid]; maxidx = j * ksz.x + i; }",
+      result_op="(float)maxidx", decls="float maxval=-FLT_MAX; int maxidx=0")
+    ctx.save_for_backward(idxs, input.shape)
     return subsample_op(ctx, input, kernel_size, kernel_size,
-      iter_op="group_res = max(group_res, input[iid])",
-      result_op="group_res", init_val="FLT_MIN")
+      iter_op="maxval = max(maxval, input[iid])",
+      result_op="maxval", decls="float maxval = -FLT_MAX")
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
+    idxs, orig_shape = ctx.saved_tensors
+    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
+      result_op="(maxidx == kernidx) * input[iid]",
+      decls="int maxidx=((__global float*)input2)[iid]; int kernidx=(gid.x%ksz.x) + ksz.x*(gid.y%ksz.y)",
+      input2=idxs)
 register('max_pool2d', MaxPool2D, gpu=True)
 
 class LogSoftmax(Function):
@@ -436,7 +445,7 @@ class Conv2D(Function):
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
-    
+
     ctx.save_for_backward(x,w)
 
     # output buffer
@@ -520,7 +529,7 @@ class Conv2D(Function):
     }
     __kernel void convx(__global const float *tensw, __global const float *ggg, __global float *dx,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
-      
+
       int B = get_global_id(0);
       int g = get_global_id(1);
       int ci = get_global_id(2);

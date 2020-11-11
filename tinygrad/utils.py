@@ -11,7 +11,7 @@ def layer_init_uniform(*x):
 
 def fetch(url):
   import requests, os, hashlib, tempfile
-  fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())    
+  fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
   if os.path.isfile(fp) and os.stat(fp).st_size > 0:
     with open(fp, "rb") as f:
       dat = f.read()
