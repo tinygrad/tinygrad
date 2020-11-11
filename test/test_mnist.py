@@ -94,7 +94,6 @@ def evaluate(model, gpu=False):
 
 class TestMNIST(unittest.TestCase):
   @unittest.skipUnless(GPU, "Requires GPU")
-  @unittest.expectedFailure
   def test_conv_gpu(self):
     np.random.seed(1337)
     model = TinyConvNet()

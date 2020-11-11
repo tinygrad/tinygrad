@@ -94,7 +94,7 @@ class TestOps(unittest.TestCase):
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.max_pool2d(x, kernel_size=ksz), gpu=self.gpu, forward_only=self.gpu)
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz), gpu=self.gpu)
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
