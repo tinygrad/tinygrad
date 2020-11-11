@@ -1,8 +1,6 @@
 import numpy as np
 from .tensor import Function, register, Tensor
 import pyopencl as cl
-import pyopencl.array as pycl_array
-from pyopencl.reduction import ReductionKernel
 import functools
 
 def buffer_new(ctx, shape):
@@ -323,12 +321,14 @@ class Reshape(Function):
       if s == -1:
         ss[i] = np.prod(x.shape) // tsum
     assert np.prod(x.shape) == np.prod(ss)
+    x = unary_op(ctx, 'a', x)
     x.shape = tuple(ss)
     return x
 
   @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
+    grad_output = unary_op(ctx, 'a', grad_output)
     grad_output.shape = in_shape
     return grad_output
 register('reshape', Reshape, gpu=True)
@@ -539,9 +539,8 @@ class Conv2D(Function):
     }
     """)
 
-    prg.convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x, grad_output, dw, np.int32(H), np.int32(W), np.int32(ctx.groups), 
-            np.int32(rcout), np.int32(cin), np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix), np.int32(ys), np.int32(xs), np.int32(bs))
-    prg.convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w, grad_output, dx, np.int32(H), np.int32(W), np.int32(ctx.groups), 
-            np.int32(rcout), np.int32(cin), np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix), np.int32(ys), np.int32(xs), np.int32(bs))
+    conv_args = i32(H), i32(W), i32(ctx.groups), i32(rcout), i32(cin), i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs)
+    prg.convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x, grad_output, dw, *conv_args)
+    prg.convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w, grad_output, dx,*conv_args)
     return dx, dw
 register('conv2d', Conv2D, gpu=True)

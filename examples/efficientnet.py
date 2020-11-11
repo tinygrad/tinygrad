@@ -175,11 +175,9 @@ def infer(model, img):
   retimg = img = img[y0:y0+224, x0:x0+224]
 
   # if you want to look at the image
-  """
   import matplotlib.pyplot as plt
   plt.imshow(img)
   plt.show()
-  """
 
   # low level preprocess
   img = np.moveaxis(img, [2,0,1], [0,1,2])
