@@ -27,7 +27,7 @@ class TestConvSpeed(unittest.TestCase):
     inter_chan, out_chan = 32, 64
 
     # ****** torch baseline *******
-    
+
     torch.backends.mkldnn.enabled = False
 
     conv = 3

@@ -57,14 +57,14 @@ def train(model, optim, steps, BS=128, gpu=False):
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
-    
+
     x = Tensor(X_train[samp].reshape((-1, 28*28)).astype(np.float32), gpu=gpu)
     Y = Y_train[samp]
     y = np.zeros((len(samp),10), np.float32)
     # correct loss for NLL, torch NLL loss returns one per row
     y[range(y.shape[0]),Y] = -10.0
     y = Tensor(y, gpu=gpu)
-    
+
     # network
     out = model.forward(x)
 
@@ -72,10 +72,10 @@ def train(model, optim, steps, BS=128, gpu=False):
     loss = out.mul(y).mean()
     loss.backward()
     optim.step()
-    
+
     cat = np.argmax(out.cpu().data, axis=1)
     accuracy = (cat == Y).mean()
-    
+
     # printing
     loss = loss.cpu().data
     losses.append(loss)
@@ -118,14 +118,14 @@ class TestMNIST(unittest.TestCase):
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, optimizer, steps=1000, gpu=True)
     evaluate(model, gpu=True)
-    
+
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, optimizer, steps=1000)
     evaluate(model)
-    
+
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()

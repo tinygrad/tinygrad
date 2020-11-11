@@ -436,7 +436,7 @@ class Conv2D(Function):
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
-    
+
     ctx.save_for_backward(x,w)
 
     # output buffer
@@ -520,7 +520,7 @@ class Conv2D(Function):
     }
     __kernel void convx(__global const float *tensw, __global const float *ggg, __global float *dx,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
-      
+
       int B = get_global_id(0);
       int g = get_global_id(1);
       int ci = get_global_id(2);
