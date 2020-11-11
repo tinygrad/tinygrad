@@ -95,7 +95,7 @@ Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture t
 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
 
-Or, if you have a webcam and pygame+cv2 installed
+Or, if you have a webcam and cv2 installed
 
 ```bash
 python3 examples/efficientnet.py webcam
@@ -118,8 +118,9 @@ python -m pytest
 * Train an EfficientNet on ImageNet
   * Make broadcasting work on the backward pass (simple please)
   * EfficientNet backward pass
-  * Tensors on GPU (GPU support, must support Mac)
-* Make tinygrad work on comma two and run driving model
+  * Tensors on GPU (a few more backward)
+* Add a language model. BERT?
+* Add a detection model. EfficientDet?
 * Reduce code
 * Increase speed
 * Add features
