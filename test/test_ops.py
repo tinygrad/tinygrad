@@ -5,6 +5,7 @@ import timeit
 import functools
 from tinygrad.tensor import Tensor, GPU
 
+
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False):
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
@@ -41,6 +42,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=self.gpu)
   def test_broadcast_add(self):
     helper_test_op([(1,32,32,32), (1,32,1,1)], lambda x,y: x+y, Tensor.add, gpu=self.gpu, forward_only=True)
+  def test_broadcast_mul(self):
+    helper_test_op([(32,32), (1,32)], lambda x,y: x*y, Tensor.mul, gpu=self.gpu, forward_only=True)
+  def test_broadcast_mul_2(self):
+    helper_test_op([(32,32), (32,1)], lambda x,y: x*y, Tensor.mul, gpu=self.gpu, forward_only=True)
+  def test_broadcast_single_dim(self):
+    helper_test_op([(32), (1,2,3,32)], lambda x,y: x*y, Tensor.mul, gpu=self.gpu, forward_only=True)
+  def test_broadcast_to_six_dimensions(self):
+    helper_test_op([(32,1,1), (1,2,3,32,4,5)], lambda x,y: x*y, Tensor.mul, gpu=self.gpu, forward_only=True)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub, gpu=self.gpu)
   def test_mul(self):
