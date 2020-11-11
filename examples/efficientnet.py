@@ -183,7 +183,7 @@ def infer(model, img):
 
   # low level preprocess
   img = np.moveaxis(img, [2,0,1], [0,1,2])
-  img = img.astype(np.float32).reshape(1,3,224,224)
+  img = img.astype(np.float32)[:3].reshape(1,3,224,224)
   img /= 255.0
   img -= np.array([0.485, 0.456, 0.406]).reshape((1,-1,1,1))
   img /= np.array([0.229, 0.224, 0.225]).reshape((1,-1,1,1))
