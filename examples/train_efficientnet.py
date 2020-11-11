@@ -8,7 +8,7 @@ if __name__ == "__main__":
   Tensor.default_gpu = os.getenv("GPU") is not None
   model = EfficientNet()
 
-  BS = 128
+  BS = 4
 
   img = np.zeros((BS,3,224,224), dtype=np.float32)
 
