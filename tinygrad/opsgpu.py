@@ -365,7 +365,7 @@ class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):
     ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op="sumval += input[iid]",
-      result_op="sumval / (ksz.x * ksz.y)", decls="float sumval=FLT_MIN")
+      result_op="sumval / (ksz.x * ksz.y)", decls="float sumval=0.f")
     ctx.save_for_backward(input.shape)
     return ret
 
