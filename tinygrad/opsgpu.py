@@ -381,11 +381,11 @@ class MaxPool2D(Function):
   def forward(ctx, input, kernel_size=(2, 2)):
     idxs = subsample_op(ctx, input, kernel_size, kernel_size,
       iter_op="if (input[iid]>maxval) { maxval = input[iid]; maxidx = j * ksz.x + i; }",
-      result_op="(float)maxidx", decls="float maxval=FLT_MIN; int maxidx=0")
+      result_op="(float)maxidx", decls="float maxval=-FLT_MAX; int maxidx=0")
     ctx.save_for_backward(idxs, input.shape)
     return subsample_op(ctx, input, kernel_size, kernel_size,
       iter_op="maxval = max(maxval, input[iid])",
-      result_op="maxval", decls="float maxval = FLT_MIN")
+      result_op="maxval", decls="float maxval = -FLT_MAX")
 
   @staticmethod
   def backward(ctx, grad_output):
