@@ -83,11 +83,11 @@ class TestOps(unittest.TestCase):
     with self.subTest(stride := 2):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
-        lambda x,w: Tensor.conv2d(x,w,stride=stride).relu(), gpu=self.gpu, forward_only=self.gpu)
+        lambda x,w: Tensor.conv2d(x,w,stride=stride).relu(), gpu=self.gpu)
     with self.subTest(stride := (2,1)):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride).relu(),
-        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), gpu=self.gpu, forward_only=self.gpu)
+        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), gpu=self.gpu)
 
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
