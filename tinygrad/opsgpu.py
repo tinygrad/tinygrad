@@ -321,12 +321,14 @@ class Reshape(Function):
       if s == -1:
         ss[i] = np.prod(x.shape) // tsum
     assert np.prod(x.shape) == np.prod(ss)
+    x = unary_op(ctx, 'a', x)
     x.shape = tuple(ss)
     return x
 
   @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
+    grad_output = unary_op(ctx, 'a', grad_output)
     grad_output.shape = in_shape
     return grad_output
 register('reshape', Reshape, gpu=True)
