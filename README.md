@@ -12,10 +12,12 @@ This may not be the best deep learning framework, but it is a deep learning fram
 
 The Tensor class is a wrapper around a numpy array, except it does Tensor things.
 
+tinygrad is also a city in Russia.
+
 ### Installation
 
 ```bash
-pip3 install tinygrad
+pip3 install tinygrad --upgrade
 ```
 
 ### Example
@@ -78,18 +80,28 @@ optim.step()
 
 ### GPU Support?!
 
-tinygrad supports GPUs through PyOpenCL. Not all ops are supported yet.
+tinygrad supports GPUs through PyOpenCL. Not all ops are supported yet on the backward pass.
 
 ```python
 from tinygrad.tensor import Tensor
 (Tensor.ones(4,4).cuda() + Tensor.ones(4,4).cuda()).cpu()
 ```
 
-### ImageNet inference (on the micrograd puppy)
+### ImageNet inference
+
+Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture to discover what it is.
 
 ```bash
-python3 examples/efficientnet.py
+python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
+
+Or, if you have a webcam and cv2 installed
+
+```bash
+python3 examples/efficientnet.py webcam
+```
+
+PROTIP: Set "GPU=1" environment variable if you want this to go faster.
 
 ### The promise of small
 
@@ -106,7 +118,9 @@ python -m pytest
 * Train an EfficientNet on ImageNet
   * Make broadcasting work on the backward pass (simple please)
   * EfficientNet backward pass
-  * Tensors on GPU (GPU support, must support Mac)
+  * Tensors on GPU (a few more backward)
+* Add a language model. BERT?
+* Add a detection model. EfficientDet?
 * Reduce code
 * Increase speed
 * Add features

@@ -1,3 +1,5 @@
+import sys
+import warnings
 import numpy as np
 from .tensor import Function, register
 
@@ -20,7 +22,6 @@ class Sub(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    # this right?
     return grad_output, -grad_output
 register('sub', Sub)
 
@@ -35,6 +36,19 @@ class Mul(Function):
     x,y = ctx.saved_tensors
     return y*grad_output, x*grad_output
 register('mul', Mul)
+
+class Div(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return x / y
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    x,y = ctx.saved_tensors
+    return grad_output / y, -x * grad_output / y**2
+# TODO: registering this breaks the default div on the GPU
+#register('div', Div)
 
 class Pow(Function):
   @staticmethod
@@ -84,13 +98,15 @@ register('matmul', Dot)
 class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
+    ctx.save_for_backward(padding)
     return np.pad(x,
       ((0,0), (0,0),
-       (padding[0], padding[1]), (padding[2], padding[3])))
+       (padding[2], padding[3]), (padding[0], padding[1])))
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise Exception("write this")
+    padding, = ctx.saved_tensors
+    return grad_output[..., padding[2]:-padding[3], padding[0]:-padding[1]]
 register('pad2d', Pad2D)
 
 class Reshape(Function):
@@ -124,10 +140,12 @@ register('relu', ReLU)
 class Sigmoid(Function):
   @staticmethod
   def forward(ctx, input):
-    # TODO: stable sigmoid? does the overflow matter?
     with np.warnings.catch_warnings():
       np.warnings.filterwarnings('ignore')
-      ret = 1/(1 + np.exp(-input))
+      ret = np.where(input >= 0,
+        1/(1 + np.exp(-input)),
+        np.exp(input)/(1 + np.exp(input))
+      )
     ctx.save_for_backward(ret)
     return ret
 
@@ -152,7 +170,7 @@ class LogSoftmax(Function):
   @staticmethod
   def backward(ctx, grad_output):
     output, = ctx.saved_tensors
-    return grad_output - np.exp(output)*grad_output.sum(axis=1).reshape((-1, 1))
+    return grad_output - np.exp(output)*(grad_output.sum(axis=1).reshape((-1, 1)))
 register('logsoftmax', LogSoftmax)
 
 
