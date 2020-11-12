@@ -1,8 +1,6 @@
 import numpy as np
 from .tensor import Function, register, Tensor
 import pyopencl as cl
-import pyopencl.array as pycl_array
-from pyopencl.reduction import ReductionKernel
 import functools
 
 def buffer_new(ctx, shape):
@@ -20,22 +18,24 @@ def buffer_zeros(ctx, shape):
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
 
-@functools.lru_cache
+@functools.lru_cache()
 def clbuild(cl_ctx, prg):
   return cl.Program(cl_ctx, prg).build()
 
 def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
+def i32(x):
+  return np.int32(x)
 
-def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
+def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, decls=''):
   prg = """
   __kernel void subsample(__global float *output, __global const float *input, uint2 osize, uint2 isize,
-                          uint2 kernel_size, uint2 stride, int nelem) {
+                          uint2 ksz, uint2 stride) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    float group_res = """+str(init_val)+""";
-    for (uint j=0; j<kernel_size.y; ++j) {
-      for (uint i=0; i<kernel_size.x; ++i) {
+    """+decls+""";
+    for (uint j=0; j<ksz.y; ++j) {
+      for (uint i=0; i<ksz.x; ++i) {
         int iid  = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
         if (gid.x*stride.x+i < isize.x && gid.y*stride.y+j < isize.y) {
           """+iter_op+""";
@@ -46,43 +46,44 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, init_val=0):
   }"""
   return clbuild(cl_ctx, prg)
 
-def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, init_val=0):
+def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, decls=''):
   py, px = stride
   N, C, Yin, Xin = input.shape
   Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
   ret = buffer_zeros(ctx, (N, C, Yout, Xout))
-  prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, init_val=init_val)
+  prg = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, decls=decls)
   prg.subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
                 ret, input, uint2(Xout, Yout), uint2(Xin, Yin),
-                uint2(*kernel_size[::-1]), uint2(px, py), np.int32(input.size))
+                uint2(*kernel_size[::-1]), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
-def cl_supsample_krnl_build(cl_ctx, result_op):
+def cl_supsample_krnl_build(cl_ctx, result_op, decls=''):
   prg = """
-  __kernel void supsample(__global float *output, __global const float *input, uint2 osize, uint2 isize,
-                          uint2 kernel_size, int nelem) {
+  __kernel void supsample(__global float *output, __global const float *input, __global const void *input2,
+                          uint2 osize, uint2 isize, uint2 ksz) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
     int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    int iid = (gid.x/kernel_size.x) + isize.x*((gid.y/kernel_size.y) + isize.y*gid.z);
-    if (gid.x/kernel_size.x < isize.x && gid.y/kernel_size.y < isize.y) {
+    int iid = (gid.x/ksz.x) + isize.x*((gid.y/ksz.y) + isize.y*gid.z);
+    """+decls+""";
+    if (gid.x/ksz.x < isize.x && gid.y/ksz.y < isize.y) {
       output[oid] = """+result_op+""";
     }
   }"""
   return clbuild(cl_ctx, prg)
 
-def supersample_op(ctx, input, out_shape, kernel_size, result_op):
+def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', input2=None):
   (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
   py,px = kernel_size
   ret = buffer_zeros(ctx, out_shape)
-  prg = cl_supsample_krnl_build(ctx.cl_ctx, result_op)
+  prg = cl_supsample_krnl_build(ctx.cl_ctx, result_op, decls=decls)
   prg.supsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-                ret, input, uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py), np.int32(input.size))
+                ret, input, input2, uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
 def binary_op(ctx, code, x, y):
-  if len(x.shape) != len(y.shape):
+  if len(x.shape) != len(y.shape) and y.shape != (1,):
     raise Exception("shape mismatch in binop %s: %r %r" % (code, x.shape, y.shape))
   xdiv = 1
   ydiv = 1
@@ -108,7 +109,7 @@ def binary_op(ctx, code, x, y):
     float b = b_g[gid/ydiv];
     res_g[gid] = """+code+""";
   }""")
-  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret, np.int32(xdiv), np.int32(ydiv))
+  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret, i32(xdiv), i32(ydiv))
   return ret
 
 def unary_op(ctx, code, x):
@@ -134,7 +135,7 @@ def reduce_op(ctx, code, code2, input, osize):
     }
     res_g[gid] = """+code2+""";
   }""")
-  prg.reduce(ctx.cl_queue, osize, None, input, np.int32(np.prod(input.shape) // np.prod(osize)), ret)
+  prg.reduce(ctx.cl_queue, osize, None, input, i32(np.prod(input.shape) // np.prod(osize)), ret)
   return ret
 
 # ***** now for the ops themselves *****
@@ -156,8 +157,7 @@ class Sub(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    not_grad_output = unary_op(ctx, '-a', grad_output)
-    return grad_output, not_grad_output
+    return grad_output, unary_op(ctx, '-a', grad_output)
 register('sub', Sub, gpu=True)
 
 class Mul(Function):
@@ -214,10 +214,7 @@ class Dot(Function):
   @staticmethod
   def forward(ctx, input, weight):
     assert input.shape[1] == weight.shape[0]
-    isize = np.int32(input.shape[0])
-    msize = np.int32(input.shape[1])
-    osize = np.int32(weight.shape[1])
-    one = np.int32(1)
+    isize, msize, osize = i32(input.shape[0]), i32(input.shape[1]), i32(weight.shape[1])
     ret = buffer_new(ctx, (isize, osize))
 
     prg = clbuild(ctx.cl_ctx, """
@@ -242,16 +239,13 @@ class Dot(Function):
     # (isize,msize) x (msize,osize) = (isize,osize)
     prg.matmul(ctx.cl_queue, [isize, osize], None,
       input, weight, ret,
-      msize, one, msize, one, osize, osize)
+      msize, i32(1), msize, i32(1), osize, osize)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
     input, weight, prg = ctx.saved_tensors
-    isize = np.int32(input.shape[0])
-    msize = np.int32(input.shape[1])
-    osize = np.int32(weight.shape[1])
-    one = np.int32(1)
+    isize, msize, osize = i32(input.shape[0]), i32(input.shape[1]), i32(weight.shape[1])
 
     grad_input = buffer_like(ctx, input)
     grad_weight = buffer_like(ctx, weight)
@@ -259,12 +253,12 @@ class Dot(Function):
     # (isize,osize) x (msize,osize) = (isize,msize)
     prg.matmul(ctx.cl_queue, [isize, msize], None,
       grad_output, weight, grad_input,
-      osize, one, osize, osize, one, msize)
+      osize, i32(1), osize, osize, i32(1), msize)
 
     # (isize,msize) x (isize,osize) = (msize,osize)
     prg.matmul(ctx.cl_queue, [msize, osize], None,
       input, grad_output, grad_weight,
-      one, msize, isize, one, osize, osize)
+      i32(1), msize, isize, i32(1), osize, osize)
 
     return grad_input, grad_weight
 register('dot', Dot, gpu=True)
@@ -281,48 +275,34 @@ class Pad2D(Function):
 
     prg = clbuild(ctx.cl_ctx, """
     __kernel void pad2d(__global const float *input, __global float *output,
-                        int py, int px, int oy, int ox, int iy, int ix) {
+                        int ipx, int ipy, int py, int px, int oy, int ox, int iy, int ix) {
       int BC = get_global_id(0);
       int Y = get_global_id(1);
       int X = get_global_id(2);
 
-      int iptr = BC*iy*ix + Y*ix + X;
+      int iptr = BC*iy*ix + (Y+ipy)*ix + ipx + X;
       int optr = BC*oy*ox + (Y+py)*ox + px + X;
 
       output[optr] = input[iptr];
     }""")
-    ctx.save_for_backward(padding)
+    ctx.save_for_backward(padding, prg)
     prg.pad2d(ctx.cl_queue, [bs*cin, iy, ix], None,
         x, ret,
-        np.int32(padding[2]), np.int32(padding[0]),
-        np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
+        i32(0), i32(0), i32(padding[2]), i32(padding[0]),
+        i32(oy), i32(ox), i32(iy), i32(ix)
       )
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    padding, = ctx.saved_tensors
+    padding, prg = ctx.saved_tensors
     bs, cin, iy, ix = grad_output.shape
     oy, ox = iy - padding[2] - padding[3], ix - padding[0] - padding[1]
     ret = buffer_new(ctx, (bs, cin, oy, ox))
-    prg = clbuild(ctx.cl_ctx, """
-    __kernel void pad2d(__global const float *input, __global float *output,
-                        int cin, int py, int px, int oy, int ox, int iy, int ix) {
-      int B = get_global_id(0);
-      int C = get_global_id(1);
-      int Y = get_global_id(2);
-
-      int iptr = B*cin*iy*ix + C*iy*ix + (Y+py)*ix + px;
-      int optr = B*cin*oy*ox + C*oy*ox + Y*ox;
-
-      for (int x = 0; x < ox; x++) {
-        output[optr+x] = input[iptr+x];
-      }
-    }""")
-    prg.pad2d(ctx.cl_queue, [bs, cin, oy], None,
+    prg.pad2d(ctx.cl_queue, [bs*cin, oy, ox], None,
               grad_output, ret,
-              np.int32(cin), np.int32(padding[2]), np.int32(padding[0]),
-              np.int32(oy), np.int32(ox), np.int32(iy), np.int32(ix)
+              i32(padding[2]), i32(padding[0]), i32(0), i32(0),
+              i32(oy), i32(ox), i32(iy), i32(ix)
               )
     return ret
 register('pad2d', Pad2D, gpu=True)
@@ -342,12 +322,14 @@ class Reshape(Function):
       if s == -1:
         ss[i] = np.prod(x.shape) // tsum
     assert np.prod(x.shape) == np.prod(ss)
+    x = unary_op(ctx, 'a', x)
     x.shape = tuple(ss)
     return x
 
   @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
+    grad_output = unary_op(ctx, 'a', grad_output)
     grad_output.shape = in_shape
     return grad_output
 register('reshape', Reshape, gpu=True)
@@ -382,30 +364,36 @@ register('sigmoid', Sigmoid, gpu=True)
 class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):
-    iter_op = "group_res += input[iid]"
-    result_op = "group_res / (kernel_size.x * kernel_size.y)"
-    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op, result_op)
+    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op="sumval += input[iid]",
+      result_op="sumval / (ksz.x * ksz.y)", decls="float sumval=0.f")
     ctx.save_for_backward(input.shape)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
     orig_shape, = ctx.saved_tensors
-    result_op = "input[iid] / (kernel_size.x * kernel_size.y)"
-    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size, result_op)
+    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
+      result_op="input[iid] / (ksz.x * ksz.y)")
 register('avg_pool2d', AvgPool2D, gpu=True)
 
 class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):
-    init_val = "FLT_MIN"
-    iter_op = "group_res = max(group_res, input[iid])"
-    result_op = "group_res"
-    return subsample_op(ctx, input, kernel_size, kernel_size, iter_op, result_op, init_val=init_val)
+    idxs = subsample_op(ctx, input, kernel_size, kernel_size,
+      iter_op="if (input[iid]>maxval) { maxval = input[iid]; maxidx = j * ksz.x + i; }",
+      result_op="(float)maxidx", decls="float maxval=-FLT_MAX; int maxidx=0")
+    ctx.save_for_backward(idxs, input.shape)
+    return subsample_op(ctx, input, kernel_size, kernel_size,
+      iter_op="maxval = max(maxval, input[iid])",
+      result_op="maxval", decls="float maxval = -FLT_MAX")
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise NotImplementedError("GPU MaxPool2D.backward() not implemented")
+    idxs, orig_shape = ctx.saved_tensors
+    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
+      result_op="(maxidx == kernidx) * input[iid]",
+      decls="int maxidx=((__global float*)input2)[iid]; int kernidx=(gid.x%ksz.x) + ksz.x*(gid.y%ksz.y)",
+      input2=idxs)
 register('max_pool2d', MaxPool2D, gpu=True)
 
 class LogSoftmax(Function):
@@ -438,7 +426,7 @@ class LogSoftmax(Function):
       grad_input[gidsz + gid2] = grad_output[gidsz + gid2] - exp(output[gidsz + gid2]) * acc;
     }""")
     prg.lsmsub2(ctx.cl_queue, [grad_output.shape[0], grad_output.shape[1]], None,
-      grad_output, output, np.int32(grad_output.shape[1]), grad_input)
+      grad_output, output, i32(grad_output.shape[1]), grad_input)
 
     return grad_input
 register('logsoftmax', LogSoftmax, gpu=True)
@@ -457,6 +445,8 @@ class Conv2D(Function):
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
+
+    ctx.save_for_backward(x,w)
 
     # output buffer
     ret = buffer_new(ctx, (bs, cout, oy, ox))
@@ -491,17 +481,75 @@ class Conv2D(Function):
 
     prg.conv(ctx.cl_queue, [bs*groups*rcout, oy, ox], None,
       x, w, ret,
-      np.int32(H), np.int32(W),
-      np.int32(groups), np.int32(rcout), np.int32(cin),
-      np.int32(oy), np.int32(ox),
-      np.int32(iy), np.int32(ix),
-      np.int32(ys), np.int32(xs)
+      i32(H), i32(W),
+      i32(groups), i32(rcout), i32(cin),
+      i32(oy), i32(ox),
+      i32(iy), i32(ix),
+      i32(ys), i32(xs)
     )
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    raise Exception("not implemented")
+    bs,_,oy,ox = grad_output.shape
+    x, w = ctx.saved_tensors
+    cout,cin,H,W = w.shape
+    ys,xs = ctx.stride
+    bs,cin_,iy,ix = x.shape
+    oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
+    assert cin*ctx.groups == cin_
+    assert cout % ctx.groups == 0
+    rcout = cout//ctx.groups
 
+    dx = buffer_zeros(ctx, (bs, cin_, iy, ix))
+    dw = buffer_new(ctx, (cout, cin, H, W))
+
+    prg = clbuild(ctx.cl_ctx, """
+    __kernel void convw(__global const float *tensx, __global const float *ggg, __global float *dw,
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
+
+      int g = get_global_id(0)/(rcout*cin) ; // range 0-groups
+      int c = (get_global_id(0)/(cin)) %rcout; // range 0-rcout
+      int ci = get_global_id(0) % cin;        // range 0-cin
+      int y = get_global_id(1);  // range 0-H
+      int x = get_global_id(2);  // range 0-W
+
+      // tensx  = (bs, groups*cin, iy, ix)
+      // tensw = (groups*rcout, cin, H, W)
+      // ggg = (bs, groups*rout, oy, ox)
+      float acc = 0.0;
+      for (int Y = 0; Y < oy; Y++) {
+        for (int X = 0; X < ox; X++) {
+          for (int B = 0; B < bs; B++) {
+            acc += ggg[B*groups*rcout*oy*ox + +g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
+          }
+        }
+      }
+      dw[get_global_id(0)*H*W + y*W + x] = acc;
+    }
+    __kernel void convx(__global const float *tensw, __global const float *ggg, __global float *dx,
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
+
+      int B = get_global_id(0);
+      int g = get_global_id(1);
+      int ci = get_global_id(2);
+
+      for (int c = 0; c < rcout; c++) {
+        for (int Y = 0; Y < oy; Y++) {
+          for (int X = 0; X < ox; X++) {
+            for (int y = 0; y < H; y++) {
+              for (int x = 0; x < W; x++) {
+                dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x]+= ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+              }
+            }
+          }
+        }
+      }
+    }
+    """)
+
+    conv_args = i32(H), i32(W), i32(ctx.groups), i32(rcout), i32(cin), i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs)
+    prg.convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x, grad_output, dw, *conv_args)
+    prg.convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w, grad_output, dx,*conv_args)
+    return dx, dw
 register('conv2d', Conv2D, gpu=True)
-

@@ -11,7 +11,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v2
     - name: Install SLOCCount
-      run: sudo apt install sloccount
+      run: sudo apt-get install sloccount
     - name: Check <1000 lines
       run: sloccount tinygrad test examples; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
@@ -22,6 +22,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v2
+    - name: Install OpenCL
+      run: sudo apt-get install pocl-opencl-icd
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:

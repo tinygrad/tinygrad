@@ -1,8 +1,5 @@
 from tinygrad.tensor import Tensor
 
-def swish(x):
-  return x.mul(x.sigmoid())
-
 class BatchNorm2D:
   def __init__(self, sz, eps=0.001):
     self.eps = eps
