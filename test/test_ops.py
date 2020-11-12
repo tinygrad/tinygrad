@@ -5,9 +5,8 @@ import timeit
 import functools
 from tinygrad.tensor import Tensor, GPU
 
-torch._set_deterministic(True)
-
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False):
+  torch.manual_seed(0)
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
   if gpu:
