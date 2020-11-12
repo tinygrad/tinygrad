@@ -110,14 +110,17 @@ def binary_op(ctx, code, x, y):
         raise Exception("shape mismatch in binop %s: %r %r" % (code, x.shape, y.shape))
   ret = buffer_like(ctx, x if np.prod(x.shape) >= np.prod(y.shape) else y)
   retsize = np.prod(ret.shape)
+
   prg = clbuild(ctx.cl_ctx, """
-  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g) {
+  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g,
+    int xdiv, int xmod, int ydiv, int ymod) {
     int gid = get_global_id(0);
-    float a = a_g[gid""" + (f"%{retsize // xdiv2}" if xdiv2 > 1 else "") + f"/{xdiv}" + """];
-    float b = b_g[gid""" + (f"%{retsize // ydiv2}" if ydiv2 > 1 else "") + f"/{ydiv}" + """];
+    float a = a_g[gid%xmod/xdiv];
+    float b = b_g[gid%ymod/ydiv];
     res_g[gid] = """+code+""";
   }""")
-  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret)
+  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret,
+            i32(xdiv), i32(retsize // xdiv2), i32(ydiv), i32(retsize // ydiv2))
   return ret
 
 def unary_op(ctx, code, x):
