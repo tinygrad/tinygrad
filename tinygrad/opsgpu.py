@@ -9,11 +9,14 @@ def buffer_new(ctx, shape):
   res_g.dtype = np.float32
   return res_g
 
+def buff(ctx, np_array):
+    res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
+    res_g.shape = np_array.shape
+    res_g.dtype = np_array.dtype
+    return res_g
+
 def buffer_zeros(ctx, shape):
-  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np.zeros(shape))
-  res_g.shape = shape
-  res_g.dtype = np.float32
-  return res_g
+  return buff(ctx, np.zeros(shape, dtype=np.float32))
 
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
@@ -83,44 +86,33 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', inpu
   return ret
 
 def binary_op(ctx, code, x, y):
-  # Broadcasting is supported for only 1s at the start and 1s at the end for the same array
-  def get_xdivs(xs, ys):
-    if len(xs) != len(ys):
-      return None
-    r, r2 = 1, 1
-    startswithones = True
-    for i in range(len(xs)):
-      startswithones = (startswithones and xs[i] == 1)
-      if startswithones:
-        r2 *= ys[i]
-      elif (xs[i] != 1) and (r > 1 or (xs[i] != ys[i])):
-        return None, None
-      else:
-        r *= ys[i] // xs[i]
-    return r, r2
-  if y.shape == (1,):
-    xdiv, ydiv, xdiv2, ydiv2=1, np.prod(x.shape), 1, 1
-  else:
-    ydiv, ydiv2 = get_xdivs(y.shape, x.shape)
-    xdiv, xdiv2 = 1, 1
-    if ydiv is None:
-      xdiv, xdiv2 = get_xdivs(x.shape, y.shape)
-      ydiv, ydiv2 = 1, 1
-      if xdiv is None:
-        raise Exception("shape mismatch in binop %s: %r %r" % (code, x.shape, y.shape))
-  ret = buffer_like(ctx, x if np.prod(x.shape) >= np.prod(y.shape) else y)
-  retsize = np.prod(ret.shape)
+  n_dims = max(len(x.shape), len(y.shape))
+  shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
+  shape_x[:len(x.shape)] = np.array(x.shape, dtype=np.int32)
+  shape_y[:len(y.shape)] = np.array(y.shape, dtype=np.int32)
+  if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
+    raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
+  shape_ret = np.maximum(shape_x, shape_y)
+  ret = buffer_zeros(ctx, shape_ret)
 
   prg = clbuild(ctx.cl_ctx, """
-  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g,
-    int xdiv, int xmod, int ydiv, int ymod) {
+  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g, int n_dims, int prod,
+          __global const int *shape_x, __global const int *shape_y, __global const int *shape_ret) {
+    // invariant: prod should contain the product of all dimensions (of the returned tensor) that we haven't handled yet
     int gid = get_global_id(0);
-    float a = a_g[gid%xmod/xdiv];
-    float b = b_g[gid%ymod/ydiv];
+    int idx_a = 0, idx_b = 0;
+    for (int dim = 0; dim < n_dims; dim++) {
+      prod /= shape_ret[dim];                       // mark current dimension as handled
+      int idx_ret = (gid / prod) % shape_ret[dim];  // the index into the current dimension (for the returned tensor)
+      idx_a = (idx_a * shape_x[dim]) + (idx_ret % shape_x[dim]); // does nothing if shape_x[dim] is 1
+      idx_b = (idx_b * shape_y[dim]) + (idx_ret % shape_y[dim]); // does nothing if shape_y[dim] is 1
+    }
+    float a = a_g[idx_a];
+    float b = b_g[idx_b];
     res_g[gid] = """+code+""";
   }""")
-  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret,
-            i32(xdiv), i32(retsize // xdiv2), i32(ydiv), i32(retsize // ydiv2))
+  prod = i32(shape_ret.prod())
+  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod, buff(ctx, shape_x), buff(ctx, shape_y), buff(ctx, shape_ret))
   return ret
 
 def unary_op(ctx, code, x):
