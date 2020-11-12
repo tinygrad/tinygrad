@@ -83,6 +83,7 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', inpu
   return ret
 
 def binary_op(ctx, code, x, y):
+  # Only one case of 1s at the start or 1s at the end are supported (not even mixed of the two cases)
   def get_xdiv(xs, ys):
     if len(xs) != len(ys):
       return None
