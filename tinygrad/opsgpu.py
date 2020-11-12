@@ -83,6 +83,7 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', inpu
   return ret
 
 def binary_op(ctx, code, x, y):
+  # TODO: Make broadcasting work when it's not at the most inner part of the arrays.
   def get_xdiv(xs, ys):
     if len(xs) != len(ys):
       return None
