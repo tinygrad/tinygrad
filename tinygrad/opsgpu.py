@@ -83,34 +83,44 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', inpu
   return ret
 
 def binary_op(ctx, code, x, y):
-  # TODO: Make broadcasting work when it's not at the most inner part of the arrays.
-  def get_xdiv(xs, ys):
+  # Broadcasting is supported for only 1s at the start and 1s at the end for the same array
+  def get_xdivs(xs, ys):
     if len(xs) != len(ys):
       return None
-    r = 1
+    r, r2 = 1, 1
+    startswithones = True
     for i in range(len(xs)):
-      if (xs[i] != 1) and (r > 1 or (xs[i] != ys[i])):
-        return None
-      r *= ys[i] / xs[i]
-    return r
+      startswithones = (startswithones and xs[i] == 1)
+      if startswithones:
+        r2 *= ys[i]
+      elif (xs[i] != 1) and (r > 1 or (xs[i] != ys[i])):
+        return None, None
+      else:
+        r *= ys[i] // xs[i]
+    return r, r2
   if y.shape == (1,):
-    xdiv, ydiv=1, np.prod(x.shape)
+    xdiv, ydiv, xdiv2, ydiv2=1, np.prod(x.shape), 1, 1
   else:
-    xdiv, ydiv=1, get_xdiv(y.shape, x.shape)
+    ydiv, ydiv2 = get_xdivs(y.shape, x.shape)
+    xdiv, xdiv2 = 1, 1
     if ydiv is None:
-      xdiv, ydiv=get_xdiv(y.shape, x.shape), 1
+      xdiv, xdiv2 = get_xdivs(x.shape, y.shape)
+      ydiv, ydiv2 = 1, 1
       if xdiv is None:
         raise Exception("shape mismatch in binop %s: %r %r" % (code, x.shape, y.shape))
   ret = buffer_like(ctx, x if np.prod(x.shape) >= np.prod(y.shape) else y)
+  retsize = np.prod(ret.shape)
+
   prg = clbuild(ctx.cl_ctx, """
   __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g,
-                      int xdiv, int ydiv) {
+    int xdiv, int xmod, int ydiv, int ymod) {
     int gid = get_global_id(0);
-    float a = a_g[gid/xdiv];
-    float b = b_g[gid/ydiv];
+    float a = a_g[gid%xmod/xdiv];
+    float b = b_g[gid%ymod/ydiv];
     res_g[gid] = """+code+""";
   }""")
-  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret, i32(xdiv), i32(ydiv))
+  prg.binop(ctx.cl_queue, [np.prod(ret.shape)], None, x, y, ret,
+            i32(xdiv), i32(retsize // xdiv2), i32(ydiv), i32(retsize // ydiv2))
   return ret
 
 def unary_op(ctx, code, x):

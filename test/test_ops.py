@@ -6,9 +6,8 @@ import timeit
 import functools
 from tinygrad.tensor import Tensor, GPU
 
-torch._set_deterministic(True)
-
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False):
+  torch.manual_seed(0)
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
   if gpu:
@@ -65,13 +64,21 @@ class TestOps(unittest.TestCase):
   def test_tanh(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
 
-  def test_broadcast(self):
-    if os.getenv('CI') and self.gpu:
+  def test_broadcast_full(self):
+    if self.gpu:
       raise unittest.SkipTest('GPU broadcasting not fully supported')
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
-      for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16), (5,1,24,1)),
-                     ((4,1), (4,5)), ((1,4), (5,4)), ((1,3,1,7,1), (2,1,5,1,8))]:
+      for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
+        with self.subTest(op=torch_op.__name__, shapes=shapes):
+          helper_test_op(shapes, torch_op, tinygrad_op, gpu=self.gpu, forward_only=True)
+
+
+  def test_broadcast_partial(self):
+    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
+                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+      for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16,2), (1,13,24,1,1)),
+                     ((4,1), (4,5)), ((1,4), (5,4))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           helper_test_op(shapes, torch_op, tinygrad_op, gpu=self.gpu, forward_only=True)
 
