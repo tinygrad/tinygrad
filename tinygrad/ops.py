@@ -1,7 +1,7 @@
 import sys
 import warnings
 import numpy as np
-from .tensor import Function, register
+from .tensor import Tensor, Function, register
 
 # ************* basic ops *************
 
@@ -155,6 +155,20 @@ class Sigmoid(Function):
     grad_input = grad_output * (ret * (1 - ret))
     return grad_input
 register('sigmoid', Sigmoid)
+
+class Tanh(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret =2*Tensor(input*2).sigmoid().data - 1 # 2*sigmoid(2*x)-1
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    grad_input = grad_output * (1 - ret**2)
+    return grad_input
+register('tanh', Tanh)
 
 class LogSoftmax(Function):
   @staticmethod
