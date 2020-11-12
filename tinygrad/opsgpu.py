@@ -24,8 +24,8 @@ def clbuild(cl_ctx, prg):
 
 def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
-def i32(x):
-  return np.int32(x)
+
+i32 = np.int32
 
 def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, decls=''):
   prg = """
