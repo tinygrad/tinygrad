@@ -314,19 +314,13 @@ class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
-    ss = list(shape)
 
     # I'm sorry for this code
-    tsum = 1
-    for s in ss:
-      if s != -1:
-        tsum *= s
-    for i,s in enumerate(ss):
-      if s == -1:
-        ss[i] = np.prod(x.shape) // tsum
-    assert np.prod(x.shape) == np.prod(ss)
+    tsum = functools.reduce(lambda x,y: x*y, (s for s in shape if s != -1), 1)
+    shape = tuple(np.prod(x.shape) // tsum if s == -1 else s for s in shape)
+    assert np.prod(x.shape) == np.prod(shape)
     x = unary_op(ctx, 'a', x)
-    x.shape = tuple(ss)
+    x.shape = shape
     return x
 
   @staticmethod
