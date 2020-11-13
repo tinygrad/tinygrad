@@ -96,23 +96,18 @@ def binary_op(ctx, code, x, y):
   ret = buffer_zeros(ctx, shape_ret)
 
   prg = clbuild(ctx.cl_ctx, """
-  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g, int n_dims, int prod,
+  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g, int prod,
           __global const int *shape_x, __global const int *shape_y, __global const int *shape_ret) {
     // invariant: prod should contain the product of all dimensions (of the returned tensor) that we haven't handled yet
     int gid = get_global_id(0);
-    int idx_a = 0, idx_b = 0;
-    for (int dim = 0; dim < n_dims; dim++) {
-      prod /= shape_ret[dim];                       // mark current dimension as handled
-      int idx_ret = (gid / prod) % shape_ret[dim];  // the index into the current dimension (for the returned tensor)
-      idx_a = (idx_a * shape_x[dim]) + (idx_ret % shape_x[dim]); // does nothing if shape_x[dim] is 1
-      idx_b = (idx_b * shape_y[dim]) + (idx_ret % shape_y[dim]); // does nothing if shape_y[dim] is 1
-    }
+    int idx_a = 0, idx_b = 0;"""+
+    ''.join(["prod /= shape_ret[%d];int idx_ret = (gid / prod) % shape_ret[%d];idx_a = (idx_a * shape_x[%d]) + (idx_ret % shape_x[%d]); idx_b = (idx_b * shape_y[%d]) + (idx_ret % shape_y[%d]);" % dim for dim in range(n_dims) ]) +"""
     float a = a_g[idx_a];
     float b = b_g[idx_b];
     res_g[gid] = """+code+""";
   }""")
   prod = i32(shape_ret.prod())
-  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod, buff(ctx, shape_x), buff(ctx, shape_y), buff(ctx, shape_ret))
+  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, prod, buff(ctx, shape_x), buff(ctx, shape_y), buff(ctx, shape_ret))
   return ret
 
 def unary_op(ctx, code, x):
