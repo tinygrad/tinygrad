@@ -100,8 +100,8 @@ def binary_op(ctx, code, x, y):
           __global const int *shape_x, __global const int *shape_y, __global const int *shape_ret) {
     // invariant: prod should contain the product of all dimensions (of the returned tensor) that we haven't handled yet
     int gid = get_global_id(0);
-    int idx_a = 0, idx_b = 0;"""+
-    ''.join(["prod /= shape_ret[%d];int idx_ret = (gid / prod) % shape_ret[%d];idx_a = (idx_a * shape_x[%d]) + (idx_ret % shape_x[%d]); idx_b = (idx_b * shape_y[%d]) + (idx_ret % shape_y[%d]);" % dim for dim in range(n_dims) ]) +"""
+    int idx_a = 0, idx_b = 0, idx_ret;"""+
+    ''.join([f"prod /= shape_ret[{dim}];idx_ret = (gid / prod) % shape_ret[{dim}];idx_a = (idx_a * shape_x[{dim}]) + (idx_ret % shape_x[{dim}]); idx_b = (idx_b * shape_y[{dim}]) + (idx_ret % shape_y[{dim}]);" for dim in range(n_dims) ]) +"""
     float a = a_g[idx_a];
     float b = b_g[idx_b];
     res_g[gid] = """+code+""";
