@@ -10,10 +10,10 @@ def buffer_new(ctx, shape):
   return res_g
 
 def buff(ctx, np_array):
-    res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
-    res_g.shape = np_array.shape
-    res_g.dtype = np_array.dtype
-    return res_g
+  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
+  res_g.shape = np_array.shape
+  res_g.dtype = np_array.dtype
+  return res_g
 
 def buffer_zeros(ctx, shape):
   return buff(ctx, np.zeros(shape, dtype=np.float32))
