@@ -83,6 +83,10 @@ class TestOps(unittest.TestCase):
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), gpu=self.gpu)
 
+  def test_reshape(self):
+    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)), gpu=self.gpu)
+    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)), gpu=self.gpu)
+
   def test_conv2d(self):
     for bs in [1,8]:
       for cin in [1,3]:
