@@ -5,7 +5,7 @@ from .tensor import Function, register
 
 # ************* basic ops *************
 def adBC(out, in_sh): #adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i] 
-    return out.sum(axis=tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1])).reshape(in_sh)
+  return out.sum(axis=tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1])).reshape(in_sh)
 
 class Add(Function):
   @staticmethod
