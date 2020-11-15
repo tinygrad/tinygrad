@@ -16,7 +16,7 @@ class Add(Function):
     shape_x, shape_y = ctx.saved_tensors
     grad_x = grad_output.sum(axis=tuple([i for i in range(len(shape_x)) if shape_x[i]==1])).reshape(shape_x)
     grad_y = grad_output.sum(axis=tuple([i for i in range(len(shape_y)) if shape_y[i]==1])).reshape(shape_y)
-    return grad_x,-grad_y
+    return grad_x,grad_y
 register('add', Add)
 
 class Sub(Function):
