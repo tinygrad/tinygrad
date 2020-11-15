@@ -8,21 +8,29 @@ from .tensor import Function, register
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape,y.shape)
     return x+y
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output, grad_output
+    shape_x, shape_y = ctx.saved_tensors
+    grad_x = grad_output.sum(axis=tuple([i for i in range(len(shape_x)) if shape_x[i]==1])).reshape(shape_x)
+    grad_y = grad_output.sum(axis=tuple([i for i in range(len(shape_y)) if shape_y[i]==1])).reshape(shape_y)
+    return grad_x,-grad_y
 register('add', Add)
 
 class Sub(Function):
   @staticmethod
   def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape,y.shape)
     return x-y
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output, -grad_output
+    shape_x, shape_y = ctx.saved_tensors
+    grad_x = grad_output.sum(axis=tuple([i for i in range(len(shape_x)) if shape_x[i]==1])).reshape(shape_x)
+    grad_y = grad_output.sum(axis=tuple([i for i in range(len(shape_y)) if shape_y[i]==1])).reshape(shape_y)
+    return grad_x,-grad_y
 register('sub', Sub)
 
 class Mul(Function):
@@ -34,7 +42,10 @@ class Mul(Function):
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    return y*grad_output, x*grad_output
+    shape_x, shape_y = x.shape, y.shape
+    grad_x = (y*grad_output).sum(axis=tuple([i for i in range(len(shape_x)) if shape_x[i]==1])).reshape(shape_x)
+    grad_y = (x*grad_output).sum(axis=tuple([i for i in range(len(shape_y)) if shape_y[i]==1])).reshape(shape_y)
+    return grad_x, grad_y
 register('mul', Mul)
 
 class Div(Function):
@@ -59,7 +70,12 @@ class Pow(Function):
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    return y * (x**(y-1.0)) * grad_output, (x**y) * np.log(x) * grad_output
+    shape_x, shape_y = x.shape, y.shape
+    grad_x = (y * (x**(y-1.0)) * grad_output).sum(
+            axis=tuple([i for i in range(len(shape_x)) if shape_x[i]==1])).reshape(shape_x)
+    grad_y = ((x**y) * np.log(x) * grad_output).sum(
+            axis=tuple([i for i in range(len(shape_y)) if shape_y[i]==1])).reshape(shape_y)
+    return grad_x,-grad_y
 register('pow', Pow)
 
 class Sum(Function):
