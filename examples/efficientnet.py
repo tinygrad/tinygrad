@@ -234,7 +234,10 @@ if __name__ == "__main__":
     cap.release()
     cv2.destroyAllWindows()
   else:
-    img = Image.open(io.BytesIO(fetch(url)))
+    if url.startswith('http'):
+      img = Image.open(io.BytesIO(fetch(url)))
+    else:
+      img = Image.open(url)
     st = time.time()
     out, _ = infer(model, img)
     print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])

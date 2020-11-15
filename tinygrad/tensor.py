@@ -190,6 +190,11 @@ class Tensor:
   def swish(self):
     return self.mul(self.sigmoid())
 
+  def tanh(self):
+    t2 = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+2, gpu=self.gpu)
+    t1 = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+1, gpu=self.gpu)
+    return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
+
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, *tensors):

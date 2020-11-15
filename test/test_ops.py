@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 import unittest
@@ -6,6 +7,7 @@ import functools
 from tinygrad.tensor import Tensor, GPU
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False):
+  torch.manual_seed(0)
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
   if gpu:
@@ -39,8 +41,6 @@ class TestOps(unittest.TestCase):
   gpu = False
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=self.gpu)
-  def test_broadcast_add(self):
-    helper_test_op([(1,32,32,32), (1,32,1,1)], lambda x,y: x+y, Tensor.add, gpu=self.gpu, forward_only=True)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub, gpu=self.gpu)
   def test_mul(self):
@@ -61,9 +61,31 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, gpu=self.gpu)
   def test_logsoftmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, gpu=self.gpu)
+  def test_tanh(self):
+    helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
+
+  def test_broadcast_full(self):
+    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
+                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+      for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
+        with self.subTest(op=torch_op.__name__, shapes=shapes):
+          helper_test_op(shapes, torch_op, tinygrad_op, gpu=self.gpu, forward_only=True)
+
+
+  def test_broadcast_partial(self):
+    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
+                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+      for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16,2), (1,13,24,1,1)),
+                     ((4,1), (4,5)), ((1,4), (5,4))]:
+        with self.subTest(op=torch_op.__name__, shapes=shapes):
+          helper_test_op(shapes, torch_op, tinygrad_op, gpu=self.gpu, forward_only=True)
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), gpu=self.gpu)
+
+  def test_reshape(self):
+    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)), gpu=self.gpu)
+    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)), gpu=self.gpu)
 
   def test_conv2d(self):
     for bs in [1,8]:
