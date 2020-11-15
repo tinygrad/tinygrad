@@ -75,7 +75,7 @@ class Pow(Function):
             axis=tuple([i for i in range(len(shape_x)) if shape_x[i]==1])).reshape(shape_x)
     grad_y = ((x**y) * np.log(x) * grad_output).sum(
             axis=tuple([i for i in range(len(shape_y)) if shape_y[i]==1])).reshape(shape_y)
-    return grad_x,-grad_y
+    return grad_x, grad_y
 register('pow', Pow)
 
 class Sum(Function):
