@@ -12,7 +12,7 @@ def unbroadcast(out, in_sh):
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape,y.shape)
+    ctx.save_for_backward(x.shape, y.shape)
     return x+y
 
   @staticmethod
@@ -24,7 +24,7 @@ register('add', Add)
 class Sub(Function):
   @staticmethod
   def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape,y.shape)
+    ctx.save_for_backward(x.shape, y.shape)
     return x-y
 
   @staticmethod

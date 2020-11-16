@@ -144,26 +144,37 @@ def reduce_op(ctx, code, code2, input, osize):
   prg.reduce(ctx.cl_queue, osize, None, input, i32(np.prod(input.shape) // np.prod(osize)), ret)
   return ret
 
+def unbroadcast(ctx, out, in_sh):
+  # TODO: write this to match unbroadcast from ops.py
+  assert out.shape == in_sh
+  return out
+
 # ***** now for the ops themselves *****
 
 class Add(Function):
   @staticmethod
   def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape, y.shape)
     return binary_op(ctx, 'a+b', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output, grad_output
+    grad_x, grad_y = grad_output, grad_output
+    shape_x, shape_y = ctx.saved_tensors
+    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
 register('add', Add, gpu=True)
 
 class Sub(Function):
   @staticmethod
   def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape, y.shape)
     return binary_op(ctx, 'a-b', x, y)
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output, unary_op(ctx, '-a', grad_output)
+    grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
+    shape_x, shape_y = ctx.saved_tensors
+    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
 register('sub', Sub, gpu=True)
 
 class Mul(Function):
@@ -175,8 +186,9 @@ class Mul(Function):
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    return binary_op(ctx, 'a*b', y, grad_output),\
-           binary_op(ctx, 'a*b', x, grad_output)
+    grad_x = binary_op(ctx, 'a*b', y, grad_output)
+    grad_y = binary_op(ctx, 'a*b', x, grad_output)
+    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
 register('mul', Mul, gpu=True)
 
 class Pow(Function):
@@ -188,11 +200,11 @@ class Pow(Function):
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    gradx = binary_op(ctx, 'a*b', grad_output,
+    grad_x = binary_op(ctx, 'a*b', grad_output,
                       binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y))
-    grady = binary_op(ctx, 'a*b', grad_output,
+    grad_y = binary_op(ctx, 'a*b', grad_output,
                       binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
-    return gradx, grady
+    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
 register('pow', Pow, gpu=True)
 
 class Sum(Function):
