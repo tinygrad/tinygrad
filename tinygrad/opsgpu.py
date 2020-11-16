@@ -5,7 +5,7 @@ import functools
 
 def buffer_new(ctx, shape):
   res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, 4*np.prod(shape))
-  res_g.shape = shape
+  res_g.shape = tuple(shape)
   res_g.dtype = np.float32
   return res_g
 
@@ -129,25 +129,52 @@ def unary_op(ctx, code, x):
   prg.unop(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
   return ret
 
-def reduce_op(ctx, code, code2, input, osize):
+def reduce_op(ctx, code, code2, inp, axis=None):
+  if axis is None:
+    # full reduce
+    osize = [1]*len(inp.shape)
+  else:
+    osize = np.array(inp.shape)
+    osize[axis] = 1
   ret = buffer_new(ctx, osize)
+  if axis is None:
+    ret.shape = (1,)
+
+  # TODO: this is insanely slow
   prg = clbuild(ctx.cl_ctx, """
-  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g) {
+  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
+                       __global const int *shape_x, __global const int *shape_ret) {
     int gid = get_global_id(0);
+
     float out = 0.0;
     for (int x = 0; x < sz; x++) {
-      float a = a_g[gid*sz + x];
+      int idx = 0;  // compute index into a_g
+      int tprod = prod;
+      int tsz = sz;
+      for (int dim = 0; dim < n_dims; dim++) {
+        idx *= shape_x[dim];
+        if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
+          tprod /= shape_x[dim];
+          idx += (gid / tprod) % shape_x[dim];
+        } else {  // dim from x
+          tsz /= shape_x[dim];
+          idx += (x / tsz) % shape_x[dim];
+        }
+      }
+      float a = a_g[idx];
       """+code+""";
     }
     res_g[gid] = """+code2+""";
   }""")
-  prg.reduce(ctx.cl_queue, osize, None, input, i32(np.prod(input.shape) // np.prod(osize)), ret)
+  prg.reduce(ctx.cl_queue, [np.prod(osize)], None, inp, i32(np.prod(inp.shape)//np.prod(osize)), ret,
+    i32(np.prod(osize)), i32(len(osize)),
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(osize, dtype=np.int32)))
   return ret
 
 def unbroadcast(ctx, out, in_sh):
-  # TODO: write this to match unbroadcast from ops.py
-  assert out.shape == in_sh
-  return out
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]
+  return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
 # ***** now for the ops themselves *****
 
@@ -211,7 +238,7 @@ class Sum(Function):
   @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return reduce_op(ctx, "out += a", "out", input, (1,))
+    return reduce_op(ctx, "out += a", "out", input)
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -410,7 +437,7 @@ class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
     # TODO: stability?
-    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, (input.shape[0],1))
+    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, axis=[1])
     output = binary_op(ctx, 'a-b', input, lsum)
     ctx.save_for_backward(output)
     return output
@@ -418,7 +445,7 @@ class LogSoftmax(Function):
   @staticmethod
   def backward(ctx, grad_output):
     output, = ctx.saved_tensors
-    lsum = reduce_op(ctx, "out += a", "out", grad_output, (grad_output.shape[0],1))
+    lsum = reduce_op(ctx, "out += a", "out", grad_output, axis=[1])
     texp = binary_op(ctx, "exp(a) * b", output, lsum)
     return binary_op(ctx, "a - b", grad_output, texp)
 register('logsoftmax', LogSoftmax, gpu=True)
