@@ -99,8 +99,8 @@ class TestMNIST(unittest.TestCase):
     np.random.seed(1337)
     model = TinyConvNet()
     [x.cuda_() for x in model.parameters()]
-    optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, optimizer, steps=1000, gpu=True)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    train(model, optimizer, steps=200, gpu=True)
     evaluate(model, gpu=True)
 
   def test_conv(self):
@@ -125,6 +125,15 @@ class TestMNIST(unittest.TestCase):
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, optimizer, steps=1000)
     evaluate(model)
+
+  @unittest.skipUnless(GPU, "Requires GPU")
+  def test_rmsprop_gpu(self):
+    np.random.seed(1337)
+    model = TinyBobNet()
+    [x.cuda_() for x in model.parameters()]
+    optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
+    train(model, optimizer, steps=1000, gpu=True)
+    evaluate(model, gpu=True)
 
   def test_rmsprop(self):
     np.random.seed(1337)
