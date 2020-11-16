@@ -72,6 +72,7 @@ def train(model, optim, steps, BS=128, gpu=False):
     loss = out.mul(y).mean()
     loss.backward()
     optim.step()
+    loss.zero_grads()
 
     cat = np.argmax(out.cpu().data, axis=1)
     accuracy = (cat == Y).mean()
