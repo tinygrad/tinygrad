@@ -109,7 +109,6 @@ class Tensor:
     return Tensor(np.eye(dim).astype(np.float32))
 
   def backward(self, allow_fill=True):
-    # print("running backward on", self)
     if self._ctx is None:
       return
 
