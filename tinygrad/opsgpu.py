@@ -9,14 +9,14 @@ def buffer_new(ctx, shape):
   res_g.dtype = np.float32
   return res_g
 
-def buff(ctx, np_array):
+def buffer_np(ctx, np_array):
   res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
   res_g.shape = np_array.shape
   res_g.dtype = np_array.dtype
   return res_g
 
 def buffer_zeros(ctx, shape):
-  return buff(ctx, np.zeros(shape, dtype=np.float32))
+  return buffer_np(ctx, np.zeros(shape, dtype=np.float32))
 
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
@@ -114,7 +114,8 @@ def binary_op(ctx, code, x, y):
     res_g[gid] = """+code+""";
   }""")
   prod = i32(shape_ret.prod())
-  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod, buff(ctx, shape_x), buff(ctx, shape_y), buff(ctx, shape_ret))
+  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod,
+    buffer_np(ctx, shape_x), buffer_np(ctx, shape_y), buffer_np(ctx, shape_ret))
   return ret
 
 def unary_op(ctx, code, x):
@@ -241,6 +242,7 @@ class Dot(Function):
       res[X * osize + Y] = ret;
     }""")
     ctx.save_for_backward(input, weight, prg)
+
     # (isize,msize) x (msize,osize) = (isize,osize)
     prg.matmul(ctx.cl_queue, [isize, osize], None,
       input, weight, ret,
@@ -308,7 +310,7 @@ class Pad2D(Function):
               grad_output, ret,
               i32(padding[2]), i32(padding[0]), i32(0), i32(0),
               i32(oy), i32(ox), i32(iy), i32(ix)
-              )
+             )
     return ret
 register('pad2d', Pad2D, gpu=True)
 
@@ -408,11 +410,9 @@ class LogSoftmax(Function):
     prg = clbuild(ctx.cl_ctx, """
     __kernel void lsmsub2(__global const float *grad_output, __global const float *output, int sz,
                           __global float *grad_input) {
-      int gid = get_global_id(0);
-      int gidsz = gid*sz;
+      int gidsz = get_global_id(0)*sz;
       int gid2 = get_global_id(1);
 
-      // TODO: this is repeated in many kernels
       float acc = 0.0;
       for (int x = 0; x < sz; x++) {
         acc += grad_output[gidsz + x];
@@ -476,11 +476,8 @@ class Conv2D(Function):
 
     prg.conv(ctx.cl_queue, [bs*groups*rcout, oy, ox], None,
       x, w, ret,
-      i32(H), i32(W),
-      i32(groups), i32(rcout), i32(cin),
-      i32(oy), i32(ox),
-      i32(iy), i32(ix),
-      i32(ys), i32(xs)
+      i32(H), i32(W), i32(groups), i32(rcout), i32(cin),
+      i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs)
     )
     return ret
 
