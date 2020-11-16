@@ -120,7 +120,7 @@ class Tensor:
 
     visited, nodes = set(), []
     def deepwalk(node):
-      visited.add(self)
+      visited.add(node)
       if node._ctx:
         for i in node._ctx.parents:
           if i not in visited:
