@@ -108,13 +108,6 @@ class Tensor:
   def eye(dim):
     return Tensor(np.eye(dim).astype(np.float32))
 
-  def zero_grads(self):
-    if self.grad is not None:
-      self.grad = None
-      if self._ctx:
-        for parent in self._ctx.parents:
-          parent.zero_grads()
-
   def backward(self, allow_fill=True):
     # print("running backward on", self)
     if self._ctx is None:

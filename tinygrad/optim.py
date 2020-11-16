@@ -7,6 +7,10 @@ class Optimizer:
   def __init__(self, params):
     self.params = params
 
+  def zero_grad(self):
+    for param in self.params:
+      param.grad = None  # PyTorch defaults to set to 0
+
 class SGD(Optimizer):
   def __init__(self, params, lr=0.001):
     super(SGD, self).__init__(params)

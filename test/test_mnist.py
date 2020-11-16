@@ -56,6 +56,7 @@ class TinyConvNet:
 def train(model, optim, steps, BS=128, gpu=False):
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
+    optim.zero_grad()
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
 
     x = Tensor(X_train[samp].reshape((-1, 28*28)).astype(np.float32), gpu=gpu)
@@ -72,7 +73,6 @@ def train(model, optim, steps, BS=128, gpu=False):
     loss = out.mul(y).mean()
     loss.backward()
     optim.step()
-    loss.zero_grads()
 
     cat = np.argmax(out.cpu().data, axis=1)
     accuracy = (cat == Y).mean()
