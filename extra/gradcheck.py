@@ -1,7 +1,10 @@
 import numpy as np
+from tinygrad.tensor import Tensor
 
-from .utils import mask_like
-from .tensor import Tensor
+def mask_like(like, mask_inx, mask_value = 1.0):
+  mask = np.zeros_like(like).reshape(-1)
+  mask[mask_inx] = mask_value
+  return mask.reshape(like.shape)
 
 def jacobian(func, input):
   output = func(input)

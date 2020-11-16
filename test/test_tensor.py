@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.gradcheck import numerical_jacobian, jacobian, gradcheck
+from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
