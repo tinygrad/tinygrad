@@ -115,20 +115,9 @@ class Tensor:
         for parent in self._ctx.parents:
           parent.zero_grads()
 
-  def deepwalk(self, visited=None, a=None):
-    if visited is None or a is None:
-      visited, a=set(), []
-    visited.add(self)
-    if self._ctx:
-      for i in self._ctx.parents:
-        if i not in visited:
-          i.deepwalk(visited, a)
-      a.append(self)
-    return a
-
   def backward(self, allow_fill=True):
     # print("running backward on", self)
-    if (self._ctx is None):
+    if self._ctx is None:
       return
 
     if self.grad is None and allow_fill:
@@ -137,7 +126,17 @@ class Tensor:
       assert self.data.shape == (1,)
       self.grad = Tensor(np.ones(self.data.shape, dtype=self.data.dtype), gpu=self.gpu)
 
-    for t0 in reversed(self.deepwalk()):
+    visited, nodes = set(), []
+    def deepwalk(node):
+      visited.add(self)
+      if node._ctx:
+        for i in node._ctx.parents:
+          if i not in visited:
+            deepwalk(i)
+        nodes.append(node)
+    deepwalk(self)
+
+    for t0 in reversed(nodes):
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
@@ -150,10 +149,7 @@ class Tensor:
           print("grad shape must match tensor shape in %r, %r != %r" %
             (self._ctx, g.shape, t.data.shape))
           assert(False)
-        if t.grad is None:
-          t.grad = Tensor(g)
-        else:
-          t.grad = t.grad + Tensor(g)
+        t.grad = Tensor(g) if t.grad is None else (t.grad + Tensor(g))
 
   # ***** tinygrad supports CPU and GPU *****
 
