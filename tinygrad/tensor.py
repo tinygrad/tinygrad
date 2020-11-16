@@ -127,7 +127,7 @@ class Tensor:
     return a
 
   def backward(self, allow_fill=True):
-    #print("running backward on", self)
+    # print("running backward on", self)
     if (self._ctx is None):
       return
 
@@ -153,7 +153,7 @@ class Tensor:
         if t.grad is None:
           t.grad = Tensor(g)
         else:
-          t.grad += Tensor(g)
+          t.grad = t.grad + Tensor(g)
 
   # ***** tinygrad supports CPU and GPU *****
 
