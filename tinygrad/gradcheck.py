@@ -11,6 +11,9 @@ def jacobian(func, input):
   J = np.zeros((jo,ji), dtype=np.float32)
 
   for o in range(jo):
+    input.grad = None
+    output = func(input)
+
     # tinygrad doesn't support slicing, tiny-hack to select
     # the needed scalar an backpropagate only through it
     o_scalar = Tensor(mask_like(output.data, o, 1.)).mul(output).sum()

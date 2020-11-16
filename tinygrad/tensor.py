@@ -109,7 +109,6 @@ class Tensor:
     return Tensor(np.eye(dim).astype(np.float32))
 
   def backward(self, allow_fill=True):
-    #print("running backward on", self)
     if self._ctx is None:
       return
 
@@ -119,29 +118,35 @@ class Tensor:
       assert self.data.shape == (1,)
       self.grad = Tensor(np.ones(self.data.shape, dtype=self.data.dtype), gpu=self.gpu)
 
-    assert(self.grad is not None)
+    visited, nodes = set(), []
+    def deepwalk(node):
+      visited.add(node)
+      if node._ctx:
+        for i in node._ctx.parents:
+          if i not in visited:
+            deepwalk(i)
+        nodes.append(node)
+    deepwalk(self)
 
-    with ProfileOp(self._ctx.__class__.__name__, [self.grad], backward=True):
-      grads = self._ctx.backward(self._ctx, self.grad.data)
-    if len(self._ctx.parents) == 1:
-      grads = [grads]
-    for t,g in zip(self._ctx.parents, grads):
-      if g is None:
-        continue
-      if g.shape != t.data.shape:
-        print("grad shape must match tensor shape in %r, %r != %r" %
-          (self._ctx, g.shape, t.data.shape))
-        assert(False)
-      t.grad = Tensor(g)
-      t.backward(False)
+    for t0 in reversed(nodes):
+      assert (t0.grad is not None)
+      with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
+        grads = t0._ctx.backward(t0._ctx, t0.grad.data)
+      if len(t0._ctx.parents) == 1:
+        grads = [grads]
+      for t,g in zip(t0._ctx.parents, grads):
+        if g is None:
+          continue
+        assert g.shape == t.data.shape, \
+          "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.data.shape)
+        t.grad = Tensor(g) if t.grad is None else (t.grad + Tensor(g))
 
   # ***** tinygrad supports CPU and GPU *****
 
   def cpu(self):
     if self.gpu:
-      data = np.empty(self.shape, dtype=np.float32)
-      cl.enqueue_copy(cl_queue, data, self.data)
-      ret = Tensor(data)
+      ret = Tensor(np.empty(self.shape, dtype=np.float32))
+      cl.enqueue_copy(cl_queue, ret.data, self.data)
       if self.grad:
         ret.grad = self.grad.cpu()
       return ret

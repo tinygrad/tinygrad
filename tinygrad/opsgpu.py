@@ -9,14 +9,14 @@ def buffer_new(ctx, shape):
   res_g.dtype = np.float32
   return res_g
 
-def buff(ctx, np_array):
+def buffer_np(ctx, np_array):
   res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
   res_g.shape = np_array.shape
   res_g.dtype = np_array.dtype
   return res_g
 
 def buffer_zeros(ctx, shape):
-  return buff(ctx, np.zeros(shape, dtype=np.float32))
+  return buffer_np(ctx, np.zeros(shape, dtype=np.float32))
 
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
@@ -39,7 +39,7 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, decls=''):
     """+decls+""";
     for (uint j=0; j<ksz.y; ++j) {
       for (uint i=0; i<ksz.x; ++i) {
-        int iid  = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
+        int iid = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
         if (gid.x*stride.x+i < isize.x && gid.y*stride.y+j < isize.y) {
           """+iter_op+""";
         }
@@ -100,6 +100,7 @@ def binary_op(ctx, code, x, y):
           __global const int *shape_x, __global const int *shape_y, __global const int *shape_ret) {
     // invariant: prod should contain the product of all dimensions (of the returned tensor) that we haven't handled yet
     int gid = get_global_id(0);
+    """ + ("""
     int idx_a = 0, idx_b = 0;
     for (int dim = 0; dim < n_dims; dim++) {
       prod /= shape_ret[dim];                       // mark current dimension as handled
@@ -107,12 +108,14 @@ def binary_op(ctx, code, x, y):
       idx_a = (idx_a * shape_x[dim]) + (idx_ret % shape_x[dim]); // does nothing if shape_x[dim] is 1
       idx_b = (idx_b * shape_y[dim]) + (idx_ret % shape_y[dim]); // does nothing if shape_y[dim] is 1
     }
+    """ if x.shape != y.shape else "int idx_a = gid, idx_b = gid;") + """
     float a = a_g[idx_a];
     float b = b_g[idx_b];
     res_g[gid] = """+code+""";
   }""")
   prod = i32(shape_ret.prod())
-  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod, buff(ctx, shape_x), buff(ctx, shape_y), buff(ctx, shape_ret))
+  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod,
+    buffer_np(ctx, shape_x), buffer_np(ctx, shape_y), buffer_np(ctx, shape_ret))
   return ret
 
 def unary_op(ctx, code, x):
@@ -239,6 +242,7 @@ class Dot(Function):
       res[X * osize + Y] = ret;
     }""")
     ctx.save_for_backward(input, weight, prg)
+
     # (isize,msize) x (msize,osize) = (isize,osize)
     prg.matmul(ctx.cl_queue, [isize, osize], None,
       input, weight, ret,
@@ -306,22 +310,19 @@ class Pad2D(Function):
               grad_output, ret,
               i32(padding[2]), i32(padding[0]), i32(0), i32(0),
               i32(oy), i32(ox), i32(iy), i32(ix)
-              )
+             )
     return ret
 register('pad2d', Pad2D, gpu=True)
 
+# TODO: Reshape shouldn't make a copy, but this is a big change since data tensor can't have shape
 class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
-
-    # I'm sorry for this code
-    tsum = functools.reduce(lambda x,y: x*y, (s for s in shape if s != -1), 1)
-    shape = tuple(np.prod(x.shape) // tsum if s == -1 else s for s in shape)
-    assert np.prod(x.shape) == np.prod(shape)
-    x = unary_op(ctx, 'a', x)
-    x.shape = shape
-    return x
+    r = unary_op(ctx, 'a', x)
+    r.shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    assert np.prod(x.shape) == np.prod(r.shape)
+    return r
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -405,27 +406,9 @@ class LogSoftmax(Function):
   @staticmethod
   def backward(ctx, grad_output):
     output, = ctx.saved_tensors
-
-    grad_input = buffer_like(ctx, grad_output)
-    prg = clbuild(ctx.cl_ctx, """
-    __kernel void lsmsub2(__global const float *grad_output, __global const float *output, int sz,
-                          __global float *grad_input) {
-      int gid = get_global_id(0);
-      int gidsz = gid*sz;
-      int gid2 = get_global_id(1);
-
-      // TODO: this is repeated in many kernels
-      float acc = 0.0;
-      for (int x = 0; x < sz; x++) {
-        acc += grad_output[gidsz + x];
-      }
-
-      grad_input[gidsz + gid2] = grad_output[gidsz + gid2] - exp(output[gidsz + gid2]) * acc;
-    }""")
-    prg.lsmsub2(ctx.cl_queue, [grad_output.shape[0], grad_output.shape[1]], None,
-      grad_output, output, i32(grad_output.shape[1]), grad_input)
-
-    return grad_input
+    lsum = reduce_op(ctx, "out += a", "out", grad_output, (grad_output.shape[0],1))
+    texp = binary_op(ctx, "exp(a) * b", output, lsum)
+    return binary_op(ctx, "a - b", grad_output, texp)
 register('logsoftmax', LogSoftmax, gpu=True)
 
 # ************* conv ops *************
@@ -478,11 +461,8 @@ class Conv2D(Function):
 
     prg.conv(ctx.cl_queue, [bs*groups*rcout, oy, ox], None,
       x, w, ret,
-      i32(H), i32(W),
-      i32(groups), i32(rcout), i32(cin),
-      i32(oy), i32(ox),
-      i32(iy), i32(ix),
-      i32(ys), i32(xs)
+      i32(H), i32(W), i32(groups), i32(rcout), i32(cin),
+      i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs)
     )
     return ret
 
@@ -511,14 +491,15 @@ class Conv2D(Function):
       int y = get_global_id(1);  // range 0-H
       int x = get_global_id(2);  // range 0-W
 
-      // tensx  = (bs, groups*cin, iy, ix)
+      // tensx = (bs, groups*cin, iy, ix)
       // tensw = (groups*rcout, cin, H, W)
       // ggg = (bs, groups*rout, oy, ox)
       float acc = 0.0;
       for (int Y = 0; Y < oy; Y++) {
         for (int X = 0; X < ox; X++) {
           for (int B = 0; B < bs; B++) {
-            acc += ggg[B*groups*rcout*oy*ox + +g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
+            acc += ggg[B*groups*rcout*oy*ox + +g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
+              tensx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
           }
         }
       }
@@ -531,13 +512,16 @@ class Conv2D(Function):
       int g = get_global_id(1);
       int ci = get_global_id(2);
 
-      for (int c = 0; c < rcout; c++) {
-        for (int Y = 0; Y < oy; Y++) {
-          for (int X = 0; X < ox; X++) {
-            for (int y = 0; y < H; y++) {
-              for (int x = 0; x < W; x++) {
-                dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x]+= ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X]*tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+      for (int Y = 0; Y < oy; Y++) {
+        for (int X = 0; X < ox; X++) {
+          for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+              float acc = 0.0;
+              for (int c = 0; c < rcout; c++) {
+                acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
+                  tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
               }
+              dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x] += acc;
             }
           }
         }
