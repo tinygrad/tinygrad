@@ -314,6 +314,7 @@ class Pad2D(Function):
     return ret
 register('pad2d', Pad2D, gpu=True)
 
+# TODO: Reshape shouldn't make a copy, but this is a big change since data tensor can't have shape
 class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
@@ -511,15 +512,16 @@ class Conv2D(Function):
       int g = get_global_id(1);
       int ci = get_global_id(2);
 
-      for (int c = 0; c < rcout; c++) {
-        for (int Y = 0; Y < oy; Y++) {
-          for (int X = 0; X < ox; X++) {
-            for (int y = 0; y < H; y++) {
-              for (int x = 0; x < W; x++) {
-                dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x] += \
-                  ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
+      for (int Y = 0; Y < oy; Y++) {
+        for (int X = 0; X < ox; X++) {
+          for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+              float acc = 0.0;
+              for (int c = 0; c < rcout; c++) {
+                acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
                   tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
               }
+              dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x] += acc;
             }
           }
         }
