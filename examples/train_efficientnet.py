@@ -1,7 +1,7 @@
 import os
 import time
 import numpy as np
-from efficientnet import EfficientNet
+from extra.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 
 if __name__ == "__main__":
