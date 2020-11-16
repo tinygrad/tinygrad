@@ -100,7 +100,7 @@ class TestMNIST(unittest.TestCase):
     model = TinyConvNet()
     [x.cuda_() for x in model.parameters()]
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, optimizer, steps=1000, gpu=True)
+    train(model, optimizer, steps=200, gpu=True)
     evaluate(model, gpu=True)
 
   def test_conv(self):
