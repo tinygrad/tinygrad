@@ -137,19 +137,16 @@ class Tensor:
       for t,g in zip(t0._ctx.parents, grads):
         if g is None:
           continue
-        if g.shape != t.data.shape:
-          print("grad shape must match tensor shape in %r, %r != %r" %
-            (self._ctx, g.shape, t.data.shape))
-          assert(False)
+        assert g.shape == t.data.shape, \
+          "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.data.shape)
         t.grad = Tensor(g) if t.grad is None else (t.grad + Tensor(g))
 
   # ***** tinygrad supports CPU and GPU *****
 
   def cpu(self):
     if self.gpu:
-      data = np.empty(self.shape, dtype=np.float32)
-      cl.enqueue_copy(cl_queue, data, self.data)
-      ret = Tensor(data)
+      ret = Tensor(np.empty(self.shape, dtype=np.float32))
+      cl.enqueue_copy(cl_queue, ret.data, self.data)
       if self.grad:
         ret.grad = self.grad.cpu()
       return ret
