@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 
 if __name__ == "__main__":
   Tensor.default_gpu = os.getenv("GPU") is not None
-  model = EfficientNet()
+  model = EfficientNet(int(os.getenv("NUM", "0")))
 
   BS = 4
 
