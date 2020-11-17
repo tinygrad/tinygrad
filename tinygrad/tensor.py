@@ -174,9 +174,7 @@ class Tensor:
       return self
 
   def detach(self):
-    r = self.reshape(shape=self.shape)
-    r._ctx = None
-    return r
+    return Tensor(self.data, self.gpu)
 
   # ***** put ops in these dicts *****
 
