@@ -173,6 +173,11 @@ class Tensor:
     else:
       return self
 
+  def detach(self):
+    r = self.reshape(shape=self.shape)
+    r._ctx = None
+    return r
+
   # ***** put ops in these dicts *****
 
   ops = {}
