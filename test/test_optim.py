@@ -55,7 +55,7 @@ class TestOptim(unittest.TestCase):
   def test_adam(self):
     for x,y in zip(step_tinygrad(Adam),
                    step_pytorch(torch.optim.Adam)):
-      np.testing.assert_allclose(x, y, atol=1e-5)
+      np.testing.assert_allclose(x, y, atol=1e-4)
 
   def test_sgd(self):
     for x,y in zip(step_tinygrad(SGD, kwargs={'lr': 0.001}),
