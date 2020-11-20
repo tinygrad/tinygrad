@@ -1,5 +1,5 @@
 numpy
-pyopencl==2020.2.2
+pyopencl
 # util deps
 requests
 # testing deps
