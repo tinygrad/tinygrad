@@ -27,7 +27,7 @@ class RMSprop(Optimizer):
     self.decay = Tensor([decay], gpu=params[0].gpu)
     self.eps = Tensor([eps], gpu=params[0].gpu)
 
-    self.v = [Tensor.zeros(*t.shape, gpu=params[0].gpu) for t in self.params]
+    self.v = [Tensor.zeros(t.shape, gpu=params[0].gpu) for t in self.params]
 
     self.one = Tensor([1], gpu=self.params[0].gpu)
     self.two = Tensor([2], gpu=self.params[0].gpu)
@@ -46,8 +46,8 @@ class Adam(Optimizer):
     self.eps = Tensor([eps], gpu=params[0].gpu)
     self.t = Tensor([0], gpu=params[0].gpu)
 
-    self.m = [Tensor.zeros(*t.shape, gpu=params[0].gpu) for t in self.params]
-    self.v = [Tensor.zeros(*t.shape, gpu=params[0].gpu) for t in self.params]
+    self.m = [Tensor.zeros(t.shape, gpu=params[0].gpu) for t in self.params]
+    self.v = [Tensor.zeros(t.shape, gpu=params[0].gpu) for t in self.params]
 
     self.one = Tensor([1], gpu=self.params[0].gpu)
     self.two = Tensor([2], gpu=self.params[0].gpu)
