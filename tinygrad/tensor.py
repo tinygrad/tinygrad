@@ -145,7 +145,7 @@ class Tensor:
 
   def cpu(self):
     if self.gpu:
-      ret = Tensor(np.empty(self.shape, dtype=np.float32))
+      ret = Tensor(np.empty(self.shape, dtype=np.float32), gpu=False)
       cl.enqueue_copy(cl_queue, ret.data, self.data)
       if self.grad:
         ret.grad = self.grad.cpu()
