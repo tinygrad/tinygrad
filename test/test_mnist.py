@@ -22,9 +22,9 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 
 # create a model
 class TinyBobNet:
-  def __init__(self):
-    self.l1 = Tensor(layer_init_uniform(784, 128))
-    self.l2 = Tensor(layer_init_uniform(128, 10))
+  def __init__(self, gpu=False):
+    self.l1 = Tensor(layer_init_uniform(784, 128), gpu=gpu)
+    self.l2 = Tensor(layer_init_uniform(128, 10), gpu=gpu)
 
   def parameters(self):
     return [self.l1, self.l2]
@@ -34,14 +34,14 @@ class TinyBobNet:
 
 # create a model with a conv layer
 class TinyConvNet:
-  def __init__(self):
+  def __init__(self, gpu=False):
     # https://keras.io/examples/vision/mnist_convnet/
     conv = 3
     #inter_chan, out_chan = 32, 64
     inter_chan, out_chan = 8, 16   # for speed
-    self.c1 = Tensor(layer_init_uniform(inter_chan,1,conv,conv))
-    self.c2 = Tensor(layer_init_uniform(out_chan,inter_chan,conv,conv))
-    self.l1 = Tensor(layer_init_uniform(out_chan*5*5, 10))
+    self.c1 = Tensor(layer_init_uniform(inter_chan,1,conv,conv), gpu=gpu)
+    self.c2 = Tensor(layer_init_uniform(out_chan,inter_chan,conv,conv), gpu=gpu)
+    self.l1 = Tensor(layer_init_uniform(out_chan*5*5, 10), gpu=gpu)
 
   def parameters(self):
     return [self.l1, self.c1, self.c2]
@@ -97,8 +97,7 @@ class TestMNIST(unittest.TestCase):
   @unittest.skipUnless(GPU, "Requires GPU")
   def test_conv_gpu(self):
     np.random.seed(1337)
-    model = TinyConvNet()
-    [x.cuda_() for x in model.parameters()]
+    model = TinyConvNet(gpu=True)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, optimizer, steps=200, gpu=True)
     evaluate(model, gpu=True)
@@ -113,8 +112,7 @@ class TestMNIST(unittest.TestCase):
   @unittest.skipUnless(GPU, "Requires GPU")
   def test_sgd_gpu(self):
     np.random.seed(1337)
-    model = TinyBobNet()
-    [x.cuda_() for x in model.parameters()]
+    model = TinyBobNet(gpu=True)
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, optimizer, steps=1000, gpu=True)
     evaluate(model, gpu=True)
@@ -129,8 +127,7 @@ class TestMNIST(unittest.TestCase):
   @unittest.skipUnless(GPU, "Requires GPU")
   def test_rmsprop_gpu(self):
     np.random.seed(1337)
-    model = TinyBobNet()
-    [x.cuda_() for x in model.parameters()]
+    model = TinyBobNet(gpu=True)
     optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
     train(model, optimizer, steps=1000, gpu=True)
     evaluate(model, gpu=True)

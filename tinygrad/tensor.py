@@ -93,20 +93,20 @@ class Tensor:
     return self.data.shape
 
   @staticmethod
-  def zeros(*shape):
-    return Tensor(np.zeros(shape, dtype=np.float32))
+  def zeros(*shape, gpu=None):
+    return Tensor(np.zeros(shape, dtype=np.float32), gpu)
 
   @staticmethod
-  def ones(*shape):
-    return Tensor(np.ones(shape, dtype=np.float32))
+  def ones(*shape, gpu=None):
+    return Tensor(np.ones(shape, dtype=np.float32), gpu)
 
   @staticmethod
-  def randn(*shape):
-    return Tensor(np.random.randn(*shape).astype(np.float32))
+  def randn(*shape, gpu=None):
+    return Tensor(np.random.randn(*shape).astype(np.float32), gpu)
 
   @staticmethod
-  def eye(dim):
-    return Tensor(np.eye(dim).astype(np.float32))
+  def eye(dim, gpu=None):
+    return Tensor(np.eye(dim).astype(np.float32), gpu)
 
   def backward(self, allow_fill=True):
     if self._ctx is None:
