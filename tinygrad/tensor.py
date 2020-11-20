@@ -54,8 +54,11 @@ def require_init_gpu():
 
 class Tensor:
   did_float_warning = False
+  default_gpu = False
 
-  def __init__(self, data, gpu=False):
+  def __init__(self, data, gpu=None):
+    if gpu is None:
+      gpu = Tensor.default_gpu
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif GPU and isinstance(data, cl._cl.Buffer):
@@ -90,11 +93,11 @@ class Tensor:
     return self.data.shape
 
   @staticmethod
-  def zeros(shape, gpu=False):
+  def zeros(*shape, gpu=False):
     return Tensor(np.zeros(shape, dtype=np.float32), gpu=gpu)
 
   @staticmethod
-  def ones(shape, gpu=False):
+  def ones(*shape, gpu=False):
     return Tensor(np.ones(shape, dtype=np.float32), gpu=gpu)
 
   @staticmethod
