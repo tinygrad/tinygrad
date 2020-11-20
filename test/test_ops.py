@@ -89,6 +89,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)), gpu=self.gpu)
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)), gpu=self.gpu)
 
+  def test_detach(self):
+    helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), gpu=self.gpu, forward_only=True)
+
   def test_conv2d(self):
     for bs in [1,8]:
       for cin in [1,3]:

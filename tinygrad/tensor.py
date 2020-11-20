@@ -173,6 +173,9 @@ class Tensor:
     else:
       return self
 
+  def detach(self):
+    return Tensor(self.data, self.gpu)
+
   # ***** put ops in these dicts *****
 
   ops = {}
