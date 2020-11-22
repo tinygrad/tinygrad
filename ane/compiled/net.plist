@@ -25,7 +25,7 @@
 		</array>
 		<key>Weights</key>
 		<array>
-			<string>/private/var/folders/l8/38vj8bm52_gfgsqgdn__sh2w0000gn/T/test_2C98AB8E-83F5-4069-B13D-315B9E562D09.mlmodelc/model.espresso.weights</string>
+			<string>/Users/taylor/fun/tinygrad/ane/compiled/model.espresso.weights</string>
 			<string>net.additional.weights</string>
 		</array>
 		<key>image</key>

@@ -1,10 +1,15 @@
 kernel driver: AppleH11ANEInterface
   requires entitlement: com.apple.ane.iokit-user-access
+	compiler is run in ANE_ProgramCreate_gated
+
+Espresso:
+	Contains ANECompilerEngine
 
 AppleNeuralEngine: Objective-C interface called by Espresso
   ANEServices: communication with the device
   ANECompiler: compile plist into hwx file
-
+		com.apple.ANECompilerService.allow in AppleNeuralEngine?
+		Called from ANECompilerService.xpc in AppleNeuralEngine.framework
 
 == call to the compiler (in dmesg!) ==
 
@@ -25,5 +30,25 @@ zin_ane_compiler v4.2.1
 	--Wl-undefined=fvmlib
 	-i /Library/Caches/com.apple.aned/tmp/Python/DB7E897E7F4D5D27501A998428B6D3863AFD96CEA82DAF2207A75394E6BAC44C/37C083FF396EB5948979EE20FD0457483E4ACE840AD23391A129BB83CFBC9C63/net.plist
 	-o /Library/Caches/com.apple.aned/20A2411/Python/C9981871BC59572E74AFA3014B183EA37567EE9A2A08328446CE4A2B754E109D/37C083FF396EB5948979EE20FD0457483E4ACE840AD23391A129BB83CFBC9C63/model.hwx.tmp
+
+== ANECCompile (in ANECompiler framework) ==
+  ANECCompile(__CFDictionary *param_1, __CFDictionary *param_2, unsigned long param_3)
+
+param_1:
+{   
+    InputNetworks =     (
+                {
+            NetworkPlistName = "net.plist";
+            NetworkPlistPath = "/Library/Caches/com.apple.aned/tmp/run/A2ACB9D5AA31B301563A4F62885BA379E62B0E1240E95C6902A93900FE0A9B54/37C083FF396EB5948979EE20FD0457483E4ACE840AD23391A129BB83CFBC9C63/";
+        }
+    );
+    OutputFileName = "model.hwx.tmp";
+    OutputFilePath = "/Library/Caches/com.apple.aned/20A2411/run/E68910CD1994681121EEDAFAE1BC524AA8E84CF80C42AFC0C7DE2C082C58BDFD/37C083FF396EB5948979EE20FD0457483E4ACE840AD23391A129BB83CFBC9C63/";
+}
+
+param_2:
+{
+    TargetArchitecture = h13;
+}
 
 
