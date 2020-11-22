@@ -39,9 +39,17 @@ int MyH11ANEDeviceControllerNotification(H11ANEDeviceController *param_1, void *
 }
 
 extern "C" {
-  int H11InitializePlatformServices(void);
+  // called
   int H11ANEDeviceOpen(unsigned long *param_1, void *param_2, unsigned long param_3, unsigned long param_4);
+
+  // programRequest has size 0x2038
+  int H11ANEProgramProcessRequestDirect(H11ANEDevice *pANEDevice, void *programRequest,void *requestCallback);
+
+  // never called
+  int H11InitializePlatformServices(void);
   int H11ANEProgramCreate(long param_1, long *param_2, long *param_3);
+
+  int H11ANEProgramPrepare(long param_1,long *param_2, unsigned long param_3);
 }
 
 /*int MyH11ANEDeviceMessageNotification(H11ANEDevice *param_1, unsigned int param_2, void *param_3, void *param_4) {
