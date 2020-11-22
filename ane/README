@@ -1,0 +1,29 @@
+kernel driver: AppleH11ANEInterface
+  requires entitlement: com.apple.ane.iokit-user-access
+
+AppleNeuralEngine: Objective-C interface called by Espresso
+  ANEServices: communication with the device
+  ANECompiler: compile plist into hwx file
+
+
+== call to the compiler (in dmesg!) ==
+
+[54476.282258]: H11ANEIn: ANE_ProgramCreate_gated:, ZinComputeProgramMake, get Mcache size: 0x0
+[54476.282259]: H11ANEIn: ANE_ProgramCreate_gated:,Program Identifier:ANEC v1
+zin_ane_compiler v4.2.1
+	-t h13
+	--fdram-allocator=ffreuse
+	--fdram-tensor-priority=sizethenliverange
+	--fl2-allocator=ffreuse
+	--fl3-allocator=ffreuse
+	--fl2-cache-mode=resident
+	--fsignature=ident
+	--memcache-strategy=
+[54476.282262]: 	--memcache-size=4194304
+	--fspatial-split=disabled
+	--fkernel-rewind=enabled
+	--Wl-undefined=fvmlib
+	-i /Library/Caches/com.apple.aned/tmp/Python/DB7E897E7F4D5D27501A998428B6D3863AFD96CEA82DAF2207A75394E6BAC44C/37C083FF396EB5948979EE20FD0457483E4ACE840AD23391A129BB83CFBC9C63/net.plist
+	-o /Library/Caches/com.apple.aned/20A2411/Python/C9981871BC59572E74AFA3014B183EA37567EE9A2A08328446CE4A2B754E109D/37C083FF396EB5948979EE20FD0457483E4ACE840AD23391A129BB83CFBC9C63/model.hwx.tmp
+
+
