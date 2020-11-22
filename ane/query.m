@@ -1,3 +1,7 @@
+// thanks to https://github.com/freedomtan/TestANE
+
+// gcc -framework Foundation query.m && ./a.out
+
 #import <Foundation/Foundation.h>
 
 int main (int argc, const char * argv[])
