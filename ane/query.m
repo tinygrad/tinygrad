@@ -3,6 +3,7 @@
 // gcc -framework Foundation query.m && ./a.out
 
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 
 int main (int argc, const char * argv[])
 {
@@ -16,5 +17,24 @@ int main (int argc, const char * argv[])
   NSLog(@"hasANE: %s", [_ANEDeviceInfo hasANE] ? "yes" : "no");
   NSLog(@"isInternalBuild: %s", [_ANEDeviceInfo isInternalBuild] ? "yes" : "no");
   NSLog(@"precompiledModelCheckDisabled: %s", [_ANEDeviceInfo precompiledModelChecksDisabled] ? "yes" : "no");
+
+  Class _ANEClient = NSClassFromString(@"_ANEClient");
+  [_ANEClient initialize];
+
+  Class elem = [_ANEClient class]; 
+  while (elem) {
+    NSLog(@"%s", class_getName(elem));
+    unsigned int numMethods = 0;
+    Method *mList = class_copyMethodList(elem, &numMethods);
+    if (mList) {
+      for (int j = 0; j < numMethods; j++) {
+        NSLog(@" %s", sel_getName(method_getName(mList[j])));
+      }
+      free(mList);
+    }
+    elem = class_getSuperclass(elem);
+    // no superclas support
+    break;
+  }
 }
 
