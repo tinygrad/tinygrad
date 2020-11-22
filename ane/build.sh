@@ -1,4 +1,4 @@
 #!/bin/bash
-clang++ -std=c++17 test.cc -F /System/Library/PrivateFrameworks/ -framework ANEServices 
+clang++ test.mm -F /System/Library/PrivateFrameworks/ -framework ANEServices -framework IOSurface -framework Foundation
 codesign --entitlements entitlements.xml -s "Taylor Swift Child" a.out
 

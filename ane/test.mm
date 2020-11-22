@@ -2,8 +2,12 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-// clang++ -std=c++17 test.cc -F /System/Library/PrivateFrameworks/ -framework ANEServices
+#import <IOSurface/IOSurfaceRef.h>
 
+#import <Foundation/Foundation.h>
+#import <CoreFoundation/CoreFoundation.h>
+
+// clang++ -std=c++17 test.cc -F /System/Library/PrivateFrameworks/ -framework ANEServices
 
 namespace H11ANE {
   class H11ANEDevice;
@@ -63,8 +67,46 @@ extern "C" {
 struct programRequest {
   int zero;
   int num;
-  void *surf;
+  IOSurfaceRef surf;
+  
+  // extra
+  char junk[0x2038-0x10];
 };
+
+/* 
+breakpoint set -r . -s ANEServices
+
+H11ANEDeviceOpen
+  CreateH11ANEDeviceController
+    H11ANEThreadReadySyncer
+    ...boring thread stuff...
+  AllocateStatsBufferPools
+  CreateH11ANEFrameReceiver
+    H11ANEFrameReceiver
+H11ANEProgramProcessRequestDirect
+  H11ANE::H11ANEFrameReceiver::ProgramProcessRequest
+    H11ANE::H11ANEDevice::ANE_ProgramSendRequest
+    H11ANE::H11ANEFrameReceiver::startNoDataTimer
+
++[_ANEClient initialize]
+  +[_ANELog framework]
++[_ANEClient sharedConnection]
+  -[_ANEClient initWithRestrictedAccessAllowed:]
+    +[_ANEDaemonConnection daemonConnection]
+      -[_ANEDaemonConnection init]
+        +[_ANEStrings machServiceName]
+        -[_ANEDaemonConnection initWithMachServiceName:restricted:]
++[_ANEModel modelAtURL:key:]
+  +[_ANEModel modelAtURL:key:modelAttributes:]
+    -[_ANEModel initWithModelAtURL:key:modelAttributes:]
+-[_ANEClient loadModel:options:qos:error:]
+  -[_ANEClient doLoadModel:options:qos:error:]
+    *** this happens for a long time, and I suspect runs the compiler ***
+    *** the H11ANEDeviceOpen happens in here
+-[_ANEClient evaluateWithModel:options:request:qos:error:] 
+  *** the H11ANEProgramProcessRequestDirect happens in here
+
+*/
 
 int main() {
   printf("hello %d\n", getpid());
@@ -76,20 +118,27 @@ int main() {
   H11ANEDevice *dev = NULL;
   uint64_t settings[4] = {0};
   // first two are some array thing (1 and unaligned pointer in real call)
-  settings[0] = 0;
-  settings[1] = NULL;
+  //settings[0] = 1;
+  //settings[1] = 0x00000029c2de11a2;
   settings[2] = 0;
-  settings[3] = 0x1388;
+  settings[3] = 5000;
 
   ret2 = H11ANEDeviceOpen((unsigned long *)&dev, settings, 0, 0);
   printf("open 0x%X %p\n", ret2, dev);
 
+  NSDictionary* dict = [NSDictionary dictionaryWithObjectsAndKeys:
+                           [NSNumber numberWithInt:1], kIOSurfaceWidth,
+                           [NSNumber numberWithInt:3], kIOSurfaceHeight,
+                           [NSNumber numberWithInt:4], kIOSurfaceBytesPerElement,
+                           nil];
+  IOSurfaceRef surf = IOSurfaceCreate((CFDictionaryRef)dict);
+  printf("we have surface %p\n", surf);
 
   //char programRequest[0x2038] = {0};
   struct programRequest pr = {0};
   pr.num = 1;
-  //pr.surf
-  ret2 = H11ANEProgramProcessRequestDirect(dev, &pr, NULL);
+  pr.surf = surf;
+  ret2 = H11ANEProgramProcessRequestDirect(dev, &pr, ^() { printf("callback"); } );
   printf("run 0x%X\n", ret2, dev);
 
   /*H11ANEDeviceController *ret = NULL;
