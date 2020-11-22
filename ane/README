@@ -75,4 +75,29 @@ param_2:
     TargetArchitecture = h13;
 }
 
+== Backtrace of device open ==
+
+  * frame #0: 0x00000001a68fac54 ANEServices`H11ANEDeviceOpen
+    frame #1: 0x00000001a78405b8 AppleNeuralEngine`__29-[_ANEDeviceController start]_block_invoke + 436
+    frame #2: 0x0000000193c84420 libdispatch.dylib`_dispatch_client_callout + 20
+    frame #3: 0x0000000193c92a98 libdispatch.dylib`_dispatch_lane_barrier_sync_invoke_and_complete + 60
+    frame #4: 0x00000001a78403e8 AppleNeuralEngine`-[_ANEDeviceController start] + 136
+    ...
+    frame #23: 0x00000001a64a4f38 Espresso`Espresso::ANERuntimeEngine::compiler::build_segment(std::__1::shared_ptr<Espresso::abstract_batch> const&, int, Espresso::net_compiler_segment_based::segment_t const&) + 2080
+    ...
+    frame #31: 0x000000019ab6099c CoreML`-[MLNeuralNetworkEngine rebuildPlan:] + 1640
+
+== Backtrace of run? ==
+
+  * frame #0: 0x00000001a68f9108 ANEServices`H11ANEProgramProcessRequestDirect
+    frame #1: 0x00000001a7839694 AppleNeuralEngine`-[_ANEProgramForEvaluation processRequest:qos:qIndex:modelStringID:options:error:] + 1904
+    frame #2: 0x00000001a7843ba4 AppleNeuralEngine`-[_ANEClient doEvaluateDirectWithModel:options:request:qos:error:] + 1236
+    frame #3: 0x00000001a7842034 AppleNeuralEngine`-[_ANEClient evaluateWithModel:options:request:qos:error:] + 104
+    frame #4: 0x00000001a64a2988 Espresso`Espresso::ANERuntimeEngine::compiler::__forward_segment(std::__1::shared_ptr<Espresso::abstract_batch> const&, int, Espresso::net_compiler_segment_based::segment_t const&) + 2008
+    frame #5: 0x00000001a6414548 Espresso`Espresso::net_compiler_segment_based::__forward(std::__1::shared_ptr<Espresso::abstract_batch> const&) + 992
+    frame #6: 0x00000001a67e2e3c Espresso`EspressoLight::espresso_plan::dispatch_task_on_compute_batch(std::__1::shared_ptr<Espresso::abstract_batch> const&, std::__1::shared_ptr<EspressoLight::plan_task_t> const&) + 612
+    frame #7: 0x00000001a67ebab0 Espresso`EspressoLight::espresso_plan::execute_sync() + 356
+    frame #8: 0x00000001a67f26fc Espresso`espresso_plan_execute_sync + 120
+    frame #9: 0x000000019ab674b8 CoreML`-[MLNeuralNetworkEngine executePlan:error:] + 136
+    frame #10: 0x000000019ab6799c CoreML`-[MLNeuralNetworkEngine evaluateInputs:bufferIndex:options:error:] + 368
 

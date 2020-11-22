@@ -40,9 +40,12 @@ int MyH11ANEDeviceControllerNotification(H11ANEDeviceController *param_1, void *
 
 extern "C" {
   // called
+  // param_3 = _ANEDeviceController
+  // param_4 = AppleNeuralEngineDeviceCallback
   int H11ANEDeviceOpen(unsigned long *param_1, void *param_2, unsigned long param_3, unsigned long param_4);
 
   // programRequest has size 0x2038
+  // the compiler already ran by this point
   int H11ANEProgramProcessRequestDirect(H11ANEDevice *pANEDevice, void *programRequest,void *requestCallback);
 
   // never called
@@ -57,16 +60,37 @@ extern "C" {
   return 0;
 }*/
 
+struct programRequest {
+  int zero;
+  int num;
+  void *surf;
+};
+
 int main() {
   printf("hello %d\n", getpid());
+  int ret2;
 
-  int ret2 = H11InitializePlatformServices();
-  printf("init 0x%X\n", ret2);
+  //ret2 = H11InitializePlatformServices();
+  //printf("init 0x%X\n", ret2);
 
   H11ANEDevice *dev = NULL;
-  char settings[0x20] = {0};
+  uint64_t settings[4] = {0};
+  // first two are some array thing (1 and unaligned pointer in real call)
+  settings[0] = 0;
+  settings[1] = NULL;
+  settings[2] = 0;
+  settings[3] = 0x1388;
+
   ret2 = H11ANEDeviceOpen((unsigned long *)&dev, settings, 0, 0);
   printf("open 0x%X %p\n", ret2, dev);
+
+
+  //char programRequest[0x2038] = {0};
+  struct programRequest pr = {0};
+  pr.num = 1;
+  //pr.surf
+  ret2 = H11ANEProgramProcessRequestDirect(dev, &pr, NULL);
+  printf("run 0x%X\n", ret2, dev);
 
   /*H11ANEDeviceController *ret = NULL;
   CreateH11ANEDeviceController(&ret, MyH11ANEDeviceControllerNotification, NULL);

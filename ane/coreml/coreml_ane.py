@@ -6,7 +6,7 @@ from coremltools.models.neural_network import datatypes, NeuralNetworkBuilder
 input_features = [('image', datatypes.Array(3))]
 output_features = [('probs', datatypes.Array(2))]
 
-weights = np.zeros((3, 2))
+weights = np.zeros((3, 2)) + 2
 bias = np.ones(2)
 
 builder = NeuralNetworkBuilder(input_features, output_features)
@@ -16,6 +16,7 @@ builder.add_inner_product(name='ip_layer', W=weights, b=bias, input_channels=3, 
 mlmodel = ct.models.MLModel(builder.spec)
 
 # trigger the ANE!
-out = mlmodel.predict({"image": np.zeros((3))})
+out = mlmodel.predict({"image": np.ones((3))})
+print(out)
 mlmodel.save('test.mlmodel')
 
