@@ -41,7 +41,7 @@ int MyH11ANEDeviceControllerNotification(H11ANEDeviceController *param_1, void *
 extern "C" {
   int H11InitializePlatformServices(void);
   int H11ANEDeviceOpen(unsigned long *param_1, void *param_2, unsigned long param_3, unsigned long param_4);
-  int H11ANEProgramCreate(long param_1, long *param_2, long *param_3)
+  int H11ANEProgramCreate(long param_1, long *param_2, long *param_3);
 }
 
 /*int MyH11ANEDeviceMessageNotification(H11ANEDevice *param_1, unsigned int param_2, void *param_3, void *param_4) {

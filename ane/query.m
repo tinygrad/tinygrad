@@ -18,10 +18,15 @@ int main (int argc, const char * argv[])
   NSLog(@"isInternalBuild: %s", [_ANEDeviceInfo isInternalBuild] ? "yes" : "no");
   NSLog(@"precompiledModelCheckDisabled: %s", [_ANEDeviceInfo precompiledModelChecksDisabled] ? "yes" : "no");
 
-  Class _ANEClient = NSClassFromString(@"_ANEClient");
-  [_ANEClient initialize];
+  //Class _ANEClient = NSClassFromString(@"_ANEClient");
+  //[_ANEClient initialize];
 
-  Class elem = [_ANEClient class]; 
+  Class _ANEDeviceController = NSClassFromString(@"_ANEDeviceController");
+
+  //NSObject *obj = [[_ANEDeviceController alloc] init];
+  //[obj start];
+
+  Class elem = [_ANEDeviceController class]; 
   while (elem) {
     NSLog(@"%s", class_getName(elem));
     unsigned int numMethods = 0;
