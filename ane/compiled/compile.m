@@ -13,7 +13,7 @@ int main() {
   ivalues[1] = CFSTR("/Users/taylor/fun/tinygrad/ane/compiled/");
   
   CFDictionaryRef iDictionary = CFDictionaryCreate(kCFAllocatorDefault, ikeys, ivalues, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-  CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, (void**)&iDictionary, 1, &kCFTypeArrayCallBacks);
+  CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, (const void**)&iDictionary, 1, &kCFTypeArrayCallBacks);
 
   CFMutableDictionaryRef optionsDictionary = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   CFMutableDictionaryRef flagsDictionary = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -24,8 +24,8 @@ int main() {
 
   CFDictionaryAddValue(flagsDictionary, CFSTR("TargetArchitecture"), CFSTR("h13"));
 
-  CFShow(optionsDictionary);
-  CFShow(flagsDictionary);
+  //CFShow(optionsDictionary);
+  //CFShow(flagsDictionary);
 
   printf("hello\n");
   int ret = ANECCompile(optionsDictionary, flagsDictionary, 0);

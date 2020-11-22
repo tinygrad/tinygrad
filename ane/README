@@ -11,6 +11,26 @@ AppleNeuralEngine: Objective-C interface called by Espresso
 		com.apple.ANECompilerService.allow in AppleNeuralEngine?
 		Called from ANECompilerService.xpc in AppleNeuralEngine.framework
 
+== Model Flow ==
+
+    Keras/ONNX model
+          |
+          | (coremltools, open source)
+          v
+      CoreML model
+          |
+          | (Espresso)
+          v
+       net.plist
+          |
+          | (AppleNeuralEngine, ANECompiler)
+          v
+       model.hwx
+          |
+          | (AppleNeuralEngine, ANEServices, AppleH11ANEInterface)
+          v
+ <run on neural engine>
+
 == call to the compiler (in dmesg!) ==
 
 [54476.282258]: H11ANEIn: ANE_ProgramCreate_gated:, ZinComputeProgramMake, get Mcache size: 0x0
