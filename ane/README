@@ -31,6 +31,10 @@ AppleNeuralEngine: Objective-C interface called by Espresso
           v
  <run on neural engine>
 
+TODO: Write a nice plist grabber
+DONE: Write a call to the compiler with plist+weights
+TODO: Write an hwx runner
+
 == call to the compiler (in dmesg!) ==
 
 [54476.282258]: H11ANEIn: ANE_ProgramCreate_gated:, ZinComputeProgramMake, get Mcache size: 0x0
