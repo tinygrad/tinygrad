@@ -10,7 +10,7 @@ int main() {
 
   CFTypeRef ivalues[2];
   ivalues[0] = CFSTR("net.plist");
-  ivalues[1] = CFSTR("/Users/taylor/fun/tinygrad/ane/compiled");
+  ivalues[1] = CFSTR("/Users/taylor/fun/tinygrad/ane/compiled/");
   
   CFDictionaryRef iDictionary = CFDictionaryCreate(kCFAllocatorDefault, ikeys, ivalues, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, (void**)&iDictionary, 1, &kCFTypeArrayCallBacks);
@@ -20,7 +20,7 @@ int main() {
 
   CFDictionaryAddValue(optionsDictionary, CFSTR("InputNetworks"), array);
   CFDictionaryAddValue(optionsDictionary, CFSTR("OutputFileName"), CFSTR("model.hwx.tmp"));
-  CFDictionaryAddValue(optionsDictionary, CFSTR("OutputFilePath"), CFSTR("/Users/taylor/fun/tinygrad/ane/compiled"));
+  CFDictionaryAddValue(optionsDictionary, CFSTR("OutputFilePath"), CFSTR("/Users/taylor/fun/tinygrad/ane/compiled/"));
 
   CFDictionaryAddValue(flagsDictionary, CFSTR("TargetArchitecture"), CFSTR("h13"));
 
