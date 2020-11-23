@@ -11,8 +11,8 @@
 
 enum ANEDeviceUsageType {
   UsageNoProgram,
-  UsageWithProgram,
-  UsageCrazy
+  UsageWithProgram,  // used in running process
+  UsageCompile       // used in aned
 };
 
 struct H11ANEDeviceInfoStruct {
@@ -20,14 +20,19 @@ struct H11ANEDeviceInfoStruct {
   uint64_t program_handle;
 };
 
+struct H11ANEProgramCreateArgsStruct {
+  void *program;
+  uint64_t program_length;
+};
+struct H11ANEProgramCreateArgsStructOutput;
+
 namespace H11ANE {
   class H11ANEDevice;
   class H11ANEServicesThreadParams;
   struct H11ANEProgramRequestArgsStruct;
 
   class H11ANEDeviceController {
-    public:
-      H11ANEDeviceController(int (*callback)(H11ANE::H11ANEDeviceController*, void*, H11ANE::H11ANEDevice*), void *arg);
+    public: H11ANEDeviceController(int (*callback)(H11ANE::H11ANEDeviceController*, void*, H11ANE::H11ANEDevice*), void *arg);
   };
 
   class H11ANEDevice {
@@ -46,6 +51,8 @@ namespace H11ANE {
       int ANE_PowerOff();
 
       void EnableDeviceMessages();
+
+      int ANE_ProgramCreate(H11ANEProgramCreateArgsStruct*, H11ANEProgramCreateArgsStructOutput*);
   };
 
   //unsigned long H11ANEServicesThreadStart(H11ANE::H11ANEServicesThreadParams *param_1);
@@ -152,6 +159,14 @@ H11ANE::H11ANEDevice::ANE_ProgramSendRequest(H11ANEProgramRequestArgsStruct*, un
   H11ANE::H11ANEDevice::ANE_PowerOn()
     H11ANE::H11ANEDevice::ANE_IsPowered()
 
+<from aned>
+H11ANEProgramCreate
+  H11ANE::H11ANEDevice::ANE_ProgramCreate
+H11ANEProgramPrepare
+  H11ANE::H11ANEDevice::ANE_ProgramPrepare
+H11ANEProgramDestroy
+  H11ANE::H11ANEDevice::ANE_ProgramDestroy
+
 */
 
 int main() {
@@ -204,7 +219,7 @@ int main() {
   char empty[0x90];
   H11ANEDeviceInfoStruct dis = {0};
   dis.program_handle = 0x0000004f4afdade2;
-  ret = dev->H11ANEDeviceOpen(MyH11ANEDeviceMessageNotification, empty, UsageNoProgram, &dis);
+  ret = dev->H11ANEDeviceOpen(MyH11ANEDeviceMessageNotification, empty, UsageCompile, &dis);
   printf("open 0x%x\n", ret);
 
   int is_powered;
@@ -216,6 +231,23 @@ int main() {
   /*unsigned int reg = 0;
   ret = dev->ANE_ReadANERegister(0, &reg);
   printf("reg 0x%x %lx\n", ret, reg);*/
+
+  is_powered = dev->ANE_IsPowered();
+  printf("powered? %d\n", is_powered);
+
+  char *prog = (char*)aligned_alloc(0x1000, 0x8000);
+  FILE *f = fopen("compiled/model.hwx.signed", "rb");
+  int sz = fread(prog, 1, 0x8000, f);
+  printf("read %x %p\n", sz, prog);
+  fclose(f);
+
+  H11ANEProgramCreateArgsStruct mprog;
+  mprog.program = prog;
+  mprog.program_length = 0x8000;
+
+  char *out = (char*)malloc(0x100);
+  ret = dev->ANE_ProgramCreate(&mprog, (H11ANEProgramCreateArgsStructOutput*)out);
+  printf("program create: %lx\n", ret);
 
   /*for (int i =0 ; i < 5; i++) {
     is_powered = dev->ANE_IsPowered();

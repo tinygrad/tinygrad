@@ -2,6 +2,9 @@ kernel driver: AppleH11ANEInterface
   requires entitlement: com.apple.ane.iokit-user-access
 	compiler is run in ANE_ProgramCreate_gated
 
+2 helper processes:
+  /usr/libexec/aned
+
 Espresso:
 	Contains ANECompilerEngine
 
