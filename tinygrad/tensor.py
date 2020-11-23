@@ -22,13 +22,10 @@ if DEBUG:
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    if DEBUG:
-      self.name = ("back_" if backward else "")+name
-      self.x = x
-    else: pass
+    self.name = ("back_" if backward else "")+name
+    self.x = x
   def __enter__(self):
     if DEBUG: self.st = time.time()
-    else: pass
   def __exit__(self, *junk):
     if DEBUG:
       et = (time.time()-self.st)*1000.
