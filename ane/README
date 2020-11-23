@@ -4,6 +4,7 @@ kernel driver: AppleH11ANEInterface
 
 2 helper processes:
   /usr/libexec/aned
+  ANECompilerService
 
 Espresso:
 	Contains ANECompilerEngine
@@ -18,18 +19,23 @@ AppleNeuralEngine: Objective-C interface called by Espresso
 
     Keras/ONNX model
           |
+          |   1_build
           | (coremltools, open source)
           v
       CoreML model
           |
+          |   TODO: automate this
+          |   Grabbed plist from lldbing ANECompilerService during 1_build
           | (Espresso)
           v
        net.plist
           |
+          |   2_compile
           | (AppleNeuralEngine, ANECompiler)
           v
        model.hwx
           |
+          |   3_run
           | (AppleNeuralEngine, ANEServices, AppleH11ANEInterface)
           v
  <run on neural engine>
