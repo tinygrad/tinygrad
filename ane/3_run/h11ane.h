@@ -40,6 +40,18 @@ namespace H11ANE {
       H11ANEDeviceController(
         int (*callback)(H11ANE::H11ANEDeviceController*, void*, H11ANE::H11ANEDevice*),
         void *arg);
+      int SetupDeviceController();
+    private:   // size is 0x50
+      CFArrayRef array_ref;
+      mach_port_t *master_port;
+      IONotificationPortRef port_ref;
+      CFRunLoopSourceRef source_ref;
+      int (*callback)(H11ANE::H11ANEDeviceController*, void*, H11ANE::H11ANEDevice*);
+      void *callback_arg;
+      CFRunLoopRef run_loop_ref;
+      io_iterator_t io_iterator;
+      pthread_t thread_self;
+      uint64_t unused;
   };
 
   class H11ANEDevice {
@@ -62,7 +74,8 @@ namespace H11ANE {
       int ANE_ProgramCreate(H11ANEProgramCreateArgsStruct*, H11ANEProgramCreateArgsStructOutput*);
       int ANE_ProgramPrepare(H11ANEProgramPrepareArgsStruct*);
       int ANE_ProgramSendRequest(H11ANEProgramRequestArgsStruct*, unsigned int);
-
+    private:   // size is 0x88 
+      unsigned char unknown[0x88];
   };
 
   unsigned long CreateH11ANEDeviceController(H11ANE::H11ANEDeviceController**,

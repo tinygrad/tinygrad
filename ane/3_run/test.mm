@@ -7,7 +7,8 @@
 #import <Foundation/Foundation.h>
 #import <CoreFoundation/CoreFoundation.h>
 
-void hexdump(unsigned char *dat, int l) {
+void hexdump(void *vdat, int l) {
+  unsigned char *dat = (unsigned char *)vdat;
   for (int i = 0; i < l; i++) {
     if (i!=0 && (i%0x10) == 0) printf("\n");
     printf("%02X ", dat[i]);
@@ -36,12 +37,12 @@ int main() {
   printf("hello %d\n", getpid());
   int ret2, ret;
 
-  // this gets the connection port
-  H11ANEDeviceController *dc = NULL;
-  CreateH11ANEDeviceController(&dc, MyH11ANEDeviceControllerNotification, NULL);
+  H11ANEDeviceController *dc = new H11ANEDeviceController(MyH11ANEDeviceControllerNotification, NULL);
+  dc->SetupDeviceController();
+  // callback should have happened
   printf("%p %p\n", dc, device);
 
-  H11ANEDevice *dev = device; //new H11ANEDevice(dc, 0xaabbcc);
+  H11ANEDevice *dev = device;
   printf("construct %p\n", dev);
 
   dev->EnableDeviceMessages();
