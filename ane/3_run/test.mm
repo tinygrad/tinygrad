@@ -34,36 +34,25 @@ int MyH11ANEDeviceMessageNotification(H11ANE::H11ANEDevice* dev, unsigned int pa
 }
 
 int main() {
+  int ret;
   printf("hello %d\n", getpid());
-  int ret2, ret;
 
-  H11ANEDeviceController *dc = new H11ANEDeviceController(MyH11ANEDeviceControllerNotification, NULL);
-  dc->SetupDeviceController();
-  // callback should have happened
-  printf("%p %p\n", dc, device);
-
+  H11ANEDeviceController dc(MyH11ANEDeviceControllerNotification, NULL);
+  dc.SetupDeviceController();
+  assert(device != NULL);
   H11ANEDevice *dev = device;
-  printf("construct %p\n", dev);
-
   dev->EnableDeviceMessages();
 
-  char empty[0x90];
+  char empty[0x90] = {0};
   H11ANEDeviceInfoStruct dis = {0};
   ret = dev->H11ANEDeviceOpen(MyH11ANEDeviceMessageNotification, empty, UsageCompile, &dis);
   printf("open 0x%x %p\n", ret, dev);
 
-  int is_powered;
-
   ret = dev->ANE_PowerOn();
   printf("power on: %d\n", ret);
 
-  // need moar privilege
-  /*unsigned int reg = 0;
-  ret = dev->ANE_ReadANERegister(0, &reg);
-  printf("reg 0x%x %lx\n", ret, reg);*/
-
-  is_powered = dev->ANE_IsPowered();
-  printf("powered? %d\n", is_powered);
+  ret = dev->ANE_IsPowered();
+  printf("powered? %d\n", ret);
 
   char *prog = (char*)aligned_alloc(0x1000, 0x8000);
   FILE *f = fopen("../2_compile/model.hwx", "rb");
@@ -128,14 +117,24 @@ int main() {
   pras->args[0x628/8] = (long long)out_surf_id<<32LL;
 
   mach_port_t recvPort = 0;
-  IOCreateReceivePort(0x39, &recvPort);
+  IOCreateReceivePort(kOSAsyncCompleteMessageID, &recvPort);
   printf("recv port: 0x%x\n", recvPort);
 
   ret = dev->ANE_ProgramSendRequest(pras, recvPort);
   printf("send 0x%x\n", ret);
 
-  // TODO: wait for message on recvPort
-  usleep(100*1000);
+	struct {
+		mach_msg_header_t header;
+		char data[256];
+	} message;
+
+	ret = mach_msg(&message.header,
+		      MACH_RCV_MSG,
+		      0, sizeof(message),
+		      recvPort,
+		      MACH_MSG_TIMEOUT_NONE,
+		      MACH_PORT_NULL);
+	printf("got message: %d sz %d\n", ret, message.header.msgh_size);
 
   unsigned char *dat = (unsigned char *)IOSurfaceGetBaseAddress(out_surf);
   printf("%p\n", dat);

@@ -62,24 +62,27 @@ namespace H11ANE {
         int (*callback)(H11ANE::H11ANEDevice*, unsigned int, void*, void*),
         void *param_2, ANEDeviceUsageType param_3, H11ANEDeviceInfoStruct *param_4);
 
-      int ANE_IsPowered();
+      void EnableDeviceMessages();
 
-      int ANE_ReadANERegister(unsigned int param_1, unsigned int *param_2);
-      int ANE_ForgetFirmware();
+      // power management
+      int ANE_IsPowered();
       int ANE_PowerOn();
       int ANE_PowerOff();
 
-      void EnableDeviceMessages();
-
-      int ANE_ProgramCreate(H11ANEProgramCreateArgsStruct*, H11ANEProgramCreateArgsStructOutput*);
+      // program creation
+      int ANE_ProgramCreate(H11ANEProgramCreateArgsStruct*,
+                            H11ANEProgramCreateArgsStructOutput*);
       int ANE_ProgramPrepare(H11ANEProgramPrepareArgsStruct*);
-      int ANE_ProgramSendRequest(H11ANEProgramRequestArgsStruct*, unsigned int);
+      int ANE_ProgramSendRequest(H11ANEProgramRequestArgsStruct*, mach_port_t);
+
+      // need PE_i_can_has_debugger
+      int ANE_ReadANERegister(unsigned int param_1, unsigned int *param_2);
+      int ANE_ForgetFirmware();
+
+
     private:   // size is 0x88 
       unsigned char unknown[0x88];
   };
-
-  unsigned long CreateH11ANEDeviceController(H11ANE::H11ANEDeviceController**,
-    int (*callback)(H11ANE::H11ANEDeviceController*, void*, H11ANE::H11ANEDevice*), void *arg);
 
 };
 
