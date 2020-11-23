@@ -32,7 +32,6 @@ class ProfileOp:
       debug_counts[self.name] += 1
       debug_times[self.name] += et
       print("%20s : %7.2f ms  %s" % (self.name, et, [y.shape for y in self.x]))
-    else: pass
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
