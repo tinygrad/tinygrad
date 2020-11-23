@@ -123,18 +123,18 @@ int main() {
   ret = dev->ANE_ProgramSendRequest(pras, recvPort);
   printf("send 0x%x\n", ret);
 
-	struct {
-		mach_msg_header_t header;
-		char data[256];
-	} message;
+  struct {
+    mach_msg_header_t header;
+    char data[256];
+  } message;
 
-	ret = mach_msg(&message.header,
-		      MACH_RCV_MSG,
-		      0, sizeof(message),
-		      recvPort,
-		      MACH_MSG_TIMEOUT_NONE,
-		      MACH_PORT_NULL);
-	printf("got message: %d sz %d\n", ret, message.header.msgh_size);
+  ret = mach_msg(&message.header,
+          MACH_RCV_MSG,
+          0, sizeof(message),
+          recvPort,
+          MACH_MSG_TIMEOUT_NONE,
+          MACH_PORT_NULL);
+  printf("got message: %d sz %d\n", ret, message.header.msgh_size);
 
   unsigned char *dat = (unsigned char *)IOSurfaceGetBaseAddress(out_surf);
   printf("%p\n", dat);
