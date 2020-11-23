@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include "float16.h"
 
 #import <IOSurface/IOSurfaceRef.h>
 
@@ -346,9 +347,17 @@ output buffer
   ret = dev->ANE_ProgramSendRequest(pras, recvPort);
   printf("send 0x%x\n", ret);
 
+  // TODO: wait for message on recvPort
+  usleep(100*1000);
+
   unsigned char *dat = (unsigned char *)IOSurfaceGetBaseAddress(out_surf);
   printf("%p\n", dat);
-  hexdump(dat, 0x10);
+  hexdump(dat, 0x100);
+
+  float a = 0;
+  float32(&a, 0x3c00);
+  printf("%f\n", a);
+  
 }
 
 
