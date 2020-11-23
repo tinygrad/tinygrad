@@ -25,7 +25,7 @@
 		</array>
 		<key>Weights</key>
 		<array>
-			<string>/Users/taylor/fun/tinygrad/ane/compiled/model.espresso.weights</string>
+			<string>model.espresso.weights</string>
 			<string>net.additional.weights</string>
 		</array>
 		<key>image</key>
