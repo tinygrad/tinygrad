@@ -42,7 +42,19 @@ AppleNeuralEngine: Objective-C interface called by Espresso
 
 TODO: Write a nice plist grabber
 DONE: Write a call to the compiler with plist+weights
-TODO: Write an hwx runner
+DONE: Write an hwx runner
+
+== plist exploration ==
+
+Float16 -> UInt8 for output works, Float32 doesn't
+Same for input
+
+Index 0: model.espresso.weights @ 192 is weights
+Index 1: net.additional.weights @ 0 is bias
+
+Float16 -> Float32 for bias works
+
+It's possible the compiler is Float32 -> Float16 converting, and the engine only supports Float16 + UInt8
 
 == call to the compiler (in dmesg!) ==
 
