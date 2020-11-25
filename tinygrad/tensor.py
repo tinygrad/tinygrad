@@ -19,25 +19,19 @@ if DEBUG:
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
       print("%20s : %3d  %10.2f ms" % (name, debug_counts[name], debug_times[name]))
   atexit.register(print_debug_exit)
-  class ProfileOp:
-    def __init__(self, name, x, backward=False):
-      self.name = ("back_" if backward else "")+name
-      self.x = x
-    def __enter__(self):
-      self.st = time.time()
-    def __exit__(self, *junk):
+
+class ProfileOp:
+  def __init__(self, name, x, backward=False):
+    self.name = ("back_" if backward else "")+name
+    self.x = x
+  def __enter__(self):
+    if DEBUG: self.st = time.time()
+  def __exit__(self, *junk):
+    if DEBUG:
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
       print("%20s : %7.2f ms  %s" % (self.name, et, [y.shape for y in self.x]))
-else:
-  class ProfileOp:
-    def __init__(self, name, x, backward=False):
-      pass
-    def __enter__(self):
-      pass
-    def __exit__(self, *junk):
-      pass
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
