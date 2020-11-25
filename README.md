@@ -92,13 +92,13 @@ from tinygrad.tensor import Tensor
 Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture to discover what it is.
 
 ```bash
-python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
+ipython3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
 
 Or, if you have a webcam and cv2 installed
 
 ```bash
-python3 examples/efficientnet.py webcam
+ipython3 examples/efficientnet.py webcam
 ```
 
 PROTIP: Set "GPU=1" environment variable if you want this to go faster.
