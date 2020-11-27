@@ -30,4 +30,6 @@ int main() {
   printf("hello\n");
   int ret = ANECCompile(optionsDictionary, flagsDictionary, 0);
   printf("compile: %d\n", ret);
+
+  return ret;
 }
