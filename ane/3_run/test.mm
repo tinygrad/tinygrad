@@ -92,12 +92,13 @@ int main() {
   printf("we have surface %p with id 0x%x\n", in_surf, in_surf_id);
 
   // load inputs
-  IOSurfaceLock(in_surf, 0, NULL);
+  IOSurfaceLock(in_surf, 0, nil);
   unsigned char *inp = (unsigned char *)IOSurfaceGetBaseAddress(in_surf);
   inp[0] = 0x39;
   inp[1] = 0x65;
   hexdump(inp, 0x20);
-  IOSurfaceUnlock(in_surf, 0, NULL);
+  __builtin___clear_cache((char*)inp, (char*)inp+0x1000);
+  IOSurfaceUnlock(in_surf, 0, nil);
 
   // output buffer
   NSDictionary* odict = [NSDictionary dictionaryWithObjectsAndKeys:
