@@ -1,9 +1,12 @@
+#include <os/log.h>
 #include <stdio.h>
 #import <CoreFoundation/CoreFoundation.h>
 
 int ANECCompile(CFDictionaryRef param_1, CFDictionaryRef param_2, unsigned long param_3);
 
 int main() {
+  os_log(OS_LOG_DEFAULT, "start compiler");
+
   CFTypeRef ikeys[2];
   ikeys[0] = CFSTR("NetworkPlistName");
   ikeys[1] = CFSTR("NetworkPlistPath");
