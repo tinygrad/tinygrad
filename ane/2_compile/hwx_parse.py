@@ -39,7 +39,8 @@ def compare(x, y):
   ln = []
   ln2 = []
 
-  for i in range(max(len(x), len(y))):
+  ll = (max(len(x), len(y)) + 0xF)//0x10 * 0x10
+  for i in range(ll+1):
     a = "%02X" % x[i] if i < len(x) else "--", \
         "%02X" % y[i] if i < len(y) else "--"
     if i!=0 and i%0x10 == 0:
