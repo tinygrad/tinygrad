@@ -31,26 +31,31 @@ for l in sym.nlists:
 for k,v in syms.items():
   print(k, hex(v))
 
-g = MachO.MachO("model.hwx.golden")
 
 
 from termcolor import colored
 def compare(x, y):
   ss = []
   ln = []
+  ln2 = []
   for i,a in enumerate(zip(x,y)):
     if i!=0 and i%0x10 == 0:
-      ss.append("%8X: " % i+''.join(ln)+"\n")
+      ss.append("%8X: " % i+''.join(ln)+"  "+''.join(ln2)+"\n")
       ln = []
+      ln2 = []
     if a[0] != a[1]:
-      ln.append(colored("%02X ", 'red') % a[0])
+      ln.append(colored("%02X ", 'green') % a[0])
+      ln2.append(colored("%02X ", 'red') % a[1])
     else:
       ln.append("%02X " % a[0])
+      ln2.append("%02X " % a[1])
   return ''.join(ss)
 
-f1 = a.headers[0].commands[1][2][0].section_data
-f2 = g.headers[0].commands[1][2][0].section_data
+g = MachO.MachO("model.hwx.golden")
+f1 = g.headers[0].commands[1][2][0].section_data
+f2 = a.headers[0].commands[1][2][0].section_data
 print(compare(f1, f2))
 
+#open("/tmp/data.section", "wb").write(f2)
 #print(compare(open("model.hwx.golden", "rb").read(), open("model.hwx", "rb").read()))
 
