@@ -44,6 +44,16 @@ TODO: Write a nice plist grabber
 DONE: Write a call to the compiler with plist+weights
 DONE: Write an hwx runner
 
+== ZinIrOpcodes ==
+
+kZinIrOpCodeConv = 0?
+kZinIrOpCodePool = 1
+kZinIrOpCodeElementWiseOp = 6
+kZinIrOpCodeConcat = 8
+kZinIrOpCodeFlattenComposite
+kZinIrOpCodeNEConvOp
+kZinIrOpCodeTranspose
+
 == plist exploration ==
 
 Float16 -> UInt8 for output works, Float32 doesn't
