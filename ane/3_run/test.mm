@@ -91,6 +91,14 @@ int main() {
   int in_surf_id = IOSurfaceGetID(in_surf);
   printf("we have surface %p with id 0x%x\n", in_surf, in_surf_id);
 
+  // load inputs
+  IOSurfaceLock(in_surf, 0, NULL);
+  unsigned char *inp = (unsigned char *)IOSurfaceGetBaseAddress(in_surf);
+  inp[0] = 0x39;
+  inp[1] = 0x65;
+  hexdump(inp, 0x20);
+  IOSurfaceUnlock(in_surf, 0, NULL);
+
   // output buffer
   NSDictionary* odict = [NSDictionary dictionaryWithObjectsAndKeys:
                            [NSNumber numberWithInt:1], kIOSurfaceWidth,
@@ -120,6 +128,7 @@ int main() {
   IOCreateReceivePort(kOSAsyncCompleteMessageID, &recvPort);
   printf("recv port: 0x%x\n", recvPort);
 
+  // run program
   ret = dev->ANE_ProgramSendRequest(pras, recvPort);
   printf("send 0x%x\n", ret);
 

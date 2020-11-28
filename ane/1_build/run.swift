@@ -17,7 +17,7 @@ class MNISTInput : MLFeatureProvider {
   func featureValue(for featureName: String) -> MLFeatureValue? {
     if (featureName == "image") {
       let tokenIDMultiArray = try? MLMultiArray(shape: [3], dataType: MLMultiArrayDataType.float32)
-      tokenIDMultiArray?[1] = NSNumber(value: 1337)
+      tokenIDMultiArray?[0] = NSNumber(value: 1337)
       return MLFeatureValue(multiArray: tokenIDMultiArray!)
     }
     return nil

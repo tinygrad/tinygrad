@@ -16,7 +16,7 @@ builder.add_inner_product(name='ip_layer', W=weights, b=bias, input_channels=3, 
 mlmodel = ct.models.MLModel(builder.spec)
 
 # trigger the ANE!
-out = mlmodel.predict({"image": np.ones((3))})
+out = mlmodel.predict({"image": np.array([1337,0,0], dtype=np.float32)})
 print(out)
 mlmodel.save('test.mlmodel')
 
