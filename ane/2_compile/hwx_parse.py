@@ -38,17 +38,20 @@ def compare(x, y):
   ss = []
   ln = []
   ln2 = []
-  for i,a in enumerate(zip(x,y)):
+
+  for i in range(max(len(x), len(y))):
+    a = "%02X" % x[i] if i < len(x) else "--", \
+        "%02X" % y[i] if i < len(y) else "--"
     if i!=0 and i%0x10 == 0:
-      ss.append("%8X: " % i+''.join(ln)+"  "+''.join(ln2)+"\n")
+      ss.append("%8X: " % i+' '.join(ln)+"  "+' '.join(ln2)+"\n")
       ln = []
       ln2 = []
-    if a[0] != a[1]:
-      ln.append(colored("%02X ", 'green') % a[0])
-      ln2.append(colored("%02X ", 'red') % a[1])
+    if a[0] != a[1] and a[0] != "--" and a[1] != "--":
+      ln.append(colored(a[0], 'green'))
+      ln2.append(colored(a[1], 'red'))
     else:
-      ln.append("%02X " % a[0])
-      ln2.append("%02X " % a[1])
+      ln.append(a[0])
+      ln2.append(a[1])
   return ''.join(ss)
 
 g = MachO.MachO("model.hwx.golden")
