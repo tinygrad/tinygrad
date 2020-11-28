@@ -71,10 +71,6 @@
 			</dict>
 			<key>Type</key>
 			<string>GOC</string>
-			<key>UnescapedBottom</key>
-			<string>probs_tmp_0</string>
-			<key>UnescapedName</key>
-			<string>probs</string>
 		</dict>
 		<key>probs@output</key>
 		<dict>
@@ -125,10 +121,6 @@
 			</dict>
 			<key>Type</key>
 			<string>Conv</string>
-			<key>UnescapedBottom</key>
-			<string>image</string>
-			<key>UnescapedName</key>
-			<string>probs_tmp_0</string>
 		</dict>
 	</dict>
 </dict>
