@@ -44,7 +44,7 @@ TODO: Write a nice plist grabber
 DONE: Write a call to the compiler with plist+weights
 DONE: Write an hwx runner
 
-== ZinIrOpcodes ==
+== Zin Constants ==
 
 kZinIrOpCodeConv = 0?
 kZinIrOpCodePool = 1
@@ -54,10 +54,17 @@ kZinIrOpCodeFlattenComposite
 kZinIrOpCodeNEConvOp
 kZinIrOpCodeTranspose
 
+# guessing from the hwx
+kZinTensorFormatUInt8 = 0
+kZinTensorFormatInt8 = 1
+kZinTensorFormatFloat16 = 2
+kZinTensorFormatInvalid
+
 == plist exploration ==
 
 Float16 -> UInt8 for output works, Float32 doesn't
 Same for input
+All weights must be float
 
 Index 0: model.espresso.weights @ 192 is weights
 Index 1: net.additional.weights @ 0 is bias
