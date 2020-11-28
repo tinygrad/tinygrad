@@ -31,7 +31,7 @@ for l in sym.nlists:
 for k,v in syms.items():
   print(k, hex(v))
 
-g = MachO.MachO("model.golden.hwx")
+g = MachO.MachO("model.hwx.golden")
 
 f1 = a.headers[0].commands[1][2][0].section_data
 f2 = g.headers[0].commands[1][2][0].section_data

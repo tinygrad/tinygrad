@@ -55,7 +55,7 @@ int main() {
   printf("powered? %d\n", ret);
 
   char *prog = (char*)aligned_alloc(0x1000, 0x8000);
-  FILE *f = fopen("../2_compile/model.hwx", "rb");
+  FILE *f = fopen("../2_compile/model.hwx.golden", "rb");
   int sz = fread(prog, 1, 0x8000, f);
   printf("read %x %p\n", sz, prog);
   fclose(f);
@@ -97,7 +97,6 @@ int main() {
   inp[0] = 0x39;
   inp[1] = 0x65;
   hexdump(inp, 0x20);
-  __builtin___clear_cache((char*)inp, (char*)inp+0x1000);
   IOSurfaceUnlock(in_surf, 0, nil);
 
   // output buffer
