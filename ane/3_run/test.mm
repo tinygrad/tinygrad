@@ -55,7 +55,7 @@ int main() {
   printf("powered? %d\n", ret);
 
   char *prog = (char*)aligned_alloc(0x1000, 0x8000);
-  FILE *f = fopen("../2_compile/model.hwx.golden", "rb");
+  FILE *f = fopen("../2_compile/model.hwx", "rb");
   int sz = fread(prog, 1, 0x8000, f);
   printf("read %x %p\n", sz, prog);
   fclose(f);

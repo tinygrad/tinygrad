@@ -33,20 +33,24 @@ for k,v in syms.items():
 
 g = MachO.MachO("model.hwx.golden")
 
-f1 = a.headers[0].commands[1][2][0].section_data
-f2 = g.headers[0].commands[1][2][0].section_data
 
 from termcolor import colored
 def compare(x, y):
   ss = []
+  ln = []
   for i,a in enumerate(zip(x,y)):
     if i!=0 and i%0x10 == 0:
-      ss.append("\n")
+      ss.append("%8X: " % i+''.join(ln)+"\n")
+      ln = []
     if a[0] != a[1]:
-      ss.append(colored("%02X ", 'red') % a[0])
+      ln.append(colored("%02X ", 'red') % a[0])
     else:
-      ss.append("%02X " % a[0])
+      ln.append("%02X " % a[0])
   return ''.join(ss)
 
+f1 = a.headers[0].commands[1][2][0].section_data
+f2 = g.headers[0].commands[1][2][0].section_data
 print(compare(f1, f2))
+
+#print(compare(open("model.hwx.golden", "rb").read(), open("model.hwx", "rb").read()))
 
