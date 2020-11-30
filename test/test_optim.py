@@ -1,20 +1,20 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, GPU
 from tinygrad.optim import Adam, SGD, RMSprop
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-def step_tinygrad(optim, kwargs={}):
-  net = TinyNet()
+def step_tinygrad(optim, kwargs={}, gpu=False):
+  net = TinyNet(gpu=gpu)
   optim = optim([net.x, net.W], **kwargs)
   out = net.forward()
   out.backward()
   optim.step()
-  return net.x.data, net.W.data
+  return net.x.cpu().data, net.W.cpu().data
 
 def step_pytorch(optim, kwargs={}):
   net = TorchNet()
@@ -26,10 +26,10 @@ def step_pytorch(optim, kwargs={}):
 
 
 class TinyNet():
-  def __init__(self):
-    self.x = Tensor(x_init.copy())
-    self.W = Tensor(W_init.copy())
-    self.m = Tensor(m_init.copy())
+  def __init__(self, gpu=False):
+    self.x = Tensor(x_init.copy(), gpu=gpu)
+    self.W = Tensor(W_init.copy(), gpu=gpu)
+    self.m = Tensor(m_init.copy(), gpu=gpu)
 
   def forward(self):
     out = self.x.dot(self.W).relu()
@@ -52,21 +52,29 @@ class TorchNet():
 
 
 class TestOptim(unittest.TestCase):
+  gpu = False
+
   def test_adam(self):
-    for x,y in zip(step_tinygrad(Adam),
+    for x,y in zip(step_tinygrad(Adam, gpu=self.gpu),
                    step_pytorch(torch.optim.Adam)):
       np.testing.assert_allclose(x, y, atol=1e-4)
 
   def test_sgd(self):
-    for x,y in zip(step_tinygrad(SGD, kwargs={'lr': 0.001}),
+    for x,y in zip(step_tinygrad(SGD, kwargs={'lr': 0.001}, gpu=self.gpu),
                    step_pytorch(torch.optim.SGD, kwargs={'lr': 0.001})):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_rmsprop(self):
-    for x,y in zip(step_tinygrad(RMSprop, kwargs={'lr': 0.001, 'decay': 0.99}),
+    for x,y in zip(step_tinygrad(RMSprop, kwargs={'lr': 0.001, 'decay': 0.99}, gpu=self.gpu),
                    step_pytorch(torch.optim.RMSprop,
                                 kwargs={'lr': 0.001, 'alpha': 0.99})):
       np.testing.assert_allclose(x, y, atol=1e-5)
+
+
+@unittest.skipUnless(GPU, "Requires GPU")
+class TestOptimGPU(TestOptim):
+  gpu = True
+
 
 if __name__ == '__main__':
   unittest.main()
