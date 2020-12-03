@@ -87,6 +87,10 @@ from tinygrad.tensor import Tensor
 (Tensor.ones(4,4).cuda() + Tensor.ones(4,4).cuda()).cpu()
 ```
 
+### ANE Support?!?!
+
+So it doesn't work yet, but see the ane directory for code to use the Apple Neural Engine at a low level.
+
 ### ImageNet inference
 
 Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture to discover what it is.
