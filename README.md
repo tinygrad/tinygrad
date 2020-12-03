@@ -80,7 +80,7 @@ optim.step()
 
 ### GPU Support?!
 
-tinygrad supports GPUs through PyOpenCL. Not all ops are supported yet on the backward pass.
+tinygrad supports GPUs through PyOpenCL.
 
 ```python
 from tinygrad.tensor import Tensor
@@ -89,7 +89,7 @@ from tinygrad.tensor import Tensor
 
 ### ANE Support?!?!
 
-So it doesn't work yet, but see the ane directory for code to use the Apple Neural Engine at a low level.
+So it doesn't work yet, but see the `ane` directory for code to use the Apple Neural Engine at a low level.
 
 ### ImageNet inference
 
