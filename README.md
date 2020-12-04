@@ -17,7 +17,7 @@ tinygrad is also a city in Russia.
 ### Installation
 
 ```bash
-pip3 install tinygrad --upgrade
+pip3 install git+https://github.com/geohot/tinygrad.git --upgrade
 ```
 
 ### Example
