@@ -42,6 +42,7 @@ def require_init_gpu():
       cl_ctx = cl.create_some_context(answers=[0,2])
     except (cl._cl.RuntimeError, cl._cl.LogicError, TypeError):
       cl_ctx = cl.create_some_context(interactive=False)
+    # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
 
 # **** start with two base classes ****
@@ -140,7 +141,7 @@ class Tensor:
   def cpu(self):
     if self.gpu:
       ret = Tensor(np.empty(self.shape, dtype=np.float32), gpu=False)
-      cl.enqueue_copy(cl_queue, ret.data, self.data)
+      cl.enqueue_copy(cl_queue, ret.data, self.data, is_blocking=True)
       if self.grad:
         ret.grad = self.grad.cpu()
       return ret
