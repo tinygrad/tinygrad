@@ -113,6 +113,7 @@ def binary_op(ctx, code, x, y):
     float b = b_g[idx_b];
     res_g[gid] = """+code+""";
   }""")
+
   prod = i32(shape_ret.prod())
   binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod,
         buffer_np(ctx, shape_x), buffer_np(ctx, shape_y), buffer_np(ctx, shape_ret))
@@ -245,7 +246,7 @@ class Sum(Function):
     input, = ctx.saved_tensors
     ret = buffer_like(ctx, input)
 
-    fill = clbuild(ctx.cl_ctx, fill, """
+    fill = clbuild(ctx.cl_ctx, "fill", """
     __kernel void fill(__global const float *a_g, __global float *res_g) {
       int gid = get_global_id(0);
       res_g[gid] = a_g[0];
