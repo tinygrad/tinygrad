@@ -8,24 +8,26 @@ if __name__ == "__main__":
   Tensor.default_gpu = os.getenv("GPU") is not None
   model = EfficientNet(int(os.getenv("NUM", "0")))
 
-  BS = 4
-
+  BS = 16
   img = np.zeros((BS,3,224,224), dtype=np.float32)
 
-  st = time.time()
-  out = model.forward(Tensor(img))
-  et = time.time()
-  print("forward %.2f s" % (et-st))
+  for i in range(32):
+    print("running batch %d" % i)
 
-  Y = [0]*BS
+    st = time.time()
+    out = model.forward(Tensor(img))
+    et = time.time()
+    print("forward %.2f s" % (et-st))
 
-  y = np.zeros((BS,1000), np.float32)
-  y[range(y.shape[0]),Y] = -1000.0
-  y = Tensor(y)
-  loss = out.logsoftmax().mul(y).mean()
+    Y = [0]*BS
 
-  st = time.time()
-  loss.backward()
-  et = time.time()
-  print("backward %.2f s" % (et-st))
+    y = np.zeros((BS,1000), np.float32)
+    y[range(y.shape[0]),Y] = -1000.0
+    y = Tensor(y)
+    loss = out.logsoftmax().mul(y).mean()
+
+    st = time.time()
+    loss.backward()
+    et = time.time()
+    print("backward %.2f s" % (et-st))
 
