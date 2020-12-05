@@ -1,6 +1,7 @@
 import numpy as np
-import torch
 import unittest
+import pytest
+from utils.import_facade import torch
 from tinygrad.tensor import Tensor
 from tinygrad.optim import Adam, SGD, RMSprop
 
@@ -51,6 +52,7 @@ class TorchNet():
     return out
 
 
+@pytest.mark.torch
 class TestOptim(unittest.TestCase):
   def test_adam(self):
     for x,y in zip(step_tinygrad(Adam),

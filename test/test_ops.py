@@ -1,9 +1,10 @@
 import os
-import torch
 import numpy as np
 import unittest
+import pytest
 import timeit
 import functools
+from utils.import_facade import torch
 from tinygrad.tensor import Tensor, GPU
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False):
@@ -37,6 +38,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
 
   print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp, tinygrad_fp, torch_fbp-torch_fp, tinygrad_fbp-tinygrad_fp))
 
+@pytest.mark.torch
 class TestOps(unittest.TestCase):
   gpu = False
   def test_add(self):

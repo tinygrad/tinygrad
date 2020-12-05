@@ -119,6 +119,12 @@ tinygrad will always be below 1000 lines. If it isn't, we will revert commits un
 python3 -m pytest
 ```
 
+To run only the subset of tests that don't presently depend on PyTorch, deselect the ones that do via:
+
+```bash
+python3 -m pytest -m "not torch"
+```
+
 ### TODO
 
 * Train an EfficientNet on ImageNet

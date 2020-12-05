@@ -2,9 +2,10 @@
 import time
 import cProfile
 import pstats
+import pytest
 import unittest
 import numpy as np
-import torch
+from utils.import_facade import torch
 from tinygrad.tensor import Tensor
 
 def start_profile():
@@ -20,6 +21,7 @@ def stop_profile(pr, sort='cumtime'):
   ps.sort_stats(sort)
   ps.print_stats(0.2)
 
+@pytest.mark.torch
 class TestConvSpeed(unittest.TestCase):
   def test_mnist(self):
     # https://keras.io/examples/vision/mnist_convnet/

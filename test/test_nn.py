@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 import unittest
+import pytest
 import numpy as np
+from utils.import_facade import torch
 from tinygrad.nn import *
-import torch
 
 class TestNN(unittest.TestCase):
+  @pytest.mark.torch
   def test_batchnorm2d(self):
     sz = 4
 

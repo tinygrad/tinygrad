@@ -1,6 +1,7 @@
 import numpy as np
-import torch
 import unittest
+import pytest
+from utils.import_facade import torch
 from tinygrad.tensor import Tensor
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
@@ -9,6 +10,7 @@ W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
+  @pytest.mark.torch
   def test_backward_pass(self):
     def test_tinygrad():
       x = Tensor(x_init)
@@ -33,6 +35,7 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  @pytest.mark.torch
   def test_jacobian(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5
