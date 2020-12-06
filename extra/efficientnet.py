@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.utils import fetch
+from tinygrad.utils import layer_init_uniform, fetch
 from tinygrad.nn import BatchNorm2D
 
 USE_TORCH = False
