@@ -1,19 +1,13 @@
 import numpy as np
-from .tensor import Function, register, Tensor
+from .tensor import Function, register, GPUBuffer
 import pyopencl as cl
 import functools
 
 def buffer_new(ctx, shape):
-  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape))
-  res_g.shape = tuple(shape)
-  res_g.dtype = np.float32
-  return res_g
+  return GPUBuffer(shape)
 
 def buffer_np(ctx, np_array):
-  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
-  res_g.shape = np_array.shape
-  res_g.dtype = np_array.dtype
-  return res_g
+  return GPUBuffer(np_array.shape, hostbuf=np_array)
 
 def buffer_zeros(ctx, shape):
   return buffer_np(ctx, np.zeros(shape, dtype=np.float32))
@@ -56,8 +50,8 @@ def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, decls=''):
   ret = buffer_zeros(ctx, (N, C, Yout, Xout))
   subsample = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, decls=decls)
   subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-                ret, input, uint2(Xout, Yout), uint2(Xin, Yin),
-                uint2(*kernel_size[::-1]), uint2(px, py))
+            ret.cl, input.cl, uint2(Xout, Yout), uint2(Xin, Yin),
+            uint2(*kernel_size[::-1]), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
@@ -81,7 +75,8 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', inpu
   ret = buffer_zeros(ctx, out_shape)
   supsample = cl_supsample_krnl_build(ctx.cl_ctx, result_op, decls=decls)
   supsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-                ret, input, input2, uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py))
+            ret.cl, input.cl, input2.cl if input2 is not None else input2,
+            uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
@@ -115,8 +110,8 @@ def binary_op(ctx, code, x, y):
   }""")
 
   prod = i32(shape_ret.prod())
-  binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod,
-        buffer_np(ctx, shape_x), buffer_np(ctx, shape_y), buffer_np(ctx, shape_ret))
+  binop(ctx.cl_queue, [prod], None, x.cl, y.cl, ret.cl, i32(n_dims), prod,
+        buffer_np(ctx, shape_x).cl, buffer_np(ctx, shape_y).cl, buffer_np(ctx, shape_ret).cl)
   return ret
 
 def unary_op(ctx, code, x):
@@ -127,7 +122,7 @@ def unary_op(ctx, code, x):
     float a = a_g[gid];
     res_g[gid] = """+code+""";
   }""")
-  unop(ctx.cl_queue, [np.prod(ret.shape)], None, x, ret)
+  unop(ctx.cl_queue, [np.prod(ret.shape)], None, x.cl, ret.cl)
   return ret
 
 def reduce_op(ctx, code, code2, inp, axis=None):
@@ -167,10 +162,11 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     }
     res_g[gid] = """+code2+""";
   }""")
-  reduce(ctx.cl_queue, [np.prod(osize)], None, inp, i32(np.prod(inp.shape)//np.prod(osize)), ret,
+  reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
+    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
-    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(osize, dtype=np.int32)))
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)).cl,
+    buffer_np(ctx, np.array(osize, dtype=np.int32)).cl)
   return ret
 
 def unbroadcast(ctx, out, in_sh):
@@ -251,7 +247,7 @@ class Sum(Function):
       int gid = get_global_id(0);
       res_g[gid] = a_g[0];
     }""")
-    fill(ctx.cl_queue, [np.prod(ret.shape)], None, grad_output, ret)
+    fill(ctx.cl_queue, [np.prod(ret.shape)], None, grad_output.cl, ret.cl)
     return ret
 
 register('sum', Sum, gpu=True)
@@ -285,7 +281,7 @@ class Dot(Function):
 
     # (isize,msize) x (msize,osize) = (isize,osize)
     matmul(ctx.cl_queue, [isize, osize], None,
-      input, weight, ret,
+      input.cl, weight.cl, ret.cl,
       msize, i32(1), msize, i32(1), osize, osize)
     return ret
 
@@ -299,12 +295,12 @@ class Dot(Function):
 
     # (isize,osize) x (msize,osize) = (isize,msize)
     matmul(ctx.cl_queue, [isize, msize], None,
-      grad_output, weight, grad_input,
+      grad_output.cl, weight.cl, grad_input.cl,
       osize, i32(1), osize, osize, i32(1), msize)
 
     # (isize,msize) x (isize,osize) = (msize,osize)
     matmul(ctx.cl_queue, [msize, osize], None,
-      input, grad_output, grad_weight,
+      input.cl, grad_output.cl, grad_weight.cl,
       i32(1), msize, isize, i32(1), osize, osize)
 
     return grad_input, grad_weight
@@ -334,7 +330,7 @@ class Pad2D(Function):
     }""")
     ctx.save_for_backward(padding, pad2d)
     pad2d(ctx.cl_queue, [bs*cin, iy, ix], None,
-        x, ret,
+        x.cl, ret.cl,
         i32(0), i32(0), i32(padding[2]), i32(padding[0]),
         i32(oy), i32(ox), i32(iy), i32(ix)
       )
@@ -347,7 +343,7 @@ class Pad2D(Function):
     oy, ox = iy - padding[2] - padding[3], ix - padding[0] - padding[1]
     ret = buffer_new(ctx, (bs, cin, oy, ox))
     pad2d(ctx.cl_queue, [bs*cin, oy, ox], None,
-              grad_output, ret,
+              grad_output.cl, ret.cl,
               i32(padding[2]), i32(padding[0]), i32(0), i32(0),
               i32(oy), i32(ox), i32(iy), i32(ix)
              )
@@ -500,7 +496,7 @@ class Conv2D(Function):
     }""")
 
     conv(ctx.cl_queue, [bs*groups*rcout, oy, ox], None,
-      x, w, ret,
+      x.cl, w.cl, ret.cl,
       i32(H), i32(W), i32(groups), i32(rcout), i32(cin),
       i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs)
     )
@@ -571,7 +567,7 @@ class Conv2D(Function):
     """)
 
     conv_args = i32(H), i32(W), i32(ctx.groups), i32(rcout), i32(cin), i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs)
-    convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x, grad_output, dw, *conv_args)
-    convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w, grad_output, dx, *conv_args)
+    convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
+    convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
 register('conv2d', Conv2D, gpu=True)

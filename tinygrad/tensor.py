@@ -45,6 +45,15 @@ def require_init_gpu():
     # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
 
+class GPUBuffer:
+  def __init__(self, shape, dtype=np.float32, hostbuf=None):
+    self.shape = tuple(shape)
+    self.dtype = dtype
+    if hostbuf is not None:
+      self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=hostbuf.ravel())
+    else:
+      self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape))
+
 # **** start with two base classes ****
 
 class Tensor:
@@ -56,7 +65,7 @@ class Tensor:
       gpu = Tensor.default_gpu
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
-    elif GPU and isinstance(data, cl._cl.Buffer):
+    elif GPU and isinstance(data, GPUBuffer):
       self.gpu = True
     elif not isinstance(data, np.ndarray):
       raise TypeError("Error constructing tensor with %r" % data)
@@ -87,6 +96,10 @@ class Tensor:
   def shape(self):
     return self.data.shape
 
+  @property
+  def dtype(self):
+    return self.data.dtype
+
   @staticmethod
   def zeros(*shape):
     return Tensor(np.zeros(shape, dtype=np.float32))
@@ -110,8 +123,8 @@ class Tensor:
     if self.grad is None and allow_fill:
       # fill in the first grad with one
       # this is "implicit gradient creation"
-      assert self.data.shape == (1,)
-      self.grad = Tensor(np.ones(self.data.shape, dtype=self.data.dtype), gpu=self.gpu)
+      assert self.shape == (1,)
+      self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu)
 
     visited, nodes = set(), []
     def deepwalk(node):
@@ -132,8 +145,8 @@ class Tensor:
       for t,g in zip(t0._ctx.parents, grads):
         if g is None:
           continue
-        assert g.shape == t.data.shape, \
-          "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.data.shape)
+        assert g.shape == t.shape, \
+          "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.shape)
         t.grad = Tensor(g) if t.grad is None else (t.grad + Tensor(g))
 
   # ***** tinygrad supports CPU and GPU *****
@@ -141,7 +154,7 @@ class Tensor:
   def cpu(self):
     if self.gpu:
       ret = Tensor(np.empty(self.shape, dtype=np.float32), gpu=False)
-      cl.enqueue_copy(cl_queue, ret.data, self.data, is_blocking=True)
+      cl.enqueue_copy(cl_queue, ret.data, self.data.cl, is_blocking=True)
       if self.grad:
         ret.grad = self.grad.cpu()
       return ret
@@ -157,11 +170,9 @@ class Tensor:
       raise Exception("No GPU Support, install pyopencl")
     if not self.gpu:
       require_init_gpu()
-      assert self.data.dtype == np.float32   # only float32 on GPU
-      data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data.ravel())
-      data.shape = self.shape
-      data.dtype = self.data.dtype
-      ret = Tensor(data)
+      assert self.dtype == np.float32   # only float32 on GPU
+
+      ret = Tensor(GPUBuffer(self.shape, self.dtype, self.data))
       if self.grad:
         ret.grad = self.grad.cuda()
       return ret
@@ -179,23 +190,23 @@ class Tensor:
   # ***** non first class ops *****
 
   def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.data.dtype), gpu=self.gpu)
+    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu)
     return self.sum().mul(div)
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+0.5, gpu=self.gpu)
+    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu)
     return self.pow(root)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1, gpu=self.gpu)
+    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu)
     return self.mul(y.pow(root))
 
   def swish(self):
     return self.mul(self.sigmoid())
 
   def tanh(self):
-    t2 = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+2, gpu=self.gpu)
-    t1 = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+1, gpu=self.gpu)
+    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu)
+    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu)
     return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
 
 # An instantiation of the Function is the Context
