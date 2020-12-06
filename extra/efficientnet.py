@@ -116,7 +116,7 @@ class MBConvBlock:
     return x
 
 class EfficientNet:
-  def __init__(self, number=0):
+  def __init__(self, number=0, categories=1000):
     self.number = number
     global_params = [
       # width, depth
@@ -171,8 +171,8 @@ class EfficientNet:
     out_channels = round_filters(1280)
     self._conv_head = Tensor.zeros(out_channels, in_channels, 1, 1)
     self._bn1 = BatchNorm2D(out_channels)
-    self._fc = Tensor.zeros(out_channels, 1000)
-    self._fc_bias = Tensor.zeros(1000)
+    self._fc = Tensor(layer_init_uniform(out_channels, categories))
+    self._fc_bias = Tensor(layer_init_uniform(categories))
 
   def forward(self, x):
     x = x.pad2d(padding=(0,1,0,1))
@@ -220,7 +220,10 @@ class EfficientNet:
         except AttributeError:
           mv = eval(mk.replace(".bias", "_bias"))
       vnp = v.numpy().astype(np.float32) if USE_TORCH else v
-      mv.data[:] = vnp if k != '_fc.weight' else vnp.T
+      try:
+        mv.data[:] = vnp if k != '_fc.weight' else vnp.T
+      except:
+        print('not loading fc weights')
       if gpu:
         mv.cuda_()
 
