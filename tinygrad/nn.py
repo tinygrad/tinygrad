@@ -3,12 +3,12 @@ from tinygrad.tensor import Tensor
 class BatchNorm2D:
   def __init__(self, sz, eps=0.001):
     self.eps = eps
-    self.weight = Tensor.zeros(sz)
+    self.weight = Tensor.ones(sz)
     self.bias = Tensor.zeros(sz)
 
     # TODO: need running_mean and running_var
     self.running_mean = Tensor.zeros(sz)
-    self.running_var = Tensor.zeros(sz)
+    self.running_var = Tensor.ones(sz)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x):
