@@ -3,7 +3,7 @@ import os
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, GPU
-from tinygrad.utils import fetch
+from tinygrad.utils import fetch, get_parameters
 import tinygrad.optim as optim
 from tqdm import trange
 
@@ -27,7 +27,7 @@ class TinyBobNet:
     self.l2 = Tensor.uniform(128, 10)
 
   def parameters(self):
-    return [self.l1, self.l2]
+    return get_parameters(self)
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
@@ -44,7 +44,7 @@ class TinyConvNet:
     self.l1 = Tensor.uniform(out_chan*5*5, 10)
 
   def parameters(self):
-    return [self.l1, self.c1, self.c2]
+    return get_parameters(self)
 
   def forward(self, x):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
