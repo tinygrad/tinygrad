@@ -350,21 +350,19 @@ class Pad2D(Function):
     return ret
 register('pad2d', Pad2D, gpu=True)
 
-# TODO: Reshape shouldn't make a copy, but this is a big change since data tensor can't have shape
 class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
-    r = unary_op(ctx, 'a', x)
-    r.shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    r = GPUBuffer(shape, hostbuf=x)
     assert np.prod(x.shape) == np.prod(r.shape)
     return r
 
   @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
-    grad_output = unary_op(ctx, 'a', grad_output)
-    grad_output.shape = in_shape
+    grad_output = GPUBuffer(in_shape, hostbuf=grad_output)
     return grad_output
 register('reshape', Reshape, gpu=True)
 

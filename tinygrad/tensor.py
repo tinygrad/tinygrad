@@ -50,7 +50,10 @@ class GPUBuffer:
     self.shape = tuple(shape)
     self.dtype = dtype
     if hostbuf is not None:
-      self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=hostbuf.ravel())
+      if isinstance(hostbuf, GPUBuffer):
+        self.cl = hostbuf.cl
+      else:
+        self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=hostbuf.ravel())
     else:
       self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape))
 
