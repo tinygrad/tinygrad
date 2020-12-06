@@ -3,10 +3,13 @@ import time
 import numpy as np
 from extra.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
+from tinygrad.utils import get_parameters
 
 if __name__ == "__main__":
   Tensor.default_gpu = os.getenv("GPU") is not None
   model = EfficientNet(int(os.getenv("NUM", "0")))
+  parameters = get_parameters(model)
+  print(len(parameters))
 
   BS = 16
   img = np.zeros((BS,3,224,224), dtype=np.float32)
@@ -25,6 +28,10 @@ if __name__ == "__main__":
     y[range(y.shape[0]),Y] = -1000.0
     y = Tensor(y)
     loss = out.logsoftmax().mul(y).mean()
+
+    # zero grad
+    for p in parameters:
+      p.grad = None
 
     st = time.time()
     loss.backward()
