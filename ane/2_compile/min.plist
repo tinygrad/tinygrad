@@ -27,7 +27,7 @@
     <!-- Global array of weights -->
 		<key>Weights</key>
 		<array>
-			<string>model.espresso.weights</string>
+			<string>min.weights</string>
 		</array>
 
 		<key>image</key>
@@ -60,7 +60,7 @@
 			<key>Name</key>
 			<string>conv_layer</string>
 			<key>OutputChannels</key>
-			<integer>2</integer>
+			<integer>3</integer>
 			<key>OutputType</key>
 			<string>Float16</string>
 
@@ -75,7 +75,7 @@
 				<key>KernelIndex</key>
 				<integer>0</integer>
 				<key>KernelOffset</key>
-				<integer>192</integer>
+				<integer>0</integer>
 				<key>KernelType</key>
 				<string>Float32</string>
 

@@ -60,6 +60,30 @@ kZinTensorFormatInt8 = 1
 kZinTensorFormatFloat16 = 2
 kZinTensorFormatInvalid
 
+== min.plist == 
+
+< conv op @ 0x140 >
+u32 0x140 = (OutputType * 0x10) | InputType
+u32 0x144 = InputChannels
+u32 0x148 = OutputChannels
+u16 0x15C = BatchSize
+
+u32 0x188 = InputRowStride
+u32 0x18C = InputPlaneStride
+u32 0x190 = (InputPlaneStride * InputChannels)
+
+u32 0x204 = InputChannels * 0x10
+u32 0x208 = InputChannels * 0x10
+
+u32 0x230 = OutputChannels * 0x10
+u32 0x234 = OutputChannels * 0x10
+
+u32 0x250 = 0x80 | KernelType
+
+u32 0x270 = OutputRowStride
+u32 0x274 = OutputPlaneStride
+u32 0x278 = (OutputPlaneStride * OutputChannels)
+
 == plist exploration ==
 
 Float16 -> UInt8 for output works, Float32 doesn't
