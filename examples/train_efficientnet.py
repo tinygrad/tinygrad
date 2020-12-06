@@ -41,7 +41,8 @@ if __name__ == "__main__":
   if TINY:
     model = TinyConvNet(classes)
   else:
-    model = EfficientNet(int(os.getenv("NUM", "0")), classes)
+    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=False)
+
   parameters = get_parameters(model)
   print("parameters", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
@@ -74,12 +75,19 @@ if __name__ == "__main__":
     optimizer.step()
     opt_time = (time.time()-st)*1000.0
 
+    st = time.time()
+    loss = loss.cpu().data
     cat = np.argmax(out.cpu().data, axis=1)
     accuracy = (cat == Y).mean()
+    finish_time = (time.time()-st)*1000.0
+
 
     # printing
-    t.set_description("loss %.2f accuracy %.2f -- %.2f %.2f %.2f -- %d" %
-      (loss.cpu().data, accuracy, fp_time, bp_time, opt_time, Tensor.allocated))
+    t.set_description("loss %.2f accuracy %.2f -- %.2f + %.2f + %.2f + %.2f = %.2f -- %d" %
+      (loss, accuracy,
+      fp_time, bp_time, opt_time, finish_time,
+      fp_time + bp_time + opt_time + finish_time,
+      Tensor.allocated))
 
     del out, y, loss
 
