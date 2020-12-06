@@ -57,12 +57,11 @@ It turns out, a decent autograd tensor library is 90% of what you need for neura
 ```python
 from tinygrad.tensor import Tensor
 import tinygrad.optim as optim
-from tinygrad.utils import layer_init_uniform
 
 class TinyBobNet:
   def __init__(self):
-    self.l1 = Tensor(layer_init_uniform(784, 128))
-    self.l2 = Tensor(layer_init_uniform(128, 10))
+    self.l1 = Tensor.uniform(784, 128)
+    self.l2 = Tensor.uniform(128, 10)
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()

@@ -4,7 +4,6 @@ import numpy as np
 from extra.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from tinygrad.utils import get_parameters, fetch
-from tinygrad.utils import layer_init_uniform
 from tqdm import trange
 import tinygrad.optim as optim
 import io
@@ -15,9 +14,9 @@ class TinyConvNet:
   def __init__(self, classes=10):
     conv = 3
     inter_chan, out_chan = 8, 16   # for speed
-    self.c1 = Tensor(layer_init_uniform(inter_chan,3,conv,conv))
-    self.c2 = Tensor(layer_init_uniform(out_chan,inter_chan,conv,conv))
-    self.l1 = Tensor(layer_init_uniform(out_chan*6*6, classes))
+    self.c1 = Tensor.uniform(inter_chan,3,conv,conv)
+    self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv)
+    self.l1 = Tensor.uniform(out_chan*6*6, classes)
 
   def forward(self, x):
     x = x.conv2d(self.c1).relu().max_pool2d()

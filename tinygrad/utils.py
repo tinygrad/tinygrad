@@ -1,10 +1,6 @@
 import numpy as np
 from tinygrad.tensor import Tensor
 
-def layer_init_uniform(*x):
-  ret = np.random.uniform(-1., 1., size=x)/np.sqrt(np.prod(x))
-  return ret.astype(np.float32)
-
 def fetch(url):
   import requests, os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())

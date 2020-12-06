@@ -118,6 +118,10 @@ class Tensor:
     return Tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
 
   @staticmethod
+  def uniform(*shape, **kwargs):
+    return Tensor((np.random.uniform(-1., 1., size=shape)/np.sqrt(np.prod(shape))).astype(np.float32), **kwargs)
+
+  @staticmethod
   def eye(dim, **kwargs):
     return Tensor(np.eye(dim).astype(np.float32), **kwargs)
 
