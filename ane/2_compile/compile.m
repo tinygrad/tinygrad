@@ -4,7 +4,7 @@
 
 int ANECCompile(CFDictionaryRef param_1, CFDictionaryRef param_2, unsigned long param_3);
 
-int main() {
+int main(int argc, char* argv[]) {
   os_log(OS_LOG_DEFAULT, "start compiler");
 
   CFTypeRef ikeys[2];
@@ -12,7 +12,7 @@ int main() {
   ikeys[1] = CFSTR("NetworkPlistPath");
 
   CFTypeRef ivalues[2];
-  ivalues[0] = CFSTR("net.plist");
+  ivalues[0] = CFStringCreateWithCString(kCFAllocatorDefault, argv[1], kCFStringEncodingUTF8);
   ivalues[1] = CFSTR("./");
   
   CFDictionaryRef iDictionary = CFDictionaryCreate(kCFAllocatorDefault, ikeys, ivalues, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
