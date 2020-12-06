@@ -105,25 +105,25 @@ class Tensor:
 
   # ***** creation helper functions *****
 
-  @staticmethod
-  def zeros(*shape, **kwargs):
-    return Tensor(np.zeros(shape, dtype=np.float32), **kwargs)
+  @classmethod
+  def zeros(cls, *shape, **kwargs):
+    return cls(np.zeros(shape, dtype=np.float32), **kwargs)
 
-  @staticmethod
-  def ones(*shape, **kwargs):
-    return Tensor(np.ones(shape, dtype=np.float32), **kwargs)
+  @classmethod
+  def ones(cls, *shape, **kwargs):
+    return cls(np.ones(shape, dtype=np.float32), **kwargs)
 
-  @staticmethod
-  def randn(*shape, **kwargs):
-    return Tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
+  @classmethod
+  def randn(cls, *shape, **kwargs):
+    return cls(np.random.randn(*shape).astype(np.float32), **kwargs)
 
-  @staticmethod
-  def uniform(*shape, **kwargs):
-    return Tensor((np.random.uniform(-1., 1., size=shape)/np.sqrt(np.prod(shape))).astype(np.float32), **kwargs)
+  @classmethod
+  def uniform(cls, *shape, **kwargs):
+    return cls((np.random.uniform(-1., 1., size=shape)/np.sqrt(np.prod(shape))).astype(np.float32), **kwargs)
 
-  @staticmethod
-  def eye(dim, **kwargs):
-    return Tensor(np.eye(dim).astype(np.float32), **kwargs)
+  @classmethod
+  def eye(cls, dim, **kwargs):
+    return cls(np.eye(dim).astype(np.float32), **kwargs)
 
   # ***** toposort and backward pass *****
 
