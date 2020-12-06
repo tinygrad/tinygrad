@@ -1,3 +1,4 @@
+import numpy as np
 from tinygrad.tensor import Tensor
 
 class BatchNorm2D:
@@ -10,12 +11,20 @@ class BatchNorm2D:
     self.running_mean = Tensor.zeros(sz, requires_grad=False)
     self.running_var = Tensor.ones(sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    self.sz = sz
 
   def __call__(self, x):
-    # TODO: use tinyops for this
-    # mean op needs to support the axis argument before we can do this
-    #self.running_mean.data = x.data.mean(axis=(0,2,3))
-    #self.running_var.data = ((x - self.running_mean.reshape(shape=[1, -1, 1, 1]))**self.two).data.mean(axis=(0,2,3))
+    sz = x.shape[1]
+    BS = x.shape[0]
+    m = x.shape[2]*x.shape[3]
+    print(x.shape,BS,m)
+
+    A =  Tensor(np.ones([1,BS], dtype=np.float32)/BS,  gpu=x.gpu, requires_grad=False)
+    B =  Tensor(np.ones([m,1], dtype=np.float32)/m,  gpu=x.gpu, requires_grad=False)
+    self.running_mean = A.dot(x.reshape(shape=[BS,x.shape[1]*m])).reshape(shape=[x.shape[1],m]).dot(B).reshape(shape=[x.shape[1]])
+    y = (x - self.running_mean.reshape(shape=[1, -1, 1, 1]))*(x - self.running_mean.reshape(shape=[1, -1, 1, 1]))
+    self.running_var = A.dot(y.reshape(shape=[BS,x.shape[1]*m])).reshape(shape=[y.shape[1],m]).dot(B).reshape(shape=[x.shape[1]])
+
 
     # this work at inference?
     x = x.sub(self.running_mean.reshape(shape=[1, -1, 1, 1]))
