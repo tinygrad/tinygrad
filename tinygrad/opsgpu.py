@@ -4,13 +4,13 @@ import pyopencl as cl
 import functools
 
 def buffer_new(ctx, shape):
-  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY, 4*np.prod(shape))
+  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape))
   res_g.shape = tuple(shape)
   res_g.dtype = np.float32
   return res_g
 
 def buffer_np(ctx, np_array):
-  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.WRITE_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
+  res_g = cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
   res_g.shape = np_array.shape
   res_g.dtype = np_array.dtype
   return res_g
@@ -93,7 +93,7 @@ def binary_op(ctx, code, x, y):
   if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
     raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
   shape_ret = np.maximum(shape_x, shape_y)
-  ret = buffer_zeros(ctx, shape_ret)
+  ret = buffer_new(ctx, shape_ret)
 
   binop = clbuild(ctx.cl_ctx, "binop", """
   __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g, int n_dims, int prod,
