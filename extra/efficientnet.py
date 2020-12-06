@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.utils import layer_init_uniform, fetch
+from tinygrad.utils import fetch
 from tinygrad.nn import BatchNorm2D
 
 USE_TORCH = False
@@ -174,13 +174,8 @@ class EfficientNet:
     out_channels = round_filters(1280)
     self._conv_head = Tensor.uniform(out_channels, in_channels, 1, 1)
     self._bn1 = BatchNorm2D(out_channels)
-<<<<<<< HEAD
-    self._fc = Tensor(layer_init_uniform(out_channels, categories))
-    self._fc_bias = Tensor(layer_init_uniform(categories))
-=======
     self._fc = Tensor.uniform(out_channels, classes)
     self._fc_bias = Tensor.zeros(classes)
->>>>>>> upstream/master
 
   def forward(self, x):
     x = x.pad2d(padding=(0,1,0,1))
