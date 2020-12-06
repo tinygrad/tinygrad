@@ -62,6 +62,8 @@ kZinTensorFormatInvalid
 
 == min.plist == 
 
+Types: GOC, Conv, Broadcast, ScaledElementWise
+
 < conv op @ 0x140 >
 u32 0x140 = (OutputType * 0x10) | InputType
 u32 0x144 = InputChannels
