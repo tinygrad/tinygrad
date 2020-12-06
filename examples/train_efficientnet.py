@@ -41,6 +41,8 @@ if __name__ == "__main__":
     model = TinyConvNet(classes)
   else:
     model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=False)
+    #model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
+    #model.load_weights_from_torch()
 
   parameters = get_parameters(model)
   print("parameters", len(parameters))
@@ -74,12 +76,13 @@ if __name__ == "__main__":
     optimizer.step()
     opt_time = (time.time()-st)*1000.0
 
+    #print(out.cpu().data)
+
     st = time.time()
     loss = loss.cpu().data
     cat = np.argmax(out.cpu().data, axis=1)
     accuracy = (cat == Y).mean()
     finish_time = (time.time()-st)*1000.0
-
 
     # printing
     t.set_description("loss %.2f accuracy %.2f -- %.2f + %.2f + %.2f + %.2f = %.2f -- %d" %

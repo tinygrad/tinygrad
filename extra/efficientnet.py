@@ -180,8 +180,8 @@ class EfficientNet:
   def forward(self, x):
     x = x.pad2d(padding=(0,1,0,1))
     x = self._bn0(x.conv2d(self._conv_stem, stride=2)).swish()
+    #print(x.shape, x.data[:, 0, 0, 0])
     for block in self._blocks:
-      #print(x.shape)
       x = block(x)
     x = self._bn1(x.conv2d(self._conv_head)).swish()
     x = x.avg_pool2d(kernel_size=x.shape[2:4])
@@ -189,7 +189,7 @@ class EfficientNet:
     #x = x.dropout(0.2)
     return x.dot(self._fc).add(self._fc_bias.reshape(shape=[1,-1]))
 
-  def load_weights_from_torch(self, gpu):
+  def load_weights_from_torch(self):
     # load b0
     # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/utils.py#L551
     if self.number == 0:
@@ -223,7 +223,10 @@ class EfficientNet:
         except AttributeError:
           mv = eval(mk.replace(".bias", "_bias"))
       vnp = v.numpy().astype(np.float32) if USE_TORCH else v
-      mv.data[:] = vnp if k != '_fc.weight' else vnp.T
-      if gpu:
-        mv.cuda_()
+      vnp = vnp if k != '_fc.weight' else vnp.T
+
+      if mv.shape == vnp.shape or vnp.shape == ():
+        mv.data[:] = vnp
+      else:
+        print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 

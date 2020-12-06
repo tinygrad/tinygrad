@@ -195,23 +195,23 @@ class Tensor:
   # ***** non first class ops *****
 
   def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu)
+    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
     return self.sum().mul(div)
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu)
+    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
     return self.pow(root)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu)
+    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu, requires_grad=False)
     return self.mul(y.pow(root))
 
   def swish(self):
     return self.mul(self.sigmoid())
 
   def tanh(self):
-    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu)
-    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu)
+    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu, requires_grad=False)
+    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu, requires_grad=False)
     return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
 
 # An instantiation of the Function is the Context
@@ -251,7 +251,7 @@ def register(name, fxn, gpu=False):
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
-  if name in ['add', 'sub', 'mul', 'div']:
+  if name in ['add', 'sub', 'mul', 'div', 'pow']:
     setattr(Tensor, "__%s__" % name, dispatch)
     setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
 
