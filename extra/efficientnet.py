@@ -70,10 +70,10 @@ def fake_torch_load(b0):
   return ret
 
 class MBConvBlock:
-  def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio):
+  def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se):
     oup = expand_ratio * input_filters
     if expand_ratio != 1:
-      self._expand_conv = Tensor.zeros(oup, input_filters, 1, 1)
+      self._expand_conv = Tensor.uniform(oup, input_filters, 1, 1)
       self._bn0 = BatchNorm2D(oup)
     else:
       self._expand_conv = None
@@ -84,16 +84,18 @@ class MBConvBlock:
     else:
       self.pad = [(kernel_size-1)//2]*4
 
-    self._depthwise_conv = Tensor.zeros(oup, 1, kernel_size, kernel_size)
+    self._depthwise_conv = Tensor.uniform(oup, 1, kernel_size, kernel_size)
     self._bn1 = BatchNorm2D(oup)
 
-    num_squeezed_channels = max(1, int(input_filters * se_ratio))
-    self._se_reduce = Tensor.zeros(num_squeezed_channels, oup, 1, 1)
-    self._se_reduce_bias = Tensor.zeros(num_squeezed_channels)
-    self._se_expand = Tensor.zeros(oup, num_squeezed_channels, 1, 1)
-    self._se_expand_bias = Tensor.zeros(oup)
+    self.has_se = has_se
+    if self.has_se:
+      num_squeezed_channels = max(1, int(input_filters * se_ratio))
+      self._se_reduce = Tensor.uniform(num_squeezed_channels, oup, 1, 1)
+      self._se_reduce_bias = Tensor.zeros(num_squeezed_channels)
+      self._se_expand = Tensor.uniform(oup, num_squeezed_channels, 1, 1)
+      self._se_expand_bias = Tensor.zeros(oup)
 
-    self._project_conv = Tensor.zeros(output_filters, oup, 1, 1)
+    self._project_conv = Tensor.uniform(output_filters, oup, 1, 1)
     self._bn2 = BatchNorm2D(output_filters)
 
   def __call__(self, inputs):
@@ -105,10 +107,11 @@ class MBConvBlock:
     x = self._bn1(x).swish()
 
     # has_se
-    x_squeezed = x.avg_pool2d(kernel_size=x.shape[2:4])
-    x_squeezed = x_squeezed.conv2d(self._se_reduce).add(self._se_reduce_bias.reshape(shape=[1, -1, 1, 1])).swish()
-    x_squeezed = x_squeezed.conv2d(self._se_expand).add(self._se_expand_bias.reshape(shape=[1, -1, 1, 1]))
-    x = x.mul(x_squeezed.sigmoid())
+    if self.has_se:
+      x_squeezed = x.avg_pool2d(kernel_size=x.shape[2:4])
+      x_squeezed = x_squeezed.conv2d(self._se_reduce).add(self._se_reduce_bias.reshape(shape=[1, -1, 1, 1])).swish()
+      x_squeezed = x_squeezed.conv2d(self._se_expand).add(self._se_expand_bias.reshape(shape=[1, -1, 1, 1]))
+      x = x.mul(x_squeezed.sigmoid())
 
     x = self._bn2(x.conv2d(self._project_conv))
     if x.shape == inputs.shape:
@@ -116,7 +119,11 @@ class MBConvBlock:
     return x
 
 class EfficientNet:
+<<<<<<< HEAD
   def __init__(self, number=0, categories=1000):
+=======
+  def __init__(self, number=0, classes=1000, has_se=True):
+>>>>>>> upstream/master
     self.number = number
     global_params = [
       # width, depth
@@ -145,7 +152,7 @@ class EfficientNet:
       return int(math.ceil(global_params[1] * repeats))
 
     out_channels = round_filters(32)
-    self._conv_stem = Tensor.zeros(out_channels, 3, 3, 3)
+    self._conv_stem = Tensor.uniform(out_channels, 3, 3, 3)
     self._bn0 = BatchNorm2D(out_channels)
     blocks_args = [
       [1, 3, (1,1), 1, 32, 16, 0.25],
@@ -163,22 +170,27 @@ class EfficientNet:
       args[3] = round_filters(args[3])
       args[4] = round_filters(args[4])
       for n in range(round_repeats(b[0])):
-        self._blocks.append(MBConvBlock(*args))
+        self._blocks.append(MBConvBlock(*args, has_se=has_se))
         args[3] = args[4]
         args[1] = (1,1)
 
     in_channels = round_filters(320)
     out_channels = round_filters(1280)
-    self._conv_head = Tensor.zeros(out_channels, in_channels, 1, 1)
+    self._conv_head = Tensor.uniform(out_channels, in_channels, 1, 1)
     self._bn1 = BatchNorm2D(out_channels)
+<<<<<<< HEAD
     self._fc = Tensor(layer_init_uniform(out_channels, categories))
     self._fc_bias = Tensor(layer_init_uniform(categories))
+=======
+    self._fc = Tensor.uniform(out_channels, classes)
+    self._fc_bias = Tensor.zeros(classes)
+>>>>>>> upstream/master
 
   def forward(self, x):
     x = x.pad2d(padding=(0,1,0,1))
     x = self._bn0(x.conv2d(self._conv_stem, stride=2)).swish()
+    #print(x.shape, x.data[:, 0, 0, 0])
     for block in self._blocks:
-      #print(x.shape)
       x = block(x)
     x = self._bn1(x.conv2d(self._conv_head)).swish()
     x = x.avg_pool2d(kernel_size=x.shape[2:4])
@@ -186,7 +198,7 @@ class EfficientNet:
     #x = x.dropout(0.2)
     return x.dot(self._fc).add(self._fc_bias.reshape(shape=[1,-1]))
 
-  def load_weights_from_torch(self, gpu):
+  def load_weights_from_torch(self):
     # load b0
     # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/utils.py#L551
     if self.number == 0:
@@ -220,10 +232,10 @@ class EfficientNet:
         except AttributeError:
           mv = eval(mk.replace(".bias", "_bias"))
       vnp = v.numpy().astype(np.float32) if USE_TORCH else v
-      try:
-        mv.data[:] = vnp if k != '_fc.weight' else vnp.T
-      except:
-        print('not loading fc weights')
-      if gpu:
-        mv.cuda_()
+      vnp = vnp if k != '_fc.weight' else vnp.T
+
+      if mv.shape == vnp.shape or vnp.shape == ():
+        mv.data[:] = vnp
+      else:
+        print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 

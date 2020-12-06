@@ -45,19 +45,6 @@ class Mul(Function):
     return unbroadcast(y*grad_output, x.shape), unbroadcast(x*grad_output, y.shape)
 register('mul', Mul)
 
-class Div(Function):
-  @staticmethod
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return x / y
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
-    return unbroadcast(grad_output / y, x.shape), unbroadcast(-x * grad_output / y**2, y.shape)
-# TODO: registering this breaks the default div on the GPU
-#register('div', Div)
-
 class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):

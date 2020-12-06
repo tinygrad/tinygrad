@@ -2,14 +2,9 @@
 from inspect import signature
 import numpy as np
 import os
-try:
-  import pyopencl as cl
-  GPU = True
-except ImportError:
-  # no GPU support
-  GPU = False
 
-# **** profiler, 10 lines too long ****
+# **** profiler ****
+
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
   import collections, atexit, time
@@ -33,50 +28,33 @@ class ProfileOp:
       debug_times[self.name] += et
       print("%20s : %7.2f ms  %s" % (self.name, et, [y.shape for y in self.x]))
 
+# **** GPU functions ****
+
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
   global cl_ctx, cl_queue
   if cl_queue is None:
-    try:
-      # for Macbook 16 inch
-      cl_ctx = cl.create_some_context(answers=[0,2])
-    except (cl._cl.RuntimeError, cl._cl.LogicError, TypeError):
-      cl_ctx = cl.create_some_context(interactive=False)
+    cl_ctx = cl.create_some_context(interactive=False)
     # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
 
 class GPUBuffer:
-  def __init__(self, shape, dtype=np.float32, hostbuf=None):
-    self.shape = tuple(shape)
-    self.dtype = dtype
-    if hostbuf is not None:
-      if isinstance(hostbuf, GPUBuffer):
-        self.cl = hostbuf.cl
-      else:
-        self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=hostbuf.ravel())
-    else:
-      self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape))
+  def __init__(self, shape, hostbuf=None):
+    self.shape, self.dtype = tuple(shape), np.float32
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
+      cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
+                hostbuf=hostbuf.ravel() if hostbuf is not None else None)
 
   def __repr__(self):
     return "<GPUBuffer with shape %r>" % (self.shape,)
 
-# **** start with two base classes ****
-
-def deepwalk(node, visited=None, nodes=None):
-  if visited == None and nodes == None:
-    visited, nodes = set(), []
-  visited.add(node)
-  if node._ctx:
-    for i in node._ctx.parents:
-      if i not in visited:
-        deepwalk(i, visited, nodes)
-    nodes.append(node)
-  return nodes
+# **** start with two base classes, Tensor and Function ****
 
 class Tensor:
   did_float_warning = False
   default_gpu = False
   allocated = 0
+  ops, opsgpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
@@ -125,6 +103,8 @@ class Tensor:
   def dtype(self):
     return self.data.dtype
 
+  # ***** creation helper functions *****
+
   @staticmethod
   def zeros(*shape, **kwargs):
     return Tensor(np.zeros(shape, dtype=np.float32), **kwargs)
@@ -138,8 +118,23 @@ class Tensor:
     return Tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
 
   @staticmethod
+  def uniform(*shape, **kwargs):
+    return Tensor((np.random.uniform(-1., 1., size=shape)/np.sqrt(np.prod(shape))).astype(np.float32), **kwargs)
+
+  @staticmethod
   def eye(dim, **kwargs):
     return Tensor(np.eye(dim).astype(np.float32), **kwargs)
+
+  # ***** toposort and backward pass *****
+
+  def deepwalk(self, visited=None, nodes=None):
+    if visited == None and nodes == None:
+      visited, nodes = set(), []
+    visited.add(self)
+    if self._ctx:
+      [i.deepwalk(visited, nodes) for i in self._ctx.parents if i not in visited]
+      nodes.append(self)
+    return nodes
 
   def backward(self, allow_fill=True):
     if self._ctx is None:
@@ -151,7 +146,7 @@ class Tensor:
       assert self.shape == (1,)
       self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
 
-    for t0 in reversed(deepwalk(self)):
+    for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
@@ -164,7 +159,6 @@ class Tensor:
           "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.shape)
         gt = Tensor(g, requires_grad=False)
         t.grad = gt if t.grad is None else (t.grad + gt)
-
 
   # ***** tinygrad supports CPU and GPU *****
 
@@ -188,8 +182,7 @@ class Tensor:
     if not self.gpu:
       require_init_gpu()
       assert self.dtype == np.float32   # only float32 on GPU
-
-      ret = Tensor(GPUBuffer(self.shape, self.dtype, self.data))
+      ret = Tensor(GPUBuffer(self.shape, self.data))
       if self.grad:
         ret.grad = self.grad.cuda()
       return ret
@@ -199,31 +192,26 @@ class Tensor:
   def detach(self):
     return Tensor(self.data, self.gpu)
 
-  # ***** put ops in these dicts *****
-
-  ops = {}
-  opsgpu = {}
-
   # ***** non first class ops *****
 
   def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu)
+    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
     return self.sum().mul(div)
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu)
+    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
     return self.pow(root)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu)
+    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu, requires_grad=False)
     return self.mul(y.pow(root))
 
   def swish(self):
     return self.mul(self.sigmoid())
 
   def tanh(self):
-    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu)
-    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu)
+    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu, requires_grad=False)
+    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu, requires_grad=False)
     return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
 
 # An instantiation of the Function is the Context
@@ -263,13 +251,17 @@ def register(name, fxn, gpu=False):
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
-  if name in ['add', 'sub', 'mul', 'div']:
+  if name in ['add', 'sub', 'mul', 'div', 'pow']:
     setattr(Tensor, "__%s__" % name, dispatch)
     setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
 
-
 # this registers all the operations
 import tinygrad.ops
-if GPU:
+try:
+  import pyopencl as cl
   import tinygrad.opsgpu
+  GPU = True
+except ImportError:
+  # no GPU support
+  GPU = False
 
