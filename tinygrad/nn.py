@@ -9,7 +9,7 @@ class BatchNorm2D:
     # TODO: need running_mean and running_var
     self.running_mean = Tensor.zeros(sz)
     self.running_var = Tensor.zeros(sz)
-    self.num_batches_tracked = Tensor.zeros(1)
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x):
     # this work at inference?

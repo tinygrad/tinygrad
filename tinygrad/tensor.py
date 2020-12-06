@@ -57,6 +57,9 @@ class GPUBuffer:
     else:
       self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape))
 
+  def __repr__(self):
+    return "<GPUBuffer with shape %r>" % (self.shape,)
+
 # **** start with two base classes ****
 
 def deepwalk(node, visited=None, nodes=None):
@@ -75,7 +78,7 @@ class Tensor:
   default_gpu = False
   allocated = 0
 
-  def __init__(self, data, gpu=None):
+  def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
       gpu = Tensor.default_gpu
     if isinstance(data, list):
@@ -94,6 +97,7 @@ class Tensor:
 
     self.data = data
     self.grad = None
+    self.requires_grad = requires_grad
 
     if gpu:
       self.cuda_()
@@ -122,20 +126,20 @@ class Tensor:
     return self.data.dtype
 
   @staticmethod
-  def zeros(*shape, gpu=None):
-    return Tensor(np.zeros(shape, dtype=np.float32), gpu)
+  def zeros(*shape, **kwargs):
+    return Tensor(np.zeros(shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def ones(*shape, gpu=None):
-    return Tensor(np.ones(shape, dtype=np.float32), gpu)
+  def ones(*shape, **kwargs):
+    return Tensor(np.ones(shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def randn(*shape, gpu=None):
-    return Tensor(np.random.randn(*shape).astype(np.float32), gpu)
+  def randn(*shape, **kwargs):
+    return Tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
 
   @staticmethod
-  def eye(dim, gpu=None):
-    return Tensor(np.eye(dim).astype(np.float32), gpu)
+  def eye(dim, **kwargs):
+    return Tensor(np.eye(dim).astype(np.float32), **kwargs)
 
   def backward(self, allow_fill=True):
     if self._ctx is None:
@@ -145,7 +149,7 @@ class Tensor:
       # fill in the first grad with one
       # this is "implicit gradient creation"
       assert self.shape == (1,)
-      self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu)
+      self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
 
     for t0 in reversed(deepwalk(self)):
       assert (t0.grad is not None)
@@ -158,8 +162,8 @@ class Tensor:
           continue
         assert g.shape == t.shape, \
           "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.shape)
-        t.grad = Tensor(g) if t.grad is None else (t.grad + Tensor(g))
-        del t.grad._ctx  # no backward pass through the add
+        gt = Tensor(g, requires_grad=False)
+        t.grad = gt if t.grad is None else (t.grad + gt)
 
 
   # ***** tinygrad supports CPU and GPU *****
@@ -243,8 +247,10 @@ class Function:
     for k, v in kwargs.items():
       setattr(ctx, k, v)
     with ProfileOp(ctx.__class__.__name__, x):
-      ret = Tensor(op.forward(ctx, *[t.data for t in x], **kwargs))
-    ret._ctx = ctx
+      ret = Tensor(op.forward(ctx, *[t.data for t in x], **kwargs),
+                   requires_grad=any([t.requires_grad for t in x]))
+    if ret.requires_grad:
+      ret._ctx = ctx
     return ret
 
 def register(name, fxn, gpu=False):

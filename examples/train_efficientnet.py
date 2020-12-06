@@ -4,12 +4,14 @@ import numpy as np
 from extra.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from tinygrad.utils import get_parameters
+import tinygrad.optim as optim
 
 if __name__ == "__main__":
   Tensor.default_gpu = os.getenv("GPU") is not None
   model = EfficientNet(int(os.getenv("NUM", "0")))
   parameters = get_parameters(model)
   print(len(parameters))
+  optimizer = optim.Adam(parameters, lr=0.001)
 
   BS = 16
   img = np.zeros((BS,3,224,224), dtype=np.float32)
@@ -29,14 +31,17 @@ if __name__ == "__main__":
     y = Tensor(y)
     loss = out.logsoftmax().mul(y).mean()
 
-    # zero grad
-    for p in parameters:
-      p.grad = None
+    optimizer.zero_grad()
 
     st = time.time()
     loss.backward()
     et = time.time()
     print("backward %.2f s" % (et-st))
+
+    st = time.time()
+    optimizer.step()
+    et = time.time()
+    print("optimizer %.2f s" % (et-st))
 
     del out, y, loss
 
