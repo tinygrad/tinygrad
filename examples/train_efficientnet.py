@@ -12,7 +12,7 @@ if __name__ == "__main__":
   img = np.zeros((BS,3,224,224), dtype=np.float32)
 
   for i in range(32):
-    print("running batch %d" % i)
+    print("running batch %d, %d tensors allocated" % (i, Tensor.allocated))
 
     st = time.time()
     out = model.forward(Tensor(img))
@@ -30,4 +30,6 @@ if __name__ == "__main__":
     loss.backward()
     et = time.time()
     print("backward %.2f s" % (et-st))
+
+    del out, y, loss
 

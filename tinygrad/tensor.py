@@ -59,9 +59,21 @@ class GPUBuffer:
 
 # **** start with two base classes ****
 
+def deepwalk(node, visited=None, nodes=None):
+  if visited == None and nodes == None:
+    visited, nodes = set(), []
+  visited.add(node)
+  if node._ctx:
+    for i in node._ctx.parents:
+      if i not in visited:
+        deepwalk(i, visited, nodes)
+    nodes.append(node)
+  return nodes
+
 class Tensor:
   did_float_warning = False
   default_gpu = False
+  allocated = 0
 
   def __init__(self, data, gpu=None):
     if gpu is None:
@@ -89,6 +101,12 @@ class Tensor:
     # internal variables used for autograd graph construction
     self._ctx = None
 
+    Tensor.allocated += 1
+
+  def __del__(self):
+    #print("cleanup", self.shape)
+    Tensor.allocated -= 1
+
   def __repr__(self):
     return "Tensor %r with grad %r" % (self.data, self.grad.data if self.grad else None)
 
@@ -104,20 +122,20 @@ class Tensor:
     return self.data.dtype
 
   @staticmethod
-  def zeros(*shape):
-    return Tensor(np.zeros(shape, dtype=np.float32))
+  def zeros(*shape, gpu=None):
+    return Tensor(np.zeros(shape, dtype=np.float32), gpu)
 
   @staticmethod
-  def ones(*shape):
-    return Tensor(np.ones(shape, dtype=np.float32))
+  def ones(*shape, gpu=None):
+    return Tensor(np.ones(shape, dtype=np.float32), gpu)
 
   @staticmethod
-  def randn(*shape):
-    return Tensor(np.random.randn(*shape).astype(np.float32))
+  def randn(*shape, gpu=None):
+    return Tensor(np.random.randn(*shape).astype(np.float32), gpu)
 
   @staticmethod
-  def eye(dim):
-    return Tensor(np.eye(dim).astype(np.float32))
+  def eye(dim, gpu=None):
+    return Tensor(np.eye(dim).astype(np.float32), gpu)
 
   def backward(self, allow_fill=True):
     if self._ctx is None:
@@ -129,17 +147,7 @@ class Tensor:
       assert self.shape == (1,)
       self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu)
 
-    visited, nodes = set(), []
-    def deepwalk(node):
-      visited.add(node)
-      if node._ctx:
-        for i in node._ctx.parents:
-          if i not in visited:
-            deepwalk(i)
-        nodes.append(node)
-    deepwalk(self)
-
-    for t0 in reversed(nodes):
+    for t0 in reversed(deepwalk(self)):
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
@@ -151,6 +159,8 @@ class Tensor:
         assert g.shape == t.shape, \
           "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.shape)
         t.grad = Tensor(g) if t.grad is None else (t.grad + Tensor(g))
+        del t.grad._ctx  # no backward pass through the add
+
 
   # ***** tinygrad supports CPU and GPU *****
 
