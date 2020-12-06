@@ -119,11 +119,7 @@ class MBConvBlock:
     return x
 
 class EfficientNet:
-<<<<<<< HEAD
-  def __init__(self, number=0, categories=1000):
-=======
   def __init__(self, number=0, classes=1000, has_se=True):
->>>>>>> upstream/master
     self.number = number
     global_params = [
       # width, depth
