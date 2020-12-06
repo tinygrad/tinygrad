@@ -9,7 +9,7 @@ except ImportError:
   # no GPU support
   GPU = False
 
-# **** profiler, 10 lines too long ****
+# **** profiler ****
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
   import collections, atexit, time
@@ -37,25 +37,16 @@ cl_ctx, cl_queue = None, None
 def require_init_gpu():
   global cl_ctx, cl_queue
   if cl_queue is None:
-    try:
-      # for Macbook 16 inch
-      cl_ctx = cl.create_some_context(answers=[0,2])
-    except (cl._cl.RuntimeError, cl._cl.LogicError, TypeError):
-      cl_ctx = cl.create_some_context(interactive=False)
+    cl_ctx = cl.create_some_context(interactive=False)
     # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
 
 class GPUBuffer:
-  def __init__(self, shape, dtype=np.float32, hostbuf=None):
-    self.shape = tuple(shape)
-    self.dtype = dtype
-    if hostbuf is not None:
-      if isinstance(hostbuf, GPUBuffer):
-        self.cl = hostbuf.cl
-      else:
-        self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=hostbuf.ravel())
-    else:
-      self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape))
+  def __init__(self, shape, hostbuf=None):
+    self.shape, self.dtype = tuple(shape), np.float32
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
+      cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
+                hostbuf=hostbuf.ravel() if hostbuf is not None else None)
 
   def __repr__(self):
     return "<GPUBuffer with shape %r>" % (self.shape,)
@@ -67,9 +58,7 @@ def deepwalk(node, visited=None, nodes=None):
     visited, nodes = set(), []
   visited.add(node)
   if node._ctx:
-    for i in node._ctx.parents:
-      if i not in visited:
-        deepwalk(i, visited, nodes)
+    [deepwalk(i, visited, nodes) for i in node._ctx.parents if i not in visited]
     nodes.append(node)
   return nodes
 
@@ -188,8 +177,7 @@ class Tensor:
     if not self.gpu:
       require_init_gpu()
       assert self.dtype == np.float32   # only float32 on GPU
-
-      ret = Tensor(GPUBuffer(self.shape, self.dtype, self.data))
+      ret = Tensor(GPUBuffer(self.shape, self.data))
       if self.grad:
         ret.grad = self.grad.cuda()
       return ret
