@@ -7,6 +7,9 @@ class Optimizer:
   def __init__(self, params):
     self.params = [x for x in params if x.requires_grad == True]
 
+  def num(self, x):
+    return Tensor([x], gpu=self.params[0].gpu, requires_grad=False)
+
   def zero_grad(self):
     for param in self.params:
       param.grad = None
@@ -14,7 +17,7 @@ class Optimizer:
 class SGD(Optimizer):
   def __init__(self, params, lr=0.001):
     super(SGD, self).__init__(params)
-    self.lr = Tensor([lr], gpu=params[0].gpu, requires_grad=False)
+    self.lr = self.num(lr)
 
   def step(self):
     for t in self.params:
@@ -23,14 +26,9 @@ class SGD(Optimizer):
 class RMSprop(Optimizer):
   def __init__(self, params, lr=0.001, decay=0.9, eps=1e-8):
     super(RMSprop, self).__init__(params)
-    self.lr = Tensor([lr], gpu=params[0].gpu, requires_grad=False)
-    self.decay = Tensor([decay], gpu=params[0].gpu, requires_grad=False)
-    self.eps = Tensor([eps], gpu=params[0].gpu, requires_grad=False)
+    self.lr, self.decay, self.eps, self.one, self.two = [self.num(x) for x in [lr, decay, eps, 1, 2]]
 
     self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), gpu=params[0].gpu, requires_grad=False) for t in self.params]
-
-    self.one = Tensor([1], gpu=self.params[0].gpu, requires_grad=False)
-    self.two = Tensor([2], gpu=self.params[0].gpu, requires_grad=False)
 
   def step(self):
     for i, t in enumerate(self.params):
@@ -40,17 +38,10 @@ class RMSprop(Optimizer):
 class Adam(Optimizer):
   def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
     super(Adam, self).__init__(params)
-    self.lr = Tensor([lr], gpu=params[0].gpu, requires_grad=False)
-    self.b1 = Tensor([b1], gpu=params[0].gpu, requires_grad=False)
-    self.b2 = Tensor([b2], gpu=params[0].gpu, requires_grad=False)
-    self.eps = Tensor([eps], gpu=params[0].gpu, requires_grad=False)
-    self.t = Tensor([0], gpu=params[0].gpu, requires_grad=False)
+    self.lr, self.b1, self.b2, self.eps, self.t, self.one, self.two = [self.num(x) for x in [lr, b1, b2, eps, 0, 1, 2]]
 
     self.m = [Tensor(np.zeros(t.shape, dtype=np.float32), gpu=params[0].gpu, requires_grad=False) for t in self.params]
     self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), gpu=params[0].gpu, requires_grad=False) for t in self.params]
-
-    self.one = Tensor([1], gpu=self.params[0].gpu, requires_grad=False)
-    self.two = Tensor([2], gpu=self.params[0].gpu, requires_grad=False)
 
   def step(self):
     self.t = self.t + self.one

@@ -2,14 +2,9 @@
 from inspect import signature
 import numpy as np
 import os
-try:
-  import pyopencl as cl
-  GPU = True
-except ImportError:
-  # no GPU support
-  GPU = False
 
 # **** profiler ****
+
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
   import collections, atexit, time
@@ -33,6 +28,8 @@ class ProfileOp:
       debug_times[self.name] += et
       print("%20s : %7.2f ms  %s" % (self.name, et, [y.shape for y in self.x]))
 
+# **** GPU functions ****
+
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
   global cl_ctx, cl_queue
@@ -51,21 +48,13 @@ class GPUBuffer:
   def __repr__(self):
     return "<GPUBuffer with shape %r>" % (self.shape,)
 
-# **** start with two base classes ****
-
-def deepwalk(node, visited=None, nodes=None):
-  if visited == None and nodes == None:
-    visited, nodes = set(), []
-  visited.add(node)
-  if node._ctx:
-    [deepwalk(i, visited, nodes) for i in node._ctx.parents if i not in visited]
-    nodes.append(node)
-  return nodes
+# **** start with two base classes, Tensor and Function ****
 
 class Tensor:
   did_float_warning = False
   default_gpu = False
   allocated = 0
+  ops, opsgpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
@@ -114,6 +103,8 @@ class Tensor:
   def dtype(self):
     return self.data.dtype
 
+  # ***** creation helper functions *****
+
   @staticmethod
   def zeros(*shape, **kwargs):
     return Tensor(np.zeros(shape, dtype=np.float32), **kwargs)
@@ -130,6 +121,17 @@ class Tensor:
   def eye(dim, **kwargs):
     return Tensor(np.eye(dim).astype(np.float32), **kwargs)
 
+  # ***** toposort and backward pass *****
+
+  def deepwalk(self, visited=None, nodes=None):
+    if visited == None and nodes == None:
+      visited, nodes = set(), []
+    visited.add(self)
+    if self._ctx:
+      [i.deepwalk(visited, nodes) for i in self._ctx.parents if i not in visited]
+      nodes.append(self)
+    return nodes
+
   def backward(self, allow_fill=True):
     if self._ctx is None:
       return
@@ -140,7 +142,7 @@ class Tensor:
       assert self.shape == (1,)
       self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
 
-    for t0 in reversed(deepwalk(self)):
+    for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
@@ -153,7 +155,6 @@ class Tensor:
           "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.shape)
         gt = Tensor(g, requires_grad=False)
         t.grad = gt if t.grad is None else (t.grad + gt)
-
 
   # ***** tinygrad supports CPU and GPU *****
 
@@ -186,11 +187,6 @@ class Tensor:
 
   def detach(self):
     return Tensor(self.data, self.gpu)
-
-  # ***** put ops in these dicts *****
-
-  ops = {}
-  opsgpu = {}
 
   # ***** non first class ops *****
 
@@ -255,9 +251,13 @@ def register(name, fxn, gpu=False):
     setattr(Tensor, "__%s__" % name, dispatch)
     setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
 
-
 # this registers all the operations
 import tinygrad.ops
-if GPU:
+try:
+  import pyopencl as cl
   import tinygrad.opsgpu
+  GPU = True
+except ImportError:
+  # no GPU support
+  GPU = False
 
