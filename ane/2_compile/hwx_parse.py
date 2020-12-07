@@ -2,10 +2,19 @@
 
 from hexdump import hexdump
 
-# mod to make the header okay
-# MH_CIGAM_64 is good
 from macholib import MachO
-a = MachO.MachO("model.hwx")
+def get_macho(fn):
+  # mod to make the header okay
+  # MH_CIGAM_64 is good
+  dat = open(fn, "rb").read()
+  dat = b"\xcf\xfa\xed\xfe"+dat[4:]
+  from tempfile import NamedTemporaryFile
+  with NamedTemporaryFile(delete=False) as f:
+    f.write(dat)
+    f.close()
+  return MachO.MachO(f.name)
+
+a = get_macho("model.hwx")
 
 # load commands
 for c in a.headers[0].commands:
@@ -76,7 +85,7 @@ def compare(x, y):
         ln2.append(a[1])
   return ''.join(ss)
 
-g = MachO.MachO("model.hwx.golden")
+g = get_macho("model.hwx.golden")
 f1 = g.headers[0].commands[1][2][0].section_data
 f2 = a.headers[0].commands[1][2][0].section_data
 for i in range(0, len(f2), 0x300):
