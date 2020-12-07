@@ -19,7 +19,7 @@ class BatchNorm2D:
       crow =  Tensor.ones(1,bs,  gpu=x.gpu, requires_grad=False)
       ccol =  Tensor.ones(m,1, gpu=x.gpu, requires_grad=False)
       self.running_mean = crow.dot(x.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
-      y = (x - self.running_mean.reshape(shape=[1, -1, 1, 1])).mul(x - self.running_mean.reshape(shape=[1, -1, 1, 1]))
+      y = pow((x - self.running_mean.reshape(shape=[1, -1, 1, 1])).reshape(shape=[-1]), self.two) 
       self.running_var = crow.dot(y.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
 
     x = x.sub(self.running_mean.reshape(shape=[1, -1, 1, 1]))
