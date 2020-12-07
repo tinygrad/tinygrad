@@ -13,13 +13,14 @@ class BatchNorm2D:
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x, training = False):
-    if training:
-      [BS, sz], m = x.shape[:2], x.shape[2]*x.shape[3]
-      A =  Tensor(np.ones([1,BS], dtype=np.float32)/BS,  gpu=x.gpu, requires_grad=False)
-      B =  Tensor(np.ones([m,1], dtype=np.float32)/m,  gpu=x.gpu, requires_grad=False)
-      self.running_mean = A.dot(x.reshape(shape=[BS,x.shape[1]*m])).reshape(shape=[x.shape[1],m]).dot(B).reshape(shape=[x.shape[1]])
-      y = (x - self.running_mean.reshape(shape=[1, -1, 1, 1]))*(x - self.running_mean.reshape(shape=[1, -1, 1, 1]))
-      self.running_var = A.dot(y.reshape(shape=[BS,x.shape[1]*m])).reshape(shape=[y.shape[1],m]).dot(B).reshape(shape=[x.shape[1]])
+    if training: #how to determine?
+      [bs, sz], m = x.shape[:2], x.shape[2]*x.shape[3]
+      div =  Tensor(np.array([1/bs/m], dtype=np.float32),  gpu=x.gpu, requires_grad=False)
+      crow =  Tensor.ones(1,bs,  gpu=x.gpu, requires_grad=False)
+      ccol =  Tensor.ones(m,1, gpu=x.gpu, requires_grad=False)
+      self.running_mean = crow.dot(x.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
+      y = (x - self.running_mean.reshape(shape=[1, -1, 1, 1])).mul(x - self.running_mean.reshape(shape=[1, -1, 1, 1]))
+      self.running_var = crow.dot(y.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
 
     x = x.sub(self.running_mean.reshape(shape=[1, -1, 1, 1]))
     x = x.mul(self.weight.reshape(shape=[1, -1, 1, 1]))
