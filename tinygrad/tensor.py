@@ -12,7 +12,7 @@ if DEBUG:
   debug_times = collections.defaultdict(float)
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
-      print("%20s : %3d  %10.2f ms" % (name, debug_counts[name], debug_times[name]))
+      print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
   atexit.register(print_debug_exit)
 
 class ProfileOp:
@@ -26,7 +26,7 @@ class ProfileOp:
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
-      print("%20s : %7.2f ms  %s" % (self.name, et, [y.shape for y in self.x]))
+      print(f"{self.name:>20} : {et:>7.2f} ms {[y.shape for y in self.x]}")
 
 # **** GPU functions ****
 
@@ -46,7 +46,7 @@ class GPUBuffer:
                 hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
 
   def __repr__(self):
-    return "<GPUBuffer with shape %r>" % (self.shape,)
+    return f"<GPUBuffer with shape {self.shape!r}>"
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -64,12 +64,12 @@ class Tensor:
     elif GPU and isinstance(data, GPUBuffer):
       self.gpu = True
     elif not isinstance(data, np.ndarray):
-      raise TypeError("Error constructing tensor with %r" % data)
+      raise TypeError(f"Error constructing tensor with {data!r}")
 
     if isinstance(data, np.ndarray):
       if data.dtype != np.float32 and not Tensor.did_float_warning:
         # warning? float64 is actually needed for numerical jacobian
-        print("warning, %r isn't float32" % (data.shape,))
+        print(f"warning, {data.shape!r} isn't float32")
         Tensor.did_float_warning = True
       self.gpu = False
 
@@ -90,7 +90,7 @@ class Tensor:
     Tensor.allocated -= 1
 
   def __repr__(self):
-    return "Tensor %r with grad %r" % (self.data, self.grad.data if self.grad else None)
+    return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
   def assign(self, x):
     self.data = x.data
@@ -155,7 +155,7 @@ class Tensor:
         if g is None:
           continue
         assert g.shape == t.shape, \
-          "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.shape)
+          f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
         gt = Tensor(g, requires_grad=False)
         t.grad = gt if t.grad is None else (t.grad + gt)
 
@@ -250,8 +250,8 @@ def register(name, fxn, gpu=False):
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'div', 'pow']:
-    setattr(Tensor, "__%s__" % name, dispatch)
-    setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
+    setattr(Tensor, f"__{name}__", dispatch)
+    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
 
 # this registers all the operations
 import tinygrad.ops
