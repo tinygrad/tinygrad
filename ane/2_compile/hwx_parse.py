@@ -40,7 +40,18 @@ def compare(x, y):
   ln2 = []
 
   ll = (max(len(x), len(y)) + 0xF)//0x10 * 0x10
+
+  highlight = False
+  next_highlight = 0x2b
   for i in range(ll+1):
+    if i == next_highlight:
+      highlight = True
+      if i < len(x):
+        next_highlight += x[i]+8
+      else:
+        next_highlight = None
+    else:
+      highlight = False
     a = "%02X" % x[i] if i < len(x) else "--", \
         "%02X" % y[i] if i < len(y) else "--"
     def fj(x):
@@ -57,8 +68,12 @@ def compare(x, y):
       ln.append(colored(a[0], 'green'))
       ln2.append(colored(a[1], 'red'))
     else:
-      ln.append(a[0])
-      ln2.append(a[1])
+      if highlight:
+        ln.append(colored(a[0], 'yellow'))
+        ln2.append(colored(a[1], 'yellow'))
+      else:
+        ln.append(a[0])
+        ln2.append(a[1])
   return ''.join(ss)
 
 g = MachO.MachO("model.hwx.golden")
