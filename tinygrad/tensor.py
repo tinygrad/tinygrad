@@ -59,7 +59,7 @@ class Tensor:
   def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
       gpu = Tensor.default_gpu
-    if isinstance(data, list):
+    if isinstance(data, (list,float)):
       data = np.array(data, dtype=np.float32)
     elif GPU and isinstance(data, GPUBuffer):
       self.gpu = True
@@ -208,8 +208,7 @@ class Tensor:
     return self.mul(self.sigmoid())
 
   def tanh(self):
-
-    return (self * np.asarray(2, dtype = self.dtype)).sigmoid() * np.asarray(2, dtype = self.dtype) - np.asarray(1.0, dtype=self.dtype) # 2*sigmoid(2*x)-1
+    return 2.0 * ((2.0 * self).sigmoid())  - 1.0 # 2*sigmoid(2*x)-1
 
 # An instantiation of the Function is the Context
 class Function:
@@ -252,6 +251,9 @@ def register(name, fxn, gpu=False):
   if name in ['add', 'sub', 'mul', 'div', 'pow']:
     setattr(Tensor, "__%s__" % name, dispatch)
     setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
+    if "__r%s__" % name in dir(int):
+        setattr(Tensor, "__r%s__" % name, lambda self, x: getattr(self, "__%s__" % name)(x))
+
 
 # this registers all the operations
 import tinygrad.ops
@@ -262,4 +264,3 @@ try:
 except ImportError:
   # no GPU support
   GPU = False
-
