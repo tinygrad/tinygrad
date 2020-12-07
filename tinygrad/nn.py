@@ -19,7 +19,7 @@ class BatchNorm2D:
     crow =  Tensor.ones(1,bs,  gpu=x.gpu, requires_grad=False) #we are reimplementing means by contracting with 1's
     ccol =  Tensor.ones(m,1, gpu=x.gpu, requires_grad=False)   #we are reimplementing means by contracting with 1's
     batch_mean = crow.dot(x.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
-    y = pow((x - self.running_mean.reshape(shape=[1, -1, 1, 1])), self.two) 
+    y = pow((x - self.running_mean.reshape(shape=[1, -1, 1, 1])).reshape(shape=[-1]), self.two)
     #y = (x - self.running_mean.reshape(shape=[1, -1, 1, 1])).mul(x - self.running_mean.reshape(shape=[1, -1, 1, 1]))#, self.two) 
     batch_var = crow.dot(y.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
     if self.track_running_stats: #needs momentum
