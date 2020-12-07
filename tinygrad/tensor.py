@@ -208,9 +208,8 @@ class Tensor:
     return self.mul(self.sigmoid())
 
   def tanh(self):
-    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu, requires_grad=False)
-    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu, requires_grad=False)
-    return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
+
+    return (self * np.asarray(2, dtype = self.dtype)).sigmoid() * np.asarray(2, dtype = self.dtype) - np.asarray(1.0, dtype=self.dtype) # 2*sigmoid(2*x)-1
 
 # An instantiation of the Function is the Context
 class Function:
@@ -245,7 +244,7 @@ def register(name, fxn, gpu=False):
   else:
     Tensor.ops[name] = fxn
   def dispatch(*x, **kwargs):
-    x = list(Tensor(arg) if not isinstance(arg, Tensor) else arg for arg in x )
+    x = tuple((Tensor(arg,requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x ))
     f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
