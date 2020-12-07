@@ -245,6 +245,7 @@ def register(name, fxn, gpu=False):
   else:
     Tensor.ops[name] = fxn
   def dispatch(*x, **kwargs):
+    x = list(Tensor(arg) if not isinstance(arg, Tensor) else arg for arg in x )
     f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
