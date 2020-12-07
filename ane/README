@@ -84,31 +84,41 @@ ops have length 0x300, seems like one basic op repeated
 
 header 0x0-0x1c
 
+u32 0x1c = next op offset
+u16 0x20 = output address?
+
+== section break 0x2c ==
 reloc 0x2c-0x74 = K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_0
                   K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_1
 
+== section break 0x128 ==
 u32 0x130 = (OutputType * 0x10) | InputType
 u32 0x134 = InputChannels
 u32 0x138 = OutputChannels
 u16 0x14C = BatchSize
 
+== section break 0x16c ==
 reloc 0x16c-0x174 = image
 
 u32 0x178 = InputRowStride
 u32 0x17C = InputPlaneStride
 u32 0x180 = (InputPlaneStride * InputChannels)
 
+== section break 0x1e0 ==
 u32 0x1F4 = InputChannels * 0x10
 u32 0x1F8 = InputChannels * 0x10
 
 u32 0x220 = OutputChannels * 0x10
 u32 0x224 = OutputChannels * 0x10
 
+== section break 0x22c ==
 u16 0x230 = BiasScalar
 u16 0x232 = ScaleScalar
 
+== section break 0x240 ==
 u32 0x240 = 0x80 | KernelType
 
+== section break 0x258 ==
 reloc 0x258-0x25c = probs@output/src
 
 u32 0x260 = OutputRowStride
