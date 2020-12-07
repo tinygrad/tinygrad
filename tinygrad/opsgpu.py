@@ -6,14 +6,14 @@ import functools
 def buffer_new(ctx, shape):
   return GPUBuffer(shape)
 
-def buffer_np(ctx, np_array):
-  return GPUBuffer(np_array.shape, hostbuf=np_array)
-
 def buffer_zeros(ctx, shape):
-  return buffer_np(ctx, np.zeros(shape, dtype=np.float32))
+  return GPUBuffer(shape, hostbuf=np.zeros(shape, dtype=np.float32))
 
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
+
+def buffer_np(ctx, np_array):
+  return cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
 
 @functools.lru_cache()
 def clbuild(cl_ctx, name, prg):
@@ -111,7 +111,7 @@ def binary_op(ctx, code, x, y):
 
   prod = i32(shape_ret.prod())
   binop(ctx.cl_queue, [prod], None, x.cl, y.cl, ret.cl, i32(n_dims), prod,
-        buffer_np(ctx, shape_x).cl, buffer_np(ctx, shape_y).cl, buffer_np(ctx, shape_ret).cl)
+        buffer_np(ctx, shape_x), buffer_np(ctx, shape_y), buffer_np(ctx, shape_ret))
   return ret
 
 def unary_op(ctx, code, x):
@@ -165,8 +165,8 @@ def reduce_op(ctx, code, code2, inp, axis=None):
   reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
     i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
-    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)).cl,
-    buffer_np(ctx, np.array(osize, dtype=np.int32)).cl)
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(osize, dtype=np.int32)))
   return ret
 
 def unbroadcast(ctx, out, in_sh):
