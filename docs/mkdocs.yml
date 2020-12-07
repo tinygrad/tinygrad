@@ -1,0 +1,24 @@
+site_name: tinygrad
+site_description: tinygradcos
+# site_author:
+site_url: https://docs.tinygrad.city
+#dev_addr: 0.0.0.0:8000
+
+repo_name: blog
+repo_url: 'https://github.com/rakibfiha/tinygrad'
+
+docs_dir: 'content'
+edit_uri: 'edit/source/docs/content/'
+
+plugins:
+    - search
+    - exclude:
+        glob:
+          - "**/include-*.md"
+
+nav:
+    - Home: index.md
+    - About: index.md
+    - tinygrad/Installation.md
+
+theme: readthedocs
