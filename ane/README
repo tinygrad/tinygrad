@@ -62,7 +62,7 @@ kZinTensorFormatInvalid
 
 == min.plist == 
 
-Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView
+Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron
 
 ops have length 0x300
 
