@@ -62,8 +62,58 @@ ANECCompileProcedure
               HandleNELayer<7u>
                 ZinAneInstruction::HandleCommonConfig
                   ZinAneInstruction::HandleCommonConfigCommonOpcodes
+        ZinIrCodegenHandleTds<7u>
+          0x1bb93ae00 <-- this is the store of the first byte in the hwx
+          CalculateSizeInBytesFromRegCount (x*4+4)
+            0xf   @ 0x128-0x168  (base 0x1003047b0)
+            0x1b  @ 0x16c-0x1dc
+            0x11  @ 0x1e0-0x228
+            0x3   @ 0x22c-0x23c
+            0x4   @ 0x240-0x254
+            0x6   @ 0x258-0x274(end)
+          AddReloc (this is gold! x4 goes in the hwx)
 
 rbreak ^ZinAneInstruction*
+
+== min.plist == 
+
+Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron, Concat
+
+
+ops have length 0x300, seems like one basic op repeated
+
+header 0x0-0x1c
+
+reloc 0x2c-0x74 = K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_0
+                  K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_1
+
+u32 0x130 = (OutputType * 0x10) | InputType
+u32 0x134 = InputChannels
+u32 0x138 = OutputChannels
+u16 0x14C = BatchSize
+
+reloc 0x16c-0x174 = image
+
+u32 0x178 = InputRowStride
+u32 0x17C = InputPlaneStride
+u32 0x180 = (InputPlaneStride * InputChannels)
+
+u32 0x1F4 = InputChannels * 0x10
+u32 0x1F8 = InputChannels * 0x10
+
+u32 0x220 = OutputChannels * 0x10
+u32 0x224 = OutputChannels * 0x10
+
+u16 0x230 = BiasScalar
+u16 0x232 = ScaleScalar
+
+u32 0x240 = 0x80 | KernelType
+
+reloc 0x258-0x25c = probs@output/src
+
+u32 0x260 = OutputRowStride
+u32 0x264 = OutputPlaneStride
+u32 0x268 = (OutputPlaneStride * OutputChannels)
 
 == Zin Constants ==
 
@@ -180,36 +230,6 @@ Investigate:
 30: N_DIM_CONCAT
 31: H_DIM_STRIDED_CONCAT
 
-== min.plist == 
-
-Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron, Concat
-
-
-ops have length 0x300, seems like one basic op repeated
-
-u32 0x130 = (OutputType * 0x10) | InputType
-u32 0x134 = InputChannels
-u32 0x138 = OutputChannels
-u16 0x14C = BatchSize
-
-u32 0x178 = InputRowStride
-u32 0x17C = InputPlaneStride
-u32 0x180 = (InputPlaneStride * InputChannels)
-
-u32 0x1F4 = InputChannels * 0x10
-u32 0x1F8 = InputChannels * 0x10
-
-u32 0x220 = OutputChannels * 0x10
-u32 0x224 = OutputChannels * 0x10
-
-u16 0x230 = BiasScalar
-u16 0x232 = ScaleScalar
-
-u32 0x240 = 0x80 | KernelType
-
-u32 0x260 = OutputRowStride
-u32 0x264 = OutputPlaneStride
-u32 0x268 = (OutputPlaneStride * OutputChannels)
 
 == plist exploration ==
 

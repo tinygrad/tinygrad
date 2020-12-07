@@ -43,8 +43,14 @@ def compare(x, y):
   for i in range(ll+1):
     a = "%02X" % x[i] if i < len(x) else "--", \
         "%02X" % y[i] if i < len(y) else "--"
+    def fj(x):
+      ss = []
+      for i in range(0, 0x10, 4):
+        ss.append(' '.join(x[i:i+4]))
+      return '  '.join(ss)
+
     if i!=0 and i%0x10 == 0:
-      ss.append("%8X: " % (i-0x10)+' '.join(ln)+"  "+' '.join(ln2)+"\n")
+      ss.append("%8X: " % (i-0x10)+fj(ln)+"  |  "+fj(ln2)+"\n")
       ln = []
       ln2 = []
     if a[0] != a[1] and a[0] != "--" and a[1] != "--":
