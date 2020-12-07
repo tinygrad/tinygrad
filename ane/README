@@ -62,9 +62,9 @@ kZinTensorFormatInvalid
 
 == min.plist == 
 
-Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron
+Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron, Concat
 
-ops have length 0x300
+ops have length 0x300, seems like one basic op repeated
 
 u32 0x130 = (OutputType * 0x10) | InputType
 u32 0x134 = InputChannels
@@ -80,6 +80,9 @@ u32 0x1F8 = InputChannels * 0x10
 
 u32 0x220 = OutputChannels * 0x10
 u32 0x224 = OutputChannels * 0x10
+
+u16 0x230 = BiasScalar
+u16 0x232 = ScaleScalar
 
 u32 0x240 = 0x80 | KernelType
 
