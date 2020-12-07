@@ -60,9 +60,25 @@ kZinTensorFormatInt8 = 1
 kZinTensorFormatFloat16 = 2
 kZinTensorFormatInvalid
 
+Zin (plist format) ---(ZinAneCoreCompile)---> Mir (hwx format)?
+  ZinAneCodeGeneration?
+
+== Neuron Types ==
+
+NeuronTypes (changes the LUT):
+  Tanh
+  Log2
+  Exp2
+  Sign = ZinMirActivationV7::GetSignLut
+  ...many more in ANECompiler
+
+Investigate:
+  ZinMirActivationV7::PrintLut(ZinMirActivationV7 *this,ane_nonlinear_lut_v7up_t *param_1
+
 == min.plist == 
 
 Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron, Concat
+
 
 ops have length 0x300, seems like one basic op repeated
 

@@ -56,7 +56,7 @@
 			<key>Params</key>
 			<dict>
 				<key>Type</key>
-				<string>Exp2</string>
+				<string>Sign</string>
 			</dict>
 			<key>Type</key>
 			<string>Neuron</string>
