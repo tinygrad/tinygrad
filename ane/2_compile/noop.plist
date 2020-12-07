@@ -24,12 +24,6 @@
 			<string>probs@output</string>
 		</array>
 
-    <!-- Global array of weights -->
-		<key>Weights</key>
-		<array>
-			<string>min.weights</string>
-		</array>
-
 		<key>image</key>
 		<dict>
       <!-- default is 1 -->
@@ -55,38 +49,25 @@
 		<dict>
 			<key>Bottom</key>
 			<string>image</string>
-
 			<key>Name</key>
 			<string>my_layer</string>
-			<key>OutputChannels</key>
-			<integer>3</integer>
 			<key>OutputType</key>
 			<string>Float16</string>
-
 			<key>Params</key>
 			<dict>
-				<key>KernelHeight</key>
+				<key>ReshapedBatch</key>
 				<integer>1</integer>
-				<key>KernelWidth</key>
+				<key>ReshapedChannel</key>
+				<integer>3</integer>
+				<key>ReshapedDepth</key>
 				<integer>1</integer>
-
-				<key>KernelIndex</key>
-				<integer>0</integer>
-				<key>KernelOffset</key>
-				<integer>0</integer>
-				<key>KernelType</key>
-				<string>Float32</string>
-
-				<key>Step</key>
-				<array>
-					<integer>1</integer>
-					<integer>1</integer>
-				</array>
-				<key>Type</key>
-				<string>Conv</string>
+				<key>ReshapedHeight</key>
+				<integer>1</integer>
+				<key>ReshapedWidth</key>
+				<integer>1</integer>
 			</dict>
 			<key>Type</key>
-			<string>Conv</string>
+			<string>Reshape</string>
 		</dict>
 
 		<key>probs@output</key>
