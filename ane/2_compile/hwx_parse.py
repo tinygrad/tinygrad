@@ -46,8 +46,8 @@ def compare(x, y):
   for i in range(ll+1):
     if i == next_highlight:
       highlight = True
-      if i < len(x):
-        next_highlight += x[i]+8
+      if i < len(y):
+        next_highlight += y[i]+8
       else:
         next_highlight = None
     else:
@@ -79,7 +79,12 @@ def compare(x, y):
 g = MachO.MachO("model.hwx.golden")
 f1 = g.headers[0].commands[1][2][0].section_data
 f2 = a.headers[0].commands[1][2][0].section_data
-print(compare(f1, f2))
+if len(f1) < 0x300:
+  for i in range(0, len(f2), 0x300):
+    print(compare(f1, f2[i:i+0x300]))
+else:
+  for i in range(0, len(f2), 0x300):
+    print(compare(f1[i:i+0x300], f2[i:i+0x300]))
 
 #open("/tmp/data.section", "wb").write(f2)
 #print(compare(open("model.hwx.golden", "rb").read(), open("model.hwx", "rb").read()))
