@@ -1,11 +1,22 @@
 #include <os/log.h>
 #include <stdio.h>
 #import <CoreFoundation/CoreFoundation.h>
+#include <string>
 
-int ANECCompile(CFDictionaryRef param_1, CFDictionaryRef param_2, unsigned long param_3);
+extern "C" {
+  int ANECCompile(CFDictionaryRef param_1, CFDictionaryRef param_2, unsigned long param_3);
+  std::string _ZN21ZinIrEnumToStringUtil14OpCodeToStringE22ZinIrOpLayerOpCodeType(int op);
+  std::string _ZN21ZinIrEnumToStringUtil21NonLinearModeToStringE18ZinIrNonLinearMode(int op);
+}
 
 int main(int argc, char* argv[]) {
   os_log(OS_LOG_DEFAULT, "start compiler");
+
+  /*for (int i = 0; i < 60; i++) {
+    std::string tmp = _ZN21ZinIrEnumToStringUtil14OpCodeToStringE22ZinIrOpLayerOpCodeType(i);
+    //std::string tmp = _ZN21ZinIrEnumToStringUtil21NonLinearModeToStringE18ZinIrNonLinearMode(i);
+    printf("%2d: %s\n", i, tmp.c_str());
+  }*/
 
   CFTypeRef ikeys[2];
   ikeys[0] = CFSTR("NetworkPlistName");
@@ -30,7 +41,8 @@ int main(int argc, char* argv[]) {
 
   if (argc > 2) {
     CFDictionaryAddValue(optionsDictionary, CFSTR("OutputFileName"), CFSTR("debug/model.hwx"));
-    CFDictionaryAddValue(flagsDictionary, CFSTR("DebugDetailPrint"), kCFBooleanTrue);
+    //CFDictionaryAddValue(flagsDictionary, CFSTR("DebugDetailPrint"), kCFBooleanTrue);
+    CFDictionaryAddValue(flagsDictionary, CFSTR("CompileANEProgramForDebugging"), kCFBooleanTrue);
     int debug_mask = 0x7fffffff;
     CFDictionaryAddValue(flagsDictionary, CFSTR("DebugMask"), CFNumberCreate(kCFAllocatorDefault, 3, &debug_mask));
   } else {
@@ -45,6 +57,7 @@ int main(int argc, char* argv[]) {
   printf("hello\n");
   int ret = ANECCompile(optionsDictionary, flagsDictionary, 0);
   printf("compile: %d\n", ret);
+
 
   return ret;
 }
