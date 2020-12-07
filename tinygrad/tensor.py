@@ -43,7 +43,7 @@ class GPUBuffer:
     self.shape, self.dtype = tuple(shape), np.float32
     self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
       cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
-                hostbuf=hostbuf.ravel() if hostbuf is not None else None)
+                hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
 
   def __repr__(self):
     return "<GPUBuffer with shape %r>" % (self.shape,)
@@ -136,15 +136,14 @@ class Tensor:
       nodes.append(self)
     return nodes
 
-  def backward(self, allow_fill=True):
+  def backward(self):
     if self._ctx is None:
       return
 
-    if self.grad is None and allow_fill:
-      # fill in the first grad with one
-      # this is "implicit gradient creation"
-      assert self.shape == (1,)
-      self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
+    # fill in the first grad with one
+    # this is "implicit gradient creation"
+    assert self.shape == (1,)
+    self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
@@ -181,7 +180,6 @@ class Tensor:
       raise Exception("No GPU Support, install pyopencl")
     if not self.gpu:
       require_init_gpu()
-      assert self.dtype == np.float32   # only float32 on GPU
       ret = Tensor(GPUBuffer(self.shape, self.data))
       if self.grad:
         ret.grad = self.grad.cuda()
