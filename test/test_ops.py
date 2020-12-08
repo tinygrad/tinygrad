@@ -61,6 +61,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, gpu=self.gpu)
   def test_sum_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), gpu=self.gpu)
+  def test_mean_axis(self):
+    helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)), gpu=self.gpu)
   def test_logsoftmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, gpu=self.gpu)
   def test_tanh(self):
