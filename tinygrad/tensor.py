@@ -194,9 +194,10 @@ class Tensor:
 
   # ***** non first class ops *****
 
-  def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
-    return self.sum().mul(div)
+  def mean(self, axis=None):
+    out = self.sum(axis=axis)
+    div = Tensor(np.array([np.prod(out.shape)/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
+    return out.mul(div)
 
   def sqrt(self):
     root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
