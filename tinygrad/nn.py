@@ -3,7 +3,7 @@ from tinygrad.tensor import Tensor
 class BatchNorm2D:
   def __init__(self, sz, eps=1e-5, track_running_stats=False, training=True):
     self.eps = Tensor([eps], requires_grad=False)
-    self.two = Tensor([2], requires_grad=False)
+    self.two = Tensor([2], requires_grad=False).reshape(shape=[1,1,1,1])
     self.weight = Tensor.ones(sz)
     self.bias = Tensor.zeros(sz)
     self.track_running_stats = track_running_stats
@@ -17,8 +17,9 @@ class BatchNorm2D:
     if self.track_running_stats or self.training:
       [bs, sz], m = x.shape[:2], x.shape[2]*x.shape[3]
       div =  Tensor([1/(bs*m)], gpu=x.gpu, requires_grad=False)  
-      batch_mean = x.sum(axis=(0,2,3)).mul(div) 
-      batch_var = pow((x - batch_mean.reshape(shape=[1, -1, 1, 1])), self.two).sum(axis=(0,2,3)).mul(div)
+      batch_mean = x.sum(axis=(0,2,3)).mul(div)
+      y = (x - batch_mean.reshape(shape=[1, -1, 1, 1])) #**self.two has issues and seems numerical unstable
+      batch_var = y.mul(y).sum(axis=(0,2,3)).mul(div)
     if self.track_running_stats: #needs momentum
       self.running_mean = self.running_mean.mul(self.num_batches_tracked).add(batch_mean)
       self.running_var = self.running_var.mul(self.num_batches_tracked).add(batch_var)
