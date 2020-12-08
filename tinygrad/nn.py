@@ -15,11 +15,9 @@ class BatchNorm2D:
 
   def __call__(self, x):
     if self.track_running_stats or self.training:
-      [bs, sz], m = x.shape[:2], x.shape[2]*x.shape[3]
-      div =  Tensor([1/(bs*m)], gpu=x.gpu, requires_grad=False)  
-      batch_mean = x.sum(axis=(0,2,3)).mul(div)
-      y = (x - batch_mean.reshape(shape=[1, -1, 1, 1])) #**self.two has issues and seems numerical unstable
-      batch_var = y.mul(y).sum(axis=(0,2,3)).mul(div)
+      batch_mean = x.mean(axis=(0,2,3))
+      y = (x - batch_mean.reshape(shape=[1, -1, 1, 1])) 
+      batch_var = (y**self.two).mean(axis=(0,2,3)) #**self.two has issues and seems numerical unstable
     if self.track_running_stats: #needs momentum
       self.running_mean = self.running_mean.mul(self.num_batches_tracked).add(batch_mean)
       self.running_var = self.running_var.mul(self.num_batches_tracked).add(batch_var)
