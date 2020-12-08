@@ -243,19 +243,8 @@ class Sum(Function):
   @staticmethod
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-<<<<<<< HEAD:tinygrad/opsgpu.py
-    
-    if axis is None:
-        bsize = np.ones(len(input.shape))
-    else:
-        bsize = np.array(input.shape)
-        bsize[list(axis)] = 1
-    
-    output = GPUBuffer(bsize, hostbuf=grad_output)
-=======
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     output = GPUBuffer(shape, hostbuf=grad_output)
->>>>>>> upstream/master:tinygrad/ops_gpu.py
     return binary_op(ctx, 'a+b', output, buffer_zeros(ctx, input.shape))
 register('sum', Sum, gpu=True)
 
