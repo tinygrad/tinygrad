@@ -196,7 +196,8 @@ class Tensor:
 
   def mean(self, axis=None):
     out = self.sum(axis=axis)
-    div = Tensor(np.array([np.prod(out.shape)/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
+    coeff = np.prod(out.shape)/np.prod(self.shape)
+    div = Tensor(coeff+np.zeros(out.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
     return out.mul(div)
 
   def sqrt(self):
