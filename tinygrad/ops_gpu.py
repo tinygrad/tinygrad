@@ -170,7 +170,7 @@ def reduce_op(ctx, code, code2, inp, axis=None):
   return ret
 
 def unbroadcast(ctx, out, in_sh):
-  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
   return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
 # ***** now for the ops themselves *****

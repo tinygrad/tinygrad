@@ -197,24 +197,19 @@ class Tensor:
   def mean(self, axis=None):
     out = self.sum(axis=axis)
     coeff = np.prod(out.shape)/np.prod(self.shape)
-    div = Tensor(coeff+np.zeros(out.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
-    return out.mul(div)
+    return out * coeff
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
-    return self.pow(root)
+    return self.pow(0.5)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu, requires_grad=False)
-    return self.mul(y.pow(root))
+    return self * (y ** -1.0)
 
   def swish(self):
-    return self.mul(self.sigmoid())
+    return self * self.sigmoid()
 
   def tanh(self):
-    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu, requires_grad=False)
-    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu, requires_grad=False)
-    return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
+    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
 
 # An instantiation of the Function is the Context
 class Function:
@@ -249,13 +244,17 @@ def register(name, fxn, gpu=False):
   else:
     Tensor.ops_cpu[name] = fxn
   def dispatch(*x, **kwargs):
+    assert isinstance(x[0], Tensor)
+    x = [Tensor(np.array([arg], dtype=x[0].dtype), gpu=x[0].gpu, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
     f = (Tensor.ops_gpu if x[0].gpu else Tensor.ops_cpu)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
-  if name in ['add', 'sub', 'mul', 'div', 'pow']:
+  # TODO: div is a second class op, so it doesn't work here
+  if name in ['add', 'sub', 'mul', 'pow']:
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
+    setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(self,x))
 
 # this registers all the operations
 import tinygrad.ops_cpu
