@@ -237,26 +237,21 @@ class Sum(Function):
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
     if axis is not None:
-        ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-
-    output = GPUBuffer([1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))], hostbuf=grad_output)
-    #make use of broadcasting
+    
+    if axis is None:
+        bsize = np.ones(len(input.shape))
+    else:
+        bsize = np.array(input.shape)
+        bsize[list(axis)] = 1
+    
+    output = GPUBuffer(bsize, hostbuf=grad_output)
     return binary_op(ctx, 'a+b', output, buffer_zeros(ctx, input.shape))
-    ret = buffer_like(ctx, input)
-
-    fill = clbuild(ctx.cl_ctx, "fill", """
-    __kernel void fill(__global const float *a_g, __global float *res_g) {
-      int gid = get_global_id(0);
-      res_g[gid] = a_g[0];
-    }""")
-    fill(ctx.cl_queue, [np.prod(ret.shape)], None, grad_output.cl, ret.cl)
-    return ret
-
 register('sum', Sum, gpu=True)
 
 class Dot(Function):
