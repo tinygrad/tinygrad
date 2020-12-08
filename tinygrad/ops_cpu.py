@@ -1,6 +1,6 @@
 import warnings
 import numpy as np
-from .tensor import Function, register
+from .tensor import Function, register, Tensor
 
 # ************* unary ops *************
 
@@ -94,7 +94,7 @@ class Pow(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
-           unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
+           unbroadcast((x**y) * np.log(x) * grad_output, y.shape) if isinstance(y, Tensor) and y.requires_grad else None
 register('pow', Pow)
 
 # ************* reduce ops *************
