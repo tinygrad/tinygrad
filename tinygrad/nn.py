@@ -14,12 +14,11 @@ class BatchNorm2D:
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x):
-    [bs, sz], m = x.shape[:2], x.shape[2]*x.shape[3]
-    div =  Tensor([1/bs/m],  gpu=x.gpu, requires_grad=False)  
-    batch_mean = x.sum(axis=(0,2,3)).mul(div) 
-    y = pow((x - self.running_mean.reshape(shape=[1, -1, 1, 1])).reshape(shape=[-1]), self.two)
-    batch_var = pow((x - self.running_mean.reshape(shape=[1, -1, 1, 1])), self.two).sum(axis=(0,2,3)).mul(div)
-    
+    if self.track_running_stats or self.training:
+      [bs, sz], m = x.shape[:2], x.shape[2]*x.shape[3]
+      div =  Tensor([1/(bs*m)], gpu=x.gpu, requires_grad=False)  
+      batch_mean = x.sum(axis=(0,2,3)).mul(div) 
+      batch_var = pow((x - batch_mean.reshape(shape=[1, -1, 1, 1])), self.two).sum(axis=(0,2,3)).mul(div)
     if self.track_running_stats: #needs momentum
       self.running_mean = self.running_mean.mul(self.num_batches_tracked).add(batch_mean)
       self.running_var = self.running_var.mul(self.num_batches_tracked).add(batch_var)
@@ -28,9 +27,9 @@ class BatchNorm2D:
       self.running_var = self.running_var.div(self.num_batches_tracked)
     if self.training: 
       return self.normalize(x, batch_mean, batch_var)
-    return self.normalize(x)
+    return self.normalize(x, self.running_mean, self.running_var)
 
-  def normalize(self, x, mean=self.running_mean, var=self.running_var):
+  def normalize(self, x, mean, var):
     x = x.sub(mean.reshape(shape=[1, -1, 1, 1]))
     x = x.mul(self.weight.reshape(shape=[1, -1, 1, 1]))
     x = x.div(var.add(self.eps).reshape(shape=[1, -1, 1, 1]).sqrt())
