@@ -10,7 +10,7 @@ import time
 import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
-from tinygrad.utils import fetch
+from tinygrad.utils import fetch, get_parameters
 from extra.efficientnet import EfficientNet
 
 def infer(model, img):
@@ -53,7 +53,9 @@ def infer(model, img):
 if __name__ == "__main__":
   # instantiate my net
   model = EfficientNet(int(os.getenv("NUM", "0")))
-  model.load_weights_from_torch(GPU)
+  model.load_weights_from_torch()
+  if GPU:
+    [x.cuda_() for x in get_parameters(model)]
 
   # category labels
   import ast

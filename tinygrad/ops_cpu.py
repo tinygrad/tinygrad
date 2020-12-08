@@ -45,19 +45,6 @@ class Mul(Function):
     return unbroadcast(y*grad_output, x.shape), unbroadcast(x*grad_output, y.shape)
 register('mul', Mul)
 
-class Div(Function):
-  @staticmethod
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return x / y
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
-    return unbroadcast(grad_output / y, x.shape), unbroadcast(-x * grad_output / y**2, y.shape)
-# TODO: registering this breaks the default div on the GPU
-#register('div', Div)
-
 class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):
@@ -73,14 +60,15 @@ register('pow', Pow)
 
 class Sum(Function):
   @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return np.array([input.sum()])
+  def forward(ctx, input,axis=None):
+    ctx.save_for_backward(input, axis)
+    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output * np.ones_like(input)
+    input, axis = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    return grad_output.reshape(shape) + np.zeros_like(input)
 register('sum', Sum)
 
 

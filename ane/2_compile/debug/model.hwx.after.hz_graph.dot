@@ -1,0 +1,7 @@
+digraph D {
+	node [shape=box style="rounded, filled"]
+	"n_0" [label="L=probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv\l(NE, sched=1, tid=0)\lS=probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_0/tile_src_l2_buf\lrange=[0, 48]\lTy=0\l ", fillcolor=white]
+	"n_1" [label="L=probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv\l(NE, sched=1, tid=0)\lS=probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv/conv_res_l2_buf\lrange=[48, 80]\lTy=2\l ", fillcolor=grey]
+
+
+}

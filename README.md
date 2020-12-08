@@ -17,7 +17,7 @@ tinygrad is also a city in Russia.
 ### Installation
 
 ```bash
-pip3 install tinygrad --upgrade
+pip3 install git+https://github.com/geohot/tinygrad.git --upgrade
 ```
 
 ### Example
@@ -57,12 +57,11 @@ It turns out, a decent autograd tensor library is 90% of what you need for neura
 ```python
 from tinygrad.tensor import Tensor
 import tinygrad.optim as optim
-from tinygrad.utils import layer_init_uniform
 
 class TinyBobNet:
   def __init__(self):
-    self.l1 = Tensor(layer_init_uniform(784, 128))
-    self.l2 = Tensor(layer_init_uniform(128, 10))
+    self.l1 = Tensor.uniform(784, 128)
+    self.l2 = Tensor.uniform(128, 10)
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
@@ -80,12 +79,16 @@ optim.step()
 
 ### GPU Support?!
 
-tinygrad supports GPUs through PyOpenCL. Not all ops are supported yet on the backward pass.
+tinygrad supports GPUs through PyOpenCL.
 
 ```python
 from tinygrad.tensor import Tensor
 (Tensor.ones(4,4).cuda() + Tensor.ones(4,4).cuda()).cpu()
 ```
+
+### ANE Support?!?!
+
+So it doesn't work yet, but see the `ane` directory for code to use the Apple Neural Engine at a low level.
 
 ### ImageNet inference
 
@@ -102,6 +105,8 @@ ipython3 examples/efficientnet.py webcam
 ```
 
 PROTIP: Set "GPU=1" environment variable if you want this to go faster.
+
+PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
 ### The promise of small
 

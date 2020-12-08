@@ -17,11 +17,12 @@ class TestNN(unittest.TestCase):
     bn.running_var.data[bn.running_var.data < 0] = 0
 
     # create in torch
-    tbn = torch.nn.BatchNorm2d(sz).eval()
-    tbn.weight[:] = torch.tensor(bn.weight.data)
-    tbn.bias[:] = torch.tensor(bn.bias.data)
-    tbn.running_mean[:] = torch.tensor(bn.running_mean.data)
-    tbn.running_var[:] = torch.tensor(bn.running_var.data)
+    with torch.no_grad():
+      tbn = torch.nn.BatchNorm2d(sz).eval()
+      tbn.weight[:] = torch.tensor(bn.weight.data)
+      tbn.bias[:] = torch.tensor(bn.bias.data)
+      tbn.running_mean[:] = torch.tensor(bn.running_mean.data)
+      tbn.running_var[:] = torch.tensor(bn.running_var.data)
 
     # trial
     inn = Tensor.randn(2, sz, 3, 3)

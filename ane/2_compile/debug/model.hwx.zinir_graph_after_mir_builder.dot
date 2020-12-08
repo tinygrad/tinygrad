@@ -1,0 +1,59 @@
+digraph G {
+	fontname="Arial Unicode MS"
+	graph[compound=true];
+	subgraph "cluster_image_O" {
+		style=rounded
+		fontsize=11
+		bgcolor="#66CDFC:#C3EBFF"
+		gradientangle=90
+		fontcolor="#055175"
+		label=<<font point-size='13' face='Arial Rounded MT Bold'>image</font><br/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Type:</font> LIVE_IN<br align='left'/>
+<font face='Arial Rounded MT Bold'>Detail Info:</font> <br align='left'/><br align='left'/>
+>;
+
+		"image_T" [label=<<font point-size='12' face='Arial Rounded MT Bold'>image</font><br/><br align='left'/>
+
+<font face='Arial Rounded MT Bold'>Dims</font>: [1×1×3×1×1] (fp16)<br align='left'/>
+<font face='Arial Rounded MT Bold'>Hint</font>: DRAM, (Interleave=1)<br align='left'/>>,shape=box,style=filled,fillcolor=white];
+
+	}
+	subgraph "cluster_probs@output_O" {
+		style=rounded
+		fontsize=11
+		bgcolor="#66CDFC:#C3EBFF"
+		gradientangle=90
+		fontcolor="#055175"
+		label=<<font point-size='13' face='Arial Rounded MT Bold'>probs@output</font><br/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Type:</font> LIVE_OUT<br align='left'/>
+<font face='Arial Rounded MT Bold'>Detail Info:</font> <br align='left'/><br align='left'/>
+>;
+
+		"probs@output_T" [label=<<font point-size='12' face='Arial Rounded MT Bold'>probs@output</font><br/><br align='left'/>
+
+<font face='Arial Rounded MT Bold'>Dims</font>: [1×1×2×1×1] (fp16)<br align='left'/>
+<font face='Arial Rounded MT Bold'>Hint</font>: DRAM, (Interleave=1)<br align='left'/>>,shape=box,style=filled,fillcolor=white];
+
+	}
+	subgraph "cluster_probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_O" {
+		style=rounded
+		fontsize=11
+		bgcolor="#BBBBBB:#EEEEEE"
+gradientangle=90
+		fontcolor="#222222"
+		pad=4
+		label=<<font point-size='13' face='Arial Rounded MT Bold'>probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv</font><br/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Type:</font> NEFUSED_CONV<br align='left'/>
+<font face='Arial Rounded MT Bold'>Detail Info:</font> <br align='left'/>Fused kernel: K: [W1H1D1]<br align='left'/>IS: [X1Y1Z1]<br align='left'/>OS: [X1Y1Z1]<br align='left'/>Dil: [X1Y1Z1]<br align='left'/><br align='left'/>PadMode: Zero<br align='left'/>K: [K2C3R1S1D1]<br align='left'/>Fmt: f16<br align='left'/>SCALE_BIAS: PerCoutBias: Y<br align='left'/><br align='left'/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Bias:</font> Non-Singular<br align='left'/>
+>;
+
+		"probs@output/src_T" [label=<<font point-size='12' face='Arial Rounded MT Bold'>probs@output/src</font><br/><br align='left'/>
+
+<font face='Arial Rounded MT Bold'>Dims</font>: [1×1×2×1×1] (fp16)<br align='left'/>
+<font face='Arial Rounded MT Bold'>Hint</font>: Flex<br align='left'/>>,shape=box,style=filled,fillcolor=white];
+
+	}
+	"image_T" -> "probs@output/src_T" [ltail="cluster_image_O", lhead="cluster_probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_O"];
+	"probs@output/src_T" -> "probs@output_T" [ltail="cluster_probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_O", lhead="cluster_probs@output_O"];
+}
