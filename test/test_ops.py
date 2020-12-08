@@ -59,6 +59,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, gpu=self.gpu)
   def test_sum(self):
     helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, gpu=self.gpu)
+  def test_sum_axis(self):
+    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), gpu=self.gpu)
   def test_logsoftmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, gpu=self.gpu)
   def test_tanh(self):
@@ -66,7 +68,7 @@ class TestOps(unittest.TestCase):
   def test_topo_sort(self):
     helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6)
 
-  def test_broadcast_full(self):
+  
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
       for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:

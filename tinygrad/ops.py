@@ -60,14 +60,14 @@ register('pow', Pow)
 
 class Sum(Function):
   @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return np.array([input.sum()])
+  def forward(ctx, input,axis=None):
+    ctx.save_for_backward(input, axis)
+    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output * np.ones_like(input)
+    input, axis = ctx.saved_tensors
+    return grad_output.reshape([1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]) + np.zeros_like(input)
 register('sum', Sum)
 
 
