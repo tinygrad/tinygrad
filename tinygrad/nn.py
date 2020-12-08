@@ -16,18 +16,15 @@ class BatchNorm2D:
   def __call__(self, x):
     [bs, sz], m = x.shape[:2], x.shape[2]*x.shape[3]
     div =  Tensor([1/bs/m],  gpu=x.gpu, requires_grad=False)   #we are reimplementing means by contracting with 1's
-    crow =  Tensor.ones(1,bs,  gpu=x.gpu, requires_grad=False) #we are reimplementing means by contracting with 1's
-    ccol =  Tensor.ones(m,1, gpu=x.gpu, requires_grad=False)   #we are reimplementing means by contracting with 1's
-    batch_mean = crow.dot(x.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
+    batch_mean = x.sum(axis=(0,2,3)).mul(div) #crow.dot(x.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
     y = pow((x - self.running_mean.reshape(shape=[1, -1, 1, 1])).reshape(shape=[-1]), self.two)
-    #y = (x - self.running_mean.reshape(shape=[1, -1, 1, 1])).mul(x - self.running_mean.reshape(shape=[1, -1, 1, 1]))#, self.two) 
-    batch_var = crow.dot(y.reshape(shape=[bs,sz*m])).reshape(shape=[sz,m]).dot(ccol).reshape(shape=[sz]).mul(div)
+    batch_var = pow((x - self.running_mean.reshape(shape=[1, -1, 1, 1])), self.two).sum(axis=(0,2,3)).mul(div)
     if self.track_running_stats: #needs momentum
         self.running_mean = self.running_mean.mul(self.num_batches_tracked).add(batch_mean)
         self.running_var = self.running_var.mul(self.num_batches_tracked).add(batch_var)
         self.num_batches_tracked = self.num_batches_tracked.add(Tensor.ones(1, requires_grad=False))
-        self.running_mean = self.running_mean.mul(self.num_batches_tracked).div(self.num_batches_tracked)
-        self.running_var = self.running_var.mul(self.num_batches_tracked).div(self.num_batches_tracked)
+        self.running_mean = self.running_mean.div(self.num_batches_tracked)
+        self.running_var = self.running_var.div(self.num_batches_tracked)
     elif self.training: #just use the batch mean and variance  
         self.running_mean = batch_mean
         self.running_var = batch_var
