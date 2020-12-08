@@ -75,7 +75,7 @@
 				<key>KernelOffset</key>
 				<integer>0</integer>
 				<key>KernelType</key>
-				<string>Float32</string>
+				<string>Float16</string>
 
 				<key>Step</key>
 				<array>
