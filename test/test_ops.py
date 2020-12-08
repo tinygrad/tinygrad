@@ -75,6 +75,11 @@ class TestOps(unittest.TestCase):
   def test_scalar_rmul(self):
     helper_test_op([(45,65)], lambda x: 2*x, lambda x: 2*x, gpu=self.gpu)
 
+  def test_scalar_sub(self):
+    helper_test_op([(45,65)], lambda x: x-2, lambda x: x-2, gpu=self.gpu)
+  def test_scalar_rsub(self):
+    helper_test_op([(45,65)], lambda x: 2-x, lambda x: 2-x, gpu=self.gpu)
+
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
