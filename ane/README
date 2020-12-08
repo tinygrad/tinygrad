@@ -91,10 +91,20 @@ u16 0x20 = output address?
 reloc 0x2c-0x74 = K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_0
                   K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_1
 
+16 output channel parallel:
+u32[16] 0x34-0x74 = 0x80 | 1 if used
+u32[16] 0x74-0xB4 = <channel data offset>
+
 == section break 0x128 ==
+u16 0x128 = InputWidth
+u16 0x12A = InputHeight
+
 u32 0x130 = (OutputType * 0x10) | InputType
 u32 0x134 = InputChannels
 u32 0x138 = OutputChannels
+u16 0x13C = OutputWidth
+u16 0x13E = OutputHeight
+
 u16 0x14C = BatchSize
 
 == section break 0x16c ==
