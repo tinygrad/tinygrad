@@ -23,6 +23,8 @@ class ProfileOp:
     if DEBUG: self.st = time.time()
   def __exit__(self, *junk):
     if DEBUG:
+      if cl_queue is not None:
+        cl_queue.finish()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
