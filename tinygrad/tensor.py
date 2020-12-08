@@ -56,7 +56,7 @@ class Tensor:
   did_float_warning = False
   default_gpu = False
   allocated = 0
-  ops, opsgpu = {}, {}
+  ops_cpu, ops_gpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
@@ -243,11 +243,11 @@ class Function:
 
 def register(name, fxn, gpu=False):
   if gpu:
-    Tensor.opsgpu[name] = fxn
+    Tensor.ops_gpu[name] = fxn
   else:
-    Tensor.ops[name] = fxn
+    Tensor.ops_cpu[name] = fxn
   def dispatch(*x, **kwargs):
-    f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
+    f = (Tensor.ops_gpu if x[0].gpu else Tensor.ops_cpu)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
@@ -256,10 +256,10 @@ def register(name, fxn, gpu=False):
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
 
 # this registers all the operations
-import tinygrad.ops
+import tinygrad.ops_cpu
 try:
   import pyopencl as cl
-  import tinygrad.opsgpu
+  import tinygrad.ops_gpu
   GPU = True
 except ImportError:
   # no GPU support
