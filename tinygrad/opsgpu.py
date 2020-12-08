@@ -131,7 +131,7 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     osize = [1]*len(inp.shape)
   else:
     osize = np.array(inp.shape)
-    osize[axis] = 1
+    osize[list(axis)] = 1 
   ret = buffer_new(ctx, osize)
   if axis is None:
     ret.shape = (1,)
@@ -233,23 +233,25 @@ register('pow', Pow, gpu=True)
 
 class Sum(Function):
   @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return reduce_op(ctx, "out += a", "out", input)
+  def forward(ctx, input, axis=None):
+    ctx.save_for_backward(input, axis)
+    ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
+    if axis is not None:
+      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+    return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    ret = buffer_like(ctx, input)
-
-    fill = clbuild(ctx.cl_ctx, "fill", """
-    __kernel void fill(__global const float *a_g, __global float *res_g) {
-      int gid = get_global_id(0);
-      res_g[gid] = a_g[0];
-    }""")
-    fill(ctx.cl_queue, [np.prod(ret.shape)], None, grad_output.cl, ret.cl)
-    return ret
-
+    input, axis = ctx.saved_tensors
+    
+    if axis is None:
+        bsize = np.ones(len(input.shape))
+    else:
+        bsize = np.array(input.shape)
+        bsize[list(axis)] = 1
+    
+    output = GPUBuffer(bsize, hostbuf=grad_output)
+    return binary_op(ctx, 'a+b', output, buffer_zeros(ctx, input.shape))
 register('sum', Sum, gpu=True)
 
 class Dot(Function):
