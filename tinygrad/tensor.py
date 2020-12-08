@@ -193,8 +193,7 @@ class Tensor:
   # ***** non first class ops *****
 
   def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
-    return self.sum().mul(div)
+    return self.sum() * (1.0/np.prod(self.shape))
 
   def sqrt(self):
     root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
@@ -243,7 +242,7 @@ def register(name, fxn, gpu=False):
   else:
     Tensor.ops[name] = fxn
   def dispatch(*x, **kwargs):
-    x = tuple((Tensor(np.array(arg), gpu=x[0].gpu, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x ))
+    x = tuple((Tensor(np.array([arg]), gpu=x[0].gpu, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x ))
     f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
@@ -253,6 +252,9 @@ def register(name, fxn, gpu=False):
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     if "__r%s__" % name in dir(int):
         setattr(Tensor, f"__r{name}__", lambda self, x: getattr(self, f"__{name}__")(x))
+    else:
+        setattr(Tensor, f"__rtrue{name}__", lambda self, x: getattr(self, f"__{name}__")(x))
+
 
 
 # this registers all the operations

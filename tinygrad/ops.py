@@ -7,9 +7,10 @@ from .tensor import Function, register
 def unbroadcast(out, in_sh):
   # adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i]
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]
-  if not in_sh: # incase input is a scalar.
-      return np.asarray(out.flat[0], dtype=out.dtype)
-  return out.sum(axis=tuple(sum_axis)).reshape(in_sh)
+  try:
+    return out.sum(axis=tuple(sum_axis)).reshape(in_sh)
+  except ValueError:
+      return np.reshape(out.flat[0], in_sh)
 
 class Add(Function):
   @staticmethod
