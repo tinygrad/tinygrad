@@ -59,7 +59,7 @@ class Tensor:
   def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
       gpu = Tensor.default_gpu
-    if isinstance(data, (list,float)):
+    if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif GPU and isinstance(data, GPUBuffer):
       self.gpu = True
@@ -243,7 +243,7 @@ def register(name, fxn, gpu=False):
   else:
     Tensor.ops[name] = fxn
   def dispatch(*x, **kwargs):
-    x = tuple((Tensor(arg,requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x ))
+    x = tuple((Tensor(np.array(arg), gpu=x[0].gpu, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x ))
     f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
