@@ -85,6 +85,22 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', inpu
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
+@functools.lru_cache(maxsize=(5*(3**4 + 3**3 + 3**2 + 3))) #  (5 kinds of operations)*(upper bound for # possible complists of len<4)
+def get_binop_prg(cl_ctx, code, complist):
+  ndims = len(complist)
+  idx_exprs = ["0", "0", "0"] # [idx_x, idx_y, idx_ret], compiler should optimize away these 0s
+  for i in range(ndims):
+    for j in range(3):
+      if j==2 or complist[i][j]:
+        idx_exprs[j] = "gid%d + d%d*(%s)" % (i, i, idx_exprs[j])
+  prg = """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+"".join([', int d%d' % i for i in range(ndims)])+""") {
+    """+"\n".join(["int gid%d = get_global_id(%d);" % (i, i) for i in range(ndims)])+"""
+    float a = x_g["""+idx_exprs[0]+"""];
+    float b = y_g["""+idx_exprs[1]+"""];
+    res_g["""+idx_exprs[2]+"""] = """+code+""";
+  }"""
+  return cl.Program(cl_ctx, prg).build()
+
 def binary_op(ctx, code, x, y):
   n_dims = max(len(x.shape), len(y.shape))
   shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
@@ -93,29 +109,20 @@ def binary_op(ctx, code, x, y):
   if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
     raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
   shape_ret = np.maximum(shape_x, shape_y)
+  
+  dimlist, complist = [], []
+  def push(dim, comp):
+    if len(complist) > 0 and complist[-1] == comp:
+      dimlist[-1] *= dim
+    elif comp != (False, False):
+      dimlist.append(dim)
+      complist.append(comp)
+  for i in range(n_dims):
+    push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
+    
+  prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
   ret = buffer_zeros(ctx, shape_ret)
-
-  prg = clbuild(ctx.cl_ctx, """
-  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g, int n_dims, int prod,
-          __global const int *shape_x, __global const int *shape_y, __global const int *shape_ret) {
-    // invariant: prod should contain the product of all dimensions (of the returned tensor) that we haven't handled yet
-    int gid = get_global_id(0);
-    """ + ("""
-    int idx_a = 0, idx_b = 0;
-    for (int dim = 0; dim < n_dims; dim++) {
-      prod /= shape_ret[dim];                       // mark current dimension as handled
-      int idx_ret = (gid / prod) % shape_ret[dim];  // the index into the current dimension (for the returned tensor)
-      idx_a = (idx_a * shape_x[dim]) + (idx_ret % shape_x[dim]); // does nothing if shape_x[dim] is 1
-      idx_b = (idx_b * shape_y[dim]) + (idx_ret % shape_y[dim]); // does nothing if shape_y[dim] is 1
-    }
-    """ if x.shape != y.shape else "int idx_a = gid, idx_b = gid;") + """
-    float a = a_g[idx_a];
-    float b = b_g[idx_b];
-    res_g[gid] = """+code+""";
-  }""")
-  prod = i32(shape_ret.prod())
-  prg.binop(ctx.cl_queue, [prod], None, x, y, ret, i32(n_dims), prod,
-    buffer_np(ctx, shape_x), buffer_np(ctx, shape_y), buffer_np(ctx, shape_ret))
+  prg.binop(ctx.cl_queue, dimlist, None, x, y, ret, *dimlist)
   return ret
 
 def unary_op(ctx, code, x):
