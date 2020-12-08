@@ -6,11 +6,8 @@ import functools
 def buffer_new(ctx, shape):
   return GPUBuffer(shape)
 
-def buffer_np(ctx, np_array):
-  return GPUBuffer(shape, hostbuf=np.zeros(shape, dtype=np.float32))
-
 def buffer_zeros(ctx, shape):
-  return buffer_np(ctx, np.zeros(shape, dtype=np.float32))
+  return GPUBuffer(shape, hostbuf=np.zeros(shape, dtype=np.float32))
 
 def buffer_like(ctx, x):
   return buffer_new(ctx, x.shape)
@@ -134,7 +131,6 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     osize = [1]*len(inp.shape)
   else:
     osize = np.array(inp.shape)
-    print('axis = ', axis, osize, osize[list(axis)])
     osize[list(axis)] = 1 
   ret = buffer_new(ctx, osize)
   if axis is None:
@@ -166,8 +162,8 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     }
     res_g[gid] = """+code2+""";
   }""")
-  reduce(ctx.cl_queue, [np.prod(osize)], None, inp,
-    i32(np.prod(inp.shape)//np.prod(osize)), ret,
+  reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
+    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
     buffer_np(ctx, np.array(osize, dtype=np.int32)))
