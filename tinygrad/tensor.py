@@ -196,15 +196,13 @@ class Tensor:
     return self.sum() * (1.0/np.prod(self.shape))
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
-    return self.pow(root)
+    return self.pow(0.5)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu, requires_grad=False)
-    return self.mul(y.pow(root))
+    return self * (y**-1.0)
 
   def swish(self):
-    return self.mul(self.sigmoid())
+    return self * (self.sigmoid())
 
   def tanh(self):
     return 2.0 * ((2.0 * self).sigmoid())  - 1.0 # 2*sigmoid(2*x)-1
