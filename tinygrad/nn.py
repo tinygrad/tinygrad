@@ -27,10 +27,10 @@ class BatchNorm2D:
       self.running_mean = self.running_mean.div(self.num_batches_tracked)
       self.running_var = self.running_var.div(self.num_batches_tracked)
     if self.training: 
-      return normalize(x, batch_mean, batch_var)
-    return normalize(x, self.running_mean, self.running_var)
+      return self.normalize(x, batch_mean, batch_var)
+    return self.normalize(x)
 
-  def normalize(self, x, mean, var):
+  def normalize(self, x, mean=self.running_mean, var=self.running_var):
     x = x.sub(mean.reshape(shape=[1, -1, 1, 1]))
     x = x.mul(self.weight.reshape(shape=[1, -1, 1, 1]))
     x = x.div(var.add(self.eps).reshape(shape=[1, -1, 1, 1]).sqrt())
