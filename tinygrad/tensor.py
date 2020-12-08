@@ -23,6 +23,8 @@ class ProfileOp:
     if DEBUG: self.st = time.time()
   def __exit__(self, *junk):
     if DEBUG:
+      if cl_queue is not None:
+        cl_queue.finish()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
@@ -54,7 +56,7 @@ class Tensor:
   did_float_warning = False
   default_gpu = False
   allocated = 0
-  ops, opsgpu = {}, {}
+  ops_cpu, ops_gpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
@@ -192,9 +194,11 @@ class Tensor:
 
   # ***** non first class ops *****
 
-  def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
-    return self.sum().mul(div)
+  def mean(self, axis=None):
+    out = self.sum(axis=axis)
+    coeff = np.prod(out.shape)/np.prod(self.shape)
+    div = Tensor(coeff+np.zeros(out.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
+    return out.mul(div)
 
   def sqrt(self):
     root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
@@ -241,11 +245,11 @@ class Function:
 
 def register(name, fxn, gpu=False):
   if gpu:
-    Tensor.opsgpu[name] = fxn
+    Tensor.ops_gpu[name] = fxn
   else:
-    Tensor.ops[name] = fxn
+    Tensor.ops_cpu[name] = fxn
   def dispatch(*x, **kwargs):
-    f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
+    f = (Tensor.ops_gpu if x[0].gpu else Tensor.ops_cpu)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
@@ -254,10 +258,10 @@ def register(name, fxn, gpu=False):
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
 
 # this registers all the operations
-import tinygrad.ops
+import tinygrad.ops_cpu
 try:
   import pyopencl as cl
-  import tinygrad.opsgpu
+  import tinygrad.ops_gpu
   GPU = True
 except ImportError:
   # no GPU support

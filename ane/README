@@ -87,43 +87,74 @@ header 0x0-0x1c
 u32 0x1c = next op offset
 u16 0x20 = output address?
 
-== section break 0x2c ==
+== section break 0x2c (weights) ==
 reloc 0x2c-0x74 = K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_0
                   K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_1
 
-== section break 0x128 ==
+16 output channel parallel:
+u32[16] 0x34-0x74 = 0x80 | 1 if used
+u32[16] 0x74-0xB4 = <channel data offset>
+u32[16] 0xB4-0xF4 = <channel data length>
+
+== section break 0x128 (conv) ==
+u16 0x128 = InputWidth
+u16 0x12A = InputHeight
+u16 0x12C = InputDepth
+
 u32 0x130 = (OutputType * 0x10) | InputType
+
 u32 0x134 = InputChannels
 u32 0x138 = OutputChannels
-u16 0x14C = BatchSize
 
-== section break 0x16c ==
+u16 0x13C = OutputWidth
+u16 0x13E = OutputHeight
+u16 0x140 = OutputDepth
+
+u16 0x144 = 0xa000 | (KernelHeight * 0x20) | KernelWidth
+u16 0x146 = 0x5000 | (PadTop * 0x40) | (PadLeft * 2)
+
+u16 0x14C = BatchSize
+u32 0x150 = OutputHeight?
+
+== section break 0x16c (input) ==
 reloc 0x16c-0x174 = image
 
 u32 0x178 = InputRowStride
 u32 0x17C = InputPlaneStride
-u32 0x180 = (InputPlaneStride * InputChannels)
+u32 0x180 = InputDepthStride
+u32 0x184 = InputBatchStride
+
+u8 0x1A7 = InputInterleave
 
 == section break 0x1e0 ==
+u8 0x1E5 = InputInterleave
+
 u32 0x1F4 = InputChannels * 0x10
-u32 0x1F8 = InputChannels * 0x10
+u32 0x1F8 = InputDepth * InputChannels * 0x10
+
+u8 0x211 = OutputInterleave
 
 u32 0x220 = OutputChannels * 0x10
-u32 0x224 = OutputChannels * 0x10
+u32 0x224 = OutputDepth * OutputChannels * 0x10
 
-== section break 0x22c ==
+== section break 0x22c (scaling) ==
 u16 0x230 = BiasScalar
 u16 0x232 = ScaleScalar
 
 == section break 0x240 ==
-u32 0x240 = 0x80 | KernelType
+u8 0x240 = 0x80 | KernelType
+u8 0x241 = 4 * hasbatch
+u16 0x246 = 0x10 | 2 * neuron?
 
-== section break 0x258 ==
+== section break 0x258 (output) ==
 reloc 0x258-0x25c = probs@output/src
 
 u32 0x260 = OutputRowStride
 u32 0x264 = OutputPlaneStride
-u32 0x268 = (OutputPlaneStride * OutputChannels)
+u32 0x268 = OutputDepthStride
+u32 0x26C = OutputBatchStride
+
+u8 0x273 = OutputInterleave
 
 == Zin Constants ==
 
