@@ -30,7 +30,7 @@ class BatchNorm2D:
       return normalize(x, batch_mean, batch_var)
     return normalize(x, self.running_mean, self.running_var)
 
-  def normalize(x, mean, var):
+  def normalize(self, x, mean, var):
     x = x.sub(mean.reshape(shape=[1, -1, 1, 1]))
     x = x.mul(self.weight.reshape(shape=[1, -1, 1, 1]))
     x = x.div(var.add(self.eps).reshape(shape=[1, -1, 1, 1]).sqrt())
