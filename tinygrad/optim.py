@@ -26,7 +26,7 @@ class SGD(Optimizer):
 class RMSprop(Optimizer):
   def __init__(self, params, lr=0.001, decay=0.9, eps=1e-8):
     super(RMSprop, self).__init__(params)
-    self.lr, self.decay, self.eps, = [self.num(x) for x in [lr, decay, eps]]
+    self.lr, self.decay, self.eps = [self.num(x) for x in [lr, decay, eps]]
 
     self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), gpu=params[0].gpu, requires_grad=False) for t in self.params]
 
