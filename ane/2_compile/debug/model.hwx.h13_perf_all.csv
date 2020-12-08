@@ -1,0 +1,3 @@
+,NumWU,mac_cycles_per_WU,post_cycles_per_WU,ne_cycle_single_buffering,ne_cycle_double_buffering,pe_cycle,l2_bcast,lw_writeback,g_conv,kdma,rdma,wdma,estimated_cycle_count,estimated_time(ms)
+0,1,4,1,5,4,0,3,1,0,12,192,128,4,3,3,1.50909e-05
+, , , , , , , , , , , , , , , ,1.50909e-05

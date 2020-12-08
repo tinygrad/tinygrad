@@ -1,0 +1,76 @@
+digraph G {
+	fontname="Arial Unicode MS"
+	graph[compound=true];
+	subgraph "cluster_image_O" {
+		style=rounded
+		fontsize=11
+		bgcolor="#66CDFC:#C3EBFF"
+		gradientangle=90
+		fontcolor="#055175"
+		label=<<font point-size='13' face='Arial Rounded MT Bold'>image</font><br/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Type:</font> LIVE_IN<br align='left'/>
+<font face='Arial Rounded MT Bold'>Detail Info:</font> <br align='left'/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Sched:</font> 0<br align='left'/>
+<font face='Arial Rounded MT Bold'>Memory Peak:</font> 192B<br align='left'/>
+>;
+
+		"image_T" [label=<<font point-size='12' face='Arial Rounded MT Bold'>image</font><br/><br align='left'/>
+
+<font face='Arial Rounded MT Bold'>Dims</font>: [1×1×3×1×1] (fp16)<br align='left'/>
+<font face='Arial Rounded MT Bold'>SymbolType</font>: NonResident<br align='left'/>
+<font face='Arial Rounded MT Bold'>Size</font>: 192B<br align='left'/>
+<font face='Arial Rounded MT Bold'>Start/End Offset</font>: 0 / 192<br align='left'/>
+<font face='Arial Rounded MT Bold'>Liverange</font>: 0 to 1<br align='left'/>>,shape=box,style=filled,gradientangle=270,margin=.2,fontname="Arial Unicode MS",fontsize=11,fillcolor="#FB5153:#DD0307"];
+
+	}
+	subgraph "cluster_probs@output_O" {
+		style=rounded
+		fontsize=11
+		bgcolor="#66CDFC:#C3EBFF"
+		gradientangle=90
+		fontcolor="#055175"
+		label=<<font point-size='13' face='Arial Rounded MT Bold'>probs@output</font><br/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Type:</font> LIVE_OUT<br align='left'/>
+<font face='Arial Rounded MT Bold'>Detail Info:</font> <br align='left'/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Sched:</font> 2<br align='left'/>
+<font face='Arial Rounded MT Bold'>Memory Peak:</font> 128B<br align='left'/>
+>;
+
+		"probs@output_T" [label=<<font point-size='12' face='Arial Rounded MT Bold'>probs@output</font><br/><br align='left'/>
+
+<font face='Arial Rounded MT Bold'>Dims</font>: [1×1×2×1×1] (fp16)<br align='left'/>
+<font face='Arial Rounded MT Bold'>SymbolType</font>: NonResident<br align='left'/>
+<font face='Arial Rounded MT Bold'>Size</font>: 66B<br align='left'/>
+<font face='Arial Rounded MT Bold'>Start/End Offset</font>: 0 / 66<br align='left'/>>,shape=box,style=filled,gradientangle=270,margin=.2,fontname="Arial Unicode MS",fontsize=11,fillcolor=white];
+
+	}
+	subgraph "cluster_probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_O" {
+		style=rounded
+		fontsize=11
+		bgcolor="#BBBBBB:#EEEEEE"
+gradientangle=90
+		fontcolor="#222222"
+		pad=4
+		label=<<font point-size='13' face='Arial Rounded MT Bold'>probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv</font><br/><br align='left'/>
+<font face='Arial Rounded MT Bold'>Type:</font> NEFUSED_CONV<br align='left'/>
+<font face='Arial Rounded MT Bold'>Detail Info:</font> <br align='left'/>Fused kernel: K: [W1H1D1]<br align='left'/>IS: [X1Y1Z1]<br align='left'/>OS: [X1Y1Z1]<br align='left'/>Dil: [X1Y1Z1]<br align='left'/><br align='left'/>PadMode: Zero<br align='left'/>K: [K2C3R1S1D1]<br align='left'/>Fmt: f16<br align='left'/>SCALE_BIAS: PerCoutBias: Y<br align='left'/><br align='left'/><br align='left'/>
+<font face='Arial Rounded MT Bold'>TID:</font> 0<br align='left'/>
+<font face='Arial Rounded MT Bold'>Sched:</font> 1<br align='left'/>
+<font face='Arial Rounded MT Bold'>Memory Peak:</font> 320B<br align='left'/>
+<font face='Arial Rounded MT Bold'>Input_1_DMA_default Start/End Offset:</font> 0 / 48<br align='left'/>
+<font face='Arial Rounded MT Bold'>Output_DMA_default Start/End Offset:</font> 48 / 80<br align='left'/>
+<font face='Arial Rounded MT Bold'>Bias:</font> Non-Singular<br align='left'/>
+>;
+
+		"probs@output/src_T" [label=<<font point-size='12' face='Arial Rounded MT Bold'>probs@output/src</font><br/><br align='left'/>
+
+<font face='Arial Rounded MT Bold'>Dims</font>: [1×1×2×1×1] (fp16)<br align='left'/>
+<font face='Arial Rounded MT Bold'>SymbolType</font>: NonResident<br align='left'/>
+<font face='Arial Rounded MT Bold'>Size</font>: 128B<br align='left'/>
+<font face='Arial Rounded MT Bold'>Start/End Offset</font>: 0 / 128<br align='left'/>
+<font face='Arial Rounded MT Bold'>Liverange</font>: 1 to 2<br align='left'/>>,shape=box,style=filled,gradientangle=270,margin=.2,fontname="Arial Unicode MS",fontsize=11,fillcolor="#FB5153:#DD0307"];
+
+	}
+	"image_T" -> "probs@output/src_T" [ltail="cluster_image_O", lhead="cluster_probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_O"];
+	"probs@output/src_T" -> "probs@output_T" [ltail="cluster_probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_O", lhead="cluster_probs@output_O"];
+}

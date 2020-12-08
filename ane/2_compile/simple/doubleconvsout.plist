@@ -17,7 +17,8 @@
 		</array>
 		<key>Units</key>
 		<array>
-			<string>conv_layer</string>
+			<string>my_layer</string>
+			<string>my_layer_2</string>
 		</array>
 		<key>Outputs</key>
 		<array>
@@ -27,7 +28,7 @@
     <!-- Global array of weights -->
 		<key>Weights</key>
 		<array>
-			<string>min.weights</string>
+			<string>../min.weights</string>
 		</array>
 
 		<key>image</key>
@@ -51,14 +52,13 @@
 			<string>Float16</string>
 		</dict>
 
-    <!-- comment? -->
-		<key>conv_layer</key>
+		<key>my_layer</key>
 		<dict>
 			<key>Bottom</key>
 			<string>image</string>
 
 			<key>Name</key>
-			<string>conv_layer</string>
+			<string>my_layer</string>
 			<key>OutputChannels</key>
 			<integer>3</integer>
 			<key>OutputType</key>
@@ -71,7 +71,44 @@
 				<key>KernelWidth</key>
 				<integer>1</integer>
 
-        <!-- where to get the weight from -->
+				<key>KernelIndex</key>
+				<integer>0</integer>
+				<key>KernelOffset</key>
+				<integer>0</integer>
+				<key>KernelType</key>
+				<string>Float32</string>
+
+				<key>Step</key>
+				<array>
+					<integer>1</integer>
+					<integer>1</integer>
+				</array>
+				<key>Type</key>
+				<string>Conv</string>
+			</dict>
+			<key>Type</key>
+			<string>Conv</string>
+		</dict>
+
+		<key>my_layer_2</key>
+		<dict>
+			<key>Bottom</key>
+			<string>my_layer</string>
+
+			<key>Name</key>
+			<string>my_layer_2</string>
+			<key>OutputChannels</key>
+			<integer>3</integer>
+			<key>OutputType</key>
+			<string>Float16</string>
+
+			<key>Params</key>
+			<dict>
+				<key>KernelHeight</key>
+				<integer>1</integer>
+				<key>KernelWidth</key>
+				<integer>1</integer>
+
 				<key>KernelIndex</key>
 				<integer>0</integer>
 				<key>KernelOffset</key>
@@ -94,7 +131,7 @@
 		<key>probs@output</key>
 		<dict>
 			<key>Bottom</key>
-			<string>conv_layer</string>
+			<string>my_layer_2</string>
 			<key>OutputPlaneStride</key>
 			<integer>64</integer>
 			<key>OutputRowStride</key>

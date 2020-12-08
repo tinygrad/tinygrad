@@ -44,6 +44,87 @@ TODO: Write a nice plist grabber
 DONE: Write a call to the compiler with plist+weights
 DONE: Write an hwx runner
 
+== Tracing the Compiler ==
+
+ANECCompileProcedure
+  ZinAneCreateIr
+    ZinParseNeuronUnit
+  ZinAneCoreCompile
+    ZinAneCodeGeneration
+      ZinIrCodegenHandleKernels
+      ZinIrTargetH13::CodegenTds
+        ZinIrCacheHintTable
+        ZinIrCodegenHandleTds_v7
+          ZinIrCodegenHandleTdsMakeList<7u>
+            ZinAneInstruction
+            ZinAneTd<7u>::HandleEngineLayer
+              ZinAneInstruction::HandleTdHeader
+              HandleNELayer<7u>
+                ZinAneInstruction::HandleCommonConfig
+                  ZinAneInstruction::HandleCommonConfigCommonOpcodes
+        ZinIrCodegenHandleTds<7u>
+          0x1bb93ae00 <-- this is the store of the first byte in the hwx
+          CalculateSizeInBytesFromRegCount (x*4+4)
+            0xf   @ 0x128-0x168  (base 0x1003047b0)
+            0x1b  @ 0x16c-0x1dc
+            0x11  @ 0x1e0-0x228
+            0x3   @ 0x22c-0x23c
+            0x4   @ 0x240-0x254
+            0x6   @ 0x258-0x274(end)
+          AddReloc (this is gold! x4 goes in the hwx)
+
+rbreak ^ZinAneInstruction*
+
+== min.plist == 
+
+Types: GOC, Conv, Broadcast, ScaledElementWise, Reshape, InputView, Neuron, Concat
+
+
+ops have length 0x300, seems like one basic op repeated
+
+header 0x0-0x1c
+
+u32 0x1c = next op offset
+u16 0x20 = output address?
+
+== section break 0x2c ==
+reloc 0x2c-0x74 = K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_0
+                  K2DBE6976FEB616E6867A2E3853FC37D0F101C4C51BA4A80C103359643338C0C1_ne_1
+
+== section break 0x128 ==
+u32 0x130 = (OutputType * 0x10) | InputType
+u32 0x134 = InputChannels
+u32 0x138 = OutputChannels
+u16 0x14C = BatchSize
+
+== section break 0x16c ==
+reloc 0x16c-0x174 = image
+
+u32 0x178 = InputRowStride
+u32 0x17C = InputPlaneStride
+u32 0x180 = (InputPlaneStride * InputChannels)
+
+== section break 0x1e0 ==
+u32 0x1F4 = InputChannels * 0x10
+u32 0x1F8 = InputChannels * 0x10
+
+u32 0x220 = OutputChannels * 0x10
+u32 0x224 = OutputChannels * 0x10
+
+== section break 0x22c ==
+u16 0x230 = BiasScalar
+u16 0x232 = ScaleScalar
+
+== section break 0x240 ==
+u32 0x240 = 0x80 | KernelType
+
+== section break 0x258 ==
+reloc 0x258-0x25c = probs@output/src
+
+u32 0x260 = OutputRowStride
+u32 0x264 = OutputPlaneStride
+u32 0x268 = (OutputPlaneStride * OutputChannels)
+
 == Zin Constants ==
 
 kZinIrOpCodeConv = 0?
@@ -54,35 +135,111 @@ kZinIrOpCodeFlattenComposite
 kZinIrOpCodeNEConvOp
 kZinIrOpCodeTranspose
 
+ 0: CONV
+ 1: POOL
+ 2: SCALE_BIAS
+ 3: TERNARY_DYNAMIC_GOC
+ 4: BINARY_DYNAMIC_GOC
+ 5: ACTIVATION
+ 6: EW
+ 7: SCALED_EW
+ 8: CONCAT
+ 9: SPLIT
+10: COPY
+11: FLATTEN
+12: UNFLATTEN
+13: CROSS_CORRELATION
+14: KERNEL_RASTERIZER
+15: ARG_MIN_MAX
+16: MATRIX_MULT
+17: BROADCAST
+18: FLATTEN_COMPOSITE
+19: UNFLATTEN_COMPOSITE
+20: KERNEL_RASTERIZER_COMPOSITE
+21: CROSS_CORRELATION_COMPOSITE
+22: LIVE_IN
+23: CONST_IN
+24: LIVE_OUT
+25: REDUCTION
+26: ALIAS
+27: Typecast
+28: RESHAPE
+29: VIEW
+30: TRANSPOSE
+31: SPACE_TO_BATCH
+32: BATCH_TO_SPACE
+33: SOFTMAX
+34: INSTANCE_NORM
+35: L2_NORM
+36: MINMAX_NORM
+37: LRN
+38: COST_VOLUME
+39: PIXEL_SHUFFLE
+40: FPS
+41: RS
+42: PEFUSED_ELEMENTWISE
+43: PEFUSED_POOL
+44: PEFUSED_GOC
+45: NEFUSED_CONV
+46: NEFUSED_POOL
+47: NEFUSED_EW
+48: NEFUSED_BYPASS
+
 # guessing from the hwx
 kZinTensorFormatUInt8 = 0
 kZinTensorFormatInt8 = 1
 kZinTensorFormatFloat16 = 2
 kZinTensorFormatInvalid
 
-== min.plist == 
+Zin (plist format) ---(ZinAneCoreCompile)---> Mir (hwx format)?
+  ZinAneCodeGeneration?
 
-< conv op @ 0x140 >
-u32 0x140 = (OutputType * 0x10) | InputType
-u32 0x144 = InputChannels
-u32 0x148 = OutputChannels
-u16 0x15C = BatchSize
+ZinIrStatus GetKernelFormat<6u>(ZinKernelFormat param_1,ane_ne_kernel_cfg_kernel_fmt *param_2)
+  List of allowed numbers
 
-u32 0x188 = InputRowStride
-u32 0x18C = InputPlaneStride
-u32 0x190 = (InputPlaneStride * InputChannels)
+NeuronTypes (changes the LUT):
+  Tanh
+  Log2
+  Exp2
+  Sign = ZinMirActivationV7::GetSignLut
+  ...many more in ANECompiler
 
-u32 0x204 = InputChannels * 0x10
-u32 0x208 = InputChannels * 0x10
+Investigate:
+  ZinMirActivationV7::PrintLut(ZinMirActivationV7 *this,ane_nonlinear_lut_v7up_t *param_1
 
-u32 0x230 = OutputChannels * 0x10
-u32 0x234 = OutputChannels * 0x10
+ 0: NONE
+ 1: RELU
+ 2: SIGMOID
+ 3: SIGMOID_HIGH_PRECISION
+ 4: TANH
+ 5: CLAMPED_RELU
+ 6: PRELU
+ 7: DIRAC
+ 8: INT
+ 9: FRAC
+10: SQRT
+11: RSQRT
+12: INV
+13: SQR
+14: LOG2
+15: EXP2
+16: ELU
+17: SIGN
+18: EQUAL_ZERO
+19: NON_ZERO
+20: LESS_THAN_ZERO
+21: LESS_EQUAL_ZERO
+22: GREATER_EQUAL_ZERO
+23: GREATER_THAN_ZERO
+24: CUSTOM_LUT
+25: C_DIM_CONCAT
+26: C_DIM_STRIDED_CONCAT
+27: H_DIM_CONCAT
+28: W_DIM_CONCAT
+29: D_DIM_CONCAT
+30: N_DIM_CONCAT
+31: H_DIM_STRIDED_CONCAT
 
-u32 0x250 = 0x80 | KernelType
-
-u32 0x270 = OutputRowStride
-u32 0x274 = OutputPlaneStride
-u32 0x278 = (OutputPlaneStride * OutputChannels)
 
 == plist exploration ==
 
