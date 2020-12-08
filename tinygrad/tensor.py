@@ -246,12 +246,14 @@ def register(name, fxn, gpu=False):
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'div', 'pow']:
-    setattr(Tensor, f"__{name}__", dispatch)
-    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
-    if "__r%s__" % name in dir(int):
+    if "__%s__" % name in dir(int):
+        setattr(Tensor, f"__{name}__", dispatch)
         setattr(Tensor, f"__r{name}__", lambda self, x: getattr(self, f"__{name}__")(x))
+        setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     else:
+        setattr(Tensor, f"__true{name}__", lambda self, x: getattr(self, f"__{name}__")(x))
         setattr(Tensor, f"__rtrue{name}__", lambda self, x: getattr(self, f"__{name}__")(x))
+        setattr(Tensor, f"__itrue{name}__", lambda self, x: getattr(self, f"__{name}__")(x))
 
 
 
