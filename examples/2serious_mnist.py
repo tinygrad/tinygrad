@@ -113,9 +113,15 @@ if __name__ == "__main__":
     print('Loaded model "'+sys.argv[1]+'", evaluating...')
     evaluate(model)
   except: pass
+
+
+  params = get_parameters(model)
+  if GPU:
+    [x.cuda_() for x in params]
+
   for lr, st in zip(lrs, steps):
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    train(model, optimizer, steps=st, lossfn=lossfn)
+    train(model, optimizer, steps=st, lossfn=lossfn, gpu=GPU)
     model.save('checkpoint')
   model.load('checkpoint')
   evaluate(model)
