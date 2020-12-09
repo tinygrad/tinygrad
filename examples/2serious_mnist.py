@@ -12,6 +12,7 @@ from test_mnist import fetch_mnist, train, evaluate
 import tinygrad.optim as optim
 GPU = os.getenv("GPU", None) is not None
 QUICK = os.getenv("QUICK", None) is not None
+DEBUG = os.getenv("DEBUG", None) is not None
 
 class SqueezeExciteBlock2D:
   def __init__(self, filters):
@@ -61,7 +62,7 @@ class BigConvNet:
     self.weight2 = Tensor.uniform(128,10)
 
   def parameters(self):
-    if DEBUG := True: #keeping this for a moment
+    if DEBUG: #keeping this for a moment
       pars = [par for par in get_parameters(self) if par.requires_grad]
       no_pars = 0
       for par in pars:
