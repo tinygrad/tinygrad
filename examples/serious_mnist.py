@@ -9,22 +9,23 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2D
 from tinygrad.utils import get_parameters
 import tinygrad.optim as optim
+from tinygrad.nn import Model
 
 # TODO: abstract this generic trainer out of the test
 from test_mnist import train as train_on_mnist
 
 GPU = os.getenv("GPU") is not None
 
-class SeriousModel:
+class SeriousModel(Model):
   def __init__(self):
     self.blocks = 3
     self.block_convs = 3
     self.chans = 128
 
-    self.convs = [Tensor.uniform(self.chans, self.chans if i > 0 else 1, 3, 3) for i in range(self.blocks * self.block_convs)]
+    self.convs = [Tensor.uniform(self.chans, self.chans if i > 0 else 1, 3, 3, name=f"conv_{i}") for i in range(self.blocks * self.block_convs)]
     # TODO: Make batchnorm work at train time
     #self.bn = [BatchNorm2D(self.chans) for i in range(3)]
-    self.fc = Tensor.uniform(self.chans, 10)
+    self.fc = Tensor.uniform(self.chans, 10, name="fully_connected")
 
   def forward(self, x):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
@@ -43,8 +44,8 @@ class SeriousModel:
 
 if __name__ == "__main__":
   model = SeriousModel()
-  params = get_parameters(model)
-  print(len(params))
+  model.summary()
+  print(model.total_params)
   if GPU:
     [x.cuda_() for x in params]
   optimizer = optim.Adam(params, lr=0.001)

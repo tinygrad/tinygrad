@@ -57,7 +57,7 @@ class Tensor:
   default_gpu = False
   ops_cpu, ops_gpu = {}, {}
 
-  def __init__(self, data, gpu=None, requires_grad=True):
+  def __init__(self, data, gpu=None, requires_grad=True, name=None):
     if gpu is None:
       gpu = Tensor.default_gpu
     if isinstance(data, list):
@@ -75,6 +75,7 @@ class Tensor:
       self.gpu = False
 
     self.data = data
+    self.name = name
     self.grad = None
     self.requires_grad = requires_grad
 
@@ -85,7 +86,8 @@ class Tensor:
     self._ctx = None
 
   def __repr__(self):
-    return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
+    name = self.name + " " if self.name else ""
+    return f"Tensor {name}{self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
   def assign(self, x):
     self.data = x.data
