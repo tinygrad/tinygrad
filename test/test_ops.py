@@ -145,9 +145,9 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu)
 
-if GPU:
-  class TestOpsGPU(TestOps):
-    gpu = True
+@unittest.skipUnless(GPU, "Requires GPU")
+class TestOpsGPU(TestOps):
+  gpu = True
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

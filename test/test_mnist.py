@@ -22,6 +22,7 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 
 # create a model
 class TinyBobNet:
+
   def __init__(self):
     self.l1 = Tensor.uniform(784, 128)
     self.l2 = Tensor.uniform(128, 10)
@@ -54,6 +55,7 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 def train(model, optim, steps, BS=128, gpu=False):
+  if gpu is True: [x.cuda_() for x in get_parameters([model, optim])]
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
@@ -94,53 +96,32 @@ def evaluate(model, gpu=False):
   assert accuracy > 0.95
 
 class TestMNIST(unittest.TestCase):
-  @unittest.skipUnless(GPU, "Requires GPU")
-  def test_conv_gpu(self):
-    np.random.seed(1337)
-    model = TinyConvNet()
-    [x.cuda_() for x in model.parameters()]
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, optimizer, steps=200, gpu=True)
-    evaluate(model, gpu=True)
+  gpu=False
 
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, optimizer, steps=200)
-    evaluate(model)
-
-  @unittest.skipUnless(GPU, "Requires GPU")
-  def test_sgd_gpu(self):
-    np.random.seed(1337)
-    model = TinyBobNet()
-    [x.cuda_() for x in model.parameters()]
-    optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, optimizer, steps=1000, gpu=True)
-    evaluate(model, gpu=True)
+    train(model, optimizer, steps=200, gpu=self.gpu)
+    evaluate(model, gpu=self.gpu)
 
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, optimizer, steps=1000)
-    evaluate(model)
-
-  @unittest.skipUnless(GPU, "Requires GPU")
-  def test_rmsprop_gpu(self):
-    np.random.seed(1337)
-    model = TinyBobNet()
-    [x.cuda_() for x in model.parameters()]
-    optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
-    train(model, optimizer, steps=1000, gpu=True)
-    evaluate(model, gpu=True)
+    train(model, optimizer, steps=1000, gpu=self.gpu)
+    evaluate(model, gpu=self.gpu)
 
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
-    train(model, optimizer, steps=1000)
-    evaluate(model)
+    train(model, optimizer, steps=1000, gpu=self.gpu)
+    evaluate(model, gpu=self.gpu)
+
+@unittest.skipUnless(GPU, "Requires GPU")
+class TestMNISTGPU(TestMNIST):
+    gpu = True
 
 if __name__ == '__main__':
   unittest.main()
