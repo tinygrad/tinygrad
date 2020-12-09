@@ -22,7 +22,7 @@ def get_parameters(obj):
   elif isinstance(obj, list):
     for x in obj:
       parameters.extend(get_parameters(x))
-  if hasattr(obj, '__dict__'):
+  elif hasattr(obj, '__dict__'):
     for k,v in obj.__dict__.items():
       parameters.extend(get_parameters(v))
   return parameters

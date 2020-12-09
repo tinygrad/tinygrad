@@ -73,6 +73,7 @@ optim = optim.SGD([model.l1, model.l2], lr=0.001)
 
 out = model.forward(x)
 loss = out.mul(y).mean()
+optim.zero_grad()
 loss.backward()
 optim.step()
 ```

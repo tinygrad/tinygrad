@@ -55,7 +55,6 @@ class GPUBuffer:
 class Tensor:
   did_float_warning = False
   default_gpu = False
-  allocated = 0
   ops_cpu, ops_gpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
@@ -84,12 +83,6 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx = None
-
-    Tensor.allocated += 1
-
-  def __del__(self):
-    #print("cleanup", self.shape)
-    Tensor.allocated -= 1
 
   def __repr__(self):
     return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
@@ -194,25 +187,22 @@ class Tensor:
 
   # ***** non first class ops *****
 
-  def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.dtype), gpu=self.gpu, requires_grad=False)
-    return self.sum().mul(div)
+  def mean(self, axis=None):
+    out = self.sum(axis=axis)
+    coeff = np.prod(out.shape)/np.prod(self.shape)
+    return out * coeff
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)+0.5, gpu=self.gpu, requires_grad=False)
-    return self.pow(root)
+    return self.pow(0.5)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.dtype)-1, gpu=self.gpu, requires_grad=False)
-    return self.mul(y.pow(root))
+    return self * (y ** -1.0)
 
   def swish(self):
-    return self.mul(self.sigmoid())
+    return self * self.sigmoid()
 
   def tanh(self):
-    t2 = Tensor(np.zeros(self.shape, dtype=self.dtype)+2, gpu=self.gpu, requires_grad=False)
-    t1 = Tensor(np.zeros(self.shape, dtype=self.dtype)+1, gpu=self.gpu, requires_grad=False)
-    return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
+    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
 
 # An instantiation of the Function is the Context
 class Function:
@@ -247,13 +237,17 @@ def register(name, fxn, gpu=False):
   else:
     Tensor.ops_cpu[name] = fxn
   def dispatch(*x, **kwargs):
-    f = (Tensor.ops_gpu if x[0].gpu else Tensor.ops_cpu)[name]
+    tt = [arg for arg in x if isinstance(arg, Tensor)][0]
+    x = [Tensor(np.array([arg], dtype=tt.dtype), gpu=tt.gpu, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
+    f = (Tensor.ops_gpu if tt.gpu else Tensor.ops_cpu)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
-  if name in ['add', 'sub', 'mul', 'div', 'pow']:
+  # TODO: div is a second class op, so it doesn't work here
+  if name in ['add', 'sub', 'mul', 'pow']:
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
+    setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
 # this registers all the operations
 import tinygrad.ops_cpu

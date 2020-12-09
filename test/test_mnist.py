@@ -58,7 +58,6 @@ def train(model, optim, steps, BS=128, gpu=False):
   if gpu is True: [x.cuda_() for x in get_parameters([model, optim])]
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
-    optim.zero_grad()
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
 
     x = Tensor(X_train[samp].reshape((-1, 28*28)).astype(np.float32), gpu=gpu)
@@ -73,6 +72,7 @@ def train(model, optim, steps, BS=128, gpu=False):
 
     # NLL loss function
     loss = out.mul(y).mean()
+    optim.zero_grad()
     loss.backward()
     optim.step()
 
