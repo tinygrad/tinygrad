@@ -3,7 +3,7 @@ import os
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, GPU
-from tinygrad.utils import layer_init_uniform, fetch
+from tinygrad.utils import fetch, get_parameters
 import tinygrad.optim as optim
 from tqdm import trange
 
@@ -23,11 +23,11 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 # create a model
 class TinyBobNet:
   def __init__(self):
-    self.l1 = Tensor(layer_init_uniform(784, 128))
-    self.l2 = Tensor(layer_init_uniform(128, 10))
+    self.l1 = Tensor.uniform(784, 128)
+    self.l2 = Tensor.uniform(128, 10)
 
   def parameters(self):
-    return [self.l1, self.l2]
+    return get_parameters(self)
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
@@ -39,12 +39,12 @@ class TinyConvNet:
     conv = 3
     #inter_chan, out_chan = 32, 64
     inter_chan, out_chan = 8, 16   # for speed
-    self.c1 = Tensor(layer_init_uniform(inter_chan,1,conv,conv))
-    self.c2 = Tensor(layer_init_uniform(out_chan,inter_chan,conv,conv))
-    self.l1 = Tensor(layer_init_uniform(out_chan*5*5, 10))
+    self.c1 = Tensor.uniform(inter_chan,1,conv,conv)
+    self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv)
+    self.l1 = Tensor.uniform(out_chan*5*5, 10)
 
   def parameters(self):
-    return [self.l1, self.c1, self.c2]
+    return get_parameters(self)
 
   def forward(self, x):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
@@ -56,7 +56,6 @@ class TinyConvNet:
 def train(model, optim, steps, BS=128, gpu=False):
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
-    optim.zero_grad()
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
 
     x = Tensor(X_train[samp].reshape((-1, 28*28)).astype(np.float32), gpu=gpu)
@@ -71,6 +70,7 @@ def train(model, optim, steps, BS=128, gpu=False):
 
     # NLL loss function
     loss = out.mul(y).mean()
+    optim.zero_grad()
     loss.backward()
     optim.step()
 
@@ -99,8 +99,8 @@ class TestMNIST(unittest.TestCase):
     np.random.seed(1337)
     model = TinyConvNet()
     [x.cuda_() for x in model.parameters()]
-    optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, optimizer, steps=1000, gpu=True)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    train(model, optimizer, steps=200, gpu=True)
     evaluate(model, gpu=True)
 
   def test_conv(self):
@@ -125,6 +125,15 @@ class TestMNIST(unittest.TestCase):
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, optimizer, steps=1000)
     evaluate(model)
+
+  @unittest.skipUnless(GPU, "Requires GPU")
+  def test_rmsprop_gpu(self):
+    np.random.seed(1337)
+    model = TinyBobNet()
+    [x.cuda_() for x in model.parameters()]
+    optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
+    train(model, optimizer, steps=1000, gpu=True)
+    evaluate(model, gpu=True)
 
   def test_rmsprop(self):
     np.random.seed(1337)

@@ -1,13 +1,5 @@
 import numpy as np
-
-def mask_like(like, mask_inx, mask_value = 1.0):
-  mask = np.zeros_like(like).reshape(-1)
-  mask[mask_inx] = mask_value
-  return mask.reshape(like.shape)
-
-def layer_init_uniform(*x):
-  ret = np.random.uniform(-1., 1., size=x)/np.sqrt(np.prod(x))
-  return ret.astype(np.float32)
+from tinygrad.tensor import Tensor
 
 def fetch(url):
   import requests, os, hashlib, tempfile
@@ -22,4 +14,18 @@ def fetch(url):
       f.write(dat)
     os.rename(fp+".tmp", fp)
   return dat
+
+def get_parameters(model):
+  parameters = []
+  if hasattr(model, '__dict__'):
+    for k,v in model.__dict__.items():
+      if isinstance(v, Tensor):
+        parameters.append(v)
+      elif isinstance(v, list):
+        for x in v:
+          parameters.extend(get_parameters(x))
+      elif hasattr(v, '__dict__'):
+        parameters.extend(get_parameters(v))
+      #print(k, type(v))
+  return parameters
 

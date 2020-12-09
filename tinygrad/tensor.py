@@ -2,14 +2,9 @@
 from inspect import signature
 import numpy as np
 import os
-try:
-  import pyopencl as cl
-  GPU = True
-except ImportError:
-  # no GPU support
-  GPU = False
 
-# **** profiler, 10 lines too long ****
+# **** profiler ****
+
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
   import collections, atexit, time
@@ -17,64 +12,71 @@ if DEBUG:
   debug_times = collections.defaultdict(float)
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
-      print("%20s : %3d  %10.2f ms" % (name, debug_counts[name], debug_times[name]))
+      print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
   atexit.register(print_debug_exit)
-  class ProfileOp:
-    def __init__(self, name, x, backward=False):
-      self.name = ("back_" if backward else "")+name
-      self.x = x
-    def __enter__(self):
-      self.st = time.time()
-    def __exit__(self, *junk):
+
+class ProfileOp:
+  def __init__(self, name, x, backward=False):
+    self.name = ("back_" if backward else "")+name
+    self.x = x
+  def __enter__(self):
+    if DEBUG: self.st = time.time()
+  def __exit__(self, *junk):
+    if DEBUG:
+      if cl_queue is not None:
+        cl_queue.finish()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
-      print("%20s : %7.2f ms  %s" % (self.name, et, [y.shape for y in self.x]))
-else:
-  class ProfileOp:
-    def __init__(self, name, x, backward=False):
-      pass
-    def __enter__(self):
-      pass
-    def __exit__(self, *junk):
-      pass
+      print(f"{self.name:>20} : {et:>7.2f} ms {[y.shape for y in self.x]}")
+
+# **** GPU functions ****
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
   global cl_ctx, cl_queue
   if cl_queue is None:
-    try:
-      # for Macbook 16 inch
-      cl_ctx = cl.create_some_context(answers=[0,2])
-    except (cl._cl.RuntimeError, cl._cl.LogicError, TypeError):
-      cl_ctx = cl.create_some_context(interactive=False)
+    cl_ctx = cl.create_some_context(interactive=False)
+    # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
 
-# **** start with two base classes ****
+class GPUBuffer:
+  def __init__(self, shape, hostbuf=None):
+    self.shape, self.dtype = tuple(shape), np.float32
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
+      cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
+                hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
+
+  def __repr__(self):
+    return f"<GPUBuffer with shape {self.shape!r}>"
+
+# **** start with two base classes, Tensor and Function ****
 
 class Tensor:
   did_float_warning = False
   default_gpu = False
+  ops_cpu, ops_gpu = {}, {}
 
-  def __init__(self, data, gpu=None):
+  def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
       gpu = Tensor.default_gpu
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
-    elif GPU and isinstance(data, cl._cl.Buffer):
+    elif GPU and isinstance(data, GPUBuffer):
       self.gpu = True
     elif not isinstance(data, np.ndarray):
-      raise TypeError("Error constructing tensor with %r" % data)
+      raise TypeError(f"Error constructing tensor with {data!r}")
 
     if isinstance(data, np.ndarray):
       if data.dtype != np.float32 and not Tensor.did_float_warning:
         # warning? float64 is actually needed for numerical jacobian
-        print("warning, %r isn't float32" % (data.shape,))
+        print(f"warning, {data.shape!r} isn't float32")
         Tensor.did_float_warning = True
       self.gpu = False
 
     self.data = data
     self.grad = None
+    self.requires_grad = requires_grad
 
     if gpu:
       self.cuda_()
@@ -83,7 +85,7 @@ class Tensor:
     self._ctx = None
 
   def __repr__(self):
-    return "Tensor %r with grad %r" % (self.data, self.grad.data if self.grad else None)
+    return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
   def assign(self, x):
     self.data = x.data
@@ -92,43 +94,53 @@ class Tensor:
   def shape(self):
     return self.data.shape
 
-  @staticmethod
-  def zeros(*shape):
-    return Tensor(np.zeros(shape, dtype=np.float32))
+  @property
+  def dtype(self):
+    return self.data.dtype
 
-  @staticmethod
-  def ones(*shape):
-    return Tensor(np.ones(shape, dtype=np.float32))
+  # ***** creation helper functions *****
 
-  @staticmethod
-  def randn(*shape):
-    return Tensor(np.random.randn(*shape).astype(np.float32))
+  @classmethod
+  def zeros(cls, *shape, **kwargs):
+    return cls(np.zeros(shape, dtype=np.float32), **kwargs)
 
-  @staticmethod
-  def eye(dim):
-    return Tensor(np.eye(dim).astype(np.float32))
+  @classmethod
+  def ones(cls, *shape, **kwargs):
+    return cls(np.ones(shape, dtype=np.float32), **kwargs)
 
-  def backward(self, allow_fill=True):
+  @classmethod
+  def randn(cls, *shape, **kwargs):
+    return cls(np.random.randn(*shape).astype(np.float32), **kwargs)
+
+  @classmethod
+  def uniform(cls, *shape, **kwargs):
+    return cls((np.random.uniform(-1., 1., size=shape)/np.sqrt(np.prod(shape))).astype(np.float32), **kwargs)
+
+  @classmethod
+  def eye(cls, dim, **kwargs):
+    return cls(np.eye(dim).astype(np.float32), **kwargs)
+
+  # ***** toposort and backward pass *****
+
+  def deepwalk(self, visited=None, nodes=None):
+    if visited == None and nodes == None:
+      visited, nodes = set(), []
+    visited.add(self)
+    if self._ctx:
+      [i.deepwalk(visited, nodes) for i in self._ctx.parents if i not in visited]
+      nodes.append(self)
+    return nodes
+
+  def backward(self):
     if self._ctx is None:
       return
 
-    if self.grad is None and allow_fill:
-      # fill in the first grad with one
-      # this is "implicit gradient creation"
-      assert self.data.shape == (1,)
-      self.grad = Tensor(np.ones(self.data.shape, dtype=self.data.dtype), gpu=self.gpu)
+    # fill in the first grad with one
+    # this is "implicit gradient creation"
+    assert self.shape == (1,)
+    self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
 
-    visited, nodes = set(), []
-    def deepwalk(node):
-      visited.add(node)
-      if node._ctx:
-        for i in node._ctx.parents:
-          if i not in visited:
-            deepwalk(i)
-        nodes.append(node)
-    deepwalk(self)
-
-    for t0 in reversed(nodes):
+    for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
@@ -137,16 +149,17 @@ class Tensor:
       for t,g in zip(t0._ctx.parents, grads):
         if g is None:
           continue
-        assert g.shape == t.data.shape, \
-          "grad shape must match tensor shape in %r, %r != %r" % (self._ctx, g.shape, t.data.shape)
-        t.grad = Tensor(g) if t.grad is None else (t.grad + Tensor(g))
+        assert g.shape == t.shape, \
+          f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
+        gt = Tensor(g, requires_grad=False)
+        t.grad = gt if t.grad is None else (t.grad + gt)
 
   # ***** tinygrad supports CPU and GPU *****
 
   def cpu(self):
     if self.gpu:
-      ret = Tensor(np.empty(self.shape, dtype=np.float32))
-      cl.enqueue_copy(cl_queue, ret.data, self.data)
+      ret = Tensor(np.empty(self.shape, dtype=np.float32), gpu=False)
+      cl.enqueue_copy(cl_queue, ret.data, self.data.cl, is_blocking=True)
       if self.grad:
         ret.grad = self.grad.cpu()
       return ret
@@ -162,43 +175,34 @@ class Tensor:
       raise Exception("No GPU Support, install pyopencl")
     if not self.gpu:
       require_init_gpu()
-      assert self.data.dtype == np.float32   # only float32 on GPU
-      data = cl.Buffer(cl_ctx, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=self.data.ravel())
-      data.shape = self.shape
-      data.dtype = self.data.dtype
-      ret = Tensor(data)
+      ret = Tensor(GPUBuffer(self.shape, self.data))
       if self.grad:
         ret.grad = self.grad.cuda()
       return ret
     else:
       return self
 
-  # ***** put ops in these dicts *****
-
-  ops = {}
-  opsgpu = {}
+  def detach(self):
+    return Tensor(self.data, self.gpu)
 
   # ***** non first class ops *****
 
-  def mean(self):
-    div = Tensor(np.array([1/np.prod(self.shape)], dtype=self.data.dtype), gpu=self.gpu)
-    return self.sum().mul(div)
+  def mean(self, axis=None):
+    out = self.sum(axis=axis)
+    coeff = np.prod(out.shape)/np.prod(self.shape)
+    return out * coeff
 
   def sqrt(self):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+0.5, gpu=self.gpu)
-    return self.pow(root)
+    return self.pow(0.5)
 
   def div(self, y):
-    root = Tensor(np.zeros(self.shape, dtype=self.data.dtype)-1, gpu=self.gpu)
-    return self.mul(y.pow(root))
+    return self * (y ** -1.0)
 
   def swish(self):
-    return self.mul(self.sigmoid())
+    return self * self.sigmoid()
 
   def tanh(self):
-    t2 = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+2, gpu=self.gpu)
-    t1 = Tensor(np.zeros(self.shape, dtype=self.data.dtype)+1, gpu=self.gpu)
-    return self.mul(t2).sigmoid().mul(t2) - t1 # 2*sigmoid(2*x)-1
+    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
 
 # An instantiation of the Function is the Context
 class Function:
@@ -221,27 +225,37 @@ class Function:
     for k, v in kwargs.items():
       setattr(ctx, k, v)
     with ProfileOp(ctx.__class__.__name__, x):
-      ret = Tensor(op.forward(ctx, *[t.data for t in x], **kwargs))
-    ret._ctx = ctx
+      ret = Tensor(op.forward(ctx, *[t.data for t in x], **kwargs),
+                   requires_grad=any([t.requires_grad for t in x]))
+    if ret.requires_grad:
+      ret._ctx = ctx
     return ret
 
 def register(name, fxn, gpu=False):
   if gpu:
-    Tensor.opsgpu[name] = fxn
+    Tensor.ops_gpu[name] = fxn
   else:
-    Tensor.ops[name] = fxn
+    Tensor.ops_cpu[name] = fxn
   def dispatch(*x, **kwargs):
-    f = (Tensor.opsgpu if x[0].gpu else Tensor.ops)[name]
+    tt = [arg for arg in x if isinstance(arg, Tensor)][0]
+    x = [Tensor(np.array([arg], dtype=tt.dtype), gpu=tt.gpu, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
+    f = (Tensor.ops_gpu if tt.gpu else Tensor.ops_cpu)[name]
     f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
-  if name in ['add', 'sub', 'mul', 'div']:
-    setattr(Tensor, "__%s__" % name, dispatch)
-    setattr(Tensor, "__i%s__" % name, lambda self,x: self.assign(dispatch(self,x)))
-
+  # TODO: div is a second class op, so it doesn't work here
+  if name in ['add', 'sub', 'mul', 'pow']:
+    setattr(Tensor, f"__{name}__", dispatch)
+    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
+    setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
 # this registers all the operations
-import tinygrad.ops
-if GPU:
-  import tinygrad.opsgpu
+import tinygrad.ops_cpu
+try:
+  import pyopencl as cl
+  import tinygrad.ops_gpu
+  GPU = True
+except ImportError:
+  # no GPU support
+  GPU = False
 

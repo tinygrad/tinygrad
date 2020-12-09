@@ -1,0 +1,26 @@
+[
+    {
+        "name":"L2_DATA",
+        "symbols":[
+            {
+                "name":"probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv/conv_res_l2_buf",
+                "size":32,
+                "offset":48,
+                "liverange_begin":1,
+                "liverange_end":1
+            },
+            {
+                "name":"probs_tmp_0__OP_EngineLayer_0_neconv_fused_neconv_0/tile_src_l2_buf",
+                "size":48,
+                "offset":0,
+                "liverange_begin":1,
+                "liverange_end":1
+            }
+        ]
+    },
+    {
+        "name":"DRAM_DATA",
+        "symbols":[
+        ]
+    }
+]

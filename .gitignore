@@ -6,3 +6,4 @@ build
 dist
 *.egg-info
 /env
+a.out

@@ -1,0 +1,7 @@
+DRAM_PEAK(bss) = 192 B
+DRAM_sum(no-reuse) = 192 B
+L2_PEAK = 0 B
+L2_sum(no-reuse) = 0 B
+
+Symbol_Name=image:Time_Span=[0, 1] (1):Space_Span=[0, 192] (192):Mem_Type=[DRAM]
+TotalCost(sum(t_space * t_time))=192
