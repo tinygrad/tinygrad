@@ -24,8 +24,10 @@ class SeriousModel:
     self.chans = 32
 
     self.convs = [Tensor.uniform(self.chans, self.chans if i > 0 else 1, 3, 3) for i in range(self.blocks * self.block_convs)]
+    self.cbias = [Tensor.uniform(1, self.chans, 1, 1) for i in range(self.blocks * self.block_convs)]
     self.bn = [BatchNorm2D(self.chans, training=True) for i in range(3)]
-    self.fc = Tensor.uniform(self.chans, 10)
+    self.fc1 = Tensor.uniform(self.chans, 10)
+    self.fc2 = Tensor.uniform(self.chans, 10)
 
   def forward(self, x):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
@@ -33,15 +35,15 @@ class SeriousModel:
       for j in range(self.block_convs):
         #print(i, j, x.shape, x.sum().cpu())
         # TODO: should padding be used?
-        x = x.conv2d(self.convs[i*3+j]).relu()
+        x = x.conv2d(self.convs[i*3+j]).add(self.cbias[i*3+j]).relu()
       x = self.bn[i](x)
       if i > 0:
         x = x.avg_pool2d(kernel_size=(2,2))
     # TODO: Add concat support to concat with max_pool2d
-    x = x.avg_pool2d(kernel_size=x.shape[2:4])
-    x = x.reshape(shape=(-1, x.shape[1]))
-    x = x.dot(self.fc).logsoftmax()
-    return x
+    x1 = x.avg_pool2d(kernel_size=x.shape[2:4]).reshape(shape=(-1, x.shape[1]))
+    x2 = x.max_pool2d(kernel_size=x.shape[2:4]).reshape(shape=(-1, x.shape[1]))
+    x = x1.dot(self.fc1) + x2.dot(self.fc2)
+    return x.logsoftmax()
 
 if __name__ == "__main__":
   model = SeriousModel()
