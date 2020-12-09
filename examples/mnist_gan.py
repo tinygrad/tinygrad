@@ -10,20 +10,19 @@ import tinygrad.optim as optim
 
 GPU = os.getenv("GPU") is not None
 
-class LeakyReLU(Function):
+class Dropout(Function):
   @staticmethod
-  def forward(ctx, input, leaky_slope=0.1):
-    ctx.save_for_backward(input, leaky_slope)
-    return np.maximum(input*leaky_slope, 0)
+  def forward(ctx, input, p=0.5):
+    _dead_ns = np.random.binomial(1, 1-p, size=input.shape)
+    ctx.save_for_backward(input, _dead_ns)
+    return input*_dead_ns
 
   @staticmethod
   def backward(ctx, grad_output):
-    input,leaky_slope = ctx.saved_tensors
-    grad_input = np.zeros_like(input)
-    grad_input[input<=0.0] = leaky_slope
-    grad_input[input>0.0] = grad_output
+    input, _dead_ns = ctx.saved_tensors
+    grad_input = grad_output * _dead_ns
     return grad_input
-register('leakyrelu', LeakyReLU)
+register('dropout', Dropout)
 
 class LinearGen:
   def __init__(self):
@@ -49,10 +48,16 @@ class LinearDisc:
     self.l3 = Tensor.uniform(512, 256)
     self.l4 = Tensor.uniform(256, 1)
 
-  def forward(self, x):
+  def forward(self, x, train=False):
     x = x.dot(self.l1).leakyrelu(0.2)
+    if train:
+        x = x.dropout(0.3)
     x = x.dot(self.l2).leakyrelu(0.2)
+    if train:
+        x = x.dropout(0.3)
     x = x.dot(self.l3).leakyrelu(0.2)
+    if train:
+        x = x.dropout(0.3)
     x = x.dot(self.l4).sigmoid()
     return x
 if __name__ == "__main__":
@@ -60,11 +65,12 @@ if __name__ == "__main__":
   discriminator = LinearDisc()
   generator_params = get_parameters(generator)
   discriminator_params = get_parameters(discriminator)
+  GPU = 0
   if GPU:
-    [x.cuda_() for x in params]
+    [x.cuda_() for x in generator_params+discriminator_params]
   # optimizers
   optim_g = optim.Adam(generator_params, lr=0.001)
   optim_d = optim.Adam(discriminator_params, lr=0.001)
   import numpy as np
-  x = generator.forward(Tensor(np.random.uniform(64, size=(10, 128))))
+  x = discriminator.forward(Tensor(np.random.uniform(1, size=(784))), train=True)
   breakpoint()
