@@ -3,14 +3,16 @@ import torch
 import unittest
 from tinygrad.tensor import Tensor, GPU
 from tinygrad.optim import Adam, SGD, RMSprop
+from tinygrad.utils import get_parameters 
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
 def step_tinygrad(optim, kwargs={}, gpu=False):
-  net = TinyNet(gpu=gpu)
+  net = TinyNet()
   optim = optim([net.x, net.W], **kwargs)
+  if gpu is True: [x.cuda_() for x in get_parameters([net, optim])]
   out = net.forward()
   out.backward()
   optim.step()
@@ -26,10 +28,10 @@ def step_pytorch(optim, kwargs={}):
 
 
 class TinyNet():
-  def __init__(self, gpu=False):
-    self.x = Tensor(x_init.copy(), gpu=gpu)
-    self.W = Tensor(W_init.copy(), gpu=gpu)
-    self.m = Tensor(m_init.copy(), gpu=gpu)
+  def __init__(self):
+    self.x = Tensor(x_init.copy())
+    self.W = Tensor(W_init.copy())
+    self.m = Tensor(m_init.copy())
 
   def forward(self):
     out = self.x.dot(self.W).relu()
