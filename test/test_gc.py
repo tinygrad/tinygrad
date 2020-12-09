@@ -4,7 +4,7 @@ import unittest
 from tinygrad.tensor import Tensor, GPU
 
 def tensors_allocated():
-    return sum([isinstance(x, Tensor) for x in gc.get_objects()])
+  return sum([isinstance(x, Tensor) for x in gc.get_objects()])
     
 class TestGC(unittest.TestCase):
   gpu = False

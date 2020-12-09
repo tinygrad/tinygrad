@@ -122,9 +122,7 @@ class Tensor:
 
   # ***** toposort and backward pass *****
 
-  def deepwalk(self, visited=None, nodes=None):
-    if visited == None and nodes == None:
-      visited, nodes = set(), []
+  def deepwalk(self, visited: set, nodes: list):
     visited.add(self)
     if self._ctx:
       [i.deepwalk(visited, nodes) for i in self._ctx.parents if i not in visited]
@@ -132,15 +130,13 @@ class Tensor:
     return nodes
 
   def backward(self):
-    if self._ctx is None:
-      return
+    assert self.shape == (1,)
 
     # fill in the first grad with one
     # this is "implicit gradient creation"
-    assert self.shape == (1,)
     self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), gpu=self.gpu, requires_grad=False)
 
-    for t0 in reversed(self.deepwalk()):
+    for t0 in reversed(self.deepwalk(set(), [])):
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
@@ -203,6 +199,9 @@ class Tensor:
 
   def tanh(self):
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+
+  def leakyrelu(self, neg_slope=0.01):
+    return self.relu() + (-neg_slope*self).relu()
 
 # An instantiation of the Function is the Context
 class Function:

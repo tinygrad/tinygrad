@@ -53,6 +53,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, gpu=self.gpu)
   def test_relu(self):
     helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu, gpu=self.gpu)
+  def test_leakyrelu(self):
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu, gpu=self.gpu)
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, gpu=self.gpu)
   def test_dot(self):
@@ -145,9 +147,9 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu)
 
-if GPU:
-  class TestOpsGPU(TestOps):
-    gpu = True
+@unittest.skipUnless(GPU, "Requires GPU")
+class TestOpsGPU(TestOps):
+  gpu = True
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
