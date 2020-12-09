@@ -15,19 +15,15 @@ def fetch(url):
     os.rename(fp+".tmp", fp)
   return dat
 
-def get_parameters(model):
+def get_parameters(obj):
   parameters = []
-  if isinstance(model, Tensor):
-    parameters.append(model)
-  if hasattr(model, '__dict__'):
-    for k,v in model.__dict__.items():
-      if isinstance(v, Tensor):
-        parameters.append(v)
-      elif isinstance(v, list):
-        for x in v:
-          parameters.extend(get_parameters(x))
-      elif hasattr(v, '__dict__'):
-        parameters.extend(get_parameters(v))
-      #print(k, type(v))
+  if isinstance(obj, Tensor):
+    parameters.append(obj)
+  elif isinstance(obj, list):
+    for x in obj:
+      parameters.extend(get_parameters(x))
+  if hasattr(obj, '__dict__'):
+    for k,v in obj.__dict__.items():
+      parameters.extend(get_parameters(v))
   return parameters
 

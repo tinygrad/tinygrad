@@ -55,7 +55,7 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 def train(model, optim, steps, BS=128, gpu=False):
-  if gpu is True: [x.cuda_() for x in get_parameters(model) + get_parameters(optim)]
+  if gpu is True: [x.cuda_() for x in get_parameters([model, optim])]
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     optim.zero_grad()
