@@ -58,17 +58,20 @@ class Model(metaclass=ABCMeta):
 
     @property
     def  total_params(self):
-        return len(self.parameters())
+        tp = 0
+        for mod in self.parameters():
+            tp += np.prod(mod.shape[1:])
+        return tp
 
     def parameters(self):
         return get_parameters(self)
 
     def summary(self):
-        # bad coding :(
+        # TODO: get shape of actual layer rather than weights/param. 
         format_summary = "{:>20}  {:>25} {:>15}".format("Layer (type)", "Shape", "Param #")
         format_summary += "\n"
         for key, mod in enumerate(self._modules()):
-            params = self.total_params
+            params = np.prod(mod.shape[1:])
             name = mod.name if mod.name else "Layer" + f" {key}"
             in_shape = mod.shape
             params = params
@@ -78,4 +81,7 @@ class Model(metaclass=ABCMeta):
             "{0:,}".format(params),
             )
             format_summary += "\n"
+        format_summary += "-"*65
+        format_summary += f"\n| Total Params: {self.total_params}"
+        format_summary += "\n"+"-"*65+"\n"
         print(format_summary)

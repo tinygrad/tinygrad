@@ -45,6 +45,7 @@ class SeriousModel(Model):
 if __name__ == "__main__":
   model = SeriousModel()
   model.summary()
+  params = model.parameters()
   print(model.total_params)
   if GPU:
     [x.cuda_() for x in params]
