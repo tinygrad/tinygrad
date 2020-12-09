@@ -71,10 +71,10 @@ class TestTinygrad(unittest.TestCase):
 class TestTinygradGPU(TestTinygrad):
   gpu = True
 
-  @unittest.skip("float32 not supported on GPU")
+  @unittest.skip("float64 not supported on GPU")
   def test_jacobian(self): pass
 
-  @unittest.skip("float32 not supported on GPU")
+  @unittest.skip("float64 not supported on GPU")
   def test_gradcheck(self): pass
 
 
