@@ -23,9 +23,9 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 # create a model
 class TinyBobNet:
 
-  def __init__(self, gpu=False):
-    self.l1 = Tensor.uniform(784, 128, gpu=gpu)
-    self.l2 = Tensor.uniform(128, 10, gpu=gpu)
+  def __init__(self):
+    self.l1 = Tensor.uniform(784, 128)
+    self.l2 = Tensor.uniform(128, 10)
 
   def parameters(self):
     return get_parameters(self)
@@ -35,14 +35,14 @@ class TinyBobNet:
 
 # create a model with a conv layer
 class TinyConvNet:
-  def __init__(self, gpu=False):
+  def __init__(self):
     # https://keras.io/examples/vision/mnist_convnet/
     conv = 3
     #inter_chan, out_chan = 32, 64
     inter_chan, out_chan = 8, 16   # for speed
-    self.c1 = Tensor.uniform(inter_chan,1,conv,conv, gpu=gpu)
-    self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv, gpu=gpu)
-    self.l1 = Tensor.uniform(out_chan*5*5, 10, gpu=gpu)
+    self.c1 = Tensor.uniform(inter_chan,1,conv,conv)
+    self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv)
+    self.l1 = Tensor.uniform(out_chan*5*5, 10)
 
   def parameters(self):
     return get_parameters(self)
@@ -55,6 +55,7 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 def train(model, optim, steps, BS=128, gpu=False):
+  if gpu is True: [x.cuda_() for x in get_parameters(model) + get_parameters(optim)]
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     optim.zero_grad()
@@ -99,21 +100,21 @@ class TestMNIST(unittest.TestCase):
 
   def test_conv(self):
     np.random.seed(1337)
-    model = TinyConvNet(gpu=self.gpu)
+    model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, optimizer, steps=200, gpu=self.gpu)
     evaluate(model, gpu=self.gpu)
 
   def test_sgd(self):
     np.random.seed(1337)
-    model = TinyBobNet(gpu=self.gpu)
+    model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, optimizer, steps=1000, gpu=self.gpu)
     evaluate(model, gpu=self.gpu)
 
   def test_rmsprop(self):
     np.random.seed(1337)
-    model = TinyBobNet(gpu=self.gpu)
+    model = TinyBobNet()
     optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
     train(model, optimizer, steps=1000, gpu=self.gpu)
     evaluate(model, gpu=self.gpu)
