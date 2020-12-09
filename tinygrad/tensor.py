@@ -55,7 +55,6 @@ class GPUBuffer:
 class Tensor:
   did_float_warning = False
   default_gpu = False
-  allocated = 0
   ops_cpu, ops_gpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
@@ -84,12 +83,6 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx = None
-
-    Tensor.allocated += 1
-
-  def __del__(self):
-    #print("cleanup", self.shape)
-    Tensor.allocated -= 1
 
   def __repr__(self):
     return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
