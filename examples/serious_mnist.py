@@ -44,7 +44,6 @@ class SeriousModel:
 if __name__ == "__main__":
   model = SeriousModel()
   params = get_parameters(model)
-  print(len(params))
   if GPU:
     [x.cuda_() for x in params]
   optimizer = optim.Adam(params, lr=0.001)
