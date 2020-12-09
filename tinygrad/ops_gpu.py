@@ -104,8 +104,7 @@ def binary_op(ctx, code, x, y):
   if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
     raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
   shape_ret = np.maximum(shape_x, shape_y)
-  
-  dimlist, complist = [], []
+  dimlist, complist = [], [] # note: we combine some dimensions together here, so len(dimlist) may be less than n_dims
   def push(dim, comp):
     if len(complist) > 0 and complist[-1] == comp:
       dimlist[-1] *= dim
@@ -114,10 +113,10 @@ def binary_op(ctx, code, x, y):
       complist.append(comp)
   for i in range(n_dims):
     push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
-    
+  # TODO: may get "CL_INVALID_WORK_DIMENSION" error when len(dimlist) > CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS >= 3
   prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
   ret = buffer_zeros(ctx, shape_ret)
-  prg.binop(ctx.cl_queue, tuple(dimlist), None, x.cl, y.cl, ret.cl, *dimlist)
+  prg.binop(ctx.cl_queue, dimlist if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist)
   return ret
 
 def unary_op(ctx, code, x):
