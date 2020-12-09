@@ -16,6 +16,8 @@ def fetch(url):
   return dat
 
 def get_parameters(model):
+  if isinstance(model, Tensor):
+    return [model]
   parameters = []
   if hasattr(model, '__dict__'):
     for k,v in model.__dict__.items():
