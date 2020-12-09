@@ -203,6 +203,10 @@ class Tensor:
   def leakyrelu(self, neg_slope=0.01):
     return self.relu() + (-neg_slope*self).relu()
 
+  def abs(self):
+    return self.relu() + (-1.0*self).relu()*(-1.0)
+
+
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, *tensors):
