@@ -10,7 +10,8 @@ from tinygrad.nn import BatchNorm2D
 from tinygrad.utils import get_parameters
 from test_mnist import fetch_mnist, train, evaluate
 import tinygrad.optim as optim
-from tqdm import trange
+GPU = os.getenv("GPU", None) is not None
+QUICK = os.getenv("QUICK", None) is not None
 
 class SqueezeExciteBlock2D:
   def __init__(self, filters):
@@ -73,15 +74,21 @@ class BigConvNet:
 
   def save(self, filename):
     with open('file'+'.npy', 'wb') as f:
-      for par in get_parameters(self) if par.requires_grad:
-        np.save(f, par.cpu().data)
+      for par in get_parameters(self):
+        if par.requires_grad:
+          np.save(f, par.cpu().data)
 
   def load(self, filename):
-    with open('file'+'.npy', 'wb') as f:
-      for par in get_parameters(self) if par.requires_grad:
-        #todo
-        #par = Tensor(np.load(f))
-  
+    with open('file'+'.npy', 'rb') as f:
+      for par in get_parameters(self): 
+        if par.requires_grad:
+          try:
+            par.cpu().data[:] = np.load(f)
+            if GPU:
+              par.cuda()
+          except:
+            print('Could not load paramer')
+
   def forward(self, x):
     x = self.conv[0](x)
     x = self.conv[1](x)
@@ -94,14 +101,21 @@ class BigConvNet:
 
 if __name__ == "__main__":
   lrs = [1e-3, 1e-4, 1e-5]
-  steps = [1, 1, 1] #[4000, 1000, 1000]
+  steps = [1, 1, 1] if QUICK else [4000, 1000, 1000]
   lmbd = 0.00025
   lossfn = lambda out,y: out.mul(y).mean() + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
   X_train, Y_train, X_test, Y_test = fetch_mnist()
   np.random.seed(1337)
   
   model = BigConvNet()
+  try:
+    model.load(sys.argv[1])
+    print('Loaded model "'+sys.argv[1]+'", evaluating...')
+    evaluate(model)
+  except: pass
   for lr, st in zip(lrs, steps):
     optimizer = optim.Adam(model.parameters(), lr=lr)
     train(model, optimizer, steps=st, lossfn=lossfn)
+    model.save('checkpoint')
+  model.load('checkpoint')
   evaluate(model)
