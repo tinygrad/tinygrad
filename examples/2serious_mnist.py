@@ -43,7 +43,7 @@ class ConvBlock:
     self.c2 = Tensor.uniform(filters, filters, conv, conv)
     self.c3 = Tensor.uniform(filters, filters,conv,conv)
 
-    self._bn = BatchNorm2D(128)
+    self._bn = BatchNorm2D(128, training=True)
     self._seb = SqueezeExciteBlock2D(filters)
   
   def __call__(self, input):
