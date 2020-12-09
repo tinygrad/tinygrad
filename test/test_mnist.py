@@ -54,7 +54,7 @@ class TinyConvNet:
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1).logsoftmax()
 
-def train(model, optim, steps, BS=128, gpu=False):
+def train(model, optim, steps, BS=128, gpu=False, lossfn = lambda out,y: out.mul(y).mean()):
   if gpu is True: [x.cuda_() for x in get_parameters([model, optim])]
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
@@ -71,7 +71,7 @@ def train(model, optim, steps, BS=128, gpu=False):
     out = model.forward(x)
 
     # NLL loss function
-    loss = out.mul(y).mean()
+    loss = lossfn(out, y) 
     optim.zero_grad()
     loss.backward()
     optim.step()
@@ -85,10 +85,12 @@ def train(model, optim, steps, BS=128, gpu=False):
     accuracies.append(accuracy)
     t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
 
-def evaluate(model, gpu=False):
+def evaluate(model, gpu=False, BS=128):
   def numpy_eval():
-    Y_test_preds_out = model.forward(Tensor(X_test.reshape((-1, 28*28)).astype(np.float32), gpu=gpu)).cpu()
-    Y_test_preds = np.argmax(Y_test_preds_out.data, axis=1)
+    Y_test_preds_out = np.zeros((len(Y_test),10))
+    for i in trange(len(Y_test)//BS, disable=os.getenv('CI') is not None):
+      Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(Tensor(X_test[i*BS:(i+1)*BS].reshape((-1, 28*28)).astype(np.float32), gpu=gpu)).cpu().data
+    Y_test_preds = np.argmax(Y_test_preds_out, axis=1)
     return (Y_test == Y_test_preds).mean()
 
   accuracy = numpy_eval()
