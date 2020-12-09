@@ -117,7 +117,7 @@ def binary_op(ctx, code, x, y):
     
   prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
   ret = buffer_zeros(ctx, shape_ret)
-  prg.binop(ctx.cl_queue, dimlist, None, x, y, ret, *dimlist)
+  prg.binop(ctx.cl_queue, tuple(dimlist), None, x.cl, y.cl, ret.cl, *dimlist)
   return ret
 
 def unary_op(ctx, code, x):
