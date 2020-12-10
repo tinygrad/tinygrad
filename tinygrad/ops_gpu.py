@@ -80,19 +80,23 @@ def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', inpu
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
-@functools.lru_cache(maxsize=(5*(3**4 + 3**3 + 3**2 + 3))) #  (5 kinds of operations)*(upper bound for # possible complists of len<4)
+@functools.lru_cache(maxsize=(5*(3**4 + 3**3 + 3**2 + 3))) #  (5 kinds of operations)*(upper bound for # of possible complists w/ len<4)
 def get_binop_prg(cl_ctx, code, complist):
   ndims = len(complist)
-  idx_exprs = ["0", "0", "0"] # [idx_x, idx_y, idx_ret], compiler should optimize away these 0s
+  args = "".join([", int d%d" % i for i in range(ndims)]) + "".join([", int p%d" % i for i in range(ndims-1)])
+  compute_idx_rets = ["\n    int idx_ret"+str(i)+" = (gid0 / "+("p%d"%i if i < ndims-1 else "1")+") % d"+str(i)+";" for i in range(ndims)]
+  
+  idx_exprs = ["0", "0"] # [idx_x, idx_y]
   for i in range(ndims):
-    for j in range(3):
-      if j==2 or complist[i][j]:
-        idx_exprs[j] = "gid%d + d%d*(%s)" % (i, i, idx_exprs[j])
-  prg = """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+"".join([', int d%d' % i for i in range(ndims)])+""") {
-    """+"\n".join(["int gid%d = get_global_id(%d);" % (i, i) for i in range(ndims)])+"""
+    for j in range(2):
+      if complist[i][j]:
+        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
+  
+  prg = """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
+    int gid0 = get_global_id(0);"""+"".join(compute_idx_rets)+"""
     float a = x_g["""+idx_exprs[0]+"""];
     float b = y_g["""+idx_exprs[1]+"""];
-    res_g["""+idx_exprs[2]+"""] = """+code+""";
+    res_g[gid0] = """+code+""";
   }"""
   return cl.Program(cl_ctx, prg).build()
 
@@ -104,8 +108,10 @@ def binary_op(ctx, code, x, y):
   if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
     raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
   shape_ret = np.maximum(shape_x, shape_y)
-  dimlist, complist = [], [] # note: we combine some dimensions together here, so len(dimlist) may be less than n_dims
-  def push(dim, comp):
+  
+  # group together any adjacent dimensions that we can to simplify broadcasting
+  dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
+  def push(dim, comp): # combines pushed dimension with previous one if possible
     if len(complist) > 0 and complist[-1] == comp:
       dimlist[-1] *= dim
     elif comp != (False, False):
@@ -113,10 +119,11 @@ def binary_op(ctx, code, x, y):
       complist.append(comp)
   for i in range(n_dims):
     push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
-  # TODO: may get "CL_INVALID_WORK_DIMENSION" error when len(dimlist) > CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS >= 3
+  
   prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
   ret = buffer_zeros(ctx, shape_ret)
-  prg.binop(ctx.cl_queue, dimlist if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist)
+  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
+  prg.binop(ctx.cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
 def unary_op(ctx, code, x):
