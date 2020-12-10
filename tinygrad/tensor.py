@@ -57,12 +57,10 @@ class Tensor:
   ops_cpu, ops_gpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
-    if isinstance(data, list):
-      data = np.array(data, dtype=np.float32)
-    elif GPU and isinstance(data, GPUBuffer):
-      self.gpu = True
+    if GPU and isinstance(data, GPUBuffer):
+        self.gpu = True
     elif not isinstance(data, np.ndarray):
-      raise TypeError(f"Error constructing tensor with {data!r}")
+        data = np.array(data, dtype=np.float32)
 
     if isinstance(data, np.ndarray):
       if data.dtype != np.float32 and not Tensor.did_float_warning:
