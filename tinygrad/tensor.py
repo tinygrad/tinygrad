@@ -203,6 +203,11 @@ class Tensor:
   def leakyrelu(self, neg_slope=0.01):
     return self.relu() + (-neg_slope*self).relu()
 
+  def dropout(self, p=0.5):
+    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    ret = self * Tensor(_mask, requires_grad=False, gpu=self.gpu)
+    return ret.div(1.0 - p)
+
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, *tensors):
