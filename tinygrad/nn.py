@@ -2,16 +2,11 @@ from tinygrad.tensor import Tensor
 
 class BatchNorm2D:
   def __init__(self, sz, eps=1e-5, track_running_stats=False, training=False, momentum=0.1):
-    self.eps = eps
-    self.track_running_stats = track_running_stats
-    self.training = training
-    self.momentum = momentum
+    self.eps, self.track_running_stats, self.training, self.momentum = eps, track_running_stats, training, momentum
 
-    self.weight = Tensor.ones(sz)
-    self.bias = Tensor.zeros(sz)
+    self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
 
-    self.running_mean = Tensor.zeros(sz, requires_grad=False)
-    self.running_var = Tensor.ones(sz, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x):
@@ -31,9 +26,6 @@ class BatchNorm2D:
     return self.normalize(x, self.running_mean, self.running_var)
 
   def normalize(self, x, mean, var):
-    x = x.sub(mean.reshape(shape=[1, -1, 1, 1]))
-    x = x.mul(self.weight.reshape(shape=[1, -1, 1, 1]))
-    x = x.div(var.add(self.eps).reshape(shape=[1, -1, 1, 1]).sqrt())
-    x = x.add(self.bias.reshape(shape=[1, -1, 1, 1]))
-    return x
+    x = (x - mean.reshape(shape=[1, -1, 1, 1])) * self.weight.reshape(shape=[1, -1, 1, 1])
+    return x.div(var.add(self.eps).reshape(shape=[1, -1, 1, 1])**0.5) + self.bias.reshape(shape=[1, -1, 1, 1])
 
