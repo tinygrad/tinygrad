@@ -8,7 +8,6 @@ class TestNN(unittest.TestCase):
   def test_batchnorm2d(self, training=False):
     sz = 4
 
-
     # create in tinygrad
     bn = BatchNorm2D(sz, eps=1e-5, training=training, track_running_stats=training)
     bn.weight = Tensor.randn(sz)

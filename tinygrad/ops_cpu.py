@@ -1,7 +1,7 @@
 import sys
 import warnings
 import numpy as np
-from .tensor import Function, register, Tensor
+from .tensor import Function, register
 
 # ************* basic ops *************
 def unbroadcast(out, in_sh):
@@ -55,7 +55,7 @@ class Pow(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
-           unbroadcast((x**y) * np.log(x) * grad_output, y.shape) 
+           unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
 register('pow', Pow)
 
 class Sum(Function):

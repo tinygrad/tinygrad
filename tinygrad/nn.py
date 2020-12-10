@@ -9,8 +9,6 @@ class BatchNorm2D:
 
     self.weight = Tensor.ones(sz)
     self.bias = Tensor.zeros(sz)
-    self.track_running_stats = track_running_stats
-    self.training = training
 
     self.running_mean = Tensor.zeros(sz, requires_grad=False)
     self.running_var = Tensor.ones(sz, requires_grad=False)
