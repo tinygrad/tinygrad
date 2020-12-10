@@ -10,13 +10,17 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
   torch.manual_seed(0)
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
+  neg_ts = [torch.FloatTensor(*x).uniform_(-1, 0) for x in shps]
+  neg_tst = [Tensor(x.detach().numpy()) for x in neg_ts]
   if gpu:
     tst = [x.cuda() for x in tst]
+    neg_tst = [x.cuda() for x in neg_tst]
 
-  out = torch_fxn(*ts)
-  ret = tinygrad_fxn(*tst)
+  out, out_neg = torch_fxn(*ts), torch_fxn(*neg_ts)
+  ret, ret_neg = tinygrad_fxn(*tst), tinygrad_fxn(*neg_tst)
 
   np.testing.assert_allclose(ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
+  np.testing.assert_allclose(ret_neg.cpu().data, out_neg.detach().numpy(), atol=atol, rtol=rtol)
 
   if not forward_only:
     out.mean().backward()
@@ -53,8 +57,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, gpu=self.gpu)
   def test_relu(self):
     helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu, gpu=self.gpu)
-  def test_leakyrelu(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu, gpu=self.gpu)
+  def test_leaky_relu(self):
+    helper_test_op([(45,65)], lambda x: torch.nn.LeakyReLU(0.01)(x), Tensor.leaky_relu, gpu=self.gpu)
   def test_abs(self):
     helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs, gpu=self.gpu)
   def test_sigmoid(self):
