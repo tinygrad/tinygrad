@@ -62,12 +62,10 @@ class Tensor:
     elif not isinstance(data, np.ndarray):
         data = np.array(data, dtype=np.float32)
 
-    if isinstance(data, np.ndarray):
-      if data.dtype != np.float32 and not Tensor.did_float_warning:
-        # warning? float64 is actually needed for numerical jacobian
-        print(f"warning, {data.shape!r} isn't float32")
-        Tensor.did_float_warning = True
-      self.gpu = False
+    if data.dtype != np.float32 and not Tensor.did_float_warning:
+      # warning? float64 is actually needed for numerical jacobian
+      print(f"warning, {data.shape!r} isn't float32")
+      Tensor.did_float_warning = True
 
     self.data = data
     self.grad = None
