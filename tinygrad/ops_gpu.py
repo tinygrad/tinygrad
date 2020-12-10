@@ -92,13 +92,11 @@ def get_binop_prg(cl_ctx, code, complist):
       if complist[i][j]:
         idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
   
-  prg = """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
+  return cl.Program(cl_ctx, """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
     int gid0 = get_global_id(0);"""+"".join(compute_idx_rets)+"""
     float a = x_g["""+idx_exprs[0]+"""];
     float b = y_g["""+idx_exprs[1]+"""];
-    res_g[gid0] = """+code+""";
-  }"""
-  return cl.Program(cl_ctx, prg).build()
+    res_g[gid0] = """+code+""";\n}""").build()
 
 def binary_op(ctx, code, x, y):
   n_dims = max(len(x.shape), len(y.shape))
@@ -109,15 +107,13 @@ def binary_op(ctx, code, x, y):
     raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
   shape_ret = np.maximum(shape_x, shape_y)
   
-  # group together any adjacent dimensions that we can to simplify broadcasting
   dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
-  def push(dim, comp): # combines pushed dimension with previous one if possible
+  def push(dim, comp):
     if len(complist) > 0 and complist[-1] == comp:
       dimlist[-1] *= dim
     elif comp != (False, False):
-      dimlist.append(dim)
-      complist.append(comp)
-  for i in range(n_dims):
+      dimlist.append(dim); complist.append(comp)
+  for i in range(n_dims): # group together any adjacent dimensions that we can to simplify broadcasting
     push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
   
   prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
