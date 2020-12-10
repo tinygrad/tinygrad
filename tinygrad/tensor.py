@@ -200,8 +200,8 @@ class Tensor:
   def tanh(self):
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
 
-  def leakyrelu(self, neg_slope=0.01):
-    return self.relu() + (-neg_slope*self).relu()
+  def leaky_relu(self, neg_slope=0.01):
+    return self.relu() - (-neg_slope*self).relu()
 
   def abs(self):
     return self.relu() + (-1.0*self).relu()*(-1.0)
