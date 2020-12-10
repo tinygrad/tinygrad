@@ -49,12 +49,14 @@ class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return x ** y
+    with np.errstate(invalid='ignore'):
+        return x ** y
 
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
+    with np.errstate(invalid='ignore'):
+        return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
            unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
 register('pow', Pow)
 
@@ -157,9 +159,9 @@ class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
     def logsumexp(x):
-      #return np.log(np.exp(x).sum(axis=1))
-      c = x.max(axis=1)
-      return c + np.log(np.exp(x-c.reshape((-1, 1))).sum(axis=1))
+      with np.errstate(invalid='ignore'):
+        c = x.max(axis=1)
+        return c + np.log(np.exp(x-c.reshape((-1, 1))).sum(axis=1))
     output = input - logsumexp(input).reshape((-1, 1))
     ctx.save_for_backward(output)
     return output
