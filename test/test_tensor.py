@@ -5,6 +5,8 @@ from tinygrad.tensor import Tensor, GPU
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
+U_init = np.random.randn(3,3).astype(np.float32)
+V_init = np.random.randn(3,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
@@ -31,6 +33,34 @@ class TestTinygrad(unittest.TestCase):
       out = out.mul(m).add(m).sum()
       out.backward()
       return out.detach().numpy(), x.grad, W.grad
+
+    for x,y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
+  def test_backward_pass_diamond_model(self):
+    def test_tinygrad():
+      u = Tensor(U_init)
+      v = Tensor(V_init)
+      w = Tensor(W_init)
+      x = u.mul(v).relu()
+      y = u.mul(w).relu()
+      out = x.add(y).mul(y).relu()
+      out = out.logsoftmax()
+      out = out.sum()
+      out.backward()
+      return out.data, u.grad.data, v.grad.data, w.grad.data
+
+    def test_pytorch():
+      u = torch.tensor(U_init, requires_grad=True)
+      v = torch.tensor(V_init, requires_grad=True)
+      w = torch.tensor(W_init, requires_grad=True)
+      x = u.mul(v).relu()
+      y = u.mul(w).relu()
+      out = x.add(y).mul(y).relu()
+      out = torch.nn.functional.log_softmax(out, dim=1)
+      out = out.sum()
+      out.backward()
+      return out.detach().numpy(), u.grad, v.grad, w.grad
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
