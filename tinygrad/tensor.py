@@ -204,7 +204,7 @@ class Tensor:
     return self.relu() - (-neg_slope*self).relu()
 
   def abs(self):
-    return self.relu() + (-1.0*self).relu()*(-1.0)
+    return self.relu() + (-1.0*self).relu()
 
 # An instantiation of the Function is the Context
 class Function:
