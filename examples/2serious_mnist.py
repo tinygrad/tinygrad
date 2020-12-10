@@ -34,23 +34,20 @@ class SqueezeExciteBlock2D:
 
 class ConvBlock:
   def __init__(self, h, w, inp, filters=128, conv=3):
-    self.h = h
-    self.w = w
-    self.filters = filters
-    self.conv = conv
+    self.h, self.w = h, w
+    #self.conv = conv
     self.inp = inp
-    self.c1 = Tensor.uniform(filters, inp, conv, conv)
-    self.c2 = Tensor.uniform(filters, filters, conv, conv)
-    self.c3 = Tensor.uniform(filters, filters,conv,conv)
-
+    #init weights
+    self.cweights = [Tensor.uniform(filters, inp if i==0 else filters, conv, conv) for i in range(3)]
+    self.cbiases = [Tensor.uniform(1, filters, 1, 1) for i in range(3)]
+    #init layers
     self._bn = BatchNorm2D(128, training=True)
     self._seb = SqueezeExciteBlock2D(filters)
   
   def __call__(self, input):
-    x = input.reshape(shape=(-1, self.inp, self.w, self.h)) # hacks
-    x = x.conv2d(self.c1).relu()
-    x = x.conv2d(self.c2).relu()
-    x = x.conv2d(self.c3).relu()
+    x = input.reshape(shape=(-1, self.inp, self.w, self.h)) 
+    for cweight, cbias in zip(self.cweights, self.cbiases):
+      x = x.conv2d(cweight).add(cbias).relu()
     x = self._bn(x)
     x = self._seb(x)
     return x
@@ -62,7 +59,7 @@ class BigConvNet:
     self.weight2 = Tensor.uniform(128,10)
 
   def parameters(self):
-    if DEBUG: #keeping this for a moment
+    if DEBUG:=True: #keeping this for a moment
       pars = [par for par in get_parameters(self) if par.requires_grad]
       no_pars = 0
       for par in pars:
