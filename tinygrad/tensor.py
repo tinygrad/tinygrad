@@ -57,7 +57,7 @@ class Tensor:
   ops_cpu, ops_gpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
-    if GPU and isinstance(data, GPUBuffer):
+    if isinstance(data, GPUBuffer):
         self.gpu = True
     elif not isinstance(data, np.ndarray):
         data = np.array(data, dtype=np.float32)
