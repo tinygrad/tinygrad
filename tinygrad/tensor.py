@@ -216,10 +216,9 @@ class Function:
     self.saved_tensors.extend(x)
 
   def apply(self, *x, **kwargs):
-    op = self
-    ctx = op(*x)
+    ctx = self(*x) # self - operation i.e 'add', 'sub', etc.
     # use default params
-    params = signature(op.forward).parameters
+    params = signature(self.forward).parameters
     for p in params.values():
       if p.default is not p.empty:
         setattr(ctx, p.name, p.default)
@@ -227,7 +226,7 @@ class Function:
     for k, v in kwargs.items():
       setattr(ctx, k, v)
     with ProfileOp(ctx.__class__.__name__, x):
-      ret = Tensor(op.forward(ctx, *[t.data for t in x], **kwargs),
+      ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
                    requires_grad=any([t.requires_grad for t in x]))
     if ret.requires_grad:
       ret._ctx = ctx
