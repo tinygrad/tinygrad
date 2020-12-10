@@ -204,7 +204,10 @@ class Tensor:
     return self.relu() - (-neg_slope*self).relu()
 
   def abs(self):
-    return self.relu() + (-1.0*self).relu()
+    return self.relu() + (-self).relu()
+
+  def neg(self):
+    return -1.0 * self
 
 # An instantiation of the Function is the Context
 class Function:
@@ -246,6 +249,9 @@ def register(name, fxn, gpu=False):
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   # TODO: div is a second class op, so it doesn't work here
+  if not hasattr(Tensor, "__neg__"):
+      setattr(Tensor, f"__neg__", lambda self: self.neg())
+
   if name in ['add', 'sub', 'mul', 'pow']:
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
