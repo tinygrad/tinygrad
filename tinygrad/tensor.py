@@ -38,7 +38,7 @@ def require_init_gpu():
   if cl_queue is None:
     devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
     if len(devices) == 0:
-      devices = cl.get_platform()[0].get_devices(device_type.cl.device_type.CPU)
+      devices = cl.get_platforms()[0].get_devices(device_type.cl.device_type.CPU)
     cl_ctx = cl.Context(devices=devices)
     # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
