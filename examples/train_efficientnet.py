@@ -37,19 +37,21 @@ if __name__ == "__main__":
 
   Tensor.default_gpu = os.getenv("GPU") is not None
   TINY = os.getenv("TINY") is not None
+  TRANSFER = os.getenv("TRANSFER") is not None
   if TINY:
     model = TinyConvNet(classes)
+  elif TRANSFER: 
+    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
+    model.load_weights_from_torch()
   else:
     model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=False)
-    #model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
-    #model.load_weights_from_torch()
 
   parameters = get_parameters(model)
   print("parameters", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 
   #BS, steps = 16, 32
-  BS, steps = 64 if TINY else 16, 1024
+  BS, steps = 64 if TINY else 16, 2048
 
   for i in (t := trange(steps)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
