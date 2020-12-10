@@ -54,12 +54,9 @@ class GPUBuffer:
 
 class Tensor:
   did_float_warning = False
-  default_gpu = False
   ops_cpu, ops_gpu = {}, {}
 
   def __init__(self, data, gpu=None, requires_grad=True):
-    if gpu is None:
-      gpu = Tensor.default_gpu
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif GPU and isinstance(data, GPUBuffer):
