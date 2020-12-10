@@ -6,21 +6,18 @@ import timeit
 import functools
 from tinygrad.tensor import Tensor, GPU
 
-def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False, neg=False):
   torch.manual_seed(0)
   ts = [torch.rand(x, requires_grad=True) for x in shps]
+  ts = ts if not neg else -ts.abs()
   tst = [Tensor(x.detach().numpy()) for x in ts]
-  neg_ts = [torch.FloatTensor(*x).uniform_(-1, 0) for x in shps]
-  neg_tst = [Tensor(x.detach().numpy()) for x in neg_ts]
   if gpu:
     tst = [x.cuda() for x in tst]
-    neg_tst = [x.cuda() for x in neg_tst]
 
-  out, out_neg = torch_fxn(*ts), torch_fxn(*neg_ts)
-  ret, ret_neg = tinygrad_fxn(*tst), tinygrad_fxn(*neg_tst)
+  out = torch_fxn(*ts)
+  ret = tinygrad_fxn(*tst)
 
   np.testing.assert_allclose(ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
-  np.testing.assert_allclose(ret_neg.cpu().data, out_neg.detach().numpy(), atol=atol, rtol=rtol)
 
   if not forward_only:
     out.mean().backward()
@@ -43,50 +40,51 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
 
 class TestOps(unittest.TestCase):
   gpu = False
+  neg = False
   def test_add(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=self.gpu, neg=self.neg)
   def test_sub(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub, gpu=self.gpu, neg=self.neg)
   def test_mul(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul, gpu=self.gpu, neg=self.neg)
   def test_div(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div, gpu=self.gpu, neg=self.neg)
   def test_pow(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, gpu=self.gpu, neg=self.neg)
   def test_sqrt(self):
-    helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, gpu=self.gpu, neg=self.neg)
   def test_relu(self):
-    helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu, gpu=self.gpu, neg=self.neg)
   def test_leaky_relu(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.LeakyReLU(0.01)(x), Tensor.leaky_relu, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: torch.nn.LeakyReLU(0.01)(x), Tensor.leaky_relu, gpu=self.gpu, neg=self.neg)
   def test_abs(self):
-    helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs, gpu=self.gpu, neg=self.neg)
   def test_sigmoid(self):
-    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, gpu=self.gpu, neg=self.neg)
   def test_dot(self):
-    helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, gpu=self.gpu)
+    helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, gpu=self.gpu, neg=self.neg)
   def test_sum(self):
-    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, gpu=self.gpu)
+    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, gpu=self.gpu, neg=self.neg)
   def test_sum_axis(self):
-    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), gpu=self.gpu)
+    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), gpu=self.gpu, neg=self.neg)
   def test_mean_axis(self):
-    helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)), gpu=self.gpu)
+    helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)), gpu=self.gpu, neg=self.neg)
   def test_logsoftmax(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, gpu=self.gpu, neg=self.neg)
   def test_tanh(self):
-    helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6, gpu=self.gpu, neg=self.neg)
   def test_topo_sort(self):
-    helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6, gpu=self.gpu, neg=self.neg)
 
   def test_scalar_mul(self):
-    helper_test_op([(45,65)], lambda x: x*2, lambda x: x*2, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x*2, lambda x: x*2, gpu=self.gpu, neg=self.neg)
   def test_scalar_rmul(self):
-    helper_test_op([(45,65)], lambda x: 2*x, lambda x: 2*x, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: 2*x, lambda x: 2*x, gpu=self.gpu, neg=self.neg)
 
   def test_scalar_sub(self):
-    helper_test_op([(45,65)], lambda x: x-2, lambda x: x-2, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x-2, lambda x: x-2, gpu=self.gpu, neg=self.neg)
   def test_scalar_rsub(self):
-    helper_test_op([(45,65)], lambda x: 2-x, lambda x: 2-x, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: 2-x, lambda x: 2-x, gpu=self.gpu, neg=self.neg)
 
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
@@ -112,7 +110,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)), gpu=self.gpu)
 
   def test_detach(self):
-    helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), gpu=self.gpu, forward_only=True)
+    helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), gpu=self.gpu, forward_only=True, neg=self.neg)
 
   def test_conv2d(self):
     for bs in [1,8]:
@@ -123,7 +121,7 @@ class TestOps(unittest.TestCase):
               with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
                 helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), gpu=self.gpu, grad_rtol=1e-5)
+                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), gpu=self.gpu, grad_rtol=1e-5, neg=self.neg)
 
   def test_strided_conv2d(self):
     bs = 4
@@ -136,14 +134,14 @@ class TestOps(unittest.TestCase):
     with self.subTest(stride := (2,1)):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride).relu(),
-        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), gpu=self.gpu)
+        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), gpu=self.gpu, neg=self.neg)
 
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.max_pool2d(x, kernel_size=ksz), gpu=self.gpu)
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz), gpu=self.gpu, neg=self.neg)
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
@@ -151,7 +149,16 @@ class TestOps(unittest.TestCase):
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu)
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu, neg=self.neg)
+  def test_neg_all_operations(self):
+    not_allowed = ["sqrt", "pow", "neg_all_operations"]
+    self.neg = True
+    print("\nNegative Testing for Operations")
+    for method in dir(self):
+        if method.startswith("test") and method not in not_allowed:
+            if callable(getattr(self, method)):
+                getattr(self, method)
+
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestOpsGPU(TestOps):
