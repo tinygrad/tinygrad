@@ -88,7 +88,7 @@ class Tensor:
     return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
   def __getitem__(self, index):
-    if not isinstance(index, (int, list, tuple):
+    if not isinstance(index, (int, list, tuple)):
       raise ValueError("{type(index)} not a valid index.")
     return self.data[index] if not self.gpu else self.cpu().data[index]
 
