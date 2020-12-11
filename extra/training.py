@@ -45,5 +45,4 @@ def evaluate(model, X_test, Y_test, gpu=False, BS=128):
 
   accuracy = numpy_eval()
   print("test set accuracy is %f" % accuracy)
-  assert accuracy > 0.95
   return accuracy 
