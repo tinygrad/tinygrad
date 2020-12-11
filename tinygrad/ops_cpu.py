@@ -219,13 +219,13 @@ class Conv2D(Function):
 
     # needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
-    for Y in range(grad_output.shape[2]):
-      for X in range(grad_output.shape[3]):
-        iY,iX = Y*ys, X*xs
-        #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
-        for g in range(ctx.groups):
-          tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
-          gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
+    for k in range(oy*ox):
+      Y, X = k//ox, k%ox
+      iY,iX = Y*ys, X*xs
+      #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
+      for g in range(ctx.groups):
+        tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
+        gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 register('conv2d', Conv2D)
@@ -235,21 +235,18 @@ register('conv2d', Conv2D)
 
 def stack_for_pool(x, py, px):
   my, mx = (x.shape[2]//py)*py, (x.shape[3]//px)*px
-  stack = []
   xup = x[:, :, :my, :mx]
-  for Y in range(py):
-    for X in range(px):
-      stack.append(xup[:, :, Y::py, X::px][None])
+  stack = [xup[:, :, k//px::py, k%px::px][None] for k in range(py*px)]
   return np.concatenate(stack, axis=0)
 
 def unstack_for_pool(fxn, s, py, px):
   my, mx = (s[2]//py)*py, (s[3]//px)*px
-  for Y in range(py):
-    for X in range(px):
-      ll = fxn(Y*px+X)
-      if X == 0 and Y == 0:
-        ret = np.zeros(s, dtype=ll.dtype)
-      ret[:, :, Y:my:py, X:mx:px] = ll
+  for k in range(py*px):
+    Y, X = k//px, k%px
+    ll = fxn(Y*px+X)
+    if X == 0 and Y == 0:
+      ret = np.zeros(s, dtype=ll.dtype)
+    ret[:, :, Y:my:py, X:mx:px] = ll
   return ret
 
 class MaxPool2D(Function):
