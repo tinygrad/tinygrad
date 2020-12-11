@@ -99,10 +99,10 @@ if __name__ == "__main__":
         optimizer.zero_grad()
 
         output_real = discriminator.forward(data_real)
-        loss_real = (output_real.logsoftmax() * real_labels).mean()
+        loss_real = (output_real * real_labels).mean()
 
         output_fake = discriminator.forward(data_fake)
-        loss_fake = (output_fake.logsoftmax() * fake_labels).mean()
+        loss_fake = (output_fake * fake_labels).mean()
 
         loss_real.backward()
         loss_fake.backward()
@@ -113,7 +113,7 @@ if __name__ == "__main__":
         real_labels = real_label(batch_size)
         optimizer.zero_grad()
         output = discriminator.forward(data_fake)
-        loss = (output.logsoftmax() * real_labels).mean()
+        loss = (output * real_labels).mean()
         loss.backward()
         optimizer.step()
         return loss.cpu().data
