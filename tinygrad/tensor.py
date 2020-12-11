@@ -154,11 +154,12 @@ class Tensor:
 
   def cpu(self):
     if self.gpu:
-      ret = Tensor(np.empty(self.shape, dtype=np.float32), gpu=False)
-      cl.enqueue_copy(cl_queue, ret.data, self.data.cl, is_blocking=True)
-      if self.grad:
-        ret.grad = self.grad.cpu()
-      return ret
+      with ProfileOp("toCPU", [self]):
+        ret = Tensor(np.empty(self.shape, dtype=np.float32), gpu=False)
+        cl.enqueue_copy(cl_queue, ret.data, self.data.cl, is_blocking=True)
+        if self.grad:
+          ret.grad = self.grad.cpu()
+        return ret
     else:
       return self
 
@@ -170,11 +171,12 @@ class Tensor:
     if not GPU:
       raise Exception("No GPU Support, install pyopencl")
     if not self.gpu:
-      require_init_gpu()
-      ret = Tensor(GPUBuffer(self.shape, self.data))
-      if self.grad:
-        ret.grad = self.grad.cuda()
-      return ret
+      with ProfileOp("toGPU", [self]):
+        require_init_gpu()
+        ret = Tensor(GPUBuffer(self.shape, self.data))
+        if self.grad:
+          ret.grad = self.grad.cuda()
+        return ret
     else:
       return self
 
