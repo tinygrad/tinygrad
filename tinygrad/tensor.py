@@ -88,9 +88,13 @@ class Tensor:
     return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
   def __getitem__(self, index):
-    if not isinstance(index, (int, list, tuple)):
-      raise ValueError("{type(index)} not a valid index.")
-    return self.data[index] if not self.gpu else self.cpu().data[index]
+    if self.gpu:
+      #TODO: Support GPU indexing.
+      NotImplementedError('Indexing not supported for GPU yet.')
+    else:
+        # let numpy handle indexing.
+      data = self.data[index] if self.data[index].shape else [self.data[index]]
+      return Tensor(data, gpu=self.gpu, requires_grad=self.requires_grad)
 
   def assign(self, x):
     self.data = x.data
