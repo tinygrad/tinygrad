@@ -9,7 +9,7 @@ sys.path.append(os.path.join(os.getcwd(), 'test'))
 from tinygrad.tensor import Tensor, Function, register
 from tinygrad.utils import get_parameters
 import tinygrad.optim as optim
-from test_mnist import X_train
+from test_mnist import X_train, Y_train
 from torchvision.utils import make_grid, save_image
 import torch
 GPU = os.getenv("GPU") is not None
@@ -46,13 +46,13 @@ class LinearDisc:
     x = x.dot(self.l3).leakyrelu(0.2)
     if train:
         x = x.dropout(0.3)
-    x = x.dot(self.l4)
+    x = x.dot(self.l4).logsoftmax()
     return x
 
 if __name__ == "__main__":
     generator = LinearGen()
     discriminator = LinearDisc()
-    batch_size = 64
+    batch_size = 128
     k = 1
     epochs = 100
     generator_params = get_parameters(generator)
@@ -62,21 +62,22 @@ if __name__ == "__main__":
     output_folder = "outputs"
     os.makedirs(output_folder, exist_ok=True)
     train_data_size = len(X_train)
-    ds_noise = Tensor(np.random.uniform(size=(10,128)).astype(np.float32), gpu=GPU, requires_grad=False)
+    ds_noise = Tensor(np.random.uniform(size=(64,128)).astype(np.float32), gpu=GPU, requires_grad=False)
+    n_steps = int(train_data_size/batch_size)
     if GPU:
       [x.cuda_() for x in generator_params+discriminator_params]
     # optimizers
     optim_g = optim.Adam(generator_params, lr=0.001)
     optim_d = optim.Adam(discriminator_params, lr=0.001)
 
-    def train_loader():
-        for _ in range(int(train_data_size/batch_size)):
-            idx =np.random.randint(0, X_train.shape[0], size=(batch_size))
-            X = Tensor(X_train[idx].reshape((-1,28*28)).astype(np.float32)/255., gpu=GPU)
-            yield X
+    def generator_batch():
+        idx = np.random.randint(0, X_train.shape[0], size=(batch_size))
+        image_b = X_train[idx].reshape(-1, 28*28).astype(np.float32)
+        image_b = (image_b - 0.5)/0.5
+        return Tensor(image_b, gpu=GPU)
 
     def real_label(bs):
-        y = np.ones((bs,2), np.float32)
+        y = np.zeros((bs,2), np.float32)
         y[range(bs), [1]*bs] = -2.0
         real_labels = Tensor(y, gpu=GPU)
         return real_labels
@@ -113,13 +114,12 @@ if __name__ == "__main__":
         optimizer.step()
         return loss.cpu().data
 
-    for epoch in range(epochs*epochs):
+    for epoch in tqdm(range(epochs)):
         loss_g = 0.0
         loss_d = 0.0
-        n_steps = int(train_data_size/batch_size)
         print(f"Epoch {epoch} of {epochs}")
-        pbar = tqdm(enumerate(train_loader()), total=n_steps)
-        for i, image in pbar:
+        for i in tqdm(range(n_steps)):
+            image = generator_batch()
             for step in range(k):
                 noise = Tensor(np.random.uniform(size=(batch_size,128)), gpu=GPU)
                 data_fake = generator.forward(noise).detach()
@@ -130,10 +130,9 @@ if __name__ == "__main__":
             data_fake = generator.forward(noise)
             loss_g_step = train_generator(optim_g, data_fake)
             loss_g += loss_g_step
-            pbar.set_postfix_str({"g_loss":loss_g_step, "d_loss":loss_d_step})
 
         fake_images = generator.forward(ds_noise).cpu().data
-        fake_images = fake_images.reshape(-1,1,28,28) * 255.
+        fake_images = (fake_images.reshape(-1,1,28,28)+ 1)/2
         fake_images = make_grid(torch.tensor(fake_images))
         save_image(fake_images, os.path.join(output_folder,f"image_{epoch}.jpg"))
         epoch_loss_g = loss_g / n_steps
