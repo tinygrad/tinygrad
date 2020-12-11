@@ -123,7 +123,8 @@ if __name__ == "__main__":
 
   for lr, st in zip(lrs, steps):
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    train(model, X_train, Y_train optimizer, steps=st, lossfn=lossfn, gpu=GPU)
+    train(model, X_train, Y_train, optimizer, steps=st, lossfn=lossfn, gpu=GPU)
     model.save('checkpoint')
-  model.load('checkpoint')
-  evaluate(model, X_test, Y_test)
+  model.save('checkpoint')
+  accuracy = evaluate(model, X_test, Y_test)
+  model.save('examples/checkpoints/checkpoint'+str("%.0f" % (accuracy*1.0e6)))
