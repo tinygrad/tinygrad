@@ -87,12 +87,16 @@ class Tensor:
   def __repr__(self):
     return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
+  def _gpu_index(self, index):
+    self.data.cl = self.data.cl.get_sub_region(index*4, 4) #4 - float32
+    self.data.shape = 1
+    return self
+
   def __getitem__(self, index):
     if self.gpu:
-      #TODO: Support GPU indexing.
-      NotImplementedError('Indexing not supported for GPU yet.')
+      return self._gpu_index(index)
     else:
-        # let numpy handle indexing.
+      # let numpy handle indexing.
       data = self.data[index] if self.data[index].shape else [self.data[index]]
       return Tensor(data, gpu=self.gpu, requires_grad=self.requires_grad)
 
