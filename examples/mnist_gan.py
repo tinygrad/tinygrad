@@ -76,7 +76,7 @@ if __name__ == "__main__":
 
     def generator_batch():
         idx = np.random.randint(0, X_train.shape[0], size=(batch_size))
-        image_b = X_train[idx].reshape(-1, 28*28).astype(np.float32)
+        image_b = X_train[idx].reshape(-1, 28*28).astype(np.float32)/255.
         image_b = (image_b - 0.5)/0.5
         return Tensor(image_b, gpu=GPU)
 
@@ -134,8 +134,7 @@ if __name__ == "__main__":
             data_fake = generator.forward(noise)
             loss_g_step = train_generator(optim_g, data_fake)
             loss_g += loss_g_step
-
-        fake_images = generator.forward(ds_noise).cpu().data
+        fake_images = generator.forward(ds_noise).detach().cpu().data
         fake_images = (fake_images.reshape(-1,1,28,28)+ 1)/2
         fake_images = make_grid(torch.tensor(fake_images))
         save_image(fake_images, os.path.join(output_folder,f"image_{epoch}.jpg"))
