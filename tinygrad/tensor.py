@@ -88,8 +88,11 @@ class Tensor:
     return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
   def _gpu_index(self, index):
-    self.data.cl = self.data.cl.get_sub_region(index*4, 4) #4 - float32
-    self.data.shape = 1
+    _slice = isinstance(index , slice)
+    _start = index if not _slice else index.start
+    _stop =  1 if not _slice else index.stop
+    self.data.cl = self.data.cl.get_sub_region(_start*4, _stop*4) #4 - float32
+    self.data.shape = (1,) if not _slice else (_stop - _start,)
     return self
 
   def __getitem__(self, index):
