@@ -12,9 +12,7 @@ import tinygrad.optim as optim
 from test_mnist import X_train
 from torchvision.utils import make_grid, save_image
 import torch
-
 GPU = os.getenv("GPU") is not None
-
 class LinearGen:
   def __init__(self):
     lv = 128
@@ -36,7 +34,7 @@ class LinearDisc:
     self.l1 = Tensor.uniform(784, 1024)
     self.l2 = Tensor.uniform(1024, 512)
     self.l3 = Tensor.uniform(512, 256)
-    self.l4 = Tensor.uniform(256, 1)
+    self.l4 = Tensor.uniform(256, 2)
 
   def forward(self, x, train=True):
     x = x.dot(self.l1).leakyrelu(0.2)
@@ -48,7 +46,7 @@ class LinearDisc:
     x = x.dot(self.l3).leakyrelu(0.2)
     if train:
         x = x.dropout(0.3)
-    x = x.dot(self.l4).sigmoid()
+    x = x.dot(self.l4)
     return x
 
 if __name__ == "__main__":
@@ -61,7 +59,10 @@ if __name__ == "__main__":
     discriminator_params = get_parameters(discriminator)
     gen_loss = []
     disc_loss = []
+    output_folder = "outputs"
+    os.makedirs(output_folder, exist_ok=True)
     train_data_size = len(X_train)
+    ds_noise = Tensor(np.random.uniform(size=(10,128)).astype(np.float32), gpu=GPU, requires_grad=False)
     if GPU:
       [x.cuda_() for x in generator_params+discriminator_params]
     # optimizers
@@ -71,11 +72,11 @@ if __name__ == "__main__":
     def train_loader():
         for _ in range(int(train_data_size/batch_size)):
             idx =np.random.randint(0, X_train.shape[0], size=(batch_size))
-            X = Tensor(X_train[idx].reshape((-1,28*28)).astype(np.float32), gpu=GPU)
+            X = Tensor(X_train[idx].reshape((-1,28*28)).astype(np.float32)/255., gpu=GPU)
             yield X
 
     def real_label(bs):
-        y = np.zeros((bs,2), np.float32)
+        y = np.ones((bs,2), np.float32)
         y[range(bs), [1]*bs] = -2.0
         real_labels = Tensor(y, gpu=GPU)
         return real_labels
@@ -101,8 +102,7 @@ if __name__ == "__main__":
         loss_real.backward()
         loss_fake.backward()
         optimizer.step()
-
-        return loss_real + loss_fake
+        return loss_real.cpu().data + loss_fake.cpu().data
 
     def train_generator(optimizer, data_fake):
         real_labels = real_label(batch_size)
@@ -111,28 +111,34 @@ if __name__ == "__main__":
         loss = (output.logsoftmax() * real_labels).mean()
         loss.backward()
         optimizer.step()
-        return loss
-    ds_noise = Tensor(np.random.uniform(size=(10,128)), gpu=GPU)
+        return loss.cpu().data
 
-    for epoch in range(epochs):
+    for epoch in range(epochs*epochs):
         loss_g = 0.0
         loss_d = 0.0
+        n_steps = int(train_data_size/batch_size)
         print(f"Epoch {epoch} of {epochs}")
-        for i, image in tqdm(enumerate(train_loader()), total=int(60000/batch_size)):
+        pbar = tqdm(enumerate(train_loader()), total=n_steps)
+        for i, image in pbar:
             for step in range(k):
                 noise = Tensor(np.random.uniform(size=(batch_size,128)), gpu=GPU)
                 data_fake = generator.forward(noise).detach()
                 data_real = image
-                loss_d += train_discriminator(optim_d, data_real, data_fake)
+                loss_d_step = train_discriminator(optim_d, data_real, data_fake)
+                loss_d += loss_d_step
             noise = Tensor(np.random.uniform(size=(batch_size,128)), gpu=GPU)
             data_fake = generator.forward(noise)
-            loss_g += train_generator(optim_g, data_fake)
+            loss_g_step = train_generator(optim_g, data_fake)
+            loss_g += loss_g_step
+            pbar.set_postfix_str({"g_loss":loss_g_step, "d_loss":loss_d_step})
+
         fake_images = generator.forward(ds_noise).cpu().data
+        fake_images = fake_images.reshape(-1,1,28,28) * 255.
         fake_images = make_grid(torch.tensor(fake_images))
-        save_image(fake_images, f"image_{epoch}.jpg")
-        epoch_loss_g = loss_g.cpu().data / i
-        epoch_loss_d = loss_d.cpu().data / i
-        print(f"Generator loss: {epoch_loss_g}, Discriminator loss: {epoch_loss_d}")
+        save_image(fake_images, os.path.join(output_folder,f"image_{epoch}.jpg"))
+        epoch_loss_g = loss_g / n_steps
+        epoch_loss_d = loss_d / n_steps
+        print(f"EPOCH: Generator loss: {epoch_loss_g}, Discriminator loss: {epoch_loss_d}")
     else:
         print("Training Completed!")
 
