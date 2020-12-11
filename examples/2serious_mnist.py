@@ -35,7 +35,6 @@ class SqueezeExciteBlock2D:
 class ConvBlock:
   def __init__(self, h, w, inp, filters=128, conv=3):
     self.h, self.w = h, w
-    #self.conv = conv
     self.inp = inp
     #init weights
     self.cweights = [Tensor.uniform(filters, inp if i==0 else filters, conv, conv) for i in range(3)]
@@ -59,7 +58,7 @@ class BigConvNet:
     self.weight2 = Tensor.uniform(128,10)
 
   def parameters(self):
-    if DEBUG:=True: #keeping this for a moment
+    if DEBUG: #keeping this for a moment
       pars = [par for par in get_parameters(self) if par.requires_grad]
       no_pars = 0
       for par in pars:
@@ -71,21 +70,21 @@ class BigConvNet:
       return get_parameters(self)
 
   def save(self, filename):
-    with open('file'+'.npy', 'wb') as f:
+    with open(filename+'.npy', 'wb') as f:
       for par in get_parameters(self):
-        if par.requires_grad:
-          np.save(f, par.cpu().data)
+        #if par.requires_grad:
+        np.save(f, par.cpu().data)
 
   def load(self, filename):
-    with open('file'+'.npy', 'rb') as f:
+    with open(filename+'.npy', 'rb') as f:
       for par in get_parameters(self): 
-        if par.requires_grad:
-          try:
-            par.cpu().data[:] = np.load(f)
-            if GPU:
-              par.cuda()
-          except:
-            print('Could not load paramer')
+        #if par.requires_grad:
+        try:
+          par.cpu().data[:] = np.load(f)
+          if GPU:
+            par.cuda()
+        except:
+          print('Could not load parameter')
 
   def forward(self, x):
     x = self.conv[0](x)
@@ -100,26 +99,31 @@ class BigConvNet:
 if __name__ == "__main__":
   lrs = [1e-3, 1e-4, 1e-5]
   steps = [1, 1, 1] if QUICK else [4000, 1000, 1000]
+
+  #testing
+  lrs, steps = [1e-5, 1e-6], [100, 100]
   lmbd = 0.00025
   lossfn = lambda out,y: out.mul(y).mean() + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
   X_train, Y_train, X_test, Y_test = fetch_mnist()
   np.random.seed(1337)
   
   model = BigConvNet()
-  try:
-    model.load(sys.argv[1])
-    print('Loaded model "'+sys.argv[1]+'", evaluating...')
-    evaluate(model)
-  except: pass
-
-
-  params = get_parameters(model)
+ 
+  if sys.argv[1] is not None:
+    try:
+      model.load(sys.argv[1])
+      print('Loaded weights "'+sys.argv[1]+'", evaluating...')
+      evaluate(model, X_test, Y_test)
+    except:
+      print('could not load weights "'+sys.argv[1]+'".')
+ 
   if GPU:
+    params = get_parameters(model)
     [x.cuda_() for x in params]
 
   for lr, st in zip(lrs, steps):
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    train(model, optimizer, steps=st, lossfn=lossfn, gpu=GPU)
+    train(model, X_train, Y_train optimizer, steps=st, lossfn=lossfn, gpu=GPU)
     model.save('checkpoint')
   model.load('checkpoint')
-  evaluate(model)
+  evaluate(model, X_test, Y_test)
