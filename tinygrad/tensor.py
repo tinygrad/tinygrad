@@ -59,9 +59,9 @@ class Tensor:
   def __init__(self, data, gpu=None, requires_grad=True):
     self.gpu = False
     if isinstance(data, GPUBuffer):
-        self.gpu = True
+      self.gpu = True
     elif not isinstance(data, np.ndarray):
-        data = np.array(data, dtype=np.float32)
+      data = np.array(data, dtype=np.float32)
 
     if data.dtype != np.float32 and not Tensor.did_float_warning:
       # warning? float64 is actually needed for numerical jacobian
