@@ -1,4 +1,3 @@
-import sys
 import warnings
 import numpy as np
 from .tensor import Function, register
