@@ -70,6 +70,10 @@ if __name__ == "__main__":
     optim_g = optim.Adam(generator_params, lr=0.001)
     optim_d = optim.Adam(discriminator_params, lr=0.001)
 
+    def regularization_l2(model, a=1e-4):
+        #TODO: l2 reg loss
+        pass
+
     def generator_batch():
         idx = np.random.randint(0, X_train.shape[0], size=(batch_size))
         image_b = X_train[idx].reshape(-1, 28*28).astype(np.float32)
