@@ -65,14 +65,14 @@ void *ANE_TensorCreate(int width, int height) {
                            [NSNumber numberWithInt:1278226536], kIOSurfacePixelFormat,
                            nil];
   IOSurfaceRef in_surf = IOSurfaceCreate((CFDictionaryRef)dict);
+  IOSurfaceLock((IOSurfaceRef)in_surf, 0, nil);
 
   return (void *)in_surf;
 }
 
 void* ANE_TensorData(void *out_surf) {
-  IOSurfaceLock((IOSurfaceRef)out_surf, 0, nil);
   void *ret = (void *)IOSurfaceGetBaseAddress((IOSurfaceRef)out_surf);
-  IOSurfaceUnlock((IOSurfaceRef)out_surf, 0, nil);
+  //IOSurfaceUnlock((IOSurfaceRef)out_surf, 0, nil);
   printf("TensorData %p -> %p\n", out_surf, ret);
   return ret;
 }

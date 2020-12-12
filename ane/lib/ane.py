@@ -28,8 +28,11 @@ class ANETensor:
   def data(self):
     data = libane.ANE_TensorData(self.tt)
     assert(data is not None)
+    #print(hex(addressof(data.contents)))
     buf = np.ctypeslib.as_array(data, shape=(self.sz,))
-    return np.frombuffer(buf, dtype=self.dtype)
+    ret = np.frombuffer(buf, dtype=self.dtype)
+    #print(ret.data)
+    return ret
 
 class ANE:
   def __init__(self):
@@ -54,9 +57,11 @@ if __name__ == "__main__":
 
   tind[0:4] = [-1,1,-2,2]
   print(tind)
+  print(toutd)
 
   comp = ane.compile(open("../2_compile/model.hwx", "rb").read())
   ret = ane.run(comp, tin, tout)
 
+  print(tind)
   print(toutd)
 
