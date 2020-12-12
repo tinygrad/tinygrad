@@ -1,5 +1,5 @@
 import numpy as np
-from .tensor import Function, register, GPUBuffer
+from .tensor import Function, register, GPUBuffer, Tensor
 import pyopencl as cl
 import functools
 
@@ -194,7 +194,7 @@ class Add(Function):
     grad_x, grad_y = grad_output, grad_output
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
-register('add', Add, gpu=True)
+register('add', Add, device=Tensor.GPU)
 
 class Sub(Function):
   @staticmethod
@@ -207,7 +207,7 @@ class Sub(Function):
     grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
-register('sub', Sub, gpu=True)
+register('sub', Sub, device=Tensor.GPU)
 
 class Mul(Function):
   @staticmethod
@@ -221,7 +221,7 @@ class Mul(Function):
     grad_x = binary_op(ctx, 'a*b', y, grad_output)
     grad_y = binary_op(ctx, 'a*b', x, grad_output)
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
-register('mul', Mul, gpu=True)
+register('mul', Mul, device=Tensor.GPU)
 
 class Pow(Function):
   @staticmethod
@@ -237,7 +237,7 @@ class Pow(Function):
     grad_y = binary_op(ctx, 'a*b', grad_output,
                       binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
-register('pow', Pow, gpu=True)
+register('pow', Pow, device=Tensor.GPU)
 
 class Sum(Function):
   @staticmethod
@@ -254,7 +254,7 @@ class Sum(Function):
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     output = GPUBuffer(shape, hostbuf=grad_output)
     return binary_op(ctx, 'a+b', output, buffer_zeros(ctx, input.shape))
-register('sum', Sum, gpu=True)
+register('sum', Sum, device=Tensor.GPU)
 
 class Dot(Function):
   @staticmethod
@@ -308,8 +308,8 @@ class Dot(Function):
       i32(1), msize, isize, i32(1), osize, osize)
 
     return grad_input, grad_weight
-register('dot', Dot, gpu=True)
-register('matmul', Dot, gpu=True)
+register('dot', Dot, device=Tensor.GPU)
+register('matmul', Dot, device=Tensor.GPU)
 
 # ************* simple ops *************
 
@@ -352,7 +352,7 @@ class Pad2D(Function):
               i32(oy), i32(ox), i32(iy), i32(ix)
              )
     return ret
-register('pad2d', Pad2D, gpu=True)
+register('pad2d', Pad2D, device=Tensor.GPU)
 
 class Reshape(Function):
   @staticmethod
@@ -368,7 +368,7 @@ class Reshape(Function):
     in_shape, = ctx.saved_tensors
     grad_output = GPUBuffer(in_shape, hostbuf=grad_output)
     return grad_output
-register('reshape', Reshape, gpu=True)
+register('reshape', Reshape, device=Tensor.GPU)
 
 # ************* activation ops *************
 
@@ -382,7 +382,7 @@ class ReLU(Function):
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
-register('relu', ReLU, gpu=True)
+register('relu', ReLU, device=Tensor.GPU)
 
 class Sigmoid(Function):
   @staticmethod
@@ -395,7 +395,7 @@ class Sigmoid(Function):
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
     return binary_op(ctx, 'a * (b * (1 - b));', grad_output, ret)
-register('sigmoid', Sigmoid, gpu=True)
+register('sigmoid', Sigmoid, device=Tensor.GPU)
 
 class AvgPool2D(Function):
   @staticmethod
@@ -410,7 +410,7 @@ class AvgPool2D(Function):
     orig_shape, = ctx.saved_tensors
     return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
       result_op="input[iid] / (ksz.x * ksz.y)")
-register('avg_pool2d', AvgPool2D, gpu=True)
+register('avg_pool2d', AvgPool2D, device=Tensor.GPU)
 
 class MaxPool2D(Function):
   @staticmethod
@@ -430,7 +430,7 @@ class MaxPool2D(Function):
       result_op="(maxidx == kernidx) * input[iid]",
       decls="int maxidx=((__global float*)input2)[iid]; int kernidx=(gid.x%ksz.x) + ksz.x*(gid.y%ksz.y)",
       input2=idxs)
-register('max_pool2d', MaxPool2D, gpu=True)
+register('max_pool2d', MaxPool2D, device=Tensor.GPU)
 
 class LogSoftmax(Function):
   @staticmethod
@@ -447,7 +447,7 @@ class LogSoftmax(Function):
     lsum = reduce_op(ctx, "out += a", "out", grad_output, axis=[1])
     texp = binary_op(ctx, "exp(a) * b", output, lsum)
     return binary_op(ctx, "a - b", grad_output, texp)
-register('logsoftmax', LogSoftmax, gpu=True)
+register('logsoftmax', LogSoftmax, device=Tensor.GPU)
 
 # ************* conv ops *************
 
@@ -572,4 +572,4 @@ class Conv2D(Function):
     convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
     convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
-register('conv2d', Conv2D, gpu=True)
+register('conv2d', Conv2D, device=Tensor.GPU)

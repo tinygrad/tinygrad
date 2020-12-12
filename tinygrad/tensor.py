@@ -2,6 +2,7 @@
 from inspect import signature
 import numpy as np
 import os
+from collections import defaultdict
 
 # **** profiler ****
 
@@ -53,20 +54,35 @@ class GPUBuffer:
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
 
+# **** ANE functions ****
+
+ane = None
+def require_init_ane():
+  global ane
+  if ane is None:
+    from ane.lib.ane import ANE
+    ane = ANE()
+    import tinygrad.ops_ane
+
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
   did_float_warning = False
-  default_gpu = False
-  ops_cpu, ops_gpu = {}, {}
+  ops = defaultdict(dict)
+
+  default_device = CPU = 0
+  GPU = 1
+  ANE = 2
 
   def __init__(self, data, gpu=None, requires_grad=True):
     if gpu is None:
-      gpu = Tensor.default_gpu
-    if isinstance(data, list):
+      device = Tensor.default_device
+    if "ANETensor" in str(type(data)):
+      self.device = Tensor.ANE
+    elif isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif GPU and isinstance(data, GPUBuffer):
-      self.gpu = True
+      self.device = Tensor.GPU
     elif not isinstance(data, np.ndarray):
       raise TypeError(f"Error constructing tensor with {data!r}")
 
@@ -75,7 +91,7 @@ class Tensor:
         # warning? float64 is actually needed for numerical jacobian
         print(f"warning, {data.shape!r} isn't float32")
         Tensor.did_float_warning = True
-      self.gpu = False
+      self.device = Tensor.CPU
 
     self.data = data
     self.grad = None
@@ -92,6 +108,10 @@ class Tensor:
 
   def assign(self, x):
     self.data = x.data
+
+  @property
+  def gpu(self):
+    return self.device == Tensor.GPU
 
   @property
   def shape(self):
@@ -156,19 +176,30 @@ class Tensor:
   # ***** tinygrad supports CPU and GPU *****
 
   def cpu(self):
-    if self.gpu:
+    if self.device == Tensor.GPU:
       with ProfileOp("toCPU", [self]):
         ret = Tensor(np.empty(self.shape, dtype=np.float32), gpu=False)
         cl.enqueue_copy(cl_queue, ret.data, self.data.cl, is_blocking=True)
         if self.grad:
           ret.grad = self.grad.cpu()
         return ret
+    elif self.device == Tensor.ANE:
+      return Tensor(self.data.data().astype(np.float32), gpu=False)
     else:
       return self
 
+  def ane_(self):
+    assert(not self.gpu)
+    require_init_ane()
+    self.device = Tensor.ANE
+    ndata = ane.tensor(self.shape)
+    ndata.data()[:] = self.data
+    self.data = ndata
+    return self
+
   def cuda_(self):
     self.data = self.cuda().data
-    self.gpu = True
+    self.device = Tensor.GPU
 
   def cuda(self):
     if not GPU:
@@ -237,16 +268,13 @@ class Function:
       ret._ctx = ctx
     return ret
 
-def register(name, fxn, gpu=False):
-  if gpu:
-    Tensor.ops_gpu[name] = fxn
-  else:
-    Tensor.ops_cpu[name] = fxn
+def register(name, fxn, device=Tensor.CPU):
+  Tensor.ops[device][name] = fxn
   def dispatch(*x, **kwargs):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
     x = [Tensor(np.array([arg], dtype=tt.dtype), gpu=tt.gpu, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    f = (Tensor.ops_gpu if tt.gpu else Tensor.ops_cpu)[name]
-    f.cl_ctx, f.cl_queue = cl_ctx, cl_queue
+    f = (Tensor.ops[tt.device])[name]
+    f.cl_ctx, f.cl_queue, f.ane = cl_ctx, cl_queue, ane
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   # TODO: div is a second class op, so it doesn't work here
@@ -259,6 +287,7 @@ def register(name, fxn, gpu=False):
 import tinygrad.ops_cpu
 try:
   import pyopencl as cl
+  # TODO: move this import to require_init_gpu?
   import tinygrad.ops_gpu
   GPU = True
 except ImportError:
