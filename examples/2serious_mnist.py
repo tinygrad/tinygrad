@@ -46,14 +46,14 @@ class ConvBlock:
   def __call__(self, input):
     x = input.reshape(shape=(-1, self.inp, self.w, self.h)) 
     for cweight, cbias in zip(self.cweights, self.cbiases):
-      x = x.conv2d(cweight).add(cbias).relu()
+      x = x.pad2d(padding=[1,1,1,1]).conv2d(cweight).add(cbias).relu()
     x = self._bn(x)
     x = self._seb(x)
     return x
 
 class BigConvNet:
   def __init__(self):
-    self.conv = [ConvBlock(28,28,1), ConvBlock(22,22,128), ConvBlock(8,8,128)]
+    self.conv = [ConvBlock(28,28,1), ConvBlock(28,28,128), ConvBlock(14,14,128)]
     self.weight1 = Tensor.uniform(128,10)
     self.weight2 = Tensor.uniform(128,10)
 
@@ -91,17 +91,16 @@ class BigConvNet:
     x = self.conv[1](x)
     x = x.avg_pool2d(kernel_size=(2,2))
     x = self.conv[2](x)
-    x1 = x.avg_pool2d(kernel_size=(2,2)).reshape(shape=(-1,128)) #global
-    x2 = x.max_pool2d(kernel_size=(2,2)).reshape(shape=(-1,128)) #global
+    x1 = x.avg_pool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
+    x2 = x.max_pool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
     xo = x1.dot(self.weight1) + x2.dot(self.weight2)
     return xo.logsoftmax()
 
 if __name__ == "__main__":
   lrs = [1e-3, 1e-4, 1e-5]
   steps = [1, 1, 1] if QUICK else [4000, 1000, 1000]
+  BS = 32
 
-  #testing
-  lrs, steps = [1e-5, 1e-6], [100, 100]
   lmbd = 0.00025
   lossfn = lambda out,y: out.mul(y).mean() + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
   X_train, Y_train, X_test, Y_test = fetch_mnist()
@@ -109,11 +108,11 @@ if __name__ == "__main__":
   
   model = BigConvNet()
  
-  if sys.argv[1] is not None:
+  if len(sys.argv) > 1:
     try:
       model.load(sys.argv[1])
       print('Loaded weights "'+sys.argv[1]+'", evaluating...')
-      evaluate(model, X_test, Y_test)
+      evaluate(model, X_test, Y_test, BS=BS)
     except:
       print('could not load weights "'+sys.argv[1]+'".')
  
@@ -123,8 +122,8 @@ if __name__ == "__main__":
 
   for lr, st in zip(lrs, steps):
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    train(model, X_train, Y_train, optimizer, steps=st, lossfn=lossfn, gpu=GPU)
+    train(model, X_train, Y_train, optimizer, steps=st, lossfn=lossfn, gpu=GPU, BS=BS)
     model.save('checkpoint')
   model.save('checkpoint')
-  accuracy = evaluate(model, X_test, Y_test)
+  accuracy = evaluate(model, X_test, Y_test, BS=BS)
   model.save('examples/checkpoints/checkpoint'+str("%.0f" % (accuracy*1.0e6)))
