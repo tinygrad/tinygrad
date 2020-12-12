@@ -37,14 +37,14 @@ def train(model, X_train, Y_train, optim, steps, num_classes=None, BS=128, gpu=F
     t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
 
 def evaluate(model, X_test, Y_test, num_classes=None, gpu=False, BS=128):
-  def numpy_eval():
-    if num_classes is None: num_classes = Y_train.max().astype(int)+1
+  def numpy_eval(num_classes):
     Y_test_preds_out = np.zeros((len(Y_test),num_classes))
     for i in trange(len(Y_test)//BS, disable=os.getenv('CI') is not None):
       Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(Tensor(X_test[i*BS:(i+1)*BS].reshape((-1, 28*28)).astype(np.float32), gpu=gpu)).cpu().data
     Y_test_preds = np.argmax(Y_test_preds_out, axis=1)
     return (Y_test == Y_test_preds).mean()
 
-  accuracy = numpy_eval()
+  if num_classes is None: num_classes = Y_test.max().astype(int)+1
+  accuracy = numpy_eval(num_classes)
   print("test set accuracy is %f" % accuracy)
   return accuracy 
