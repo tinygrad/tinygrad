@@ -32,3 +32,15 @@ jobs:
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
       run: python -m pytest -s -v
+
+  linter:
+      name: Indentation Linter
+      runs-on: ubuntu-latest
+
+      steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+      - name: Install PyLint
+        run: sudo apt-get install pylint3
+      - name: Validate indentation is 2 lines
+        run: if [[ $(pylint --jobs=0 --indent-string='  ' * | grep "Bad indentation") ]]; then exit 1; fi
