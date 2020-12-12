@@ -41,6 +41,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v2
       - name: Install PyLint
-        run: sudo apt-get install pylint3
+        run: sudo apt-get install pylint
       - name: Validate indentation is 2 lines
         run: if [[ $(pylint --jobs=0 --indent-string='  ' * | grep "Bad indentation") ]]; then exit 1; fi
