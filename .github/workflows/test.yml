@@ -19,6 +19,8 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
       - name: Python Style Checker
         uses: andymckay/pycodestyle-action@0.1.3
 
