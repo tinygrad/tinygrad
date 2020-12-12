@@ -69,7 +69,7 @@
       <key>Name</key>
       <string>my_layer</string>
       <key>OutputChannels</key>
-      <integer>1</integer>
+      <integer>3</integer>
       <key>OutputType</key>
       <string>UInt8</string>
 

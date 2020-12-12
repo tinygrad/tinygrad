@@ -76,13 +76,10 @@ int main() {
   ret = dev->ANE_ProgramPrepare(&pas);
   printf("program prepare: %lx\n", ret);
 
-  H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
-  memset(pras, 0, sizeof(H11ANEProgramRequestArgsStruct));
-
   // input buffer
   NSDictionary* dict = [NSDictionary dictionaryWithObjectsAndKeys:
                            [NSNumber numberWithInt:16], kIOSurfaceWidth,
-                           [NSNumber numberWithInt:1], kIOSurfaceHeight,
+                           [NSNumber numberWithInt:16], kIOSurfaceHeight,
                            [NSNumber numberWithInt:1], kIOSurfaceBytesPerElement,
                            [NSNumber numberWithInt:64], kIOSurfaceBytesPerRow,
                            [NSNumber numberWithInt:1278226536], kIOSurfacePixelFormat,
@@ -102,9 +99,9 @@ int main() {
 
   // output buffer
   NSDictionary* odict = [NSDictionary dictionaryWithObjectsAndKeys:
-                           [NSNumber numberWithInt:1], kIOSurfaceWidth,
-                           [NSNumber numberWithInt:2], kIOSurfaceHeight,
-                           [NSNumber numberWithInt:2], kIOSurfaceBytesPerElement,
+                           [NSNumber numberWithInt:16], kIOSurfaceWidth,
+                           [NSNumber numberWithInt:16], kIOSurfaceHeight,
+                           [NSNumber numberWithInt:1], kIOSurfaceBytesPerElement,
                            [NSNumber numberWithInt:64], kIOSurfaceBytesPerRow,
                            [NSNumber numberWithInt:1278226536], kIOSurfacePixelFormat,
                            nil];
@@ -112,8 +109,11 @@ int main() {
   int out_surf_id = IOSurfaceGetID(out_surf);
   printf("we have surface %p with id 0x%x\n", out_surf, out_surf_id);
 
+  H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
+  memset(pras, 0, sizeof(H11ANEProgramRequestArgsStruct));
+
   // TODO: make real struct
-  pras->args[0] = out->program_handle;
+  pras->args[0] = program_handle;
   pras->args[4] = 0x0000002100000003;
 
   // inputs
