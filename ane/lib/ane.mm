@@ -43,6 +43,8 @@ int ANE_Open() {
 
   ret = dev->ANE_IsPowered();
   printf("powered? %d\n", ret);
+
+  return 0;
 }
 
 int stride_for_width(int width) {
@@ -51,7 +53,7 @@ int stride_for_width(int width) {
   return ret;
 }
 
-void *ANE_CreateTensor(int width, int height) {
+void *ANE_TensorCreate(int width, int height) {
   // all float16
   // input buffer
 
@@ -73,9 +75,10 @@ void* ANE_TensorData(void *out_surf) {
 
 uint64_t ANE_Compile(char *prog, int sz) {
   int ret;
+  printf("ANE_Compile %p with size %d\n", prog, sz);
   H11ANEProgramCreateArgsStruct mprog = {0};
   mprog.program = prog;
-  mprog.program_length = 0x8000;
+  mprog.program_length = sz;
 
   H11ANEProgramCreateArgsStructOutput *out = new H11ANEProgramCreateArgsStructOutput;
   memset(out, 0, sizeof(H11ANEProgramCreateArgsStructOutput));
@@ -93,7 +96,7 @@ uint64_t ANE_Compile(char *prog, int sz) {
   return program_handle;
 }
 
-void ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
+int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
   int ret;
   H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
   memset(pras, 0, sizeof(H11ANEProgramRequestArgsStruct));
@@ -135,6 +138,8 @@ void ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
           MACH_PORT_NULL);
   printf("got message: %d sz %d\n", ret, message.header.msgh_size);
   delete pras;
+
+  return 0;
 }
 
 }
