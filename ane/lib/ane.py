@@ -23,9 +23,11 @@ class ANETensor:
     self.dtype = np.float16
     self.sz = int(np.prod(shape))
     self.tt = libane.ANE_TensorCreate(self.sz, 1)
+    assert(self.tt is not None)
 
   def data(self):
     data = libane.ANE_TensorData(self.tt)
+    assert(data is not None)
     buf = np.ctypeslib.as_array(data, shape=(self.sz,))
     return np.frombuffer(buf, dtype=self.dtype)
 

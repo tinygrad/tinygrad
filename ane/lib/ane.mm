@@ -70,12 +70,22 @@ void *ANE_TensorCreate(int width, int height) {
 }
 
 void* ANE_TensorData(void *out_surf) {
-  return (void *)IOSurfaceGetBaseAddress((IOSurfaceRef)out_surf);
+  IOSurfaceLock((IOSurfaceRef)out_surf, 0, nil);
+  void *ret = (void *)IOSurfaceGetBaseAddress((IOSurfaceRef)out_surf);
+  IOSurfaceUnlock((IOSurfaceRef)out_surf, 0, nil);
+  printf("TensorData %p -> %p\n", out_surf, ret);
+  return ret;
 }
 
-uint64_t ANE_Compile(char *prog, int sz) {
+uint64_t ANE_Compile(char *iprog, int sz) {
   int ret;
-  printf("ANE_Compile %p with size %d\n", prog, sz);
+  int cksum = 0;
+  for (int i = 0; i < sz; i++) cksum += iprog[i];
+  printf("ANE_Compile %p with checksum %x size %d\n", iprog, cksum, sz);
+
+  char *prog = (char*)aligned_alloc(0x1000, sz);
+  memcpy(prog, iprog, sz);
+
   H11ANEProgramCreateArgsStruct mprog = {0};
   mprog.program = prog;
   mprog.program_length = sz;
@@ -86,6 +96,8 @@ uint64_t ANE_Compile(char *prog, int sz) {
   uint64_t program_handle = out->program_handle;
   delete out;
   printf("program create: %lx %lx\n", ret, program_handle);
+  // early failure
+  if (ret != 0) return 0;
 
   H11ANEProgramPrepareArgsStruct pas = {0};
   pas.program_handle = program_handle;
@@ -98,6 +110,7 @@ uint64_t ANE_Compile(char *prog, int sz) {
 
 int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
   int ret;
+  printf("ANE_Run %p %p\n", in_surf, out_surf);
   H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
   memset(pras, 0, sizeof(H11ANEProgramRequestArgsStruct));
 
