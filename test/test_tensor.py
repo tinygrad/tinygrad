@@ -66,6 +66,19 @@ class TestTinygrad(unittest.TestCase):
     # coarse approx. since a "big" eps and the non-linearities of the model
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 0.1))
 
+  def test_multi_indexing(self):
+      shape = np.random.RandomState(1822).randint(1,5, size=5)
+      data = np.random.RandomState(1337).random(shape)
+      x = Tensor(data ,gpu=self.gpu)
+      idx = tuple([np.random.randint(0, ix, size=1)[0] for ix in shape])
+      self.assertTrue(x[idx].cpu().data, data[idx])
+
+  def test_slicing(self):
+      data = np.random.RandomState(1337).random(100).astype(np.float32)
+      end = np.random.RandomState(1330).randint(0,99, size=(1))[0]
+      start = np.random.RandomState(1330).randint(0,end, size=(1))[0]
+      x = Tensor(data ,gpu=self.gpu)
+      self.assertListEqual(x[start:end].cpu().data.tolist(), data[start:end].tolist())
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestTinygradGPU(TestTinygrad):

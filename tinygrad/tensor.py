@@ -87,13 +87,23 @@ class Tensor:
   def __repr__(self):
     return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
 
+  def _calc_strides(self, shape):
+    stride = [np.prod(shape[i:]) for i in range(1, len(shape))]
+    stride.append(1)
+    return stride
+
   def _gpu_index(self, index):
-    _slice = isinstance(index , slice)
-    _start = index if not _slice else index.start
-    _stop =  1 if not _slice else index.stop
-    self.data.cl = self.data.cl.get_sub_region(_start*4, _stop*4) #4 - float32
-    self.data.shape = (1,) if not _slice else (_stop - _start,)
-    return self
+    if isinstance(index , slice):
+      data = self.data.cl.get_sub_region(index.start*4, index.stop*4) #4 - float32
+      shape = (index.stop - index.start,)
+    elif isinstance(index, tuple):
+      _strides = self._calc_strides(self.shape)
+      _origin = sum(map(lambda x: x[0]*x[1]*4, zip(_strides, index)))
+      data = self.data.cl.get_sub_region(_origin, 4)
+      shape = (1,)
+    gbuffer = GPUBuffer(shape)
+    gbuffer.cl = data
+    return Tensor(gbuffer, gpu=True, requires_grad=self.requires_grad)
 
   def __getitem__(self, index):
     if self.gpu:
