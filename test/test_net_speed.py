@@ -3,7 +3,6 @@ import time
 import cProfile
 import pstats
 import unittest
-import numpy as np
 import torch
 from tinygrad.tensor import Tensor
 
