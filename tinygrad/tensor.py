@@ -93,7 +93,10 @@ class Tensor:
     return stride
 
   def _gpu_index(self, index):
-    if isinstance(index , slice):
+    if isinstance(index, int):
+      data = self.data.cl.get_sub_region(index*4, 4)
+      shape = (1,)
+    elif isinstance(index , slice):
       data = self.data.cl.get_sub_region(index.start*4, index.stop*4) #4 - float32
       shape = (index.stop - index.start,)
     elif isinstance(index, tuple):
