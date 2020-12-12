@@ -13,13 +13,24 @@ using namespace H11ANE;
 extern "C" {
 
 // global vars
-H11ANEDevice *dev;
+H11ANEDevice *dev = NULL;
+
+int MyH11ANEDeviceControllerNotification(H11ANEDeviceController *param_1, void *param_2, H11ANEDevice *param_3) {
+  printf("MyH11ANEDeviceControllerNotification %p %p %p\n", param_1, param_2, param_3);
+  dev = param_3;
+  return 0;
+}
+
+int MyH11ANEDeviceMessageNotification(H11ANE::H11ANEDevice* dev, unsigned int param_1, void* param_2, void* param_3) {
+  printf("MyH11ANEDeviceMessageNotification %d %p %p\n", param_1, param_2, param_3);
+  return 0;
+}
 
 int ANE_Open() {
+  int ret;
   H11ANEDeviceController dc(MyH11ANEDeviceControllerNotification, NULL);
   dc.SetupDeviceController();
-  assert(device != NULL);
-  H11ANEDevice *dev = device;
+  assert(dev != NULL);
   dev->EnableDeviceMessages();
 
   char empty[0x90] = {0};
@@ -40,7 +51,7 @@ int stride_for_width(int width) {
   return ret;
 }
 
-int ANE_CreateTensor(int width, int height) {
+void *ANE_CreateTensor(int width, int height) {
   // all float16
   // input buffer
 
@@ -52,13 +63,16 @@ int ANE_CreateTensor(int width, int height) {
                            [NSNumber numberWithInt:1278226536], kIOSurfacePixelFormat,
                            nil];
   IOSurfaceRef in_surf = IOSurfaceCreate((CFDictionaryRef)dict);
-  int in_surf_id = IOSurfaceGetID(in_surf);
-  printf("we have surface %p with id 0x%x\n", in_surf, in_surf_id);
 
-  return in_surf_id;
+  return (void *)in_surf;
+}
+
+void* ANE_TensorData(void *out_surf) {
+  return (void *)IOSurfaceGetBaseAddress((IOSurfaceRef)out_surf);
 }
 
 uint64_t ANE_Compile(char *prog, int sz) {
+  int ret;
   H11ANEProgramCreateArgsStruct mprog = {0};
   mprog.program = prog;
   mprog.program_length = 0x8000;
@@ -79,15 +93,19 @@ uint64_t ANE_Compile(char *prog, int sz) {
   return program_handle;
 }
 
-void ANE_Run(uint64_t program_handle, int in_surf_id, int out_surf_id) {
+void ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
+  int ret;
   H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
   memset(pras, 0, sizeof(H11ANEProgramRequestArgsStruct));
 
   // TODO: make real struct
-  pras->args[0] = out->program_handle;
+  pras->args[0] = program_handle;
   pras->args[4] = 0x0000002100000003;
 
   // inputs
+  int in_surf_id = IOSurfaceGetID((IOSurfaceRef)in_surf);
+  int out_surf_id = IOSurfaceGetID((IOSurfaceRef)out_surf);
+
   pras->args[0x28/8] = 1;
   pras->args[0x128/8] = (long long)in_surf_id<<32LL;
 
@@ -116,6 +134,7 @@ void ANE_Run(uint64_t program_handle, int in_surf_id, int out_surf_id) {
           MACH_MSG_TIMEOUT_NONE,
           MACH_PORT_NULL);
   printf("got message: %d sz %d\n", ret, message.header.msgh_size);
+  delete pras;
 }
 
 }
