@@ -81,9 +81,9 @@ int main() {
 
   // input buffer
   NSDictionary* dict = [NSDictionary dictionaryWithObjectsAndKeys:
-                           [NSNumber numberWithInt:1], kIOSurfaceWidth,
-                           [NSNumber numberWithInt:3], kIOSurfaceHeight,
-                           [NSNumber numberWithInt:2], kIOSurfaceBytesPerElement,
+                           [NSNumber numberWithInt:16], kIOSurfaceWidth,
+                           [NSNumber numberWithInt:1], kIOSurfaceHeight,
+                           [NSNumber numberWithInt:1], kIOSurfaceBytesPerElement,
                            [NSNumber numberWithInt:64], kIOSurfaceBytesPerRow,
                            [NSNumber numberWithInt:1278226536], kIOSurfacePixelFormat,
                            nil];
@@ -94,8 +94,9 @@ int main() {
   // load inputs
   IOSurfaceLock(in_surf, 0, nil);
   unsigned char *inp = (unsigned char *)IOSurfaceGetBaseAddress(in_surf);
-  inp[0] = 0x39;
-  inp[1] = 0x65;
+  for (int i = 0; i < 16; i++) inp[i] = (i+1)*0x10;
+  /*inp[0] = 0x39;
+  inp[1] = 0x65;*/
   hexdump(inp, 0x20);
   IOSurfaceUnlock(in_surf, 0, nil);
 
