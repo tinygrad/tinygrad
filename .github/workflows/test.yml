@@ -15,6 +15,13 @@ jobs:
     - name: Check <1000 lines
       run: sloccount tinygrad test examples; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Python Style Checker
+        uses: andymckay/pycodestyle-action@0.1.3
+
   test:
     name: Test
     runs-on: ubuntu-latest
