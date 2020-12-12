@@ -3,7 +3,7 @@ import torch
 import unittest
 from tinygrad.tensor import Tensor, GPU
 from tinygrad.optim import Adam, SGD, RMSprop
-from tinygrad.utils import get_parameters 
+from extra.utils import get_parameters
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)

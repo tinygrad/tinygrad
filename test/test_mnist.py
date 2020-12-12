@@ -3,8 +3,8 @@ import os
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, GPU
-from tinygrad.utils import fetch, get_parameters
 import tinygrad.optim as optim
+from extra.utils import fetch, get_parameters
 from tqdm import trange
 
 # mnist loader

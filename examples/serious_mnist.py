@@ -7,8 +7,8 @@ sys.path.append(os.path.join(os.getcwd(), 'test'))
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2D
-from tinygrad.utils import get_parameters
 import tinygrad.optim as optim
+from extra.utils import get_parameters
 
 # TODO: abstract this generic trainer out of the test
 from test_mnist import train as train_on_mnist
