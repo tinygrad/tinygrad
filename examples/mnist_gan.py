@@ -69,7 +69,7 @@ if __name__ == "__main__":
     if GPU:
       [x.cuda_() for x in generator_params+discriminator_params]
     # optimizers
-    optim_g = optim.Adam(generator_params,lr=0.0002, b1=0.5)
+    optim_g = optim.Adam(generator_params,lr=0.0002, b1=0.5) # 0.0002 for equilibrium!
     optim_d = optim.Adam(discriminator_params,lr=0.0002, b1=0.5)
 
     def regularization_l2(model, a=1e-4):
@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     def fake_label(bs):
         y = np.zeros((bs,2), np.float32)
-        y[range(bs), [0]*bs] = -2.0
+        y[range(bs), [0]*bs] = -2.0 # Can we do label smoothin? i.e -2.0 changed to -1.98789.
         fake_labels = Tensor(y, gpu=GPU)
         return fake_labels
 
@@ -126,7 +126,7 @@ if __name__ == "__main__":
         print(f"Epoch {epoch} of {epochs}")
         for i in tqdm(range(n_steps)):
             image = generator_batch()
-            for step in range(k):
+            for step in range(k): # Try with k = 5 or 7.
                 noise = Tensor(np.random.randn(batch_size,128), gpu=GPU)
                 data_fake = generator.forward(noise).detach()
                 data_real = image
@@ -137,7 +137,7 @@ if __name__ == "__main__":
             loss_g_step = train_generator(optim_g, data_fake)
             loss_g += loss_g_step
         fake_images = generator.forward(ds_noise).detach().cpu().data
-        fake_images = (fake_images.reshape(-1,1,28,28)+ 1)/2
+        fake_images = (fake_images.reshape(-1, 1, 28, 28)+ 1) / 2 # 0 - 1 range.
         fake_images = make_grid(torch.tensor(fake_images))
         save_image(fake_images, os.path.join(output_folder,f"image_{epoch}.jpg"))
         epoch_loss_g = loss_g / n_steps
