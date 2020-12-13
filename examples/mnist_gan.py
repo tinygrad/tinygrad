@@ -7,7 +7,7 @@ sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
 
 from tinygrad.tensor import Tensor, Function, register
-from tinygrad.utils import get_parameters
+from extra.utils import get_parameters
 import tinygrad.optim as optim
 from test_mnist import X_train, Y_train
 from torchvision.utils import make_grid, save_image
