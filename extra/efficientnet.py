@@ -1,8 +1,8 @@
 import math
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.utils import fetch
 from tinygrad.nn import BatchNorm2D
+from extra.utils import fetch
 
 USE_TORCH = False
 

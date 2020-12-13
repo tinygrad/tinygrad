@@ -3,7 +3,7 @@ import time
 import numpy as np
 from extra.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
-from tinygrad.utils import get_parameters, fetch
+from extra.utils import get_parameters, fetch
 from tqdm import trange
 import tinygrad.optim as optim
 import io

@@ -3,7 +3,6 @@ import os
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, GPU
-from tinygrad.utils import fetch, get_parameters
 import tinygrad.optim as optim
 from extra.training import train, evaluate
 

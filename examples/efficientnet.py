@@ -10,7 +10,7 @@ import time
 import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
-from tinygrad.utils import fetch, get_parameters
+from extra.utils import fetch, get_parameters
 from extra.efficientnet import EfficientNet
 
 def infer(model, img):
