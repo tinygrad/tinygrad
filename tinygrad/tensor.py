@@ -60,9 +60,8 @@ ane = None
 def require_init_ane():
   global ane
   if ane is None:
-    from ane.lib.ane import ANE
-    ane = ANE()
-    import tinygrad.ops_ane
+    import ane.lib.ane, tinygrad.ops_ane
+    ane = ane.lib.ane.ANE()
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -70,13 +69,9 @@ class Tensor:
   did_float_warning = False
   ops = defaultdict(dict)
 
-  default_device = CPU = 0
-  GPU = 1
-  ANE = 2
+  CPU, GPU, ANE = 0, 1, 2
 
   def __init__(self, data, gpu=None, requires_grad=True):
-    if gpu is None:
-      device = Tensor.default_device
     if "ANETensor" in str(type(data)):
       self.device = Tensor.ANE
     elif isinstance(data, list):
@@ -108,10 +103,6 @@ class Tensor:
 
   def assign(self, x):
     self.data = x.data
-
-  @property
-  def gpu(self):
-    return self.device == Tensor.GPU
 
   @property
   def shape(self):
@@ -188,14 +179,9 @@ class Tensor:
     else:
       return self
 
-  def ane_(self):
-    assert(not self.gpu)
-    require_init_ane()
-    self.device = Tensor.ANE
-    ndata = ane.tensor(self.shape)
-    ndata.data()[:] = self.data
-    self.data = ndata
-    return self
+  @property
+  def gpu(self):
+    return self.device == Tensor.GPU
 
   def cuda_(self):
     self.data = self.cuda().data
@@ -213,6 +199,15 @@ class Tensor:
         return ret
     else:
       return self
+
+  def ane_(self):
+    assert(not self.gpu)
+    require_init_ane()
+    self.device = Tensor.ANE
+    ndata = ane.tensor(self.shape)
+    ndata.data()[:] = self.data
+    self.data = ndata
+    return self
 
   def detach(self):
     return Tensor(self.data, self.gpu)

@@ -8,14 +8,9 @@ def compile_wrapper(ane, dat):
 class ReLU(Function):
   @staticmethod
   def forward(ctx, input):
-    ane = ctx.ane
-    ret = ane.tensor(input.shape)
-    comp = compile_wrapper(ane, open("ane/ops/relu.hwx", "rb").read())
-    ane.run(comp, input, ret)
+    ret = ctx.ane.tensor(input.shape)
+    comp = compile_wrapper(ctx.ane, open("ane/ops/relu.hwx", "rb").read())
+    ctx.ane.run(comp, input, ret)
     return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    raise Exception("not implemented")
 register('relu', ReLU, device=Tensor.ANE)
 
