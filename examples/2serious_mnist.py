@@ -11,6 +11,7 @@ from extra.utils import get_parameters
 from test_mnist import fetch_mnist
 from extra.training import train, evaluate
 import tinygrad.optim as optim
+from extra.augment import augment_img
 GPU = os.getenv("GPU", None) is not None
 QUICK = os.getenv("QUICK", None) is not None
 DEBUG = os.getenv("DEBUG", None) is not None
@@ -97,14 +98,16 @@ class BigConvNet:
     xo = x1.dot(self.weight1) + x2.dot(self.weight2)
     return xo.logsoftmax()
 
+
 if __name__ == "__main__":
   lrs = [1e-3, 1e-4, 1e-5]
-  steps = [1, 1, 1] if QUICK else [4000, 1000, 1000]
+  epochss = [13, 1, 1] 
   BS = 32
 
   lmbd = 0.00025
   lossfn = lambda out,y: out.mul(y).mean() + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
   X_train, Y_train, X_test, Y_test = fetch_mnist()
+  steps = len(X_train)//BS
   np.random.seed(1337)
   
   model = BigConvNet()
@@ -121,10 +124,18 @@ if __name__ == "__main__":
     params = get_parameters(model)
     [x.cuda_() for x in params]
 
-  for lr, st in zip(lrs, steps):
+  for lr, epochs in zip(lrs, epochss):
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    train(model, X_train, Y_train, optimizer, steps=st, lossfn=lossfn, gpu=GPU, BS=BS)
-    model.save('checkpoint')
+    for epoch in range(1,epochs+1):
+      if epoch == 1: #first epcho without augementation
+        X_aug = X_train
+      else:
+        X_aug = augment_img(X_train)
+
+      train(model, X_aug, Y_train, optimizer, steps=steps, lossfn=lossfn, gpu=GPU, BS=BS)
+      model.save('checkpoint')
+      accuracy = evaluate(model, X_test, Y_test, BS=BS)
+      model.save('examples/checkpoints/checkpoint'+str("%.0f" % (accuracy*1.0e6)))
   model.save('checkpoint')
   accuracy = evaluate(model, X_test, Y_test, BS=BS)
   model.save('examples/checkpoints/checkpoint'+str("%.0f" % (accuracy*1.0e6)))
