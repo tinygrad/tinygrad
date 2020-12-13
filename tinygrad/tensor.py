@@ -230,7 +230,12 @@ class Tensor:
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
 
   def leakyrelu(self, neg_slope=0.01):
-    return self.relu() + (-neg_slope*self).relu()
+    return self.relu() - (-neg_slope*self).relu()
+
+  def dropout(self, p=0.5):
+    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    ret = self * Tensor(_mask, requires_grad=False, gpu=self.gpu)
+    return ret.div(1.0 - p)
 
   def abs(self):
     return self.relu() + (-1.0*self).relu()
