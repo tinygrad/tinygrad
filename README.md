@@ -89,7 +89,7 @@ from tinygrad.tensor import Tensor
 
 ### ANE Support?!?!
 
-If you all want to do is ReLU, you are in luck! You can do very fast ReLU (fastness not confirmed)
+If all you want to do is ReLU, you are in luck! You can do very fast ReLU (fastness not confirmed)
 
 Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement.
 
