@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+#inspired by https://github.com/Matuzas77/MNIST-0.17/blob/master/MNIST_final_solution.ipynb
 import os
 import sys
 sys.path.append(os.getcwd())
