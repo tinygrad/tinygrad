@@ -11,7 +11,6 @@ from extra.utils import get_parameters
 import tinygrad.optim as optim
 from test_mnist import X_train
 from torchvision.utils import make_grid, save_image
-from torchvision.transforms import transforms
 import torch
 GPU = os.getenv("GPU") is not None
 class LinearGen:
@@ -57,7 +56,6 @@ if __name__ == "__main__":
     k = 1
     epochs = 300
     generator_params = get_parameters(generator)
-    to_pil = transforms.ToPILImage()
     discriminator_params = get_parameters(discriminator)
     gen_loss = []
     disc_loss = []
