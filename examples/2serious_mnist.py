@@ -127,7 +127,7 @@ if __name__ == "__main__":
   for lr, epochs in zip(lrs, epochss):
     optimizer = optim.Adam(model.parameters(), lr=lr)
     for epoch in range(1,epochs+1):
-      if epoch == 1: #first epcho without augementation
+      if epoch == 0: #first epoch without augementation
         X_aug = X_train
       else:
         X_aug = augment_img(X_train)
