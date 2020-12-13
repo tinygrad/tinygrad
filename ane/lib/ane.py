@@ -25,6 +25,7 @@ class ANETensor:
     self.shape = shape
     self.dtype = np.float16
     self.sz = int(np.prod(shape))
+    assert(self.sz <= 0x4000)
     self.tt = libane.ANE_TensorCreate(self.sz, 1)
     assert(self.tt is not None)
 

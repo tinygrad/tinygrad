@@ -10,19 +10,22 @@
 #include "h11ane.h"
 using namespace H11ANE;
 
+//#define DEBUG printf
+#define DEBUG(x, ...)
+
 extern "C" {
 
 // global vars
 H11ANEDevice *dev = NULL;
 
 int MyH11ANEDeviceControllerNotification(H11ANEDeviceController *param_1, void *param_2, H11ANEDevice *param_3) {
-  printf("MyH11ANEDeviceControllerNotification %p %p %p\n", param_1, param_2, param_3);
+  DEBUG("MyH11ANEDeviceControllerNotification %p %p %p\n", param_1, param_2, param_3);
   dev = param_3;
   return 0;
 }
 
 int MyH11ANEDeviceMessageNotification(H11ANE::H11ANEDevice* dev, unsigned int param_1, void* param_2, void* param_3) {
-  printf("MyH11ANEDeviceMessageNotification %d %p %p\n", param_1, param_2, param_3);
+  DEBUG("MyH11ANEDeviceMessageNotification %d %p %p\n", param_1, param_2, param_3);
   return 0;
 }
 
@@ -36,20 +39,20 @@ int ANE_Open() {
   char empty[0x90] = {0};
   H11ANEDeviceInfoStruct dis = {0};
   ret = dev->H11ANEDeviceOpen(MyH11ANEDeviceMessageNotification, empty, UsageCompile, &dis);
-  printf("open 0x%x %p\n", ret, dev);
+  DEBUG("open 0x%x %p\n", ret, dev);
 
   ret = dev->ANE_PowerOn();
-  printf("power on: %d\n", ret);
+  DEBUG("power on: %d\n", ret);
 
   ret = dev->ANE_IsPowered();
-  printf("powered? %d\n", ret);
+  DEBUG("powered? %d\n", ret);
 
   return 0;
 }
 
 int stride_for_width(int width) {
   int ret = width*2;
-  ret += (64-ret) % 64;
+  ret += (64-(ret % 64))%64;
   return ret;
 }
 
@@ -73,7 +76,7 @@ void *ANE_TensorCreate(int width, int height) {
 void* ANE_TensorData(void *out_surf) {
   void *ret = (void *)IOSurfaceGetBaseAddress((IOSurfaceRef)out_surf);
   //IOSurfaceUnlock((IOSurfaceRef)out_surf, 0, nil);
-  printf("TensorData %p -> %p\n", out_surf, ret);
+  DEBUG("TensorData %p -> %p\n", out_surf, ret);
   return ret;
 }
 
@@ -81,7 +84,7 @@ uint64_t ANE_Compile(char *iprog, int sz) {
   int ret;
   int cksum = 0;
   for (int i = 0; i < sz; i++) cksum += iprog[i];
-  printf("ANE_Compile %p with checksum %x size %d\n", iprog, cksum, sz);
+  DEBUG("ANE_Compile %p with checksum %x size %d\n", iprog, cksum, sz);
 
   char *prog = (char*)aligned_alloc(0x1000, sz);
   memcpy(prog, iprog, sz);
@@ -95,7 +98,7 @@ uint64_t ANE_Compile(char *iprog, int sz) {
   ret = dev->ANE_ProgramCreate(&mprog, out);
   uint64_t program_handle = out->program_handle;
   delete out;
-  printf("program create: %lx %lx\n", ret, program_handle);
+  DEBUG("program create: %lx %lx\n", ret, program_handle);
   // early failure
   if (ret != 0) return 0;
 
@@ -103,14 +106,14 @@ uint64_t ANE_Compile(char *iprog, int sz) {
   pas.program_handle = program_handle;
   pas.flags = 0x0000000100010001;
   ret = dev->ANE_ProgramPrepare(&pas);
-  printf("program prepare: %lx\n", ret);
+  DEBUG("program prepare: %lx\n", ret);
 
   return program_handle;
 }
 
 int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
   int ret;
-  printf("ANE_Run %p %p\n", in_surf, out_surf);
+  DEBUG("ANE_Run %p %p\n", in_surf, out_surf);
   H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
   memset(pras, 0, sizeof(H11ANEProgramRequestArgsStruct));
 
@@ -132,11 +135,11 @@ int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
 
   mach_port_t recvPort = 0;
   IOCreateReceivePort(kOSAsyncCompleteMessageID, &recvPort);
-  printf("recv port: 0x%x\n", recvPort);
+  DEBUG("recv port: 0x%x\n", recvPort);
 
   // run program
   ret = dev->ANE_ProgramSendRequest(pras, recvPort);
-  printf("send 0x%x\n", ret);
+  DEBUG("send 0x%x\n", ret);
 
   struct {
     mach_msg_header_t header;
@@ -149,7 +152,7 @@ int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
           recvPort,
           MACH_MSG_TIMEOUT_NONE,
           MACH_PORT_NULL);
-  printf("got message: %d sz %d\n", ret, message.header.msgh_size);
+  DEBUG("got message: %d sz %d\n", ret, message.header.msgh_size);
   delete pras;
 
   return 0;

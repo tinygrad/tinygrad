@@ -35,12 +35,8 @@
 			<key>InputHeight</key>
 			<integer>1</integer>
 			<key>InputWidth</key>
-			<integer>16</integer>
+			<integer>678</integer>
 
-			<key>InputPlaneStride</key>
-			<integer>64</integer>
-			<key>InputRowStride</key>
-			<integer>64</integer>
 			<key>InputType</key>
 			<string>Float16</string>
 		</dict>
@@ -66,10 +62,6 @@
 		<dict>
 			<key>Bottom</key>
 			<string>my_layer</string>
-			<key>OutputPlaneStride</key>
-			<integer>64</integer>
-			<key>OutputRowStride</key>
-			<integer>64</integer>
 		</dict>
 
 	</dict>

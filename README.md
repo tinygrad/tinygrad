@@ -89,7 +89,7 @@ from tinygrad.tensor import Tensor
 
 ### ANE Support?!?!
 
-If all you want to do is ReLU, you are in luck! You can do very fast ReLU (fastness not confirmed)
+If all you want to do is ReLU, you are in luck! You can do very fast ReLU (at least 30 MEGAReLUs/sec confirmed)
 
 Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement.
 
@@ -100,6 +100,8 @@ a = Tensor([-2,-1,0,1,2]).ane()
 b = a.relu()
 print(b.cpu())
 ```
+
+Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doing something important with tinygrad and wanted to use the ANE, you might have a bad time.
 
 ### ImageNet inference
 

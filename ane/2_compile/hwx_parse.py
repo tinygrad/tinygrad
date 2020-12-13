@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-
+import sys
 from hexdump import hexdump
-
 from macholib import MachO
 def get_macho(fn):
   # mod to make the header okay
@@ -85,7 +84,7 @@ def compare(x, y):
         ln2.append(a[1])
   return ''.join(ss)
 
-g = get_macho("model.hwx.golden")
+g = get_macho("model.hwx.golden" if len(sys.argv) < 2 else sys.argv[1])
 f1 = g.headers[0].commands[1][2][0].section_data
 f2 = a.headers[0].commands[1][2][0].section_data
 for i in range(0, len(f2), 0x300):
