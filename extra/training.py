@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from tqdm import trange
-from tinygrad.utils import fetch, get_parameters
+from extra.utils import get_parameters
 from tinygrad.tensor import Tensor, GPU
 
 def train(model, X_train, Y_train, optim, steps, num_classes=None, BS=128, gpu=False, lossfn = lambda out,y: out.mul(y).mean()):

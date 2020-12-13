@@ -5,6 +5,7 @@ import numpy as np
 from tinygrad.tensor import Tensor, GPU
 import tinygrad.optim as optim
 from extra.training import train, evaluate
+from extra.utils import fetch, get_parameters
 
 # mnist loader
 def fetch_mnist():

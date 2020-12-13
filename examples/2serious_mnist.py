@@ -7,8 +7,9 @@ sys.path.append(os.path.join(os.getcwd(), 'test'))
 import numpy as np
 from tinygrad.tensor import Tensor, GPU
 from tinygrad.nn import BatchNorm2D
-from tinygrad.utils import get_parameters
-from test_mnist import fetch_mnist, train, evaluate
+from extra.utils import get_parameters
+from test_mnist import fetch_mnist
+from extra.training import train, evaluate
 import tinygrad.optim as optim
 GPU = os.getenv("GPU", None) is not None
 QUICK = os.getenv("QUICK", None) is not None
