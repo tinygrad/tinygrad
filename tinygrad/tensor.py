@@ -200,14 +200,12 @@ class Tensor:
     else:
       return self
 
-  def ane_(self):
+  def ane(self):
     assert(not self.gpu)
     require_init_ane()
-    self.device = Tensor.ANE
     ndata = ane.tensor(self.shape)
     ndata.data()[:] = self.data
-    self.data = ndata
-    return self
+    return Tensor(ndata)
 
   def detach(self):
     return Tensor(self.data, self.gpu)

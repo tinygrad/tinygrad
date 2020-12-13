@@ -89,7 +89,17 @@ from tinygrad.tensor import Tensor
 
 ### ANE Support?!?!
 
-So it doesn't work yet, but see the `ane` directory for code to use the Apple Neural Engine at a low level.
+If you all want to do is ReLU, you are in luck! You can do very fast ReLU (fastness not confirmed)
+
+Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement.
+
+```python
+from tinygrad.tensor import Tensor
+
+a = Tensor([-2,-1,0,1,2]).ane()
+b = a.relu()
+print(b.cpu())
+```
 
 ### ImageNet inference
 
