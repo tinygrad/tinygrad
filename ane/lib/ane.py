@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+import os
 from ctypes import *
 import numpy as np
 import faulthandler
 faulthandler.enable()
 
-libane = cdll.LoadLibrary("libane.dylib")
+libane = cdll.LoadLibrary(os.path.join(
+  os.path.dirname(os.path.abspath(__file__)), 
+  "libane.dylib"))
 
 libane.ANE_Compile.argtypes = [c_char_p, c_int]
 libane.ANE_Compile.restype = c_void_p
@@ -45,6 +48,9 @@ class ANE:
 
   def run(self, prog, tin, tout):
     libane.ANE_Run(prog, tin.tt, tout.tt)
+
+  def tensor(self, shape):
+    return ANETensor(shape)
 
 if __name__ == "__main__":
   ane = ANE()
