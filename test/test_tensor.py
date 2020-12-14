@@ -67,10 +67,10 @@ class TestTinygrad(unittest.TestCase):
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 0.1))
 
   def test_multi_indexing(self):
-      shape = np.random.RandomState(1822).randint(1,5, size=5)
-      data = np.random.RandomState(1337).random(shape)
+      shape = np.random.RandomState(1813).randint(1,5, size=5)
+      data = np.random.RandomState(1330).random(shape)
       x = Tensor(data ,gpu=self.gpu)
-      idx = tuple([np.random.randint(0, ix, size=1)[0] for ix in shape])
+      idx = tuple([np.random.RandomState(1399).randint(0, ix, size=1)[0] for ix in shape])
       self.assertTrue(x[idx].cpu().data, data[idx])
 
   def test_slicing(self):
