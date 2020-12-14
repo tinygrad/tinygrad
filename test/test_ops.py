@@ -4,14 +4,16 @@ import numpy as np
 import unittest
 import timeit
 import functools
-from tinygrad.tensor import Tensor, GPU
+from tinygrad.tensor import Tensor, ANE, GPU, DeviceTypes
 
-def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, gpu=False, forward_only=False):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=DeviceTypes.CPU, forward_only=False):
   torch.manual_seed(0)
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
-  if gpu:
+  if device==DeviceTypes.GPU:
     tst = [x.cuda() for x in tst]
+  elif device==DeviceTypes.ANE:
+    tst = [x.ane() for x in tst]
 
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
@@ -38,58 +40,59 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
   print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp, tinygrad_fp, torch_fbp-torch_fp, tinygrad_fbp-tinygrad_fp))
 
 class TestOps(unittest.TestCase):
-  gpu = False
+  device=DeviceTypes.CPU
+
   def test_add(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, device=self.device)
   def test_sub(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub, device=self.device)
   def test_mul(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul, device=self.device)
   def test_div(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div, device=self.device)
   def test_pow(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, gpu=self.gpu)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, device=self.device)
   def test_sqrt(self):
-    helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, device=self.device)
   def test_relu(self):
-    helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu, device=self.device)
   def test_leakyrelu(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu, device=self.device)
   def test_abs(self):
-    helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs, device=self.device)
   def test_sigmoid(self):
-    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, device=self.device)
   def test_dot(self):
-    helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, gpu=self.gpu)
+    helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, device=self.device)
   def test_sum(self):
-    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, gpu=self.gpu)
+    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, device=self.device)
   def test_sum_axis(self):
-    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), gpu=self.gpu)
+    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), device=self.device)
   def test_mean_axis(self):
-    helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)), gpu=self.gpu)
+    helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)), device=self.device)
   def test_logsoftmax(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-7, grad_atol=1e-7, device=self.device)
   def test_tanh(self):
-    helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6, device=self.device)
   def test_topo_sort(self):
-    helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6, device=self.device)
 
   def test_scalar_mul(self):
-    helper_test_op([(45,65)], lambda x: x*2, lambda x: x*2, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x*2, lambda x: x*2, device=self.device)
   def test_scalar_rmul(self):
-    helper_test_op([(45,65)], lambda x: 2*x, lambda x: 2*x, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: 2*x, lambda x: 2*x, device=self.device)
 
   def test_scalar_sub(self):
-    helper_test_op([(45,65)], lambda x: x-2, lambda x: x-2, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: x-2, lambda x: x-2, device=self.device)
   def test_scalar_rsub(self):
-    helper_test_op([(45,65)], lambda x: 2-x, lambda x: 2-x, gpu=self.gpu)
+    helper_test_op([(45,65)], lambda x: 2-x, lambda x: 2-x, device=self.device)
 
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
       for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
-          helper_test_op(shapes, torch_op, tinygrad_op, gpu=self.gpu)
+          helper_test_op(shapes, torch_op, tinygrad_op, device=self.device)
 
 
   def test_broadcast_partial(self):
@@ -98,17 +101,18 @@ class TestOps(unittest.TestCase):
       for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16,2), (1,13,24,1,1)),
                      ((4,1), (4,5)), ((1,4), (5,4))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
-          helper_test_op(shapes, torch_op, tinygrad_op, gpu=self.gpu, forward_only=self.gpu)
+          # NOTE: ANE backwards?
+          helper_test_op(shapes, torch_op, tinygrad_op, device=self.device, forward_only=self.device!=DeviceTypes.CPU)
 
   def test_pad2d(self):
-    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), gpu=self.gpu)
+    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), device=self.device)
 
   def test_reshape(self):
-    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)), gpu=self.gpu)
-    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)), gpu=self.gpu)
+    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)), device=self.device)
+    helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)), device=self.device)
 
   def test_detach(self):
-    helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), gpu=self.gpu, forward_only=True)
+    helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), device=self.device, forward_only=True)
 
   def test_conv2d(self):
     for bs in [1,8]:
@@ -119,7 +123,7 @@ class TestOps(unittest.TestCase):
               with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
                 helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), gpu=self.gpu, grad_rtol=1e-5)
+                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), device=self.device, grad_rtol=1e-5)
 
   def test_strided_conv2d(self):
     bs = 4
@@ -128,18 +132,18 @@ class TestOps(unittest.TestCase):
     with self.subTest(stride := 2):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
-        lambda x,w: Tensor.conv2d(x,w,stride=stride).relu(), gpu=self.gpu)
+        lambda x,w: Tensor.conv2d(x,w,stride=stride).relu(), device=self.device)
     with self.subTest(stride := (2,1)):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride).relu(),
-        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), gpu=self.gpu)
+        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), device=self.device)
 
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.max_pool2d(x, kernel_size=ksz), gpu=self.gpu)
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz), device=self.device)
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
@@ -147,11 +151,15 @@ class TestOps(unittest.TestCase):
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), gpu=self.gpu)
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), device=self.device)
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestOpsGPU(TestOps):
-  gpu = True
+  device=DeviceTypes.GPU
+
+@unittest.skipUnless(ANE, "Requires ANE")
+class TestOpsANE(TestOps):
+  device=DeviceTypes.ANE
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
