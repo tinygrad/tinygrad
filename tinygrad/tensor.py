@@ -204,7 +204,7 @@ class Tensor:
     return self.relu() - (-neg_slope*self).relu()
 
   def abs(self):
-    return self.relu() + (-*self).relu()
+    return self.relu() + (-self).relu()
 
   def neg(self):
     return -1.0*self
