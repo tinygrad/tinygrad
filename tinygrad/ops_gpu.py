@@ -290,7 +290,6 @@ class Dot(Function):
 
     return grad_input, grad_weight
 register('dot', Dot, device=Tensor.GPU)
-register('matmul', Dot, device=Tensor.GPU)
 
 # ************* simple ops *************
 

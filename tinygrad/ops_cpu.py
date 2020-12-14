@@ -86,8 +86,6 @@ class Dot(Function):
     grad_weight = input.T.dot(grad_output)
     return grad_input, grad_weight
 register('dot', Dot)
-register('matmul', Dot)
-
 
 # ************* simple ops *************
 

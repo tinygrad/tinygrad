@@ -212,6 +212,9 @@ class Tensor:
 
   # ***** non first class ops *****
 
+  def matmul(self, w):
+    return self.dot(w)
+
   def mean(self, axis=None):
     out = self.sum(axis=axis)
     coeff = np.prod(out.shape)/np.prod(self.shape)
