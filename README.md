@@ -121,6 +121,14 @@ PROTIP: Set "GPU=1" environment variable if you want this to go faster.
 
 PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
+### tinygrad also supports GANs
+
+See `examples/mnist_gan.py`
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/mnist_by_tinygrad.jpg">
+</p>
+
 ### The promise of small
 
 tinygrad will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.

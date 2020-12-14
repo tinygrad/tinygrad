@@ -3,17 +3,8 @@ from .tensor import Function, register, GPUBuffer, Tensor
 import pyopencl as cl
 import functools
 
-def buffer_new(ctx, shape):
-  return GPUBuffer(shape)
-
-def buffer_zeros(ctx, shape):
-  return GPUBuffer(shape, hostbuf=np.zeros(shape, dtype=np.float32))
-
-def buffer_like(ctx, x):
-  return buffer_new(ctx, x.shape)
-
-def buffer_np(ctx, np_array):
-  return cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=np_array)
+def buffer_new(ctx, shape, zero=False):
+  return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
 @functools.lru_cache()
 def clbuild(cl_ctx, name, prg):
@@ -21,11 +12,14 @@ def clbuild(cl_ctx, name, prg):
 
 def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
-
 i32 = np.int32
 
-def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, decls=''):
-  prg = """
+def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, decls=''):
+  py, px = stride
+  N, C, Yin, Xin = input.shape
+  Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
+  ret = buffer_new(ctx, (N, C, Yout, Xout), zero=True)
+  subsample = clbuild(ctx.cl_ctx, "subsample", """
   __kernel void subsample(__global float *output, __global const float *input, uint2 osize, uint2 isize,
                           uint2 ksz, uint2 stride) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
@@ -40,23 +34,18 @@ def cl_subsample_krnl_build(cl_ctx, iter_op, result_op, decls=''):
       }
     }
     output[oid] = """+result_op+""";
-  }"""
-  return clbuild(cl_ctx, "subsample", prg)
-
-def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, decls=''):
-  py, px = stride
-  N, C, Yin, Xin = input.shape
-  Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
-  ret = buffer_zeros(ctx, (N, C, Yout, Xout))
-  subsample = cl_subsample_krnl_build(ctx.cl_ctx, iter_op, result_op, decls=decls)
+  }""")
   subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
             ret.cl, input.cl, uint2(Xout, Yout), uint2(Xin, Yin),
             uint2(*kernel_size[::-1]), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
-def cl_supsample_krnl_build(cl_ctx, result_op, decls=''):
-  prg = """
+def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', input2=None):
+  (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
+  py,px = kernel_size
+  ret = buffer_new(ctx, out_shape, zero=True)
+  supsample = clbuild(ctx.cl_ctx, "supsample", """
   __kernel void supsample(__global float *output, __global const float *input, __global const void *input2,
                           uint2 osize, uint2 isize, uint2 ksz) {
     int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
@@ -66,21 +55,14 @@ def cl_supsample_krnl_build(cl_ctx, result_op, decls=''):
     if (gid.x/ksz.x < isize.x && gid.y/ksz.y < isize.y) {
       output[oid] = """+result_op+""";
     }
-  }"""
-  return clbuild(cl_ctx, "supsample", prg)
-
-def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', input2=None):
-  (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
-  py,px = kernel_size
-  ret = buffer_zeros(ctx, out_shape)
-  supsample = cl_supsample_krnl_build(ctx.cl_ctx, result_op, decls=decls)
+  }""")
   supsample(ctx.cl_queue, (N*C, Yout, Xout), None,
             ret.cl, input.cl, input2.cl if input2 is not None else input2,
             uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py))
   ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
   return ret
 
-@functools.lru_cache(maxsize=(5*(3**4 + 3**3 + 3**2 + 3))) #  (5 kinds of operations)*(upper bound for # of possible complists w/ len<4)
+@functools.lru_cache()
 def get_binop_prg(cl_ctx, code, complist):
   ndims = len(complist)
   args = "".join([", int d%d" % i for i in range(ndims)]) + "".join([", int p%d" % i for i in range(ndims-1)])
@@ -117,13 +99,13 @@ def binary_op(ctx, code, x, y):
     push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
   
   prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
-  ret = buffer_zeros(ctx, shape_ret)
+  ret = buffer_new(ctx, shape_ret, zero=True)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
   prg.binop(ctx.cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
 def unary_op(ctx, code, x):
-  ret = buffer_like(ctx, x)
+  ret = buffer_new(ctx, x.shape)
   unop = clbuild(ctx.cl_ctx, "unop", """
   __kernel void unop(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0);
@@ -170,11 +152,13 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     }
     res_g[gid] = """+code2+""";
   }""")
+  buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
+    cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
   reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
     i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
-    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(osize, dtype=np.int32)))
+    buffer_np(np.array(inp.shape, dtype=np.int32)),
+    buffer_np(np.array(osize, dtype=np.int32)))
   return ret
 
 def unbroadcast(ctx, out, in_sh):
@@ -253,7 +237,7 @@ class Sum(Function):
     input, axis = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     output = GPUBuffer(shape, hostbuf=grad_output)
-    return binary_op(ctx, 'a+b', output, buffer_zeros(ctx, input.shape))
+    return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape))
 register('sum', Sum, device=Tensor.GPU)
 
 class Dot(Function):
@@ -265,11 +249,8 @@ class Dot(Function):
 
     matmul = clbuild(ctx.cl_ctx, "matmul", """
     __kernel void matmul(
-        __global const float *input,
-        __global const float *weight,
-        __global float *res,
-        int is0, int is1, int msize,
-        int ws0, int ws1, int osize
+      __global const float *input, __global const float *weight, __global float *res,
+      int is0, int is1, int msize, int ws0, int ws1, int osize
    ) {
       int X = get_global_id(0); // isize
       int Y = get_global_id(1); // osize
@@ -294,8 +275,8 @@ class Dot(Function):
     input, weight, matmul = ctx.saved_tensors
     isize, msize, osize = i32(input.shape[0]), i32(input.shape[1]), i32(weight.shape[1])
 
-    grad_input = buffer_like(ctx, input)
-    grad_weight = buffer_like(ctx, weight)
+    grad_input = buffer_new(ctx, input.shape)
+    grad_weight = buffer_new(ctx, weight.shape)
 
     # (isize,osize) x (msize,osize) = (isize,msize)
     matmul(ctx.cl_queue, [isize, msize], None,
@@ -318,7 +299,7 @@ class Pad2D(Function):
   def forward(ctx, x, padding=None):
     bs,cin,iy,ix = x.shape
     oy,ox = iy+padding[2]+padding[3], ix+padding[0]+padding[1]
-    ret = buffer_zeros(ctx, (bs, cin, oy, ox))
+    ret = buffer_new(ctx, (bs, cin, oy, ox), zero=True)
 
     pad2d = clbuild(ctx.cl_ctx, "pad2d", """
     __kernel void pad2d(__global const float *input, __global float *output,
@@ -516,8 +497,12 @@ class Conv2D(Function):
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
-    dx = buffer_zeros(ctx, (bs, cin_, iy, ix))
+    dx = buffer_new(ctx, (bs, cin_, iy, ix), zero=True)
     dw = buffer_new(ctx, (cout, cin, H, W))
+
+    # tensx = (bs, groups*cin, iy, ix)
+    # tensw = (groups*rcout, cin, H, W)
+    # ggg = (bs, groups*rout, oy, ox)
 
     convw = clbuild(ctx.cl_ctx, "convw", """
     __kernel void convw(__global const float *tensx, __global const float *ggg, __global float *dw,
@@ -529,9 +514,6 @@ class Conv2D(Function):
       int y = get_global_id(1);  // range 0-H
       int x = get_global_id(2);  // range 0-W
 
-      // tensx = (bs, groups*cin, iy, ix)
-      // tensw = (groups*rcout, cin, H, W)
-      // ggg = (bs, groups*rout, oy, ox)
       float acc = 0.0;
       for (int Y = 0; Y < oy; Y++) {
         for (int X = 0; X < ox; X++) {
