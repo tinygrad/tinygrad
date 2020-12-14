@@ -1,3 +1,4 @@
+six
 numpy
 pyopencl==2020.2.2
 # util deps
