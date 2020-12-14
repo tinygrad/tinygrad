@@ -98,7 +98,7 @@ class Tensor:
       _strides = [np.prod(shape[i:]) for i in range(1, len(self.shape))]
       _strides.append(1)
       _origin = sum(map(lambda x: x[0]*x[1]*4, zip(_strides, index)))
-      data = self.data.cl.get_sub_region(_origin, 4)
+      data = self.data.cl.get_sub_region(int(_origin), 4)
     gbuffer = GPUBuffer(shape)
     gbuffer.cl = data
     return Tensor(gbuffer, gpu=True, requires_grad=self.requires_grad)
