@@ -7,14 +7,14 @@ sys.path.append(os.path.join(os.getcwd(), 'test'))
 from test_mnist import fetch_mnist
 from tqdm import trange
 
-def augment_img(X):
+def augment_img(X, rotate=10, px=3):
   Xaug = np.zeros_like(X)
   for i in trange(len(X)):
     im = Image.fromarray(X[i])
-    im = im.rotate(np.random.randint(-10,10), resample=Image.BICUBIC)
+    im = im.rotate(np.random.randint(-rotate,rotate), resample=Image.BICUBIC)
     w, h = X.shape[1:]
     #upper left, lower left, lower right, upper right
-    quad = np.random.randint(-3,3,size=(8)) + np.array([0,0,0,h,w,h,w,0])
+    quad = np.random.randint(-px,px,size=(8)) + np.array([0,0,0,h,w,h,w,0])
     im = im.transform((w, h), Image.QUAD, quad, resample=Image.BICUBIC)
     Xaug[i] = im
   return Xaug
@@ -27,8 +27,14 @@ if __name__ == "__main__":
   fig, a = plt.subplots(2,len(X))
   Xaug = augment_img(X)
   for i in range(len(X)):
-    a[0][i].imshow(X[i])
-    a[1][i].imshow(Xaug[i])
+    a[0][i].imshow(X[i], cmap='gray')
+    a[1][i].imshow(Xaug[i],cmap='gray')
     a[0][i].axis('off')
     a[1][i].axis('off')
   plt.show()
+
+  #create some nice gifs for doc?!
+  for i in range(10):
+    im = Image.fromarray(X_train[7353+i])
+    im_aug = [Image.fromarray(x) for x in augment_img(np.array([X_train[7353+i]]*100))]
+    im.save("aug"+str(i)+".gif", save_all=True, append_images=im_aug, duration=100, loop=0)
