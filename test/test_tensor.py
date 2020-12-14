@@ -17,6 +17,7 @@ class TestTinygrad(unittest.TestCase):
     self.x = np.random.RandomState(7331).random((1, 10)) - 0.5
     self._idx_end = np.random.RandomState(1330).randint(0,99, size=(1))[0]
     self._idx_start = np.random.RandomState(1330).randint(0,self._idx_end, size=(1))[0]
+
   def test_backward_pass(self):
 
     def test_tinygrad():
@@ -87,6 +88,11 @@ class TestTinygrad(unittest.TestCase):
     t = Tensor(self.data , gpu=self.gpu)
     with self.assertRaises(IndexError):
       [t[idx] for idx in invalid_indices]
+
+  def tearDown(self):
+    if self.gpu:
+      pass
+      # may be release gpu buffer once testing is done?
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestTinygradGPU(TestTinygrad):
