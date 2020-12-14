@@ -8,9 +8,8 @@ from collections import defaultdict
 
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
-  import collections, atexit, time
-  debug_counts = collections.defaultdict(int)
-  debug_times = collections.defaultdict(float)
+  import atexit, time
+  debug_counts, debug_times = defaultdict(int), defaultdict(float)
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
       print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
@@ -88,9 +87,7 @@ class Tensor:
         Tensor.did_float_warning = True
       self.device = Tensor.CPU
 
-    self.data = data
-    self.grad = None
-    self.requires_grad = requires_grad
+    self.data, self.grad, self.requires_grad = data, None, requires_grad
 
     if gpu:
       self.cuda_()
@@ -157,12 +154,11 @@ class Tensor:
       if len(t0._ctx.parents) == 1:
         grads = [grads]
       for t,g in zip(t0._ctx.parents, grads):
-        if g is None:
-          continue
-        assert g.shape == t.shape, \
-          f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
-        gt = Tensor(g, requires_grad=False)
-        t.grad = gt if t.grad is None else (t.grad + gt)
+        if g is not None:
+          assert g.shape == t.shape, \
+            f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
+          gt = Tensor(g, requires_grad=False)
+          t.grad = gt if t.grad is None else (t.grad + gt)
 
   # ***** tinygrad supports CPU and GPU *****
 
@@ -197,8 +193,7 @@ class Tensor:
         if self.grad:
           ret.grad = self.grad.cuda()
         return ret
-    else:
-      return self
+    return self
 
   def ane(self):
     assert(not self.gpu)

@@ -93,9 +93,7 @@ class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
     ctx.save_for_backward(padding)
-    return np.pad(x,
-      ((0,0), (0,0),
-       (padding[2], padding[3]), (padding[0], padding[1])))
+    return np.pad(x, ((0,0), (0,0), tuple(padding[2:4]), tuple(padding[0:2])))
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -127,8 +125,7 @@ class ReLU(Function):
   @staticmethod
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    grad_input = grad_output * (input >= 0)
-    return grad_input
+    return grad_output * (input >= 0)
 register('relu', ReLU)
 
 class Sigmoid(Function):
@@ -146,8 +143,7 @@ class Sigmoid(Function):
   @staticmethod
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
-    grad_input = grad_output * (ret * (1 - ret))
-    return grad_input
+    return grad_output * (ret * (1 - ret))
 register('sigmoid', Sigmoid)
 
 class LogSoftmax(Function):
@@ -185,12 +181,10 @@ class Conv2D(Function):
 
     gx = x.reshape(bs,ctx.groups,cin,x.shape[2],x.shape[3])
     tx = np.lib.stride_tricks.as_strided(gx,
-           shape=(bs, ctx.groups, cin, oy, ox, H, W),
-           strides=(gx.strides[0], gx.strides[1], gx.strides[2],
-                    gx.strides[3]*ys, gx.strides[4]*xs,
-                    gx.strides[3], gx.strides[4]),
-           writeable=False,
-         )
+      shape=(bs, ctx.groups, cin, oy, ox, H, W),
+      strides=(*gx.strides[0:3], gx.strides[3]*ys, gx.strides[4]*xs, *gx.strides[3:5]),
+      writeable=False,
+    )
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
 
@@ -258,9 +252,7 @@ class MaxPool2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     idxs,s = ctx.saved_tensors
-    return unstack_for_pool(
-      lambda idx: grad_output * (idxs == idx),
-      s, *ctx.kernel_size)
+    return unstack_for_pool(lambda idx: grad_output * (idxs == idx), s, *ctx.kernel_size)
 register('max_pool2d', MaxPool2D)
 
 class AvgPool2D(Function):
@@ -274,8 +266,6 @@ class AvgPool2D(Function):
   def backward(ctx, grad_output):
     s, = ctx.saved_tensors
     py, px = ctx.kernel_size
-    return unstack_for_pool(
-      lambda idx: grad_output/py/px,
-      s, py, px)
+    return unstack_for_pool(lambda idx: grad_output/py/px, s, py, px)
 register('avg_pool2d', AvgPool2D)
 
