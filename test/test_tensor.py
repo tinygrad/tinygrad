@@ -11,7 +11,14 @@ m_init = np.random.randn(1,3).astype(np.float32)
 class TestTinygrad(unittest.TestCase):
   gpu = False
 
+  def setUp(self):
+    self.data = np.random.RandomState(1337).random(100).astype(np.float32)
+    self.W = np.random.RandomState(1337).random((10, 5))
+    self.x = np.random.RandomState(7331).random((1, 10)) - 0.5
+    self._idx_end = np.random.RandomState(1330).randint(0,99, size=(1))[0]
+    self._idx_start = np.random.RandomState(1330).randint(0,self._idx_end, size=(1))[0]
   def test_backward_pass(self):
+
     def test_tinygrad():
       x = Tensor(x_init, gpu=self.gpu)
       W = Tensor(W_init, gpu=self.gpu)
@@ -36,16 +43,13 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_jacobian(self):
-    W = np.random.RandomState(1337).random((10, 5))
-    x = np.random.RandomState(7331).random((1, 10)) - 0.5
-
-    torch_x = torch.tensor(x, requires_grad=True)
-    torch_W = torch.tensor(W, requires_grad=True)
+    torch_x = torch.tensor(self.x, requires_grad=True)
+    torch_W = torch.tensor(self.W, requires_grad=True)
     torch_func = lambda x: torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
     PJ = torch.autograd.functional.jacobian(torch_func, torch_x).squeeze().numpy()
 
-    tiny_x = Tensor(x, gpu=self.gpu)
-    tiny_W = Tensor(W, gpu=self.gpu)
+    tiny_x = Tensor(self.x, gpu=self.gpu)
+    tiny_W = Tensor(self.W, gpu=self.gpu)
     tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
     J = jacobian(tiny_func, tiny_x)
     NJ = numerical_jacobian(tiny_func, tiny_x)
@@ -54,11 +58,8 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(PJ, NJ, atol = 1e-5)
 
   def test_gradcheck(self):
-    W = np.random.RandomState(1337).random((10, 5))
-    x = np.random.RandomState(7331).random((1, 10)) - 0.5
-
-    tiny_x = Tensor(x, gpu=self.gpu)
-    tiny_W = Tensor(W, gpu=self.gpu)
+    tiny_x = Tensor(self.x, gpu=self.gpu)
+    tiny_W = Tensor(self.W, gpu=self.gpu)
     tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
 
     self.assertTrue(gradcheck(tiny_func, tiny_x))
@@ -67,18 +68,25 @@ class TestTinygrad(unittest.TestCase):
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 0.1))
 
   def test_multi_indexing(self):
-      shape = np.random.RandomState(1813).randint(1,5, size=5)
-      data = np.random.RandomState(1330).random(shape)
-      x = Tensor(data ,gpu=self.gpu)
-      idx = tuple([np.random.RandomState(1399).randint(0, ix, size=1)[0] for ix in shape])
-      self.assertTrue(x[idx].cpu().data, data[idx])
+    shape = np.random.RandomState(1813).randint(1,5, size=5)
+    data = np.random.RandomState(1330).random(shape)
+    x = Tensor(data ,gpu=self.gpu)
+    idx = tuple([np.random.RandomState(1399).randint(0, ix, size=1)[0] for ix in shape])
+    self.assertTrue(x[idx].cpu().data, data[idx])
 
   def test_slicing(self):
-      data = np.random.RandomState(1337).random(100).astype(np.float32)
-      end = np.random.RandomState(1330).randint(0,99, size=(1))[0]
-      start = np.random.RandomState(1330).randint(0,end, size=(1))[0]
-      x = Tensor(data ,gpu=self.gpu)
-      self.assertListEqual(x[start:end].cpu().data.tolist(), data[start:end].tolist())
+    x = Tensor(self.data ,gpu=self.gpu)
+    self.assertListEqual(x[self._idx_start:self._idx_end].cpu().data.tolist(), self.data[self._idx_start:self._idx_end].tolist())
+
+  def test_single_index(self):
+    t = Tensor(self.data, gpu=self.gpu)
+    self.assertTrue(t[int(self._idx_start)].cpu().data, self.data[self._idx_start])
+
+  def test_invalid_indices(self):
+    invalid_indices = ['invalid', self, [slice(2,4), slice(9,10)], [(1,2)], range(1), [1,2,3]]
+    t = Tensor(self.data , gpu=self.gpu)
+    with self.assertRaises(IndexError):
+      [t[idx] for idx in invalid_indices]
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestTinygradGPU(TestTinygrad):
