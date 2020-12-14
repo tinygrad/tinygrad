@@ -178,7 +178,7 @@ class Add(Function):
     grad_x, grad_y = grad_output, grad_output
     shape_x, shape_y = ctx.saved_tensors
     grad_required = list(map(lambda x: x.requires_grad, ctx.parents))
-    return unbroadcast(ctx, grad_x, shape_x) if grad_required[0] else None, unbroadcast(ctx, grad_y, shape_y) if grad_required[1] else None,
+    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y) if grad_required[1] else None,
 register('add', Add, device=Tensor.GPU)
 
 class Sub(Function):
@@ -192,7 +192,7 @@ class Sub(Function):
     grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
     shape_x, shape_y = ctx.saved_tensors
     grad_required = list(map(lambda x: x.requires_grad, ctx.parents))
-    return unbroadcast(ctx, grad_x, shape_x) if grad_required[0] else None, unbroadcast(ctx, grad_y, shape_y) if grad_required[1] else None,
+    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y) if grad_required[1] else None,
 register('sub', Sub, device=Tensor.GPU)
 
 class Mul(Function):
@@ -206,9 +206,9 @@ class Mul(Function):
     x,y = ctx.saved_tensors
     grad_required = list(map(lambda x: x.requires_grad, ctx.parents))
 
-    grad_x = binary_op(ctx, 'a*b', y, grad_output) if grad_required[0] else None
+    grad_x = binary_op(ctx, 'a*b', y, grad_output)
     grad_y = binary_op(ctx, 'a*b', x, grad_output) if grad_required[1] else None
-    return unbroadcast(ctx, grad_x, x.shape) if grad_required[0] else None, unbroadcast(ctx, grad_y, y.shape) if grad_required[1] else None,
+    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape) if grad_required[1] else None,
 register('mul', Mul, device=Tensor.GPU)
 
 class Pow(Function):
@@ -222,10 +222,10 @@ class Pow(Function):
     x,y = ctx.saved_tensors
     grad_required = list(map(lambda x: x.requires_grad, ctx.parents))
     grad_x = binary_op(ctx, 'a*b', grad_output,
-                      binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y)) if grad_required[0] else None
+                      binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y))
     grad_y = binary_op(ctx, 'a*b', grad_output,
                       binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y)) if grad_required[1] else None
-    return unbroadcast(ctx, grad_x, x.shape) if grad_required[0] else None, unbroadcast(ctx, grad_y, y.shape) if grad_required[1] else None,
+    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape) if grad_required[1] else None,
 register('pow', Pow, device=Tensor.GPU)
 
 class Sum(Function):
