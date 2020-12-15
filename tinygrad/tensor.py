@@ -157,11 +157,13 @@ class Tensor:
       if device == Device.GPU: return data
       old = data
       data = np.empty(old.shape, dtype=np.float32)
-      cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
+      with ProfileOp("toCPU", [data]):
+          cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
 
     elif "ANETensor" in str(type(data)):
       if device == Device.ANE: return data
-      data = data.data().astype(np.float32)
+      with ProfileOp("toCPU", [data]):
+          data = data.data().astype(np.float32)
 
     if not isinstance(data, np.ndarray):
         data = np.array(data, dtype=np.float32)
@@ -176,13 +178,15 @@ class Tensor:
 
     elif device == Device.GPU:
       require_init_gpu()
-      return GPUBuffer(data.shape, data)
+      with ProfileOp("toGPU", [data]):
+          return GPUBuffer(data.shape, data)
 
     elif device == Device.ANE:
      require_init_ane()
-     ndata = ane.tensor(data.shape)
-     ndata.data()[:] = data
-     return ndata
+     with ProfileOp("toANE", [data]):
+         ndata = ane.tensor(data.shape)
+         ndata.data()[:] = data
+         return ndata
 
   def to_(self, device):
     self.data, self.device = self._move_data(self.data, device), device
