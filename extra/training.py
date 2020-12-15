@@ -2,10 +2,10 @@ import os
 import numpy as np
 from tqdm import trange
 from extra.utils import get_parameters
-from tinygrad.tensor import Tensor, GPU, DeviceTypes
+from tinygrad.tensor import Tensor, GPU, Device
 
-def train(model, X_train, Y_train, optim, steps, num_classes=None, BS=128, device=DeviceTypes.CPU, lossfn = lambda out,y: out.mul(y).mean()):
-  if device == DeviceTypes.GPU: [x.gpu_() for x in get_parameters([model, optim])]
+def train(model, X_train, Y_train, optim, steps, num_classes=None, BS=128, device=Device.CPU, lossfn = lambda out,y: out.mul(y).mean()):
+  if device == Device.GPU: [x.gpu_() for x in get_parameters([model, optim])]
   if num_classes is None: num_classes = Y_train.max().astype(int)+1
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
@@ -36,7 +36,7 @@ def train(model, X_train, Y_train, optim, steps, num_classes=None, BS=128, devic
     accuracies.append(accuracy)
     t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
 
-def evaluate(model, X_test, Y_test, num_classes=None, device=DeviceTypes.CPU, BS=128):
+def evaluate(model, X_test, Y_test, num_classes=None, device=Device.CPU, BS=128):
   def numpy_eval(num_classes):
     Y_test_preds_out = np.zeros((len(Y_test),num_classes))
     for i in trange(len(Y_test)//BS, disable=os.getenv('CI') is not None):

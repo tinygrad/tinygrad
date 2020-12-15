@@ -4,7 +4,7 @@ import cProfile
 import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor, ANE, GPU, DeviceTypes
+from tinygrad.tensor import Tensor, ANE, GPU, Device
 
 def start_profile():
   import time
@@ -20,7 +20,7 @@ def stop_profile(pr, sort='cumtime'):
   ps.print_stats(0.2)
 
 class TestConvSpeed(unittest.TestCase):
-  device= DeviceTypes.CPU
+  device= Device.CPU
 
   def test_mnist(self):
     # https://keras.io/examples/vision/mnist_convnet/
@@ -95,11 +95,11 @@ class TestConvSpeed(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestConvSpeedGPU(TestConvSpeed):
-  device = DeviceTypes.GPU
+  device = Device.GPU
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestConvSpeedANE(TestConvSpeed):
-  device=DeviceTypes.ANE
+  device=Device.ANE
 
 
 if __name__ == '__main__':

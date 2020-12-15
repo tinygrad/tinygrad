@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import ANE, GPU, DeviceTypes
+from tinygrad.tensor import ANE, GPU, Device
 from tinygrad.nn import *
 from extra.utils import get_parameters
 import torch
 
 class TestNN(unittest.TestCase):
-  device = DeviceTypes.CPU
+  device = Device.CPU
 
   def test_batchnorm2d(self, training=False):
     sz = 4
@@ -20,8 +20,8 @@ class TestNN(unittest.TestCase):
     bn.running_var = Tensor.randn(sz)
     bn.running_var.data[bn.running_var.data < 0] = 0
 
-    if self.device==DeviceTypes.GPU: [x.gpu_() for x in get_parameters(bn)]
-    elif self.device==DeviceTypes.ANE: [x.ane_() for x in get_parameters(bn)]
+    if self.device==Device.GPU: [x.gpu_() for x in get_parameters(bn)]
+    elif self.device==Device.ANE: [x.ane_() for x in get_parameters(bn)]
 
     # create in torch
     with torch.no_grad():
@@ -57,11 +57,11 @@ class TestNN(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestNNGPU(TestNN):
-  device = DeviceTypes.GPU
+  device = Device.GPU
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestNNANE(TestNN):
-  device=DeviceTypes.ANE
+  device=Device.ANE
 
 
 if __name__ == '__main__':

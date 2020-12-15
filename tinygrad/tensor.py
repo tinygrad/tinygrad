@@ -39,7 +39,8 @@ def require_init_gpu():
     raise Exception("No GPU Support, install pyopencl")
   global cl_ctx, cl_queue
   if cl_queue is None:
-    devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU) if len(devices) == 0:
+    devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
+    if len(devices) == 0:
       devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
     cl_ctx = cl.Context(devices=devices)
     # this is an in-order command queue
@@ -68,14 +69,14 @@ def require_init_ane():
 
 # **** start with two base classes, Tensor and Function ****
 
-class DeviceTypes:
+class Device:
   CPU, GPU, ANE = 0, 1, 2
 
 class Tensor:
   did_float_warning = False
   ops = defaultdict(dict)
 
-  def __init__(self, data, device=DeviceTypes.CPU, requires_grad=True):
+  def __init__(self, data, device=Device.CPU, requires_grad=True):
     self.data = self._move_data(data, device)
 
     self.device, self.grad, self.requires_grad = device, None, requires_grad
@@ -153,13 +154,13 @@ class Tensor:
   @staticmethod
   def _move_data(data, device):
     if isinstance(data, GPUBuffer):
-      if device == DeviceTypes.GPU: return data
+      if device == Device.GPU: return data
       old = data
       data = np.empty(old.shape, dtype=np.float32)
       cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
 
     elif "ANETensor" in str(type(data)):
-      if device == DeviceTypes.ANE: return data
+      if device == Device.ANE: return data
       data = data.data().astype(np.float32)
 
     if not isinstance(data, np.ndarray):
@@ -170,14 +171,14 @@ class Tensor:
       print(f"warning, {data.shape!r} isn't float32")
       Tensor.did_float_warning = True
 
-    if device == DeviceTypes.CPU:
+    if device == Device.CPU:
       return data
 
-    elif device == DeviceTypes.GPU:
+    elif device == Device.GPU:
       require_init_gpu()
       return GPUBuffer(data.shape, data)
 
-    elif device == DeviceTypes.ANE:
+    elif device == Device.ANE:
      require_init_ane()
      ndata = ane.tensor(data.shape)
      ndata.data()[:] = data
@@ -256,7 +257,7 @@ class Function:
       ret._ctx = ctx
     return ret
 
-def register(name, fxn, device=DeviceTypes.CPU):
+def register(name, fxn, device=Device.CPU):
   Tensor.ops[device][name] = fxn
   def dispatch(*x, **kwargs):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
@@ -271,11 +272,10 @@ def register(name, fxn, device=DeviceTypes.CPU):
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
-# Dynamically add device handler
-for device in [device for device in DeviceTypes.__dict__.keys() if device[0] != "_"]:
-    setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, DeviceTypes.__dict__[device]))
-    setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, DeviceTypes.__dict__[device]))
-    setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, DeviceTypes.__dict__[device])))
+for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
+    setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
+    setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
+    setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, Device.__dict__[device])))
 
 # this registers all the operations
 import tinygrad.ops_cpu

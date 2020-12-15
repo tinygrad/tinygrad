@@ -2,7 +2,7 @@
 import os
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, ANE, GPU, DeviceTypes
+from tinygrad.tensor import Tensor, ANE, GPU, Device
 import tinygrad.optim as optim
 from extra.training import train, evaluate
 from extra.utils import fetch, get_parameters
@@ -55,7 +55,7 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 class TestMNIST(unittest.TestCase):
-  device = DeviceTypes.CPU
+  device = Device.CPU
 
   def test_conv(self):
     np.random.seed(1337)
@@ -80,11 +80,11 @@ class TestMNIST(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestMNISTGPU(TestMNIST):
-  device = DeviceTypes.GPU
+  device = Device.GPU
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestMNISTANE(TestMNIST):
-  device=DeviceTypes.ANE
+  device=Device.ANE
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor, ANE, GPU, DeviceTypes
+from tinygrad.tensor import Tensor, ANE, GPU, Device
 from tinygrad.optim import Adam, SGD, RMSprop
 from extra.utils import get_parameters
 
@@ -9,11 +9,11 @@ x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-def step_tinygrad(optim, kwargs={}, device=DeviceTypes.CPU):
+def step_tinygrad(optim, kwargs={}, device=Device.CPU):
   net = TinyNet()
   optim = optim([net.x, net.W], **kwargs)
-  if device==DeviceTypes.GPU: [x.gpu_() for x in get_parameters([net, optim])]
-  elif device==DeviceTypes.ANE: [x.ane_() for x in get_parameters([net, optim])]
+  if device==Device.GPU: [x.gpu_() for x in get_parameters([net, optim])]
+  elif device==Device.ANE: [x.ane_() for x in get_parameters([net, optim])]
   out = net.forward()
   out.backward()
   optim.step()
@@ -55,7 +55,7 @@ class TorchNet():
 
 
 class TestOptim(unittest.TestCase):
-  device = DeviceTypes.CPU
+  device = Device.CPU
 
   def test_adam(self):
     for x,y in zip(step_tinygrad(Adam, device=self.device),
@@ -76,11 +76,11 @@ class TestOptim(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestOptimGPU(TestOptim):
-  device = DeviceTypes.GPU
+  device = Device.GPU
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestOptimANE(TestOptim):
-  device = DeviceTypes.ANE
+  device = Device.ANE
 
 
 if __name__ == '__main__':

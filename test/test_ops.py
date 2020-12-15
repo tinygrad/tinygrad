@@ -4,15 +4,15 @@ import numpy as np
 import unittest
 import timeit
 import functools
-from tinygrad.tensor import Tensor, ANE, GPU, DeviceTypes
+from tinygrad.tensor import Tensor, ANE, GPU, Device
 
-def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=DeviceTypes.CPU, forward_only=False):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=Device.CPU, forward_only=False):
   torch.manual_seed(0)
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
-  if device==DeviceTypes.GPU:
+  if device==Device.GPU:
     tst = [x.gpu() for x in tst]
-  elif device==DeviceTypes.ANE:
+  elif device==Device.ANE:
     tst = [x.ane() for x in tst]
 
   out = torch_fxn(*ts)
@@ -40,7 +40,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
   print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp, tinygrad_fp, torch_fbp-torch_fp, tinygrad_fbp-tinygrad_fp))
 
 class TestOps(unittest.TestCase):
-  device=DeviceTypes.CPU
+  device=Device.CPU
 
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, device=self.device)
@@ -102,7 +102,7 @@ class TestOps(unittest.TestCase):
                      ((4,1), (4,5)), ((1,4), (5,4))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           # NOTE: ANE backwards?
-          helper_test_op(shapes, torch_op, tinygrad_op, device=self.device, forward_only=self.device!=DeviceTypes.CPU)
+          helper_test_op(shapes, torch_op, tinygrad_op, device=self.device, forward_only=self.device!=Device.CPU)
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), device=self.device)
@@ -155,11 +155,11 @@ class TestOps(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestOpsGPU(TestOps):
-  device=DeviceTypes.GPU
+  device=Device.GPU
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestOpsANE(TestOps):
-  device=DeviceTypes.ANE
+  device=Device.ANE
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

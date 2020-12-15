@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor, ANE, GPU, DeviceTypes
+from tinygrad.tensor import Tensor, ANE, GPU, Device
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -11,7 +11,7 @@ W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
-  device = DeviceTypes.CPU
+  device = Device.CPU
 
   def test_backward_pass(self):
     def test_tinygrad():
@@ -100,7 +100,7 @@ class TestTinygrad(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestTinygradGPU(TestTinygrad):
-  device = DeviceTypes.GPU
+  device = Device.GPU
 
   @unittest.skip("float64 not supported on GPU")
   def test_jacobian(self): pass
@@ -110,7 +110,7 @@ class TestTinygradGPU(TestTinygrad):
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestOpsANE(TestTinygrad):
-  device=DeviceTypes.ANE
+  device=Device.ANE
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 import gc
 import unittest
-from tinygrad.tensor import Tensor, ANE, GPU, DeviceTypes
+from tinygrad.tensor import Tensor, ANE, GPU, Device
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
     
 class TestGC(unittest.TestCase):
-  device = DeviceTypes.CPU
+  device = Device.CPU
 
   def test_gc(self):
     a = Tensor.zeros(4,4, device=self.device)
@@ -35,11 +35,11 @@ class TestGC(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestGCGPU(TestGC):
-  device = DeviceTypes.GPU 
+  device = Device.GPU 
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestGCANE(TestGC):
-  device=DeviceTypes.ANE
+  device=Device.ANE
 
 if __name__ == '__main__':
   unittest.main()
