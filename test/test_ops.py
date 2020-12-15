@@ -4,7 +4,8 @@ import numpy as np
 import unittest
 import timeit
 import functools
-from tinygrad.tensor import Tensor, ANE, GPU, Device
+from tinygrad.tensor import Tensor, GPU, Device
+from .config import ANE
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=Device.CPU, forward_only=False):
   torch.manual_seed(0)

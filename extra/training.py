@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor, GPU, Device
 
 def train(model, X_train, Y_train, optim, steps, num_classes=None, BS=128, device=Device.CPU, lossfn = lambda out,y: out.mul(y).mean()):
   if device == Device.GPU: [x.gpu_() for x in get_parameters([model, optim])]
+  elif device == Device.ANE: [x.ane_() for x in get_parameters([model, optim])]
   if num_classes is None: num_classes = Y_train.max().astype(int)+1
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):

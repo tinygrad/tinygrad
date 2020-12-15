@@ -59,13 +59,11 @@ class GPUBuffer:
 # **** ANE functions ****
 
 ane = None
-ANE = False
 def require_init_ane():
   global ane
   if ane is None:
     import ane.lib.ane, tinygrad.ops_ane
     ane = ane.lib.ane.ANE()
-    ANE = True
 
 # **** start with two base classes, Tensor and Function ****
 

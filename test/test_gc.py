@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import gc
 import unittest
-from tinygrad.tensor import Tensor, ANE, GPU, Device
+from tinygrad.tensor import Tensor, GPU, Device
+from .config import ANE
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])

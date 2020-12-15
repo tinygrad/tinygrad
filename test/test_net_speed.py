@@ -4,7 +4,8 @@ import cProfile
 import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor, ANE, GPU, Device
+from tinygrad.tensor import Tensor, GPU, Device
+from .config import ANE
 
 def start_profile():
   import time
