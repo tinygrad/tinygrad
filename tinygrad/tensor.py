@@ -8,9 +8,8 @@ from collections import defaultdict
 
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
-  import collections, atexit, time
-  debug_counts = collections.defaultdict(int)
-  debug_times = collections.defaultdict(float)
+  import atexit, time
+  debug_counts, debug_times = defaultdict(int), defaultdict(float)
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
       print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
@@ -78,10 +77,8 @@ class Tensor:
 
   def __init__(self, data, device=DeviceTypes.CPU, requires_grad=True):
     self.data = self.data_to_device(data, device=device)
-    self.device = device
 
-    self.grad = None
-    self.requires_grad = requires_grad
+    self.device, self.grad, self.requires_grad = device, None, requires_grad
 
     # internal variables used for autograd graph construction
     self._ctx = None
@@ -145,12 +142,11 @@ class Tensor:
       if len(t0._ctx.parents) == 1:
         grads = [grads]
       for t,g in zip(t0._ctx.parents, grads):
-        if g is None:
-          continue
-        assert g.shape == t.shape, \
-          f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
-        gt = Tensor(g, device=self.device, requires_grad=False)
-        t.grad = gt if t.grad is None else (t.grad + gt)
+        if g is not None:
+          assert g.shape == t.shape, \
+            f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
+          gt = Tensor(g, device=self.device, requires_grad=False)
+          t.grad = gt if t.grad is None else (t.grad + gt)
 
   # ***** tinygrad supports CPU and GPU *****
 

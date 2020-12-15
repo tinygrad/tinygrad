@@ -346,8 +346,7 @@ class Reshape(Function):
   @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
-    grad_output = GPUBuffer(in_shape, hostbuf=grad_output)
-    return grad_output
+    return GPUBuffer(in_shape, hostbuf=grad_output)
 register('reshape', Reshape, device=DeviceTypes.GPU)
 
 # ************* activation ops *************
@@ -449,6 +448,10 @@ class Conv2D(Function):
     # output buffer
     ret = buffer_new(ctx, (bs, cout, oy, ox))
 
+    # input  = (bs, groups, cin, iy, ix)
+    # weight = (groups, rcout, cin, H, W)
+    # output = (bs, groups, rcout, oy, ox)
+
     conv = clbuild(ctx.cl_ctx, "conv", """
     __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs) {
@@ -462,9 +465,6 @@ class Conv2D(Function):
       int IY = Y*ys;
       int IX = X*xs;
 
-      // input  = (bs, groups, cin, iy, ix)
-      // weight = (groups, rcout, cin, H, W)
-      // output = (bs, groups, rcout, oy, ox)
       float acc = 0.0;
       for (int ci = 0; ci < cin; ci++) {
         for (int y = IY; y < IY+H; y++) {
