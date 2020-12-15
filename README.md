@@ -84,7 +84,7 @@ tinygrad supports GPUs through PyOpenCL.
 
 ```python
 from tinygrad.tensor import Tensor
-(Tensor.ones(4,4).cuda() + Tensor.ones(4,4).cuda()).cpu()
+(Tensor.ones(4,4).gpu() + Tensor.ones(4,4).gpu()).cpu()
 ```
 
 ### ANE Support?!
