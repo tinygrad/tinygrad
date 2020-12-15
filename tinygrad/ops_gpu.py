@@ -237,7 +237,7 @@ class Sum(Function):
     input, axis = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     output = GPUBuffer(shape, hostbuf=grad_output)
-    return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape))
+    return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
 register('sum', Sum, device=Device.GPU)
 
 class Dot(Function):
