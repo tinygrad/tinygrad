@@ -20,9 +20,6 @@ class TestNN(unittest.TestCase):
     bn.running_var = Tensor.randn(sz)
     bn.running_var.data[bn.running_var.data < 0] = 0
 
-    if self.device==Device.GPU: [x.gpu_() for x in get_parameters(bn)]
-    elif self.device==Device.ANE: [x.ane_() for x in get_parameters(bn)]
-
     # create in torch
     with torch.no_grad():
       tbn = torch.nn.BatchNorm2d(sz).eval()
@@ -45,9 +42,9 @@ class TestNN(unittest.TestCase):
     toutt = tbn(torch.tensor(inn.cpu().data))
 
     # close
-    np.testing.assert_allclose(outt.cpu().data, toutt.detach().numpy(), rtol=5e-5)
+    np.testing.assert_allclose(outt.data, toutt.detach().numpy(), rtol=5e-5)
 
-    np.testing.assert_allclose(bn.running_mean.cpu().data, tbn.running_mean.detach().numpy(), rtol=1e-5)
+    np.testing.assert_allclose(bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5)
 
     # TODO: this is failing
     #np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
@@ -59,9 +56,22 @@ class TestNN(unittest.TestCase):
 class TestNNGPU(TestNN):
   device = Device.GPU
 
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d(self): pass
+
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d_training(self): pass
+
+
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestNNANE(TestNN):
   device=Device.ANE
+
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d(self): pass
+
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d_training(self): pass
 
 
 if __name__ == '__main__':
