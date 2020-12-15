@@ -76,7 +76,7 @@ class Tensor:
   ops = defaultdict(dict)
 
   def __init__(self, data, device=DeviceTypes.CPU, requires_grad=True):
-    self.data = self.data_to_device(data, device=device)
+    self.data = self._move_data(data, device)
 
     self.device, self.grad, self.requires_grad = device, None, requires_grad
 
@@ -151,7 +151,7 @@ class Tensor:
   # ***** tinygrad supports CPU and GPU *****
 
   @staticmethod
-  def data_to_device(data, device=DeviceTypes.CPU):
+  def _move_data(data, device):
     if isinstance(data, GPUBuffer):
       if device == DeviceTypes.GPU: return data
       old = data
@@ -183,41 +183,30 @@ class Tensor:
      ndata.data()[:] = data
      return ndata
 
-  def cpu(self):
-    with ProfileOp("toCPU", [self]):
-      ret = Tensor(self.data_to_device(self.data), device=DeviceTypes.CPU)
-      if self.grad:
-        ret.grad = self.grad.cpu()
+  def to_(self, device):
+    self.data, self.device = self._move_data(self.data, device), device
+    if self.grad: self.grad.to_(device)
+
+  def to(self, device):
+      ret = Tensor(self.data, device)
+      if self.grad: ret.grad = self.grad.to(device)
       return ret
 
-  def change_device(self, device):
-    self.data = self.data_to_device(self.data, device=device)
-    self.device = device 
-    if self.grad:
-      self.grad.change_device(device)
-    
   @property
   def gpu(self):
     return self.device == DeviceTypes.GPU
 
-  def cuda_(self):
-    self.change_device(DeviceTypes.GPU)
+  def cpu_(self): self.to_(DeviceTypes.CPU)
 
-  def cuda(self):
-    ret = Tensor(self.data, device=DeviceTypes.GPU)
-    if self.grad:
-      ret.grad = self.grad.cuda()
-    return ret
+  def cpu(self): return self.to(DeviceTypes.CPU)
 
-  def ane_(self):
-    self.change_device(DeviceTypes.ANE)
+  def cuda_(self): self.to_(DeviceTypes.GPU)
 
-  def ane(self):
-    # NOTE: This does not convert grad to ANE?
-    ret = Tensor(self.data, device=DeviceTypes.ANE)
-    if self.grad:
-      ret.grad = self.grad.ane()
-    return ret
+  def cuda(self): return self.to(DeviceTypes.GPU)
+
+  def ane_(self): self.to_(DeviceTypes.ANE)
+
+  def ane(self): return self.to(DeviceTypes.ANE)
 
   def detach(self):
     return Tensor(self.data, device=self.device)
