@@ -1,5 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from inspect import signature
+import functools
 import numpy as np
 import os
 from collections import defaultdict
@@ -38,8 +39,7 @@ def require_init_gpu():
     raise Exception("No GPU Support, install pyopencl")
   global cl_ctx, cl_queue
   if cl_queue is None:
-    devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
-    if len(devices) == 0:
+    devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU) if len(devices) == 0:
       devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
     cl_ctx = cl.Context(devices=devices)
     # this is an in-order command queue
@@ -192,21 +192,7 @@ class Tensor:
       if self.grad: ret.grad = self.grad.to(device)
       return ret
 
-  @property
-  def gpu(self):
-    return self.device == DeviceTypes.GPU
-
-  def cpu_(self): self.to_(DeviceTypes.CPU)
-
-  def cpu(self): return self.to(DeviceTypes.CPU)
-
-  def cuda_(self): self.to_(DeviceTypes.GPU)
-
-  def cuda(self): return self.to(DeviceTypes.GPU)
-
-  def ane_(self): self.to_(DeviceTypes.ANE)
-
-  def ane(self): return self.to(DeviceTypes.ANE)
+  def _is(self, device): return self.device == device
 
   def detach(self):
     return Tensor(self.data, device=self.device)
@@ -284,6 +270,12 @@ def register(name, fxn, device=DeviceTypes.CPU):
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
+
+# Dynamically add device handler
+for device in [device for device in DeviceTypes.__dict__.keys() if device[0] != "_"]:
+    setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, DeviceTypes.__dict__[device]))
+    setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, DeviceTypes.__dict__[device]))
+    setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, DeviceTypes.__dict__[device])))
 
 # this registers all the operations
 import tinygrad.ops_cpu

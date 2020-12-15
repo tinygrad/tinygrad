@@ -12,7 +12,7 @@ m_init = np.random.randn(1,3).astype(np.float32)
 def step_tinygrad(optim, kwargs={}, device=DeviceTypes.CPU):
   net = TinyNet()
   optim = optim([net.x, net.W], **kwargs)
-  if device==DeviceTypes.GPU: [x.cuda_() for x in get_parameters([net, optim])]
+  if device==DeviceTypes.GPU: [x.gpu_() for x in get_parameters([net, optim])]
   elif device==DeviceTypes.ANE: [x.ane_() for x in get_parameters([net, optim])]
   out = net.forward()
   out.backward()

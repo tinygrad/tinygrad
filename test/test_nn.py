@@ -20,7 +20,7 @@ class TestNN(unittest.TestCase):
     bn.running_var = Tensor.randn(sz)
     bn.running_var.data[bn.running_var.data < 0] = 0
 
-    if self.device==DeviceTypes.GPU: [x.cuda_() for x in get_parameters(bn)]
+    if self.device==DeviceTypes.GPU: [x.gpu_() for x in get_parameters(bn)]
     elif self.device==DeviceTypes.ANE: [x.ane_() for x in get_parameters(bn)]
 
     # create in torch

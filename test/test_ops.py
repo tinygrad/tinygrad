@@ -11,7 +11,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
   ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
   if device==DeviceTypes.GPU:
-    tst = [x.cuda() for x in tst]
+    tst = [x.gpu() for x in tst]
   elif device==DeviceTypes.ANE:
     tst = [x.ane() for x in tst]
 
