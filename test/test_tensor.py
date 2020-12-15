@@ -48,8 +48,7 @@ class TestTinygrad(unittest.TestCase):
       out = out.logsoftmax()
       out = out.sum()
       out.backward()
-      out = out.cpu()
-      return out.data, u.grad.data, v.grad.data, w.grad.data
+      return out.cpu().data, u.cpu().grad.data, v.cpu().grad.data, w.cpu().grad.data
 
     def test_pytorch():
       u = torch.tensor(U_init, requires_grad=True)
