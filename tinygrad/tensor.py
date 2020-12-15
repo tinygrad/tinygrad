@@ -35,8 +35,7 @@ class ProfileOp:
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
-  if not GPU:
-    raise Exception("No GPU Support, install pyopencl")
+  if not GPU: raise Exception("No GPU Support, install pyopencl")
   global cl_ctx, cl_queue
   if cl_queue is None:
     devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
@@ -67,8 +66,7 @@ def require_init_ane():
 
 # **** start with two base classes, Tensor and Function ****
 
-class Device:
-  CPU, GPU, ANE = 0, 1, 2
+class Device: CPU, GPU, ANE = 0, 1, 2
 
 class Tensor:
   did_float_warning = False
@@ -171,29 +169,27 @@ class Tensor:
       print(f"warning, {data.shape!r} isn't float32")
       Tensor.did_float_warning = True
 
-    if device == Device.CPU:
-      return data
-
-    elif device == Device.GPU:
+    if device == Device.GPU:
       require_init_gpu()
       with ProfileOp("toGPU", [data]):
-          return GPUBuffer(data.shape, data)
+        return GPUBuffer(data.shape, data)
 
     elif device == Device.ANE:
-     require_init_ane()
-     with ProfileOp("toANE", [data]):
-         ndata = ane.tensor(data.shape)
-         ndata.data()[:] = data
-         return ndata
+      require_init_ane()
+      with ProfileOp("toANE", [data]):
+        ndata = ane.tensor(data.shape)
+        ndata.data()[:] = data
+        return ndata
+    return data
 
   def to_(self, device):
     self.data, self.device = self._move_data(self.data, device), device
     if self.grad: self.grad.to_(device)
 
   def to(self, device):
-      ret = Tensor(self.data, device)
-      if self.grad: ret.grad = self.grad.to(device)
-      return ret
+    ret = Tensor(self.data, device)
+    if self.grad: ret.grad = self.grad.to(device)
+    return ret
 
   def _is(self, device): return self.device == device
 
@@ -275,9 +271,9 @@ def register(name, fxn, device=Device.CPU):
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
-    setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
-    setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
-    setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, Device.__dict__[device])))
+  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
+  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
+  setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, Device.__dict__[device])))
 
 # this registers all the operations
 import tinygrad.ops_cpu
