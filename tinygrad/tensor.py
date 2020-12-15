@@ -204,7 +204,7 @@ class Tensor:
     self.change_device(DeviceTypes.GPU)
 
   def cuda(self):
-    ret = Tensor(self.data_to_device(self.data, device=DeviceTypes.GPU), device=DeviceTypes.GPU)
+    ret = Tensor(self.data, device=DeviceTypes.GPU)
     if self.grad:
       ret.grad = self.grad.cuda()
     return ret
@@ -214,7 +214,7 @@ class Tensor:
 
   def ane(self):
     # NOTE: This does not convert grad to ANE?
-    ret = Tensor(self.data_to_device(self.data, device=DeviceTypes.ANE), device=DeviceTypes.ANE)
+    ret = Tensor(self.data, device=DeviceTypes.ANE)
     if self.grad:
       ret.grad = self.grad.ane()
     return ret
