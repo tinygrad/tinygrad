@@ -1,10 +1,15 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+from tinygrad.tensor import GPU, Device
 from tinygrad.nn import *
+from extra.utils import get_parameters
 import torch
+from .config import ANE
 
 class TestNN(unittest.TestCase):
+  device = Device.CPU
+
   def test_batchnorm2d(self, training=False):
     sz = 4
 
@@ -29,13 +34,13 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
 
     # trial
-    inn = Tensor.randn(2, sz, 3, 3)
+    inn = Tensor.randn(2, sz, 3, 3, device=self.device)
 
     # in tinygrad
     outt = bn(inn)
 
     # in torch
-    toutt = tbn(torch.tensor(inn.data))
+    toutt = tbn(torch.tensor(inn.cpu().data))
 
     # close
     np.testing.assert_allclose(outt.data, toutt.detach().numpy(), rtol=5e-5)
@@ -47,6 +52,27 @@ class TestNN(unittest.TestCase):
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
+
+@unittest.skipUnless(GPU, "Requires GPU")
+class TestNNGPU(TestNN):
+  device = Device.GPU
+
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d(self): pass
+
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d_training(self): pass
+
+
+@unittest.skipUnless(ANE, "Requires ANE")
+class TestNNANE(TestNN):
+  device=Device.ANE
+
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d(self): pass
+
+  @unittest.skip("Tests not added")
+  def test_batchnorm2d_training(self): pass
 
 
 if __name__ == '__main__':
