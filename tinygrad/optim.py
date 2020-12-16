@@ -25,7 +25,7 @@ class RMSprop(Optimizer):
     super(RMSprop, self).__init__(params)
     self.lr, self.decay, self.eps = lr, decay, eps
 
-    self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), gpu=params[0].gpu, requires_grad=False) for t in self.params]
+    self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), device=params[0].device, requires_grad=False) for t in self.params]
 
   def step(self):
     for i, t in enumerate(self.params):
@@ -37,8 +37,8 @@ class Adam(Optimizer):
     super(Adam, self).__init__(params)
     self.lr, self.b1, self.b2, self.eps, self.t = lr, b1, b2, eps, 0
 
-    self.m = [Tensor(np.zeros(t.shape, dtype=np.float32), gpu=params[0].gpu, requires_grad=False) for t in self.params]
-    self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), gpu=params[0].gpu, requires_grad=False) for t in self.params]
+    self.m = [Tensor(np.zeros(t.shape, dtype=np.float32), device=params[0].device, requires_grad=False) for t in self.params]
+    self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), device=params[0].device, requires_grad=False) for t in self.params]
 
   def step(self):
     self.t = self.t + 1
