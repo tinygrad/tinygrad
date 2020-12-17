@@ -20,5 +20,3 @@ for dev in ["CPU", "GPU", "ANE"]:
       print("%s can do at least %.2f MEGAReLUs/sec" % (dev, (np.prod(boaa.shape)/1e6)/(et-st)))
     # decently reliable
     assert(np.all(boaa.cpu().data >= 0))
-
-

@@ -154,15 +154,15 @@ class Tensor:
       old = data
       data = np.empty(old.shape, dtype=np.float32)
       with ProfileOp("toCPU", [data]):
-          cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
+        cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
 
     elif "ANETensor" in str(type(data)):
       if device == Device.ANE: return data
       with ProfileOp("toCPU", [data]):
-          data = data.data().astype(np.float32)
+        data = data.data().astype(np.float32)
 
     if not isinstance(data, np.ndarray):
-        data = np.array(data, dtype=np.float32)
+      data = np.array(data, dtype=np.float32)
 
     if data.dtype != np.float32 and not Tensor.did_float_warning:
       # warning? float64 is actually needed for numerical jacobian
@@ -285,4 +285,3 @@ try:
 except ImportError:
   # no GPU support
   GPU = False
-
