@@ -134,7 +134,6 @@ def reduce_op(ctx, code, code2, inp, axis=None):
   __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret, __local float *loc) {
     int gid = get_global_id(0);
-    int gsz = get_global_size(0);
     int group = get_global_id(1);
     int groups = get_global_size(1);
     int buffer_size = get_local_size(2);
