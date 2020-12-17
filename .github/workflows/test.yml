@@ -40,12 +40,16 @@ jobs:
       steps:
       - name: Checkout Code
         uses: actions/checkout@v2
-      - name: Install PyLint
-        run: sudo apt-get install pylint
-      - name: Enumerate Files
-        run: ls -larth
-      - name: Validate indentation is 2 lines
-        shell: bash
-        run: |
-          set -e
-          pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+     - uses: actions/checkout@v1
+     - name: Set up Python 3.8
+       uses: actions/setup-python@v1
+       with:
+         python-version: 3.8
+     - name: Install dependencies
+       run: |
+         python -m pip install --upgrade pip
+        # pip install -r requirements.txt
+     - name: Lint with pylint
+       run: |
+         python -m pip install pylint
+         python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
