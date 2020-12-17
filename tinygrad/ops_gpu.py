@@ -121,54 +121,66 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     osize = [1]*len(inp.shape)
   else:
     osize = np.array(inp.shape)
-    osize[list(axis)] = 1 
-  ret = buffer_new(ctx, osize)
-  if axis is None:
-    ret.shape = (1,)
+    osize[list(axis)] = 1
 
   sz = np.prod(inp.shape)//np.prod(osize)
-  assert sz <= 256
-  # TODO: this is insanely slow
+  buffer_len = min(sz,256)
+  groups = ((sz-1)//256+1)
+
+  ret = buffer_new(ctx, osize+[groups]) if groups > 1 else buffer_new(ctx, osize)
+  if axis is None:
+    ret.shape = (1,) if groups == 1 else (groups,)
   reduce = clbuild(ctx.cl_ctx, "reduce", """
   __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret, __local float *loc) {
     int gid = get_global_id(0);
-    int lid = get_local_id(0);
-      
+    int gsz = get_global_size(0);
+    int group = get_global_id(1);
+    int groups = get_global_size(1);
+    int buffer_size = get_local_size(2);
+    int lid = get_local_id(2);
+    int x = lid + group*buffer_size;
     int idx = 0;  // compute index into a_g
     int tprod = prod;
     int tsz = sz;
-    for (int dim = 0; dim < n_dims; dim++) {
-      idx *= shape_x[dim];
-      if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
-        tprod /= shape_x[dim];
-        idx += (gid / tprod) % shape_x[dim];
-      } else {  // dim from x
-        tsz /= shape_x[dim];
-        idx += (lid / tsz) % shape_x[dim];
+    if (x < sz) {
+      for (int dim = 0; dim < n_dims; dim++) {
+        idx *= shape_x[dim];
+        if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
+          tprod /= shape_x[dim];
+          idx += (gid / tprod) % shape_x[dim];
+        } else {  // dim from x
+          tsz /= shape_x[dim];
+          idx += (x / tsz) % shape_x[dim];
+        }
       }
+      loc[lid] = a_g[idx]; //copy into local memory
+    } 
+    else {
+      loc[lid] = 0.0;
     }
-    loc[lid] = a_g[idx]; //copy into local memory
     //see https://dournac.org/info/gpu_sum_reduction
     for (int stride = 128; stride>0; stride /=2) {
       barrier(CLK_LOCAL_MEM_FENCE);
-      if (lid < stride & (lid + stride) < sz)
+      if (lid < stride && (lid + stride) < sz)
         loc[lid] += loc[lid + stride];
     }
-    if (lid == 0)
-      res_g[gid] = loc[0];
+    //printf("gid = %d, gsz = %d\\n", gid, gsz);
+    if (lid  == 0)
+      res_g[gid*groups + group] = loc[0];
   }""")
   buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
     cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-  reduce(ctx.cl_queue, [np.prod(osize)], [sz], inp.cl,
+  #print([np.prod(osize),groups, buffer_len], [1,1,buffer_len],inp.shape,osize)
+  reduce(ctx.cl_queue, [np.prod(osize),groups, buffer_len], [1,1,buffer_len], inp.cl,
     i32(sz), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(osize, dtype=np.int32)),
-    cl.LocalMemory(4*sz), #4*256
-    g_times_l=True,
-    )
-  return ret
+    cl.LocalMemory(4*min(sz,256)), #4*256
+    ) #reducing to osize + [groups]. If groups > 1 reduce last axis
+  return reduce_op(ctx, code, code2, ret, axis=[len(ret.shape)-1]) if groups > 1 else ret
+
 
 def unbroadcast(ctx, out, in_sh):
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
@@ -424,7 +436,9 @@ class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
     # TODO: stability?
-    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, axis=[1])
+    expa = unary_op(ctx, "exp(a)", input)
+    lsumexp = reduce_op(ctx, "out += a", "log(out)", expa, axis=[1])
+    lsum = unary_op(ctx, "log(a)", lsumexp)
     output = binary_op(ctx, 'a-b', input, lsum)
     ctx.save_for_backward(output)
     return output
