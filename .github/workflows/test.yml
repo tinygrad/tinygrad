@@ -42,5 +42,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Install PyLint
         run: sudo apt-get install pylint
+      - name: Enumerate Files
+        run: ls -larth
       - name: Validate indentation is 2 lines
         run: pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' tinygrad
