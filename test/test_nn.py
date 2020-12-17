@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad.nn import *
 import torch
 
+
 class TestNN(unittest.TestCase):
   def test_batchnorm2d(self, training=False):
     sz = 4
@@ -25,8 +26,12 @@ class TestNN(unittest.TestCase):
       tbn.running_mean[:] = torch.tensor(bn.running_mean.data)
       tbn.running_var[:] = torch.tensor(bn.running_var.data)
 
-    np.testing.assert_allclose(bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5)
-    np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
+    np.testing.assert_allclose(
+      bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5
+    )
+    np.testing.assert_allclose(
+      bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5
+    )
 
     # trial
     inn = Tensor.randn(2, sz, 3, 3)
@@ -40,14 +45,16 @@ class TestNN(unittest.TestCase):
     # close
     np.testing.assert_allclose(outt.data, toutt.detach().numpy(), rtol=5e-5)
 
-    np.testing.assert_allclose(bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5)
+    np.testing.assert_allclose(
+      bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5
+    )
 
     # TODO: this is failing
-    #np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
+    # np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   unittest.main()
