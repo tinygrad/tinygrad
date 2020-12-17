@@ -229,4 +229,3 @@ class EfficientNet:
         mv.data[:] = vnp
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
-

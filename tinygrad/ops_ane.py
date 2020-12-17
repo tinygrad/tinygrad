@@ -34,4 +34,3 @@ class ReLU(Function):
     ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
     return ret
 register('relu', ReLU, device=Tensor.ANE)
-

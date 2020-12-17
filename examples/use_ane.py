@@ -8,4 +8,3 @@ print(a.cpu())
 b = a.relu()
 print(b.cpu())
 assert(np.all(b.cpu().data >= 0))
-

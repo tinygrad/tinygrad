@@ -28,7 +28,7 @@ for c in a.headers[0].commands:
 
 # this parser is wrong (fixed with 64-bit one)
 from macholib import SymbolTable
-sym = SymbolTable.SymbolTable(a) 
+sym = SymbolTable.SymbolTable(a)
 
 syms = {}
 for l in sym.nlists:
@@ -96,4 +96,3 @@ for i in range(0, len(f2), 0x300):
 
 #open("/tmp/data.section", "wb").write(f2)
 #print(compare(open("model.hwx.golden", "rb").read(), open("model.hwx", "rb").read()))
-

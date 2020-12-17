@@ -6,7 +6,7 @@ from .config import ANE
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
-    
+
 class TestGC(unittest.TestCase):
   device = Device.CPU
 
@@ -36,7 +36,7 @@ class TestGC(unittest.TestCase):
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestGCGPU(TestGC):
-  device = Device.GPU 
+  device = Device.GPU
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestGCANE(TestGC):
