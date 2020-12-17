@@ -7,7 +7,6 @@ from extra.utils import get_parameters
 import torch
 from .config import ANE
 
-
 class TestNN(unittest.TestCase):
   device = Device.CPU
 
@@ -31,12 +30,8 @@ class TestNN(unittest.TestCase):
       tbn.running_mean[:] = torch.tensor(bn.running_mean.data)
       tbn.running_var[:] = torch.tensor(bn.running_var.data)
 
-    np.testing.assert_allclose(
-      bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5
-    )
-    np.testing.assert_allclose(
-      bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5
-    )
+    np.testing.assert_allclose(bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5)
+    np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
 
     # trial
     inn = Tensor.randn(2, sz, 3, 3, device=self.device)
@@ -50,42 +45,35 @@ class TestNN(unittest.TestCase):
     # close
     np.testing.assert_allclose(outt.data, toutt.detach().numpy(), rtol=5e-5)
 
-    np.testing.assert_allclose(
-      bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5
-    )
+    np.testing.assert_allclose(bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5)
 
     # TODO: this is failing
-    # np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
+    #np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
-
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestNNGPU(TestNN):
   device = Device.GPU
 
   @unittest.skip("Tests not added")
-  def test_batchnorm2d(self):
-    pass
+  def test_batchnorm2d(self): pass
 
   @unittest.skip("Tests not added")
-  def test_batchnorm2d_training(self):
-    pass
+  def test_batchnorm2d_training(self): pass
 
 
 @unittest.skipUnless(ANE, "Requires ANE")
 class TestNNANE(TestNN):
-  device = Device.ANE
+  device=Device.ANE
 
   @unittest.skip("Tests not added")
-  def test_batchnorm2d(self):
-    pass
+  def test_batchnorm2d(self): pass
 
   @unittest.skip("Tests not added")
-  def test_batchnorm2d_training(self):
-    pass
+  def test_batchnorm2d_training(self): pass
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   unittest.main()

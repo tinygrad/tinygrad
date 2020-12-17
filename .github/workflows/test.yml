@@ -34,21 +34,13 @@ jobs:
       run: python -m pytest -s -v
 
   linter:
-    name: Indentation  Linter
-    runs-on: ubuntu-latest
+      name: Indentation Linter
+      runs-on: ubuntu-latest
 
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v2
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install pylint
-    - name: Lint with pylint
-      run: |
-        python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
-
+      steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+      - name: Install PyLint
+        run: sudo apt-get install pylint
+      - name: Validate indentation is 2 lines
+        run: if [[ $(pylint --jobs=0 --indent-string='  ' * | grep "Bad indentation") ]]; then exit 1; fi

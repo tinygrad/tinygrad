@@ -17,9 +17,8 @@ for dev in ["CPU", "GPU", "ANE"]:
     boaa = baa.relu()
     et = time.time()
     if i == 2:
-      print(
-        "%s can do at least %.2f MEGAReLUs/sec"
-        % (dev, (np.prod(boaa.shape) / 1e6) / (et - st))
-      )
+      print("%s can do at least %.2f MEGAReLUs/sec" % (dev, (np.prod(boaa.shape)/1e6)/(et-st)))
     # decently reliable
-    assert np.all(boaa.cpu().data >= 0)
+    assert(np.all(boaa.cpu().data >= 0))
+
+

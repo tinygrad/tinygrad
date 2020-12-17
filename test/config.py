@@ -1,3 +1,3 @@
 import os
 
-ANE = os.environ.get("ANE", False)
+ANE = os.environ.get('ANE', False)

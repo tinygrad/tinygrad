@@ -10,43 +10,32 @@ from collections import defaultdict
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
   import atexit, time
-
   debug_counts, debug_times = defaultdict(int), defaultdict(float)
-
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
       print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
-
   atexit.register(print_debug_exit)
-
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    self.name = ("back_" if backward else "") + name
+    self.name = ("back_" if backward else "")+name
     self.x = x
-
   def __enter__(self):
-    if DEBUG:
-      self.st = time.time()
-
+    if DEBUG: self.st = time.time()
   def __exit__(self, *junk):
     if DEBUG:
       if cl_queue is not None:
         cl_queue.finish()
-      et = (time.time() - self.st) * 1000.0
+      et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
       print(f"{self.name:>20} : {et:>7.2f} ms {[y.shape for y in self.x]}")
 
-
 # **** GPU functions ****
 
 cl_ctx, cl_queue = None, None
-
-
 def require_init_gpu():
-  if not GPU:
-    raise Exception("No GPU Support, install pyopencl")
+  if not GPU: raise Exception("No GPU Support, install pyopencl")
   global cl_ctx, cl_queue
   if cl_queue is None:
     devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
@@ -56,45 +45,28 @@ def require_init_gpu():
     # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
 
-
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = (
-      hostbuf.cl
-      if isinstance(hostbuf, GPUBuffer)
-      else cl.Buffer(
-        cl_ctx,
-        cl.mem_flags.READ_WRITE
-        | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0),
-        4 * np.prod(shape),
-        hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None,
-      )
-    )
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
+      cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
+                hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
 
-
 # **** ANE functions ****
 
 ane = None
-
-
 def require_init_ane():
   global ane
   if ane is None:
     import ane.lib.ane, tinygrad.ops_ane
-
     ane = ane.lib.ane.ANE()
-
 
 # **** start with two base classes, Tensor and Function ****
 
-
-class Device:
-  CPU, GPU, ANE = 0, 1, 2
-
+class Device: CPU, GPU, ANE = 0, 1, 2
 
 class Tensor:
   did_float_warning = False
@@ -138,12 +110,7 @@ class Tensor:
 
   @classmethod
   def uniform(cls, *shape, **kwargs):
-    return cls(
-      (np.random.uniform(-1.0, 1.0, size=shape) / np.sqrt(np.prod(shape))).astype(
-        np.float32
-      ),
-      **kwargs,
-    )
+    return cls((np.random.uniform(-1., 1., size=shape)/np.sqrt(np.prod(shape))).astype(np.float32), **kwargs)
 
   @classmethod
   def eye(cls, dim, **kwargs):
@@ -163,21 +130,18 @@ class Tensor:
 
     # fill in the first grad with one
     # this is "implicit gradient creation"
-    self.grad = Tensor(
-      np.ones(self.shape, dtype=self.dtype), device=self.device, requires_grad=False
-    )
+    self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk(set(), [])):
-      assert t0.grad is not None
+      assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
-      for t, g in zip(t0._ctx.parents, grads):
+      for t,g in zip(t0._ctx.parents, grads):
         if g is not None:
-          assert (
-            g.shape == t.shape
-          ), f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
+          assert g.shape == t.shape, \
+            f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
           gt = Tensor(g, device=self.device, requires_grad=False)
           t.grad = gt if t.grad is None else (t.grad + gt)
 
@@ -186,21 +150,19 @@ class Tensor:
   @staticmethod
   def _move_data(data, device):
     if isinstance(data, GPUBuffer):
-      if device == Device.GPU:
-        return data
+      if device == Device.GPU: return data
       old = data
       data = np.empty(old.shape, dtype=np.float32)
       with ProfileOp("toCPU", [data]):
-        cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
+          cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
 
     elif "ANETensor" in str(type(data)):
-      if device == Device.ANE:
-        return data
+      if device == Device.ANE: return data
       with ProfileOp("toCPU", [data]):
-        data = data.data().astype(np.float32)
+          data = data.data().astype(np.float32)
 
     if not isinstance(data, np.ndarray):
-      data = np.array(data, dtype=np.float32)
+        data = np.array(data, dtype=np.float32)
 
     if data.dtype != np.float32 and not Tensor.did_float_warning:
       # warning? float64 is actually needed for numerical jacobian
@@ -222,17 +184,14 @@ class Tensor:
 
   def to_(self, device):
     self.data, self.device = self._move_data(self.data, device), device
-    if self.grad:
-      self.grad.to_(device)
+    if self.grad: self.grad.to_(device)
 
   def to(self, device):
     ret = Tensor(self.data, device)
-    if self.grad:
-      ret.grad = self.grad.to(device)
+    if self.grad: ret.grad = self.grad.to(device)
     return ret
 
-  def _is(self, device):
-    return self.device == device
+  def _is(self, device): return self.device == device
 
   def detach(self):
     return Tensor(self.data, device=self.device)
@@ -244,7 +203,7 @@ class Tensor:
 
   def mean(self, axis=None):
     out = self.sum(axis=axis)
-    coeff = np.prod(out.shape) / np.prod(self.shape)
+    coeff = np.prod(out.shape)/np.prod(self.shape)
     return out * coeff
 
   def sqrt(self):
@@ -260,18 +219,15 @@ class Tensor:
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
 
   def leakyrelu(self, neg_slope=0.01):
-    return self.relu() - (-neg_slope * self).relu()
+    return self.relu() - (-neg_slope*self).relu()
 
   def dropout(self, p=0.5):
-    _mask = np.asarray(
-      np.random.binomial(1, 1.0 - p, size=self.shape), dtype=self.dtype
-    )
+    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     ret = self * Tensor(_mask, requires_grad=False, device=self.device)
     return ret.div(1.0 - p)
 
   def abs(self):
-    return self.relu() + (-1.0 * self).relu()
-
+    return self.relu() + (-1.0*self).relu()
 
 # An instantiation of the Function is the Context
 class Function:
@@ -283,7 +239,7 @@ class Function:
     self.saved_tensors.extend(x)
 
   def apply(self, *x, **kwargs):
-    ctx = self(*x)  # self - operation i.e 'add', 'sub', etc.
+    ctx = self(*x) # self - operation i.e 'add', 'sub', etc.
     # use default params
     params = signature(self.forward).parameters
     for p in params.values():
@@ -293,66 +249,40 @@ class Function:
     for k, v in kwargs.items():
       setattr(ctx, k, v)
     with ProfileOp(ctx.__class__.__name__, x):
-      ret = Tensor(
-        self.forward(ctx, *[t.data for t in x], **kwargs),
-        device=ctx.device,
-        requires_grad=any([t.requires_grad for t in x]),
-      )
+      ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
+                   device=ctx.device, requires_grad=any([t.requires_grad for t in x]))
     if ret.requires_grad:
       ret._ctx = ctx
     return ret
 
-
 def register(name, fxn, device=Device.CPU):
   Tensor.ops[device][name] = fxn
-
   def dispatch(*x, **kwargs):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
-    x = [
-      Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False)
-      if not isinstance(arg, Tensor)
-      else arg
-      for arg in x
-    ]
+    x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
     f = (Tensor.ops[tt.device])[name]
     f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
     return f.apply(f, *x, **kwargs)
-
   setattr(Tensor, name, dispatch)
   # TODO: div is a second class op, so it doesn't work here
-  if name in ["add", "sub", "mul", "pow"]:
+  if name in ['add', 'sub', 'mul', 'pow']:
     setattr(Tensor, f"__{name}__", dispatch)
-    setattr(Tensor, f"__i{name}__", lambda self, x: self.assign(dispatch(self, x)))
-    setattr(Tensor, f"__r{name}__", lambda self, x: dispatch(x, self))
-
+    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
+    setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
-  setattr(
-    Tensor,
-    f"{device.lower()}",
-    functools.partialmethod(Tensor.to, Device.__dict__[device]),
-  )
-  setattr(
-    Tensor,
-    f"{device.lower()}_",
-    functools.partialmethod(Tensor.to_, Device.__dict__[device]),
-  )
-  setattr(
-    Tensor,
-    f"is_{device.lower()}",
-    property(functools.partialmethod(Tensor._is, Device.__dict__[device])),
-  )
+  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
+  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
+  setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, Device.__dict__[device])))
 
 # this registers all the operations
 import tinygrad.ops_cpu
-
 try:
   import pyopencl as cl
-
   # TODO: move this import to require_init_gpu?
   import tinygrad.ops_gpu
-
   GPU = True
 except ImportError:
   # no GPU support
   GPU = False
+
