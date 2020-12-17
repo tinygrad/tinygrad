@@ -5,7 +5,7 @@ import unittest
 import timeit
 import functools
 from tinygrad.tensor import Tensor, GPU, Device
-from .config import ANE
+#from .config import ANE
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=Device.CPU, forward_only=False):
   torch.manual_seed(0)
@@ -13,8 +13,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
   tst = [Tensor(x.detach().numpy()) for x in ts]
   if device==Device.GPU:
     tst = [x.gpu() for x in tst]
-  elif device==Device.ANE:
-    tst = [x.ane() for x in tst]
+#  elif device==Device.ANE:
+#    tst = [x.ane() for x in tst]
 
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
@@ -158,9 +158,9 @@ class TestOps(unittest.TestCase):
 class TestOpsGPU(TestOps):
   device=Device.GPU
 
-@unittest.skipUnless(ANE, "Requires ANE")
-class TestOpsANE(TestOps):
-  device=Device.ANE
+#@unittest.skipUnless(ANE, "Requires ANE")
+#class TestOpsANE(TestOps):
+#  device=Device.ANE
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -126,39 +126,48 @@ def reduce_op(ctx, code, code2, inp, axis=None):
   if axis is None:
     ret.shape = (1,)
 
+  sz = np.prod(inp.shape)//np.prod(osize)
+  assert sz <= 256
   # TODO: this is insanely slow
   reduce = clbuild(ctx.cl_ctx, "reduce", """
   __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
-                       __global const int *shape_x, __global const int *shape_ret) {
+                       __global const int *shape_x, __global const int *shape_ret, __local float *loc) {
     int gid = get_global_id(0);
-
-    float out = 0.0;
-    for (int x = 0; x < sz; x++) {
-      int idx = 0;  // compute index into a_g
-      int tprod = prod;
-      int tsz = sz;
-      for (int dim = 0; dim < n_dims; dim++) {
-        idx *= shape_x[dim];
-        if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
-          tprod /= shape_x[dim];
-          idx += (gid / tprod) % shape_x[dim];
-        } else {  // dim from x
-          tsz /= shape_x[dim];
-          idx += (x / tsz) % shape_x[dim];
-        }
+    int lid = get_local_id(0);
+      
+    int idx = 0;  // compute index into a_g
+    int tprod = prod;
+    int tsz = sz;
+    for (int dim = 0; dim < n_dims; dim++) {
+      idx *= shape_x[dim];
+      if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
+        tprod /= shape_x[dim];
+        idx += (gid / tprod) % shape_x[dim];
+      } else {  // dim from x
+        tsz /= shape_x[dim];
+        idx += (lid / tsz) % shape_x[dim];
       }
-      float a = a_g[idx];
-      """+code+""";
     }
-    res_g[gid] = """+code2+""";
+    loc[lid] = a_g[idx]; //copy into local memory
+    //see https://dournac.org/info/gpu_sum_reduction
+    for (int stride = 128; stride>0; stride /=2) {
+      barrier(CLK_LOCAL_MEM_FENCE);
+      if (lid < stride & (lid + stride) < sz)
+        loc[lid] += loc[lid + stride];
+    }
+    if (lid == 0)
+      res_g[gid] = loc[0];
   }""")
   buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
     cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-  reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
-    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
+  reduce(ctx.cl_queue, [np.prod(osize)], [sz], inp.cl,
+    i32(sz), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(osize, dtype=np.int32)))
+    buffer_np(np.array(osize, dtype=np.int32)),
+    cl.LocalMemory(1024),
+    g_times_l=True,
+    )
   return ret
 
 def unbroadcast(ctx, out, in_sh):
