@@ -129,8 +129,8 @@ class ReLU(Function):
 register('relu', ReLU)
 
 def _exp_normalize(x, axis=None):
-    y = np.exp(x - x.max(axis=axis, keepdims=True))
-    return y / y.sum(axis=axis, keepdims=True)
+  y = np.exp(x - x.max(axis=axis, keepdims=True))
+  return y / y.sum(axis=axis, keepdims=True)
 
 class Sigmoid(Function):
   @staticmethod
@@ -155,7 +155,7 @@ class LogSoftmax(Function):
   def forward(ctx, input):
     softmax = _exp_normalize(input, axis=1)
     ctx.save_for_backward(softmax)
-    return np.log(softmax) 
+    return np.log(softmax)
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -268,4 +268,3 @@ class AvgPool2D(Function):
     py, px = ctx.kernel_size
     return unstack_for_pool(lambda idx: grad_output/py/px, s, py, px)
 register('avg_pool2d', AvgPool2D)
-

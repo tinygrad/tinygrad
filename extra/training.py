@@ -23,7 +23,7 @@ def train(model, X_train, Y_train, optim, steps, num_classes=None, BS=128, devic
     out = model.forward(x)
 
     # NLL loss function
-    loss = lossfn(out, y) 
+    loss = lossfn(out, y)
     optim.zero_grad()
     loss.backward()
     optim.step()
@@ -48,4 +48,4 @@ def evaluate(model, X_test, Y_test, num_classes=None, device=Device.CPU, BS=128)
   if num_classes is None: num_classes = Y_test.max().astype(int)+1
   accuracy = numpy_eval(num_classes)
   print("test set accuracy is %f" % accuracy)
-  return accuracy 
+  return accuracy

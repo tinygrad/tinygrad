@@ -23,4 +23,3 @@ mlmodel = ct.models.MLModel(builder.spec)
 out = mlmodel.predict({"image": np.array([1337,0,0], dtype=np.float32)})
 print(out)
 mlmodel.save('test.mlmodel')
-

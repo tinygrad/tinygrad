@@ -25,4 +25,3 @@ def get_parameters(obj):
     for k,v in obj.__dict__.items():
       parameters.extend(get_parameters(v))
   return parameters
-

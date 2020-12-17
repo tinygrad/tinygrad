@@ -6,7 +6,7 @@ import faulthandler
 faulthandler.enable()
 
 libane = cdll.LoadLibrary(os.path.join(
-  os.path.dirname(os.path.abspath(__file__)), 
+  os.path.dirname(os.path.abspath(__file__)),
   "libane.dylib"))
 
 libane.ANE_Compile.argtypes = [c_char_p, c_int]
@@ -71,4 +71,3 @@ if __name__ == "__main__":
 
   print(tind)
   print(toutd)
-
