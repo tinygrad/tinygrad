@@ -48,5 +48,4 @@ jobs:
         shell: bash
         run: |
           set -e
-          exit 1
-          # pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+          pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
