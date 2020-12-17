@@ -34,7 +34,7 @@ jobs:
       run: python -m pytest -s -v
 
   linter:
-      name: Indentation Linter
+      name: Indentation  Linter
       runs-on: ubuntu-latest
 
       steps:
