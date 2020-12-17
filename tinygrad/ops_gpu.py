@@ -127,7 +127,8 @@ def reduce_op(ctx, code, code2, inp, axis=None):
   buffer_len = min(sz,256)
   groups = ((sz-1)//256+1)
 
-  ret = buffer_new(ctx, osize+[groups]) if groups > 1 else buffer_new(ctx, osize)
+  #do we want size to be np.array or list or tuple?
+  ret = buffer_new(ctx, tuple(list(osize)+[groups])) if groups > 1 else buffer_new(ctx, osize)
   if axis is None:
     ret.shape = (1,) if groups == 1 else (groups,)
   reduce = clbuild(ctx.cl_ctx, "reduce", """
@@ -164,13 +165,11 @@ def reduce_op(ctx, code, code2, inp, axis=None):
       if (lid < stride && (lid + stride) < sz)
         loc[lid] += loc[lid + stride];
     }
-    //printf("gid = %d, gsz = %d\\n", gid, gsz);
     if (lid  == 0)
       res_g[gid*groups + group] = loc[0];
   }""")
   buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
     cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-  #print([np.prod(osize),groups, buffer_len], [1,1,buffer_len],inp.shape,osize)
   reduce(ctx.cl_queue, [np.prod(osize),groups, buffer_len], [1,1,buffer_len], inp.cl,
     i32(sz), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
@@ -178,8 +177,10 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     buffer_np(np.array(osize, dtype=np.int32)),
     cl.LocalMemory(4*min(sz,256)), #4*256
     ) #reducing to osize + [groups]. If groups > 1 reduce last axis
-  return reduce_op(ctx, code, code2, ret, axis=[len(ret.shape)-1]) if groups > 1 else ret
-
+  if groups>1:
+    ret = reduce_op(ctx, code, code2, ret, axis=[len(ret.shape)-1]) 
+    ret.shape = (1,) if axis is None else tuple(osize)
+  return ret
 
 def unbroadcast(ctx, out, in_sh):
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
