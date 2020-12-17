@@ -45,4 +45,7 @@ jobs:
       - name: Enumerate Files
         run: ls -larth
       - name: Validate indentation is 2 lines
-        run: pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+        shell: bash
+        run: |
+          set -e
+          sh -c "pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py"
