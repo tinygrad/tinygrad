@@ -134,9 +134,13 @@ def _exp_normalize(x, axis=None):
 
 class Sigmoid(Function):
   @staticmethod
-  def forward(ctx, x):
-    xpad = np.pad(x.reshape((-1,1)), [(0,0),(1,0)], constant_values=0.)
-    ret = _exp_normalize(xpad, axis=1).take(1, axis=1).reshape(x.shape)
+  def forward(ctx, input):
+    with np.warnings.catch_warnings():
+      np.warnings.filterwarnings('ignore')
+      ret = np.where(input >= 0,
+        1/(1 + np.exp(-input)),
+        np.exp(input)/(1 + np.exp(input))
+      )
     ctx.save_for_backward(ret)
     return ret
 
