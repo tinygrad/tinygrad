@@ -43,4 +43,4 @@ jobs:
       - name: Install PyLint
         run: sudo apt-get install pylint
       - name: Validate indentation is 2 lines
-        run: if [[ $(pylint --jobs=0 --indent-string='  ' * | grep "Bad indentation") ]]; then exit 1; fi
+        run: pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' *
