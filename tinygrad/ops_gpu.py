@@ -165,7 +165,7 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(osize, dtype=np.int32)),
-    cl.LocalMemory(1024),
+    cl.LocalMemory(4*sz), #4*256
     g_times_l=True,
     )
   return ret
