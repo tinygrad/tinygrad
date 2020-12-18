@@ -115,7 +115,7 @@ def unary_op(ctx, code, x):
   unop(ctx.cl_queue, [np.prod(ret.shape)], None, x.cl, ret.cl)
   return ret
 
-def reduce_op(ctx, inp, axis=None, code1="a_g[idx]", code2="loc[lid]+=loc[lid + stride]", code3="loc[0]"):
+def reduce_op(ctx, inp, axis=None, code_pre="a", code_post="out"):
   if axis is None: # full reduce
     osize = [1]*len(inp.shape)
   else:
@@ -156,17 +156,19 @@ def reduce_op(ctx, inp, axis=None, code1="a_g[idx]", code2="loc[lid]+=loc[lid + 
           idx += (x / tsz) % shape_x[dim];
         }
       }
-      loc[lid] = """+code1+"""; //copy into local memory
-    }  
+      loc[lid] = """+code_pre.replace("a","a_g[idx]")+"""; //copy into local memory
+    } else {
+      loc[lid] = 0.0;
+    }
     //see https://dournac.org/info/gpu_sum_reduction
     for (int stride = 128; stride>0; stride /=2) {
       barrier(CLK_LOCAL_MEM_FENCE);
       if (lid < stride && (lid + stride) < sz) 
-        """+code2+""";
+        loc[lid] += loc[lid + stride];
     }
     if (lid  == 0) {
       if (groups == 1) {
-        res_g[gid*groups + group] = """+code3+""";
+        res_g[gid*groups + group] = """+code_post.replace("out","loc[0]")+""";
       } else { 
         res_g[gid*groups + group] = loc[0];
       }
@@ -182,7 +184,7 @@ def reduce_op(ctx, inp, axis=None, code1="a_g[idx]", code2="loc[lid]+=loc[lid + 
     cl.LocalMemory(4*min(sz,256)), #4*256
     ) #reducing to osize + [groups]. If groups > 1 reduce last axis
   if groups>1:
-    ret = reduce_op(ctx, ret, code2=code2, code3=code3, axis=[len(ret.shape)-1]) 
+    ret = reduce_op(ctx, ret, code_pre=code_pre, code_post=code_post, axis=[len(ret.shape)-1]) 
     ret.shape = (1,) if axis is None else tuple(osize)
   return ret
 
@@ -440,7 +442,7 @@ class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
     # TODO: stability?
-    lsum = reduce_op(ctx, input, code1="exp(a_g[idx])", code3="log(loc[0])", axis=[1])
+    lsum = reduce_op(ctx, input, code_pre="exp(a)", code_post="log(out)", axis=[1])
     output = binary_op(ctx, 'a-b', input, lsum)
     ctx.save_for_backward(output)
     return output

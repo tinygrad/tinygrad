@@ -5,7 +5,7 @@ import unittest
 import timeit
 import functools
 from tinygrad.tensor import Tensor, GPU, Device
-#from .config import ANE
+from .config import ANE
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=Device.CPU, forward_only=False):
   torch.manual_seed(0)
@@ -13,8 +13,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
   tst = [Tensor(x.detach().numpy()) for x in ts]
   if device==Device.GPU:
     tst = [x.gpu() for x in tst]
-#  elif device==Device.ANE:
-#    tst = [x.ane() for x in tst]
+  elif device==Device.ANE:
+    tst = [x.ane() for x in tst]
 
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
@@ -66,9 +66,9 @@ class TestOps(unittest.TestCase):
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, device=self.device)
   def test_sum(self):
-    helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, device=self.device)
+    helper_test_op([(45,65)], lambda x: x.sum(), Tensor.sum, device=self.device)
   def test_sum_axis(self):
-    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), device=self.device)
+    helper_test_op([(3,45,8,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)), device=self.device)
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)), device=self.device)
   def test_logsoftmax(self):
@@ -158,9 +158,9 @@ class TestOps(unittest.TestCase):
 class TestOpsGPU(TestOps):
   device=Device.GPU
 
-#@unittest.skipUnless(ANE, "Requires ANE")
-#class TestOpsANE(TestOps):
-#  device=Device.ANE
+@unittest.skipUnless(ANE, "Requires ANE")
+class TestOpsANE(TestOps):
+  device=Device.ANE
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
