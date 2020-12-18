@@ -13,9 +13,10 @@ def compile_relu(ane, sz):
   dat = list(open("ane/ops/relu.hwx", "rb").read())
   # TODO: make this all nice and once
   # number of engines? (max 0x100)
-  dat = ane.fill(dat, [0x1ec, 0x1f0, 0x1f4, 0x1f8], "I", max(0x100, roundup(sz*2, 0x10)))
+  dat = ane.fill(dat, [0x1ec, 0x1f0, 0x1f4, 0x1f8, 0x214], "I", max(0x100, roundup(sz*2, 0x10)))
   stride = roundup(sz*2, 0x40)
   dat = ane.filln(dat, {
+    "NeuronType": 0x11,   # 0x10 makes this a copy, 0x11 = ReLU, 0x12 = crash
     "InputWidth": sz, "OutputWidth": sz,
     "InputRowStride": stride, "InputPlaneStride": stride, "InputDepthStride": stride,
     "OutputRowStride": stride, "OutputPlaneStride": stride, "OutputDepthStride": stride})
