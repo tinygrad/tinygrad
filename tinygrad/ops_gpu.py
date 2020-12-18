@@ -116,8 +116,7 @@ def unary_op(ctx, code, x):
   return ret
 
 def reduce_op(ctx, code, code2, inp, axis=None):
-  if axis is None:
-    # full reduce
+  if axis is None: # full reduce
     osize = [1]*len(inp.shape)
   else:
     osize = np.array(inp.shape)
@@ -132,7 +131,7 @@ def reduce_op(ctx, code, code2, inp, axis=None):
   if axis is None:
     ret.shape = (1,) if groups == 1 else (groups,)
   reduce = clbuild(ctx.cl_ctx, "reduce", """
-  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
+  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret, __local float *loc) {
     int gid = get_global_id(0);
     int group = get_global_id(1);
@@ -140,8 +139,9 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     int buffer_size = get_local_size(2);
     int lid = get_local_id(2);
     int x = lid + group*buffer_size;
+
     int idx = 0;  // compute index into a_g
-    int tprod = prod;
+    int tprod = get_global_size(0);
     int tsz = sz;
     if (x < sz) {
       for (int dim = 0; dim < n_dims; dim++) {
@@ -155,10 +155,7 @@ def reduce_op(ctx, code, code2, inp, axis=None):
         }
       }
       loc[lid] = a_g[idx]; //copy into local memory
-    } 
-    else {
-      loc[lid] = 0.0;
-    }
+    }  
     //see https://dournac.org/info/gpu_sum_reduction
     for (int stride = 128; stride>0; stride /=2) {
       barrier(CLK_LOCAL_MEM_FENCE);
@@ -170,9 +167,9 @@ def reduce_op(ctx, code, code2, inp, axis=None):
   }""")
   buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
     cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-  reduce(ctx.cl_queue, [np.prod(osize),groups, buffer_len], [1,1,buffer_len], inp.cl,
+  reduce(ctx.cl_queue, [np.prod(osize),groups,buffer_len], [1,1,buffer_len], inp.cl,
     i32(sz), ret.cl,
-    i32(np.prod(osize)), i32(len(osize)),
+    i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(osize, dtype=np.int32)),
     cl.LocalMemory(4*min(sz,256)), #4*256
