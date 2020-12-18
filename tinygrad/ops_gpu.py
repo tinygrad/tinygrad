@@ -115,7 +115,7 @@ def unary_op(ctx, code, x):
   unop(ctx.cl_queue, [np.prod(ret.shape)], None, x.cl, ret.cl)
   return ret
 
-def reduce_op(ctx, code, code2, inp, axis=None):
+def reduce_op(ctx, inp, axis=None, code1="a_g[idx]", code2="loc[lid]+=loc[lid + stride]", code3="loc[0]"):
   if axis is None: # full reduce
     osize = [1]*len(inp.shape)
   else:
@@ -139,6 +139,8 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     int buffer_size = get_local_size(2);
     int lid = get_local_id(2);
     int x = lid + group*buffer_size;
+    //float out = 0.0;
+    //float a = 0.0;
 
     int idx = 0;  // compute index into a_g
     int tprod = get_global_size(0);
@@ -154,16 +156,21 @@ def reduce_op(ctx, code, code2, inp, axis=None):
           idx += (x / tsz) % shape_x[dim];
         }
       }
-      loc[lid] = a_g[idx]; //copy into local memory
+      loc[lid] = """+code1+"""; //copy into local memory
     }  
     //see https://dournac.org/info/gpu_sum_reduction
     for (int stride = 128; stride>0; stride /=2) {
       barrier(CLK_LOCAL_MEM_FENCE);
-      if (lid < stride && (lid + stride) < sz)
-        loc[lid] += loc[lid + stride];
+      if (lid < stride && (lid + stride) < sz) 
+        """+code2+""";
     }
-    if (lid  == 0)
-      res_g[gid*groups + group] = loc[0];
+    if (lid  == 0) {
+      if (groups == 1) {
+        res_g[gid*groups + group] = """+code3+""";
+      } else { 
+        res_g[gid*groups + group] = loc[0];
+      }
+    }
   }""")
   buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
     cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
@@ -175,13 +182,13 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     cl.LocalMemory(4*min(sz,256)), #4*256
     ) #reducing to osize + [groups]. If groups > 1 reduce last axis
   if groups>1:
-    ret = reduce_op(ctx, code, code2, ret, axis=[len(ret.shape)-1]) 
+    ret = reduce_op(ctx, ret, code2=code2, code3=code3, axis=[len(ret.shape)-1]) 
     ret.shape = (1,) if axis is None else tuple(osize)
   return ret
 
 def unbroadcast(ctx, out, in_sh):
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
-  return reduce_op(ctx, "out += a", "out", out, sum_axis)
+  return reduce_op(ctx, out, sum_axis)
 
 # ***** now for the ops themselves *****
 
@@ -245,7 +252,7 @@ class Sum(Function):
   @staticmethod
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
-    ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
+    ret = reduce_op(ctx, input, axis=axis)
     if axis is not None:
       ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
@@ -433,9 +440,7 @@ class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
     # TODO: stability?
-    expa = unary_op(ctx, "exp(a)", input)
-    lsumexp = reduce_op(ctx, "out += a", "log(out)", expa, axis=[1])
-    lsum = unary_op(ctx, "log(a)", lsumexp)
+    lsum = reduce_op(ctx, input, code1="exp(a_g[idx])", code3="log(loc[0])", axis=[1])
     output = binary_op(ctx, 'a-b', input, lsum)
     ctx.save_for_backward(output)
     return output
@@ -443,7 +448,7 @@ class LogSoftmax(Function):
   @staticmethod
   def backward(ctx, grad_output):
     output, = ctx.saved_tensors
-    lsum = reduce_op(ctx, "out += a", "out", grad_output, axis=[1])
+    lsum = reduce_op(ctx, grad_output, axis=[1])
     texp = binary_op(ctx, "exp(a) * b", output, lsum)
     return binary_op(ctx, "a - b", grad_output, texp)
 register('logsoftmax', LogSoftmax, device=Device.GPU)
