@@ -10,26 +10,26 @@
 	<string>1.0.9</string>
 	<key>net</key>
 	<dict>
-    <!-- This is a one layer network -->
 		<key>Inputs</key>
 		<array>
-			<string>image</string>
-		</array>
-		<key>Units</key>
-		<array>
-			<string>my_layer</string>
+			<string>input_1</string>
+			<string>input_0</string>
 		</array>
 		<key>Outputs</key>
 		<array>
-			<string>probs@output</string>
+			<string>output@output</string>
 		</array>
-
-		<key>image</key>
+		<key>Units</key>
+		<array>
+			<string>output</string>
+		</array>
+		<key>Weights</key>
+		<array>
+			<string>/private/var/folders/l8/38vj8bm52_gfgsqgdn__sh2w0000gn/T/tmp0yvkl2ux.mlmodelc/model.espresso.weights</string>
+			<string>net.additional.weights</string>
+		</array>
+		<key>input_0</key>
 		<dict>
-      <!-- default is 1 -->
-			<key>BatchSize</key>
-			<integer>1</integer>
-
 			<key>InputChannels</key>
 			<integer>1</integer>
 			<key>InputHeight</key>
@@ -40,30 +40,39 @@
 			<key>InputType</key>
 			<string>Float16</string>
 		</dict>
+		<key>input_1</key>
+		<dict>
+			<key>InputChannels</key>
+			<integer>1</integer>
+			<key>InputHeight</key>
+			<integer>1</integer>
+			<key>InputWidth</key>
+			<integer>77</integer>
 
-		<key>my_layer</key>
+			<key>InputType</key>
+			<string>Float16</string>
+		</dict>
+		<key>output</key>
 		<dict>
 			<key>Bottom</key>
-			<string>image</string>
+			<array>
+				<string>input_0</string>
+				<string>input_1</string>
+			</array>
 			<key>Name</key>
-			<string>my_layer</string>
+			<string>output</string>
 			<key>OutputType</key>
 			<string>Float16</string>
-			<key>Params</key>
-			<dict>
-				<key>Type</key>
-				<string>ReLU</string>
-			</dict>
 			<key>Type</key>
-			<string>Neuron</string>
+			<string>Concat</string>
 		</dict>
-
-		<key>probs@output</key>
+		<key>output@output</key>
 		<dict>
 			<key>Bottom</key>
-			<string>my_layer</string>
+			<string>output</string>
+			<key>OutputType</key>
+			<string>Float16</string>
 		</dict>
-
 	</dict>
 </dict>
 </plist>

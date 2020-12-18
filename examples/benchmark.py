@@ -7,7 +7,7 @@ import time
 ba = Tensor(np.random.normal(size=(0x4000,)))
 for dev in ["CPU", "GPU", "ANE"]:
   if dev == "GPU":
-    baa = ba.cuda()
+    baa = ba.gpu()
   elif dev == "ANE":
     baa = ba.ane()
   else:

@@ -40,6 +40,17 @@ for k,v in syms.items():
   print(k, hex(v))
 
 
+from ane import ANE_Struct
+
+aneb = set()
+for typ, num, nam in ANE_Struct:
+  ltyp = {"u32": 4, "u16": 2, "u8": 1}[typ]
+  for l in range(num, num+ltyp):
+    aneb.add(l)
+
+# we understand these too
+for l in range(0x34, 0xF4):
+  aneb.add(l)
 
 from termcolor import colored
 def compare(x, y):
@@ -80,8 +91,12 @@ def compare(x, y):
         ln.append(colored(a[0], 'yellow'))
         ln2.append(colored(a[1], 'yellow'))
       else:
-        ln.append(a[0])
-        ln2.append(a[1])
+        if i in aneb:
+          ln.append(colored(a[0], 'white'))
+          ln2.append(colored(a[1], 'white'))
+        else:
+          ln.append(a[0])
+          ln2.append(a[1])
   return ''.join(ss)
 
 g = get_macho("model.hwx.golden" if len(sys.argv) < 2 else sys.argv[1])
