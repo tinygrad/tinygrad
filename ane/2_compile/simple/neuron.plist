@@ -35,7 +35,7 @@
 			<key>InputHeight</key>
 			<integer>1</integer>
 			<key>InputWidth</key>
-			<integer>678</integer>
+			<integer>200</integer>
 
 			<key>InputType</key>
 			<string>Float16</string>

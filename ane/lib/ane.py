@@ -3,10 +3,11 @@ import os
 from ctypes import *
 import numpy as np
 import faulthandler
+import struct
 faulthandler.enable()
 
 libane = cdll.LoadLibrary(os.path.join(
-  os.path.dirname(os.path.abspath(__file__)),
+  os.path.dirname(os.path.abspath(__file__)), 
   "libane.dylib"))
 
 libane.ANE_Compile.argtypes = [c_char_p, c_int]
@@ -67,6 +68,10 @@ ANE_Struct = [
 
   ("u8",  0x273, "OutputInterleave")]
 
+ANE_Struct_Dict = {}
+for typ, num, nam in ANE_Struct:
+  styp = {"u32": "I", "u16": "H", "u8": "B"}[typ]
+  ANE_Struct_Dict[nam] = (styp, num)
 
 class ANETensor:
   def __init__(self, *shape):
@@ -101,6 +106,18 @@ class ANE:
   def tensor(self, shape):
     return ANETensor(shape)
 
+  def filln(self, dat, nvdict, base=0x4000):
+    for n,v in nvdict.items():
+      styp, num = ANE_Struct_Dict[n]
+      dat = self.fill(dat, [num], styp, v)
+    return dat
+
+  def fill(self, dat, addrs, type, val, base=0x4000):
+    x = struct.pack(type, val)
+    for a in addrs:
+      dat[base+a:base+a+len(x)] = x
+    return dat
+
 if __name__ == "__main__":
   ane = ANE()
 
@@ -120,3 +137,4 @@ if __name__ == "__main__":
   print("** after **")
   print(tind)
   print(toutd)
+
