@@ -37,6 +37,7 @@ ANE_Struct = [
   ("u16", 0x12C, "InputDepth"),
 
   ("u32", 0x130, "InputOutputType"),   # (OutputType * 0x10) | InputType
+                                       # UInt8 = 0, Int8 = 1, Float16 = 2
 
   ("u32", 0x134, "InputChannels"),
   ("u32", 0x138, "OutputChannels"),
@@ -70,7 +71,7 @@ ANE_Struct = [
   ("u16", 0x246, "NeuronType"),  # 0x10 = copy, 0x11 = ReLU, 0x12 = custom
 
 # section @ 0x258 len 0x18
-  ("u32", 0x25C, "OutputOffset"),  # offset into output buffer to write at
+  ("u32", 0x25C, "OutputOffset"),  # offset into output buffer to write at?
 
   ("u32", 0x260, "OutputRowStride"),
   ("u32", 0x264, "OutputPlaneStride"),
