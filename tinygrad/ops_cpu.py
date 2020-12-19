@@ -252,4 +252,4 @@ class AvgPool2D(Function):
     py, px = ctx.kernel_size    
     return unstack_for_pool(lambda idx: grad_output/py/px, s, py, px)
 
-register(OPS_NAMES, [Add, Sub, Mul, Pow, Sum, Dot, Pad2D, Reshape, ReLu, Sigmoid, LogSoftmax, Conv2D, MaxPool2D, AvgPool2D])
+register(OPS_NAMES, [Add, Sub, Mul, Pow, Sum, Dot, Pad2D, Reshape, ReLU, Sigmoid, LogSoftmax, Conv2D, MaxPool2D, AvgPool2D])
