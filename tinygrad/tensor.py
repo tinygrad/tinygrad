@@ -18,8 +18,7 @@ if DEBUG:
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    self.name = ("back_" if backward else "")+name
-    self.x = x
+    self.name, self.x = f"back_{name}" if backward else name, x
   def __enter__(self):
     if DEBUG: self.st = time.time()
   def __exit__(self, *junk):
@@ -74,14 +73,12 @@ class Tensor:
 
   def __init__(self, data, device=Device.CPU, requires_grad=True):
     self.data = self._move_data(data, device)
-
     self.device, self.grad, self.requires_grad = device, None, requires_grad
-
     # internal variables used for autograd graph construction
     self._ctx = None
 
   def __repr__(self):
-    return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
+    return f"<Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}>"
 
   def assign(self, x):
     self.data = x.data
@@ -127,7 +124,6 @@ class Tensor:
 
   def backward(self):
     assert self.shape == (1,)
-
     # fill in the first grad with one
     # this is "implicit gradient creation"
     self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), device=self.device, requires_grad=False)
@@ -138,7 +134,7 @@ class Tensor:
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
-      for t,g in zip(t0._ctx.parents, grads):
+      for t, g in zip(t0._ctx.parents, grads):
         if g is not None:
           assert g.shape == t.shape, \
             f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
