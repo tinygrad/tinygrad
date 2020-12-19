@@ -178,7 +178,6 @@ class Add(Function):
     grad_x, grad_y = grad_output, grad_output
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
-register('add', Add, device=Device.GPU)
 
 class Sub(Function):
   @staticmethod
