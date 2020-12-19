@@ -40,6 +40,7 @@ for k,v in syms.items():
   print(k, hex(v))
 
 
+# **** document what we know ***
 from ane import ANE_Struct
 
 aneb = set()
