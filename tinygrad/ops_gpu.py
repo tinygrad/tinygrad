@@ -541,4 +541,4 @@ class Conv2D(Function):
     convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
     convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
-register(OPS_NAMES, [Add, Sub, Mul, Pow, Sum, Dot, Pad2D, Reshape, ReLu, Sigmoid, LogSoftmax, Conv2D, MaxPool2D, AvgPool2D], device=Device.GPU))
+register(OPS_NAMES, [Add, Sub, Mul, Pow, Sum, Dot, Pad2D, Reshape, ReLU, Sigmoid, LogSoftmax, Conv2D, MaxPool2D, AvgPool2D], device=Device.GPU)

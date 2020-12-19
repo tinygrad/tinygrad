@@ -28,4 +28,4 @@ class ReLU(Function):
     ret = ctx.ane.tensor(input.shape)
     ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
     return ret
-register([OPS_NAMES[8]], [ReLu], device=Device.ANE)
+register([OPS_NAMES[8]], [ReLU], device=Device.ANE)
