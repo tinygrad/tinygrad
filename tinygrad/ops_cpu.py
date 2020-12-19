@@ -105,7 +105,6 @@ class Reshape(Function):
     in_shape, = ctx.saved_tensors
     return grad_output.reshape(in_shape)
 
-
 # ************* activation ops *************
 
 class ReLU(Function):
@@ -151,7 +150,6 @@ class LogSoftmax(Function):
   def backward(ctx, grad_output):
     softmax, = ctx.saved_tensors
     return grad_output - grad_output.sum(axis=1, keepdims=True)*softmax
-
 
 # ************* conv ops *************
 
@@ -209,7 +207,6 @@ class Conv2D(Function):
         gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-
 
 # ************* pooling ops *************
 

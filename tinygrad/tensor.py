@@ -257,7 +257,7 @@ class Function:
     return ret
 
 def register(names, fxns, device=Device.CPU):
-  for name, fxn, device in zip(names, fxns, [device]*len(names):  
+  for name, fxn, device in zip(names, fxns, [device]*len(names)):  
     Tensor.ops[device][name] = fxn
     def dispatch(*x, **kwargs):
       tt = [arg for arg in x if isinstance(arg, Tensor)][0]
