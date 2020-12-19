@@ -1,4 +1,4 @@
-from .tensor import Device, Function, register
+from .tensor import Device, Function, register, OPS_NAMES
 from functools import lru_cache
 
 @lru_cache
@@ -28,4 +28,4 @@ class ReLU(Function):
     ret = ctx.ane.tensor(input.shape)
     ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
     return ret
-register('relu', ReLU, device=Device.ANE)
+register([OPS_NAMES[8]], [ReLu], device=Device.ANE)

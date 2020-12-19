@@ -1,6 +1,6 @@
 import warnings
 import numpy as np
-from .tensor import Function, register
+from .tensor import Function, register, OPS_NAMES
 
 # ************* basic ops *************
 def unbroadcast(out, in_sh):
@@ -18,7 +18,6 @@ class Add(Function):
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x), unbroadcast(grad_output, shape_y)
-register('add', Add)
 
 class Sub(Function):
   @staticmethod
@@ -30,7 +29,6 @@ class Sub(Function):
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x), unbroadcast(-grad_output, shape_y)
-register('sub', Sub)
 
 class Mul(Function):
   @staticmethod
@@ -42,7 +40,6 @@ class Mul(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return unbroadcast(y*grad_output, x.shape), unbroadcast(x*grad_output, y.shape)
-register('mul', Mul)
 
 class Pow(Function):
   @staticmethod
@@ -55,7 +52,6 @@ class Pow(Function):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
            unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
-register('pow', Pow)
 
 class Sum(Function):
   @staticmethod
@@ -68,7 +64,6 @@ class Sum(Function):
     input, axis = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     return grad_output.reshape(shape) + np.zeros_like(input)
-register('sum', Sum)
 
 
 # ************* GEMM *************
@@ -85,7 +80,6 @@ class Dot(Function):
     grad_input = grad_output.dot(weight.T)
     grad_weight = input.T.dot(grad_output)
     return grad_input, grad_weight
-register('dot', Dot)
 
 # ************* simple ops *************
 
@@ -99,7 +93,6 @@ class Pad2D(Function):
   def backward(ctx, grad_output):
     padding, = ctx.saved_tensors
     return grad_output[..., padding[2]:-padding[3], padding[0]:-padding[1]]
-register('pad2d', Pad2D)
 
 class Reshape(Function):
   @staticmethod
@@ -111,7 +104,6 @@ class Reshape(Function):
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
     return grad_output.reshape(in_shape)
-register('reshape', Reshape)
 
 
 # ************* activation ops *************
@@ -126,7 +118,6 @@ class ReLU(Function):
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return grad_output * (input >= 0)
-register('relu', ReLU)
 
 def _exp_normalize(x, axis=None):
   y = np.exp(x - x.max(axis=axis, keepdims=True))
@@ -148,7 +139,6 @@ class Sigmoid(Function):
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
     return grad_output * (ret * (1 - ret))
-register('sigmoid', Sigmoid)
 
 class LogSoftmax(Function):
   @staticmethod
@@ -161,7 +151,6 @@ class LogSoftmax(Function):
   def backward(ctx, grad_output):
     softmax, = ctx.saved_tensors
     return grad_output - grad_output.sum(axis=1, keepdims=True)*softmax
-register('logsoftmax', LogSoftmax)
 
 
 # ************* conv ops *************
@@ -220,7 +209,6 @@ class Conv2D(Function):
         gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-register('conv2d', Conv2D)
 
 
 # ************* pooling ops *************
@@ -253,7 +241,6 @@ class MaxPool2D(Function):
   def backward(ctx, grad_output):
     idxs,s = ctx.saved_tensors
     return unstack_for_pool(lambda idx: grad_output * (idxs == idx), s, *ctx.kernel_size)
-register('max_pool2d', MaxPool2D)
 
 class AvgPool2D(Function):
   @staticmethod
@@ -265,6 +252,7 @@ class AvgPool2D(Function):
   @staticmethod
   def backward(ctx, grad_output):
     s, = ctx.saved_tensors
-    py, px = ctx.kernel_size
+    py, px = ctx.kernel_size    
     return unstack_for_pool(lambda idx: grad_output/py/px, s, py, px)
-register('avg_pool2d', AvgPool2D)
+
+register(OPS_NAMES, [Add, Sub, Mul, Pow, Sum, Dot, Pad2D, Reshape, ReLu, Sigmoid, LogSoftmax, Conv2D, MaxPool2D, AvgPool2D])

@@ -4,6 +4,7 @@ import functools
 import numpy as np
 import os
 from collections import defaultdict
+OPS_NAMES = ['add', 'sub', 'mul', 'pow', 'sum', 'dot', 'pad2d', 'reshape', 'relu', 'sigmoid', 'logsoftmax', 'conv2d', 'max_pool2d', 'avg_pool2d']
 
 # **** profiler ****
 
@@ -255,20 +256,21 @@ class Function:
       ret._ctx = ctx
     return ret
 
-def register(name, fxn, device=Device.CPU):
-  Tensor.ops[device][name] = fxn
-  def dispatch(*x, **kwargs):
-    tt = [arg for arg in x if isinstance(arg, Tensor)][0]
-    x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    f = (Tensor.ops[tt.device])[name]
-    f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
-    return f.apply(f, *x, **kwargs)
-  setattr(Tensor, name, dispatch)
-  # TODO: div is a second class op, so it doesn't work here
-  if name in ['add', 'sub', 'mul', 'pow']:
-    setattr(Tensor, f"__{name}__", dispatch)
-    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
-    setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
+def register(names, fxns, device=Device.CPU):
+  for name, fxn, device in zip(names, fxns, [device]*len(names):  
+    Tensor.ops[device][name] = fxn
+    def dispatch(*x, **kwargs):
+      tt = [arg for arg in x if isinstance(arg, Tensor)][0]
+      x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
+      f = (Tensor.ops[tt.device])[name]
+      f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
+      return f.apply(f, *x, **kwargs)
+    setattr(Tensor, name, dispatch)
+    # TODO: div is a second class op, so it doesn't work here
+    if name in ['add', 'sub', 'mul', 'pow']:
+      setattr(Tensor, f"__{name}__", dispatch)
+      setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
+      setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
