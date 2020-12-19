@@ -17,14 +17,15 @@ a = get_macho("model.hwx")
 
 # load commands
 for c in a.headers[0].commands:
-  print(c[0])
+  print("command", c[0], c[1])
   if c[0].cmd == 25:
-    print(c[1])
     for section in c[2]:
       print(section.segname.strip(b'\0'), section.sectname.strip(b'\0'), hex(section.addr), hex(section.size), "@", hex(c[1].fileoff))
       #print(dir(section))
       if c[1].filesize > 0:
         hexdump(section.section_data)
+
+
 
 # this parser is wrong (fixed with 64-bit one)
 from macholib import SymbolTable

@@ -31,11 +31,11 @@
 		<key>input_0</key>
 		<dict>
 			<key>InputChannels</key>
-			<integer>1</integer>
+			<integer>16</integer>
 			<key>InputHeight</key>
 			<integer>1</integer>
 			<key>InputWidth</key>
-			<integer>77</integer>
+			<integer>1</integer>
 
 			<key>InputType</key>
 			<string>Float16</string>
@@ -43,11 +43,11 @@
 		<key>input_1</key>
 		<dict>
 			<key>InputChannels</key>
-			<integer>1</integer>
+			<integer>16</integer>
 			<key>InputHeight</key>
 			<integer>1</integer>
 			<key>InputWidth</key>
-			<integer>77</integer>
+			<integer>1</integer>
 
 			<key>InputType</key>
 			<string>Float16</string>
