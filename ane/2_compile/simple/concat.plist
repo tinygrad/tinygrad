@@ -31,7 +31,7 @@
 		<key>input_0</key>
 		<dict>
 			<key>InputChannels</key>
-			<integer>16</integer>
+			<integer>16384</integer>
 			<key>InputHeight</key>
 			<integer>1</integer>
 			<key>InputWidth</key>
