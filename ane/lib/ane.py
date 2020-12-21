@@ -10,7 +10,7 @@ libane = None
 def init_libane():
   global libane
   libane = cdll.LoadLibrary(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), 
+    os.path.dirname(os.path.abspath(os.path.realpath(__file__))), 
     "libane.dylib"))
 
   libane.ANE_Compile.argtypes = [c_char_p, c_int]
@@ -23,6 +23,8 @@ def init_libane():
 
   libane.ANE_Run.argtypes = [c_void_p]*3
   libane.ANE_Run.restype = c_int
+
+  libane.ANE_RegDebug.restype = c_char_p
 
 ANE_Struct = [
 # aneTD.Header
@@ -133,6 +135,18 @@ class ANE:
 
   def tensor(self, shape):
     return ANETensor(shape)
+
+  def debug(self, dat, mems=0):
+    add = [0x30, 0x1d4, 0x220, 0x29c, 0x2f0, 0x30c, 0x32c]
+    ptr = 0x2b
+    ddat = dat[0:0x28]
+    for a in add:
+      pm = dat[ptr]
+      ddat += b"\x00" * (a-len(ddat))
+      ddat += dat[ptr+1:ptr+1+pm+4]
+      ptr += pm+8
+    ddat += b"\x00" * 8
+    return libane.ANE_RegDebug(0, create_string_buffer(ddat), mems).decode('utf-8')
 
   def filln(self, dat, nvdict, base=0x4000):
     for n,v in nvdict.items():

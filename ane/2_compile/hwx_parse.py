@@ -44,7 +44,8 @@ for k,v in syms.items():
 
 
 # **** document what we know ***
-from ane import ANE_Struct
+from ane import ANE_Struct, ANE
+ane = ANE()
 
 aneb = set()
 for typ, num, nam in ANE_Struct:
@@ -108,6 +109,8 @@ f1 = g.headers[0].commands[1][2][0].section_data
 f2 = a.headers[0].commands[1][2][0].section_data
 for i in range(0, len(f2), 0x300):
   print("===== op %d =====" % (i//0x300))
+  dbg = ane.debug(f2[i:i+0x300])
+  print(dbg)
   if len(f1) < 0x300:
     print(compare(f1, f2[i:i+0x300]))
   else:
