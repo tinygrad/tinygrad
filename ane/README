@@ -72,8 +72,12 @@ ANECCompileProcedure
             0x4   @ 0x240-0x254
             0x6   @ 0x258-0x274(end)
           AddReloc (this is gold! x4 goes in the hwx)
+          ZinAneTd<7u>::HandleEngineLayer
 
 rbreak ^ZinAneInstruction*
+
+weeee ZinIrRegBitPrintOutDebug_7u_
+print (void)debugregs(0, 0x0000000100310f30, 0)
 
 == min.plist == 
 

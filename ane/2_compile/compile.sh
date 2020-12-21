@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -e
 g++ compile.mm -F /System/Library/PrivateFrameworks/ -framework ANECompiler -framework CoreFoundation
 rm -f model.hwx
 ./a.out net.plist debug

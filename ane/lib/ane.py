@@ -25,6 +25,8 @@ def init_libane():
   libane.ANE_Run.restype = c_int
 
 ANE_Struct = [
+  ("u32", 0x1C, "NextCommandOffset"),
+
 # section @ 0x2C len 0xF4
   # reloc 0x2c-0x34?? = weights
   # u32[16] 0x34-0x74 = 0x80 | 1 if used
@@ -73,13 +75,20 @@ ANE_Struct = [
   ("u16", 0x246, "NeuronType"),  # 0x10 = copy, 0x11 = ReLU, 0x12 = custom
 
 # section @ 0x258 len 0x18
+# HandleTileDmaDstConfig
+  # 0x258 -- *(uint *)(this + 0x334) = *(uint *)(this + 0x334) & 0xfffffc3f | 0xc0;
+  #          (GetCacheHintRegisterValue & 0xf) << 6;
   ("u32", 0x25C, "OutputOffset"),  # offset into output buffer to write at?
 
+  # 0x260 -- *(uint *)(this + 0x33c) = *(uint *)(this + 0x33c) & 0x3f | (int)uVar10 << 6;
   ("u32", 0x260, "OutputRowStride"),
   ("u32", 0x264, "OutputPlaneStride"),
   ("u32", 0x268, "OutputDepthStride"),
   ("u32", 0x26C, "OutputBatchStride"),
 
+  # 0x270 -- *(uint *)(this + 0x34c) = *(uint *)(this + 0x34c) & 0xf0ffffff | 0x1000000;
+  #  uVar6 = *(uint *)(this + 0x34c) & 0xffffcfcc | 0x2031;
+  #          (ZinTensorDescriptorDmaInterleave & 0xf) << 0x18;
   ("u8",  0x273, "OutputInterleave"),    # i also have this at 0x211?
 ]
 
