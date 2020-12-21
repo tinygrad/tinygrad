@@ -146,7 +146,7 @@ class LogSoftmax(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-      return (lambda gout, s: gout - gout.sum(axis=1, keepdims=True)*s)(grad_output, *ctx.saved_tensors)
+    return (lambda gout, s: gout - gout.sum(axis=1, keepdims=True)*s)(grad_output, *ctx.saved_tensors)
 register('logsoftmax', LogSoftmax)
 
 
