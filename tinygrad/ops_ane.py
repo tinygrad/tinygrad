@@ -2,11 +2,8 @@ from .tensor import Device, Function, register
 from functools import lru_cache
 
 @lru_cache
-def compile_wrapper(ane, dat):
-  return ane.compile(dat)
-
-def roundup(x, v):
-  return x + (v-x)%v
+def compile_wrapper(ane, dat): return ane.compile(dat)
+def roundup(x, v): return x + (v-x)%v
 
 @lru_cache
 def compile_relu(ane, sz):
@@ -24,8 +21,8 @@ def compile_relu(ane, sz):
 
 class ReLU(Function):
   @staticmethod
-  def forward(ctx, input):
-    ret = ctx.ane.tensor(input.shape)
-    ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
+  def forward(ctx, _input):
+    ret = ctx.ane.tensor(_input.shape)
+    ctx.ane.run(compile_relu(ctx.ane, _input.sz), _input, ret)
     return ret
 register('relu', ReLU, device=Device.ANE)

@@ -7,11 +7,9 @@ def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
 @functools.lru_cache()
-def clbuild(cl_ctx, name, prg):
-  return cl.Program(cl_ctx, prg).build().__getattr__(name)
+def clbuild(cl_ctx, name, prg): return cl.Program(cl_ctx, prg).build().__getattr__(name)
 
-def uint2(x, y):
-  return np.array((x,y), dtype=cl.cltypes.uint2)
+def uint2(x, y): return np.array((x,y), dtype=cl.cltypes.uint2)
 i32 = np.int32
 
 def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, decls=''):
@@ -175,9 +173,7 @@ class Add(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    grad_x, grad_y = grad_output, grad_output
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
+    return tuple([unbroadcast(ctx, grad, shape) for (grad, shape) in zip([grad_output]*2, ctx.saved_tensors)])
 register('add', Add, device=Device.GPU)
 
 class Sub(Function):
@@ -188,30 +184,25 @@ class Sub(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
+    return tuple([unbroadcast(ctx, grad, shape) for (grad, shape) in zip([grad_output, unary_op(ctx, '-a', grad_output)], ctx.saved_tensors)])
 register('sub', Sub, device=Device.GPU)
 
 class Mul(Function):
   @staticmethod
   def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return binary_op(ctx, 'a*b', x, y)
+    return (lambda x, y: binary_op(ctx, 'a*b', x, y))(*ctx.save_for_backward(x, y))
 
   @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x = binary_op(ctx, 'a*b', y, grad_output)
-    grad_y = binary_op(ctx, 'a*b', x, grad_output)
+    grad_x, grad_y = binary_op(ctx, 'a*b', y, grad_output), binary_op(ctx, 'a*b', x, grad_output)
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
 register('mul', Mul, device=Device.GPU)
 
 class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return binary_op(ctx, 'pow(a,b)', x, y)
+    return binary_op(ctx, 'pow(a,b)', *ctx.save_for_backward(x, y))
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -225,26 +216,23 @@ register('pow', Pow, device=Device.GPU)
 
 class Sum(Function):
   @staticmethod
-  def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input, axis)
-    ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
-    if axis is not None:
-      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+  def forward(ctx, _input, axis=None):
+    ret = (lambda i,a: reduce_op(ctx, "out += a", "out", i, axis=a))(*ctx.save_for_backward(_input, axis))
+    if axis is not None: ret.shape = tuple([_input.shape[i] for i in range(len(_input.shape)) if i not in axis])
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    output = GPUBuffer(shape, hostbuf=grad_output)
-    return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
+    _input, axis = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else _input.shape[i] for i in range(len(_input.shape))]
+    return binary_op(ctx, 'a+b', GPUBuffer(shape, hostbuf=grad_output), buffer_new(ctx, _input.shape, zero=True))
 register('sum', Sum, device=Device.GPU)
 
 class Dot(Function):
   @staticmethod
-  def forward(ctx, input, weight):
-    assert input.shape[1] == weight.shape[0]
-    isize, msize, osize = i32(input.shape[0]), i32(input.shape[1]), i32(weight.shape[1])
+  def forward(ctx, _input, weight):
+    assert _input.shape[1] == weight.shape[0]
+    isize, msize, osize = i32(_input.shape[0]), i32(_input.shape[1]), i32(weight.shape[1])
     ret = buffer_new(ctx, (isize, osize))
 
     matmul = clbuild(ctx.cl_ctx, "matmul", """
@@ -262,20 +250,20 @@ class Dot(Function):
 
       res[X * osize + Y] = ret;
     }""")
-    ctx.save_for_backward(input, weight, matmul)
+    ctx.save_for_backward(_input, weight, matmul)
 
     # (isize,msize) x (msize,osize) = (isize,osize)
     matmul(ctx.cl_queue, [isize, osize], None,
-      input.cl, weight.cl, ret.cl,
+      _input.cl, weight.cl, ret.cl,
       msize, i32(1), msize, i32(1), osize, osize)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, weight, matmul = ctx.saved_tensors
-    isize, msize, osize = i32(input.shape[0]), i32(input.shape[1]), i32(weight.shape[1])
+    _input, weight, matmul = ctx.saved_tensors
+    isize, msize, osize = i32(_input.shape[0]), i32(_input.shape[1]), i32(weight.shape[1])
 
-    grad_input = buffer_new(ctx, input.shape)
+    grad_input = buffer_new(ctx, _input.shape)
     grad_weight = buffer_new(ctx, weight.shape)
 
     # (isize,osize) x (msize,osize) = (isize,msize)
@@ -285,7 +273,7 @@ class Dot(Function):
 
     # (isize,msize) x (isize,osize) = (msize,osize)
     matmul(ctx.cl_queue, [msize, osize], None,
-      input.cl, grad_output.cl, grad_weight.cl,
+      _input.cl, grad_output.cl, grad_weight.cl,
       i32(1), msize, isize, i32(1), osize, osize)
 
     return grad_input, grad_weight
@@ -337,57 +325,46 @@ register('pad2d', Pad2D, device=Device.GPU)
 class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    r = GPUBuffer(shape, hostbuf=x)
-    assert np.prod(x.shape) == np.prod(r.shape)
+    r = GPUBuffer(tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape), hostbuf=x)
+    assert np.prod(ctx.save_for_backward(x.shape)) == np.prod(r.shape)
     return r
 
   @staticmethod
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return GPUBuffer(in_shape, hostbuf=grad_output)
+  def backward(ctx, grad_output): return GPUBuffer(*ctx.saved_tensors, hostbuf=grad_output)
 register('reshape', Reshape, device=Device.GPU)
 
 # ************* activation ops *************
 
 class ReLU(Function):
   @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'max(a, (float)0.)', input)
+  def forward(ctx, _input):
+    return unary_op(ctx, 'max(a, (float)0.)', *ctx.save_for_backward(_input))
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
+    return binary_op(ctx, 'a * (b >= 0)', grad_output, *ctx.saved_tensors)
 register('relu', ReLU, device=Device.GPU)
 
 class Sigmoid(Function):
   @staticmethod
-  def forward(ctx, input):
-    ret = unary_op(ctx, '1./(1+exp(-a))', input)
-    ctx.save_for_backward(ret)
-    return ret
+  def forward(ctx, _input):
+    return ctx.save_for_backward(unary_op(ctx, '1./(1+exp(-a))', _input))[0]
 
   @staticmethod
   def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b * (1 - b));', grad_output, ret)
+    return binary_op(ctx, 'a * (b * (1 - b));', grad_output, *ctx.saved_tensors)
 register('sigmoid', Sigmoid, device=Device.GPU)
 
 class AvgPool2D(Function):
   @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2)):
-    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op="sumval += input[iid]",
+  def forward(ctx, _input, kernel_size=(2, 2)):
+    ctx.save_for_backward(_input.shape)
+    return subsample_op(ctx, _input, kernel_size, kernel_size, iter_op="sumval += input[iid]",
       result_op="sumval / (ksz.x * ksz.y)", decls="float sumval=0.f")
-    ctx.save_for_backward(input.shape)
-    return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    orig_shape, = ctx.saved_tensors
-    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
+    return supersample_op(ctx, grad_output, *ctx.saved_tensors, ctx.kernel_size,
       result_op="input[iid] / (ksz.x * ksz.y)")
 register('avg_pool2d', AvgPool2D, device=Device.GPU)
 
@@ -413,18 +390,15 @@ register('max_pool2d', MaxPool2D, device=Device.GPU)
 
 class LogSoftmax(Function):
   @staticmethod
-  def forward(ctx, input):
+  def forward(ctx, _input):
     # TODO: stability?
-    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, axis=[1])
-    output = binary_op(ctx, 'a-b', input, lsum)
-    ctx.save_for_backward(output)
-    return output
+    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", _input, axis=[1])
+    return ctx.save_for_backward(binary_op(ctx, 'a-b', _input, lsum))[0]
 
   @staticmethod
   def backward(ctx, grad_output):
-    output, = ctx.saved_tensors
     lsum = reduce_op(ctx, "out += a", "out", grad_output, axis=[1])
-    texp = binary_op(ctx, "exp(a) * b", output, lsum)
+    texp = binary_op(ctx, "exp(a) * b", *ctx.saved_tensors, lsum)
     return binary_op(ctx, "a - b", grad_output, texp)
 register('logsoftmax', LogSoftmax, device=Device.GPU)
 

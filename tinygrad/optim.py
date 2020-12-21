@@ -8,8 +8,7 @@ class Optimizer:
     self.params = [x for x in params if x.requires_grad == True]
 
   def zero_grad(self):
-    for param in self.params:
-      param.grad = None
+    for param in self.params: param.grad = None
 
 class SGD(Optimizer):
   def __init__(self, params, lr=0.001):
@@ -17,14 +16,12 @@ class SGD(Optimizer):
     self.lr = lr
 
   def step(self):
-    for t in self.params:
-      t -= t.grad * self.lr
+    for t in self.params: t -= t.grad * self.lr
 
 class RMSprop(Optimizer):
   def __init__(self, params, lr=0.001, decay=0.9, eps=1e-8):
     super().__init__(params)
     self.lr, self.decay, self.eps = lr, decay, eps
-
     self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), device=params[0].device, requires_grad=False) for t in self.params]
 
   def step(self):

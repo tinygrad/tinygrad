@@ -35,8 +35,7 @@ register('sub', Sub)
 class Mul(Function):
   @staticmethod
   def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return x*y
+    return (lambda x,y: x*y)(*ctx.save_for_backward(x, y))
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -47,8 +46,8 @@ register('mul', Mul)
 class Pow(Function):
   @staticmethod
   def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return x ** y
+    return (lambda x,y: x**y)(*ctx.save_for_backward(x, y))
+
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -59,9 +58,8 @@ register('pow', Pow)
 
 class Sum(Function):
   @staticmethod
-  def forward(ctx, input,axis=None):
-    ctx.save_for_backward(input, axis)
-    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
+  def forward(ctx, _input, axis=None):
+    return (lambda i, a: np.array([i.sum()]) if a is None else _input.sum(axis=a))(*ctx.save_for_backward(_input, axis))
 
   @staticmethod
   def backward(ctx, grad_output):
@@ -75,16 +73,13 @@ register('sum', Sum)
 
 class Dot(Function):
   @staticmethod
-  def forward(ctx, input, weight):
-    ctx.save_for_backward(input, weight)
-    return input.dot(weight)
+  def forward(ctx, _input, weight):
+    return (lambda i, w: i.dot(w))(*ctx.save_for_backward(_input, weight))
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, weight = ctx.saved_tensors
-    grad_input = grad_output.dot(weight.T)
-    grad_weight = input.T.dot(grad_output)
-    return grad_input, grad_weight
+    _input, weight = ctx.saved_tensors
+    return grad_output.dot(weight.T), _input.T.dot(grad_output)
 register('dot', Dot)
 
 # ************* simple ops *************
@@ -92,13 +87,12 @@ register('dot', Dot)
 class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
-    ctx.save_for_backward(padding)
-    return np.pad(x, ((0,0), (0,0), tuple(padding[2:4]), tuple(padding[0:2])))
+    return (lambda p: np.pad(x, ((0,0), (0,0), tuple(p[2:4]), tuple(p[0:2]))))(*ctx.save_for_backward(padding))
+
 
   @staticmethod
   def backward(ctx, grad_output):
-    padding, = ctx.saved_tensors
-    return grad_output[..., padding[2]:-padding[3], padding[0]:-padding[1]]
+    return (lambda p: grad_output[..., p[2]:-p[3], p[0]:-p[1]])(*ctx.saved_tensors)
 register('pad2d', Pad2D)
 
 class Reshape(Function):
@@ -109,8 +103,7 @@ class Reshape(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return grad_output.reshape(in_shape)
+    return grad_output.reshape(*ctx.saved_tensors)
 register('reshape', Reshape)
 
 
@@ -118,14 +111,12 @@ register('reshape', Reshape)
 
 class ReLU(Function):
   @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return np.maximum(input, 0)
+  def forward(ctx, _input):
+    return np.maximum(*ctx.save_for_backward(_input), 0)
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output * (input >= 0)
+    return (lambda i: grad_output * (i >= 0))(*ctx.saved_tensors)
 register('relu', ReLU)
 
 def _exp_normalize(x, axis=None):
@@ -141,26 +132,21 @@ class Sigmoid(Function):
         1/(1 + np.exp(-input)),
         np.exp(input)/(1 + np.exp(input))
       )
-    ctx.save_for_backward(ret)
-    return ret
+    return ctx.save_for_backward(ret)[0]
 
   @staticmethod
   def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return grad_output * (ret * (1 - ret))
+    return (lambda r, gout: gout * (r * (1 - r)))(*ctx.saved_tensors, grad_output)
 register('sigmoid', Sigmoid)
 
 class LogSoftmax(Function):
   @staticmethod
-  def forward(ctx, input):
-    softmax = _exp_normalize(input, axis=1)
-    ctx.save_for_backward(softmax)
-    return np.log(softmax)
+  def forward(ctx, _input):
+    return np.log(*ctx.save_for_backward(_exp_normalize(_input, axis=1)))
 
   @staticmethod
   def backward(ctx, grad_output):
-    softmax, = ctx.saved_tensors
-    return grad_output - grad_output.sum(axis=1, keepdims=True)*softmax
+      return (lambda gout, s: gout - gout.sum(axis=1, keepdims=True)*s)(grad_output, *ctx.saved_tensors)
 register('logsoftmax', LogSoftmax)
 
 
@@ -245,26 +231,22 @@ class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2)):
     stack = stack_for_pool(x, *kernel_size)
-    idxs = np.argmax(stack, axis=0)
-    ctx.save_for_backward(idxs, x.shape)
+    ctx.save_for_backward(np.argmax(stack, axis=0), x.shape)
     return np.max(stack, axis=0)
 
   @staticmethod
   def backward(ctx, grad_output):
-    idxs,s = ctx.saved_tensors
-    return unstack_for_pool(lambda idx: grad_output * (idxs == idx), s, *ctx.kernel_size)
+    return (lambda idxs, s: unstack_for_pool(lambda idx: grad_output * (idxs == idx), s, *ctx.kernel_size))(*ctx.saved_tensors)
 register('max_pool2d', MaxPool2D)
 
 class AvgPool2D(Function):
   @staticmethod
   def forward(ctx, x, kernel_size=(2, 2)):
-    stack = stack_for_pool(x, *kernel_size)
     ctx.save_for_backward(x.shape)
-    return np.mean(stack, axis=0)
+    return np.mean(stack_for_pool(x, *kernel_size), axis=0)
 
   @staticmethod
   def backward(ctx, grad_output):
-    s, = ctx.saved_tensors
-    py, px = ctx.kernel_size
-    return unstack_for_pool(lambda idx: grad_output/py/px, s, py, px)
+    return (lambda py, px, s: unstack_for_pool(lambda idx: grad_output/py/px, s, py, px))(*ctx.kernel_size, *ctx.saved_tensors)
+
 register('avg_pool2d', AvgPool2D)

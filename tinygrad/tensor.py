@@ -136,8 +136,7 @@ class Tensor:
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
-      if len(t0._ctx.parents) == 1:
-        grads = [grads]
+      if len(t0._ctx.parents) == 1: grads = [grads]
       for t,g in zip(t0._ctx.parents, grads):
         if g is not None:
           assert g.shape == t.shape, \
@@ -161,8 +160,7 @@ class Tensor:
       with ProfileOp("toCPU", [data]):
         data = data.data().astype(np.float32)
 
-    if not isinstance(data, np.ndarray):
-      data = np.array(data, dtype=np.float32)
+    if not isinstance(data, np.ndarray): data = np.array(data, dtype=np.float32)
 
     if data.dtype != np.float32 and not Tensor.did_float_warning:
       # warning? float64 is actually needed for numerical jacobian
@@ -203,8 +201,7 @@ class Tensor:
 
   def mean(self, axis=None):
     out = self.sum(axis=axis)
-    coeff = np.prod(out.shape)/np.prod(self.shape)
-    return out * coeff
+    return out * (np.prod(out.shape)/np.prod(self.shape)) # out * coeff
 
   def sqrt(self):
     return self.pow(0.5)
@@ -237,6 +234,7 @@ class Function:
 
   def save_for_backward(self, *x):
     self.saved_tensors.extend(x)
+    return x
 
   def apply(self, *x, **kwargs):
     ctx = self(*x) # self - operation i.e 'add', 'sub', etc.
@@ -251,8 +249,7 @@ class Function:
     with ProfileOp(ctx.__class__.__name__, x):
       ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
                    device=ctx.device, requires_grad=any([t.requires_grad for t in x]))
-    if ret.requires_grad:
-      ret._ctx = ctx
+    if ret.requires_grad: ret._ctx = ctx
     return ret
 
 def register(name, fxn, device=Device.CPU):
