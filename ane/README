@@ -77,7 +77,7 @@ ANECCompileProcedure
 rbreak ^ZinAneInstruction*
 
 weeee ZinIrRegBitPrintOutDebug_7u_
-print (void)debugregs(0, 0x0000000100310f30, 0)
+print (void)debugregs(0, 0x0000000100211030+8, 3)
 
 == min.plist == 
 

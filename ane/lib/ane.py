@@ -25,15 +25,16 @@ def init_libane():
   libane.ANE_Run.restype = c_int
 
 ANE_Struct = [
+# aneTD.Header
   ("u32", 0x1C, "NextCommandOffset"),
 
-# section @ 0x2C len 0xF4
+# KernelDMASrc @ section @ 0x2C len 0xF4
   # reloc 0x2c-0x34?? = weights
   # u32[16] 0x34-0x74 = 0x80 | 1 if used
   # u32[16] 0x74-0xB4 = <channel data offset>
   # u32[16] 0xB4-0xF4 = <channel data length>
 
-# section @ 0x128 len 0x3C (conv)
+# Common @ section @ 0x128 len 0x3C (conv)
   ("u16", 0x128, "InputWidth"),
   ("u16", 0x12A, "InputHeight"),
   ("u16", 0x12C, "InputDepth"),
@@ -53,7 +54,7 @@ ANE_Struct = [
 
   ("u16", 0x14C, "BatchSize"),
 
-# section @ 0x16C len 0x6C (input)
+# TileDMASrc @ section @ 0x16C len 0x6C (input)
   # reloc 0x16c-0x174 = image
   ("u32", 0x178, "InputRowStride"),
   ("u32", 0x17C, "InputPlaneStride"),
@@ -62,19 +63,21 @@ ANE_Struct = [
 
   ("u8",  0x1A7, "InputInterleave"),
 
-# section @ 0x1E0 len 0x44
+# L2 @ section @ 0x1E0 len 0x44
   # [0x1ec, 0x1f0, 0x1f4, 0x1f8, 0x214] = number of engines
   # [0x1f0, 0x1f4, 0x1f8, 0x214] = engines for inconv?
   # [0x21c, 0x220, 0x224] = engines for outconv?
 
-# section @ 0x22c len 0xC (scaling)
+# NE @ section @ 0x22c len 0xC (scaling)
   ("u16", 0x230, "BiasScalar"),
   ("u16", 0x232, "ScaleScalar"),
 
 # section @ 0x240 len 0x10
   ("u16", 0x246, "NeuronType"),  # 0x10 = copy, 0x11 = ReLU, 0x12 = custom
+  ("u32", 0x250, "PostScale"),
 
-# section @ 0x258 len 0x18
+# TileDMADst @ section @ 0x258 len 0x18
+
 # HandleTileDmaDstConfig
   # 0x258 -- *(uint *)(this + 0x334) = *(uint *)(this + 0x334) & 0xfffffc3f | 0xc0;
   #          (GetCacheHintRegisterValue & 0xf) << 6;
