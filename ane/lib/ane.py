@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 from ctypes import *
+import collections
 import numpy as np
 import faulthandler
 import struct
@@ -138,15 +139,21 @@ class ANE:
 
   def debug(self, dat, mems=0):
     add = [0x30, 0x1d4, 0x220, 0x29c, 0x2f0, 0x30c, 0x32c]
+    lens = [244, 60, 108, 68, 12, 16, 24]
     ptr = 0x2b
     ddat = dat[0:0x28]
-    for a in add:
-      pm = dat[ptr]
+    for a, pm in zip(add, lens):
+      #assert pm == dat[ptr]
       ddat += b"\x00" * (a-len(ddat))
       ddat += dat[ptr+1:ptr+1+pm+4]
       ptr += pm+8
     ddat += b"\x00" * 8
-    return libane.ANE_RegDebug(0, create_string_buffer(ddat), mems).decode('utf-8')
+    ret = collections.OrderedDict()
+    for ln in libane.ANE_RegDebug(0, create_string_buffer(ddat), mems).decode('utf-8').strip().split("\n"):
+      lnn = ln.split(" = ")
+      if len(lnn) == 2:
+        ret[lnn[0]] = int(lnn[1])
+    return ret
 
   def filln(self, dat, nvdict, base=0x4000):
     for n,v in nvdict.items():
