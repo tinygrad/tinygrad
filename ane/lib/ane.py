@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 import os
 from ctypes import *
+import json
 import collections
 import numpy as np
 import faulthandler
 import struct
 faulthandler.enable()
 
+basedir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
+
 libane = None
+aneregs = None
 def init_libane():
-  global libane
-  libane = cdll.LoadLibrary(os.path.join(
-    os.path.dirname(os.path.abspath(os.path.realpath(__file__))), 
-    "libane.dylib"))
+  global libane, aneregs
+  libane = cdll.LoadLibrary(os.path.join(basedir, "libane.dylib"))
 
   libane.ANE_Compile.argtypes = [c_char_p, c_int]
   libane.ANE_Compile.restype = c_void_p
@@ -26,6 +28,9 @@ def init_libane():
   libane.ANE_Run.restype = c_int
 
   libane.ANE_RegDebug.restype = c_char_p
+
+  with open(os.path.join(basedir, "aneregs.json")) as f:
+    aneregs = json.load(f)
 
 ANE_Struct = [
 # aneTD.Header
@@ -137,6 +142,28 @@ class ANE:
   def tensor(self, shape):
     return ANETensor(shape)
 
+  def unpack(self, dat):
+    dat = struct.unpack("Q"*(len(dat)//8), dat)
+    ret = {}
+    for k,v in aneregs:
+      by,bi,sz = v
+      bi += (by%8)*8
+      by //= 8
+      rv = (dat[by] >> bi) & ((1 << sz)-1)
+      ret[k] = rv
+    return ret
+
+  def pack(self, pk, dat):
+    dat = list(struct.unpack("Q"*(len(dat)//8), dat))
+    for k,v in aneregs:
+      by,bi,sz = v
+      bi += (by%8)*8
+      by //= 8
+      dat[by] &= ~(((1 << sz)-1) << bi)
+      dat[by] |= pk[k] << bi
+    dat = struct.pack("Q"*len(dat), *dat)
+    return dat
+
   def debug(self, dat, mems=0):
     add = [0x30, 0x1d4, 0x220, 0x29c, 0x2f0, 0x30c, 0x32c]
     lens = [244, 60, 108, 68, 12, 16, 24]
@@ -181,7 +208,13 @@ if __name__ == "__main__":
   print(tind)
   print(toutd)
 
-  comp = ane.compile(open("../ops/relu.hwx", "rb").read())
+  dat = open("../ops/relu.hwx", "rb").read()
+  md = dat[0x4000:0x4300]
+  dd = ane.unpack(md)
+  mdf = ane.pack(dd, md)
+  assert(md == mdf)
+
+  comp = ane.compile(dat) 
   ret = ane.run(comp, tin, tout)
   print("** after **")
   print(tind)
