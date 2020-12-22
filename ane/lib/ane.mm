@@ -112,7 +112,7 @@ uint64_t ANE_Compile(char *iprog, int sz) {
   return program_handle;
 }
 
-int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
+int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf, void *w_surf) {
   int ret;
   DEBUG("ANE_Run %p %p\n", in_surf, out_surf);
   H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
@@ -126,7 +126,13 @@ int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
   int in_surf_id = IOSurfaceGetID((IOSurfaceRef)in_surf);
   int out_surf_id = IOSurfaceGetID((IOSurfaceRef)out_surf);
 
-  pras->args[0x28/8] = 1;
+  if (w_surf != NULL) {
+    pras->args[0x28/8] = 0x0000010000000002;
+    int w_surf_id = IOSurfaceGetID((IOSurfaceRef)w_surf);
+    pras->args[0x130/8] = (long long)w_surf_id;
+  } else {
+    pras->args[0x28/8] = 1;
+  }
   pras->args[0x128/8] = (long long)in_surf_id<<32LL;
 
   // outputs

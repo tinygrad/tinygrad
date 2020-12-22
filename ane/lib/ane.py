@@ -22,7 +22,7 @@ def init_libane():
   libane.ANE_TensorData.argtypes = [c_void_p]
   libane.ANE_TensorData.restype = POINTER(c_uint16)
 
-  libane.ANE_Run.argtypes = [c_void_p]*3
+  libane.ANE_Run.argtypes = [c_void_p]*4
   libane.ANE_Run.restype = c_int
 
   libane.ANE_RegDebug.restype = c_char_p
@@ -131,8 +131,8 @@ class ANE:
     assert(ret is not None)
     return ret
 
-  def run(self, prog, tin, tout):
-    libane.ANE_Run(prog, tin.tt, tout.tt)
+  def run(self, prog, tin, tout, tweights=None):
+    libane.ANE_Run(prog, tin.tt, tout.tt, tweights.tt if tweights is not None else 0)
 
   def tensor(self, shape):
     return ANETensor(shape)
