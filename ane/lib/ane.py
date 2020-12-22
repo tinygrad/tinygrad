@@ -147,7 +147,7 @@ class ANE:
       ddat += b"\x00" * (a-len(ddat))
       ddat += dat[ptr+1:ptr+1+pm+4]
       ptr += pm+8
-    ddat += b"\x00" * 8
+    ddat += b"\x00" * 0x100
     ret = collections.OrderedDict()
     for ln in libane.ANE_RegDebug(0, create_string_buffer(ddat), mems).decode('utf-8').strip().split("\n"):
       lnn = ln.split(" = ")

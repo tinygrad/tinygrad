@@ -104,14 +104,19 @@ def compare(x, y):
           ln2.append(a[1])
   return ''.join(ss)
 
+import json
+aneregs = dict(json.load(open("aneregs.json")))
 g = get_macho("model.hwx.golden" if len(sys.argv) < 2 else sys.argv[1])
 f1 = g.headers[0].commands[1][2][0].section_data
 f2 = a.headers[0].commands[1][2][0].section_data
 for i in range(0, len(f2), 0x300):
   print("===== op %d =====" % (i//0x300))
-  dbg = ane.debug(f1[i:i+0x300], 2)
-  for k,v in dbg.items():
-    print(k, v)
+  dbg1 = ane.debug(f1[i:i+0x300], 16)
+  dbg2 = ane.debug(f2[i:i+0x300], 16)
+  for k in dbg1:
+    if dbg1[k] != dbg2[k]:
+      rr = aneregs[k] if k in aneregs else (-1,-1,-1)
+      print("0x%3x %d %2d" % tuple(rr), k, dbg1[k], "->", dbg2[k])
   if len(f1) < 0x300:
     print(compare(f1, f2[i:i+0x300]))
   else:

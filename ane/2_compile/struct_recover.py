@@ -3,7 +3,6 @@ from ane import ANE
 ane = ANE()
 
 lens = {}
-pos = {}
 
 dat = b"\xff"*0x300
 ret = ane.debug(dat, 16)
@@ -17,6 +16,7 @@ for k,v in ret.items():
   #print(k, hex(v), found)
   lens[k] = found
 
+pos = []
 dat = b"\x00"*0x300
 for i in range(0x300):
   for j in range(8):
@@ -27,7 +27,10 @@ for i in range(0x300):
     for k,v in ret.items():
       if v == 1:
         print("0x%3x %d %2d" % (i, j, lens[k]), k)
-        pos[k] = (i,j, lens[k])
+        pos.append((k, (i,j, lens[k])))
 
-print(len(lens), len(pos))
+import json
+jpos = json.dumps(pos, indent=2)
+with open("aneregs.json", "w") as f:
+  f.write(jpos)
 
