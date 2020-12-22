@@ -4,7 +4,7 @@ The Apple Neural Engine is a fancy DMA Engine that is based around convolutions.
 
 It operates out of RAM or its 4MB L2 cache. The L2 "cache" appears to be manually managed, and only applies to the input and output, not the weights. The weights are usually included in the program, and it's unclear where they are copied to.
 
-The 16 cores likely refer to the 16 wide Kernel DMA engine. They claim 11 TOPS total, which would be 687.5 GOPS/core. Perhaps it's a 24x24 MAC running at 600 MHz, with more work we can determine this better.
+The 16 cores likely refer to the 16 wide Kernel DMA engine. They claim 11 TOPS total, which would be 687.5 GOPS/core. Perhaps it's a 32x32 MAC running at 335 MHz. That clock speed matches the cycle count time ratio from the debug perf stats.
 
 It works with 5D Tensors, you specify the stride for the latter 4. All strides must be a multiple of 0x40 bytes
 * Column (width)    -- aneRegs.Common.InDim.Win / aneRegs.Common.OutDim.Wout
