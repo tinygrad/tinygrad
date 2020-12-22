@@ -27,7 +27,7 @@
     <!-- Global array of weights -->
     <key>Weights</key>
     <array>
-      <string>../min.weights</string>
+      <string>../twos.weights</string>
     </array>
 
     <key>image</key>
