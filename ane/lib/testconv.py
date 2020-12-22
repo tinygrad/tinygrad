@@ -19,25 +19,17 @@ if __name__ == "__main__":
   tind[0x40] = 3
 
   # toutd[0] = \
-  #   tind[0] * toutd[0] + \
-  #   tind[0x20] + toutd[1] + \
-  #   tind[0x40] + toutd[2]
-  toutd[0] = 0x100
-  toutd[1] = 0x100
-  toutd[2] = 0x100
-
-  # toutd[0x20] = \
-  #   tind[0] * toutd[0x20] + \
-  #   tind[0x20] + toutd[0x21] + \
-  #   tind[0x40] + toutd[0x22]
-  toutd[0x20] = 0x200
-  toutd[0x21] = 0x200
-  toutd[0x22] = 0x200
-
-  toutd[0x40] = 0x200
+  #   tind[0] * twd[0] + \
+  #   tind[0x20] + twd[1] + \
+  #   tind[0x40] + twd[2]
 
   twd[0] = 4
+  twd[1] = 0x100
+
   twd[0x20] = 5
+  twd[0x21] = 5
+  twd[0x22] = 5
+
   twd[0x40] = 6
 
   print("** before **")
@@ -53,10 +45,11 @@ if __name__ == "__main__":
   ret = ane.run(comp, tin, tout, tw)
   """
 
+  datb = open("../ops/sum.hwx", "rb").read()
   dat = open("../ops/conv.hwx", "rb").read()
   dd = ane.unpack(dat[0x4000:0x4300])
-  # use the output buffer as the weights
-  dd["aneTD.Header[9].KBase0"] = 4
+  # use the 3rd arg as the weights
+  dd["aneTD.Header[9].KBase0"] = 6
   dd["aneRegs.NE.PostScale.PostScale"] = 0x3c00
   #dd["aneRegs.L2.L2Cfg.InputReLU"] = 1
   #dd["aneRegs.NE.MACCfg.NonlinearMode"] = 1
@@ -67,9 +60,9 @@ if __name__ == "__main__":
   #dd["aneRegs.TileDMADst.DMAConfig.En"] = 0
   for k,v in dd.items():
     print(k,v)
-  dat = dat[:0x4000] + ane.pack(dd, dat[0x4000:0x4300]) + dat[0x4300:]
+  dat = datb[:0x4000] + ane.pack(dd, dat[0x4000:0x4300]) + datb[0x4300:]
   comp = ane.compile(dat)
-  ret = ane.run(comp, tin, tout)
+  ret = ane.run(comp, tin, tout, tw)
 
   print("** after **")
   print(tind)

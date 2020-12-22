@@ -21,15 +21,20 @@ for c in a.headers[0].commands:
   print("command", c[0], c[1])
   if c[0].cmd == 4:
     hexdump(c[2])
+    pass
+  if c[0].cmd == 6:
+    print("name:", c[2].decode('utf-8'))
+  if c[0].cmd == 8:
+    print(c[2].decode('utf-8'))
   if c[0].cmd == 25:
     for section in c[2]:
       print(section.segname.strip(b'\0'), section.sectname.strip(b'\0'), hex(section.addr), hex(section.size), "@", hex(c[1].fileoff))
       #print(dir(section))
       if c[1].filesize > 0:
-        if len(section.section_data) < 0x10000:
+        if len(section.section_data) < 0x100:
           hexdump(section.section_data)
-
-
+        else:
+          print("in file, not dumping 0x%x" % len(section.section_data))
 
 # this parser is wrong (fixed with 64-bit one)
 from macholib import SymbolTable
