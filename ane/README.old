@@ -275,6 +275,16 @@ Investigate:
 30: N_DIM_CONCAT
 31: H_DIM_STRIDED_CONCAT
 
+CacheHint
+0: ALLOC
+1: NOALLOC
+2: DROP
+3: DEPRI
+
+conv kinds
+0: regular
+1: channelwise
+2: grouped
 
 == plist exploration ==
 

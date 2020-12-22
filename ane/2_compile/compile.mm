@@ -8,6 +8,8 @@ extern "C" {
   int ANECCompile(CFDictionaryRef param_1, CFDictionaryRef param_2, unsigned long param_3);
   std::string _ZN21ZinIrEnumToStringUtil14OpCodeToStringE22ZinIrOpLayerOpCodeType(int op);
   std::string _ZN21ZinIrEnumToStringUtil21NonLinearModeToStringE18ZinIrNonLinearMode(int op);
+  std::string _ZN19ZinMirCacheHintUtil17CacheHintToStringE15ZinMirCacheHint(int op);
+  std::string _ZN30ZinMirKernelSizeSplitterEngine16ConvKindToStringENS_8ConvKindE(int op);
 
   void _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(
     unsigned long param_1, void *param_2,int param_3, std::basic_ostream<char> *param_4);
