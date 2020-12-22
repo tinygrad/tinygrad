@@ -28,10 +28,10 @@ The ops have several parts
 * TileDMADst -- Output DMA engine
 
 It can work with 8 base addresses for the DMA streams per OP
-* 2x Read
+* 2x Read, both used for things like sum
 * 1x Write
 * 1x T?
-* 4x Kernel, I assume each is the base for 4 of the engines
+* 4x Kernel, though only the first one seems used
 
 ## Normal Flow for ANE Usage
 

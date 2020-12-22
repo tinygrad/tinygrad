@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
+import time
 from ane import ANE, ANETensor
+
+def benchmark(ane):
+  tin = ANETensor(512*0x20)
+  tout = ANETensor(512*0x20)
+  dat = open("../ops/gemm.hwx", "rb").read()
+  for k,v in ane.debug(dat[0x4000:0x4300], 16).items():
+    print(k,v)
+  comp = ane.compile(dat)
+
+  st = time.time()
+  for i in range(1000):
+    ret = ane.run(comp, tin, tout)
+  et = time.time()
+  ts = (et-st)
+  ops = 1000*512*512*512*2
+
+  print("%.2f ms, %.2f gigaops/sec" % (ts*1000, ops*1e-9/ts))
+
 
 if __name__ == "__main__":
   ane = ANE()
@@ -30,11 +49,14 @@ if __name__ == "__main__":
   twd[0x21] = 5
   twd[0x22] = 5
 
-  twd[0x40] = 6
+  twd[0x40] = 12
 
   print("** before **")
   print(tind)
   print(toutd)
+
+  #benchmark(ane)
+  #exit(0)
 
   """
   dat = list(open("../ops/sum.hwx", "rb").read())

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--  dd if=/dev/zero of=/tmp/zero bs=1024 count=16384 -->
+<!-- 1024x512 is the max that gets compiled into one op -->
 <plist version="1.0">
 <dict>
 	<key>Networks</key>
@@ -31,7 +32,7 @@
 		<key>image</key>
 		<dict>
 			<key>InputChannels</key>
-			<integer>1024</integer>
+			<integer>512</integer>
 			<key>InputHeight</key>
 			<integer>1</integer>
 			<key>InputWidth</key>
@@ -46,7 +47,7 @@
 			<key>Name</key>
 			<string>probs</string>
 			<key>OutputChannels</key>
-			<integer>1024</integer>
+			<integer>512</integer>
 			<key>OutputType</key>
 			<string>Float16</string>
 			<key>Params</key>
