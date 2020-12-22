@@ -66,6 +66,7 @@ aneRegs.KernelDMASrc.CoeffDMAConfig[2].CacheHint = 2
 aneRegs.KernelDMASrc.CoeffDMAConfig[2].CrH = 0
 aneRegs.KernelDMASrc.CoeffDMAConfig[2].En = 0
 aneRegs.KernelDMASrc.CoeffDMAConfig[2].PrefetchParticipateEn = 0                                         
+# there's 13 more of these
 aneRegs.KernelDMASrc.Spare0.Spare = 0
 aneRegs.KernelDMASrc.Spare1.Spare = 0         
 

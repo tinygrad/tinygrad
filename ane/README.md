@@ -1,6 +1,10 @@
 # The Apple Neural Engine
 
-The Apple Neural Engine is a fancy DMA Engine that is based around convolutions. We don't have all the details worked out yet, but we can do some things with it. At its core, it runs through 0x300 ops in an hwx file. See `aneregs.json` for the registers used in each op.
+The Apple Neural Engine is a fancy DMA Engine that is based around convolutions. We don't have all the details worked out yet, but we can do some things with it. At its core, it runs through 0x300 ops in an hwx file. See `aneregs` for the registers used in each op.
+
+It operates out of RAM or its 4MB L2 cache. The L2 cache appears to be manually managed, and only applies to the input and output, not the weights.
+
+The 16 cores likely refer to the 16 wide Kernel DMA engine. They claim 11 TOPS total, which would be 687.5 GOPS/core. Perhaps it's a 24x24 MAC running at 600 MHz, with more work we can determine this better.
 
 It works with 5D Tensors, you specify the stride for the latter 4. All strides must be a multiple of 0x40 bytes
 * Column
@@ -19,7 +23,7 @@ The ops have several parts
 * KernelDMASrc -- 16x wide DMA engine for the weights/bias/nonlinearity
 * Common -- Specifies the parameters for the convolution
 * TileDMASrc -- Input DMA engine
-* L2 -- L2 caching for Source/Result?
+* L2 -- Use the L2 cache for Source/Result instead of RAM
 * NE -- Configure Kernel/MAC/Post
 * TileDMADst -- Output DMA engine
 
