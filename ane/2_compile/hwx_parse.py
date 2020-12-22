@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import sys
 from hexdump import hexdump
 from macholib import MachO
@@ -25,7 +26,8 @@ for c in a.headers[0].commands:
       print(section.segname.strip(b'\0'), section.sectname.strip(b'\0'), hex(section.addr), hex(section.size), "@", hex(c[1].fileoff))
       #print(dir(section))
       if c[1].filesize > 0:
-        hexdump(section.section_data)
+        if len(section.section_data) < 0x10000:
+          hexdump(section.section_data)
 
 
 
@@ -111,16 +113,23 @@ f1 = g.headers[0].commands[1][2][0].section_data
 f2 = a.headers[0].commands[1][2][0].section_data
 for i in range(0, len(f2), 0x300):
   print("===== op %d =====" % (i//0x300))
-  dbg1 = ane.debug(f1[i:i+0x300], 16)
-  dbg2 = ane.debug(f2[i:i+0x300], 16)
-  for k in dbg1:
-    if dbg1[k] != dbg2[k]:
-      rr = aneregs[k] if k in aneregs else (-1,-1,-1)
-      print("0x%3x %d %2d" % tuple(rr), k, dbg1[k], "->", dbg2[k])
   if len(f1) < 0x300:
-    print(compare(f1, f2[i:i+0x300]))
+    c1, c2 = f1, f2[i:i+0x300]
   else:
-    print(compare(f1[i:i+0x300], f2[i:i+0x300]))
+    c1, c2 = f1[i:i+0x300], f2[i:i+0x300]
+  dbg1 = ane.debug(c1, 16)
+  dbg2 = ane.debug(c2, 16)
+  if os.getenv("PRINTALL"):
+    for k in dbg2:
+      if k in aneregs:
+        rr = aneregs[k] if k in aneregs else (-1,-1,-1)
+        print("0x%3x %d %2d" % tuple(rr), k, dbg1[k], "->", dbg2[k])
+  else:
+    for k in dbg1:
+      if dbg1[k] != dbg2[k]:
+        rr = aneregs[k] if k in aneregs else (-1,-1,-1)
+        print("0x%3x %d %2d" % tuple(rr), k, dbg1[k], "->", dbg2[k])
 
+  print(compare(c1, c2))
 #open("/tmp/data.section", "wb").write(f2)
 #print(compare(open("model.hwx.golden", "rb").read(), open("model.hwx", "rb").read()))

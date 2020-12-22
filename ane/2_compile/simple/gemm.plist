@@ -31,7 +31,7 @@
 		<key>image</key>
 		<dict>
 			<key>InputChannels</key>
-			<integer>8</integer>
+			<integer>1024</integer>
 			<key>InputHeight</key>
 			<integer>1</integer>
 			<key>InputWidth</key>
@@ -46,7 +46,7 @@
 			<key>Name</key>
 			<string>probs</string>
 			<key>OutputChannels</key>
-			<integer>8</integer>
+			<integer>1024</integer>
 			<key>OutputType</key>
 			<string>Float16</string>
 			<key>Params</key>

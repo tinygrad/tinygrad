@@ -32,10 +32,6 @@
 
     <key>image</key>
     <dict>
-      <!-- default is 1 -->
-      <key>BatchSize</key>
-      <integer>1</integer>
-
       <key>InputChannels</key>
       <integer>3</integer>
       <key>InputHeight</key>
@@ -43,20 +39,6 @@
       <key>InputWidth</key>
       <integer>1</integer>
 
-      <key>InputDepth</key>
-      <integer>1</integer>
-
-      <key>InputInterleave</key>
-      <integer>1</integer>
-
-      <key>InputBatchStride</key>
-      <integer>192</integer>
-      <key>InputDepthStride</key>
-      <integer>192</integer>
-      <key>InputPlaneStride</key>
-      <integer>64</integer>
-      <key>InputRowStride</key>
-      <integer>64</integer>
       <key>InputType</key>
       <string>Float16</string>
     </dict>
@@ -80,18 +62,6 @@
         <key>KernelWidth</key>
         <integer>1</integer>
 
-        <key>KernelDepth</key>
-        <integer>1</integer>
-
-        <key>PadTop</key>
-        <integer>0</integer>
-        <key>PadBot</key>
-        <integer>0</integer>
-        <key>PadLeft</key>
-        <integer>0</integer>
-        <key>PadRight</key>
-        <integer>0</integer>
-
         <key>KernelIndex</key>
         <integer>0</integer>
         <key>KernelOffset</key>
@@ -104,6 +74,7 @@
           <integer>1</integer>
           <integer>1</integer>
         </array>
+
         <key>Type</key>
         <string>Conv</string>
       </dict>
@@ -116,18 +87,6 @@
     <dict>
       <key>Bottom</key>
       <string>my_layer</string>
-
-      <key>OutputInterleave</key>
-      <integer>1</integer>
-
-      <key>OutputBatchStride</key>
-      <integer>192</integer>
-      <key>OutputDepthStride</key>
-      <integer>192</integer>
-      <key>OutputPlaneStride</key>
-      <integer>64</integer>
-      <key>OutputRowStride</key>
-      <integer>64</integer>
     </dict>
 
   </dict>
