@@ -7,11 +7,11 @@ It operates out of RAM or its 4MB L2 cache. The L2 "cache" appears to be manuall
 The 16 cores likely refer to the 16 wide Kernel DMA engine. They claim 11 TOPS total, which would be 687.5 GOPS/core. Perhaps it's a 24x24 MAC running at 600 MHz, with more work we can determine this better.
 
 It works with 5D Tensors, you specify the stride for the latter 4. All strides must be a multiple of 0x40 bytes
-* Column
-* Row
-* Plane (height/channels)
+* Column (width)    -- aneRegs.Common.InDim.Win / aneRegs.Common.OutDim.Wout
+* Row    (height)   -- aneRegs.Common.InDim.Hin / aneRegs.Common.OutDim.Hout
+* Plane  (channels) -- aneRegs.Common.Cin.Cin / aneRegs.Common.Cout.Cout
 * Depth
-* Group (batch)
+* Group  (batch)    -- aneRegs.Common.GroupConvCfg.NumGroups
 
 It works with 3 data types
 * UInt8
