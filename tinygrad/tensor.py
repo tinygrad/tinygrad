@@ -73,7 +73,9 @@ class Tensor:
 
   def __init__(self, data, device=Device.CPU, requires_grad=True):
     self.data = self._move_data(data, device)
+
     self.device, self.grad, self.requires_grad = device, None, requires_grad
+
     # internal variables used for autograd graph construction
     self._ctx = None
 
@@ -124,6 +126,7 @@ class Tensor:
 
   def backward(self):
     assert self.shape == (1,)
+
     # fill in the first grad with one
     # this is "implicit gradient creation"
     self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), device=self.device, requires_grad=False)
