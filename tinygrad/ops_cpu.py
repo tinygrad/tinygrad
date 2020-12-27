@@ -138,10 +138,6 @@ class ReLU(Function):
     return grad_output * (input >= 0)
 register('relu', ReLU)
 
-def _exp_normalize(x, axis=None):
-  y = np.exp(x - x.max(axis=axis, keepdims=True))
-  return y / y.sum(axis=axis, keepdims=True)
-
 class Sigmoid(Function):
   @staticmethod
   def forward(ctx, input):
@@ -160,17 +156,21 @@ class Sigmoid(Function):
     return grad_output * (ret * (1 - ret))
 register('sigmoid', Sigmoid)
 
+def _exp_normalize(x, axis=None):
+  y = np.exp(x - x.max(axis=axis, keepdims=True))
+  return y / y.sum(axis=axis, keepdims=True)
+
 class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
-    softmax = _exp_normalize(input, axis=1)
+    softmax = _exp_normalize(input, axis=-1)
     ctx.save_for_backward(softmax)
     return np.log(softmax)
 
   @staticmethod
   def backward(ctx, grad_output):
     softmax, = ctx.saved_tensors
-    return grad_output - grad_output.sum(axis=1, keepdims=True)*softmax
+    return grad_output - grad_output.sum(axis=-1, keepdims=True)*softmax
 register('logsoftmax', LogSoftmax)
 
 

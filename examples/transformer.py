@@ -3,6 +3,10 @@ import numpy as np
 import random
 from tinygrad.tensor import Tensor
 
+from extra.utils import get_parameters
+from extra.training import train, evaluate
+from tinygrad.optim import Adam
+
 # dataset idea from https://github.com/karpathy/minGPT/blob/master/play_math.ipynb
 def make_dataset():
   ds = []
@@ -19,8 +23,6 @@ def make_dataset():
 
   return ds_X_train, ds_Y_train, ds_X_test, ds_Y_test
 
-#X_train, Y_train, X_test, Y_test = make_dataset()
-
 class TransformerBlock:
   def __init__(self, embed_dim, num_heads):
     # Multi-Head Attention
@@ -33,44 +35,72 @@ class TransformerBlock:
     self.key_dense = Tensor.uniform(embed_dim, embed_dim)
     self.value_dense = Tensor.uniform(embed_dim, embed_dim)
 
+    self.final = Tensor.uniform(embed_dim, embed_dim)
+
     self.ff1 = Tensor.uniform(embed_dim, embed_dim)
     self.ff2 = Tensor.uniform(embed_dim, embed_dim)
 
   def __call__(self, x):
     # bs x T x embed_dim
     bs = x.shape[0]
-    x = x.reshape(shape=(-1, self.num_heads * self.head_size))
+    inputs = x.reshape(shape=(-1, self.num_heads * self.head_size))
 
     # run multi head attention (bs, T, num_heads, head_size)
-    query, key, value = [x.dot(y) \
+    query, key, value = [inputs.dot(y) \
       .reshape(shape=(bs, -1, self.num_heads, self.head_size)) \
       for y in [self.query_dense, self.key_dense, self.value_dense]]
 
     query = query.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
     key = key.transpose(order=(0,2,3,1))      # (bs, num_heads, head_size, T)
-    score = query.dot(key)
-    print(query.shape)
-    print(key.shape)
-    print(score.shape)
+    value = value.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
+
+    score = query.dot(key) * (1 / np.sqrt(self.head_size))
+    weights = score.logsoftmax()              # (bs, num_heads, T, T)
+    attention = weights.dot(value).transpose(order=(0,2,1,3))
+    x = inputs + attention.reshape(shape=(-1, self.num_heads * self.head_size)).dot(self.final)
+    print(x.shape)
+    # layernorm
+    x = x + x.dot(self.ff1).relu().dot(self.ff2)
+    print(x.shape)
+    # layernorm
+    return x.reshape(shape=(bs, -1, self.num_heads * self.head_size))
+
+class Transformer:
+  def __init__(self, syms, maxlen, cnt, embed_dim, num_heads):
+    self.maxlen, self.syms = maxlen, syms
+    self.embed = Tensor.uniform(maxlen+syms, embed_dim)
+    self.tbs = []
+    for i in range(cnt):
+      self.tbs.append(TransformerBlock(embed_dim, num_heads))
+    self.final = Tensor.uniform(embed_dim, syms)
+
+  def forward(self, x):
+    bs = x.shape[0]
+    xnp = x.cpu().data
+    onehot = np.zeros((bs, x.shape[1], self.maxlen+self.syms), dtype=np.float32)
+    print(onehot.shape)
+    for i in range(x.shape[1]):
+      onehot[range(bs), i, i] = 1
+      onehot[range(bs), i, self.maxlen + xnp[:, i]] = 1
+    x = Tensor(onehot, device=x.device).dot(self.embed)
+    print(x.shape)
+    for t in self.tbs:
+      x = t(x)
+    return x.dot(self.final).logsoftmax()
+
     
-
-    #score = query.reshape(shape=(-1, self.projection_dim)).dot(
-    #  key.reshape(shape=(-1, self.projection_dim)).transpose(order=(1,0)))
-    #scaled_score = score * (1/np.sqrt(self.projection_dim))
-
-    #print(value.shape)
-    #print(scaled_score.shape)
-
-    #query = self.query_dense(x).reshape((bs, -1, self.num_heads, self.projection_dim))
-    #key = self.key_dense(x).reshape((bs, -1, self.num_heads, self.projection_dim))
-    #value = self.value_dense(x).reshape((bs, -1, self.num_heads, self.projection_dim))
-
-    #x = self.ff2(self.ff1(x).relu())
-    #return x
-
+  from tinygrad.optim import Adam
 if __name__ == "__main__":
-  tb = TransformerBlock(128, 4)
-  tmp = Tensor.zeros(20, 10, 128)
-  ret = tb(tmp)
-  print(ret)
+  model = Transformer(10, 6, 2, 128, 4)
+
+  #in1 = Tensor.zeros(20, 6, 128)
+  #ret = model.forward(in1)
+  #print(ret.shape)
+
+  X_train, Y_train, X_test, Y_test = make_dataset()
+  optim = Adam(get_parameters(model), lr=0.001)
+  train(model, X_train, Y_train, optim, 100)
+
+
+
 
