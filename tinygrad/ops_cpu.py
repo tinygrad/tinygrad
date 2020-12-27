@@ -77,13 +77,13 @@ class Dot(Function):
   @staticmethod
   def forward(ctx, input, weight):
     ctx.save_for_backward(input, weight)
-    return input.dot(weight)
+    return input @ weight
 
   @staticmethod
   def backward(ctx, grad_output):
     input, weight = ctx.saved_tensors
-    grad_input = grad_output.dot(weight.T)
-    grad_weight = input.T.dot(grad_output)
+    grad_input = grad_output @ np.swapaxes(weight, -2, -1)
+    grad_weight = np.swapaxes(input, -2, -1) @ grad_output
     return grad_input, grad_weight
 register('dot', Dot)
 
