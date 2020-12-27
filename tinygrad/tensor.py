@@ -18,8 +18,7 @@ if DEBUG:
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    self.name = ("back_" if backward else "")+name
-    self.x = x
+    self.name, self.x = f"back_{name}" if backward else name, x
   def __enter__(self):
     if DEBUG: self.st = time.time()
   def __exit__(self, *junk):
@@ -81,7 +80,7 @@ class Tensor:
     self._ctx = None
 
   def __repr__(self):
-    return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
+    return f"<Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}>"
 
   def assign(self, x):
     self.data = x.data
@@ -138,7 +137,7 @@ class Tensor:
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
-      for t,g in zip(t0._ctx.parents, grads):
+      for t, g in zip(t0._ctx.parents, grads):
         if g is not None:
           assert g.shape == t.shape, \
             f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
