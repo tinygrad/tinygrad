@@ -33,7 +33,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, device=Device.CPU, loss
     loss.backward()
     optim.step()
 
-    cat = np.argmax(out.cpu().data, axis=1)
+    cat = np.argmax(out.cpu().data, axis=-1)
     accuracy = (cat == y).mean()
 
     # printing
