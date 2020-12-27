@@ -39,6 +39,12 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
 
   print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp, tinygrad_fp, torch_fbp-torch_fp, tinygrad_fbp-tinygrad_fp))
 
+def cpu_only(func):
+  def wrapper(self):
+    if self.device == Device.CPU:
+      func(self)
+  return wrapper
+
 class TestOps(unittest.TestCase):
   device=Device.CPU
 
@@ -107,10 +113,8 @@ class TestOps(unittest.TestCase):
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), device=self.device)
 
+  @cpu_only  # TODO: transpose for GPU
   def test_transpose(self):
-    # TODO: transpose for GPU
-    if self.device == Device.GPU:
-      return
     helper_test_op([(3,3,3)], lambda x: x.transpose(1,2), lambda x: x.transpose(order=(0,2,1)), device=self.device)
 
   def test_reshape(self):
