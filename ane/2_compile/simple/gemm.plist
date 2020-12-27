@@ -31,6 +31,8 @@
 
 		<key>image</key>
 		<dict>
+			<key>BatchSize</key>
+			<integer>512</integer>
 			<key>InputChannels</key>
 			<integer>512</integer>
 			<key>InputHeight</key>

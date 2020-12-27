@@ -284,3 +284,4 @@ try:
 except ImportError:
   # no GPU support
   GPU = False
+ANE = False

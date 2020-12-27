@@ -113,6 +113,16 @@ class Reshape(Function):
     return grad_output.reshape(in_shape)
 register('reshape', Reshape)
 
+class Transpose(Function):
+  @staticmethod
+  def forward(ctx, x, order):
+    ctx.save_for_backward(order)
+    return np.transpose(x, order)
+
+  @staticmethod
+  def backward(ctx, x):
+    return np.transpose(x, np.argsort(ctx.order))
+register('transpose', Transpose)
 
 # ************* activation ops *************
 

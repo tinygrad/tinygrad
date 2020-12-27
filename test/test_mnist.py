@@ -2,11 +2,10 @@
 import os
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, GPU, Device
+from tinygrad.tensor import Tensor, GPU, ANE, Device
 import tinygrad.optim as optim
 from extra.training import train, evaluate
 from extra.utils import fetch, get_parameters
-from .config import ANE
 
 # mnist loader
 def fetch_mnist():

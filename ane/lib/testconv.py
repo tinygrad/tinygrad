@@ -15,7 +15,7 @@ def benchmark(ane):
     ret = ane.run(comp, tin, tout)
   et = time.time()
   ts = (et-st)
-  ops = 1000*512*512*512*2
+  ops = 1000*512*512*2
 
   print("%.2f ms, %.2f gigaops/sec" % (ts*1000, ops*1e-9/ts))
 
