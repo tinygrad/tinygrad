@@ -225,6 +225,9 @@ class Tensor:
     ret = self * Tensor(_mask, requires_grad=False, device=self.device)
     return ret.div(1.0 - p)
 
+  def mish(self):
+    return self*(self.softplus().tanh()) # x*tanh(softplus(x))
+
   def abs(self):
     return self.relu() + (-1.0*self).relu()
 
