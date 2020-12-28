@@ -23,6 +23,15 @@ def make_dataset():
 
   return ds_X_train, ds_Y_train, ds_X_test, ds_Y_test
 
+def layernorm(x, sz, eps=1e-5):
+  in_shape = x.shape
+  x = x.reshape(shape=(-1, sz))
+  layer_mean = x.mean(axis=(1,))
+  y = (x - layer_mean.reshape(shape=[-1, 1]))
+  layer_var = (y*y).mean(axis=(1,))
+  ret = y.div(layer_var.add(eps).reshape(shape=[-1, 1]).sqrt())
+  return ret.reshape(shape=in_shape)
+
 class TransformerBlock:
   def __init__(self, embed_dim, num_heads):
     # Multi-Head Attention
@@ -43,7 +52,8 @@ class TransformerBlock:
   def __call__(self, x):
     # bs x T x embed_dim
     bs = x.shape[0]
-    inputs = x.reshape(shape=(-1, self.num_heads * self.head_size))
+    embed_dim = self.num_heads * self.head_size
+    inputs = x.reshape(shape=(-1, embed_dim))
 
     # run multi head attention (bs, T, num_heads, head_size)
     query, key, value = [inputs.dot(y) \
@@ -55,18 +65,20 @@ class TransformerBlock:
     value = value.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
 
     score = query.dot(key) * (1 / np.sqrt(self.head_size))
-    weights = score.softmax()              # (bs, num_heads, T, T)
-    attention = weights.dot(value).transpose(order=(0,2,1,3))
-    x = inputs + attention.reshape(shape=(-1, self.num_heads * self.head_size)).dot(self.final)
-    # layernorm
+    weights = score.softmax()                                   # (bs, num_heads, T, T)
+    attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
+
+    x = inputs + attention.reshape(shape=(-1, embed_dim)).dot(self.final)
+    x = layernorm(x, embed_dim)
     x = x + x.dot(self.ff1).relu().dot(self.ff2)
-    # layernorm
-    return x.reshape(shape=(bs, -1, self.num_heads * self.head_size))
+    x = layernorm(x, embed_dim)
+    return x.reshape(shape=(bs, -1, embed_dim))
 
 class Transformer:
+  # L = cnt, H = embed_dim, A = num_heads
   def __init__(self, syms, maxlen, cnt, embed_dim, num_heads):
     self.maxlen, self.syms = maxlen, syms
-    self.embed = Tensor.uniform(maxlen+syms, embed_dim)
+    self.embed = Tensor.uniform(maxlen+syms, embed_dim, requires_grad=False)
     self.tbs = []
     for i in range(cnt):
       self.tbs.append(TransformerBlock(embed_dim, num_heads))
@@ -93,7 +105,7 @@ if __name__ == "__main__":
 
   X_train, Y_train, X_test, Y_test = make_dataset()
   optim = Adam(get_parameters(model), lr=0.001)
-  train(model, X_train, Y_train, optim, 500)
+  train(model, X_train, Y_train, optim, 500, BS=16)
 
   evaluate(model, X_test, Y_test, num_classes=10)
 
