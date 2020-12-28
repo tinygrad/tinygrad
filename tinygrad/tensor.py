@@ -238,6 +238,12 @@ class Tensor:
     ret = self * Tensor(_mask, requires_grad=False, device=self.device)
     return ret.div(1.0 - p)
 
+  def softplus(self, limit=20, beta=1):
+    # safe softplus - 1/beta*log(1 + exp(beta*x)) (PyTorch)
+    eb = (self*beta).exp()
+    ret = (1 + eb).log()
+    return (1/beta)*ret
+
   def mish(self):
     return self * (self.softplus().tanh()) # x*tanh(softplus(x))
 
