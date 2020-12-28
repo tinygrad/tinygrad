@@ -47,7 +47,7 @@ def evaluate(model, X_test, Y_test, num_classes=None, device=Device.CPU, BS=128)
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
     for i in trange(len(Y_test)//BS, disable=os.getenv('CI') is not None):
       Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(Tensor(X_test[i*BS:(i+1)*BS], device=device)).cpu().data
-    Y_test_preds = np.argmax(Y_test_preds_out, axis=len(Y_test.shape))
+    Y_test_preds = np.argmax(Y_test_preds_out, axis=-1)
     return (Y_test == Y_test_preds).mean()
 
   if num_classes is None: num_classes = Y_test.max().astype(int)+1
