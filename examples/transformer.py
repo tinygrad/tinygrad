@@ -87,19 +87,15 @@ class Transformer:
       x = t(x)
     x = x.reshape(shape=(-1, x.shape[-1])).dot(self.final).logsoftmax()
     return x.reshape(shape=(bs, -1, x.shape[-1]))
-    
+
 from tinygrad.optim import Adam
 if __name__ == "__main__":
   model = Transformer(10, 6, 2, 128, 4)
 
-  #in1 = Tensor.zeros(20, 6, 128)
-  #ret = model.forward(in1)
-  #print(ret.shape)
-
   X_train, Y_train, X_test, Y_test = make_dataset()
   optim = Adam(get_parameters(model), lr=0.001)
-  train(model, X_train, Y_train, optim, 100)
+  train(model, X_train, Y_train, optim, 500)
 
-
+  evaluate(model, X_test, Y_test, num_classes=10)
 
 
