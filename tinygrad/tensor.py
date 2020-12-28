@@ -211,6 +211,10 @@ class Tensor:
   def div(self, y):
     return self * (y ** -1.0)
 
+  def sigmoid(self):
+    e = self.exp()
+    return e.div(1 + e)
+
   def swish(self):
     return self * self.sigmoid()
 
@@ -219,6 +223,15 @@ class Tensor:
 
   def leakyrelu(self, neg_slope=0.01):
     return self.relu() - (-neg_slope*self).relu()
+
+  def softmax(self):
+    # Replace with (self - self.max())
+    e = self.exp()
+    ss = e.sum(axis=len(self.shape)-1).reshape(shape=list(self.shape)[:-1]+[1])
+    return e.div(ss)
+
+  def logsoftmax(self):
+    return self.softmax().log()
 
   def dropout(self, p=0.5):
     _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)

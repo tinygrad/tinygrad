@@ -226,6 +226,7 @@ register('pow', Pow, device=Device.GPU)
 class Sum(Function):
   @staticmethod
   def forward(ctx, input, axis=None):
+    axis = [axis] if type(axis) == int else axis
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
     if axis is not None:
@@ -363,18 +364,30 @@ class ReLU(Function):
     return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
 register('relu', ReLU, device=Device.GPU)
 
-class Sigmoid(Function):
+class Log(Function):
   @staticmethod
   def forward(ctx, input):
-    ret = unary_op(ctx, '1./(1+exp(-a))', input)
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'log(a)', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a / b', grad_output, input)
+register('log', Log, device=Device.GPU)
+
+class Exp(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = unary_op(ctx, 'exp(a)', input)
     ctx.save_for_backward(ret)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b * (1 - b));', grad_output, ret)
-register('sigmoid', Sigmoid, device=Device.GPU)
+    return binary_op(ctx, 'a * b', grad_output, ret)
+register('exp', Exp, device=Device.GPU)
 
 class AvgPool2D(Function):
   @staticmethod
@@ -410,23 +423,6 @@ class MaxPool2D(Function):
       decls="int maxidx=((__global float*)input2)[iid]; int kernidx=(gid.x%ksz.x) + ksz.x*(gid.y%ksz.y)",
       input2=idxs)
 register('max_pool2d', MaxPool2D, device=Device.GPU)
-
-class LogSoftmax(Function):
-  @staticmethod
-  def forward(ctx, input):
-    # TODO: stability?
-    lsum = reduce_op(ctx, "out += exp(a)", "log(out)", input, axis=[1])
-    output = binary_op(ctx, 'a-b', input, lsum)
-    ctx.save_for_backward(output)
-    return output
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    output, = ctx.saved_tensors
-    lsum = reduce_op(ctx, "out += a", "out", grad_output, axis=[1])
-    texp = binary_op(ctx, "exp(a) * b", output, lsum)
-    return binary_op(ctx, "a - b", grad_output, texp)
-register('logsoftmax', LogSoftmax, device=Device.GPU)
 
 # ************* conv ops *************
 

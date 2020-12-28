@@ -67,6 +67,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu, device=self.device)
   def test_abs(self):
     helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs, device=self.device)
+  def test_log(self):
+    helper_test_op([(45,65)], lambda x: torch.log(x), Tensor.log, device=self.device)
+  def test_exp(self):
+    helper_test_op([(45,65)], lambda x: torch.exp(x), Tensor.exp, device=self.device)
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, device=self.device)
   def test_dot(self):

@@ -105,12 +105,12 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 
 ### Adding an accelerator
 
-You need to support 14 basic ops:
+You need to support 15 basic ops:
 
 ```
 Add, Sub, Mul, Pow, Sum, Dot
-Pad2D, Reshape
-Relu, Sigmoid, LogSoftmax
+Pad2D, Reshape, Transpose
+Relu, Log, Exp
 Conv2D, MaxPool2D, AvgPool2D
 ```
 
