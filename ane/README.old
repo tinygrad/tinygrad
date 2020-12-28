@@ -72,8 +72,12 @@ ANECCompileProcedure
             0x4   @ 0x240-0x254
             0x6   @ 0x258-0x274(end)
           AddReloc (this is gold! x4 goes in the hwx)
+          ZinAneTd<7u>::HandleEngineLayer
 
 rbreak ^ZinAneInstruction*
+
+weeee ZinIrRegBitPrintOutDebug_7u_
+print (void)debugregs(0, 0x0000000100211030+8, 3)
 
 == min.plist == 
 
@@ -271,6 +275,16 @@ Investigate:
 30: N_DIM_CONCAT
 31: H_DIM_STRIDED_CONCAT
 
+CacheHint
+0: ALLOC
+1: NOALLOC
+2: DROP
+3: DEPRI
+
+conv kinds
+0: regular
+1: channelwise
+2: grouped
 
 == plist exploration ==
 

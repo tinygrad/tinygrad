@@ -38,7 +38,7 @@ def infer(model, img):
 
   # run the net
   if GPU:
-    out = model.forward(Tensor(img).cuda()).cpu()
+    out = model.forward(Tensor(img).gpu()).cpu()
   else:
     out = model.forward(Tensor(img))
 
@@ -55,7 +55,7 @@ if __name__ == "__main__":
   model = EfficientNet(int(os.getenv("NUM", "0")))
   model.load_weights_from_torch()
   if GPU:
-    [x.cuda_() for x in get_parameters(model)]
+    [x.gpu_() for x in get_parameters(model)]
 
   # category labels
   import ast
@@ -93,4 +93,3 @@ if __name__ == "__main__":
     print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
     print("did inference in %.2f s" % (time.time()-st))
   #print("NOT", np.argmin(out.data), np.min(out.data), lbls[np.argmin(out.data)])
-

@@ -4,8 +4,7 @@ import cProfile
 import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor, GPU, Device
-from .config import ANE
+from tinygrad.tensor import Tensor, GPU, ANE, Device
 
 def start_profile():
   import time
@@ -105,4 +104,3 @@ class TestConvSpeedANE(TestConvSpeed):
 
 if __name__ == '__main__':
   unittest.main()
-

@@ -4,8 +4,7 @@ import numpy as np
 import unittest
 import timeit
 import functools
-from tinygrad.tensor import Tensor, GPU, Device
-from .config import ANE
+from tinygrad.tensor import Tensor, GPU, ANE, Device
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=Device.CPU, forward_only=False):
   torch.manual_seed(0)
@@ -40,6 +39,13 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0
 
   print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp, tinygrad_fp, torch_fbp-torch_fp, tinygrad_fbp-tinygrad_fp))
 
+# TODO: everywhere you see this, make the op work on GPU
+def cpu_only(func):
+  def wrapper(self):
+    if self.device == Device.CPU:
+      func(self)
+  return wrapper
+
 class TestOps(unittest.TestCase):
   device=Device.CPU
 
@@ -65,6 +71,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid, device=self.device)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, device=self.device)
+  @cpu_only
+  def test_multidot(self):
+    helper_test_op([(10,45,65), (10,65,45)], lambda x,y: x @ y, Tensor.dot, device=self.device)
   def test_sum(self):
     helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum, device=self.device)
   def test_sum_axis(self):
@@ -107,6 +116,10 @@ class TestOps(unittest.TestCase):
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), device=self.device)
+
+  @cpu_only
+  def test_transpose(self):
+    helper_test_op([(3,3,3)], lambda x: x.transpose(1,2), lambda x: x.transpose(order=(0,2,1)), device=self.device)
 
   def test_reshape(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)), device=self.device)
@@ -164,4 +177,3 @@ class TestOpsANE(TestOps):
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
-

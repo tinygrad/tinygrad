@@ -40,7 +40,7 @@ if __name__ == "__main__":
   TRANSFER = os.getenv("TRANSFER") is not None
   if TINY:
     model = TinyConvNet(classes)
-  elif TRANSFER: 
+  elif TRANSFER:
     model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
     model.load_weights_from_torch()
   else:
@@ -93,4 +93,3 @@ if __name__ == "__main__":
       fp_time + bp_time + opt_time + finish_time))
 
     del out, y, loss
-

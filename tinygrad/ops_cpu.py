@@ -77,13 +77,13 @@ class Dot(Function):
   @staticmethod
   def forward(ctx, input, weight):
     ctx.save_for_backward(input, weight)
-    return input.dot(weight)
+    return input @ weight
 
   @staticmethod
   def backward(ctx, grad_output):
     input, weight = ctx.saved_tensors
-    grad_input = grad_output.dot(weight.T)
-    grad_weight = input.T.dot(grad_output)
+    grad_input = grad_output @ np.swapaxes(weight, -2, -1)
+    grad_weight = np.swapaxes(input, -2, -1) @ grad_output
     return grad_input, grad_weight
 register('dot', Dot)
 
@@ -113,6 +113,16 @@ class Reshape(Function):
     return grad_output.reshape(in_shape)
 register('reshape', Reshape)
 
+class Transpose(Function):
+  @staticmethod
+  def forward(ctx, x, order):
+    ctx.save_for_backward(order)
+    return np.transpose(x, order)
+
+  @staticmethod
+  def backward(ctx, x):
+    return np.transpose(x, np.argsort(ctx.order))
+register('transpose', Transpose)
 
 # ************* activation ops *************
 
@@ -146,21 +156,21 @@ class Sigmoid(Function):
     return grad_output * (ret * (1 - ret))
 register('sigmoid', Sigmoid)
 
+def _exp_normalize(x, axis=None):
+  y = np.exp(x - x.max(axis=axis, keepdims=True))
+  return y / y.sum(axis=axis, keepdims=True)
+
 class LogSoftmax(Function):
   @staticmethod
   def forward(ctx, input):
-    def logsumexp(x):
-      #return np.log(np.exp(x).sum(axis=1))
-      c = x.max(axis=1)
-      return c + np.log(np.exp(x-c.reshape((-1, 1))).sum(axis=1))
-    output = input - logsumexp(input).reshape((-1, 1))
-    ctx.save_for_backward(output)
-    return output
+    softmax = _exp_normalize(input, axis=-1)
+    ctx.save_for_backward(softmax)
+    return np.log(softmax)
 
   @staticmethod
   def backward(ctx, grad_output):
-    output, = ctx.saved_tensors
-    return grad_output - np.exp(output)*(grad_output.sum(axis=1).reshape((-1, 1)))
+    softmax, = ctx.saved_tensors
+    return grad_output - grad_output.sum(axis=-1, keepdims=True)*softmax
 register('logsoftmax', LogSoftmax)
 
 
@@ -268,4 +278,3 @@ class AvgPool2D(Function):
     py, px = ctx.kernel_size
     return unstack_for_pool(lambda idx: grad_output/py/px, s, py, px)
 register('avg_pool2d', AvgPool2D)
-

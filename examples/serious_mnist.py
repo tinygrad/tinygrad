@@ -29,9 +29,9 @@ class SqueezeExciteBlock2D:
     se = input.avg_pool2d(kernel_size=(input.shape[2], input.shape[3])) #GlobalAveragePool2D
     se = se.reshape(shape=(-1, self.filters))
     se = se.dot(self.weight1) + self.bias1
-    se = se.relu() 
+    se = se.relu()
     se = se.dot(self.weight2) + self.bias2
-    se = se.sigmoid().reshape(shape=(-1,self.filters,1,1)) #for broadcasting 
+    se = se.sigmoid().reshape(shape=(-1,self.filters,1,1)) #for broadcasting
     se = input.mul(se)
     return se
 
@@ -45,9 +45,9 @@ class ConvBlock:
     #init layers
     self._bn = BatchNorm2D(128, training=True)
     self._seb = SqueezeExciteBlock2D(filters)
-  
+
   def __call__(self, input):
-    x = input.reshape(shape=(-1, self.inp, self.w, self.h)) 
+    x = input.reshape(shape=(-1, self.inp, self.w, self.h))
     for cweight, cbias in zip(self.cweights, self.cbiases):
       x = x.pad2d(padding=[1,1,1,1]).conv2d(cweight).add(cbias).relu()
     x = self._bn(x)
@@ -80,12 +80,12 @@ class BigConvNet:
 
   def load(self, filename):
     with open(filename+'.npy', 'rb') as f:
-      for par in get_parameters(self): 
+      for par in get_parameters(self):
         #if par.requires_grad:
         try:
           par.cpu().data[:] = np.load(f)
           if GPU:
-            par.cuda()
+            par.gpu()
         except:
           print('Could not load parameter')
 
@@ -102,7 +102,7 @@ class BigConvNet:
 
 if __name__ == "__main__":
   lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
-  epochss = [2, 1] if QUICK else [13, 3, 3, 1] 
+  epochss = [2, 1] if QUICK else [13, 3, 3, 1]
   BS = 32
 
   lmbd = 0.00025
@@ -113,9 +113,9 @@ if __name__ == "__main__":
   if QUICK:
     steps = 1
     X_test, Y_test = X_test[:BS], Y_test[:BS]
-  
+
   model = BigConvNet()
- 
+
   if len(sys.argv) > 1:
     try:
       model.load(sys.argv[1])
@@ -123,10 +123,10 @@ if __name__ == "__main__":
       evaluate(model, X_test, Y_test, BS=BS)
     except:
       print('could not load weights "'+sys.argv[1]+'".')
- 
+
   if GPU:
     params = get_parameters(model)
-    [x.cuda_() for x in params]
+    [x.gpu_() for x in params]
 
   for lr, epochs in zip(lrs, epochss):
     optimizer = optim.Adam(model.parameters(), lr=lr)

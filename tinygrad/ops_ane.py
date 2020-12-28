@@ -1,6 +1,5 @@
-from .tensor import Tensor, Function, register
+from .tensor import Device, Function, register
 from functools import lru_cache
-import struct
 
 @lru_cache
 def compile_wrapper(ane, dat):
@@ -9,22 +8,18 @@ def compile_wrapper(ane, dat):
 def roundup(x, v):
   return x + (v-x)%v
 
-def fill(dat, addrs, type, val, base=0x4000):
-  x = struct.pack(type, val)
-  for a in addrs:
-    dat[base+a:base+a+len(x)] = x
-  return dat
-
 @lru_cache
 def compile_relu(ane, sz):
   dat = list(open("ane/ops/relu.hwx", "rb").read())
   # TODO: make this all nice and once
-  # number of relus
-  dat = fill(dat, [0x128, 0x13C], "H", sz)
   # number of engines? (max 0x100)
-  dat = fill(dat, [0x1ec, 0x1f0, 0x1f4, 0x1f8], "I", max(0x100, roundup(sz*2, 0x10)))
-  # strides?
-  dat = fill(dat, [0x260, 0x264, 0x268], "I", roundup(sz*2, 0x40))
+  dat = ane.fill(dat, [0x1ec, 0x1f0, 0x1f4, 0x1f8, 0x214], "I", max(0x100, roundup(sz*2, 0x10)))
+  stride = roundup(sz*2, 0x40)
+  dat = ane.filln(dat, {
+    "NeuronType": 0x11,   # 0x10 makes this a copy, 0x11 = ReLU, 0x12 = crash
+    "InputWidth": sz, "OutputWidth": sz,
+    "InputRowStride": stride, "InputPlaneStride": stride, "InputDepthStride": stride,
+    "OutputRowStride": stride, "OutputPlaneStride": stride, "OutputDepthStride": stride})
   return compile_wrapper(ane, bytes(dat))
 
 class ReLU(Function):
@@ -33,5 +28,4 @@ class ReLU(Function):
     ret = ctx.ane.tensor(input.shape)
     ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
     return ret
-register('relu', ReLU, device=Tensor.ANE)
-
+register('relu', ReLU, device=Device.ANE)
