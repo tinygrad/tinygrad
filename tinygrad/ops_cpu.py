@@ -142,13 +142,13 @@ class Softplus(Function):
   @staticmethod
   def forward(ctx, input, limit=20):
     ctx.save_for_backward(input)
-    ret = np.where(input>limit, input, np.log(1 + np.exp(input)))
+    ret = np.where(input > limit, input, np.log(1 + np.exp(input)))
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    return grad_output * (1/(1 + np.exp(-input)))
+    return grad_output * (1 / (1 + np.exp(-input)))
 register('softplus', Softplus)
 
 class Sigmoid(Function):

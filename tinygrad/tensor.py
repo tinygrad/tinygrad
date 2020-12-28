@@ -226,7 +226,7 @@ class Tensor:
     return ret.div(1.0 - p)
 
   def mish(self):
-    return self*(self.softplus().tanh()) # x*tanh(softplus(x))
+    return self * (self.softplus().tanh()) # x*tanh(softplus(x))
 
   def abs(self):
     return self.relu() + (-1.0*self).relu()
