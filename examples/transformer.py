@@ -75,7 +75,7 @@ class TransformerBlock:
 class Transformer:
   def __init__(self, syms, maxlen, cnt, embed_dim, num_heads):
     self.maxlen, self.syms = maxlen, syms
-    self.embed = Tensor.uniform(maxlen+syms, embed_dim)
+    self.embed = Tensor.uniform(maxlen+syms, embed_dim, requires_grad=False)
     self.tbs = []
     for i in range(cnt):
       self.tbs.append(TransformerBlock(embed_dim, num_heads))
