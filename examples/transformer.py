@@ -23,11 +23,14 @@ def make_dataset():
 
   return ds_X_train, ds_Y_train, ds_X_test, ds_Y_test
 
-def layernorm(x, eps=1e-5):
-  layer_mean = x.mean(axis=(0,1))
-  y = (x - layer_mean.reshape(shape=[1, 1, -1]))
-  layer_var = (y*y).mean(axis=(0,1))
-  return y.div(layer_var.add(eps).reshape(shape=[1, 1, -1]))
+def layernorm(x, sz, eps=1e-5):
+  in_shape = x.shape
+  x = x.reshape(shape=(-1, sz))
+  layer_mean = x.mean(axis=(1,))
+  y = (x - layer_mean.reshape(shape=[-1, 1]))
+  layer_var = (y*y).mean(axis=(1,))
+  ret = y.div(layer_var.add(eps).reshape(shape=[-1, 1]))
+  return ret.reshape(shape=in_shape)
 
 class TransformerBlock:
   def __init__(self, embed_dim, num_heads):
@@ -64,13 +67,9 @@ class TransformerBlock:
     weights = score.softmax()                                   # (bs, num_heads, T, T)
     attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
     x = inputs + attention.reshape(shape=(-1, self.num_heads * self.head_size)).dot(self.final)
-    x = x.reshape(shape=(bs, -1, self.num_heads * self.head_size))
-    x = layernorm(x)
-    x = x.reshape(shape=(-1, self.num_heads * self.head_size))
+    x = layernorm(x, self.num_heads * self.head_size)
     x = x + x.dot(self.ff1).relu().dot(self.ff2)
-    x = x.reshape(shape=(bs, -1, self.num_heads * self.head_size))
-    x = layernorm(x)
-    x = x.reshape(shape=(-1, self.num_heads * self.head_size))
+    x = layernorm(x, self.num_heads * self.head_size)
     return x.reshape(shape=(bs, -1, self.num_heads * self.head_size))
 
 class Transformer:
