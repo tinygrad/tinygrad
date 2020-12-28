@@ -109,9 +109,9 @@ You need to support 14 basic ops:
 
 ```
 Add, Sub, Mul, Pow              # binary ops
-Dot                             # matrix multiplication
-Sum                             # reduce op
 Relu, Log, Exp                  # unary ops
+Sum                             # reduce op
+Dot                             # matrix multiplication
 Conv2D, MaxPool2D               # 2D ops
 Pad2D, Reshape, Transpose       # moving things around ops
 ```
