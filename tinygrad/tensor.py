@@ -241,6 +241,12 @@ class Tensor:
   def abs(self):
     return self.relu() + (-1.0*self).relu()
 
+  def avg_pool2d(self, kernel_size=(2,2)):
+    chan = self.shape[1]
+    ww = np.zeros((chan, 1, kernel_size[0], kernel_size[1]), dtype=np.float32)
+    ww[range(chan), 0, :, :] = 1/(kernel_size[0]*kernel_size[1])
+    return self.conv2d(Tensor(ww, device=self.device, requires_grad=False), stride=kernel_size, groups=chan)
+
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, *tensors):

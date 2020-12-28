@@ -255,16 +255,3 @@ class MaxPool2D(Function):
     return unstack_for_pool(lambda idx: grad_output * (idxs == idx), s, *ctx.kernel_size)
 register('max_pool2d', MaxPool2D)
 
-class AvgPool2D(Function):
-  @staticmethod
-  def forward(ctx, x, kernel_size=(2, 2)):
-    stack = stack_for_pool(x, *kernel_size)
-    ctx.save_for_backward(x.shape)
-    return np.mean(stack, axis=0)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    s, = ctx.saved_tensors
-    py, px = ctx.kernel_size
-    return unstack_for_pool(lambda idx: grad_output/py/px, s, py, px)
-register('avg_pool2d', AvgPool2D)

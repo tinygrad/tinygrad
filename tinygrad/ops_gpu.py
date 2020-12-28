@@ -389,21 +389,6 @@ class Exp(Function):
     return binary_op(ctx, 'a * b', grad_output, ret)
 register('exp', Exp, device=Device.GPU)
 
-class AvgPool2D(Function):
-  @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2)):
-    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op="sumval += input[iid]",
-      result_op="sumval / (ksz.x * ksz.y)", decls="float sumval=0.f")
-    ctx.save_for_backward(input.shape)
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    orig_shape, = ctx.saved_tensors
-    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
-      result_op="input[iid] / (ksz.x * ksz.y)")
-register('avg_pool2d', AvgPool2D, device=Device.GPU)
-
 class MaxPool2D(Function):
   @staticmethod
   def forward(ctx, input, kernel_size=(2, 2)):

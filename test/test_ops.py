@@ -169,7 +169,7 @@ class TestOps(unittest.TestCase):
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), device=self.device)
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), device=self.device, rtol=1e-5)
 
 @unittest.skipUnless(GPU, "Requires GPU")
 class TestOpsGPU(TestOps):

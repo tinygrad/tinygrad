@@ -78,7 +78,7 @@ loss.backward()
 optim.step()
 ```
 
-## GPU Support
+## GPU and Accelerator Support
 
 tinygrad supports GPUs through PyOpenCL.
 
@@ -105,13 +105,15 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 
 ### Adding an accelerator
 
-You need to support 15 basic ops:
+You need to support 14 basic ops:
 
 ```
-Add, Sub, Mul, Pow, Sum, Dot
-Pad2D, Reshape, Transpose
-Relu, Log, Exp
-Conv2D, MaxPool2D, AvgPool2D
+Add, Sub, Mul, Pow              # binary ops
+Dot                             # matrix multiplication
+Sum                             # reduce op
+Relu, Log, Exp                  # unary ops
+Conv2D, MaxPool2D               # 2D ops
+Pad2D, Reshape, Transpose       # moving things around ops
 ```
 
 ## ImageNet inference
