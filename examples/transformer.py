@@ -105,9 +105,9 @@ if __name__ == "__main__":
 
   X_train, Y_train, X_test, Y_test = make_dataset()
   optim = Adam(get_parameters(model), lr=0.001)
-  train(model, X_train, Y_train, optim, 500, BS=16)
 
-  Tensor.training = False
-  evaluate(model, X_test, Y_test, num_classes=10)
+  for i in range(5):
+    train(model, X_train, Y_train, optim, 500, BS=32)
+    evaluate(model, X_test, Y_test, num_classes=10)
 
 
