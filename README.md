@@ -10,9 +10,9 @@ For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
-The Tensor class is a wrapper around a numpy array, except it does Tensor things.
+Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. Support the simple basic ops, and you get SOTA vision and language models. We are working on support for the Apple Neural Engine.
 
-tinygrad is also a city in Russia.
+Eventually, we will build custom hardware for tinygrad, and it will be blindingly fast. Now, it is slow.
 
 ### Installation
 
@@ -108,8 +108,8 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 You need to support 15 basic ops:
 
 ```
-Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Relu, Log, Exp                  # unary ops
+Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Sum, Max                        # reduce ops (with axis argument)
 Dot, Conv2D                     # matrix multiplication and conv
 Reshape, Transpose              # moving things around ops
