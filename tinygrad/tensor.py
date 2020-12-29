@@ -226,9 +226,10 @@ class Tensor:
     return self.relu() - (-neg_slope*self).relu()
 
   def softmax(self):
-    # Replace with (self - self.max())
+    ns = list(self.shape)[:-1]+[1]
+    #e = (self - self.max(axis=len(self.shape)-1).reshape(shape=ns)).exp()
     e = self.exp()
-    ss = e.sum(axis=len(self.shape)-1).reshape(shape=list(self.shape)[:-1]+[1])
+    ss = e.sum(axis=len(self.shape)-1).reshape(shape=ns)
     return e.div(ss)
 
   def logsoftmax(self):
