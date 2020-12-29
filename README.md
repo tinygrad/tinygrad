@@ -111,9 +111,9 @@ You need to support 15 basic ops:
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Relu, Log, Exp                  # unary ops
 Sum, Max                        # reduce ops (with axis argument)
-Dot                             # matrix multiplication
-Conv2D, MaxPool2D               # 2D ops
-Pad2D, Reshape, Transpose       # moving things around ops
+Dot, Conv2D                     # matrix multiplication and conv
+Reshape, Transpose              # moving things around ops
+Unpad2D, Pad2D                  # stupid slices
 ```
 
 ## ImageNet inference

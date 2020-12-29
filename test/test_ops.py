@@ -164,6 +164,7 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride).relu(),
         lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), device=self.device)
 
+  @cpu_only
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):

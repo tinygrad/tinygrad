@@ -105,17 +105,28 @@ register('dot', Dot)
 
 # ************* simple ops *************
 
+# TODO: Combine Pad2D and Unpad2D into something generic
 class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
-    ctx.save_for_backward(padding)
-    return np.pad(x, ((0,0), (0,0), tuple(padding[2:4]), tuple(padding[0:2])))
+    return np.pad(x, ((0,0), (0,0), tuple(ctx.padding[2:4]), tuple(ctx.padding[0:2])))
 
   @staticmethod
   def backward(ctx, grad_output):
-    padding, = ctx.saved_tensors
-    return grad_output[..., padding[2]:-padding[3], padding[0]:-padding[1]]
+    return grad_output[...,
+      ctx.padding[2]:(None if ctx.padding[3] == 0 else -ctx.padding[3]),
+      ctx.padding[0]:(None if ctx.padding[1] == 0 else -ctx.padding[1])]
 register('pad2d', Pad2D)
+
+class Unpad2D(Function):
+  @staticmethod
+  def forward(ctx, x, padding=None):
+    return Pad2D.backward(ctx, x)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return Pad2D.forward(ctx, grad_output)
+register('unpad2d', Unpad2D)
 
 class Reshape(Function):
   @staticmethod
@@ -236,37 +247,4 @@ class Conv2D(Function):
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 register('conv2d', Conv2D)
-
-
-# ************* pooling ops *************
-
-def stack_for_pool(x, py, px):
-  my, mx = (x.shape[2]//py)*py, (x.shape[3]//px)*px
-  xup = x[:, :, :my, :mx]
-  stack = [xup[:, :, k//px::py, k%px::px][None] for k in range(py*px)]
-  return np.concatenate(stack, axis=0)
-
-def unstack_for_pool(fxn, s, py, px):
-  my, mx = (s[2]//py)*py, (s[3]//px)*px
-  for k in range(py*px):
-    Y, X = k//px, k%px
-    ll = fxn(Y*px+X)
-    if X == 0 and Y == 0:
-      ret = np.zeros(s, dtype=ll.dtype)
-    ret[:, :, Y:my:py, X:mx:px] = ll
-  return ret
-
-class MaxPool2D(Function):
-  @staticmethod
-  def forward(ctx, x, kernel_size=(2, 2)):
-    stack = stack_for_pool(x, *kernel_size)
-    idxs = np.argmax(stack, axis=0)
-    ctx.save_for_backward(idxs, x.shape)
-    return np.max(stack, axis=0)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    idxs,s = ctx.saved_tensors
-    return unstack_for_pool(lambda idx: grad_output * (idxs == idx), s, *ctx.kernel_size)
-register('max_pool2d', MaxPool2D)
 

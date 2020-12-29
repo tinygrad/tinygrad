@@ -14,54 +14,6 @@ def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
 i32 = np.int32
 
-def subsample_op(ctx, input, kernel_size, stride, iter_op, result_op, decls=''):
-  py, px = stride
-  N, C, Yin, Xin = input.shape
-  Yout, Xout = (Yin-kernel_size[0])//py+1, (Xin-kernel_size[1])//px+1
-  ret = buffer_new(ctx, (N, C, Yout, Xout), zero=True)
-  subsample = clbuild(ctx.cl_ctx, "subsample", """
-  __kernel void subsample(__global float *output, __global const float *input, uint2 osize, uint2 isize,
-                          uint2 ksz, uint2 stride) {
-    int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
-    int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    """+decls+""";
-    for (uint j=0; j<ksz.y; ++j) {
-      for (uint i=0; i<ksz.x; ++i) {
-        int iid = (gid.x*stride.x+i) + isize.x*((gid.y*stride.y+j) + isize.y*gid.z);
-        if (gid.x*stride.x+i < isize.x && gid.y*stride.y+j < isize.y) {
-          """+iter_op+""";
-        }
-      }
-    }
-    output[oid] = """+result_op+""";
-  }""")
-  subsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-            ret.cl, input.cl, uint2(Xout, Yout), uint2(Xin, Yin),
-            uint2(*kernel_size[::-1]), uint2(px, py))
-  ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
-  return ret
-
-def supersample_op(ctx, input, out_shape, kernel_size, result_op, decls='', input2=None):
-  (N, C, Yin, Xin), (Yout, Xout) = input.shape, out_shape[2:]
-  py,px = kernel_size
-  ret = buffer_new(ctx, out_shape, zero=True)
-  supsample = clbuild(ctx.cl_ctx, "supsample", """
-  __kernel void supsample(__global float *output, __global const float *input, __global const void *input2,
-                          uint2 osize, uint2 isize, uint2 ksz) {
-    int3 gid = (int3)(get_global_id(2), get_global_id(1), get_global_id(0));
-    int oid = gid.x + osize.x*(gid.y + osize.y*gid.z);
-    int iid = (gid.x/ksz.x) + isize.x*((gid.y/ksz.y) + isize.y*gid.z);
-    """+decls+""";
-    if (gid.x/ksz.x < isize.x && gid.y/ksz.y < isize.y) {
-      output[oid] = """+result_op+""";
-    }
-  }""")
-  supsample(ctx.cl_queue, (N*C, Yout, Xout), None,
-            ret.cl, input.cl, input2.cl if input2 is not None else input2,
-            uint2(Xout, Yout), uint2(Xin, Yin), uint2(px, py))
-  ctx.data = np.empty((N, C, Yout, Xout)) # set shape expectation on tensor instance
-  return ret
-
 @functools.lru_cache()
 def get_binop_prg(cl_ctx, code, complist):
   ndims = len(complist)
@@ -423,26 +375,6 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return binary_op(ctx, 'a * b', grad_output, ret)
 register('exp', Exp, device=Device.GPU)
-
-class MaxPool2D(Function):
-  @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2)):
-    idxs = subsample_op(ctx, input, kernel_size, kernel_size,
-      iter_op="if (input[iid]>maxval) { maxval = input[iid]; maxidx = j * ksz.x + i; }",
-      result_op="(float)maxidx", decls="float maxval=-FLT_MAX; int maxidx=0")
-    ctx.save_for_backward(idxs, input.shape)
-    return subsample_op(ctx, input, kernel_size, kernel_size,
-      iter_op="maxval = max(maxval, input[iid])",
-      result_op="maxval", decls="float maxval = -FLT_MAX")
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    idxs, orig_shape = ctx.saved_tensors
-    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
-      result_op="(maxidx == kernidx) * input[iid]",
-      decls="int maxidx=((__global float*)input2)[iid]; int kernidx=(gid.x%ksz.x) + ksz.x*(gid.y%ksz.y)",
-      input2=idxs)
-register('max_pool2d', MaxPool2D, device=Device.GPU)
 
 # ************* conv ops *************
 
