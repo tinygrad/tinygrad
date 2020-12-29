@@ -191,8 +191,6 @@ class Tensor:
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
-  def _is(self, device): return self.device == device
-
   def detach(self):
     return Tensor(self.data, device=self.device)
 
@@ -303,7 +301,6 @@ def register(name, fxn, device=Device.CPU):
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
-  setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, Device.__dict__[device])))
 
 # this registers all the operations
 import tinygrad.ops_cpu
