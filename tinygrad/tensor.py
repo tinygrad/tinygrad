@@ -69,6 +69,7 @@ class Device: CPU, GPU, ANE = 0, 1, 2
 
 class Tensor:
   did_float_warning = False
+  training = True
   ops = defaultdict(dict)
 
   def __init__(self, data, device=Device.CPU, requires_grad=True):
@@ -225,18 +226,22 @@ class Tensor:
     return self.relu() - (-neg_slope*self).relu()
 
   def softmax(self):
-    # Replace with (self - self.max())
+    ns = list(self.shape)[:-1]+[1]
+    #e = (self - self.max(axis=len(self.shape)-1).reshape(shape=ns)).exp()
     e = self.exp()
-    ss = e.sum(axis=len(self.shape)-1).reshape(shape=list(self.shape)[:-1]+[1])
+    ss = e.sum(axis=len(self.shape)-1).reshape(shape=ns)
     return e.div(ss)
 
   def logsoftmax(self):
     return self.softmax().log()
 
   def dropout(self, p=0.5):
-    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-    ret = self * Tensor(_mask, requires_grad=False, device=self.device)
-    return ret.div(1.0 - p)
+    if Tensor.training:
+      _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+      ret = self * Tensor(_mask, requires_grad=False, device=self.device)
+      return ret.div(1.0 - p)
+    else:
+      return self
 
   def abs(self):
     return self.relu() + (-1.0*self).relu()
