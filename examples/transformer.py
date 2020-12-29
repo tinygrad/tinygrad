@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+import os
 import numpy as np
 import random
 
+from tinygrad.tensor import Device
 from extra.utils import get_parameters
 from extra.training import train, evaluate
 from extra.transformer import Transformer
@@ -23,7 +25,6 @@ def make_dataset():
 
   return ds_X_train, ds_Y_train, ds_X_test, ds_Y_test
 
-
 from tinygrad.optim import Adam
 if __name__ == "__main__":
   model = Transformer(10, 6, 2, 128, 4)
@@ -32,7 +33,7 @@ if __name__ == "__main__":
   optim = Adam(get_parameters(model), lr=0.001)
 
   for i in range(5):
-    train(model, X_train, Y_train, optim, 500, BS=32)
+    train(model, X_train, Y_train, optim, 500, BS=32, device=Device.GPU if os.getenv("GPU") else Device.CPU)
     evaluate(model, X_test, Y_test, num_classes=10)
 
 

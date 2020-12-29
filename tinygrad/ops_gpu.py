@@ -250,9 +250,9 @@ class Dot(Function):
   @staticmethod
   def forward(ctx, input, weight):
     assert input.shape[-1] == weight.shape[-2]
-    cnt = input.shape[0] if len(input.shape) == 3 else 1
+    cnt = np.prod(input.shape[0:-2]) if len(input.shape) > 2 else 1
     isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
-    ret = buffer_new(ctx, (isize, osize) if cnt == 1 else (cnt, isize, osize))
+    ret = buffer_new(ctx, list(input.shape[0:-2])+[isize, osize])
 
     matmul = clbuild(ctx.cl_ctx, "matmul", """
     __kernel void matmul(
