@@ -224,15 +224,15 @@ class Tensor:
 
   def softmax(self):
     ns = list(self.shape)[:-1]+[1]
-    #e = (self - self.max(axis=len(self.shape)-1).reshape(shape=ns)).exp()
-    e = self.exp()
+    m = self.max(axis=len(self.shape)-1).reshape(shape=ns)
+    e = (self - m).exp()
     ss = e.sum(axis=len(self.shape)-1).reshape(shape=ns)
     return e.div(ss)
 
   def logsoftmax(self):
     ns = list(self.shape)[:-1]+[1]
-    # TODO: logsumexp stability with max
-    ss = self.exp().sum(axis=len(self.shape)-1).reshape(shape=ns).log()
+    m = self.max(axis=len(self.shape)-1).reshape(shape=ns)
+    ss = m + (self-m).exp().sum(axis=len(self.shape)-1).reshape(shape=ns).log()
     return self - ss
 
   def dropout(self, p=0.5):

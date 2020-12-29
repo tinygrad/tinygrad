@@ -228,6 +228,24 @@ class Sum(Function):
     return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
 register('sum', Sum, device=Device.GPU)
 
+class Max(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis)
+    ctx.save_for_backward(input, axis, ret)
+    if axis is not None:
+      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = binary_op(ctx, "1.0*(a == b)", input, GPUBuffer(shape, ret))
+    return binary_op(ctx, 'a*b', ret2, GPUBuffer(shape, grad_output))
+register('max', Max, device=Device.GPU)
+
 class Dot(Function):
   @staticmethod
   def forward(ctx, input, weight):
