@@ -161,11 +161,46 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     buffer_np(np.array(osize, dtype=np.int32)))
   return ret
 
+def perm_axis(ctx, inp, order):
+  osize = np.array(inp.shape)[list(order)]
+  ret = buffer_new(ctx, osize)
+  perm = clbuild(ctx.cl_ctx, "perm", """
+  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
+                       __global const int *shape, __global const int *order) {
+    int gid = get_global_id(0);
+    int gi = gid;
+    int idx = 0;
+    for(int i = n_axis-1; i>-1; i--) {
+      int stride = 1;
+      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
+      idx += (gi % shape[order[i]])*stride;
+      gi /= shape[order[i]];
+    }
+    res_g[gid] = a_g[idx];
+    }""")
+  buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
+    cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
+  perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
+    buffer_np(np.array(inp.shape, dtype=np.int32)),
+    buffer_np(np.array(order, dtype=np.int32)))
+  return ret
+
 def unbroadcast(ctx, out, in_sh):
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
   return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
 # ***** now for the ops themselves *****
+
+class Transpose(Function):
+  @staticmethod
+  def forward(ctx, x, order=(1,0)):
+    ctx.save_for_backward(order)
+    return perm_axis(ctx, x, order)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return perm_axis(ctx, grad_output, np.argsort(ctx.order))
+register('transpose', Transpose, device=Device.GPU)
 
 class Add(Function):
   @staticmethod
