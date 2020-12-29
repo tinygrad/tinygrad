@@ -115,7 +115,7 @@ def unary_op(ctx, code, x):
   unop(ctx.cl_queue, [np.prod(ret.shape)], None, x.cl, ret.cl)
   return ret
 
-def reduce_op(ctx, inp, axis=None, code_pre="a", code_post="out"):
+def reduce_op(ctx, inp, axis=None, code_pre="a", code_post="out", code_op="out+=inp"):
   if axis is None: # full reduce
     osize = [1]*len(inp.shape)
   else:
@@ -164,7 +164,7 @@ def reduce_op(ctx, inp, axis=None, code_pre="a", code_post="out"):
     for (int stride = 128; stride>0; stride /=2) {
       barrier(CLK_LOCAL_MEM_FENCE);
       if (lid < stride && (lid + stride) < sz) 
-        loc[lid] += loc[lid + stride];
+        """+code_op.replace("out","loc[lid]").replace("inp","loc[lid + stride]")+""";
     }
     if (lid  == 0) {
       if (groups == 1) {
@@ -188,11 +188,46 @@ def reduce_op(ctx, inp, axis=None, code_pre="a", code_post="out"):
     ret.shape = (1,) if axis is None else tuple(osize)
   return ret
 
+def perm_axis(ctx, inp, order):
+  osize = np.array(inp.shape)[list(order)]
+  ret = buffer_new(ctx, osize)
+  perm = clbuild(ctx.cl_ctx, "perm", """
+  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
+                       __global const int *shape, __global const int *order) {
+    int gid = get_global_id(0);
+    int gi = gid;
+    int idx = 0;
+    for(int i = n_axis-1; i>-1; i--) {
+      int stride = 1;
+      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
+      idx += (gi % shape[order[i]])*stride;
+      gi /= shape[order[i]];
+    }
+    res_g[gid] = a_g[idx];
+    }""")
+  buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
+    cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
+  perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
+    buffer_np(np.array(inp.shape, dtype=np.int32)),
+    buffer_np(np.array(order, dtype=np.int32)))
+  return ret
+
 def unbroadcast(ctx, out, in_sh):
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
   return reduce_op(ctx, out, sum_axis)
 
 # ***** now for the ops themselves *****
+
+class Transpose(Function):
+  @staticmethod
+  def forward(ctx, x, order=(1,0)):
+    ctx.save_for_backward(order)
+    return perm_axis(ctx, x, order)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return perm_axis(ctx, grad_output, np.argsort(ctx.order))
+register('transpose', Transpose, device=Device.GPU)
 
 class Add(Function):
   @staticmethod
@@ -253,6 +288,7 @@ register('pow', Pow, device=Device.GPU)
 class Sum(Function):
   @staticmethod
   def forward(ctx, input, axis=None):
+    axis = [axis] if type(axis) == int else axis
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, input, axis=axis)
     if axis is not None:
@@ -266,6 +302,25 @@ class Sum(Function):
     output = GPUBuffer(shape, hostbuf=grad_output)
     return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
 register('sum', Sum, device=Device.GPU)
+
+class Max(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = reduce_op(ctx, input, axis=axis,code_op="out=max(inp,out)")
+    ctx.save_for_backward(input, axis,ret)
+    if axis is not None:
+      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    #output = GPUBuffer(shape, hostbuf=grad_output)
+    ret2 = binary_op(ctx, "1.0*(a == b)", input, ret)
+    return binary_op(ctx, 'a*b', ret2, grad_output)
+register('max', Max, device=Device.GPU)
 
 class Dot(Function):
   @staticmethod
@@ -390,33 +445,30 @@ class ReLU(Function):
     return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
 register('relu', ReLU, device=Device.GPU)
 
-class Sigmoid(Function):
+class Log(Function):
   @staticmethod
   def forward(ctx, input):
-    ret = unary_op(ctx, '1./(1+exp(-a))', input)
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'log(a)', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a / b', grad_output, input)
+register('log', Log, device=Device.GPU)
+
+class Exp(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = unary_op(ctx, 'exp(a)', input)
     ctx.save_for_backward(ret)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b * (1 - b));', grad_output, ret)
-register('sigmoid', Sigmoid, device=Device.GPU)
-
-class AvgPool2D(Function):
-  @staticmethod
-  def forward(ctx, input, kernel_size=(2, 2)):
-    ret = subsample_op(ctx, input, kernel_size, kernel_size, iter_op="sumval += input[iid]",
-      result_op="sumval / (ksz.x * ksz.y)", decls="float sumval=0.f")
-    ctx.save_for_backward(input.shape)
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    orig_shape, = ctx.saved_tensors
-    return supersample_op(ctx, grad_output, orig_shape, ctx.kernel_size,
-      result_op="input[iid] / (ksz.x * ksz.y)")
-register('avg_pool2d', AvgPool2D, device=Device.GPU)
+    return binary_op(ctx, 'a * b', grad_output, ret)
+register('exp', Exp, device=Device.GPU)
 
 class MaxPool2D(Function):
   @staticmethod
@@ -437,23 +489,6 @@ class MaxPool2D(Function):
       decls="int maxidx=((__global float*)input2)[iid]; int kernidx=(gid.x%ksz.x) + ksz.x*(gid.y%ksz.y)",
       input2=idxs)
 register('max_pool2d', MaxPool2D, device=Device.GPU)
-
-class LogSoftmax(Function):
-  @staticmethod
-  def forward(ctx, input):
-    # TODO: stability?
-    lsum = reduce_op(ctx, input, code_pre="exp(a)", code_post="log(out)", axis=[1])
-    output = binary_op(ctx, 'a-b', input, lsum)
-    ctx.save_for_backward(output)
-    return output
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    output, = ctx.saved_tensors
-    lsum = reduce_op(ctx, grad_output, axis=[1])
-    texp = binary_op(ctx, "exp(a) * b", output, lsum)
-    return binary_op(ctx, "a - b", grad_output, texp)
-register('logsoftmax', LogSoftmax, device=Device.GPU)
 
 # ************* conv ops *************
 

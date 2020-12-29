@@ -65,7 +65,7 @@ if __name__ == "__main__":
   ds_noise = Tensor(np.random.randn(64,128).astype(np.float32), gpu=GPU, requires_grad=False)
   n_steps = int(train_data_size/batch_size)
   if GPU:
-    [x.cuda_() for x in generator_params+discriminator_params]
+    [x.gpu_() for x in generator_params+discriminator_params]
   # optimizers
   optim_g = optim.Adam(generator_params,lr=0.0002, b1=0.5) # 0.0002 for equilibrium!
   optim_d = optim.Adam(discriminator_params,lr=0.0002, b1=0.5)

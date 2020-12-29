@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <sstream>
 
 #import <IOSurface/IOSurfaceRef.h>
 
@@ -111,7 +112,7 @@ uint64_t ANE_Compile(char *iprog, int sz) {
   return program_handle;
 }
 
-int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
+int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf, void *w_surf) {
   int ret;
   DEBUG("ANE_Run %p %p\n", in_surf, out_surf);
   H11ANEProgramRequestArgsStruct *pras = new H11ANEProgramRequestArgsStruct;
@@ -125,7 +126,13 @@ int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
   int in_surf_id = IOSurfaceGetID((IOSurfaceRef)in_surf);
   int out_surf_id = IOSurfaceGetID((IOSurfaceRef)out_surf);
 
-  pras->args[0x28/8] = 1;
+  if (w_surf != NULL) {
+    pras->args[0x28/8] = 0x0000010000000002;
+    int w_surf_id = IOSurfaceGetID((IOSurfaceRef)w_surf);
+    pras->args[0x130/8] = (long long)w_surf_id;
+  } else {
+    pras->args[0x28/8] = 1;
+  }
   pras->args[0x128/8] = (long long)in_surf_id<<32LL;
 
   // outputs
@@ -156,6 +163,47 @@ int ANE_Run(uint64_t program_handle, void *in_surf, void *out_surf) {
   delete pras;
 
   return 0;
+}
+
+int ANECCompile(CFDictionaryRef param_1, CFDictionaryRef param_2, unsigned long param_3);
+int ANE_CompilePlist(char *path, bool debug=false) {
+  CFTypeRef ikeys[2];
+  ikeys[0] = CFSTR("NetworkPlistName");
+  ikeys[1] = CFSTR("NetworkPlistPath");
+
+  CFTypeRef ivalues[2];
+  ivalues[0] = CFStringCreateWithCString(kCFAllocatorDefault, path, kCFStringEncodingUTF8);
+  ivalues[1] = CFSTR("./");
+
+  CFDictionaryRef iDictionary = CFDictionaryCreate(kCFAllocatorDefault, ikeys, ivalues, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+  CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, (const void**)&iDictionary, 1, &kCFTypeArrayCallBacks);
+
+  CFMutableDictionaryRef optionsDictionary = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+  CFMutableDictionaryRef flagsDictionary = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+  // h11 (or anything?) works here too, and creates different outputs that don't run
+  CFDictionaryAddValue(flagsDictionary, CFSTR("TargetArchitecture"), CFSTR("h13"));
+  CFDictionaryAddValue(optionsDictionary, CFSTR("OutputFileName"), CFSTR("model.hwx"));
+
+  if (debug) {
+    CFDictionaryAddValue(flagsDictionary, CFSTR("CompileANEProgramForDebugging"), kCFBooleanTrue);
+    int debug_mask = 0x7fffffff;
+    CFDictionaryAddValue(flagsDictionary, CFSTR("DebugMask"), CFNumberCreate(kCFAllocatorDefault, 3, &debug_mask));
+  }
+
+  return ANECCompile(optionsDictionary, flagsDictionary, 0);
+}
+
+void _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(
+  unsigned long param_1, void *param_2,int param_3, std::basic_ostream<char> *param_4);
+char *ANE_RegDebug(int a1, void *dat, int a2) {
+  std::ostringstream ss;
+  _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(a1, dat, a2, &ss);
+  std::string cppstr = ss.str();
+  const char *str = cppstr.c_str();
+  char *ret = (char *)malloc(strlen(str)+1);
+  strcpy(ret, str);
+  return ret;
 }
 
 }

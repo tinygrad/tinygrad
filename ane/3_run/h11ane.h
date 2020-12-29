@@ -69,6 +69,12 @@ namespace H11ANE {
       int ANE_PowerOn();
       int ANE_PowerOff();
 
+      // logging (e00002c7 error, needs PE_i_can_has_debugger)
+      int ANE_CreateClientLoggingSession(unsigned int log_iosurface);
+      int ANE_TerminateClientLoggingSession(unsigned int log_iosurface);
+      int ANE_GetDriverLoggingFlags(unsigned int *flags);
+      int ANE_SetDriverLoggingFlags(unsigned int flags);
+
       // program creation
       int ANE_ProgramCreate(H11ANEProgramCreateArgsStruct*,
                             H11ANEProgramCreateArgsStructOutput*);

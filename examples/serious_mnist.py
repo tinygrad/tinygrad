@@ -85,7 +85,7 @@ class BigConvNet:
         try:
           par.cpu().data[:] = np.load(f)
           if GPU:
-            par.cuda()
+            par.gpu()
         except:
           print('Could not load parameter')
 
@@ -126,7 +126,7 @@ if __name__ == "__main__":
 
   if GPU:
     params = get_parameters(model)
-    [x.cuda_() for x in params]
+    [x.gpu_() for x in params]
 
   for lr, epochs in zip(lrs, epochss):
     optimizer = optim.Adam(model.parameters(), lr=lr)

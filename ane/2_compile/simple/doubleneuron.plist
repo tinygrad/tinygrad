@@ -18,6 +18,7 @@
 		<key>Units</key>
 		<array>
 			<string>my_layer</string>
+			<string>my_layer_2</string>
 		</array>
 		<key>Outputs</key>
 		<array>
@@ -58,10 +59,27 @@
 			<string>Neuron</string>
 		</dict>
 
-		<key>probs@output</key>
+		<key>my_layer_2</key>
 		<dict>
 			<key>Bottom</key>
 			<string>my_layer</string>
+			<key>Name</key>
+			<string>my_layer_2</string>
+			<key>OutputType</key>
+			<string>Float16</string>
+			<key>Params</key>
+			<dict>
+				<key>Type</key>
+				<string>Sigmoid</string>
+			</dict>
+			<key>Type</key>
+			<string>Neuron</string>
+		</dict>
+
+		<key>probs@output</key>
+		<dict>
+			<key>Bottom</key>
+			<string>my_layer_2</string>
 		</dict>
 
 	</dict>

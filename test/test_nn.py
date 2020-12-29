@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import GPU, Device
+from tinygrad.tensor import GPU, ANE, Device
 from tinygrad.nn import *
 from extra.utils import get_parameters
 import torch
-from .config import ANE
 
 class TestNN(unittest.TestCase):
   device = Device.CPU

@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 
 class Optimizer:
   def __init__(self, params):
-    self.params = [x for x in params if x.requires_grad == True]
+    self.params = [x for x in params if x.requires_grad]
 
   def zero_grad(self):
     for param in self.params:
@@ -43,7 +43,7 @@ class Adam(Optimizer):
   def step(self):
     self.t = self.t + 1
     a = self.lr * ((1.0 - self.b2**self.t)**0.5) / (1.0 - self.b1**self.t)
-    for i,t in enumerate(self.params):
+    for i, t in enumerate(self.params):
       self.m[i] = self.b1 * self.m[i] + (1.0 - self.b1) * t.grad
       self.v[i] = self.b2 * self.v[i] + (1.0 - self.b2) * t.grad * t.grad
       t -= a * self.m[i].div(self.v[i].sqrt() + self.eps)

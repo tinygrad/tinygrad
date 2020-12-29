@@ -1,3 +1,4 @@
 *.hwx
 anecompiler.swap.*
 context_switch_log.txt
+debug/

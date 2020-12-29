@@ -18,8 +18,7 @@ if DEBUG:
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    self.name = ("back_" if backward else "")+name
-    self.x = x
+    self.name, self.x = f"back_{name}" if backward else name, x
   def __enter__(self):
     if DEBUG: self.st = time.time()
   def __exit__(self, *junk):
@@ -70,6 +69,7 @@ class Device: CPU, GPU, ANE = 0, 1, 2
 
 class Tensor:
   did_float_warning = False
+  training = True
   ops = defaultdict(dict)
 
   def __init__(self, data, device=Device.CPU, requires_grad=True):
@@ -81,7 +81,7 @@ class Tensor:
     self._ctx = None
 
   def __repr__(self):
-    return f"Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}"
+    return f"<Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}>"
 
   def assign(self, x):
     self.data = x.data
@@ -138,7 +138,7 @@ class Tensor:
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
-      for t,g in zip(t0._ctx.parents, grads):
+      for t, g in zip(t0._ctx.parents, grads):
         if g is not None:
           assert g.shape == t.shape, \
             f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
@@ -212,6 +212,10 @@ class Tensor:
   def div(self, y):
     return self * (y ** -1.0)
 
+  def sigmoid(self):
+    e = self.exp()
+    return e.div(1 + e)
+
   def swish(self):
     return self * self.sigmoid()
 
@@ -221,13 +225,32 @@ class Tensor:
   def leakyrelu(self, neg_slope=0.01):
     return self.relu() - (-neg_slope*self).relu()
 
+  def softmax(self):
+    ns = list(self.shape)[:-1]+[1]
+    #e = (self - self.max(axis=len(self.shape)-1).reshape(shape=ns)).exp()
+    e = self.exp()
+    ss = e.sum(axis=len(self.shape)-1).reshape(shape=ns)
+    return e.div(ss)
+
+  def logsoftmax(self):
+    return self.softmax().log()
+
   def dropout(self, p=0.5):
-    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-    ret = self * Tensor(_mask, requires_grad=False, device=self.device)
-    return ret.div(1.0 - p)
+    if Tensor.training:
+      _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+      ret = self * Tensor(_mask, requires_grad=False, device=self.device)
+      return ret.div(1.0 - p)
+    else:
+      return self
 
   def abs(self):
     return self.relu() + (-1.0*self).relu()
+
+  def avg_pool2d(self, kernel_size=(2,2)):
+    chan = self.shape[1]
+    ww = np.zeros((chan, 1, kernel_size[0], kernel_size[1]), dtype=np.float32)
+    ww[range(chan), 0, :, :] = 1/(kernel_size[0]*kernel_size[1])
+    return self.conv2d(Tensor(ww, device=self.device, requires_grad=False), stride=kernel_size, groups=chan)
 
 # An instantiation of the Function is the Context
 class Function:
@@ -285,3 +308,4 @@ try:
 except ImportError:
   # no GPU support
   GPU = False
+ANE = False
