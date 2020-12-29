@@ -105,15 +105,15 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 
 ### Adding an accelerator
 
-You need to support 15 basic ops:
+You need to support 14 basic ops:
 
 ```
 Relu, Log, Exp                  # unary ops
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Sum, Max                        # reduce ops (with axis argument)
 Dot, Conv2D                     # matrix multiplication and conv
-Reshape, Transpose              # moving things around ops
-Pad2D, Unpad2D                  # stupid slices
+Reshape, Transpose, Slice       # moving things around ops
+Pad2D, Unpad2D                  # stupid (refactor to Slice)
 ```
 
 ## ImageNet inference
