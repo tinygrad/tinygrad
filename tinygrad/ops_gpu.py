@@ -281,46 +281,55 @@ register('dot', Dot, device=Device.GPU)
 
 # ************* simple ops *************
 
+def get_pad2d_kernel(ctx):
+  return clbuild(ctx.cl_ctx, "pad2d", """
+  __kernel void pad2d(__global const float *input, __global float *output,
+                      int ipx, int ipy, int py, int px, int oy, int ox, int iy, int ix) {
+    int BC = get_global_id(0);
+    int Y = get_global_id(1);
+    int X = get_global_id(2);
+
+    int iptr = BC*iy*ix + (Y+ipy)*ix + ipx + X;
+    int optr = BC*oy*ox + (Y+py)*ox + px + X;
+
+    output[optr] = input[iptr];
+  }""")
+
 class Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
     bs,cin,iy,ix = x.shape
-    oy,ox = iy+padding[2]+padding[3], ix+padding[0]+padding[1]
+    oy,ox = iy+ctx.padding[2]+ctx.padding[3], ix+ctx.padding[0]+ctx.padding[1]
     ret = buffer_new(ctx, (bs, cin, oy, ox), zero=True)
-
-    pad2d = clbuild(ctx.cl_ctx, "pad2d", """
-    __kernel void pad2d(__global const float *input, __global float *output,
-                        int ipx, int ipy, int py, int px, int oy, int ox, int iy, int ix) {
-      int BC = get_global_id(0);
-      int Y = get_global_id(1);
-      int X = get_global_id(2);
-
-      int iptr = BC*iy*ix + (Y+ipy)*ix + ipx + X;
-      int optr = BC*oy*ox + (Y+py)*ox + px + X;
-
-      output[optr] = input[iptr];
-    }""")
-    ctx.save_for_backward(padding, pad2d)
-    pad2d(ctx.cl_queue, [bs*cin, iy, ix], None,
+    get_pad2d_kernel(ctx)(ctx.cl_queue, [bs*cin, iy, ix], None,
         x.cl, ret.cl,
-        i32(0), i32(0), i32(padding[2]), i32(padding[0]),
+        i32(0), i32(0), i32(ctx.padding[2]), i32(ctx.padding[0]),
         i32(oy), i32(ox), i32(iy), i32(ix)
       )
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    padding, pad2d = ctx.saved_tensors
     bs, cin, iy, ix = grad_output.shape
-    oy, ox = iy - padding[2] - padding[3], ix - padding[0] - padding[1]
+    oy, ox = iy - ctx.padding[2] - ctx.padding[3], ix - ctx.padding[0] - ctx.padding[1]
     ret = buffer_new(ctx, (bs, cin, oy, ox))
-    pad2d(ctx.cl_queue, [bs*cin, oy, ox], None,
+    get_pad2d_kernel(ctx)(ctx.cl_queue, [bs*cin, oy, ox], None,
               grad_output.cl, ret.cl,
-              i32(padding[2]), i32(padding[0]), i32(0), i32(0),
+              i32(ctx.padding[2]), i32(ctx.padding[0]), i32(0), i32(0),
               i32(oy), i32(ox), i32(iy), i32(ix)
              )
     return ret
 register('pad2d', Pad2D, device=Device.GPU)
+
+# TODO: this is an exact copy from the CPU code
+class Unpad2D(Function):
+  @staticmethod
+  def forward(ctx, x, padding=None):
+    return Pad2D.backward(ctx, x)
+  @staticmethod
+  def backward(ctx, grad_output):
+    return Pad2D.forward(ctx, grad_output)
+register('unpad2d', Unpad2D, device=Device.GPU)
 
 class Reshape(Function):
   @staticmethod

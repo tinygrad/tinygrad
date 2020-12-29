@@ -291,7 +291,7 @@ def register(name, fxn, device=Device.CPU):
   def dispatch(*x, **kwargs):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    f = (Tensor.ops[tt.device])[name]
+    f = Tensor.ops[tt.device][name]
     f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)

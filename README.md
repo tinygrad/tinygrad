@@ -113,7 +113,7 @@ Relu, Log, Exp                  # unary ops
 Sum, Max                        # reduce ops (with axis argument)
 Dot, Conv2D                     # matrix multiplication and conv
 Reshape, Transpose              # moving things around ops
-Unpad2D, Pad2D                  # stupid slices
+Pad2D, Unpad2D                  # stupid slices
 ```
 
 ## ImageNet inference

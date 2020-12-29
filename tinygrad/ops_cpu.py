@@ -122,7 +122,6 @@ class Unpad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
     return Pad2D.backward(ctx, x)
-
   @staticmethod
   def backward(ctx, grad_output):
     return Pad2D.forward(ctx, grad_output)
