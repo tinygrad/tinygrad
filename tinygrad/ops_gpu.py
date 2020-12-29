@@ -180,9 +180,7 @@ def perm_axis(ctx, inp, order):
     }""")
   buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
     cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-  perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
-    ret.cl,
-    i32(len(osize)),
+  perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(order, dtype=np.int32)))
   return ret
