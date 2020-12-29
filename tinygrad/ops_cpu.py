@@ -66,7 +66,7 @@ class Sum(Function):
   @staticmethod
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-    axis = [axis] if type(axis) == int else axis
+    axis = [axis] if type(axis) is int else axis
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     return grad_output.reshape(shape) + np.zeros_like(input)
 register('sum', Sum)

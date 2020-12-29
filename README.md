@@ -108,9 +108,9 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 You need to support 15 basic ops:
 
 ```
-Add, Sub, Mul, Pow              # binary ops
+Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Relu, Log, Exp                  # unary ops
-Sum, Max                        # reduce ops
+Sum, Max                        # reduce ops (with axis argument)
 Dot                             # matrix multiplication
 Conv2D, MaxPool2D               # 2D ops
 Pad2D, Reshape, Transpose       # moving things around ops
