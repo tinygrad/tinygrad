@@ -75,10 +75,7 @@ class Max(Function):
   @staticmethod
   def forward(ctx, input, axis=None):
     am = input.argmax(axis=axis)
-    if axis is not None:
-      am = np.expand_dims(am, axis=axis)
-    else:
-      am = np.array([am])
+    am = np.expand_dims(am, axis=axis) if axis is not None else np.array([am])
     ctx.save_for_backward(input.shape, am, axis)
     return np.take_along_axis(input, am, axis=axis).squeeze(axis=axis)
 
@@ -86,7 +83,7 @@ class Max(Function):
   def backward(ctx, grad_output):
     shape, am, axis = ctx.saved_tensors
     ret = np.zeros(shape, dtype=np.float32)
-    np.put_along_axis(ret, am, 1/np.prod(am.shape), axis=axis)
+    np.put_along_axis(ret, am, grad_output.reshape(am.shape), axis=axis)
     return ret
 register('max', Max)
 
