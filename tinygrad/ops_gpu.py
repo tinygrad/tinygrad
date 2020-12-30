@@ -242,8 +242,10 @@ class Max(Function):
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = binary_op(ctx, "1.0*(a == b)", input, GPUBuffer(shape, ret))
-    return binary_op(ctx, 'a*b', ret2, GPUBuffer(shape, grad_output))
+    ret2 = binary_op(ctx, "1.0*(a==b)", input, GPUBuffer(shape, ret))
+    div = reduce_op(ctx, "out += a", "out+1e-10", ret2, axis=axis)
+    ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))
+    return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
 register('max', Max, device=Device.GPU)
 
 class Matmul(Function):

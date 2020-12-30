@@ -115,18 +115,21 @@ register('sum', Sum)
 
 class Max(Function):
   @staticmethod
-  def forward(ctx, input, axis=None):
-    am = input.argmax(axis=axis)
-    am = np.expand_dims(am, axis=axis) if axis is not None else np.array([am])
-    ctx.save_for_backward(input.shape, am, axis)
-    return np.take_along_axis(input, am, axis=axis).squeeze(axis=axis)
+  def forward(ctx, inp, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True) 
+    ctx.save_for_backward(inp, axis, ret)
+    if axis is not None:
+      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
+    return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    shape, am, axis = ctx.saved_tensors
-    ret = np.zeros(shape, dtype=np.float32)
-    np.put_along_axis(ret, am, grad_output.reshape(am.shape), axis=axis)
-    return ret
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = (input==ret.reshape(shape))
+    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True) 
+    return ret2*grad_output.reshape(shape)/div
 register('max', Max)
 
 # ************* movement ops *************
