@@ -1,6 +1,6 @@
 import warnings
 import numpy as np
-from .tensor import Function, register, Tensor
+from .tensor import Function, register
 
 # ************* unary ops *************
 
@@ -94,7 +94,7 @@ class Pow(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
-           unbroadcast((x**y) * np.log(x) * grad_output, y.shape) 
+           unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
 register('pow', Pow)
 
 # ************* reduce ops *************
