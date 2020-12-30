@@ -191,8 +191,6 @@ class Tensor:
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
-  def _is(self, device): return self.device == device
-
   def detach(self):
     return Tensor(self.data, device=self.device)
 
@@ -203,8 +201,7 @@ class Tensor:
 
   def mean(self, axis=None):
     out = self.sum(axis=axis)
-    coeff = np.prod(out.shape)/np.prod(self.shape)
-    return out * coeff
+    return out * (np.prod(out.shape)/np.prod(self.shape))
 
   def sqrt(self):
     return self.pow(0.5)
@@ -227,30 +224,38 @@ class Tensor:
 
   def softmax(self):
     ns = list(self.shape)[:-1]+[1]
-    #e = (self - self.max(axis=len(self.shape)-1).reshape(shape=ns)).exp()
-    e = self.exp()
+    m = self.max(axis=len(self.shape)-1).reshape(shape=ns)
+    e = (self - m).exp()
     ss = e.sum(axis=len(self.shape)-1).reshape(shape=ns)
     return e.div(ss)
 
   def logsoftmax(self):
-    return self.softmax().log()
+    ns = list(self.shape)[:-1]+[1]
+    m = self.max(axis=len(self.shape)-1).reshape(shape=ns)
+    ss = m + (self-m).exp().sum(axis=len(self.shape)-1).reshape(shape=ns).log()
+    return self - ss
 
   def dropout(self, p=0.5):
+    # TODO: this needs a test
     if Tensor.training:
       _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-      ret = self * Tensor(_mask, requires_grad=False, device=self.device)
-      return ret.div(1.0 - p)
+      return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
     else:
       return self
 
   def abs(self):
     return self.relu() + (-1.0*self).relu()
 
+  def _pool2d(self, py, px):
+    xup = self.unpad2d(padding=(0, self.shape[3]%px, 0, self.shape[2]%py))
+    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
+
   def avg_pool2d(self, kernel_size=(2,2)):
-    chan = self.shape[1]
-    ww = np.zeros((chan, 1, kernel_size[0], kernel_size[1]), dtype=np.float32)
-    ww[range(chan), 0, :, :] = 1/(kernel_size[0]*kernel_size[1])
-    return self.conv2d(Tensor(ww, device=self.device, requires_grad=False), stride=kernel_size, groups=chan)
+    return self._pool2d(*kernel_size).mean(axis=(3,5))
+
+  def max_pool2d(self, kernel_size=(2,2)):
+    # TODO: support tuples in max and avoid a copy
+    return self._pool2d(*kernel_size).max(axis=5).max(axis=3)
 
 # An instantiation of the Function is the Context
 class Function:
@@ -283,7 +288,7 @@ def register(name, fxn, device=Device.CPU):
   def dispatch(*x, **kwargs):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    f = (Tensor.ops[tt.device])[name]
+    f = Tensor.ops[tt.device][name]
     f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
@@ -296,7 +301,6 @@ def register(name, fxn, device=Device.CPU):
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
-  setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, Device.__dict__[device])))
 
 # this registers all the operations
 import tinygrad.ops_cpu
