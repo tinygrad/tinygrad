@@ -42,17 +42,19 @@ def train(model, X_train, Y_train, optim, steps, BS=128, device=Device.CPU, loss
     accuracies.append(accuracy)
     t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
 
-def evaluate(model, X_test, Y_test, num_classes=None, device=Device.CPU, BS=128):
+def evaluate(model, X_test, Y_test, num_classes=None, device=Device.CPU, BS=128, return_predict=False):
   Tensor.training = False
-  def numpy_eval(num_classes):
+  def numpy_eval(num_classes, return_predict):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
-    for i in trange(len(Y_test)//BS, disable=os.getenv('CI') is not None):
+    for i in trange(len(Y_test)//BS+1, disable=os.getenv('CI') is not None):
       Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(Tensor(X_test[i*BS:(i+1)*BS], device=device)).cpu().data
     Y_test_preds = np.argmax(Y_test_preds_out, axis=-1)
+    if return_predict:
+      return (Y_test == Y_test_preds).mean(), Y_test_preds
     return (Y_test == Y_test_preds).mean()
 
   if num_classes is None: num_classes = Y_test.max().astype(int)+1
-  accuracy = numpy_eval(num_classes)
-  print("test set accuracy is %f" % accuracy)
-  return accuracy
+  ret = numpy_eval(num_classes, return_predict)
+  print("test set accuracy is %f" % ret[0] if return_predict else ret)  
+  return ret
 
