@@ -246,7 +246,7 @@ class Max(Function):
     return binary_op(ctx, 'a*b', ret2, GPUBuffer(shape, grad_output))
 register('max', Max, device=Device.GPU)
 
-class Dot(Function):
+class Matmul(Function):
   @staticmethod
   def forward(ctx, input, weight):
     assert input.shape[-1] == weight.shape[-2]
@@ -299,7 +299,7 @@ class Dot(Function):
       i32(1), msize, isize, i32(1), osize, osize)
 
     return grad_input, grad_weight
-register('dot', Dot, device=Device.GPU)
+register('matmul', Matmul, device=Device.GPU)
 
 # ************* movement ops *************
 

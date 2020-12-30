@@ -207,8 +207,8 @@ class Tensor:
   def pad2d(self, padding):
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
-  def matmul(self, w):
-    return self.dot(w)
+  def dot(self, w):
+    return self.matmul(w)
 
   def mean(self, axis=None):
     out = self.sum(axis=axis)
@@ -304,7 +304,7 @@ def register(name, fxn, device=Device.CPU):
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   # TODO: div is a second class op, so it doesn't work here
-  if name in ['add', 'sub', 'mul', 'pow']:
+  if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))

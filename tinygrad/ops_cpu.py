@@ -89,7 +89,7 @@ register('max', Max)
 
 # ************* GEMM *************
 
-class Dot(Function):
+class Matmul(Function):
   @staticmethod
   def forward(ctx, input, weight):
     ctx.save_for_backward(input, weight)
@@ -101,7 +101,7 @@ class Dot(Function):
     grad_input = grad_output @ np.swapaxes(weight, -2, -1)
     grad_weight = np.swapaxes(input, -2, -1) @ grad_output
     return grad_input, grad_weight
-register('dot', Dot)
+register('matmul', Matmul)
 
 # ************* movement ops *************
 

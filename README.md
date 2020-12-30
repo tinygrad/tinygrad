@@ -111,7 +111,7 @@ You need to support 14 basic ops:
 Relu, Log, Exp                  # unary ops
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Sum, Max                        # reduce ops (with axis argument)
-Dot, Conv2D                     # matrix multiplication and conv
+Matmul, Conv2D                  # matrix multiplication and conv
 Reshape, Transpose, Slice       # moving things around ops
 ```
 
