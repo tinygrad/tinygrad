@@ -258,8 +258,7 @@ class Tensor:
     return self.relu() + (-1.0*self).relu()
 
   def _pool2d(self, py, px):
-    xup = self.slice(arg=[(0,self.shape[0]), (0,self.shape[1]),
-      (0,self.shape[2]-self.shape[2]%py), (0, self.shape[3]-self.shape[3]%px)])
+    xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px]
     return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
 
   def avg_pool2d(self, kernel_size=(2,2)):
