@@ -111,7 +111,7 @@ You need to support 14 first class ops:
 Relu, Log, Exp                  # unary ops
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Sum, Max                        # reduce ops (with axis argument)
-Reshape, Transpose, Slice       # moving things around ops
+Reshape, Transpose, Slice       # movement ops
 Matmul, Conv2D                  # heavy data processing ops
 ```
 
