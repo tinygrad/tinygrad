@@ -242,7 +242,7 @@ class Max(Function):
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = binary_op(ctx, "1.0*(a == b)", input, GPUBuffer(shape, ret))
+    ret2 = binary_op(ctx, "1.0*(fabs(a- b) < 1.0e-8)", input, GPUBuffer(shape, ret))
     div = reduce_op(ctx, "out += a", "out", ret2, axis=axis)
     ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))
     return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
