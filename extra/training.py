@@ -46,7 +46,7 @@ def evaluate(model, X_test, Y_test, num_classes=None, device=Device.CPU, BS=128,
   Tensor.training = False
   def numpy_eval(num_classes, return_predict):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
-    for i in trange(len(Y_test)//BS+1, disable=os.getenv('CI') is not None):
+    for i in trange((len(Y_test)-1)//BS+1, disable=os.getenv('CI') is not None):
       Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(Tensor(X_test[i*BS:(i+1)*BS], device=device)).cpu().data
     Y_test_preds = np.argmax(Y_test_preds_out, axis=-1)
     if return_predict:
