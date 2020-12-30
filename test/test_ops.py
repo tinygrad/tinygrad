@@ -9,9 +9,9 @@ from tinygrad.tensor import Tensor, GPU, ANE, Device
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=Device.CPU, forward_only=False, vals=None):
   torch.manual_seed(0)
   if shps is None:
-      ts = [torch.tensor(x, requires_grad=True) for x in vals]
+    ts = [torch.tensor(x, requires_grad=True) for x in vals]
   else:
-      ts = [torch.rand(x, requires_grad=True) for x in shps]
+    ts = [torch.rand(x, requires_grad=True) for x in shps]
   tst = [Tensor(x.detach().numpy()) for x in ts]
   if device==Device.GPU:
     tst = [x.gpu() for x in tst]
