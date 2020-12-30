@@ -103,29 +103,26 @@ class Dot(Function):
     return grad_input, grad_weight
 register('dot', Dot)
 
-# ************* simple ops *************
+# ************* movement ops *************
 
-# TODO: Combine Pad2D and Unpad2D into something generic
-class Pad2D(Function):
+def inner_slice(x, arg):
+  padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
+  x = np.pad(x, padding)
+  slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
+  return x[tuple([slice(x[0], x[1], None) for x in slicee])]
+
+class Slice(Function):
   @staticmethod
-  def forward(ctx, x, padding=None):
-    return np.pad(x, ((0,0), (0,0), tuple(ctx.padding[2:4]), tuple(ctx.padding[0:2])))
+  def forward(ctx, x, arg=None):
+    ctx.save_for_backward(x.shape)
+    return inner_slice(x, arg)
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output[...,
-      ctx.padding[2]:(None if ctx.padding[3] == 0 else -ctx.padding[3]),
-      ctx.padding[0]:(None if ctx.padding[1] == 0 else -ctx.padding[1])]
-register('pad2d', Pad2D)
-
-class Unpad2D(Function):
-  @staticmethod
-  def forward(ctx, x, padding=None):
-    return Pad2D.backward(ctx, x)
-  @staticmethod
-  def backward(ctx, grad_output):
-    return Pad2D.forward(ctx, grad_output)
-register('unpad2d', Unpad2D)
+    shape, = ctx.saved_tensors
+    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
+    return inner_slice(grad_output, narg)
+register('slice', Slice)
 
 class Reshape(Function):
   @staticmethod

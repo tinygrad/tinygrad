@@ -124,6 +124,11 @@ class TestOps(unittest.TestCase):
           # NOTE: ANE backwards?
           helper_test_op(shapes, torch_op, tinygrad_op, device=self.device, forward_only=self.device!=Device.CPU)
 
+  def test_slice(self):
+    helper_test_op([(3,3,3,3)], lambda x: x[1:2], lambda x: x[1:2], device=self.device)
+    helper_test_op([(3,3,3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2], device=self.device)
+    helper_test_op([(3,3,3,3)], lambda x: x[1:2, 1:2, 0:-1], lambda x: x[1:2, 1:2, 0:-1], device=self.device)
+
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)), device=self.device)
 

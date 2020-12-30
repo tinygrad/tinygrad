@@ -196,6 +196,17 @@ class Tensor:
 
   # ***** non first class ops *****
 
+  def __getitem__(self, val):
+    arg = []
+    for i,s in enumerate(val if type(val) in [list, tuple] else ([] if val is None else [val])):
+      arg.append((s.start if s.start is not None else 0,
+        (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+      assert s.step is None or s.step == 1
+    return self.slice(arg = arg+[(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
+
+  def pad2d(self, padding):
+    return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
+
   def matmul(self, w):
     return self.dot(w)
 
@@ -247,7 +258,8 @@ class Tensor:
     return self.relu() + (-1.0*self).relu()
 
   def _pool2d(self, py, px):
-    xup = self.unpad2d(padding=(0, self.shape[3]%px, 0, self.shape[2]%py))
+    xup = self.slice(arg=[(0,self.shape[0]), (0,self.shape[1]),
+      (0,self.shape[2]-self.shape[2]%py), (0, self.shape[3]-self.shape[3]%px)])
     return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
 
   def avg_pool2d(self, kernel_size=(2,2)):

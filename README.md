@@ -113,7 +113,6 @@ Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Sum, Max                        # reduce ops (with axis argument)
 Dot, Conv2D                     # matrix multiplication and conv
 Reshape, Transpose, Slice       # moving things around ops
-Pad2D, Unpad2D                  # stupid (refactor to Slice)
 ```
 
 ## ImageNet inference

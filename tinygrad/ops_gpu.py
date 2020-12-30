@@ -301,7 +301,7 @@ class Dot(Function):
     return grad_input, grad_weight
 register('dot', Dot, device=Device.GPU)
 
-# ************* simple ops *************
+# ************* movement ops *************
 
 def get_pad2d_kernel(ctx):
   return clbuild(ctx.cl_ctx, "pad2d", """
@@ -341,17 +341,7 @@ class Pad2D(Function):
               i32(oy), i32(ox), i32(iy), i32(ix)
              )
     return ret
-register('pad2d', Pad2D, device=Device.GPU)
-
-# TODO: this is an exact copy from the CPU code
-class Unpad2D(Function):
-  @staticmethod
-  def forward(ctx, x, padding=None):
-    return Pad2D.backward(ctx, x)
-  @staticmethod
-  def backward(ctx, grad_output):
-    return Pad2D.forward(ctx, grad_output)
-register('unpad2d', Unpad2D, device=Device.GPU)
+#register('pad2d', Pad2D, device=Device.GPU)
 
 class Reshape(Function):
   @staticmethod
