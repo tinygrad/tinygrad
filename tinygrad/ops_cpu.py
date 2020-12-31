@@ -236,4 +236,4 @@ class Conv2D(Function):
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 
 for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
-    if name[0] != "_":  register(name.lower(), cls)
+  if name[0] != "_":  register(name.lower(), cls)

@@ -515,4 +515,4 @@ class Conv2D(Function):
     return dx, dw
 
 for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
-    if name[0] != "_":  register(name.lower(), cls, device=Device.GPU)
+  if name[0] != "_":  register(name.lower(), cls, device=Device.GPU)
