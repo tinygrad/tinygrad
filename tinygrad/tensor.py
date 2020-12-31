@@ -265,8 +265,7 @@ class Tensor:
     return self._pool2d(*kernel_size).mean(axis=(3,5))
 
   def max_pool2d(self, kernel_size=(2,2)):
-    # TODO: support tuples in max and avoid a copy
-    return self._pool2d(*kernel_size).max(axis=5).max(axis=3)
+    return self._pool2d(*kernel_size).max(axis=(3,5))
 
 # An instantiation of the Function is the Context
 class Function:

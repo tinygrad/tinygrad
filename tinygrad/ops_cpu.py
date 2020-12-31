@@ -39,6 +39,39 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return grad_output * ret
 
+# ************* reduce ops *************
+
+class Sum(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    ctx.save_for_backward(input, axis)
+    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis = ctx.saved_tensors
+    axis = [axis] if type(axis) is int else axis
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    return grad_output.reshape(shape) + np.zeros_like(input)
+
+class Max(Function):
+  @staticmethod
+  def forward(ctx, inp, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ctx.save_for_backward(inp, axis, ret)
+    if axis is not None:
+      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = (input==ret.reshape(shape))
+    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    return ret2*grad_output.reshape(shape)/div
+
 # ************* binary ops *************
 
 def unbroadcast(out, in_sh):
@@ -90,39 +123,6 @@ class Pow(Function):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
            unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
-
-# ************* reduce ops *************
-
-class Sum(Function):
-  @staticmethod
-  def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input, axis)
-    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    axis = [axis] if type(axis) is int else axis
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    return grad_output.reshape(shape) + np.zeros_like(input)
-
-class Max(Function):
-  @staticmethod
-  def forward(ctx, inp, axis=None):
-    axis = [axis] if type(axis) == int else axis
-    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True) 
-    ctx.save_for_backward(inp, axis, ret)
-    if axis is not None:
-      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis, ret = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True) 
-    return ret2*grad_output.reshape(shape)/div
 
 # ************* movement ops *************
 

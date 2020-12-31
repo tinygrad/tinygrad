@@ -109,8 +109,8 @@ You need to support 14 first class ops:
 
 ```
 Relu, Log, Exp                  # unary ops
-Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Sum, Max                        # reduce ops (with axis argument)
+Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Reshape, Transpose, Slice       # movement ops
 Matmul, Conv2D                  # processing ops
 ```
