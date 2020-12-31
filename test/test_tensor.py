@@ -3,6 +3,7 @@ import torch
 import unittest
 from tinygrad.tensor import Tensor, GPU, ANE, Device
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
+from .env import TEST_DEVICES
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -10,7 +11,7 @@ V_init = np.random.randn(3,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-class TestTinygrad(unittest.TestCase):
+class _TestTinygrad:
   device = Device.CPU
 
   def test_backward_pass(self):
@@ -96,9 +97,12 @@ class TestTinygrad(unittest.TestCase):
     # coarse approx. since a "big" eps and the non-linearities of the model
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 0.1))
 
+@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
+class TestOpsCPU(_TestTinygrad, unittest.TestCase):
+  device=Device.CPU
 
-@unittest.skipUnless(GPU, "Requires GPU")
-class TestTinygradGPU(TestTinygrad):
+@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
+class TestTinygradGPU(_TestTinygrad, unittest.TestCase):
   device = Device.GPU
 
   @unittest.skip("float64 not supported on GPU")
@@ -107,8 +111,8 @@ class TestTinygradGPU(TestTinygrad):
   @unittest.skip("float64 not supported on GPU")
   def test_gradcheck(self): pass
 
-@unittest.skipUnless(ANE, "Requires ANE")
-class TestOpsANE(TestTinygrad):
+@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
+class TestOpsANE(_TestTinygrad, unittest.TestCase):
   device=Device.ANE
 
 if __name__ == '__main__':

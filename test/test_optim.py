@@ -4,6 +4,7 @@ import unittest
 from tinygrad.tensor import Tensor, GPU, ANE, Device
 from tinygrad.optim import Adam, SGD, RMSprop
 from extra.utils import get_parameters
+from .env import TEST_DEVICES
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
@@ -54,7 +55,7 @@ class TorchNet():
     return out
 
 
-class TestOptim(unittest.TestCase):
+class _TestOptim:
   device = Device.CPU
 
   def test_adam(self):
@@ -73,15 +74,17 @@ class TestOptim(unittest.TestCase):
                                 kwargs={'lr': 0.001, 'alpha': 0.99})):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
+class TestOptimCPU(_TestOptim, unittest.TestCase):
+  device = Device.CPU
 
-@unittest.skipUnless(GPU, "Requires GPU")
-class TestOptimGPU(TestOptim):
+@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
+class TestOptimGPU(_TestOptim, unittest.TestCase):
   device = Device.GPU
 
-@unittest.skipUnless(ANE, "Requires ANE")
-class TestOptimANE(TestOptim):
+@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
+class TestOptimANE(_TestOptim, unittest.TestCase):
   device = Device.ANE
-
 
 if __name__ == '__main__':
   unittest.main()

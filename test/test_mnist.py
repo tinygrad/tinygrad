@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor, GPU, ANE, Device
 import tinygrad.optim as optim
 from extra.training import train, evaluate
 from extra.utils import fetch, get_parameters
+from .env import TEST_DEVICES
 
 # mnist loader
 def fetch_mnist():
@@ -54,8 +55,7 @@ class TinyConvNet:
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1).logsoftmax()
 
-class TestMNIST(unittest.TestCase):
-  device = Device.CPU
+class _TestMNIST:
 
   def test_conv(self):
     np.random.seed(1337)
@@ -78,12 +78,16 @@ class TestMNIST(unittest.TestCase):
     train(model,  X_train, Y_train, optimizer, steps=1000, device=self.device)
     assert evaluate(model, X_test, Y_test, device=self.device) > 0.95
 
-@unittest.skipUnless(GPU, "Requires GPU")
-class TestMNISTGPU(TestMNIST):
+@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
+class TestMNISTCPU(_TestMNIST, unittest.TestCase):
+  device = Device.CPU
+
+@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
+class TestMNISTGPU(_TestMNIST, unittest.TestCase):
   device = Device.GPU
 
-@unittest.skipUnless(ANE, "Requires ANE")
-class TestMNISTANE(TestMNIST):
+@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
+class TestMNISTANE(_TestMNIST, unittest.TestCase):
   device=Device.ANE
 
 if __name__ == '__main__':

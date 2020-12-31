@@ -5,6 +5,7 @@ import unittest
 import timeit
 import functools
 from tinygrad.tensor import Tensor, GPU, ANE, Device
+from .env import TEST_DEVICES
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=0, rtol=1e-6, grad_atol=0, grad_rtol=1e-6, device=Device.CPU, forward_only=False, vals=None):
   torch.manual_seed(0)
@@ -49,8 +50,7 @@ def cpu_only(func):
       func(self)
   return wrapper
 
-class TestOps(unittest.TestCase):
-  device=Device.CPU
+class _TestOps:
 
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, device=self.device)
@@ -188,12 +188,16 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), device=self.device, rtol=1e-5)
 
-@unittest.skipUnless(GPU, "Requires GPU")
-class TestOpsGPU(TestOps):
+@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
+class TestOpsCPU(_TestOps, unittest.TestCase):
+  device=Device.CPU
+
+@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
+class TestOpsGPU(_TestOps, unittest.TestCase):
   device=Device.GPU
 
-@unittest.skipUnless(ANE, "Requires ANE")
-class TestOpsANE(TestOps):
+@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
+class TestOpsANE(_TestOps, unittest.TestCase):
   device=Device.ANE
 
 if __name__ == '__main__':

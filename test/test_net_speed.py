@@ -5,6 +5,7 @@ import pstats
 import unittest
 import torch
 from tinygrad.tensor import Tensor, GPU, ANE, Device
+from .env import TEST_DEVICES
 
 def start_profile():
   import time
@@ -19,7 +20,7 @@ def stop_profile(pr, sort='cumtime'):
   ps.sort_stats(sort)
   ps.print_stats(0.2)
 
-class TestConvSpeed(unittest.TestCase):
+class _TestConvSpeed:
   device= Device.CPU
 
   def test_mnist(self):
@@ -93,12 +94,16 @@ class TestConvSpeed(unittest.TestCase):
     print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
     print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/bpt_baseline, bpt_baseline))
 
-@unittest.skipUnless(GPU, "Requires GPU")
-class TestConvSpeedGPU(TestConvSpeed):
+@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
+class TestConvSpeedCPU(_TestConvSpeed, unittest.TestCase):
+  device = Device.CPU
+
+@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
+class TestConvSpeedGPU(_TestConvSpeed, unittest.TestCase):
   device = Device.GPU
 
-@unittest.skipUnless(ANE, "Requires ANE")
-class TestConvSpeedANE(TestConvSpeed):
+@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
+class TestConvSpeedANE(_TestConvSpeed, unittest.TestCase):
   device=Device.ANE
 
 
