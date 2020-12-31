@@ -19,47 +19,7 @@ def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
 i32 = np.int32
 
-@functools.lru_cache()
-def get_binop_prg(cl_ctx, code, complist):
-  ndims = len(complist)
-  args = "".join([", int d%d" % i for i in range(ndims)]) + "".join([", int p%d" % i for i in range(ndims-1)])
-  compute_idx_rets = ["\n    int idx_ret"+str(i)+" = (gid0 / "+("p%d"%i if i < ndims-1 else "1")+") % d"+str(i)+";" for i in range(ndims)]
-
-  idx_exprs = ["0", "0"] # [idx_x, idx_y]
-  for i in range(ndims):
-    for j in range(2):
-      if complist[i][j]:
-        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
-
-  return cl.Program(cl_ctx, """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
-    int gid0 = get_global_id(0);"""+"".join(compute_idx_rets)+"""
-    float a = x_g["""+idx_exprs[0]+"""];
-    float b = y_g["""+idx_exprs[1]+"""];
-    res_g[gid0] = """+code+""";\n}""").build()
-
-def binary_op(ctx, code, x, y):
-  n_dims = max(len(x.shape), len(y.shape))
-  shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
-  shape_x[:len(x.shape)] = np.array(x.shape, dtype=np.int32)
-  shape_y[:len(y.shape)] = np.array(y.shape, dtype=np.int32)
-  if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
-    raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
-  shape_ret = np.maximum(shape_x, shape_y)
-
-  dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
-  def push(dim, comp):
-    if len(complist) > 0 and complist[-1] == comp:
-      dimlist[-1] *= dim
-    elif comp != (False, False):
-      dimlist.append(dim); complist.append(comp)
-  for i in range(n_dims): # group together any adjacent dimensions that we can to simplify broadcasting
-    push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
-
-  prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
-  ret = buffer_new(ctx, shape_ret, zero=True)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-  prg.binop(ctx.cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
-  return ret
+# ************* unary ops *************
 
 def unary_op(ctx, code, x):
   ret = buffer_new(ctx, x.shape)
@@ -71,6 +31,42 @@ def unary_op(ctx, code, x):
   }""")
   unop(ctx.cl_queue, [np.prod(ret.shape)], None, x.cl, ret.cl)
   return ret
+
+class ReLU(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'max(a, (float)0.)', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
+
+class Log(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'log(a)', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a / b', grad_output, input)
+
+class Exp(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = unary_op(ctx, 'exp(a)', input)
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return binary_op(ctx, 'a * b', grad_output, ret)
+
+# ************* reduce ops *************
 
 def reduce_op(ctx, code, code2, inp, axis=None):
   if axis is None:
@@ -116,70 +112,6 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     buffer_np(ctx, np.array(osize, dtype=np.int32)))
   return ret
 
-def perm_axis(ctx, inp, order):
-  osize = np.array(inp.shape)[list(order)]
-  ret = buffer_new(ctx, osize)
-  perm = clbuild(ctx.cl_ctx, "perm", """
-  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
-                       __global const int *shape, __global const int *order) {
-    int gid = get_global_id(0);
-    int gi = gid;
-    int idx = 0;
-    for(int i = n_axis-1; i>-1; i--) {
-      int stride = 1;
-      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
-      idx += (gi % shape[order[i]])*stride;
-      gi /= shape[order[i]];
-    }
-    res_g[gid] = a_g[idx];
-    }""")
-  perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
-    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(order, dtype=np.int32)))
-  return ret
-
-
-# ***** now for the ops themselves *****
-
-
-# ************* unary ops *************
-
-class ReLU(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'max(a, (float)0.)', input)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
-
-class Log(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'log(a)', input)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a / b', grad_output, input)
-
-class Exp(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ret = unary_op(ctx, 'exp(a)', input)
-    ctx.save_for_backward(ret)
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return binary_op(ctx, 'a * b', grad_output, ret)
-
-# ************* reduce ops *************
-
 class Sum(Function):
   @staticmethod
   def forward(ctx, input, axis=None):
@@ -217,6 +149,48 @@ class Max(Function):
     return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
 
 # ************* binary ops *************
+
+@functools.lru_cache()
+def get_binop_prg(cl_ctx, code, complist):
+  ndims = len(complist)
+  args = "".join([", int d%d" % i for i in range(ndims)]) + "".join([", int p%d" % i for i in range(ndims-1)])
+  compute_idx_rets = ["\n    int idx_ret"+str(i)+" = (gid0 / "+("p%d"%i if i < ndims-1 else "1")+") % d"+str(i)+";" for i in range(ndims)]
+
+  idx_exprs = ["0", "0"] # [idx_x, idx_y]
+  for i in range(ndims):
+    for j in range(2):
+      if complist[i][j]:
+        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
+
+  return cl.Program(cl_ctx, """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
+    int gid0 = get_global_id(0);"""+"".join(compute_idx_rets)+"""
+    float a = x_g["""+idx_exprs[0]+"""];
+    float b = y_g["""+idx_exprs[1]+"""];
+    res_g[gid0] = """+code+""";\n}""").build()
+
+def binary_op(ctx, code, x, y):
+  n_dims = max(len(x.shape), len(y.shape))
+  shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
+  shape_x[:len(x.shape)] = np.array(x.shape, dtype=np.int32)
+  shape_y[:len(y.shape)] = np.array(y.shape, dtype=np.int32)
+  if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
+    raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
+  shape_ret = np.maximum(shape_x, shape_y)
+
+  dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
+  def push(dim, comp):
+    if len(complist) > 0 and complist[-1] == comp:
+      dimlist[-1] *= dim
+    elif comp != (False, False):
+      dimlist.append(dim); complist.append(comp)
+  for i in range(n_dims): # group together any adjacent dimensions that we can to simplify broadcasting
+    push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
+
+  prg = get_binop_prg(ctx.cl_ctx, code, tuple(complist))
+  ret = buffer_new(ctx, shape_ret, zero=True)
+  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
+  prg.binop(ctx.cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
+  return ret
 
 def unbroadcast(ctx, out, in_sh):
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
@@ -276,6 +250,53 @@ class Pow(Function):
 
 # ************* movement ops *************
 
+class Reshape(Function):
+  @staticmethod
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    r = GPUBuffer(shape, hostbuf=x)
+    assert np.prod(x.shape) == np.prod(r.shape)
+    return r
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return GPUBuffer(in_shape, hostbuf=grad_output)
+
+def perm_axis(ctx, inp, order):
+  osize = np.array(inp.shape)[list(order)]
+  ret = buffer_new(ctx, osize)
+  perm = clbuild(ctx.cl_ctx, "perm", """
+  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
+                       __global const int *shape, __global const int *order) {
+    int gid = get_global_id(0);
+    int gi = gid;
+    int idx = 0;
+    for(int i = n_axis-1; i>-1; i--) {
+      int stride = 1;
+      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
+      idx += (gi % shape[order[i]])*stride;
+      gi /= shape[order[i]];
+    }
+    res_g[gid] = a_g[idx];
+    }""")
+  perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(order, dtype=np.int32)))
+  return ret
+
+class Transpose(Function):
+  @staticmethod
+  def forward(ctx, x, order=(1,0)):
+    ctx.save_for_backward(order)
+    return perm_axis(ctx, x, order)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return perm_axis(ctx, grad_output, np.argsort(ctx.order))
+
+# TODO: merge this with perm axis
 def inner_slice(ctx, x, arg):
   shift = [y[0] for y in arg]
   oshape = [y[1]-y[0] for y in arg]
@@ -313,30 +334,6 @@ class Slice(Function):
     shape, = ctx.saved_tensors
     narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
     return inner_slice(ctx, grad_output, narg)
-
-class Reshape(Function):
-  @staticmethod
-  def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    r = GPUBuffer(shape, hostbuf=x)
-    assert np.prod(x.shape) == np.prod(r.shape)
-    return r
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return GPUBuffer(in_shape, hostbuf=grad_output)
-
-class Transpose(Function):
-  @staticmethod
-  def forward(ctx, x, order=(1,0)):
-    ctx.save_for_backward(order)
-    return perm_axis(ctx, x, order)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    return perm_axis(ctx, grad_output, np.argsort(ctx.order))
 
 # ************* processing ops *************
 

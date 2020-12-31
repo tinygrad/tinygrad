@@ -126,24 +126,6 @@ class Pow(Function):
 
 # ************* movement ops *************
 
-def inner_slice(x, arg):
-  padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
-  x = np.pad(x, padding)
-  slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
-  return x[tuple([slice(x[0], x[1], None) for x in slicee])]
-
-class Slice(Function):
-  @staticmethod
-  def forward(ctx, x, arg=None):
-    ctx.save_for_backward(x.shape)
-    return inner_slice(x, arg)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    shape, = ctx.saved_tensors
-    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
-    return inner_slice(grad_output, narg)
-
 class Reshape(Function):
   @staticmethod
   def forward(ctx, x, shape):
@@ -164,6 +146,24 @@ class Transpose(Function):
   @staticmethod
   def backward(ctx, x):
     return np.transpose(x, np.argsort(ctx.order))
+
+def inner_slice(x, arg):
+  padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
+  x = np.pad(x, padding)
+  slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
+  return x[tuple([slice(x[0], x[1], None) for x in slicee])]
+
+class Slice(Function):
+  @staticmethod
+  def forward(ctx, x, arg=None):
+    ctx.save_for_backward(x.shape)
+    return inner_slice(x, arg)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    shape, = ctx.saved_tensors
+    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
+    return inner_slice(grad_output, narg)
 
 # ************* processing ops *************
 
