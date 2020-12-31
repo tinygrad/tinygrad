@@ -1,3 +1,5 @@
+import sys
+import inspect
 import numpy as np
 from .tensor import Function, register, GPUBuffer, Tensor, Device
 import pyopencl as cl
@@ -6,6 +8,9 @@ import functools
 def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
+def buffer_np(ctx, x):
+  return cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
+
 @functools.lru_cache()
 def clbuild(cl_ctx, name, prg):
   return cl.Program(cl_ctx, prg).build().__getattr__(name)
@@ -13,6 +18,137 @@ def clbuild(cl_ctx, name, prg):
 def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
 i32 = np.int32
+
+# ************* unary ops *************
+
+def unary_op(ctx, code, x):
+  ret = buffer_new(ctx, x.shape)
+  unop = clbuild(ctx.cl_ctx, "unop", """
+  __kernel void unop(__global const float *a_g, __global float *res_g) {
+    int gid = get_global_id(0);
+    float a = a_g[gid];
+    res_g[gid] = """+code+""";
+  }""")
+  unop(ctx.cl_queue, [np.prod(ret.shape)], None, x.cl, ret.cl)
+  return ret
+
+class ReLU(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'max(a, (float)0.)', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
+
+class Log(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'log(a)', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a / b', grad_output, input)
+
+class Exp(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = unary_op(ctx, 'exp(a)', input)
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return binary_op(ctx, 'a * b', grad_output, ret)
+
+# ************* reduce ops *************
+
+def reduce_op(ctx, code, code2, inp, axis=None):
+  if axis is None:
+    # full reduce
+    osize = [1]*len(inp.shape)
+  else:
+    osize = np.array(inp.shape)
+    osize[list(axis)] = 1
+  ret = buffer_new(ctx, osize)
+  if axis is None:
+    ret.shape = (1,)
+
+  # TODO: this is insanely slow
+  reduce = clbuild(ctx.cl_ctx, "reduce", """
+  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
+                       __global const int *shape_x, __global const int *shape_ret) {
+    int gid = get_global_id(0);
+
+    float out = 0.0;
+    for (int x = 0; x < sz; x++) {
+      int idx = 0;  // compute index into a_g
+      int tprod = prod;
+      int tsz = sz;
+      for (int dim = 0; dim < n_dims; dim++) {
+        idx *= shape_x[dim];
+        if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
+          tprod /= shape_x[dim];
+          idx += (gid / tprod) % shape_x[dim];
+        } else {  // dim from x
+          tsz /= shape_x[dim];
+          idx += (x / tsz) % shape_x[dim];
+        }
+      }
+      float a = a_g[idx];
+      """+code+""";
+    }
+    res_g[gid] = """+code2+""";
+  }""")
+  reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
+    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
+    i32(np.prod(osize)), i32(len(osize)),
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(osize, dtype=np.int32)))
+  return ret
+
+class Sum(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ctx.save_for_backward(input, axis)
+    ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
+    if axis is not None:
+      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    output = GPUBuffer(shape, hostbuf=grad_output)
+    return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
+
+class Max(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis)
+    ctx.save_for_backward(input, axis, ret)
+    if axis is not None:
+      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = binary_op(ctx, "1.0*(a==b)", input, GPUBuffer(shape, ret))
+    div = reduce_op(ctx, "out += a", "out+1e-10", ret2, axis=axis)
+    ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))
+    return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
+
+# ************* binary ops *************
 
 @functools.lru_cache()
 def get_binop_prg(cl_ctx, code, complist):
@@ -56,62 +192,77 @@ def binary_op(ctx, code, x, y):
   prg.binop(ctx.cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
-def unary_op(ctx, code, x):
-  ret = buffer_new(ctx, x.shape)
-  unop = clbuild(ctx.cl_ctx, "unop", """
-  __kernel void unop(__global const float *a_g, __global float *res_g) {
-    int gid = get_global_id(0);
-    float a = a_g[gid];
-    res_g[gid] = """+code+""";
-  }""")
-  unop(ctx.cl_queue, [np.prod(ret.shape)], None, x.cl, ret.cl)
-  return ret
+def unbroadcast(ctx, out, in_sh):
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
+  return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
-def reduce_op(ctx, code, code2, inp, axis=None):
-  if axis is None:
-    # full reduce
-    osize = [1]*len(inp.shape)
-  else:
-    osize = np.array(inp.shape)
-    osize[list(axis)] = 1
-  ret = buffer_new(ctx, osize)
-  if axis is None:
-    ret.shape = (1,)
+class Add(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape, y.shape)
+    return binary_op(ctx, 'a+b', x, y)
 
-  # TODO: this is insanely slow
-  reduce = clbuild(ctx.cl_ctx, "reduce", """
-  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
-                       __global const int *shape_x, __global const int *shape_ret) {
-    int gid = get_global_id(0);
+  @staticmethod
+  def backward(ctx, grad_output):
+    grad_x, grad_y = grad_output, grad_output
+    shape_x, shape_y = ctx.saved_tensors
+    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
 
-    float out = 0.0;
-    for (int x = 0; x < sz; x++) {
-      int idx = 0;  // compute index into a_g
-      int tprod = prod;
-      int tsz = sz;
-      for (int dim = 0; dim < n_dims; dim++) {
-        idx *= shape_x[dim];
-        if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
-          tprod /= shape_x[dim];
-          idx += (gid / tprod) % shape_x[dim];
-        } else {  // dim from x
-          tsz /= shape_x[dim];
-          idx += (x / tsz) % shape_x[dim];
-        }
-      }
-      float a = a_g[idx];
-      """+code+""";
-    }
-    res_g[gid] = """+code2+""";
-  }""")
-  buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
-    cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-  reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
-    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
-    i32(np.prod(osize)), i32(len(osize)),
-    buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(osize, dtype=np.int32)))
-  return ret
+class Sub(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape, y.shape)
+    return binary_op(ctx, 'a-b', x, y)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
+    shape_x, shape_y = ctx.saved_tensors
+    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
+
+class Mul(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return binary_op(ctx, 'a*b', x, y)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    x,y = ctx.saved_tensors
+    grad_x = binary_op(ctx, 'a*b', y, grad_output)
+    grad_y = binary_op(ctx, 'a*b', x, grad_output)
+    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
+
+class Pow(Function):
+  @staticmethod
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return binary_op(ctx, 'pow(a,b)', x, y)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    x,y = ctx.saved_tensors
+    grad_x = binary_op(ctx, 'a*b', grad_output,
+                      binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y))
+    grad_y = binary_op(ctx, 'a*b', grad_output,
+                      binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
+    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
+
+# ************* movement ops *************
+
+class Reshape(Function):
+  @staticmethod
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    r = GPUBuffer(shape, hostbuf=x)
+    assert np.prod(x.shape) == np.prod(r.shape)
+    return r
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return GPUBuffer(in_shape, hostbuf=grad_output)
 
 def perm_axis(ctx, inp, order):
   osize = np.array(inp.shape)[list(order)]
@@ -130,18 +281,10 @@ def perm_axis(ctx, inp, order):
     }
     res_g[gid] = a_g[idx];
     }""")
-  buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
-    cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
   perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
-    buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(order, dtype=np.int32)))
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(order, dtype=np.int32)))
   return ret
-
-def unbroadcast(ctx, out, in_sh):
-  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
-  return reduce_op(ctx, "out += a", "out", out, sum_axis)
-
-# ***** now for the ops themselves *****
 
 class Transpose(Function):
   @staticmethod
@@ -152,101 +295,47 @@ class Transpose(Function):
   @staticmethod
   def backward(ctx, grad_output):
     return perm_axis(ctx, grad_output, np.argsort(ctx.order))
-register('transpose', Transpose, device=Device.GPU)
 
-class Add(Function):
-  @staticmethod
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
-    return binary_op(ctx, 'a+b', x, y)
+# TODO: merge this with perm axis
+def inner_slice(ctx, x, arg):
+  shift = [y[0] for y in arg]
+  oshape = [y[1]-y[0] for y in arg]
+  ret = buffer_new(ctx, oshape)
+  gslice = clbuild(ctx.cl_ctx, "gslice", """
+  __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
+                       __global const int *shape_x, __global const int *shape_ret,
+                       __global const int *shift) {
+    int gid = get_global_id(0);
+    int iptr = 0;
+    int zero = 1;
+    for (int dim = 0; dim < n_dims; dim++) {
+      prod /= shape_ret[dim];
+      int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
+      zero &= (sidx >= 0 && sidx < shape_x[dim]);
+      iptr = (iptr * shape_x[dim]) + sidx;
+    }
+    output[gid] = zero ? input[iptr] : 0.0;
+  }""")
+  gslice(ctx.cl_queue, [np.prod(ret.shape)], None,
+    x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
+    buffer_np(ctx, np.array(x.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(ret.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(shift, dtype=np.int32)))
+  return ret
 
+class Slice(Function):
   @staticmethod
-  def backward(ctx, grad_output):
-    grad_x, grad_y = grad_output, grad_output
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
-register('add', Add, device=Device.GPU)
-
-class Sub(Function):
-  @staticmethod
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
-    return binary_op(ctx, 'a-b', x, y)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
-register('sub', Sub, device=Device.GPU)
-
-class Mul(Function):
-  @staticmethod
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return binary_op(ctx, 'a*b', x, y)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
-    grad_x = binary_op(ctx, 'a*b', y, grad_output)
-    grad_y = binary_op(ctx, 'a*b', x, grad_output)
-    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
-register('mul', Mul, device=Device.GPU)
-
-class Pow(Function):
-  @staticmethod
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return binary_op(ctx, 'pow(a,b)', x, y)
+  def forward(ctx, x, arg=None):
+    ctx.save_for_backward(x.shape)
+    return inner_slice(ctx, x, arg)
 
   @staticmethod
   def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
-    grad_x = binary_op(ctx, 'a*b', grad_output,
-                      binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y))
-    grad_y = binary_op(ctx, 'a*b', grad_output,
-                      binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
-    return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
-register('pow', Pow, device=Device.GPU)
+    shape, = ctx.saved_tensors
+    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
+    return inner_slice(ctx, grad_output, narg)
 
-class Sum(Function):
-  @staticmethod
-  def forward(ctx, input, axis=None):
-    axis = [axis] if type(axis) == int else axis
-    ctx.save_for_backward(input, axis)
-    ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
-    if axis is not None:
-      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    output = GPUBuffer(shape, hostbuf=grad_output)
-    return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
-register('sum', Sum, device=Device.GPU)
-
-class Max(Function):
-  @staticmethod
-  def forward(ctx, input, axis=None):
-    axis = [axis] if type(axis) == int else axis
-    ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis)
-    ctx.save_for_backward(input, axis, ret)
-    if axis is not None:
-      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis, ret = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = binary_op(ctx, "1.0*(a==b)", input, GPUBuffer(shape, ret))
-    div = reduce_op(ctx, "out += a", "out+1e-10", ret2, axis=axis)
-    ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))
-    return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
-register('max', Max, device=Device.GPU)
+# ************* processing ops *************
 
 class Matmul(Function):
   @staticmethod
@@ -301,105 +390,6 @@ class Matmul(Function):
       i32(1), msize, isize, i32(1), osize, osize)
 
     return grad_input, grad_weight
-register('matmul', Matmul, device=Device.GPU)
-
-# ************* movement ops *************
-
-def get_pad2d_kernel(ctx):
-  return clbuild(ctx.cl_ctx, "pad2d", """
-  __kernel void pad2d(__global const float *input, __global float *output,
-                      int ipx, int ipy, int py, int px, int oy, int ox, int iy, int ix) {
-    int BC = get_global_id(0);
-    int Y = get_global_id(1);
-    int X = get_global_id(2);
-
-    int iptr = BC*iy*ix + (Y+ipy)*ix + ipx + X;
-    int optr = BC*oy*ox + (Y+py)*ox + px + X;
-
-    output[optr] = input[iptr];
-  }""")
-
-class Pad2D(Function):
-  @staticmethod
-  def forward(ctx, x, padding=None):
-    bs,cin,iy,ix = x.shape
-    oy,ox = iy+ctx.padding[2]+ctx.padding[3], ix+ctx.padding[0]+ctx.padding[1]
-    ret = buffer_new(ctx, (bs, cin, oy, ox), zero=True)
-    get_pad2d_kernel(ctx)(ctx.cl_queue, [bs*cin, iy, ix], None,
-        x.cl, ret.cl,
-        i32(0), i32(0), i32(ctx.padding[2]), i32(ctx.padding[0]),
-        i32(oy), i32(ox), i32(iy), i32(ix)
-      )
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    bs, cin, iy, ix = grad_output.shape
-    oy, ox = iy - ctx.padding[2] - ctx.padding[3], ix - ctx.padding[0] - ctx.padding[1]
-    ret = buffer_new(ctx, (bs, cin, oy, ox))
-    get_pad2d_kernel(ctx)(ctx.cl_queue, [bs*cin, oy, ox], None,
-              grad_output.cl, ret.cl,
-              i32(ctx.padding[2]), i32(ctx.padding[0]), i32(0), i32(0),
-              i32(oy), i32(ox), i32(iy), i32(ix)
-             )
-    return ret
-#register('pad2d', Pad2D, device=Device.GPU)
-
-class Reshape(Function):
-  @staticmethod
-  def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    r = GPUBuffer(shape, hostbuf=x)
-    assert np.prod(x.shape) == np.prod(r.shape)
-    return r
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return GPUBuffer(in_shape, hostbuf=grad_output)
-register('reshape', Reshape, device=Device.GPU)
-
-# ************* activation ops *************
-
-class ReLU(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'max(a, (float)0.)', input)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
-register('relu', ReLU, device=Device.GPU)
-
-class Log(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'log(a)', input)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a / b', grad_output, input)
-register('log', Log, device=Device.GPU)
-
-class Exp(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ret = unary_op(ctx, 'exp(a)', input)
-    ctx.save_for_backward(ret)
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return binary_op(ctx, 'a * b', grad_output, ret)
-register('exp', Exp, device=Device.GPU)
-
-# ************* conv ops *************
 
 class Conv2D(Function):
   @staticmethod
@@ -524,4 +514,7 @@ class Conv2D(Function):
     convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
     convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
-register('conv2d', Conv2D, device=Device.GPU)
+
+for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
+  if name[0] != "_":  register(name.lower(), cls, device=Device.GPU)
+

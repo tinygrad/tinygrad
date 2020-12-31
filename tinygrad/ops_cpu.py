@@ -1,4 +1,5 @@
-import warnings
+import sys
+import inspect
 import numpy as np
 from .tensor import Function, register
 
@@ -14,7 +15,6 @@ class ReLU(Function):
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return grad_output * (input >= 0)
-register('relu', ReLU)
 
 class Log(Function):
   @staticmethod
@@ -26,7 +26,6 @@ class Log(Function):
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return grad_output / input
-register('log', Log)
 
 class Exp(Function):
   @staticmethod
@@ -39,7 +38,39 @@ class Exp(Function):
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
     return grad_output * ret
-register('exp', Exp)
+
+# ************* reduce ops *************
+
+class Sum(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    ctx.save_for_backward(input, axis)
+    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis = ctx.saved_tensors
+    axis = [axis] if type(axis) is int else axis
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    return grad_output.reshape(shape) + np.zeros_like(input)
+
+class Max(Function):
+  @staticmethod
+  def forward(ctx, inp, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ctx.save_for_backward(inp, axis, ret)
+    if axis is not None:
+      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = (input==ret.reshape(shape))
+    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    return ret2*grad_output.reshape(shape)/div
 
 # ************* binary ops *************
 
@@ -58,7 +89,6 @@ class Add(Function):
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x), unbroadcast(grad_output, shape_y)
-register('add', Add)
 
 class Sub(Function):
   @staticmethod
@@ -70,7 +100,6 @@ class Sub(Function):
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x), unbroadcast(-grad_output, shape_y)
-register('sub', Sub)
 
 class Mul(Function):
   @staticmethod
@@ -82,7 +111,6 @@ class Mul(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return unbroadcast(y*grad_output, x.shape), unbroadcast(x*grad_output, y.shape)
-register('mul', Mul)
 
 class Pow(Function):
   @staticmethod
@@ -95,44 +123,29 @@ class Pow(Function):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
            unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
-register('pow', Pow)
-
-# ************* reduce ops *************
-
-class Sum(Function):
-  @staticmethod
-  def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input, axis)
-    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    axis = [axis] if type(axis) is int else axis
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    return grad_output.reshape(shape) + np.zeros_like(input)
-register('sum', Sum)
-
-class Max(Function):
-  @staticmethod
-  def forward(ctx, inp, axis=None):
-    axis = [axis] if type(axis) == int else axis
-    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True) 
-    ctx.save_for_backward(inp, axis, ret)
-    if axis is not None:
-      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis, ret = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True) 
-    return ret2*grad_output.reshape(shape)/div
-register('max', Max)
 
 # ************* movement ops *************
+
+class Reshape(Function):
+  @staticmethod
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    return x.reshape(shape)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return grad_output.reshape(in_shape)
+
+class Transpose(Function):
+  @staticmethod
+  def forward(ctx, x, order):
+    ctx.save_for_backward(order)
+    return np.transpose(x, order)
+
+  @staticmethod
+  def backward(ctx, x):
+    return np.transpose(x, np.argsort(ctx.order))
 
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
@@ -151,30 +164,6 @@ class Slice(Function):
     shape, = ctx.saved_tensors
     narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
     return inner_slice(grad_output, narg)
-register('slice', Slice)
-
-class Reshape(Function):
-  @staticmethod
-  def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    return x.reshape(shape)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return grad_output.reshape(in_shape)
-register('reshape', Reshape)
-
-class Transpose(Function):
-  @staticmethod
-  def forward(ctx, x, order):
-    ctx.save_for_backward(order)
-    return np.transpose(x, order)
-
-  @staticmethod
-  def backward(ctx, x):
-    return np.transpose(x, np.argsort(ctx.order))
-register('transpose', Transpose)
 
 # ************* processing ops *************
 
@@ -190,7 +179,6 @@ class Matmul(Function):
     grad_input = grad_output @ np.swapaxes(weight, -2, -1)
     grad_weight = np.swapaxes(input, -2, -1) @ grad_output
     return grad_input, grad_weight
-register('matmul', Matmul)
 
 class Conv2D(Function):
   @staticmethod
@@ -246,5 +234,7 @@ class Conv2D(Function):
         gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-register('conv2d', Conv2D)
+
+for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
+  if name[0] != "_":  register(name.lower(), cls)
 
