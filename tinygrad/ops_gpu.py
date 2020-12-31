@@ -1,3 +1,5 @@
+import sys
+import inspect
 import numpy as np
 from .tensor import Function, register, GPUBuffer, Tensor, Device
 import pyopencl as cl
@@ -152,7 +154,6 @@ class Transpose(Function):
   @staticmethod
   def backward(ctx, grad_output):
     return perm_axis(ctx, grad_output, np.argsort(ctx.order))
-register('transpose', Transpose, device=Device.GPU)
 
 class Add(Function):
   @staticmethod
@@ -165,7 +166,6 @@ class Add(Function):
     grad_x, grad_y = grad_output, grad_output
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
-register('add', Add, device=Device.GPU)
 
 class Sub(Function):
   @staticmethod
@@ -178,7 +178,6 @@ class Sub(Function):
     grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
-register('sub', Sub, device=Device.GPU)
 
 class Mul(Function):
   @staticmethod
@@ -192,7 +191,6 @@ class Mul(Function):
     grad_x = binary_op(ctx, 'a*b', y, grad_output)
     grad_y = binary_op(ctx, 'a*b', x, grad_output)
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
-register('mul', Mul, device=Device.GPU)
 
 class Pow(Function):
   @staticmethod
@@ -208,7 +206,6 @@ class Pow(Function):
     grad_y = binary_op(ctx, 'a*b', grad_output,
                       binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
-register('pow', Pow, device=Device.GPU)
 
 class Sum(Function):
   @staticmethod
@@ -226,7 +223,6 @@ class Sum(Function):
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     output = GPUBuffer(shape, hostbuf=grad_output)
     return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
-register('sum', Sum, device=Device.GPU)
 
 class Max(Function):
   @staticmethod
@@ -246,7 +242,6 @@ class Max(Function):
     div = reduce_op(ctx, "out += a", "out+1e-10", ret2, axis=axis)
     ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))
     return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
-register('max', Max, device=Device.GPU)
 
 class Matmul(Function):
   @staticmethod
@@ -301,7 +296,6 @@ class Matmul(Function):
       i32(1), msize, isize, i32(1), osize, osize)
 
     return grad_input, grad_weight
-register('matmul', Matmul, device=Device.GPU)
 
 # ************* movement ops *************
 
@@ -319,7 +313,7 @@ def get_pad2d_kernel(ctx):
     output[optr] = input[iptr];
   }""")
 
-class Pad2D(Function):
+class _Pad2D(Function):
   @staticmethod
   def forward(ctx, x, padding=None):
     bs,cin,iy,ix = x.shape
@@ -343,7 +337,6 @@ class Pad2D(Function):
               i32(oy), i32(ox), i32(iy), i32(ix)
              )
     return ret
-#register('pad2d', Pad2D, device=Device.GPU)
 
 class Reshape(Function):
   @staticmethod
@@ -358,7 +351,6 @@ class Reshape(Function):
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
     return GPUBuffer(in_shape, hostbuf=grad_output)
-register('reshape', Reshape, device=Device.GPU)
 
 # ************* activation ops *************
 
@@ -372,7 +364,6 @@ class ReLU(Function):
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
-register('relu', ReLU, device=Device.GPU)
 
 class Log(Function):
   @staticmethod
@@ -384,7 +375,6 @@ class Log(Function):
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return binary_op(ctx, 'a / b', grad_output, input)
-register('log', Log, device=Device.GPU)
 
 class Exp(Function):
   @staticmethod
@@ -397,7 +387,6 @@ class Exp(Function):
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
     return binary_op(ctx, 'a * b', grad_output, ret)
-register('exp', Exp, device=Device.GPU)
 
 # ************* conv ops *************
 
@@ -524,4 +513,6 @@ class Conv2D(Function):
     convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
     convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
-register('conv2d', Conv2D, device=Device.GPU)
+
+for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
+    if name[0] != "_":  register(name.lower(), cls, device=Device.GPU)
