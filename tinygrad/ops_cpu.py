@@ -237,3 +237,4 @@ class Conv2D(Function):
 
 for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
   if name[0] != "_":  register(name.lower(), cls)
+

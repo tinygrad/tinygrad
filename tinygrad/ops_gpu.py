@@ -138,21 +138,51 @@ def perm_axis(ctx, inp, order):
     buffer_np(ctx, np.array(order, dtype=np.int32)))
   return ret
 
-def unbroadcast(ctx, out, in_sh):
-  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
-  return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
 # ***** now for the ops themselves *****
 
-class Transpose(Function):
+
+# ************* unary ops *************
+
+class ReLU(Function):
   @staticmethod
-  def forward(ctx, x, order=(1,0)):
-    ctx.save_for_backward(order)
-    return perm_axis(ctx, x, order)
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'max(a, (float)0.)', input)
 
   @staticmethod
   def backward(ctx, grad_output):
-    return perm_axis(ctx, grad_output, np.argsort(ctx.order))
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
+
+class Log(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'log(a)', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a / b', grad_output, input)
+
+class Exp(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = unary_op(ctx, 'exp(a)', input)
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return binary_op(ctx, 'a * b', grad_output, ret)
+
+# ************* binary ops *************
+
+def unbroadcast(ctx, out, in_sh):
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
+  return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
 class Add(Function):
   @staticmethod
@@ -206,6 +236,8 @@ class Pow(Function):
                       binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
 
+# ************* reduce ops *************
+
 class Sum(Function):
   @staticmethod
   def forward(ctx, input, axis=None):
@@ -241,60 +273,6 @@ class Max(Function):
     div = reduce_op(ctx, "out += a", "out+1e-10", ret2, axis=axis)
     ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))
     return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
-
-class Matmul(Function):
-  @staticmethod
-  def forward(ctx, input, weight):
-    assert input.shape[-1] == weight.shape[-2]
-    cnt = np.prod(input.shape[0:-2]) if len(input.shape) > 2 else 1
-    isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
-    ret = buffer_new(ctx, list(input.shape[0:-2])+[isize, osize])
-
-    matmul = clbuild(ctx.cl_ctx, "matmul", """
-    __kernel void matmul(
-      __global const float *input, __global const float *weight, __global float *res,
-      int isize, int is0, int is1, int msize, int ws0, int ws1, int osize
-   ) {
-      int stride = get_global_id(2);
-
-      int X = get_global_id(0); // isize
-      int Y = get_global_id(1); // osize
-
-      float ret = 0.0;
-      for (int x = 0; x < msize; x++) {
-        ret += input[X * is0 + x * is1 + isize*msize*stride] *
-          weight[Y * ws0 + x * ws1 + msize*osize*stride];
-      }
-
-      res[X * osize + Y + isize*osize*stride] = ret;
-    }""")
-    ctx.save_for_backward(input, weight, matmul, cnt)
-
-    # (isize,msize) x (msize,osize) = (isize,osize)
-    matmul(ctx.cl_queue, [isize, osize, cnt], None,
-      input.cl, weight.cl, ret.cl, isize,
-      msize, i32(1), msize, i32(1), osize, osize)
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, weight, matmul, cnt = ctx.saved_tensors
-    isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
-
-    grad_input = buffer_new(ctx, input.shape)
-    grad_weight = buffer_new(ctx, weight.shape)
-
-    # (isize,osize) x (msize,osize) = (isize,msize)
-    matmul(ctx.cl_queue, [isize, msize, cnt], None,
-      grad_output.cl, weight.cl, grad_input.cl, isize,
-      osize, i32(1), osize, osize, i32(1), msize)
-
-    # (isize,msize) x (isize,osize) = (msize,osize)
-    matmul(ctx.cl_queue, [msize, osize, cnt], None,
-      input.cl, grad_output.cl, grad_weight.cl, msize,
-      i32(1), msize, isize, i32(1), osize, osize)
-
-    return grad_input, grad_weight
 
 # ************* movement ops *************
 
@@ -350,43 +328,71 @@ class Reshape(Function):
     in_shape, = ctx.saved_tensors
     return GPUBuffer(in_shape, hostbuf=grad_output)
 
-# ************* activation ops *************
-
-class ReLU(Function):
+class Transpose(Function):
   @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'max(a, (float)0.)', input)
+  def forward(ctx, x, order=(1,0)):
+    ctx.save_for_backward(order)
+    return perm_axis(ctx, x, order)
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
+    return perm_axis(ctx, grad_output, np.argsort(ctx.order))
 
-class Log(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'log(a)', input)
+# ************* processing ops *************
 
+class Matmul(Function):
   @staticmethod
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a / b', grad_output, input)
+  def forward(ctx, input, weight):
+    assert input.shape[-1] == weight.shape[-2]
+    cnt = np.prod(input.shape[0:-2]) if len(input.shape) > 2 else 1
+    isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
+    ret = buffer_new(ctx, list(input.shape[0:-2])+[isize, osize])
 
-class Exp(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ret = unary_op(ctx, 'exp(a)', input)
-    ctx.save_for_backward(ret)
+    matmul = clbuild(ctx.cl_ctx, "matmul", """
+    __kernel void matmul(
+      __global const float *input, __global const float *weight, __global float *res,
+      int isize, int is0, int is1, int msize, int ws0, int ws1, int osize
+   ) {
+      int stride = get_global_id(2);
+
+      int X = get_global_id(0); // isize
+      int Y = get_global_id(1); // osize
+
+      float ret = 0.0;
+      for (int x = 0; x < msize; x++) {
+        ret += input[X * is0 + x * is1 + isize*msize*stride] *
+          weight[Y * ws0 + x * ws1 + msize*osize*stride];
+      }
+
+      res[X * osize + Y + isize*osize*stride] = ret;
+    }""")
+    ctx.save_for_backward(input, weight, matmul, cnt)
+
+    # (isize,msize) x (msize,osize) = (isize,osize)
+    matmul(ctx.cl_queue, [isize, osize, cnt], None,
+      input.cl, weight.cl, ret.cl, isize,
+      msize, i32(1), msize, i32(1), osize, osize)
     return ret
 
   @staticmethod
   def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return binary_op(ctx, 'a * b', grad_output, ret)
+    input, weight, matmul, cnt = ctx.saved_tensors
+    isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
 
-# ************* conv ops *************
+    grad_input = buffer_new(ctx, input.shape)
+    grad_weight = buffer_new(ctx, weight.shape)
+
+    # (isize,osize) x (msize,osize) = (isize,msize)
+    matmul(ctx.cl_queue, [isize, msize, cnt], None,
+      grad_output.cl, weight.cl, grad_input.cl, isize,
+      osize, i32(1), osize, osize, i32(1), msize)
+
+    # (isize,msize) x (isize,osize) = (msize,osize)
+    matmul(ctx.cl_queue, [msize, osize, cnt], None,
+      input.cl, grad_output.cl, grad_weight.cl, msize,
+      i32(1), msize, isize, i32(1), osize, osize)
+
+    return grad_input, grad_weight
 
 class Conv2D(Function):
   @staticmethod
@@ -514,3 +520,4 @@ class Conv2D(Function):
 
 for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
   if name[0] != "_":  register(name.lower(), cls, device=Device.GPU)
+
