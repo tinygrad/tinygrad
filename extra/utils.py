@@ -1,4 +1,6 @@
-from tinygrad.tensor import Tensor
+import sys
+import inspect
+from tinygrad.tensor import Tensor, register, Device
 
 def fetch(url):
   import requests, os, hashlib, tempfile
@@ -89,3 +91,7 @@ def fake_torch_load(b0):
     np_array.strides = real_strides
 
   return ret
+
+def register_ops(namespace, device=Device.CPU):
+  for name, cls in inspect.getmembers(sys.modules[namespace], inspect.isclass):
+    if name[0] != "_":  register(name.lower(), cls, device=device)

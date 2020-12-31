@@ -1,7 +1,6 @@
-import sys
-import inspect
 import numpy as np
 from .tensor import Function, register
+from extra import utils
 
 # ************* unary ops *************
 
@@ -234,6 +233,4 @@ class Conv2D(Function):
         gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-
-for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
-  if name[0] != "_":  register(name.lower(), cls)
+utils.register_ops(__name__)

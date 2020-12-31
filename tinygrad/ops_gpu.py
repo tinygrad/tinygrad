@@ -1,9 +1,8 @@
-import sys
-import inspect
-import numpy as np
-from .tensor import Function, register, GPUBuffer, Tensor, Device
-import pyopencl as cl
 import functools
+import pyopencl as cl
+import numpy as np
+from extra import utils
+from .tensor import Function, register, GPUBuffer, Tensor, Device
 
 def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
@@ -513,6 +512,4 @@ class Conv2D(Function):
     convw(ctx.cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
     convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
-
-for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
-  if name[0] != "_":  register(name.lower(), cls, device=Device.GPU)
+utils.register_ops(__name__, device=Device.GPU)
