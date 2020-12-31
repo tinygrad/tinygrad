@@ -15,24 +15,6 @@ jobs:
     - name: Check <1000 lines
       run: sloccount tinygrad test examples; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v2
-    - name: Install OpenCL
-      run: sudo apt-get install pocl-opencl-icd
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]'
-    - name: Run Pytest
-      run: python -m pytest -s -v
-
   linter:
     name: Indentation  Linter
     runs-on: ubuntu-latest
@@ -51,5 +33,43 @@ jobs:
         # pip install -r requirements.txt
     - name: Lint with pylint
       run: |
-        python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+        python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py'
+
+  testcpu:
+    name: Test CPU 
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v2
+    - name: Install OpenCL
+      run: sudo apt-get install pocl-opencl-icd
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e '.[testing]'
+    - name: Run Pytest
+      run: TEST_DEVICES=CPU python -m pytest -s -v
+
+  testgpu:
+    name: Test GPU 
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v2
+    - name: Install OpenCL
+      run: sudo apt-get install pocl-opencl-icd
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e '.[gpu,testing]'
+    - name: Run Pytest
+      run: TEST_DEVICES=GPU python -m pytest -s -v
+
+
 
