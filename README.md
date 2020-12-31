@@ -112,7 +112,7 @@ Relu, Log, Exp                  # unary ops
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Sum, Max                        # reduce ops (with axis argument)
 Reshape, Transpose, Slice       # movement ops
-Matmul, Conv2D                  # heavy data processing ops
+Matmul, Conv2D                  # processing ops
 ```
 
 While more ops may be added (like Sign), I think these base 14 are stable.

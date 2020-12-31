@@ -311,12 +311,11 @@ def inner_slice(ctx, x, arg):
     int zero = 1;
     for (int dim = 0; dim < n_dims; dim++) {
       prod /= shape_ret[dim];
-      int tidx = (gid / prod) % shape_ret[dim];
-      int sidx = tidx + shift[dim];
+      int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
       zero &= (sidx >= 0 && sidx < shape_x[dim]);
       iptr = (iptr * shape_x[dim]) + sidx;
     }
-    output[gid] = input[iptr] * zero;
+    output[gid] = zero ? input[iptr] : 0.0;
   }""")
   gslice(ctx.cl_queue, [np.prod(ret.shape)], None,
     x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
