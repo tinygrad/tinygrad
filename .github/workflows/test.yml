@@ -33,7 +33,7 @@ jobs:
         # pip install -r requirements.txt
     - name: Lint with pylint
       run: |
-        python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py'
+        python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
 
   testcpu:
     name: Test CPU 
