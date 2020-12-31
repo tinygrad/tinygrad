@@ -8,6 +8,9 @@ import functools
 def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
+def buffer_np(ctx, x):
+  return cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
+
 @functools.lru_cache()
 def clbuild(cl_ctx, name, prg):
   return cl.Program(cl_ctx, prg).build().__getattr__(name)
@@ -106,13 +109,11 @@ def reduce_op(ctx, code, code2, inp, axis=None):
     }
     res_g[gid] = """+code2+""";
   }""")
-  buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
-    cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
   reduce(ctx.cl_queue, [np.prod(osize)], None, inp.cl,
     i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
-    buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(osize, dtype=np.int32)))
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(osize, dtype=np.int32)))
   return ret
 
 def perm_axis(ctx, inp, order):
@@ -132,11 +133,9 @@ def perm_axis(ctx, inp, order):
     }
     res_g[gid] = a_g[idx];
     }""")
-  buffer_np = lambda x: cl.Buffer(ctx.cl_ctx,
-    cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
   perm(ctx.cl_queue, [np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
-    buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(order, dtype=np.int32)))
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(order, dtype=np.int32)))
   return ret
 
 def unbroadcast(ctx, out, in_sh):
@@ -299,44 +298,44 @@ class Matmul(Function):
 
 # ************* movement ops *************
 
-def get_pad2d_kernel(ctx):
-  return clbuild(ctx.cl_ctx, "pad2d", """
-  __kernel void pad2d(__global const float *input, __global float *output,
-                      int ipx, int ipy, int py, int px, int oy, int ox, int iy, int ix) {
-    int BC = get_global_id(0);
-    int Y = get_global_id(1);
-    int X = get_global_id(2);
-
-    int iptr = BC*iy*ix + (Y+ipy)*ix + ipx + X;
-    int optr = BC*oy*ox + (Y+py)*ox + px + X;
-
-    output[optr] = input[iptr];
+def inner_slice(ctx, x, arg):
+  shift = [y[0] for y in arg]
+  oshape = [y[1]-y[0] for y in arg]
+  ret = buffer_new(ctx, oshape)
+  gslice = clbuild(ctx.cl_ctx, "gslice", """
+  __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
+                       __global const int *shape_x, __global const int *shape_ret,
+                       __global const int *shift) {
+    int gid = get_global_id(0);
+    int iptr = 0;
+    int zero = 1;
+    for (int dim = 0; dim < n_dims; dim++) {
+      prod /= shape_ret[dim];
+      int tidx = (gid / prod) % shape_ret[dim];
+      int sidx = tidx + shift[dim];
+      zero &= (sidx >= 0 && sidx < shape_x[dim]);
+      iptr = (iptr * shape_x[dim]) + sidx;
+    }
+    output[gid] = input[iptr] * zero;
   }""")
+  gslice(ctx.cl_queue, [np.prod(ret.shape)], None,
+    x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
+    buffer_np(ctx, np.array(x.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(ret.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(shift, dtype=np.int32)))
+  return ret
 
-class _Pad2D(Function):
+class Slice(Function):
   @staticmethod
-  def forward(ctx, x, padding=None):
-    bs,cin,iy,ix = x.shape
-    oy,ox = iy+ctx.padding[2]+ctx.padding[3], ix+ctx.padding[0]+ctx.padding[1]
-    ret = buffer_new(ctx, (bs, cin, oy, ox), zero=True)
-    get_pad2d_kernel(ctx)(ctx.cl_queue, [bs*cin, iy, ix], None,
-        x.cl, ret.cl,
-        i32(0), i32(0), i32(ctx.padding[2]), i32(ctx.padding[0]),
-        i32(oy), i32(ox), i32(iy), i32(ix)
-      )
-    return ret
+  def forward(ctx, x, arg=None):
+    ctx.save_for_backward(x.shape)
+    return inner_slice(ctx, x, arg)
 
   @staticmethod
   def backward(ctx, grad_output):
-    bs, cin, iy, ix = grad_output.shape
-    oy, ox = iy - ctx.padding[2] - ctx.padding[3], ix - ctx.padding[0] - ctx.padding[1]
-    ret = buffer_new(ctx, (bs, cin, oy, ox))
-    get_pad2d_kernel(ctx)(ctx.cl_queue, [bs*cin, oy, ox], None,
-              grad_output.cl, ret.cl,
-              i32(ctx.padding[2]), i32(ctx.padding[0]), i32(0), i32(0),
-              i32(oy), i32(ox), i32(iy), i32(ix)
-             )
-    return ret
+    shape, = ctx.saved_tensors
+    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
+    return inner_slice(ctx, grad_output, narg)
 
 class Reshape(Function):
   @staticmethod
