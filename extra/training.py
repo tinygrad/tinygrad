@@ -50,7 +50,7 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
     return (Y_test == Y_test_preds).mean(), Y_test_preds
 
   if num_classes is None: num_classes = Y_test.max().astype(int)+1
-  ret = numpy_eval(num_classes)
-  print("test set accuracy is %f" % ret[0])  
-  return ret if return_predict else ret[0]
+  acc, Y_test_pred = numpy_eval(num_classes)
+  print("test set accuracy is %f" % acc)
+  return (acc, Y_test_pred) if return_predict else acc
 
