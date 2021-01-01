@@ -163,27 +163,6 @@ class Slice(Function):
     narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
     return inner_slice(grad_output, narg)
 
-class Reshape(Function):
-  @staticmethod
-  def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    return x.reshape(shape)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return grad_output.reshape(in_shape)
-
-class Transpose(Function):
-  @staticmethod
-  def forward(ctx, x, order):
-    ctx.save_for_backward(order)
-    return np.transpose(x, order)
-
-  @staticmethod
-  def backward(ctx, x):
-    return np.transpose(x, np.argsort(ctx.order))
-
 # ************* processing ops *************
 
 class Matmul(Function):
