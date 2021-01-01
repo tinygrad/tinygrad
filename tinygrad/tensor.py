@@ -67,15 +67,17 @@ def require_init_ane():
 
 class Device: CPU, GPU, ANE = 0, 1, 2
 
+DEFAULT_DEVICE = Device.CPU if os.environ.get("GPU", 0) != "1" else Device.GPU
+
 class Tensor:
   did_float_warning = False
   training = True
   ops = defaultdict(dict)
 
-  def __init__(self, data, device=Device.CPU, requires_grad=True):
-    self.data = self._move_data(data, device)
+  def __init__(self, data, device=DEFAULT_DEVICE, requires_grad=True):
+    self.device, self.data = device, self._move_data(data, device)
 
-    self.device, self.grad, self.requires_grad = device, None, requires_grad
+    self.grad, self.requires_grad = None, requires_grad
 
     # internal variables used for autograd graph construction
     self._ctx = None
@@ -265,8 +267,7 @@ class Tensor:
     return self._pool2d(*kernel_size).mean(axis=(3,5))
 
   def max_pool2d(self, kernel_size=(2,2)):
-    # TODO: support tuples in max and avoid a copy
-    return self._pool2d(*kernel_size).max(axis=5).max(axis=3)
+    return self._pool2d(*kernel_size).max(axis=(3,5))
 
 # An instantiation of the Function is the Context
 class Function:

@@ -33,7 +33,7 @@ if __name__ == "__main__":
   lr = 0.003
   for i in range(10):
     optim = Adam(get_parameters(model), lr=lr)
-    train(model, X_train, Y_train, optim, 50, BS=64, device=Device.GPU if os.getenv("GPU") else Device.CPU)
+    train(model, X_train, Y_train, optim, 50, BS=64)
     acc, Y_test_preds = evaluate(model, X_test, Y_test, num_classes=10, return_predict=True)
     lr /= 1.2
     print(f'reducing lr to {lr:.4f}')
