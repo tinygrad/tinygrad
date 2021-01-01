@@ -2,7 +2,7 @@
 import os
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, GPU, ANE, Device
+from tinygrad.tensor import Tensor
 import tinygrad.optim as optim
 from extra.training import train, evaluate
 from extra.utils import fetch, get_parameters
@@ -55,36 +55,27 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 class TestMNIST(unittest.TestCase):
-  device = Device.CPU
 
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=200, device=self.device)
-    assert evaluate(model, X_test, Y_test, device=self.device) > 0.95
+    train(model, X_train, Y_train, optimizer, steps=200)
+    assert evaluate(model, X_test, Y_test) > 0.95
 
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=1000, device=self.device)
-    assert evaluate(model, X_test, Y_test, device=self.device) > 0.95
+    train(model, X_train, Y_train, optimizer, steps=1000)
+    assert evaluate(model, X_test, Y_test) > 0.95
 
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
-    train(model,  X_train, Y_train, optimizer, steps=1000, device=self.device)
-    assert evaluate(model, X_test, Y_test, device=self.device) > 0.95
-
-@unittest.skipUnless(GPU, "Requires GPU")
-class TestMNISTGPU(TestMNIST):
-  device = Device.GPU
-
-@unittest.skipUnless(ANE, "Requires ANE")
-class TestMNISTANE(TestMNIST):
-  device=Device.ANE
+    train(model,  X_train, Y_train, optimizer, steps=1000)
+    assert evaluate(model, X_test, Y_test) > 0.95
 
 if __name__ == '__main__':
   unittest.main()
