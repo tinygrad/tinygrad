@@ -1,6 +1,7 @@
+import sys
+import inspect
 import numpy as np
 from .tensor import Function, register
-from extra import utils
 
 # ************* unary ops *************
 
@@ -37,6 +38,39 @@ class Exp(Function):
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
     return grad_output * ret
+
+# ************* reduce ops *************
+
+class Sum(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    ctx.save_for_backward(input, axis)
+    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis = ctx.saved_tensors
+    axis = [axis] if type(axis) is int else axis
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    return grad_output.reshape(shape) + np.zeros_like(input)
+
+class Max(Function):
+  @staticmethod
+  def forward(ctx, inp, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ctx.save_for_backward(inp, axis, ret)
+    if axis is not None:
+      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = (input==ret.reshape(shape))
+    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    return ret2*grad_output.reshape(shape)/div
 
 # ************* binary ops *************
 
@@ -90,40 +124,28 @@ class Pow(Function):
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
            unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
 
-# ************* reduce ops *************
-
-class Sum(Function):
-  @staticmethod
-  def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input, axis)
-    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    axis = [axis] if type(axis) is int else axis
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    return grad_output.reshape(shape) + np.zeros_like(input)
-
-class Max(Function):
-  @staticmethod
-  def forward(ctx, inp, axis=None):
-    axis = [axis] if type(axis) == int else axis
-    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True) 
-    ctx.save_for_backward(inp, axis, ret)
-    if axis is not None:
-      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
-    return ret
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis, ret = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True) 
-    return ret2*grad_output.reshape(shape)/div
-
 # ************* movement ops *************
+
+class Reshape(Function):
+  @staticmethod
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    return x.reshape(shape)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return grad_output.reshape(in_shape)
+
+class Transpose(Function):
+  @staticmethod
+  def forward(ctx, x, order):
+    ctx.save_for_backward(order)
+    return np.transpose(x, order)
+
+  @staticmethod
+  def backward(ctx, x):
+    return np.transpose(x, np.argsort(ctx.order))
 
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
@@ -233,4 +255,7 @@ class Conv2D(Function):
         gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-utils.register_ops(__name__)
+
+for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
+  if name[0] != "_":  register(name.lower(), cls)
+
