@@ -1,6 +1,5 @@
 from functools import lru_cache
 from .tensor import Device, Function
-from extra import utils
 
 @lru_cache
 def compile_wrapper(ane, dat):
@@ -34,4 +33,3 @@ class ReLU(Function):
     ret = ctx.ane.tensor(input.shape)
     ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
     return ret
-utils.register_ops(__name__, device=Device.ANE)

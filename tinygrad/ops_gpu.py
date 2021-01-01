@@ -1,7 +1,6 @@
 import functools
 import pyopencl as cl
 import numpy as np
-from extra import utils
 from .tensor import Function, register, GPUBuffer, Tensor, Device
 
 def buffer_new(ctx, shape, zero=False):
@@ -514,6 +513,7 @@ class Conv2D(Function):
     convx(ctx.cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
 <<<<<<< HEAD
+<<<<<<< HEAD
 utils.register_ops(__name__, device=Device.GPU)
 =======
 
@@ -521,3 +521,5 @@ for name, cls in inspect.getmembers(sys.modules[__name__], inspect.isclass):
   if name[0] != "_":  register(name.lower(), cls, device=Device.GPU)
 
 >>>>>>> ebd72ff437006fc5855a599a46d12cfebc69594a
+=======
+>>>>>>> :hammer: refactor

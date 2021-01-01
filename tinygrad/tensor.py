@@ -1,9 +1,10 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-from inspect import signature
+import sys
+import inspect
 import functools
-import numpy as np
 import os
 from collections import defaultdict
+import numpy as np
 
 # **** profiler ****
 
@@ -281,7 +282,7 @@ class Function:
   def apply(self, *x, **kwargs):
     ctx = self(*x) # self - operation i.e 'add', 'sub', etc.
     # use default params
-    params = signature(self.forward).parameters
+    params = inspect.signature(self.forward).parameters
     for p in params.values():
       if p.default is not p.empty:
         setattr(ctx, p.name, p.default)
@@ -315,11 +316,17 @@ for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
 
 # this registers all the operations
-import tinygrad.ops_cpu
+def _register_ops(namespace, device=Device.CPU):
+  for name, cls in inspect.getmembers(namespace, inspect.isclass):
+    if name[0] != "_":  register(name.lower(), cls, device=device)
+
+from tinygrad import ops_cpu
+_register_ops(ops_cpu)
 try:
   import pyopencl as cl
   # TODO: move this import to require_init_gpu?
-  import tinygrad.ops_gpu
+  from tinygrad import ops_gpu
+  _register_ops(ops_gpu, device=Device.GPU)
   GPU = True
 except ImportError:
   # no GPU support
