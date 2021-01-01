@@ -1,4 +1,4 @@
-from tinygrad.tensor import Tensor, register, Device
+from tinygrad.tensor import Tensor
 
 def fetch(url):
   import requests, os, hashlib, tempfile
