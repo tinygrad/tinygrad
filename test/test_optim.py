@@ -1,20 +1,17 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor, GPU, ANE, Device
+from tinygrad.tensor import Tensor
 from tinygrad.optim import Adam, SGD, RMSprop
 from extra.utils import get_parameters
-from .env import TEST_DEVICES
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-def step_tinygrad(optim, kwargs={}, device=Device.CPU):
+def step_tinygrad(optim, kwargs={}):
   net = TinyNet()
   optim = optim([net.x, net.W], **kwargs)
-  if device==Device.GPU: [x.gpu_() for x in get_parameters([net, optim])]
-  elif device==Device.ANE: [x.ane_() for x in get_parameters([net, optim])]
   out = net.forward()
   out.backward()
   optim.step()
@@ -55,36 +52,23 @@ class TorchNet():
     return out
 
 
-class _TestOptim:
-  device = Device.CPU
+class TestOptim(unittest.TestCase):
 
   def test_adam(self):
-    for x,y in zip(step_tinygrad(Adam, device=self.device),
+    for x,y in zip(step_tinygrad(Adam),
                    step_pytorch(torch.optim.Adam)):
       np.testing.assert_allclose(x, y, atol=1e-4)
 
   def test_sgd(self):
-    for x,y in zip(step_tinygrad(SGD, kwargs={'lr': 0.001}, device=self.device),
+    for x,y in zip(step_tinygrad(SGD, kwargs={'lr': 0.001}),
                    step_pytorch(torch.optim.SGD, kwargs={'lr': 0.001})):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_rmsprop(self):
-    for x,y in zip(step_tinygrad(RMSprop, kwargs={'lr': 0.001, 'decay': 0.99}, device=self.device),
+    for x,y in zip(step_tinygrad(RMSprop, kwargs={'lr': 0.001, 'decay': 0.99}),
                    step_pytorch(torch.optim.RMSprop,
                                 kwargs={'lr': 0.001, 'alpha': 0.99})):
       np.testing.assert_allclose(x, y, atol=1e-5)
-
-@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
-class TestOptimCPU(_TestOptim, unittest.TestCase):
-  device = Device.CPU
-
-@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
-class TestOptimGPU(_TestOptim, unittest.TestCase):
-  device = Device.GPU
-
-@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
-class TestOptimANE(_TestOptim, unittest.TestCase):
-  device = Device.ANE
 
 if __name__ == '__main__':
   unittest.main()

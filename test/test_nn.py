@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import GPU, ANE, Device
+from tinygrad.tensor import Tensor, DEFAULT_DEVICE
 from tinygrad.nn import *
 from extra.utils import get_parameters
 import torch
-from .env import TEST_DEVICES
 
-class _TestNN:
+@unittest.skipUnless(not DEFAULT_DEVICE, "Not Implemented")
+class TestNN(unittest.TestCase):
 
   def test_batchnorm2d(self, training=False):
     sz = 4
@@ -33,7 +33,7 @@ class _TestNN:
     np.testing.assert_allclose(bn.running_var.data, tbn.running_var.detach().numpy(), rtol=1e-5)
 
     # trial
-    inn = Tensor.randn(2, sz, 3, 3, device=self.device)
+    inn = Tensor.randn(2, sz, 3, 3)
 
     # in tinygrad
     outt = bn(inn)
@@ -51,32 +51,6 @@ class _TestNN:
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
-
-@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
-class TestNNCPU(_TestNN, unittest.TestCase):
-  device = Device.CPU
-
-@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
-class TestNNGPU(_TestNN, unittest.TestCase):
-  device = Device.GPU
-
-  @unittest.skip("Tests not added")
-  def test_batchnorm2d(self): pass
-
-  @unittest.skip("Tests not added")
-  def test_batchnorm2d_training(self): pass
-
-
-@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
-class TestNNANE(_TestNN, unittest.TestCase):
-  device=Device.ANE
-
-  @unittest.skip("Tests not added")
-  def test_batchnorm2d(self): pass
-
-  @unittest.skip("Tests not added")
-  def test_batchnorm2d_training(self): pass
-
 
 if __name__ == '__main__':
   unittest.main()

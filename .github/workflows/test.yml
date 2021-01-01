@@ -36,7 +36,7 @@ jobs:
         python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
 
   testcpu:
-    name: Test CPU 
+    name: CPU Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -51,10 +51,10 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
-      run: TEST_DEVICES=CPU python -m pytest -s -v
+      run: python -m pytest -s -v
 
   testgpu:
-    name: Test GPU 
+    name: GPU Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -69,7 +69,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
-      run: TEST_DEVICES=GPU python -m pytest -s -v
+      run: GPU=1 python -m pytest -s -v
 
 
 

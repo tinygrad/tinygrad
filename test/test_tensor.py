@@ -1,9 +1,8 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor, GPU, ANE, Device
+from tinygrad.tensor import Tensor, DEFAULT_DEVICE
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
-from .env import TEST_DEVICES
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -11,14 +10,13 @@ V_init = np.random.randn(3,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-class _TestTinygrad:
-  device = Device.CPU
+class TestTinygrad(unittest.TestCase):
 
   def test_backward_pass(self):
     def test_tinygrad():
-      x = Tensor(x_init, device=self.device)
-      W = Tensor(W_init, device=self.device)
-      m = Tensor(m_init, device=self.device)
+      x = Tensor(x_init)
+      W = Tensor(W_init)
+      m = Tensor(m_init)
       out = x.dot(W).relu()
       out = out.logsoftmax()
       out = out.mul(m).add(m).sum()
@@ -40,9 +38,9 @@ class _TestTinygrad:
 
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
-      u = Tensor(U_init, device=self.device)
-      v = Tensor(V_init, device=self.device)
-      w = Tensor(W_init, device=self.device)
+      u = Tensor(U_init)
+      v = Tensor(V_init)
+      w = Tensor(W_init)
       x = u.mul(v).relu()
       y = u.mul(w).relu()
       out = x.add(y).mul(y).relu()
@@ -66,6 +64,7 @@ class _TestTinygrad:
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
   def test_jacobian(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5
@@ -75,8 +74,8 @@ class _TestTinygrad:
     torch_func = lambda x: torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
     PJ = torch.autograd.functional.jacobian(torch_func, torch_x).squeeze().numpy()
 
-    tiny_x = Tensor(x, device=self.device)
-    tiny_W = Tensor(W, device=self.device)
+    tiny_x = Tensor(x)
+    tiny_W = Tensor(W)
     tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
     J = jacobian(tiny_func, tiny_x)
     NJ = numerical_jacobian(tiny_func, tiny_x)
@@ -84,36 +83,19 @@ class _TestTinygrad:
     np.testing.assert_allclose(PJ, J, atol = 1e-5)
     np.testing.assert_allclose(PJ, NJ, atol = 1e-5)
 
+  @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
   def test_gradcheck(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5
 
-    tiny_x = Tensor(x, device=self.device)
-    tiny_W = Tensor(W, device=self.device)
+    tiny_x = Tensor(x)
+    tiny_W = Tensor(W)
     tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
 
     self.assertTrue(gradcheck(tiny_func, tiny_x))
 
     # coarse approx. since a "big" eps and the non-linearities of the model
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 0.1))
-
-@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
-class TestOpsCPU(_TestTinygrad, unittest.TestCase):
-  device=Device.CPU
-
-@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
-class TestTinygradGPU(_TestTinygrad, unittest.TestCase):
-  device = Device.GPU
-
-  @unittest.skip("float64 not supported on GPU")
-  def test_jacobian(self): pass
-
-  @unittest.skip("float64 not supported on GPU")
-  def test_gradcheck(self): pass
-
-@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
-class TestOpsANE(_TestTinygrad, unittest.TestCase):
-  device=Device.ANE
 
 if __name__ == '__main__':
   unittest.main()

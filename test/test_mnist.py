@@ -2,11 +2,10 @@
 import os
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, GPU, ANE, Device
+from tinygrad.tensor import Tensor
 import tinygrad.optim as optim
 from extra.training import train, evaluate
 from extra.utils import fetch, get_parameters
-from .env import TEST_DEVICES
 
 # mnist loader
 def fetch_mnist():
@@ -55,40 +54,28 @@ class TinyConvNet:
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1).logsoftmax()
 
-class _TestMNIST:
+class TestMNIST(unittest.TestCase):
 
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=200, device=self.device)
-    assert evaluate(model, X_test, Y_test, device=self.device) > 0.95
+    train(model, X_train, Y_train, optimizer, steps=200)
+    assert evaluate(model, X_test, Y_test) > 0.95
 
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=1000, device=self.device)
-    assert evaluate(model, X_test, Y_test, device=self.device) > 0.95
+    train(model, X_train, Y_train, optimizer, steps=1000)
+    assert evaluate(model, X_test, Y_test) > 0.95
 
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
-    train(model,  X_train, Y_train, optimizer, steps=1000, device=self.device)
-    assert evaluate(model, X_test, Y_test, device=self.device) > 0.95
-
-@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
-class TestMNISTCPU(_TestMNIST, unittest.TestCase):
-  device = Device.CPU
-
-@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
-class TestMNISTGPU(_TestMNIST, unittest.TestCase):
-  device = Device.GPU
-
-@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
-class TestMNISTANE(_TestMNIST, unittest.TestCase):
-  device=Device.ANE
+    train(model,  X_train, Y_train, optimizer, steps=1000)
+    assert evaluate(model, X_test, Y_test) > 0.95
 
 if __name__ == '__main__':
   unittest.main()

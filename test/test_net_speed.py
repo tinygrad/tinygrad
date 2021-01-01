@@ -4,8 +4,7 @@ import cProfile
 import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor, GPU, ANE, Device
-from .env import TEST_DEVICES
+from tinygrad.tensor import Tensor
 
 def start_profile():
   import time
@@ -20,8 +19,7 @@ def stop_profile(pr, sort='cumtime'):
   ps.sort_stats(sort)
   ps.print_stats(0.2)
 
-class _TestConvSpeed:
-  device= Device.CPU
+class TestConvSpeed(unittest.TestCase):
 
   def test_mnist(self):
     # https://keras.io/examples/vision/mnist_convnet/
@@ -65,15 +63,15 @@ class _TestConvSpeed:
 
     # ****** tinygrad compare *******
 
-    c1 = Tensor(c1.detach().numpy(), device=self.device)
-    c2 = Tensor(c2.detach().numpy(), device=self.device)
-    l1 = Tensor(l1.detach().numpy(), device=self.device)
+    c1 = Tensor(c1.detach().numpy())
+    c2 = Tensor(c2.detach().numpy())
+    l1 = Tensor(l1.detach().numpy())
 
     cnt = 5
     fpt, bpt = 0.0, 0.0
     for i in range(1+cnt):
       et0 = time.time()
-      x = Tensor.randn(128, 1, 28, 28, device=self.device)
+      x = Tensor.randn(128, 1, 28, 28)
       x = x.conv2d(c1).relu().avg_pool2d()
       x = x.conv2d(c2).relu().max_pool2d()
       x = x.reshape(shape=(x.shape[0], -1))
@@ -93,18 +91,6 @@ class _TestConvSpeed:
     bpt = (bpt*1000/cnt)
     print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
     print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/bpt_baseline, bpt_baseline))
-
-@unittest.skipUnless(Device.CPU in TEST_DEVICES, "Device Deselected")
-class TestConvSpeedCPU(_TestConvSpeed, unittest.TestCase):
-  device = Device.CPU
-
-@unittest.skipUnless(Device.GPU in TEST_DEVICES, "Device Deselected")
-class TestConvSpeedGPU(_TestConvSpeed, unittest.TestCase):
-  device = Device.GPU
-
-@unittest.skipUnless(Device.ANE in TEST_DEVICES, "Device Deselected")
-class TestConvSpeedANE(_TestConvSpeed, unittest.TestCase):
-  device=Device.ANE
 
 
 if __name__ == '__main__':
