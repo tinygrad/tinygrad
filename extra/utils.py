@@ -50,7 +50,7 @@ def my_unpickle(fb0):
 
   class MyPickle(pickle.Unpickler):
     def find_class(self, module, name):
-      print(module, name)
+      #print(module, name)
       if name == 'FloatStorage':
         return np.float32
       if name == 'LongStorage':
