@@ -10,7 +10,7 @@ from tinygrad.tensor import Tensor, GPU
 from tinygrad.nn import BatchNorm2D
 from extra.utils import get_parameters
 from test_mnist import fetch_mnist
-from extra.training import train, evaluate
+from extra.training import train, evaluate, sparse_categorical_crossentropy
 import tinygrad.optim as optim
 from extra.augment import augment_img
 GPU = os.getenv("GPU", None) is not None
@@ -106,7 +106,7 @@ if __name__ == "__main__":
   BS = 32
 
   lmbd = 0.00025
-  lossfn = lambda out,y: out.mul(y).mean() + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
+  lossfn = lambda out,y: sparse_categorical_crossentropy(out, y) + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
   X_train, Y_train, X_test, Y_test = fetch_mnist()
   steps = len(X_train)//BS
   np.random.seed(1337)
@@ -133,6 +133,6 @@ if __name__ == "__main__":
     for epoch in range(1,epochs+1):
       #first epoch without augmentation
       X_aug = X_train if epoch == 1 else augment_img(X_train)
-      train(model, X_aug, Y_train, optimizer, steps=steps, lossfn=lossfn, gpu=GPU, BS=BS)
+      train(model, X_aug, Y_train, optimizer, steps=steps, lossfn=lossfn, BS=BS)
       accuracy = evaluate(model, X_test, Y_test, BS=BS)
       model.save('examples/checkpoint'+str("%.0f" % (accuracy*1.0e6)))
