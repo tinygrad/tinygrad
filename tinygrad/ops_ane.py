@@ -1,5 +1,5 @@
-from .tensor import Device, Function, register
 from functools import lru_cache
+from .tensor import Device, Function, register
 
 @lru_cache
 def compile_wrapper(ane, dat):
