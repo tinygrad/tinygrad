@@ -1,9 +1,10 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-from inspect import signature
+import sys
+import inspect
 import functools
-import numpy as np
 import os
 from collections import defaultdict
+import numpy as np
 
 # **** profiler ****
 
@@ -67,14 +68,17 @@ def require_init_ane():
 
 class Device: CPU, GPU, ANE = 0, 1, 2
 
+DEFAULT_DEVICE = Device.CPU if os.environ.get("GPU", 0) != "1" else Device.GPU
+
 class Tensor:
   did_float_warning = False
+  training = True
   ops = defaultdict(dict)
 
-  def __init__(self, data, device=Device.CPU, requires_grad=True):
-    self.data = self._move_data(data, device)
+  def __init__(self, data, device=DEFAULT_DEVICE, requires_grad=True):
+    self.device, self.data = device, self._move_data(data, device)
 
-    self.device, self.grad, self.requires_grad = device, None, requires_grad
+    self.grad, self.requires_grad = None, requires_grad
 
     # internal variables used for autograd graph construction
     self._ctx = None
@@ -190,20 +194,28 @@ class Tensor:
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
-  def _is(self, device): return self.device == device
-
   def detach(self):
     return Tensor(self.data, device=self.device)
 
   # ***** non first class ops *****
 
-  def matmul(self, w):
-    return self.dot(w)
+  def __getitem__(self, val):
+    arg = []
+    for i,s in enumerate(val if type(val) in [list, tuple] else ([] if val is None else [val])):
+      arg.append((s.start if s.start is not None else 0,
+        (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+      assert s.step is None or s.step == 1
+    return self.slice(arg = arg+[(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
+
+  def pad2d(self, padding):
+    return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
+
+  def dot(self, w):
+    return self.matmul(w)
 
   def mean(self, axis=None):
     out = self.sum(axis=axis)
-    coeff = np.prod(out.shape)/np.prod(self.shape)
-    return out * coeff
+    return out * (np.prod(out.shape)/np.prod(self.shape))
 
   def sqrt(self):
     return self.pow(0.5)
@@ -225,18 +237,25 @@ class Tensor:
     return self.relu() - (-neg_slope*self).relu()
 
   def softmax(self):
-    # Replace with (self - self.max())
-    e = self.exp()
-    ss = e.sum(axis=len(self.shape)-1).reshape(shape=list(self.shape)[:-1]+[1])
+    ns = list(self.shape)[:-1]+[1]
+    m = self.max(axis=len(self.shape)-1).reshape(shape=ns)
+    e = (self - m).exp()
+    ss = e.sum(axis=len(self.shape)-1).reshape(shape=ns)
     return e.div(ss)
 
   def logsoftmax(self):
-    return self.softmax().log()
+    ns = list(self.shape)[:-1]+[1]
+    m = self.max(axis=len(self.shape)-1).reshape(shape=ns)
+    ss = m + (self-m).exp().sum(axis=len(self.shape)-1).reshape(shape=ns).log()
+    return self - ss
 
   def dropout(self, p=0.5):
-    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-    ret = self * Tensor(_mask, requires_grad=False, device=self.device)
-    return ret.div(1.0 - p)
+    # TODO: this needs a test
+    if Tensor.training:
+      _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+      return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    else:
+      return self
 
   def softplus(self, limit=20, beta=1):
     # safe softplus - 1/beta*log(1 + exp(beta*x)) (PyTorch)
@@ -250,11 +269,15 @@ class Tensor:
   def abs(self):
     return self.relu() + (-1.0*self).relu()
 
+  def _pool2d(self, py, px):
+    xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px]
+    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
+
   def avg_pool2d(self, kernel_size=(2,2)):
-    chan = self.shape[1]
-    ww = np.zeros((chan, 1, kernel_size[0], kernel_size[1]), dtype=np.float32)
-    ww[range(chan), 0, :, :] = 1/(kernel_size[0]*kernel_size[1])
-    return self.conv2d(Tensor(ww, device=self.device, requires_grad=False), stride=kernel_size, groups=chan)
+    return self._pool2d(*kernel_size).mean(axis=(3,5))
+
+  def max_pool2d(self, kernel_size=(2,2)):
+    return self._pool2d(*kernel_size).max(axis=(3,5))
 
 # An instantiation of the Function is the Context
 class Function:
@@ -268,7 +291,7 @@ class Function:
   def apply(self, *x, **kwargs):
     ctx = self(*x) # self - operation i.e 'add', 'sub', etc.
     # use default params
-    params = signature(self.forward).parameters
+    params = inspect.signature(self.forward).parameters
     for p in params.values():
       if p.default is not p.empty:
         setattr(ctx, p.name, p.default)
@@ -287,12 +310,12 @@ def register(name, fxn, device=Device.CPU):
   def dispatch(*x, **kwargs):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    f = (Tensor.ops[tt.device])[name]
+    f = Tensor.ops[tt.device][name]
     f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   # TODO: div is a second class op, so it doesn't work here
-  if name in ['add', 'sub', 'mul', 'pow']:
+  if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
@@ -300,14 +323,19 @@ def register(name, fxn, device=Device.CPU):
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
-  setattr(Tensor, f"is_{device.lower()}", property(functools.partialmethod(Tensor._is, Device.__dict__[device])))
 
 # this registers all the operations
-import tinygrad.ops_cpu
+def _register_ops(namespace, device=Device.CPU):
+  for name, cls in inspect.getmembers(namespace, inspect.isclass):
+    if name[0] != "_":  register(name.lower(), cls, device=device)
+
+from tinygrad import ops_cpu
+_register_ops(ops_cpu)
 try:
   import pyopencl as cl
   # TODO: move this import to require_init_gpu?
-  import tinygrad.ops_gpu
+  from tinygrad import ops_gpu
+  _register_ops(ops_gpu, device=Device.GPU)
   GPU = True
 except ImportError:
   # no GPU support

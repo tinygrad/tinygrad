@@ -1,8 +1,77 @@
-import warnings
 import numpy as np
 from .tensor import Function, register
 
-# ************* basic ops *************
+# ************* unary ops *************
+
+class ReLU(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return np.maximum(input, 0)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return grad_output * (input >= 0)
+
+class Log(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return np.log(input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return grad_output / input
+
+class Exp(Function):
+  @staticmethod
+  def forward(ctx, input):
+    ret = np.exp(input)
+    ctx.save_for_backward(ret)
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return grad_output * ret
+
+# ************* reduce ops *************
+
+class Sum(Function):
+  @staticmethod
+  def forward(ctx, input, axis=None):
+    ctx.save_for_backward(input, axis)
+    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis = ctx.saved_tensors
+    axis = [axis] if type(axis) is int else axis
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    return grad_output.reshape(shape) + np.zeros_like(input)
+
+class Max(Function):
+  @staticmethod
+  def forward(ctx, inp, axis=None):
+    axis = [axis] if type(axis) == int else axis
+    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ctx.save_for_backward(inp, axis, ret)
+    if axis is not None:
+      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
+    return ret
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = (input==ret.reshape(shape))
+    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    return ret2*grad_output.reshape(shape)/div
+
+# ************* binary ops *************
+
 def unbroadcast(out, in_sh):
   # adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i]
   sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]) if in_sh != (1,) else None
@@ -18,7 +87,6 @@ class Add(Function):
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x), unbroadcast(grad_output, shape_y)
-register('add', Add)
 
 class Sub(Function):
   @staticmethod
@@ -30,7 +98,6 @@ class Sub(Function):
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x), unbroadcast(-grad_output, shape_y)
-register('sub', Sub)
 
 class Mul(Function):
   @staticmethod
@@ -42,7 +109,6 @@ class Mul(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return unbroadcast(y*grad_output, x.shape), unbroadcast(x*grad_output, y.shape)
-register('mul', Mul)
 
 class Pow(Function):
   @staticmethod
@@ -55,52 +121,8 @@ class Pow(Function):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
            unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
-register('pow', Pow)
 
-class Sum(Function):
-  @staticmethod
-  def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input, axis)
-    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    axis = [axis] if type(axis) == int else axis
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    return grad_output.reshape(shape) + np.zeros_like(input)
-register('sum', Sum)
-
-
-# ************* GEMM *************
-
-class Dot(Function):
-  @staticmethod
-  def forward(ctx, input, weight):
-    ctx.save_for_backward(input, weight)
-    return input @ weight
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, weight = ctx.saved_tensors
-    grad_input = grad_output @ np.swapaxes(weight, -2, -1)
-    grad_weight = np.swapaxes(input, -2, -1) @ grad_output
-    return grad_input, grad_weight
-register('dot', Dot)
-
-# ************* simple ops *************
-
-class Pad2D(Function):
-  @staticmethod
-  def forward(ctx, x, padding=None):
-    ctx.save_for_backward(padding)
-    return np.pad(x, ((0,0), (0,0), tuple(padding[2:4]), tuple(padding[0:2])))
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    padding, = ctx.saved_tensors
-    return grad_output[..., padding[2]:-padding[3], padding[0]:-padding[1]]
-register('pad2d', Pad2D)
+# ************* movement ops *************
 
 class Reshape(Function):
   @staticmethod
@@ -112,7 +134,6 @@ class Reshape(Function):
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
     return grad_output.reshape(in_shape)
-register('reshape', Reshape)
 
 class Transpose(Function):
   @staticmethod
@@ -123,48 +144,39 @@ class Transpose(Function):
   @staticmethod
   def backward(ctx, x):
     return np.transpose(x, np.argsort(ctx.order))
-register('transpose', Transpose)
 
-# ************* activation ops *************
+def inner_slice(x, arg):
+  padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
+  x = np.pad(x, padding)
+  slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
+  return x[tuple([slice(x[0], x[1], None) for x in slicee])]
 
-class ReLU(Function):
+class Slice(Function):
   @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return np.maximum(input, 0)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output * (input >= 0)
-register('relu', ReLU)
-
-class Log(Function):
-  @staticmethod
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return np.log(input)
+  def forward(ctx, x, arg=None):
+    ctx.save_for_backward(x.shape)
+    return inner_slice(x, arg)
 
   @staticmethod
   def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output / input
-register('log', Log)
+    shape, = ctx.saved_tensors
+    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
+    return inner_slice(grad_output, narg)
 
-class Exp(Function):
+# ************* processing ops *************
+
+class Matmul(Function):
   @staticmethod
-  def forward(ctx, input):
-    ret = np.exp(input)
-    ctx.save_for_backward(ret)
-    return ret
+  def forward(ctx, input, weight):
+    ctx.save_for_backward(input, weight)
+    return input @ weight
 
   @staticmethod
   def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return grad_output * ret
-register('exp', Exp)
-
-# ************* conv ops *************
+    input, weight = ctx.saved_tensors
+    grad_input = grad_output @ np.swapaxes(weight, -2, -1)
+    grad_weight = np.swapaxes(input, -2, -1) @ grad_output
+    return grad_input, grad_weight
 
 class Conv2D(Function):
   @staticmethod
@@ -220,38 +232,3 @@ class Conv2D(Function):
         gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-register('conv2d', Conv2D)
-
-
-# ************* pooling ops *************
-
-def stack_for_pool(x, py, px):
-  my, mx = (x.shape[2]//py)*py, (x.shape[3]//px)*px
-  xup = x[:, :, :my, :mx]
-  stack = [xup[:, :, k//px::py, k%px::px][None] for k in range(py*px)]
-  return np.concatenate(stack, axis=0)
-
-def unstack_for_pool(fxn, s, py, px):
-  my, mx = (s[2]//py)*py, (s[3]//px)*px
-  for k in range(py*px):
-    Y, X = k//px, k%px
-    ll = fxn(Y*px+X)
-    if X == 0 and Y == 0:
-      ret = np.zeros(s, dtype=ll.dtype)
-    ret[:, :, Y:my:py, X:mx:px] = ll
-  return ret
-
-class MaxPool2D(Function):
-  @staticmethod
-  def forward(ctx, x, kernel_size=(2, 2)):
-    stack = stack_for_pool(x, *kernel_size)
-    idxs = np.argmax(stack, axis=0)
-    ctx.save_for_backward(idxs, x.shape)
-    return np.max(stack, axis=0)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    idxs,s = ctx.saved_tensors
-    return unstack_for_pool(lambda idx: grad_output * (idxs == idx), s, *ctx.kernel_size)
-register('max_pool2d', MaxPool2D)
-

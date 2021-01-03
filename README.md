@@ -10,9 +10,9 @@ For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
-The Tensor class is a wrapper around a numpy array, except it does Tensor things.
+Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. Support the simple basic ops, and you get SOTA [vision](https://arxiv.org/abs/1905.11946) `extra/efficientnet.py` and [language](https://arxiv.org/abs/1706.03762) `extra/transformer.py` models. We are working on support for the Apple Neural Engine.
 
-tinygrad is also a city in Russia.
+Eventually, we will build custom hardware for tinygrad, and it will be blindingly fast. Now, it is slow.
 
 ### Installation
 
@@ -105,16 +105,17 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 
 ### Adding an accelerator
 
-You need to support 14 basic ops:
+You need to support 14 first class ops:
 
 ```
-Add, Sub, Mul, Pow              # binary ops
 Relu, Log, Exp                  # unary ops
-Sum                             # reduce op
-Dot                             # matrix multiplication
-Conv2D, MaxPool2D               # 2D ops
-Pad2D, Reshape, Transpose       # moving things around ops
+Sum, Max                        # reduce ops (with axis argument)
+Add, Sub, Mul, Pow              # binary ops (with broadcasting)
+Reshape, Transpose, Slice       # movement ops
+Matmul, Conv2D                  # processing ops
 ```
+
+While more ops may be added (like Sign), I think these base 14 are stable.
 
 ## ImageNet inference
 

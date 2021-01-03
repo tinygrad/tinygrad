@@ -11,23 +11,21 @@ def sparse_categorical_crossentropy(out, Y):
   # correct loss for NLL, torch NLL loss returns one per row
   y[range(y.shape[0]),YY] = -1.0*num_classes
   y = y.reshape(list(Y.shape)+[num_classes])
-  y = Tensor(y, device=out.device)
+  y = Tensor(y)
   return out.mul(y).mean()
 
-def train(model, X_train, Y_train, optim, steps, BS=128, device=Device.CPU, lossfn=sparse_categorical_crossentropy):
-  if device == Device.GPU: [x.gpu_() for x in get_parameters([model, optim])]
-  elif device == Device.ANE: [x.ane_() for x in get_parameters([model, optim])]
+def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy):
+  Tensor.training = True
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
 
-    x = Tensor(X_train[samp], device=device)
+    x = Tensor(X_train[samp])
     y = Y_train[samp]
 
     # network
     out = model.forward(x)
 
-    # NLL loss function
     loss = lossfn(out, y)
     optim.zero_grad()
     loss.backward()
@@ -42,15 +40,17 @@ def train(model, X_train, Y_train, optim, steps, BS=128, device=Device.CPU, loss
     accuracies.append(accuracy)
     t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
 
-def evaluate(model, X_test, Y_test, num_classes=None, device=Device.CPU, BS=128):
+def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False):
+  Tensor.training = False
   def numpy_eval(num_classes):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
-    for i in trange(len(Y_test)//BS, disable=os.getenv('CI') is not None):
-      Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(Tensor(X_test[i*BS:(i+1)*BS], device=device)).cpu().data
-    Y_test_preds = np.argmax(Y_test_preds_out, axis=len(Y_test.shape))
-    return (Y_test == Y_test_preds).mean()
+    for i in trange((len(Y_test)-1)//BS+1, disable=os.getenv('CI') is not None):
+      Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(Tensor(X_test[i*BS:(i+1)*BS])).cpu().data
+    Y_test_preds = np.argmax(Y_test_preds_out, axis=-1)
+    return (Y_test == Y_test_preds).mean(), Y_test_preds
 
   if num_classes is None: num_classes = Y_test.max().astype(int)+1
-  accuracy = numpy_eval(num_classes)
-  print("test set accuracy is %f" % accuracy)
-  return accuracy
+  acc, Y_test_pred = numpy_eval(num_classes)
+  print("test set accuracy is %f" % acc)
+  return (acc, Y_test_pred) if return_predict else acc
+
