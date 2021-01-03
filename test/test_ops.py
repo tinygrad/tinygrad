@@ -75,7 +75,7 @@ class TestOps(unittest.TestCase):
   def test_mish(self):
     def _mish_pytorch(x):
       return x*torch.tanh(torch.nn.functional.softplus(x))
-    helper_test_op([(45,65)], _mish_pytorch, Tensor.mish, atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], _mish_pytorch, Tensor.mish)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot)
   def test_multidot(self):
