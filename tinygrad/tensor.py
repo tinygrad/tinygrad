@@ -276,6 +276,9 @@ class Tensor:
   def abs(self):
     return self.relu() + (-1.0*self).relu()
 
+  def sign(self):
+    return self.abs() / (self+1e-10)
+
   def _pool2d(self, py, px):
     xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px]
     return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
