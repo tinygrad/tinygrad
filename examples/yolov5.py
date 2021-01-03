@@ -5,27 +5,29 @@ from extra.utils import fetch, my_unpickle
 
 if __name__ == "__main__":
   dat = fetch('https://github.com/ultralytics/yolov5/releases/download/v3.0/yolov5s.pt')
-  #import torch
-  #td = torch.load(io.BytesIO(dat))
-  #print(td)
+  #dat = fetch('https://github.com/ultralytics/yolov5/releases/download/v3.0/yolov5m.pt')
 
   import zipfile
   fp = zipfile.ZipFile(io.BytesIO(dat))
   #fp.printdir()
   data = fp.read('archive/data.pkl')
 
-  #import pickletools
-  #pickletools.dis(io.BytesIO(data))
-
+  # yolo specific
   ret, out = my_unpickle(io.BytesIO(data))
-  print(dir(ret['model']))
-  for m in ret['model']._modules['model']:
-    print(m)
-    print(m._modules.keys())
+  d = ret['model'].yaml
+  for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
+    tm = ret['model']._modules['model'][i]
+    print(i, f, n, m, args, tm._modules.keys())
+    # Focus, Conv, BottleneckCSP, SPP, Concat, Detect
+    #for k,v in tm._modules.items():
+    #  print("   ", k, v)
+    if m in "Focus":
+      conv = tm._modules['conv']
+      print("   ", conv._modules)
+    if m in "Conv":
+      conv, bn = tm._modules['conv'], tm._modules['bn']
+      print("   ", conv)
+      #print(bn)
 
-  """
-  weights = fake_torch_load(data)
-  for k,v in weights:
-    print(k)
-  """
+
 

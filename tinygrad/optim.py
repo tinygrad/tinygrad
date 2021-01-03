@@ -1,6 +1,4 @@
 # sorted in order of increasing complexity
-
-import numpy as np
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -25,7 +23,7 @@ class RMSprop(Optimizer):
     super().__init__(params)
     self.lr, self.decay, self.eps = lr, decay, eps
 
-    self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), device=params[0].device, requires_grad=False) for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
 
   def step(self):
     for i, t in enumerate(self.params):
@@ -37,8 +35,8 @@ class Adam(Optimizer):
     super().__init__(params)
     self.lr, self.b1, self.b2, self.eps, self.t = lr, b1, b2, eps, 0
 
-    self.m = [Tensor(np.zeros(t.shape, dtype=np.float32), device=params[0].device, requires_grad=False) for t in self.params]
-    self.v = [Tensor(np.zeros(t.shape, dtype=np.float32), device=params[0].device, requires_grad=False) for t in self.params]
+    self.m = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
 
   def step(self):
     self.t = self.t + 1
