@@ -44,7 +44,7 @@ class Sign(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    return grad_output * 0
+    return np.zeros_like(grad_output)
 
 # ************* reduce ops *************
 

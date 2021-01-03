@@ -71,7 +71,7 @@ class Sign(Function):
 
   @staticmethod
   def backward(ctx, grad_output):
-    return unary_op(ctx, 'a * 0', grad_output)
+    return buffer_new(ctx, grad_output.shape, zero=True)
 
 # ************* reduce ops *************
 
