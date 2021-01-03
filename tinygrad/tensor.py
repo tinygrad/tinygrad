@@ -274,7 +274,7 @@ class Tensor:
     return self * (self.softplus().tanh()) # x*tanh(softplus(x))
 
   def abs(self):
-    return self.relu() + (-1.0*self).relu()
+    return self * self.sign()
 
   def _pool2d(self, py, px):
     xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px]
