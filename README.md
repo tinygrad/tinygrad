@@ -105,17 +105,17 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 
 ### Adding an accelerator
 
-You need to support 15 first class ops:
+You need to support 14 first class ops:
 
 ```
-Relu, Log, Exp, Sign            # unary ops
+Relu, Log, Exp                  # unary ops
 Sum, Max                        # reduce ops (with axis argument)
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Reshape, Transpose, Slice       # movement ops
 Matmul, Conv2D                  # processing ops
 ```
 
-While more ops may be added, I think these base 15 are stable.
+While more ops may be added, I think this base is stable.
 
 ## ImageNet inference
 

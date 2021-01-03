@@ -232,10 +232,10 @@ class Tensor:
     return self * self.sigmoid()
 
   def relu6(self):
-    return self.relu() * (6-self).sign()
+    return self.relu() - (self-6).relu()
 
   def hardswish(self):
-    return self * (self+3).relu6()/6
+    return self * (self+3).relu6() * (1/6)
 
   def tanh(self):
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
@@ -274,7 +274,7 @@ class Tensor:
     return self * (self.softplus().tanh()) # x*tanh(softplus(x))
 
   def abs(self):
-    return self * self.sign()
+    return self.relu() + (-1.0*self).relu()
 
   def _pool2d(self, py, px):
     xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px]

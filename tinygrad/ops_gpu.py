@@ -64,18 +64,9 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return binary_op(ctx, 'a * b', grad_output, ret)
 
-class Sign(Function):
-  @staticmethod
-  def forward(ctx, input):
-    return unary_op(ctx, '(a > 0) - (a < 0)', input)
-
-  @staticmethod
-  def backward(ctx, grad_output):
-    return buffer_new(ctx, grad_output.shape, zero=True)
-
 # ************* reduce ops *************
 
-def reduce_op(ctx, code, code2, inp, axis=None):
+def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
   if axis is None:
     # full reduce
     osize = [1]*len(inp.shape)
@@ -92,7 +83,7 @@ def reduce_op(ctx, code, code2, inp, axis=None):
                        __global const int *shape_x, __global const int *shape_ret) {
     int gid = get_global_id(0);
 
-    float out = 0.0;
+    float out = """+start+""";
     for (int x = 0; x < sz; x++) {
       int idx = 0;  // compute index into a_g
       int tprod = prod;
@@ -140,7 +131,7 @@ class Max(Function):
   @staticmethod
   def forward(ctx, input, axis=None):
     axis = [axis] if type(axis) == int else axis
-    ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis)
+    ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
     if axis is not None:
       ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
