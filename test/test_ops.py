@@ -64,6 +64,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: torch.exp(x), Tensor.exp)
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
+  def test_softplus(self):
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
+  def test_mish(self):
+    def _mish_pytorch(x):
+      return x*torch.tanh(torch.nn.functional.softplus(x))
+    helper_test_op([(45,65)], _mish_pytorch, Tensor.mish, atol=1e-6, grad_atol=1e-6)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot)
   def test_multidot(self):
