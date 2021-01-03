@@ -6,12 +6,12 @@ import timeit
 import functools
 from tinygrad.tensor import Tensor, DEFAULT_DEVICE, Device
 
-def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
   torch.manual_seed(0)
   if shps is None:
     ts = [torch.tensor(x, requires_grad=True) for x in vals]
   else:
-    ts = [torch.tensor((np.random.random(size=x).astype(np.float32)-0.5)*20, requires_grad=True) for x in shps]
+    ts = [torch.tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=True) for x in shps]
 
   tst = [Tensor(x.detach().numpy()) for x in ts]
   out = torch_fxn(*ts)
@@ -49,9 +49,9 @@ class TestOps(unittest.TestCase):
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
   def test_pow(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
   def test_sqrt(self):
-    helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt)
+    helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
   def test_relu(self):
     helper_test_op([(45,65)], lambda x: x.relu(), Tensor.relu)
   def test_leakyrelu(self):
@@ -117,7 +117,7 @@ class TestOps(unittest.TestCase):
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
       for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
-          helper_test_op(shapes, torch_op, tinygrad_op)
+          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
 
 
   def test_broadcast_partial(self):
@@ -127,7 +127,7 @@ class TestOps(unittest.TestCase):
                      ((4,1), (4,5)), ((1,4), (5,4))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           # NOTE: ANE backwards?
-          helper_test_op(shapes, torch_op, tinygrad_op, forward_only=DEFAULT_DEVICE!=Device.CPU)
+          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
 
   def test_slice(self):
     helper_test_op([(3,3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
