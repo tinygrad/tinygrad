@@ -222,6 +222,7 @@ class Tensor:
 
   def div(self, y):
     return self * (y ** -1.0)
+  __truediv__ = div
 
   def sigmoid(self):
     e = self.exp()
@@ -229,6 +230,12 @@ class Tensor:
 
   def swish(self):
     return self * self.sigmoid()
+
+  def relu6(self):
+    return self.relu() * (6-self).sign()
+
+  def hardswish(self):
+    return self * (self+3).relu6()/6
 
   def tanh(self):
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
@@ -314,7 +321,6 @@ def register(name, fxn, device=Device.CPU):
     f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
-  # TODO: div is a second class op, so it doesn't work here
   if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))

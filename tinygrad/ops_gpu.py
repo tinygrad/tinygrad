@@ -64,6 +64,15 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return binary_op(ctx, 'a * b', grad_output, ret)
 
+class Sign(Function):
+  @staticmethod
+  def forward(ctx, input):
+    return unary_op(ctx, 'a >= 0', input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return unary_op(ctx, 'a * 0', grad_output)
+
 # ************* reduce ops *************
 
 def reduce_op(ctx, code, code2, inp, axis=None):

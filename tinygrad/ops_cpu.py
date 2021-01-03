@@ -37,6 +37,15 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return grad_output * ret
 
+class Sign(Function):
+  @staticmethod
+  def forward(ctx, input):
+    return np.sign(input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    return grad_output * 0
+
 # ************* reduce ops *************
 
 class Sum(Function):
