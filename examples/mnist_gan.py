@@ -62,7 +62,7 @@ if __name__ == "__main__":
   output_folder = "outputs"
   os.makedirs(output_folder, exist_ok=True)
   train_data_size = len(X_train)
-  ds_noise = Tensor(np.random.randn(64,128).astype(np.float32), gpu=GPU, requires_grad=False)
+  ds_noise = Tensor(np.random.randn(64,128).astype(np.float32), requires_grad=False)
   n_steps = int(train_data_size/batch_size)
   if GPU:
     [x.gpu_() for x in generator_params+discriminator_params]
@@ -78,18 +78,18 @@ if __name__ == "__main__":
     idx = np.random.randint(0, X_train.shape[0], size=(batch_size))
     image_b = X_train[idx].reshape(-1, 28*28).astype(np.float32)/255.
     image_b = (image_b - 0.5)/0.5
-    return Tensor(image_b, gpu=GPU)
+    return Tensor(image_b)
 
   def real_label(bs):
     y = np.zeros((bs,2), np.float32)
     y[range(bs), [1]*bs] = -2.0
-    real_labels = Tensor(y, gpu=GPU)
+    real_labels = Tensor(y)
     return real_labels
 
   def fake_label(bs):
     y = np.zeros((bs,2), np.float32)
     y[range(bs), [0]*bs] = -2.0 # Can we do label smoothin? i.e -2.0 changed to -1.98789.
-    fake_labels = Tensor(y, gpu=GPU)
+    fake_labels = Tensor(y)
     return fake_labels
 
   def train_discriminator(optimizer, data_real, data_fake):
@@ -125,12 +125,12 @@ if __name__ == "__main__":
     for i in tqdm(range(n_steps)):
       image = generator_batch()
       for step in range(k): # Try with k = 5 or 7.
-        noise = Tensor(np.random.randn(batch_size,128), gpu=GPU)
+        noise = Tensor(np.random.randn(batch_size,128))
         data_fake = generator.forward(noise).detach()
         data_real = image
         loss_d_step = train_discriminator(optim_d, data_real, data_fake)
         loss_d += loss_d_step
-      noise = Tensor(np.random.randn(batch_size,128), gpu=GPU)
+      noise = Tensor(np.random.randn(batch_size,128))
       data_fake = generator.forward(noise)
       loss_g_step = train_generator(optim_g, data_fake)
       loss_g += loss_g_step
