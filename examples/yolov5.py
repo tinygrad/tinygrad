@@ -4,8 +4,7 @@ import pickle
 from extra.utils import fetch, my_unpickle
 
 if __name__ == "__main__":
-  dat = fetch('https://github.com/ultralytics/yolov5/releases/download/v3.0/yolov5s.pt')
-  #dat = fetch('https://github.com/ultralytics/yolov5/releases/download/v3.0/yolov5m.pt')
+  dat = fetch('https://github.com/ultralytics/yolov5/releases/download/v4.0/yolov5s.pt')
 
   import zipfile
   fp = zipfile.ZipFile(io.BytesIO(dat))
