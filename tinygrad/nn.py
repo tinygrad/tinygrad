@@ -75,7 +75,7 @@ class Conv2d:
     """
     if self.padding != 0:
       # TODO: Check padding line
-      x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, self.stride, self.groups).add(biases)
+      x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, self.stride, self.groups).add(self.biases)
     else:
       x = x.conv2d(self.weights, self.stride, self.groups).add(self.biases)
     

@@ -283,7 +283,7 @@ if __name__ == "__main__":
 
   #from PIL import Image
   # url = sys.argv[1]
-  url = "https://vayla.fi/documents/25230764/35593281/liikennevirasto-tieliikenne-kasvoi-onnettomuudet-vahenivat-uutinen-kuvituskuva-2017.jpg/40ba05aa-832b-4e54-bd76-fe3c4907bf18?t=1498049041101"
+  url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
   img = None
   if url.startswith('http'):
     img = Image.open(io.BytesIO(fetch(url)))
