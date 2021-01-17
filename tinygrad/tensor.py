@@ -208,6 +208,12 @@ class Tensor:
     return self.slice(arg = arg+[(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
 
   def pad2d(self, padding):
+    print("Tuple index:")
+    print(self.shape[2])
+    # print(self.shape[3])
+    print("Self shape")
+    print(self.shape)
+    print(padding[3])
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
   def dot(self, w):

@@ -1,18 +1,10 @@
 #!/usr/bin/env python
-#inspired by https://github.com/Matuzas77/MNIST-0.17/blob/master/MNIST_final_solution.ipynb
 import os
 import sys
-sys.path.append(os.getcwd())
-sys.path.append(os.path.join(os.getcwd(), 'test'))
-
 import numpy as np
 from tinygrad.tensor import Tensor, GPU
 from tinygrad.nn import BatchNorm2D
 from extra.utils import get_parameters
-from test_mnist import fetch_mnist
-from extra.training import train, evaluate, sparse_categorical_crossentropy
-import tinygrad.optim as optim
-from extra.augment import augment_img
 GPU = os.getenv("GPU", None) is not None
 QUICK = os.getenv("QUICK", None) is not None
 DEBUG = os.getenv("DEBUG", None) is not None
@@ -47,11 +39,7 @@ class ConvBlock:
     self._seb = SqueezeExciteBlock2D(filters)
 
   def __call__(self, input):
-    print("Input shape before transform:")
-    print(input.shape)
     x = input.reshape(shape=(-1, self.inp, self.w, self.h))
-    print("after:")
-    print(x.shape)
     for cweight, cbias in zip(self.cweights, self.cbiases):
       x = x.pad2d(padding=[1,1,1,1]).conv2d(cweight).add(cbias).relu()
     x = self._bn(x)
@@ -103,40 +91,86 @@ class BigConvNet:
     xo = x1.dot(self.weight1) + x2.dot(self.weight2)
     return xo.logsoftmax()
 
+def parse_model(d, ch):
+
+
+class yolo:
+	def __init__(self, num_classes, model_size=(0.33, 0.5), match_thresh=4, giou_ratio=1, img_sizes=(320, 416), score_thresh=0.1, nms_thresh=0.6, detections=100):
+		# Original
+		anchors1 = [
+      [[10, 13], [16, 30], [33, 23]],
+      [[30, 61], [62, 45], [59, 119]],
+      [[116, 90], [156, 198], [373, 326]]
+    ]
+    # [320, 416]
+    anchors = [
+      [[6.1, 8.1], [20.6, 12.6], [11.2, 23.7]],
+      [[36.2, 26.8], [25.9, 57.2], [57.8, 47.9]],
+      [[122.1, 78.3], [73.7, 143.8], [236.1, 213.1]],
+    ]
+		# Backbone
+		self.backbone = [
+			[-1, 1, Focus, [64, 3]], # 0-P1/2
+			[-1, 1, Conv, [128, 3, 2]], # 1-P2/4
+			[-1, 3, C3, [128]],
+			[-1, 1, Conv, [256, 3, 2]], # 3-P3/8
+			[-1, 9, C3, [256]],
+			[-1, 1, Conv, [512, 3, 2]], # 5-P4/16
+			[-1, 9, C3, [512]],
+			[-1, 1, Conv, [1024, 3, 2]], # 7-P5/32
+			[-1, 1, SPP, [1024, [5, 9, 13]]],
+			[-1, 3, C3, [1024, False]], # 9
+		]
+
+		# Header
+		self.header = [
+			[-1, 1, Conv, [512, 1, 1]],
+			[-1, 1, nn.Upsample, [None, 2, 'nearest']],
+			[[-1, 6], 1, Concat, [1]],  # cat backbone P4
+			[-1, 3, C3, [512, False]],  # 13
+
+			[-1, 1, Conv, [256, 1, 1]],
+			[-1, 1, nn.Upsample, [None, 2, 'nearest']],
+			[[-1, 4], 1, Concat, [1]],  # cat backbone P3
+			[-1, 3, C3, [256, False]],  # 17 (P3/8-small)
+
+			[-1, 1, Conv, [256, 3, 2]],
+			[[-1, 14], 1, Concat, [1]],  # cat head P4
+			[-1, 3, C3, [512, False]],  # 20 (P4/16-medium)
+
+			[-1, 1, Conv, [512, 3, 2]],
+			[[-1, 10], 1, Concat, [1]],  # cat head P5
+			[-1, 3, C3, [1024, False]],  # 23 (P5/32-large)
+
+			[[17, 20, 23], 1, Detect, [nc, anchors]
+		]
+	
+	def parse_model():
+		layers, save, c2 = [], [], None
+		for i, (f, n, m, args) in enumerate()
+
+def main():
+	model_sizes = {"small": (0.33, 0.5), "medium": (0.67, 0.75), "large": (1, 1), "extreme": (1.33, 1.25)}
+  num_classes = len(d_test.dataset.classes)
+  model = yolo(num_classes, model_sizes[args.model_size], **args.kwargs)
+  model.head.eval_with_loss = args.eval_with_loss
+  
+	### LOAD MODEL
+  checkpoint = torch.load(args.ckpt_path, map_location=device)
+  if "ema" in checkpoint:
+      model.load_state_dict(checkpoint["ema"][0])
+      print(checkpoint["eval_info"])
+  else:
+      model.load_state_dict(checkpoint)
+	###
+  
+	model.fuse()
+  print("evaluating...")
+  B = time.time()
+  eval_output, iter_eval = yolo.evaluate(model, d_test, device, args, evaluation=args.evaluation)
+  B = time.time() - B
+  print(eval_output)
+  print("\ntotal time of this evaluation: {:.2f} s, speed: {:.2f} FPS".format(B, args.batch_size / iter_eval))
 
 if __name__ == "__main__":
-  lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
-  epochss = [2, 1] if QUICK else [13, 3, 3, 1]
-  BS = 32
-
-  lmbd = 0.00025
-  lossfn = lambda out,y: sparse_categorical_crossentropy(out, y) + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
-  X_train, Y_train, X_test, Y_test = fetch_mnist()
-  steps = len(X_train)//BS
-  np.random.seed(1337)
-  if QUICK:
-    steps = 1
-    X_test, Y_test = X_test[:BS], Y_test[:BS]
-
-  model = BigConvNet()
-
-  if len(sys.argv) > 1:
-    try:
-      model.load(sys.argv[1])
-      print('Loaded weights "'+sys.argv[1]+'", evaluating...')
-      evaluate(model, X_test, Y_test, BS=BS)
-    except:
-      print('could not load weights "'+sys.argv[1]+'".')
-
-  if GPU:
-    params = get_parameters(model)
-    [x.gpu_() for x in params]
-
-  for lr, epochs in zip(lrs, epochss):
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    for epoch in range(1,epochs+1):
-      #first epoch without augmentation
-      X_aug = X_train if epoch == 1 else augment_img(X_train)
-      train(model, X_aug, Y_train, optimizer, steps=steps, lossfn=lossfn, BS=BS)
-      accuracy = evaluate(model, X_test, Y_test, BS=BS)
-      model.save('examples/checkpoint'+str("%.0f" % (accuracy*1.0e6)))
+  main()
