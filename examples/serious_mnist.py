@@ -47,11 +47,7 @@ class ConvBlock:
     self._seb = SqueezeExciteBlock2D(filters)
 
   def __call__(self, input):
-    print("Input shape before transform:")
-    print(input.shape)
     x = input.reshape(shape=(-1, self.inp, self.w, self.h))
-    print("after:")
-    print(x.shape)
     for cweight, cbias in zip(self.cweights, self.cbiases):
       x = x.pad2d(padding=[1,1,1,1]).conv2d(cweight).add(cbias).relu()
     x = self._bn(x)

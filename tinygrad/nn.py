@@ -51,6 +51,9 @@ class Conv2d:
       self.biases = Tensor.uniform(1, out_channels, 1, 1)
     else:
       self.biases = None
+  
+  def __repr__(self):
+    return f"<Conv2d Layer with in_channels {self.in_channels!r}, out_channels {self.out_channels!r}, weights with shape {self.weights.shape!r}>"
 
   
   def __call__(self, x):
@@ -75,9 +78,9 @@ class Conv2d:
     """
     if self.padding != 0:
       # TODO: Check padding line
-      x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, self.stride, self.groups).add(self.biases)
+      x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
     else:
-      x = x.conv2d(self.weights, self.stride, self.groups).add(self.biases)
+      x = x.conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
     
     return x
 

@@ -53,22 +53,41 @@ def parse_cfg(cfg):
   return blocks
 
 def predict_transform(prediction, inp_dim, anchors, num_classes):
-  batch_size = prediction.size(0)
-  stride =  inp_dim // prediction.size(2)
+  # batch_size = prediction.size(0)
+  batch_size = prediction.shape[0]
+  stride = inp_dim // prediction.shape[2]
+  # stride =  inp_dim // prediction.size(2)
   grid_size = inp_dim // stride
   bbox_attrs = 5 + num_classes
   num_anchors = len(anchors)
-    
+  
+  """
   prediction = prediction.view(batch_size, bbox_attrs*num_anchors, grid_size*grid_size)
   prediction = prediction.transpose(1,2).contiguous()
   prediction = prediction.view(batch_size, grid_size*grid_size*num_anchors, bbox_attrs)
+  """
+  prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
+  # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
+  # print(prediction.shape)
+  # print(prediction.transpose(order=(2, 1)).reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs)).shape)
+  # prediction = np.ascontiguousarray(prediction.transpose(order=(2, 1)))
+  prediction = prediction.transpose(order=(2, 1))
+  # print("Prediction:", prediction.shape)
+  prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
+
 
   anchors = [(a[0]/stride, a[1]/stride) for a in anchors]
   #Sigmoid the  centre_X, centre_Y. and object confidencce
   # TODO: Fix this
-  prediction[:,:,0] = (prediction[:,:,0].sigmoid())
-  prediction[:,:,1] = (prediction[:,:,1].sigmoid())
-  prediction[:,:,4] = (prediction[:,:,4].sigmoid())
+  # print(prediction.cpu().data[:,:,0])
+  def dsigmoid(data):
+    return 1/(1+np.exp(-data))
+  prediction.cpu().data[:,:,0] = dsigmoid(prediction.cpu().data[:,:,0])
+  prediction.cpu().data[:,:,1] = dsigmoid(prediction.cpu().data[:,:,1])
+  prediction.cpu().data[:,:,4] = dsigmoid(prediction.cpu().data[:,:,4])
+  # prediction[:,:,0] = (prediction[:,:,0].sigmoid())
+  # prediction[:,:,1] = (prediction[:,:,1].sigmoid())
+  # prediction[:,:,4] = (prediction[:,:,4].sigmoid())
   """
   prediction[:,:,0] = torch.sigmoid(prediction[:,:,0])
   prediction[:,:,1] = torch.sigmoid(prediction[:,:,1])
@@ -78,8 +97,12 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   grid = np.arange(grid_size)
   a, b = np.meshgrid(grid, grid)
 
-  x_offset = torch.FloatTensor(a).view(-1,1)
-  y_offset = torch.FloatTensor(b).view(-1,1)
+  # x_offset = a.reshape(shape=(-1, 1))
+  # y_offset = b.reshape(shape=(-1, 1))
+  x_offset = a.reshape((-1, 1))
+  y_offset = b.reshape((-1, 1))
+  # x_offset = torch.FloatTensor(a).view(-1,1)
+  # y_offset = torch.FloatTensor(b).view(-1,1)
 
   """
   if CUDA:
@@ -87,9 +110,14 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
     y_offset = y_offset.cuda()
   """
 
-  x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(1,num_anchors).view(-1,2).unsqueeze(0)
+  # x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(1,num_anchors).view(-1,2).unsqueeze(0)
+  x_y_offset = np.concatenate((x_offset, y_offset), 1)
+  x_y_offset = np.tile(x_y_offset, (1, num_anchors))
+  x_y_offset = x_y_offset.reshape((-1,2))
+  x_y_offset = np.expand_dims(x_y_offset, 0)
 
-  prediction[:,:,:2] += x_y_offset
+  prediction.cpu().data[:,:,:2] += x_y_offset
+  # prediction[:,:,:2] += x_y_offset
 
   #log space transform height and the width
   # anchors = torch.FloatTensor(anchors)
@@ -100,12 +128,16 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
     anchors = anchors.cuda()
   """
 
-  anchors = anchors.repeat(grid_size*grid_size, 1).unsqueeze(0)
-  prediction[:,:,2:4] = torch.exp(prediction[:,:,2:4])*anchors
+  # anchors = anchors.cpu().data.tile((grid_size*grid_size, 1)).expand_dims(0) # .repeat(grid_size*grid_size, 1).unsqueeze(0)
+  # anchors = anchors.cpu().data.tile((grid_size*grid_size, 1)).expand_dims(0)
+  anchors = np.tile(anchors.cpu().data, (grid_size*grid_size, 1))
+  anchors = np.expand_dims(anchors, 0)
+  # prediction[:,:,2:4] = torch.exp(prediction[:,:,2:4])*anchors
+  prediction.cpu().data[:,:,2:4] = np.exp(prediction.cpu().data[:,:,2:4])*anchors
 
-  prediction[:,:,5: 5 + num_classes] = ((prediction[:,:, 5 : 5 + num_classes]).sigmoid())
+  prediction.cpu().data[:,:,5: 5 + num_classes] = dsigmoid((prediction.cpu().data[:,:, 5 : 5 + num_classes]))
 
-  prediction[:,:,:4] *= stride
+  prediction.cpu().data[:,:,:4] *= stride
 
   return prediction
 
@@ -226,6 +258,9 @@ class Darknet:
       print("Running forward through " + module_type)
       if module_type == "convolutional" or module_type == "upsample":
         for layer in self.module_list[i]:
+          print("x shape:")
+          print(x.shape)
+          print(layer)
           x = layer(x)
         # print(self.module_list[i])
         # x = self.module_list[i](x)
@@ -262,14 +297,15 @@ class Darknet:
         num_classes = int(module["classes"])
 
         # Transform
-        x = x.data
+        # x = x.data
         x = predict_transform(x, inp_dim, anchors, num_classes)
         if not write:
           detections = x
           write = 1
         else:
-          detections = np.concat((detections, x), 1)
+          detections = np.concatenate((detections, x), 1)
       
+      print("Output shape: ", x.shape)
       outputs[i] = x
     
     return detections # Return detections
@@ -280,6 +316,12 @@ if __name__ == "__main__":
 
   # Start model
   model = Darknet(cfg)
+
+  if GPU:
+    print("Running on GPU")
+    params = get_parameters(model)
+    print("No params:", len(params))
+    [x.gpu_() for x in params]
 
   #from PIL import Image
   # url = sys.argv[1]

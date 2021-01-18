@@ -398,6 +398,8 @@ class Conv2D(Function):
     ys,xs = ctx.stride
     bs,cin_,iy,ix = x.shape
     oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
+    print(cin*ctx.groups)
+    print(cin_)
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
