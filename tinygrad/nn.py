@@ -20,8 +20,10 @@ class Upsample:
     self.scale_factor, self.mode = scale_factor, mode
   
   def upsampleNearest(self, input):
-    # TODO: Implement bilinear upsampling with pure numpy
-    return input.cpu().data.repeat(self.scale_factor, axis=1)
+    # TODO: Implement actual interpolation function
+    # inspired: https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/nn/functional/upsampling.h
+    # Honestly, idk if this implementation is even correct, but it works for this model. Need to implement interp function
+    return input.cpu().data.repeat(self.scale_factor, axis=len(input.shape)-2).repeat(self.scale_factor, axis=len(input.shape)-1)
     # return input.cpu().data.repeat(self.scale_factor, axis=1).repeat(self.scale_factor, axis=1)
 
 

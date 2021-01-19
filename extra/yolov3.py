@@ -289,8 +289,8 @@ class Darknet:
           
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
-          print("Indexes: ", (i+ layers[0]))
-          print("Indexes: ", (i+ layers[1]))
+          print(f"Indexes: {(i+ layers[0])} i: {i}")
+          print(f"Indexes: {(i+ layers[1])} i: {i}")
 
           print("map shapes.")
           print(map1.shape)
@@ -326,7 +326,8 @@ class Darknet:
           detections = x
           write = 1
         else:
-          detections = np.concatenate((detections, x), 1)
+          # detections = np.concatenate((detections, x), 1)
+          detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
       
       print("Output shape: ", x.shape)
       outputs[i] = x
@@ -361,3 +362,5 @@ if __name__ == "__main__":
   print("running inference")
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
+  print("Prediction:")
+  print(prediction)
