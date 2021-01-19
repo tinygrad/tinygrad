@@ -48,7 +48,7 @@ def imresize(img, w, h):
 
 def infer(model, img):
   img = np.array(img)
-  img = imresize(img, 416, 416)
+  img = imresize(img, 608, 608)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
   # Run through model
@@ -67,7 +67,7 @@ def parse_cfg(cfg):
   #file = open(cfgfile, 'r')
   #lines = file.read().split('\n') # store the lines in a list
   lines = cfg.decode("utf-8").split('\n')
-  lines = cfg.split("\n")
+  # lines = cfg.split("\n")
   lines = [x for x in lines if len(x) > 0] # get read of the empty lines 
   lines = [x for x in lines if x[0] != '#'] # get rid of comments
   lines = [x.rstrip().lstrip() for x in lines]
@@ -299,18 +299,19 @@ class Darknet:
   def load_weights(self, url):
     weights = fetch(url)
     print("Weights.")
-    print(weights)
-    exit()
-    fp = open(file, "rb")
+    # print(weights)
+    # fp = open(file, "rb")
     # First 5 values (major, minor, subversion, Images seen)
-    header = np.fromfile(fp, dtype=np.int32, count = 5)
+    # header = np.fromfile(fp, dtype=np.int32, count = 5)
+    header = np.frombuffer(weights, dtype=np.int32, count = 5)
     self.seen = header[3]
 
     def numel(tensor):
       from functools import reduce
       return reduce(lambda x, y: x*y, tensor.shape)
 
-    weights = np.fromfile(fp, dtype=np.float32)
+    # weights = np.fromfile(fp, dtype=np.float32)
+    weights = np.frombuffer(weights, dtype=np.float32)
     ptr = 0
     for i in range(len(self.module_list)):
       module_type = self.blocks[i + 1]["type"]
