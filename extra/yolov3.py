@@ -23,6 +23,8 @@ def infer(model, img):
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
   # Run through model
+  print("Input img shape")
+  print(img.shape)
   prediction = model.forward(Tensor(img))
   return prediction
 
@@ -31,7 +33,8 @@ def parse_cfg(cfg):
   # Return a list of blocks
   #file = open(cfgfile, 'r')
   #lines = file.read().split('\n') # store the lines in a list
-  lines = cfg.decode("utf-8").split('\n')
+  # lines = cfg.decode("utf-8").split('\n')
+  lines = cfg.split("\n")
   lines = [x for x in lines if len(x) > 0] # get read of the empty lines 
   lines = [x for x in lines if x[0] != '#'] # get rid of comments
   lines = [x.rstrip().lstrip() for x in lines]
@@ -147,8 +150,17 @@ class Darknet:
     self.blocks = parse_cfg(cfg)
     self.net_info, self.module_list = self.create_modules(self.blocks)
     # Inputs
-    print("Modules length:")
-    print(len(self.module_list))
+    print("Modules length:", len(self.module_list))
+    # print(self.module_list)
+    """
+    for i, module in enumerate(self.blocks[1:]):
+      # Print module
+      print(module["type"])
+      # print(self.module_list[i][0])
+      if self.module_list[i][0].weights is not None:
+        print("Weights:", self.module_list[i][0].weights.shape)
+    print("=== MODULE LIST END ===")
+    """
     # self.weights = Tensor.uniform(416 * 416)
     # print(self.blocks)
 
@@ -187,7 +199,8 @@ class Darknet:
           pad = (int(x["size"]) - 1) // 2
         else:
           pad = 0
-        
+
+        print(f"{index}: Adding a Conv2d layer with filters: prev_filters: {prev_filters}, filters: {filters}")
         conv = Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias = True)        
         module.append(conv)
 
@@ -204,13 +217,14 @@ class Darknet:
         stride = int(x["stride"])
         upsample = Upsample(scale_factor = 2, mode = "bilinear")
         module.append(upsample)
+      
       elif module_type == "route":
         x["layers"] = x["layers"].split(",")
         # Start of route
         start = int(x["layers"][0])
         # End if it exists
         try:
-          end = int(x["layers"][0])
+          end = int(x["layers"][1])
         except:
           end = 0
         if start > 0: start = start - index
@@ -255,12 +269,10 @@ class Darknet:
 
     for i, module in enumerate(modules):
       module_type = (module["type"])
-      print("Running forward through " + module_type)
+      print("Running through layer " + module_type)
+      print("Input shape:", x.shape)
       if module_type == "convolutional" or module_type == "upsample":
         for layer in self.module_list[i]:
-          print("x shape:")
-          print(x.shape)
-          print(layer)
           x = layer(x)
         # print(self.module_list[i])
         # x = self.module_list[i](x)
@@ -273,13 +285,24 @@ class Darknet:
         if len(layers) == 1:
           x = outputs[i + (layers[0])]
         else:
-          if (layers[1]) > 0:
-            layers[1] = layers[1] - i
+          if (layers[1]) > 0: layers[1] = layers[1] - i
           
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
+          print("Indexes: ", (i+ layers[0]))
+          print("Indexes: ", (i+ layers[1]))
 
-          x = np.concatenate((map1, map2), 1)
+          print("map shapes.")
+          print(map1.shape)
+          print(map2.shape)
+          print("layers")
+          print(layers)
+
+          # x = np.concatenate((map1, map2), 1)
+          x = Tensor(np.concatenate((map1.cpu().data, map2.cpu().data), 1))
+      
+        print("layers")
+        print(layers)
       
       elif module_type == "shortcut":
         from_ = int(module["from"])
@@ -315,6 +338,8 @@ if __name__ == "__main__":
   cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
 
   # Start model
+  cfg = open("extra/yolov3.cfg", "r")
+  cfg = cfg.read()
   model = Darknet(cfg)
 
   if GPU:

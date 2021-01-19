@@ -398,9 +398,7 @@ class Conv2D(Function):
     ys,xs = ctx.stride
     bs,cin_,iy,ix = x.shape
     oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
-    print(cin*ctx.groups)
-    print(cin_)
-    assert cin*ctx.groups == cin_
+    if cin*ctx.groups != cin_: raise Exception(f"Input Tensor shape {x.shape} does not match the shape of the weights {w.shape}. ({cin*ctx.groups} vs. {cin_})")
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 

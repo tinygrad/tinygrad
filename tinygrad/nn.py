@@ -21,11 +21,15 @@ class Upsample:
   
   def upsampleNearest(self, input):
     # TODO: Implement bilinear upsampling with pure numpy
-    return input.repeat(self.scale_factor, axis=0).repeat(self.scale_factor, axis=1)
+    return input.cpu().data.repeat(self.scale_factor, axis=1)
+    # return input.cpu().data.repeat(self.scale_factor, axis=1).repeat(self.scale_factor, axis=1)
 
 
   def __call__(self, input):
-    return upsampleNearest(input)
+    return Tensor(self.upsampleNearest(input))
+    #input.cpu().data = self.upsampleNearest(input)
+    #return input
+    # return self.upsampleNearest(input)
 
 class LeakyReLU:
   def __init__(self, neg_slope):
