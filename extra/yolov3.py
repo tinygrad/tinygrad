@@ -14,6 +14,35 @@ from tinygrad.nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU,
 
 from PIL import Image
 
+def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0.4):
+  prediction = prediction.detach().numpy()
+  conf_mask = (prediction[:,:,4] > confidence)
+  conf_mask = np.expand_dims(conf_mask, 2)
+  prediction = prediction * conf_mask
+  
+  # Non max suppression
+  # box_corner = Tensor.uniform(tuple(prediction.shape))
+  box_corner = prediction.cpu().data
+  box_corner[:,:,0] = (prediction[:,:,0] - prediction[:,:,2]/2)
+  box_corner[:,:,1] = (prediction[:,:,1] - prediction[:,:,3]/2)
+  box_corner[:,:,2] = (prediction[:,:,0] + prediction[:,:,2]/2) 
+  box_corner[:,:,3] = (prediction[:,:,1] + prediction[:,:,3]/2)
+  prediction[:,:,:4] = box_corner[:,:,:4]
+    
+  batch_size = prediction.shape[0]
+
+  write = False
+
+  # Process img
+  img_pred = predictions[0]
+
+  """
+  for i in range(batch_size):
+    img_pred = prediction[i]
+  """
+  pass # TODO: Process prediciton
+
+
 def imresize(img, w, h):
   return np.array(Image.fromarray(img).resize((w, h)))
 
@@ -23,8 +52,12 @@ def infer(model, img):
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
   # Run through model
-  print("Input img shape")
-  print(img.shape)
+  #print("Input img shape")
+  #print(img.shape)
+
+  # TODO: Fetch weights from original github repo… Same
+  print("Loading weights file (237MB). This might take a while…")
+  model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
   prediction = model.forward(Tensor(img))
   return prediction
 
@@ -33,7 +66,7 @@ def parse_cfg(cfg):
   # Return a list of blocks
   #file = open(cfgfile, 'r')
   #lines = file.read().split('\n') # store the lines in a list
-  # lines = cfg.decode("utf-8").split('\n')
+  lines = cfg.decode("utf-8").split('\n')
   lines = cfg.split("\n")
   lines = [x for x in lines if len(x) > 0] # get read of the empty lines 
   lines = [x for x in lines if x[0] != '#'] # get rid of comments
@@ -55,6 +88,7 @@ def parse_cfg(cfg):
 
   return blocks
 
+# TODO: Speed up this function, avoid copying stuff from GPU to CPU
 def predict_transform(prediction, inp_dim, anchors, num_classes):
   # batch_size = prediction.size(0)
   batch_size = prediction.shape[0]
@@ -262,6 +296,91 @@ class Darknet:
     
     return (net_info, module_list)
   
+  def load_weights(self, url):
+    weights = fetch(url)
+    print("Weights.")
+    print(weights)
+    exit()
+    fp = open(file, "rb")
+    # First 5 values (major, minor, subversion, Images seen)
+    header = np.fromfile(fp, dtype=np.int32, count = 5)
+    self.seen = header[3]
+
+    def numel(tensor):
+      from functools import reduce
+      return reduce(lambda x, y: x*y, tensor.shape)
+
+    weights = np.fromfile(fp, dtype=np.float32)
+    ptr = 0
+    for i in range(len(self.module_list)):
+      module_type = self.blocks[i + 1]["type"]
+      print("loading weights for module_type " , module_type)
+      if module_type == "convolutional":
+        model = self.module_list[i]
+        try: # we have batchnorm, load conv weights without biases, and batchnorm values
+          batch_normalize = int(self.blocks[i + 1])["batch_normalize"]
+        except: # no batchnorm, load conv weights + biases
+          batch_normalize = 0
+        
+        conv = model[0]
+
+        if (batch_normalize):
+          bn = model[1]
+
+          # Get the number of weights of batchnorm
+          # num_biases = bn.bias.shape
+          num_biases = numel(bn.bias)
+
+          # Load weights
+          bn_biases = Tensor(weights[ptr:ptr + num_biases])
+          ptr += num_biases
+
+          bn_weights = Tensor(weights[ptr:ptr+num_biases])
+          ptr += num_biases
+
+          bn_running_mean = Tensor(weights[ptr:ptr+num_biases])
+          ptr += num_biases
+
+          bn_running_var = Tensor(weights[ptr:ptr+num_biases])
+          ptr += num_biases
+
+          # Cast the loaded weights into dims of model weights
+          bn_biases = bn_biases.reshape(shape=tuple(bn.bias.shape))
+          bn_weights = bn_weights.reshape(shape=tuple(bn.weight.shape))
+          bn_running_mean = bn_running_mean.reshape(shape=tuple(bn.running_mean.shape))
+          bn_running_var = bn_running_var.reshape(shape=tuple(bn.running_var.shape))
+
+          # Copy data
+          bn.bias = bn_biases # Idk if this works
+          bn.weight = bn_weights
+          bn.running_mean = bn_running_mean
+          bn.running_var = bn_running_var
+        else:
+          # load biases of the conv layer
+          num_biases = numel(conv.biases)
+
+          # Load wieghts
+          conv_biases = Tensor(weights[ptr: ptr+num_biases])
+          ptr += num_biases
+
+          # Reshape
+          conv_biases = conv_biases.reshape(shape=tuple(conv.biases.shape))
+
+          # Copy
+          conv.bias = conv_biases
+        
+        # Load weighys for conv layers
+        num_weights = numel(conv.weights)
+
+        conv_weights = Tensor(weights[ptr:ptr+num_weights])
+        ptr += num_weights
+
+        conv_weights = conv_weights.reshape(shape=tuple(conv.weights.shape))
+        conv.weights = conv_weights
+
+
+
+  
   def forward(self, x):
     modules = self.blocks[1:]
     outputs = {} # Cached outputs for route layer
@@ -339,14 +458,12 @@ if __name__ == "__main__":
   cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
 
   # Start model
-  cfg = open("extra/yolov3.cfg", "r")
-  cfg = cfg.read()
+  #cfg = open("extra/yolov3.cfg", "r")
+  #cfg = cfg.read()
   model = Darknet(cfg)
 
   if GPU:
-    print("Running on GPU")
     params = get_parameters(model)
-    print("No params:", len(params))
     [x.gpu_() for x in params]
 
   #from PIL import Image
