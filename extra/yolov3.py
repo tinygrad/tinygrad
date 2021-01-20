@@ -14,32 +14,161 @@ from tinygrad.nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU,
 
 from PIL import Image
 
+def temp_process_results(prediction, confidence = 0.9, num_classes = 80):
+  coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+  coco_labels = coco_labels.decode('utf-8').split('\n')
+
+  prediction = prediction.detach().cpu().data
+
+  conf_mask = (prediction[:,:,4] > confidence)
+  conf_mask = np.expand_dims(conf_mask, 2)
+  prediction = prediction * conf_mask
+
+  img = prediction[0]
+
+  # Loop through the probabilities for all bounding boxes, smh.
+  # img => (22743, 85)
+  # 22743 bounding boxes, with probabilities for 80 class labels, and 5 bbox attributes
+  # Ignore bbox attributes, and just show highest probabilities
+  def max_argmax(input, dim):
+    return np.amax(input, axis=dim), np.argmax(input, axis=dim)
+  
+  detections = {}
+
+  for i in range(img.shape[0]):
+    labels = img[i][:num_classes]
+    index = np.argmax(labels)
+    probability = img[i][index]
+    if probability > confidence:
+      if coco_labels[index] in detections.keys():
+        detections[coco_labels[index]] += 1
+      else:
+        detections[coco_labels[index]] = 1
+  
+  print("Detections, the more the bigger probability")
+  detections = dict(sorted(detections.items(), key=lambda item: item[1]))
+  print(detections)
+
 def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0.4):
-  prediction = prediction.detach().numpy()
+  prediction = prediction.detach().cpu().data
+  print("PREDICTION")
+  print(prediction.shape)
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
   prediction = prediction * conf_mask
   
   # Non max suppression
   # box_corner = Tensor.uniform(tuple(prediction.shape))
-  box_corner = prediction.cpu().data
+  # box_corner = prediction.cpu().data
+  box_corner = prediction
   box_corner[:,:,0] = (prediction[:,:,0] - prediction[:,:,2]/2)
   box_corner[:,:,1] = (prediction[:,:,1] - prediction[:,:,3]/2)
   box_corner[:,:,2] = (prediction[:,:,0] + prediction[:,:,2]/2) 
   box_corner[:,:,3] = (prediction[:,:,1] + prediction[:,:,3]/2)
   prediction[:,:,:4] = box_corner[:,:,:4]
-    
+
   batch_size = prediction.shape[0]
 
   write = False
 
   # Process img
-  img_pred = predictions[0]
+  img_pred = prediction[0]
 
   """
   for i in range(batch_size):
     img_pred = prediction[i]
   """
+  def numpy_max(input, dim):
+    # Input -> tensor (10x8)
+    return np.amax(input, axis=dim), np.argmax(input, axis=dim)
+
+    """
+    for i in range(input.shape[dim-1]):
+      # Get items
+      item = numpy.max(items[i])
+      print("Max item: ", item)
+    """
+    # Return -> values: the maximum value of each row in given dimension dim
+    # Return -> indices: the index location of each maximum value found
+
+    max_values = np.amax(input, dim=dim)
+    # for i in range(input.shape[-1])
+    # print(max_values.shape)
+    return max_values
+  # max_conf, max_conf_score = numpy.amax(image_pred[:,5:5+ num_classes], 1)
+  print("Shape:")
+  print(img_pred[:,5:5+ num_classes].shape)
+  max_conf, max_conf_score = numpy_max(img_pred[:,5:5+ num_classes], 1)
+  print("Max conf, max conf score shapes")
+  print(max_conf.shape, max_conf_score.shape)
+  # max_conf, max_conf_score = torch.max(image_pred[:,5:5+ num_classes], 1)
+  # max_conf = max_conf.float().unsqueeze(1)
+  max_conf_score = max_conf_score.float().unsqueeze(1)
+  seq = (image_pred[:,:5], max_conf, max_conf_score)
+  image_pred = torch.cat(seq, 1)
+        
+  non_zero_ind =  (torch.nonzero(image_pred[:,4]))
+  try:
+    image_pred_ = image_pred[non_zero_ind.squeeze(),:].view(-1,7)
+  except:
+    pass
+    # continue
+  
+  if image_pred_.shape[0] == 0:
+    # continue
+    pass
+  
+  def unique(tensor):
+    tensor_np = tensor.cpu().numpy()
+    unique_np = np.unique(tensor_np)
+    unique_tensor = Tensor(unique_np)
+
+    tensor_res = Tensor(unique_np)
+    return tensor_res
+
+  #Get the various classes detected in the image
+  img_classes = unique(image_pred_[:,-1])  # -1 index holds the class index
+
+  for cls in img_classes:
+    #perform NMS, get the detections with one particular class
+    cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
+    class_mask_ind = torch.nonzero(cls_mask[:,-2]).squeeze()
+    image_pred_class = image_pred_[class_mask_ind].view(-1,7)
+    
+    #sort the detections such that the entry with the maximum objectness
+    #confidence is at the top
+    conf_sort_index = torch.sort(image_pred_class[:,4], descending = True )[1]
+    image_pred_class = image_pred_class[conf_sort_index]
+    idx = image_pred_class.size(0)   #Number of detections
+    
+    for i in range(idx):
+        #Get the IOUs of all boxes that come after the one we are looking at 
+        #in the loop
+        try:
+            ious = bbox_iou(image_pred_class[i].unsqueeze(0), image_pred_class[i+1:])
+        except ValueError:
+            break
+    
+        except IndexError:
+            break
+    
+        #Zero out all the detections that have IoU > treshhold
+        iou_mask = (ious < nms_conf).float().unsqueeze(1)
+        image_pred_class[i+1:] *= iou_mask       
+    
+        #Remove the non-zero entries
+        non_zero_ind = torch.nonzero(image_pred_class[:,4]).squeeze()
+        image_pred_class = image_pred_class[non_zero_ind].view(-1,7)
+        
+    batch_ind = image_pred_class.new(image_pred_class.size(0), 1).fill_(ind)      #Repeat the batch_id for as many detections of the class cls in the image
+    seq = batch_ind, image_pred_class
+    
+    if not write:
+        output = torch.cat(seq,1)
+        write = True
+    else:
+        out = torch.cat(seq,1)
+        output = torch.cat((output,out))
   pass # TODO: Process prediciton
 
 
@@ -234,7 +363,7 @@ class Darknet:
         else:
           pad = 0
 
-        print(f"{index}: Adding a Conv2d layer with filters: prev_filters: {prev_filters}, filters: {filters}")
+        # print(f"{index}: Adding a Conv2d layer with filters: prev_filters: {prev_filters}, filters: {filters}")
         conv = Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias = True)        
         module.append(conv)
 
@@ -298,7 +427,6 @@ class Darknet:
   
   def load_weights(self, url):
     weights = fetch(url)
-    print("Weights.")
     # print(weights)
     # fp = open(file, "rb")
     # First 5 values (major, minor, subversion, Images seen)
@@ -315,7 +443,7 @@ class Darknet:
     ptr = 0
     for i in range(len(self.module_list)):
       module_type = self.blocks[i + 1]["type"]
-      print("loading weights for module_type " , module_type)
+      # print("loading weights for module_type " , module_type)
       if module_type == "convolutional":
         model = self.module_list[i]
         try: # we have batchnorm, load conv weights without biases, and batchnorm values
@@ -389,8 +517,8 @@ class Darknet:
 
     for i, module in enumerate(modules):
       module_type = (module["type"])
-      print("Running through layer " + module_type)
-      print("Input shape:", x.shape)
+      # print("Running through layer " + module_type)
+      # print("Input shape:", x.shape)
       if module_type == "convolutional" or module_type == "upsample":
         for layer in self.module_list[i]:
           x = layer(x)
@@ -409,20 +537,9 @@ class Darknet:
           
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
-          print(f"Indexes: {(i+ layers[0])} i: {i}")
-          print(f"Indexes: {(i+ layers[1])} i: {i}")
-
-          print("map shapes.")
-          print(map1.shape)
-          print(map2.shape)
-          print("layers")
-          print(layers)
 
           # x = np.concatenate((map1, map2), 1)
           x = Tensor(np.concatenate((map1.cpu().data, map2.cpu().data), 1))
-      
-        print("layers")
-        print(layers)
       
       elif module_type == "shortcut":
         from_ = int(module["from"])
@@ -432,7 +549,7 @@ class Darknet:
         print(outputs[i-1].shape)
         print(outputs[i+from_].shape)
         """
-        # x = outputs[i - 1] + outputs[i + from_]
+        x = outputs[i - 1] + outputs[i + from_]
       
       elif module_type == "yolo":
         anchors = self.module_list[i][0].anchors
@@ -440,7 +557,6 @@ class Darknet:
         num_classes = int(module["classes"])
 
         # Transform
-        # x = x.data
         x = predict_transform(x, inp_dim, anchors, num_classes)
         if not write:
           detections = x
@@ -449,7 +565,6 @@ class Darknet:
           # detections = np.concatenate((detections, x), 1)
           detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
       
-      print("Output shape: ", x.shape)
       outputs[i] = x
     
     return detections # Return detections
@@ -459,8 +574,6 @@ if __name__ == "__main__":
   cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
 
   # Start model
-  #cfg = open("extra/yolov3.cfg", "r")
-  #cfg = cfg.read()
   model = Darknet(cfg)
 
   if GPU:
@@ -480,5 +593,8 @@ if __name__ == "__main__":
   print("running inference")
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
-  print("Prediction:")
-  print(prediction)
+  #print("Prediction:")
+  # prediction = Tensor.ones(1, 27612, 85)
+  # print(prediction)
+  # prediction = process_results(prediction)
+  prediction = temp_process_results(prediction)
