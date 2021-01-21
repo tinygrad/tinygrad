@@ -36,7 +36,7 @@ def temp_process_results(prediction, confidence = 0.9, num_classes = 80):
   detections = {}
 
   for i in range(img.shape[0]):
-    labels = img[i][:num_classes]
+    labels = img[i][5:num_classes + 5]
     index = np.argmax(labels)
     probability = img[i][index]
     if probability > confidence:
@@ -103,10 +103,12 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
   print(max_conf.shape, max_conf_score.shape)
   # max_conf, max_conf_score = torch.max(image_pred[:,5:5+ num_classes], 1)
   # max_conf = max_conf.float().unsqueeze(1)
-  max_conf_score = max_conf_score.float().unsqueeze(1)
+  max_conf_score = np.expand_dims(max_conf_score, axis=1)
+  # max_conf_score = max_conf_score.float().unsqueeze(1)
   seq = (image_pred[:,:5], max_conf, max_conf_score)
-  image_pred = torch.cat(seq, 1)
-        
+  image_pred = np.concatenate(seq, axis=1)
+  # image_pred = torch.cat(seq, 1)
+
   non_zero_ind =  (torch.nonzero(image_pred[:,4]))
   try:
     image_pred_ = image_pred[non_zero_ind.squeeze(),:].view(-1,7)
@@ -119,7 +121,8 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
     pass
   
   def unique(tensor):
-    tensor_np = tensor.cpu().numpy()
+    # tensor_np = tensor.cpu().numpy()
+    tensor_np = tensor.cpu().data
     unique_np = np.unique(tensor_np)
     unique_tensor = Tensor(unique_np)
 
@@ -130,7 +133,7 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
   img_classes = unique(image_pred_[:,-1])  # -1 index holds the class index
 
   for cls in img_classes:
-    #perform NMS, get the detections with one particular class
+    # perform NMS, get the detections with one particular class
     cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
     class_mask_ind = torch.nonzero(cls_mask[:,-2]).squeeze()
     image_pred_class = image_pred_[class_mask_ind].view(-1,7)
@@ -180,13 +183,8 @@ def infer(model, img):
   img = imresize(img, 608, 608)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
-  # Run through model
-  #print("Input img shape")
-  #print(img.shape)
 
   # TODO: Fetch weights from original github repo… Same
-  print("Loading weights file (237MB). This might take a while…")
-  model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
   prediction = model.forward(Tensor(img))
   return prediction
 
@@ -576,13 +574,20 @@ if __name__ == "__main__":
   # Start model
   model = Darknet(cfg)
 
+  print("Loading weights file (237MB). This might take a while…")
+  model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
+
   if GPU:
     params = get_parameters(model)
     [x.gpu_() for x in params]
 
-  #from PIL import Image
+  # from PIL import Image
   # url = sys.argv[1]
-  url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
+  # url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
+  # url = "https://i.redd.it/rflitbaldl751.jpg"
+  # url = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRGLa9_s7mdUNHpBIvRdvi0baIdFNy-_uxV5g&usqp=CAU"
+  url = "https://upload.wikimedia.org/wikipedia/commons/f/fb/Hotdog_-_Evan_Swigart.jpg"
+  # url = "https://www.telegraph.co.uk/content/dam/cars/2016/04/11/Dashcam1_trans_NvBQzQNjv4BqPItlErHJmT3AsVLfg-otf_grG63UgcgwjHsyPCDdu4E.png"
   img = None
   if url.startswith('http'):
     img = Image.open(io.BytesIO(fetch(url)))
