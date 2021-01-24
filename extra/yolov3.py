@@ -49,10 +49,39 @@ def temp_process_results(prediction, confidence = 0.9, num_classes = 80):
   detections = dict(sorted(detections.items(), key=lambda item: item[1]))
   print(detections)
 
+def bbox_iou(box1, box2):
+  """
+  Returns the IoU of two bounding boxes
+  IoU: IoU = Area Of Overlap / Area of Union -> How close the predicted bounding box is
+  to the ground truth bounding box. Higher IoU = Better accuracy
+
+  In training, used to track accuracy. with inference, using to remove duplicate bounding boxes
+  """
+  # Get the coordinates of bounding boxes
+  b1_x1, b1_y1, b1_x2, b1_y2 = box1[:,0], box1[:,1], box1[:,2], box1[:,3]
+  b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,0], box2[:,1], box2[:,2], box2[:,3]
+
+  # get the corrdinates of the intersection rectangle
+  inter_rect_x1 = torch.max(b1_x1, b2_x1)
+  inter_rect_y1 = torch.max(b1_y1, b2_y1)
+  inter_rect_x2 = torch.min(b1_x2, b2_x2)
+  inter_rect_y2 = torch.min(b1_y2, b2_y2)
+
+  #Intersection area
+  # inter_area = torch.clamp(inter_rect_x2 - inter_rect_x1 + 1, min=0) * torch.clamp(inter_rect_y2 - inter_rect_y1 + 1, min=0)
+  inter_area = numpy.clamp(inter_rect_x2 - inter_rect_x1 + 1, 0) * numpy.clamp(inter_rect_y2 - inter_rect_y1 + 1, 0)
+
+  #Union Area
+  b1_area = (b1_x2 - b1_x1 + 1)*(b1_y2 - b1_y1 + 1)
+  b2_area = (b2_x2 - b2_x1 + 1)*(b2_y2 - b2_y1 + 1)
+
+  iou = inter_area / (b1_area + b2_area - inter_area)
+
+  return iou
+
+
 def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0.4):
   prediction = prediction.detach().cpu().data
-  print("PREDICTION")
-  print(prediction.shape)
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
   prediction = prediction * conf_mask
@@ -81,66 +110,73 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
   def numpy_max(input, dim):
     # Input -> tensor (10x8)
     return np.amax(input, axis=dim), np.argmax(input, axis=dim)
-
-    """
-    for i in range(input.shape[dim-1]):
-      # Get items
-      item = numpy.max(items[i])
-      print("Max item: ", item)
-    """
-    # Return -> values: the maximum value of each row in given dimension dim
-    # Return -> indices: the index location of each maximum value found
-
-    max_values = np.amax(input, dim=dim)
-    # for i in range(input.shape[-1])
-    # print(max_values.shape)
-    return max_values
+  
   # max_conf, max_conf_score = numpy.amax(image_pred[:,5:5+ num_classes], 1)
-  print("Shape:")
-  print(img_pred[:,5:5+ num_classes].shape)
-  max_conf, max_conf_score = numpy_max(img_pred[:,5:5+ num_classes], 1)
-  print("Max conf, max conf score shapes")
-  print(max_conf.shape, max_conf_score.shape)
+  max_conf, max_conf_score = numpy_max(img_pred[:,5:5 + num_classes], 1)
   # max_conf, max_conf_score = torch.max(image_pred[:,5:5+ num_classes], 1)
   # max_conf = max_conf.float().unsqueeze(1)
   max_conf_score = np.expand_dims(max_conf_score, axis=1)
   # max_conf_score = max_conf_score.float().unsqueeze(1)
-  seq = (image_pred[:,:5], max_conf, max_conf_score)
+  max_conf = np.expand_dims(max_conf, axis=1)
+  seq = (img_pred[:,:5], max_conf, max_conf_score)
   image_pred = np.concatenate(seq, axis=1)
   # image_pred = torch.cat(seq, 1)
 
-  non_zero_ind =  (torch.nonzero(image_pred[:,4]))
+  # non_zero_ind =  (torch.nonzero(image_pred[:,4]))
+
+  non_zero_ind = np.nonzero(image_pred[:,4])[0] # TODO: Check if this is right
+  print("non zero ind")
+  print(non_zero_ind.shape)
+  image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
+  print("Image_pred_")
+  print(image_pred_.shape)
   try:
-    image_pred_ = image_pred[non_zero_ind.squeeze(),:].view(-1,7)
+    # image_pred_ = image_pred[non_zero_ind.squeeze(),:].view(-1,7)
+    image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
   except:
+    print("No detections found!")
     pass
     # continue
-  
+
   if image_pred_.shape[0] == 0:
     # continue
+    print("Exception occurred!")
     pass
   
   def unique(tensor):
     # tensor_np = tensor.cpu().numpy()
-    tensor_np = tensor.cpu().data
+    # tensor_np = tensor.cpu().data
+    tensor_np = tensor
     unique_np = np.unique(tensor_np)
+    return unique_np # Dunno if this even works
     unique_tensor = Tensor(unique_np)
 
-    tensor_res = Tensor(unique_np)
-    return tensor_res
+    # tensor_res = Tensor(unique_np)
+    # return tensor_res
 
-  #Get the various classes detected in the image
-  img_classes = unique(image_pred_[:,-1])  # -1 index holds the class index
+  # Get the various classes detected in the image
+  # img_classes = unique(image_pred_[:,-1])  # -1 index holds the class index
+
+  img_classes = unique(image_pred_[:, -1])
 
   for cls in img_classes:
     # perform NMS, get the detections with one particular class
-    cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
-    class_mask_ind = torch.nonzero(cls_mask[:,-2]).squeeze()
-    image_pred_class = image_pred_[class_mask_ind].view(-1,7)
+    # cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
+    print("Shapes:")
+    print(image_pred_.shape)
+    print((image_pred_[:,-1] == cls).shape)
+
+    # This line makes no funckign sensee
+    cls_mask = np.expand_dims(image_pred_*(image_pred_[:,-1] == cls), axis=1)
+    class_mask_ind = np.nonzero(cls_mask[:,-2]).squeeze()
+    # class_mask_ind = torch.nonzero(cls_mask[:,-2]).squeeze()
+    # image_pred_class = image_pred_[class_mask_ind].view(-1,7)
+    image_pred_class = np.reshape(image_pred_[class_mask_ind], shape=(-1, 7))
     
     #sort the detections such that the entry with the maximum objectness
     #confidence is at the top
-    conf_sort_index = torch.sort(image_pred_class[:,4], descending = True )[1]
+    # conf_sort_index = torch.sort(image_pred_class[:,4], descending = True )[1]
+    conf_sort_index = np.sort(image_pred_class[:,4], )
     image_pred_class = image_pred_class[conf_sort_index]
     idx = image_pred_class.size(0)   #Number of detections
     
@@ -180,11 +216,11 @@ def imresize(img, w, h):
 
 def infer(model, img):
   img = np.array(img)
-  img = imresize(img, 608, 608)
+  # img = imresize(img, 608, 608)
+  img = imresize(img, 416, 416)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
 
-  # TODO: Fetch weights from original github repo… Same
   prediction = model.forward(Tensor(img))
   return prediction
 
@@ -423,9 +459,18 @@ class Darknet:
     
     return (net_info, module_list)
   
+  def dump_weights(self):
+    for i in range(len(self.module_list)):
+      module_type = self.blocks[i + 1]["type"]
+      print(self.blocks[i + 1]["type"], "weights")
+      if module_type == "convolutional":
+        model = self.module_list[i]
+        conv = model[0]
+        print("Conv weights")
+        print(conv.weights.cpu().data)
+  
   def load_weights(self, url):
     weights = fetch(url)
-    # print(weights)
     # fp = open(file, "rb")
     # First 5 values (major, minor, subversion, Images seen)
     # header = np.fromfile(fp, dtype=np.int32, count = 5)
@@ -438,6 +483,8 @@ class Darknet:
 
     # weights = np.fromfile(fp, dtype=np.float32)
     weights = np.frombuffer(weights, dtype=np.float32)
+    weights = weights[5:]
+
     ptr = 0
     for i in range(len(self.module_list)):
       module_type = self.blocks[i + 1]["type"]
@@ -445,7 +492,7 @@ class Darknet:
       if module_type == "convolutional":
         model = self.module_list[i]
         try: # we have batchnorm, load conv weights without biases, and batchnorm values
-          batch_normalize = int(self.blocks[i + 1])["batch_normalize"]
+          batch_normalize = int(self.blocks[i + 1]["batch_normalize"])
         except: # no batchnorm, load conv weights + biases
           batch_normalize = 0
         
@@ -456,20 +503,22 @@ class Darknet:
 
           # Get the number of weights of batchnorm
           # num_biases = bn.bias.shape
-          num_biases = numel(bn.bias)
+          num_bn_biases = numel(bn.bias)
 
           # Load weights
-          bn_biases = Tensor(weights[ptr:ptr + num_biases])
-          ptr += num_biases
+          # print("Loading BN biases", ptr, ":", ptr + num_bn_biases)
+          bn_biases = Tensor(weights[ptr:ptr + num_bn_biases])
+          ptr += num_bn_biases
 
-          bn_weights = Tensor(weights[ptr:ptr+num_biases])
-          ptr += num_biases
+          # print("Loading BN weights", ptr, ":", ptr + num_bn_biases)
+          bn_weights = Tensor(weights[ptr:ptr+num_bn_biases])
+          ptr += num_bn_biases
 
-          bn_running_mean = Tensor(weights[ptr:ptr+num_biases])
-          ptr += num_biases
+          bn_running_mean = Tensor(weights[ptr:ptr+num_bn_biases])
+          ptr += num_bn_biases
 
-          bn_running_var = Tensor(weights[ptr:ptr+num_biases])
-          ptr += num_biases
+          bn_running_var = Tensor(weights[ptr:ptr+num_bn_biases])
+          ptr += num_bn_biases
 
           # Cast the loaded weights into dims of model weights
           bn_biases = bn_biases.reshape(shape=tuple(bn.bias.shape))
@@ -487,6 +536,7 @@ class Darknet:
           num_biases = numel(conv.biases)
 
           # Load wieghts
+          # print("Loading CONV biases", ptr, ":", ptr + num_biases)
           conv_biases = Tensor(weights[ptr: ptr+num_biases])
           ptr += num_biases
 
@@ -494,11 +544,12 @@ class Darknet:
           conv_biases = conv_biases.reshape(shape=tuple(conv.biases.shape))
 
           # Copy
-          conv.bias = conv_biases
+          conv.biases = conv_biases
         
         # Load weighys for conv layers
         num_weights = numel(conv.weights)
 
+        # print("Loading CONV weights", ptr, ":", ptr + num_weights)
         conv_weights = Tensor(weights[ptr:ptr+num_weights])
         ptr += num_weights
 
@@ -569,7 +620,11 @@ class Darknet:
 
 
 if __name__ == "__main__":
-  cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
+  # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
+  cfg = fetch('https://raw.githubusercontent.com/ayooshkathuria/YOLO_v3_tutorial_from_scratch/master/cfg/yolov3.cfg')
+
+  # Make deterministic
+  np.random.seed(1337)
 
   # Start model
   model = Darknet(cfg)
@@ -583,10 +638,8 @@ if __name__ == "__main__":
 
   # from PIL import Image
   # url = sys.argv[1]
-  # url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
+  url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
   # url = "https://i.redd.it/rflitbaldl751.jpg"
-  # url = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRGLa9_s7mdUNHpBIvRdvi0baIdFNy-_uxV5g&usqp=CAU"
-  url = "https://upload.wikimedia.org/wikipedia/commons/f/fb/Hotdog_-_Evan_Swigart.jpg"
   # url = "https://www.telegraph.co.uk/content/dam/cars/2016/04/11/Dashcam1_trans_NvBQzQNjv4BqPItlErHJmT3AsVLfg-otf_grG63UgcgwjHsyPCDdu4E.png"
   img = None
   if url.startswith('http'):
@@ -598,8 +651,12 @@ if __name__ == "__main__":
   print("running inference")
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
+  print("Prediction result:")
+  print(prediction.shape)
+  print(prediction.cpu().data[0][0][5:10])
   #print("Prediction:")
   # prediction = Tensor.ones(1, 27612, 85)
   # print(prediction)
-  # prediction = process_results(prediction)
-  prediction = temp_process_results(prediction)
+  # prediction = Tensor.uniform(1, 27612, 85)
+  prediction = process_results(prediction)
+  # prediction = temp_process_results(prediction)
