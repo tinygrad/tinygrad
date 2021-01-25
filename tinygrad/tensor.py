@@ -289,6 +289,9 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
+  def upsample_nearest2d(self, scale_factor = 2):
+    return Tensor(self.data.repeat(scale_factor, axis=2).repeat(scale_factor, axis=3))
+  
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, *tensors):
