@@ -159,6 +159,9 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
 
   img_classes = unique(image_pred_[:, -1])
 
+  print("Classes")
+  print(img_classes.shape)
+
   for cls in img_classes:
     # perform NMS, get the detections with one particular class
     # cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
@@ -396,9 +399,9 @@ class Darknet:
           pad = (int(x["size"]) - 1) // 2
         else:
           pad = 0
-
+        
         # print(f"{index}: Adding a Conv2d layer with filters: prev_filters: {prev_filters}, filters: {filters}")
-        conv = Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias = True)        
+        conv = Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias = bias)
         module.append(conv)
 
         # BatchNorm2d
@@ -462,12 +465,18 @@ class Darknet:
   def dump_weights(self):
     for i in range(len(self.module_list)):
       module_type = self.blocks[i + 1]["type"]
-      print(self.blocks[i + 1]["type"], "weights")
       if module_type == "convolutional":
+        print(self.blocks[i + 1]["type"], "weights", i)
         model = self.module_list[i]
         conv = model[0]
-        print("Conv weights")
-        print(conv.weights.cpu().data)
+        print(conv.weights.cpu().data[0][0][0])
+        if conv.biases is not None:
+          print("biases")
+          print(conv.biases.shape)
+          print(conv.biases.cpu().data[0][0:5])
+          # print(conv.bias[0][0:5])
+        else:
+          print("None biases for layer", i)
   
   def load_weights(self, url):
     weights = fetch(url)
@@ -488,7 +497,7 @@ class Darknet:
     ptr = 0
     for i in range(len(self.module_list)):
       module_type = self.blocks[i + 1]["type"]
-      # print("loading weights for module_type " , module_type)
+
       if module_type == "convolutional":
         model = self.module_list[i]
         try: # we have batchnorm, load conv weights without biases, and batchnorm values
@@ -570,7 +579,15 @@ class Darknet:
       # print("Input shape:", x.shape)
       if module_type == "convolutional" or module_type == "upsample":
         for layer in self.module_list[i]:
+          """
+          try:
+            # print(layer.weights.cpu().data)
+          except:
+            pass
+          """
           x = layer(x)
+          #print("x after ", str(layer))
+          #print(x.cpu().data)
         # print(self.module_list[i])
         # x = self.module_list[i](x)
       elif module_type == "route":
@@ -614,6 +631,8 @@ class Darknet:
           # detections = np.concatenate((detections, x), 1)
           detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
       
+      print("Output values", i, x.shape)
+      print(x.cpu().data)
       outputs[i] = x
     
     return detections # Return detections
@@ -631,6 +650,9 @@ if __name__ == "__main__":
 
   print("Loading weights file (237MB). This might take a while…")
   model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
+
+  #model.dump_weights()
+  #exit()
 
   if GPU:
     params = get_parameters(model)
@@ -654,6 +676,9 @@ if __name__ == "__main__":
   print("Prediction result:")
   print(prediction.shape)
   print(prediction.cpu().data[0][0][5:10])
+  print("Prediction should be:")
+  print("tensor([0.37478, 0.00032929, 0.072857, 0.00036275, 0.0012436])")
+  exit()
   #print("Prediction:")
   # prediction = Tensor.ones(1, 27612, 85)
   # print(prediction)

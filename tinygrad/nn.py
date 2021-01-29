@@ -43,7 +43,7 @@ class LeakyReLU:
 
 
 class Conv2d:
-  def __init__(self, in_channels, out_channels, kernel_size, stride, padding = 0, groups = 1, bias = False):
+  def __init__(self, in_channels, out_channels, kernel_size, stride = 1, padding = 0, groups = 1, bias = True):
     self.in_channels, self.out_channels, self.stride, self.padding, self.groups, self.bias = in_channels, out_channels, stride, padding, groups, bias # Wow this is terrible
 
     if type(kernel_size) == int:
@@ -60,33 +60,18 @@ class Conv2d:
   
   def __repr__(self):
     return f"<Conv2d Layer with in_channels {self.in_channels!r}, out_channels {self.out_channels!r}, weights with shape {self.weights.shape!r}>"
-
   
   def __call__(self, x):
-    """
-    x = input.reshape(shape=(-1, self.inp, self.w, self.h))
-    for cweight, cbias in zip(self.cweights, self.cbiases):
-      x = x.pad2d(padding=[1,1,1,1]).conv2d(cweight).add(cbias).relu()
-    x = self._bn(x)
-    x = self._seb(x)
-    """
-    # Figure out this line... wtf
-    # x = x.reshape(shape=(-1, self.in_channels, self.out_channels))
-    #x = input
-    """
-    for weights, biases in zip(self.weights, self.biases):
-      if padding != 0:
-        # TODO: Check padding line
-        # Mauybe should be padding=[self.padding, self.padding * 2]
-        x = x.pad2d(self.padding).conv2d(weights, self.stride, self.groups).add(biases)
-      else:
-        x = x.conv2d(weights, self.stride, self.groups).add(biases)
-    """
     if self.padding != 0:
-      # TODO: Check padding line
-      x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
+      if self.biases is not None:
+        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
+      else:
+        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, stride=self.stride, groups=self.groups)
     else:
-      x = x.conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
+      if self.biases is not None:
+        x = x.conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
+      else:
+        x = x.conv2d(self.weights, stride=self.stride, groups=self.groups)
     
     return x
 
