@@ -190,5 +190,13 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
 
+
+  def test_upsample2d_nearest(self):
+    for sf in [1, 2, 3, 4, 5]:
+      with self.subTest(scale_factor=sf):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.interpolate(x, scale_factor=sf, mode='nearest'),
+          lambda x: Tensor.upsample_nearest2d(x, scale_factor=sf), forward_only=True)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
