@@ -14,7 +14,6 @@ from yolo_nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, Max
 from tinygrad.nn import BatchNorm2D
 
 from PIL import Image
-import cv2
 
 def show_labels(prediction, confidence = 0.9, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
@@ -146,34 +145,33 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
     idx = image_pred_class.size(0)   #Number of detections
     
     for i in range(idx):
-        #Get the IOUs of all boxes that come after the one we are looking at 
-        #in the loop
-        try:
-            ious = bbox_iou(image_pred_class[i].unsqueeze(0), image_pred_class[i+1:])
-        except ValueError:
-            break
-    
-        except IndexError:
-            break
-    
-        #Zero out all the detections that have IoU > treshhold
-        iou_mask = (ious < nms_conf).float().unsqueeze(1)
-        image_pred_class[i+1:] *= iou_mask       
-    
-        #Remove the non-zero entries
-        non_zero_ind = torch.nonzero(image_pred_class[:,4]).squeeze()
-        image_pred_class = image_pred_class[non_zero_ind].view(-1,7)
+      #Get the IOUs of all boxes that come after the one we are looking at 
+      #in the loop
+      try:
+        ious = bbox_iou(image_pred_class[i].unsqueeze(0), image_pred_class[i+1:])
+      except ValueError:
+        break
+  
+      except IndexError:
+        break
+  
+      #Zero out all the detections that have IoU > treshhold
+      iou_mask = (ious < nms_conf).float().unsqueeze(1)
+      image_pred_class[i+1:] *= iou_mask       
+  
+      #Remove the non-zero entries
+      non_zero_ind = torch.nonzero(image_pred_class[:,4]).squeeze()
+      image_pred_class = image_pred_class[non_zero_ind].view(-1,7)
         
     batch_ind = image_pred_class.new(image_pred_class.size(0), 1).fill_(ind)      #Repeat the batch_id for as many detections of the class cls in the image
     seq = batch_ind, image_pred_class
     
     if not write:
-        output = torch.cat(seq,1)
-        write = True
+      output = torch.cat(seq,1)
+      write = True
     else:
-        out = torch.cat(seq,1)
-        output = torch.cat((output,out))
-  pass # TODO: Process prediciton
+      out = torch.cat(seq,1)
+      output = torch.cat((output,out))
 
 
 def imresize(img, w, h):
