@@ -10,12 +10,13 @@ import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
 from extra.utils import fetch, get_parameters
-from tinygrad.nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, BatchNorm2D, MaxPool2d
+from yolo_nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
+from tinygrad.nn import BatchNorm2D
 
 from PIL import Image
 import cv2
 
-def temp_process_results(prediction, confidence = 0.9, num_classes = 80):
+def show_labels(prediction, confidence = 0.9, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
 
@@ -25,30 +26,30 @@ def temp_process_results(prediction, confidence = 0.9, num_classes = 80):
   conf_mask = np.expand_dims(conf_mask, 2)
   prediction = prediction * conf_mask
 
-  img = prediction[0]
-
-  # Loop through the probabilities for all bounding boxes, smh.
-  # img => (22743, 85)
-  # 22743 bounding boxes, with probabilities for 80 class labels, and 5 bbox attributes
-  # Ignore bbox attributes, and just show highest probabilities
-  def max_argmax(input, dim):
+  def numpy_max(input, dim):
+    # Input -> tensor (10x8)
     return np.amax(input, axis=dim), np.argmax(input, axis=dim)
   
-  detections = {}
+  # Iterate over batches
+  for i in range(prediction.shape[0]):
+    img_pred = prediction[i]
+    max_conf, max_conf_score = numpy_max(img_pred[:,5:5 + num_classes], 1)
+    max_conf_score = np.expand_dims(max_conf_score, axis=1)
+    max_conf = np.expand_dims(max_conf, axis=1)
+    seq = (img_pred[:,:5], max_conf, max_conf_score)
+    image_pred = np.concatenate(seq, axis=1)
 
-  for i in range(img.shape[0]):
-    labels = img[i][5:num_classes + 5]
-    index = np.argmax(labels)
-    probability = img[i][index]
-    if probability > confidence:
-      if coco_labels[index] in detections.keys():
-        detections[coco_labels[index]] += 1
-      else:
-        detections[coco_labels[index]] = 1
-  
-  print("Detections, the more the bigger probability")
-  detections = dict(sorted(detections.items(), key=lambda item: item[1]))
-  print(detections)
+    non_zero_ind = np.nonzero(image_pred[:,4])[0] # TODO: Check if this is right
+    image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
+    try:
+      image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
+    except:
+      print("No detections found!")
+      pass
+    classes, indexes = np.unique(image_pred_[:, -1], return_index=True)
+    for index, coco_class in enumerate(classes):
+      probability = image_pred_[indexes[index]][5] * 100
+      print("Detected", coco_labels[int(coco_class)], "{:.2f}%".format(probability))
 
 def bbox_iou(box1, box2):
   """
@@ -162,6 +163,7 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
 
   print("Classes")
   print(img_classes.shape)
+  print(img_classes)
 
   for cls in img_classes:
     # perform NMS, get the detections with one particular class
@@ -220,8 +222,7 @@ def imresize(img, w, h):
 
 def infer(model, img):
   img = np.array(img)
-  # img = imresize(img, 608, 608) # normal model
-  img = imresize(img, 416, 416) # tiny model
+  img = imresize(img, 416, 416)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
 
@@ -272,49 +273,25 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   """
   prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
   # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
-  # print(prediction.shape)
-  # print(prediction.transpose(order=(2, 1)).reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs)).shape)
-  # prediction = np.ascontiguousarray(prediction.transpose(order=(2, 1)))
-  prediction = prediction.transpose(order=(2, 1))
-  # print("Prediction:", prediction.shape)
+  prediction = prediction.transpose(order=(0, 2, 1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
-
 
   anchors = [(a[0]/stride, a[1]/stride) for a in anchors]
   #Sigmoid the  centre_X, centre_Y. and object confidencce
   # TODO: Fix this
-  # print(prediction.cpu().data[:,:,0])
   def dsigmoid(data):
     return 1/(1+np.exp(-data))
   prediction.cpu().data[:,:,0] = dsigmoid(prediction.cpu().data[:,:,0])
   prediction.cpu().data[:,:,1] = dsigmoid(prediction.cpu().data[:,:,1])
   prediction.cpu().data[:,:,4] = dsigmoid(prediction.cpu().data[:,:,4])
-  # prediction[:,:,0] = (prediction[:,:,0].sigmoid())
-  # prediction[:,:,1] = (prediction[:,:,1].sigmoid())
-  # prediction[:,:,4] = (prediction[:,:,4].sigmoid())
-  """
-  prediction[:,:,0] = torch.sigmoid(prediction[:,:,0])
-  prediction[:,:,1] = torch.sigmoid(prediction[:,:,1])
-  prediction[:,:,4] = torch.sigmoid(prediction[:,:,4])
-  """
+  
   #Add the center offsets
   grid = np.arange(grid_size)
   a, b = np.meshgrid(grid, grid)
 
-  # x_offset = a.reshape(shape=(-1, 1))
-  # y_offset = b.reshape(shape=(-1, 1))
   x_offset = a.reshape((-1, 1))
   y_offset = b.reshape((-1, 1))
-  # x_offset = torch.FloatTensor(a).view(-1,1)
-  # y_offset = torch.FloatTensor(b).view(-1,1)
 
-  """
-  if CUDA:
-    x_offset = x_offset.cuda()
-    y_offset = y_offset.cuda()
-  """
-
-  # x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(1,num_anchors).view(-1,2).unsqueeze(0)
   x_y_offset = np.concatenate((x_offset, y_offset), 1)
   x_y_offset = np.tile(x_y_offset, (1, num_anchors))
   x_y_offset = x_y_offset.reshape((-1,2))
@@ -324,23 +301,13 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   # prediction[:,:,:2] += x_y_offset
 
   #log space transform height and the width
-  # anchors = torch.FloatTensor(anchors)
   anchors = Tensor(anchors)
 
-  """ TODO: This GPU Stuff
-  if CUDA:
-    anchors = anchors.cuda()
-  """
-
-  # anchors = anchors.cpu().data.tile((grid_size*grid_size, 1)).expand_dims(0) # .repeat(grid_size*grid_size, 1).unsqueeze(0)
-  # anchors = anchors.cpu().data.tile((grid_size*grid_size, 1)).expand_dims(0)
   anchors = np.tile(anchors.cpu().data, (grid_size*grid_size, 1))
   anchors = np.expand_dims(anchors, 0)
-  # prediction[:,:,2:4] = torch.exp(prediction[:,:,2:4])*anchors
+
   prediction.cpu().data[:,:,2:4] = np.exp(prediction.cpu().data[:,:,2:4])*anchors
-
   prediction.cpu().data[:,:,5: 5 + num_classes] = dsigmoid((prediction.cpu().data[:,:, 5 : 5 + num_classes]))
-
   prediction.cpu().data[:,:,:4] *= stride
 
   return prediction
@@ -350,20 +317,7 @@ class Darknet:
   def __init__(self, cfg):
     self.blocks = parse_cfg(cfg)
     self.net_info, self.module_list = self.create_modules(self.blocks)
-    # Inputs
     print("Modules length:", len(self.module_list))
-    # print(self.module_list)
-    """
-    for i, module in enumerate(self.blocks[1:]):
-      # Print module
-      print(module["type"])
-      # print(self.module_list[i][0])
-      if self.module_list[i][0].weights is not None:
-        print("Weights:", self.module_list[i][0].weights.shape)
-    print("=== MODULE LIST END ===")
-    """
-    # self.weights = Tensor.uniform(416 * 416)
-    # print(self.blocks)
 
   def create_modules(self, blocks):
     net_info = blocks[0] # Info about model hyperparameters
@@ -376,15 +330,6 @@ class Darknet:
       module_type = x["type"]
       module = []
       if module_type == "convolutional":
-        # TODO: BatchNorm2d
-        """
-        try:
-                batch_normalize = int(x["batch_normalize"])
-                bias = False
-            except:
-                batch_normalize = 0
-                bias = True
-        """
         try:
           batch_normalize = int(x["batch_normalize"])
           bias = False
@@ -401,7 +346,6 @@ class Darknet:
         else:
           pad = 0
         
-        # print(f"{index}: Adding a Conv2d layer with filters: prev_filters: {prev_filters}, filters: {filters}")
         conv = Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias = bias)
         module.append(conv)
 
@@ -414,6 +358,7 @@ class Darknet:
         if activation == "leaky":
           module.append(LeakyReLU(0.1))
       
+      # TODO: Add tiny model
       elif module_type == "maxpool":
         size = int(x["size"])
         stride = int(x["stride"])
@@ -421,7 +366,6 @@ class Darknet:
         module.append(maxpool)
 
       elif module_type == "upsample":
-        stride = int(x["stride"])
         upsample = Upsample(scale_factor = 2, mode = "nearest")
         module.append(upsample)
       
@@ -481,15 +425,12 @@ class Darknet:
           print("biases")
           print(conv.bias.shape)
           print(conv.bias.cpu().data[0][0:5])
-          # print(conv.bias[0][0:5])
         else:
           print("None biases for layer", i)
   
   def load_weights(self, url):
     weights = fetch(url)
-    # fp = open(file, "rb")
     # First 5 values (major, minor, subversion, Images seen)
-    # header = np.fromfile(fp, dtype=np.int32, count = 5)
     header = np.frombuffer(weights, dtype=np.int32, count = 5)
     self.seen = header[3]
 
@@ -497,7 +438,6 @@ class Darknet:
       from functools import reduce
       return reduce(lambda x, y: x*y, tensor.shape)
 
-    # weights = np.fromfile(fp, dtype=np.float32)
     weights = np.frombuffer(weights, dtype=np.float32)
     weights = weights[5:]
 
@@ -518,15 +458,12 @@ class Darknet:
           bn = model[1]
 
           # Get the number of weights of batchnorm
-          # num_biases = bn.bias.shape
           num_bn_biases = numel(bn.bias)
 
           # Load weights
-          # print("Loading BN biases", ptr, ":", ptr + num_bn_biases)
           bn_biases = Tensor(weights[ptr:ptr + num_bn_biases])
           ptr += num_bn_biases
 
-          # print("Loading BN weights", ptr, ":", ptr + num_bn_biases)
           bn_weights = Tensor(weights[ptr:ptr+num_bn_biases])
           ptr += num_bn_biases
 
@@ -543,7 +480,7 @@ class Darknet:
           bn_running_var = bn_running_var.reshape(shape=tuple(bn.running_var.shape))
 
           # Copy data
-          bn.bias = bn_biases # Idk if this works
+          bn.bias = bn_biases
           bn.weight = bn_weights
           bn.running_mean = bn_running_mean
           bn.running_var = bn_running_var
@@ -552,7 +489,6 @@ class Darknet:
           num_biases = numel(conv.bias)
 
           # Load wieghts
-          # print("Loading CONV biases", ptr, ":", ptr + num_biases)
           conv_biases = Tensor(weights[ptr: ptr+num_biases])
           ptr += num_biases
 
@@ -565,7 +501,6 @@ class Darknet:
         # Load weighys for conv layers
         num_weights = numel(conv.weight)
 
-        # print("Loading CONV weights", ptr, ":", ptr + num_weights)
         conv_weights = Tensor(weights[ptr:ptr+num_weights])
         ptr += num_weights
 
@@ -582,72 +517,10 @@ class Darknet:
 
     for i, module in enumerate(modules):
       module_type = (module["type"])
-      # print("Running through layer " + module_type)
-      # print("Input shape:", x.shape)
       if module_type == "convolutional" or module_type == "upsample":
         for index, layer in enumerate(self.module_list[i]):
-          """
-          try:
-            # print(layer.weights.cpu().data)
-          except:
-            pass
-          """
-          #print("Inputting to", layer)
-          #print(x.cpu().data[0][0][0][0:10])
-          #print("Layer weights", layer, layer.weight.shape)
-          #print(layer.weight)
-          """
-          if layer.bias is not None:
-            print("Layer bias", layer, layer.bias.shape)
-            print(layer.bias)
-            print("Running mean", layer, layer.running_mean.shape)
-            print(layer.running_mean.cpu().data)
-            print("Running var", layer, layer.running_var.shape)
-            print(layer.running_var.cpu().data)
-          """
           x = layer(x)
-          """
-          print("Layer weights", layer, layer.weight.shape)
-          print(layer.weight.cpu().data)
-          if layer.bias is not None:
-            print("Layer bias", layer, layer.bias.shape)
-            print(layer.bias.cpu().data)
-            print("Running mean", layer, layer.running_mean.shape)
-            print(layer.running_mean.cpu().data)
-            print("Running var", layer, layer.running_var.shape)
-            print(layer.running_var.cpu().data)
-          """
-          if index == 1:
-            pass
-            # BatchNorm layer
-            # Run in torhc too
-            #import torch
-            ##def fromNumpy(ndarray): # have to use this since PyTorch on M1 doesn't have NumPy support… smh
-            #  return torch.Tensor(ndarray.tolist())
-            # create in torch
-            #with torch.no_grad():
-            #  tbn = torch.nn.BatchNorm2d(32).eval()
-            #  tbn.training = False
-            #  tbn.weight[:] = torch.tensor(layer.weight.cpu().data)
-            #  tbn.bias[:] = torch.tensor(layer.bias.cpu().data)
-            #  tbn.running_mean[:] = torch.tensor(layer.running_mean.cpu().data)
-            #  tbn.running_var[:] = torch.tensor(layer.running_var.cpu().data)
-
-            #np.testing.assert_allclose(layer.running_mean.cpu().data, tbn.running_mean.detach().numpy(), rtol=1e-5)
-            #np.testing.assert_allclose(layer.running_var.cpu().data, tbn.running_var.detach().numpy(), rtol=1e-5)
-            #m = torch.nn.BatchNorm2d(32)
-            #m.weight[:] = torch.from_numpy(layer.weight.cpu().data)
-            # m.weight = torch.nn.Parameter(fromNumpy(layer.weight.cpu().data))
-            # m.bias = torch.nn.Parameter(fromNumpy(layer.weight.cpu().data))
-            # m._buffers['running_mean'] = fromNumpy(layer.running_mean.cpu().data)
-            # m._buffers['running_var'] = fromNumpy(layer.running_var.cpu().data)
-            #print("Output from Torch", tbn(torch.from_numpy(x.cpu().data))[0][0][0][0:10])
-          ##print("Output from", index, layer)
-          #print(x.cpu().data[0][0][0][0:10])
-        #print("Output from", i, self.module_list[i])
-        #print(x.cpu().data[0][0][0][0:10])
-        # print(self.module_list[i])
-        # x = self.module_list[i](x)
+      
       elif module_type == "route":
         layers = module["layers"]
         layers = [int(a) for a in layers]
@@ -662,37 +535,24 @@ class Darknet:
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
 
-          # x = np.concatenate((map1, map2), 1)
           x = Tensor(np.concatenate((map1.cpu().data, map2.cpu().data), 1))
       
       elif module_type == "shortcut":
         from_ = int(module["from"])
-        """ Shape mismatch: (1, 64, 410, 410) vs. (1, 64, 412, 412)
-        TODO: Implement shortcut
-        print("Outputs:")
-        print(outputs[i-1].shape)
-        print(outputs[i+from_].shape)
-        """
         x = outputs[i - 1] + outputs[i + from_]
       
       elif module_type == "yolo":
         anchors = self.module_list[i][0].anchors
         inp_dim = int(self.net_info["height"])
         num_classes = int(module["classes"])
-        print(anchors, inp_dim, num_classes)
         # Transform
         x = predict_transform(x, inp_dim, anchors, num_classes)
-        print("yolo result", x.shape)
-        print(x.cpu().data[0][0][0:5])
         if not write:
           detections = x
           write = 1
         else:
-          # detections = np.concatenate((detections, x), 1)
           detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
       
-      print("Outputs from", i, self.module_list[i], module_type)
-      print(x.cpu().data[0][0][0])
       outputs[i] = x
     
     return detections # Return detections
@@ -700,7 +560,7 @@ class Darknet:
 
 if __name__ == "__main__":
   # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg') # normal model
-  cfg = fetch('https://raw.githubusercontent.com/ayooshkathuria/YOLO_v3_tutorial_from_scratch/master/cfg/yolov3.cfg')
+  cfg = fetch('https://raw.githubusercontent.com/ayooshkathuria/YOLO_v3_tutorial_from_scratch/master/cfg/yolov3.cfg') # like normal model, but smaller input size (416*416)
   # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg') # tiny model
 
   # Make deterministic
@@ -713,18 +573,13 @@ if __name__ == "__main__":
   model.load_weights('https://pjreddie.com/media/files/yolov3.weights') # normal model
   # model.load_weights('https://pjreddie.com/media/files/yolov3-tiny.weights') # tiny model
 
-  #model.dump_weights()
-  #exit()
-
   if GPU:
     params = get_parameters(model)
     [x.gpu_() for x in params]
 
-  # from PIL import Image
-  # url = sys.argv[1]
-  url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
-  # url = "https://i.redd.it/rflitbaldl751.jpg"
-  # url = "https://www.telegraph.co.uk/content/dam/cars/2016/04/11/Dashcam1_trans_NvBQzQNjv4BqPItlErHJmT3AsVLfg-otf_grG63UgcgwjHsyPCDdu4E.png"
+  url = sys.argv[1]
+  # url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
+
   img = None
   if url.startswith('http'):
     img = Image.open(io.BytesIO(fetch(url)))
@@ -732,22 +587,7 @@ if __name__ == "__main__":
     img = Image.open(url)
   # Predict
   st = time.time()
-  print("running inference")
-
-  img = cv2.imread("dog-cycle-car.png")
-  img = cv2.resize(img, (416,416))
-
+  print("Running inference…")
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
-  print("Prediction result:")
-  print(prediction.shape)
-  print(prediction.cpu().data[0][0][5:10])
-  print("Prediction should be:")
-  print("tensor([0.37478, 0.00032929, 0.072857, 0.00036275, 0.0012436])")
-  # exit()
-  #print("Prediction:")
-  # prediction = Tensor.ones(1, 27612, 85)
-  # print(prediction)
-  # prediction = Tensor.uniform(1, 27612, 85)
-  prediction = process_results(prediction)
-  # prediction = temp_process_results(prediction)
+  prediction = show_labels(prediction)
