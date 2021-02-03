@@ -15,14 +15,7 @@ if __name__ == "__main__":
   ret, out = my_unpickle(io.BytesIO(data))
   d = ret['model'].yaml
   for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
-    #print(m)
-    #print(eval(m))
-    # tm = ret['model']._modules['model'][i]
-    # print(ret['model']._modules['model'].__dict__)
-
-    import pprint
-    pprint.pprint(vars(ret['model']))
-
+    tm = ret['model']._modules['model'][i]
     print(i, f, n, m, args, tm._modules.keys())
     # Focus, Conv, BottleneckCSP, SPP, Concat, Detect
     #for k,v in tm._modules.items():
@@ -34,6 +27,4 @@ if __name__ == "__main__":
       conv, bn = tm._modules['conv'], tm._modules['bn']
       print("   ", conv)
       #print(bn)
-
-
 
