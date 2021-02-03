@@ -47,7 +47,7 @@ def show_labels(prediction, confidence = 0.9, num_classes = 80):
       pass
     classes, indexes = np.unique(image_pred_[:, -1], return_index=True)
     for index, coco_class in enumerate(classes):
-      probability = image_pred_[indexes[index]][5] * 100
+      probability = image_pred_[indexes[index]][4] * 100
       print("Detected", coco_labels[int(coco_class)], "{:.2f}%".format(probability))
 
 def bbox_iou(box1, box2):
@@ -530,7 +530,11 @@ if __name__ == "__main__":
   if url.startswith('http'):
     img = Image.open(io.BytesIO(fetch(url)))
   else:
-    img = Image.open(url)
+    # img = Image.open(url)
+    import cv2 # for some reason imread with cv2 yields better results??
+    img = cv2.imread(url)
+    img = cv2.resize(img, (416, 416))
+  
   # Predict
   st = time.time()
   print("Running inference…")
