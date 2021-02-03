@@ -10,9 +10,10 @@ import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
 from extra.utils import fetch, get_parameters
-from tinygrad.nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, BatchNorm2D
+from tinygrad.nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, BatchNorm2D, MaxPool2d
 
 from PIL import Image
+import cv2
 
 def temp_process_results(prediction, confidence = 0.9, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
@@ -219,8 +220,8 @@ def imresize(img, w, h):
 
 def infer(model, img):
   img = np.array(img)
-  # img = imresize(img, 608, 608)
-  img = imresize(img, 416, 416)
+  # img = imresize(img, 608, 608) # normal model
+  img = imresize(img, 416, 416) # tiny model
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
 
@@ -406,16 +407,22 @@ class Darknet:
 
         # BatchNorm2d
         if batch_normalize:
-          bn = BatchNorm2D(filters)
+          bn = BatchNorm2D(filters, eps=1e-05, training=True, track_running_stats=True)
           module.append(bn)
 
         # LeakyReLU activation
         if activation == "leaky":
           module.append(LeakyReLU(0.1))
+      
+      elif module_type == "maxpool":
+        size = int(x["size"])
+        stride = int(x["stride"])
+        maxpool = MaxPool2d(size, stride)
+        module.append(maxpool)
 
       elif module_type == "upsample":
         stride = int(x["stride"])
-        upsample = Upsample(scale_factor = 2, mode = "bilinear")
+        upsample = Upsample(scale_factor = 2, mode = "nearest")
         module.append(upsample)
       
       elif module_type == "route":
@@ -469,11 +476,11 @@ class Darknet:
         print(self.blocks[i + 1]["type"], "weights", i)
         model = self.module_list[i]
         conv = model[0]
-        print(conv.weights.cpu().data[0][0][0])
-        if conv.biases is not None:
+        print(conv.weight.cpu().data[0][0][0])
+        if conv.bias is not None:
           print("biases")
-          print(conv.biases.shape)
-          print(conv.biases.cpu().data[0][0:5])
+          print(conv.bias.shape)
+          print(conv.bias.cpu().data[0][0:5])
           # print(conv.bias[0][0:5])
         else:
           print("None biases for layer", i)
@@ -542,7 +549,7 @@ class Darknet:
           bn.running_var = bn_running_var
         else:
           # load biases of the conv layer
-          num_biases = numel(conv.biases)
+          num_biases = numel(conv.bias)
 
           # Load wieghts
           # print("Loading CONV biases", ptr, ":", ptr + num_biases)
@@ -550,20 +557,20 @@ class Darknet:
           ptr += num_biases
 
           # Reshape
-          conv_biases = conv_biases.reshape(shape=tuple(conv.biases.shape))
+          conv_biases = conv_biases.reshape(shape=tuple(conv.bias.shape))
 
           # Copy
-          conv.biases = conv_biases
+          conv.bias = conv_biases
         
         # Load weighys for conv layers
-        num_weights = numel(conv.weights)
+        num_weights = numel(conv.weight)
 
         # print("Loading CONV weights", ptr, ":", ptr + num_weights)
         conv_weights = Tensor(weights[ptr:ptr+num_weights])
         ptr += num_weights
 
-        conv_weights = conv_weights.reshape(shape=tuple(conv.weights.shape))
-        conv.weights = conv_weights
+        conv_weights = conv_weights.reshape(shape=tuple(conv.weight.shape))
+        conv.weight = conv_weights
 
 
 
@@ -578,16 +585,67 @@ class Darknet:
       # print("Running through layer " + module_type)
       # print("Input shape:", x.shape)
       if module_type == "convolutional" or module_type == "upsample":
-        for layer in self.module_list[i]:
+        for index, layer in enumerate(self.module_list[i]):
           """
           try:
             # print(layer.weights.cpu().data)
           except:
             pass
           """
+          #print("Inputting to", layer)
+          #print(x.cpu().data[0][0][0][0:10])
+          #print("Layer weights", layer, layer.weight.shape)
+          #print(layer.weight)
+          """
+          if layer.bias is not None:
+            print("Layer bias", layer, layer.bias.shape)
+            print(layer.bias)
+            print("Running mean", layer, layer.running_mean.shape)
+            print(layer.running_mean.cpu().data)
+            print("Running var", layer, layer.running_var.shape)
+            print(layer.running_var.cpu().data)
+          """
           x = layer(x)
-          #print("x after ", str(layer))
-          #print(x.cpu().data)
+          """
+          print("Layer weights", layer, layer.weight.shape)
+          print(layer.weight.cpu().data)
+          if layer.bias is not None:
+            print("Layer bias", layer, layer.bias.shape)
+            print(layer.bias.cpu().data)
+            print("Running mean", layer, layer.running_mean.shape)
+            print(layer.running_mean.cpu().data)
+            print("Running var", layer, layer.running_var.shape)
+            print(layer.running_var.cpu().data)
+          """
+          if index == 1:
+            pass
+            # BatchNorm layer
+            # Run in torhc too
+            #import torch
+            ##def fromNumpy(ndarray): # have to use this since PyTorch on M1 doesn't have NumPy support… smh
+            #  return torch.Tensor(ndarray.tolist())
+            # create in torch
+            #with torch.no_grad():
+            #  tbn = torch.nn.BatchNorm2d(32).eval()
+            #  tbn.training = False
+            #  tbn.weight[:] = torch.tensor(layer.weight.cpu().data)
+            #  tbn.bias[:] = torch.tensor(layer.bias.cpu().data)
+            #  tbn.running_mean[:] = torch.tensor(layer.running_mean.cpu().data)
+            #  tbn.running_var[:] = torch.tensor(layer.running_var.cpu().data)
+
+            #np.testing.assert_allclose(layer.running_mean.cpu().data, tbn.running_mean.detach().numpy(), rtol=1e-5)
+            #np.testing.assert_allclose(layer.running_var.cpu().data, tbn.running_var.detach().numpy(), rtol=1e-5)
+            #m = torch.nn.BatchNorm2d(32)
+            #m.weight[:] = torch.from_numpy(layer.weight.cpu().data)
+            # m.weight = torch.nn.Parameter(fromNumpy(layer.weight.cpu().data))
+            # m.bias = torch.nn.Parameter(fromNumpy(layer.weight.cpu().data))
+            # m._buffers['running_mean'] = fromNumpy(layer.running_mean.cpu().data)
+            # m._buffers['running_var'] = fromNumpy(layer.running_var.cpu().data)
+            #print("Output from Torch", tbn(torch.from_numpy(x.cpu().data))[0][0][0][0:10])
+          ##print("Output from", index, layer)
+          #print(x.cpu().data[0][0][0][0:10])
+        #print("Output from", i, self.module_list[i])
+        #print(x.cpu().data[0][0][0][0:10])
         # print(self.module_list[i])
         # x = self.module_list[i](x)
       elif module_type == "route":
@@ -621,9 +679,11 @@ class Darknet:
         anchors = self.module_list[i][0].anchors
         inp_dim = int(self.net_info["height"])
         num_classes = int(module["classes"])
-
+        print(anchors, inp_dim, num_classes)
         # Transform
         x = predict_transform(x, inp_dim, anchors, num_classes)
+        print("yolo result", x.shape)
+        print(x.cpu().data[0][0][0:5])
         if not write:
           detections = x
           write = 1
@@ -631,16 +691,17 @@ class Darknet:
           # detections = np.concatenate((detections, x), 1)
           detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
       
-      print("Output values", i, x.shape)
-      print(x.cpu().data)
+      print("Outputs from", i, self.module_list[i], module_type)
+      print(x.cpu().data[0][0][0])
       outputs[i] = x
     
     return detections # Return detections
 
 
 if __name__ == "__main__":
-  # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
+  # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg') # normal model
   cfg = fetch('https://raw.githubusercontent.com/ayooshkathuria/YOLO_v3_tutorial_from_scratch/master/cfg/yolov3.cfg')
+  # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg') # tiny model
 
   # Make deterministic
   np.random.seed(1337)
@@ -649,7 +710,8 @@ if __name__ == "__main__":
   model = Darknet(cfg)
 
   print("Loading weights file (237MB). This might take a while…")
-  model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
+  model.load_weights('https://pjreddie.com/media/files/yolov3.weights') # normal model
+  # model.load_weights('https://pjreddie.com/media/files/yolov3-tiny.weights') # tiny model
 
   #model.dump_weights()
   #exit()
@@ -671,6 +733,10 @@ if __name__ == "__main__":
   # Predict
   st = time.time()
   print("running inference")
+
+  img = cv2.imread("dog-cycle-car.png")
+  img = cv2.resize(img, (416,416))
+
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
   print("Prediction result:")
@@ -678,7 +744,7 @@ if __name__ == "__main__":
   print(prediction.cpu().data[0][0][5:10])
   print("Prediction should be:")
   print("tensor([0.37478, 0.00032929, 0.072857, 0.00036275, 0.0012436])")
-  exit()
+  # exit()
   #print("Prediction:")
   # prediction = Tensor.ones(1, 27612, 85)
   # print(prediction)

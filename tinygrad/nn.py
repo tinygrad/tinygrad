@@ -1,5 +1,17 @@
 from tinygrad.tensor import Tensor
 
+class MaxPool2d:
+  def __init__(self, kernel_size, stride):
+    if type(kernel_size) == int:
+      self.kernel_size = (kernel_size, kernel_size)
+    else: self.kernel_size = kernel_size
+    self.stride = stride if (stride is not None) else kernel_size
+
+  def __call__(self, input):
+    # TODO: Implement strided max_pool2d, and maxpool2d for 3d inputs
+    return x.max_pool2d(kernel_size=self.kernel_size)
+
+
 class DetectionLayer:
   def __init__(self, anchors):
     self.anchors = anchors
@@ -52,26 +64,26 @@ class Conv2d:
 
     assert out_channels % groups == 0 and in_channels % groups == 0
 
-    self.weights = Tensor.uniform(out_channels, in_channels // groups, *self.kernel_size)
+    self.weight = Tensor.uniform(out_channels, in_channels // groups, *self.kernel_size)
     if self.bias:
-      self.biases = Tensor.uniform(1, out_channels, 1, 1)
+      self.bias = Tensor.uniform(1, out_channels, 1, 1)
     else:
-      self.biases = None
+      self.bias = None
   
   def __repr__(self):
-    return f"<Conv2d Layer with in_channels {self.in_channels!r}, out_channels {self.out_channels!r}, weights with shape {self.weights.shape!r}>"
+    return f"<Conv2d Layer with in_channels {self.in_channels!r}, out_channels {self.out_channels!r}, weights with shape {self.weight.shape!r}>"
   
   def __call__(self, x):
     if self.padding != 0:
-      if self.biases is not None:
-        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
+      if self.bias is not None:
+        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weight, stride=self.stride, groups=self.groups).add(self.bias)
       else:
-        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weights, stride=self.stride, groups=self.groups)
+        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weight, stride=self.stride, groups=self.groups)
     else:
-      if self.biases is not None:
-        x = x.conv2d(self.weights, stride=self.stride, groups=self.groups).add(self.biases)
+      if self.bias is not None:
+        x = x.conv2d(self.weight, stride=self.stride, groups=self.groups).add(self.bias)
       else:
-        x = x.conv2d(self.weights, stride=self.stride, groups=self.groups)
+        x = x.conv2d(self.weight, stride=self.stride, groups=self.groups)
     
     return x
 
