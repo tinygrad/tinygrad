@@ -70,7 +70,6 @@ def bbox_iou(box1, box2):
   inter_rect_y2 = torch.min(b1_y2, b2_y2)
 
   #Intersection area
-  # inter_area = torch.clamp(inter_rect_x2 - inter_rect_x1 + 1, min=0) * torch.clamp(inter_rect_y2 - inter_rect_y1 + 1, min=0)
   inter_area = numpy.clamp(inter_rect_x2 - inter_rect_x1 + 1, 0) * numpy.clamp(inter_rect_y2 - inter_rect_y1 + 1, 0)
 
   #Union Area
@@ -89,8 +88,6 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
   prediction = prediction * conf_mask
   
   # Non max suppression
-  # box_corner = Tensor.uniform(tuple(prediction.shape))
-  # box_corner = prediction.cpu().data
   box_corner = prediction
   box_corner[:,:,0] = (prediction[:,:,0] - prediction[:,:,2]/2)
   box_corner[:,:,1] = (prediction[:,:,1] - prediction[:,:,3]/2)
@@ -105,83 +102,45 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
   # Process img
   img_pred = prediction[0]
 
-  """
-  for i in range(batch_size):
-    img_pred = prediction[i]
-  """
   def numpy_max(input, dim):
     # Input -> tensor (10x8)
     return np.amax(input, axis=dim), np.argmax(input, axis=dim)
   
-  # max_conf, max_conf_score = numpy.amax(image_pred[:,5:5+ num_classes], 1)
   max_conf, max_conf_score = numpy_max(img_pred[:,5:5 + num_classes], 1)
-  # max_conf, max_conf_score = torch.max(image_pred[:,5:5+ num_classes], 1)
-  # max_conf = max_conf.float().unsqueeze(1)
   max_conf_score = np.expand_dims(max_conf_score, axis=1)
-  # max_conf_score = max_conf_score.float().unsqueeze(1)
   max_conf = np.expand_dims(max_conf, axis=1)
   seq = (img_pred[:,:5], max_conf, max_conf_score)
   image_pred = np.concatenate(seq, axis=1)
-  # image_pred = torch.cat(seq, 1)
-
-  # non_zero_ind =  (torch.nonzero(image_pred[:,4]))
 
   non_zero_ind = np.nonzero(image_pred[:,4])[0] # TODO: Check if this is right
-  print("non zero ind")
-  print(non_zero_ind.shape)
   image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
-  print("Image_pred_")
-  print(image_pred_.shape)
   try:
-    # image_pred_ = image_pred[non_zero_ind.squeeze(),:].view(-1,7)
     image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
   except:
     print("No detections found!")
     pass
-    # continue
 
   if image_pred_.shape[0] == 0:
-    # continue
     print("Exception occurred!")
     pass
   
   def unique(tensor):
-    # tensor_np = tensor.cpu().numpy()
-    # tensor_np = tensor.cpu().data
     tensor_np = tensor
     unique_np = np.unique(tensor_np)
-    return unique_np # Dunno if this even works
-    unique_tensor = Tensor(unique_np)
-
-    # tensor_res = Tensor(unique_np)
-    # return tensor_res
-
-  # Get the various classes detected in the image
-  # img_classes = unique(image_pred_[:,-1])  # -1 index holds the class index
+    return unique_np
 
   img_classes = unique(image_pred_[:, -1])
 
-  print("Classes")
-  print(img_classes.shape)
-  print(img_classes)
 
   for cls in img_classes:
     # perform NMS, get the detections with one particular class
-    # cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
-    print("Shapes:")
-    print(image_pred_.shape)
-    print((image_pred_[:,-1] == cls).shape)
 
-    # This line makes no funckign sensee
     cls_mask = np.expand_dims(image_pred_*(image_pred_[:,-1] == cls), axis=1)
     class_mask_ind = np.nonzero(cls_mask[:,-2]).squeeze()
-    # class_mask_ind = torch.nonzero(cls_mask[:,-2]).squeeze()
-    # image_pred_class = image_pred_[class_mask_ind].view(-1,7)
     image_pred_class = np.reshape(image_pred_[class_mask_ind], shape=(-1, 7))
     
     #sort the detections such that the entry with the maximum objectness
     #confidence is at the top
-    # conf_sort_index = torch.sort(image_pred_class[:,4], descending = True )[1]
     conf_sort_index = np.sort(image_pred_class[:,4], )
     image_pred_class = image_pred_class[conf_sort_index]
     idx = image_pred_class.size(0)   #Number of detections
@@ -232,25 +191,22 @@ def infer(model, img):
 
 def parse_cfg(cfg):
   # Return a list of blocks
-  #file = open(cfgfile, 'r')
-  #lines = file.read().split('\n') # store the lines in a list
   lines = cfg.decode("utf-8").split('\n')
-  # lines = cfg.split("\n")
-  lines = [x for x in lines if len(x) > 0] # get read of the empty lines 
-  lines = [x for x in lines if x[0] != '#'] # get rid of comments
+  lines = [x for x in lines if len(x) > 0]
+  lines = [x for x in lines if x[0] != '#']
   lines = [x.rstrip().lstrip() for x in lines]
 
   block = {}
   blocks = []
 
   for line in lines:
-    if line[0] == "[":               # This marks the start of a new block
-      if len(block) != 0:          # If block is not empty, implies it is storing values of previous block.
-        blocks.append(block)     # add it the blocks list
-        block = {}               # re-init the block
-      block["type"] = line[1:-1].rstrip()     
+    if line[0] == "[":
+      if len(block) != 0:
+        blocks.append(block)
+        block = {}
+      block["type"] = line[1:-1].rstrip()
     else:
-      key,value = line.split("=") 
+      key,value = line.split("=")
       block[key.rstrip()] = value.lstrip()
   blocks.append(block)
 
@@ -258,26 +214,19 @@ def parse_cfg(cfg):
 
 # TODO: Speed up this function, avoid copying stuff from GPU to CPU
 def predict_transform(prediction, inp_dim, anchors, num_classes):
-  # batch_size = prediction.size(0)
   batch_size = prediction.shape[0]
   stride = inp_dim // prediction.shape[2]
-  # stride =  inp_dim // prediction.size(2)
   grid_size = inp_dim // stride
   bbox_attrs = 5 + num_classes
   num_anchors = len(anchors)
   
-  """
-  prediction = prediction.view(batch_size, bbox_attrs*num_anchors, grid_size*grid_size)
-  prediction = prediction.transpose(1,2).contiguous()
-  prediction = prediction.view(batch_size, grid_size*grid_size*num_anchors, bbox_attrs)
-  """
   prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
   # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
   prediction = prediction.transpose(order=(0, 2, 1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
 
   anchors = [(a[0]/stride, a[1]/stride) for a in anchors]
-  #Sigmoid the  centre_X, centre_Y. and object confidencce
+  #Sigmoid the  centre_X, centre_Y. and object confidence
   # TODO: Fix this
   def dsigmoid(data):
     return 1/(1+np.exp(-data))
@@ -298,7 +247,6 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   x_y_offset = np.expand_dims(x_y_offset, 0)
 
   prediction.cpu().data[:,:,:2] += x_y_offset
-  # prediction[:,:,:2] += x_y_offset
 
   #log space transform height and the width
   anchors = Tensor(anchors)
