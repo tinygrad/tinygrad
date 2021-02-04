@@ -13,9 +13,9 @@ from extra.utils import fetch, get_parameters
 from yolo_nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
 from tinygrad.nn import BatchNorm2D
 
-from PIL import Image
+import cv2
 
-def show_labels(prediction, confidence = 0.9, num_classes = 80):
+def show_labels(prediction, confidence = 0.5, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
 
@@ -174,12 +174,14 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
       output = torch.cat((output,out))
 
 
+"""
 def imresize(img, w, h):
   return np.array(Image.fromarray(img).resize((w, h)))
+"""
 
 def infer(model, img):
   img = np.array(img)
-  img = imresize(img, 416, 416)
+  # img = imresize(img, 416, 416)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
 
@@ -527,11 +529,33 @@ if __name__ == "__main__":
   # url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
 
   img = None
-  if url.startswith('http'):
-    img = Image.open(io.BytesIO(fetch(url)))
+  # We use cv2 because for some reason, cv2 imread produces better results?
+  if url == "webcam":
+    from PIL import Image
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    while 1:
+      _ = cap.grab() # discard one frame to circumvent capture buffering
+      ret, frame = cap.read()
+      img = Image.fromarray(frame[:, :, [2,1,0]]).resize((416, 416))
+      # out, retimg = infer(model, img)
+      prediction = infer(model, img)
+      show_labels(prediction)
+      # print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
+      #SCALE = 3
+      # simg = cv2.resize(retimg, (224*SCALE, 224*SCALE))
+      # retimg = cv2.cvtColor(simg, cv2.COLOR_RGB2BGR)
+      #retimg = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+      #cv2.imshow('capture', retimg)
+      #if cv2.waitKey(1) & 0xFF == ord('q'):
+      #  break
+    cap.release()
+    cv2.destroyAllWindows()
+  elif url.startswith('http'):
+    img_stream = io.BytesIO(fetch(url))
+    img = cv2.imdecode(np.fromstring(img_stream.read(), np.uint8), 1)
+    img = cv2.resize(img, (416, 416))
   else:
-    # img = Image.open(url)
-    import cv2 # for some reason imread with cv2 yields better results??
     img = cv2.imread(url)
     img = cv2.resize(img, (416, 416))
   
