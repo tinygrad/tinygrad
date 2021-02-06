@@ -14,6 +14,7 @@ from yolo_nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, Max
 from tinygrad.nn import BatchNorm2D
 
 import cv2
+from PIL import Image
 
 def show_labels(prediction, confidence = 0.5, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
@@ -50,6 +51,38 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
       probability = image_pred_[indexes[index]][4] * 100
       print("Detected", coco_labels[int(coco_class)], "{:.2f}%".format(probability))
 
+def letterbox_image(img, inp_dim=416):
+  img_w, img_h = img.shape[1], img.shape[0]
+  w, h = inp_dim
+  new_w = int(img_w * min(w/img_w, h/img_h))
+  new_h = int(img_h * min(w/img_w, h/img_h))
+  resized_image = cv2.resize(img, (new_w,new_h), interpolation = cv2.INTER_CUBIC)
+  
+  canvas = np.full((inp_dim[1], inp_dim[0], 3), 128)
+  canvas[(h-new_h)//2:(h-new_h)//2 + new_h,(w-new_w)//2:(w-new_w)//2 + new_w,  :] = resized_image
+  
+  return canvas
+
+def add_boxes(img, prediction):
+  coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+  coco_labels = coco_labels.decode('utf-8').split('\n')
+
+  height, width = img.shape[0:2]
+  scale_factor = width / 416
+  prediction[:, [1,3]] *= scale_factor
+  prediction[:, [3,5]] *= scale_factor
+  # scale_factor = img.shape[3]
+
+  for i in range(prediction.shape[0]):
+    pred = prediction[i]
+    corner1 = tuple(pred[1:3].astype(int))
+    corner2 = tuple(pred[3:5].astype(int))
+    label = coco_labels[int(pred[-1])]
+    img = cv2.rectangle(img, corner1, corner2, (255, 0, 0), 2)
+    img = cv2.rectangle(img, (0, 0), (416, 416), (255, 0, 0), 2)
+  
+  return img
+
 def bbox_iou(box1, box2):
   """
   Returns the IoU of two bounding boxes
@@ -63,13 +96,20 @@ def bbox_iou(box1, box2):
   b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,0], box2[:,1], box2[:,2], box2[:,3]
 
   # get the corrdinates of the intersection rectangle
+  print(b1_x1)
+  """
   inter_rect_x1 = torch.max(b1_x1, b2_x1)
   inter_rect_y1 = torch.max(b1_y1, b2_y1)
   inter_rect_x2 = torch.min(b1_x2, b2_x2)
   inter_rect_y2 = torch.min(b1_y2, b2_y2)
+  """
+  inter_rect_x1 = np.maximum(b1_x1, b2_x1)
+  inter_rect_y1 = np.maximum(b1_y1, b2_y1)
+  inter_rect_x2 = np.maximum(b1_x2, b2_x2)
+  inter_rect_y2 = np.maximum(b1_y2, b2_y2)
 
   #Intersection area
-  inter_area = numpy.clamp(inter_rect_x2 - inter_rect_x1 + 1, 0) * numpy.clamp(inter_rect_y2 - inter_rect_y1 + 1, 0)
+  inter_area = np.clip(inter_rect_x2 - inter_rect_x1 + 1, 0, 99999) * np.clip(inter_rect_y2 - inter_rect_y1 + 1, 0, 99999)
 
   #Union Area
   b1_area = (b1_x2 - b1_x1 + 1)*(b1_y2 - b1_y1 + 1)
@@ -130,25 +170,28 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
 
   img_classes = unique(image_pred_[:, -1])
 
-
   for cls in img_classes:
+    print("class", cls)
     # perform NMS, get the detections with one particular class
-
-    cls_mask = np.expand_dims(image_pred_*(image_pred_[:,-1] == cls), axis=1)
-    class_mask_ind = np.nonzero(cls_mask[:,-2]).squeeze()
-    image_pred_class = np.reshape(image_pred_[class_mask_ind], shape=(-1, 7))
+    # cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
+    # cls_mask = np.expand_dims(image_pred_*(image_pred_[:,-1] == cls), axis=1)
+    cls_mask = image_pred_*np.expand_dims(image_pred_[:, -1] == cls, axis=1)
+    class_mask_ind = np.squeeze(np.nonzero(cls_mask[:,-2]))
+    # class_mask_ind = np.nonzero()
+    image_pred_class = np.reshape(image_pred_[class_mask_ind], (-1, 7))
     
     #sort the detections such that the entry with the maximum objectness
     #confidence is at the top
-    conf_sort_index = np.sort(image_pred_class[:,4], )
+    conf_sort_index = np.argsort(image_pred_class[:,4])
     image_pred_class = image_pred_class[conf_sort_index]
-    idx = image_pred_class.size(0)   #Number of detections
+    idx = image_pred_class.shape[0]   #Number of detections
     
     for i in range(idx):
       #Get the IOUs of all boxes that come after the one we are looking at 
       #in the loop
       try:
-        ious = bbox_iou(image_pred_class[i].unsqueeze(0), image_pred_class[i+1:])
+        # ious = bbox_iou(image_pred_class[i].unsqueeze(0), image_pred_class[i+1:])
+        ious = bbox_iou(np.expand_dims(image_pred_class[i], axis=0), image_pred_class[i+1:])
       except ValueError:
         break
   
@@ -156,32 +199,55 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
         break
   
       #Zero out all the detections that have IoU > treshhold
-      iou_mask = (ious < nms_conf).float().unsqueeze(1)
-      image_pred_class[i+1:] *= iou_mask       
+      iou_mask = np.expand_dims((ious < nms_conf), axis=1)
+      # iou_mask = (ious < nms_conf).float().unsqueeze(1)
+      image_pred_class[i+1:] *= iou_mask
   
       #Remove the non-zero entries
-      non_zero_ind = torch.nonzero(image_pred_class[:,4]).squeeze()
-      image_pred_class = image_pred_class[non_zero_ind].view(-1,7)
-        
-    batch_ind = image_pred_class.new(image_pred_class.size(0), 1).fill_(ind)      #Repeat the batch_id for as many detections of the class cls in the image
-    seq = batch_ind, image_pred_class
+      non_zero_ind = np.squeeze(np.nonzero(image_pred_class[:,4]))
+      # non_zero_ind = torch.nonzero(image_pred_class[:,4]).squeeze()
+      # image_pred_class = image_pred_class[non_zero_ind].view(-1,7)
+      image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))
+    
+    #print("batch _ind")
+    # batch_ind = image_pred_class.new(image_pred_class.size(0), 1).fill_(ind)      #Repeat the batch_id for as many detections of the class cls in the image
+    batch_ind = np.array([[0]])
+    seq = (batch_ind, image_pred_class)
     
     if not write:
-      output = torch.cat(seq,1)
+      # output = torch.cat(seq,1)
+      output = np.concatenate(seq, 1)
       write = True
     else:
-      out = torch.cat(seq,1)
-      output = torch.cat((output,out))
-
+      # out = torch.cat(seq,1)
+      out = np.concatenate(seq, axis=1)
+      # output = torch.cat((output,out))
+      output = np.concatenate((output,out))
+  try:
+    return output
+  except:
+    return 0
 
 """
 def imresize(img, w, h):
   return np.array(Image.fromarray(img).resize((w, h)))
 """
+def resize(img, inp_dim=(416, 416)):
+  img_w, img_h = img.shape[1], img.shape[0]
+  w, h = inp_dim
+  new_w = int(img_w * min(w/img_w, h/img_h))
+  new_h = int(img_h * min(w/img_w, h/img_h))
+  resized_image = cv2.resize(img, (new_w,new_h), interpolation = cv2.INTER_CUBIC)
+  
+  canvas = np.full((inp_dim[1], inp_dim[0], 3), 128)
+  canvas[(h-new_h)//2:(h-new_h)//2 + new_h,(w-new_w)//2:(w-new_w)//2 + new_w,  :] = resized_image
+  
+  return canvas
 
 def infer(model, img):
   img = np.array(img)
-  # img = imresize(img, 416, 416)
+  #img = imresize(img, 416)
+  img = resize(img)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
 
@@ -531,13 +597,13 @@ if __name__ == "__main__":
   img = None
   # We use cv2 because for some reason, cv2 imread produces better results?
   if url == "webcam":
-    from PIL import Image
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     while 1:
       _ = cap.grab() # discard one frame to circumvent capture buffering
       ret, frame = cap.read()
-      img = Image.fromarray(frame[:, :, [2,1,0]]).resize((416, 416))
+      # img = Image.fromarray(frame[:, :, [2,1,0]]).resize((416, 416))
+      img = Image.fromarray(frame[:, :, [2,1,0]])
       # out, retimg = infer(model, img)
       prediction = infer(model, img)
       show_labels(prediction)
@@ -554,14 +620,18 @@ if __name__ == "__main__":
   elif url.startswith('http'):
     img_stream = io.BytesIO(fetch(url))
     img = cv2.imdecode(np.fromstring(img_stream.read(), np.uint8), 1)
-    img = cv2.resize(img, (416, 416))
+    # img = cv2.resize(img, (416, 416))
   else:
     img = cv2.imread(url)
-    img = cv2.resize(img, (416, 416))
+    # img = cv2.resize(img, (416, 416))
   
   # Predict
   st = time.time()
-  print("Running inference…")
+  print("running inference…")
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
-  prediction = show_labels(prediction)
+  # prediction = show_labels(prediction)
+  prediction = process_results(prediction)
+  boxes = add_boxes(img, prediction)
+  # Save img
+  cv2.imwrite("boxes.jpg", boxes)
