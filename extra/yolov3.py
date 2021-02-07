@@ -51,7 +51,7 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
       probability = image_pred_[indexes[index]][4] * 100
       print("Detected", coco_labels[int(coco_class)], "{:.2f}%".format(probability))
 
-def letterbox_image(img, inp_dim=416):
+def letterbox_image(img, inp_dim=608):
   img_w, img_h = img.shape[1], img.shape[0]
   w, h = inp_dim
   new_w = int(img_w * min(w/img_w, h/img_h))
@@ -64,14 +64,15 @@ def letterbox_image(img, inp_dim=416):
   return canvas
 
 def add_boxes(img, prediction):
+  if type(prediction) is int: # no predictions
+    return img
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
-
   height, width = img.shape[0:2]
-  scale_factor = width / 416
-  prediction[:, [1,3]] *= scale_factor
-  prediction[:, [3,5]] *= scale_factor
-  # scale_factor = img.shape[3]
+  scale_factor = 608 / width
+
+  prediction[:,[1,3]] -= (608 - scale_factor * width) / 2
+  prediction[:,[2,4]] -= (608 - scale_factor * height) / 2
 
   for i in range(prediction.shape[0]):
     pred = prediction[i]
@@ -79,7 +80,10 @@ def add_boxes(img, prediction):
     corner2 = tuple(pred[3:5].astype(int))
     label = coco_labels[int(pred[-1])]
     img = cv2.rectangle(img, corner1, corner2, (255, 0, 0), 2)
-    img = cv2.rectangle(img, (0, 0), (416, 416), (255, 0, 0), 2)
+    t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 1 , 1)[0]
+    c2 = corner1[0] + t_size[0] + 3, corner1[1] + t_size[1] + 4
+    img = cv2.rectangle(img, corner1, c2, (255, 0, 0), -1)
+    img = cv2.putText(img, label, (corner1[0], corner1[1] + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 1, [225,255,255], 1)
   
   return img
 
@@ -96,13 +100,6 @@ def bbox_iou(box1, box2):
   b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,0], box2[:,1], box2[:,2], box2[:,3]
 
   # get the corrdinates of the intersection rectangle
-  print(b1_x1)
-  """
-  inter_rect_x1 = torch.max(b1_x1, b2_x1)
-  inter_rect_y1 = torch.max(b1_y1, b2_y1)
-  inter_rect_x2 = torch.min(b1_x2, b2_x2)
-  inter_rect_y2 = torch.min(b1_y2, b2_y2)
-  """
   inter_rect_x1 = np.maximum(b1_x1, b2_x1)
   inter_rect_y1 = np.maximum(b1_y1, b2_y1)
   inter_rect_x2 = np.maximum(b1_x2, b2_x2)
@@ -120,7 +117,7 @@ def bbox_iou(box1, box2):
   return iou
 
 
-def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0.4):
+def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0.4):
   prediction = prediction.detach().cpu().data
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
@@ -171,10 +168,7 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
   img_classes = unique(image_pred_[:, -1])
 
   for cls in img_classes:
-    print("class", cls)
     # perform NMS, get the detections with one particular class
-    # cls_mask = image_pred_*(image_pred_[:,-1] == cls).float().unsqueeze(1)
-    # cls_mask = np.expand_dims(image_pred_*(image_pred_[:,-1] == cls), axis=1)
     cls_mask = image_pred_*np.expand_dims(image_pred_[:, -1] == cls, axis=1)
     class_mask_ind = np.squeeze(np.nonzero(cls_mask[:,-2]))
     # class_mask_ind = np.nonzero()
@@ -190,7 +184,6 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
       #Get the IOUs of all boxes that come after the one we are looking at 
       #in the loop
       try:
-        # ious = bbox_iou(image_pred_class[i].unsqueeze(0), image_pred_class[i+1:])
         ious = bbox_iou(np.expand_dims(image_pred_class[i], axis=0), image_pred_class[i+1:])
       except ValueError:
         break
@@ -205,34 +198,26 @@ def process_results(prediction, confidence = 0.5, num_classes = 80, nms_conf = 0
   
       #Remove the non-zero entries
       non_zero_ind = np.squeeze(np.nonzero(image_pred_class[:,4]))
-      # non_zero_ind = torch.nonzero(image_pred_class[:,4]).squeeze()
-      # image_pred_class = image_pred_class[non_zero_ind].view(-1,7)
-      image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))
-    
-    #print("batch _ind")
-    # batch_ind = image_pred_class.new(image_pred_class.size(0), 1).fill_(ind)      #Repeat the batch_id for as many detections of the class cls in the image
+      image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))    
+
     batch_ind = np.array([[0]])
     seq = (batch_ind, image_pred_class)
     
     if not write:
-      # output = torch.cat(seq,1)
       output = np.concatenate(seq, 1)
       write = True
     else:
-      # out = torch.cat(seq,1)
       out = np.concatenate(seq, axis=1)
-      # output = torch.cat((output,out))
       output = np.concatenate((output,out))
   try:
     return output
   except:
     return 0
 
-"""
 def imresize(img, w, h):
   return np.array(Image.fromarray(img).resize((w, h)))
-"""
-def resize(img, inp_dim=(416, 416)):
+
+def resize(img, inp_dim=(608, 608)):
   img_w, img_h = img.shape[1], img.shape[0]
   w, h = inp_dim
   new_w = int(img_w * min(w/img_w, h/img_h))
@@ -246,8 +231,8 @@ def resize(img, inp_dim=(416, 416)):
 
 def infer(model, img):
   img = np.array(img)
-  #img = imresize(img, 416)
-  img = resize(img)
+  img = imresize(img, 608, 608)
+  # img = resize(img)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
 
@@ -290,15 +275,18 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
   prediction = prediction.transpose(order=(0, 2, 1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
+  
+  prediction_cpu = prediction.cpu().data
 
   anchors = [(a[0]/stride, a[1]/stride) for a in anchors]
   #Sigmoid the  centre_X, centre_Y. and object confidence
   # TODO: Fix this
   def dsigmoid(data):
     return 1/(1+np.exp(-data))
-  prediction.cpu().data[:,:,0] = dsigmoid(prediction.cpu().data[:,:,0])
-  prediction.cpu().data[:,:,1] = dsigmoid(prediction.cpu().data[:,:,1])
-  prediction.cpu().data[:,:,4] = dsigmoid(prediction.cpu().data[:,:,4])
+
+  prediction_cpu[:,:,0] = dsigmoid(prediction_cpu[:,:,0])
+  prediction_cpu[:,:,1] = dsigmoid(prediction_cpu[:,:,1])
+  prediction_cpu[:,:,4] = dsigmoid(prediction_cpu[:,:,4])
   
   #Add the center offsets
   grid = np.arange(grid_size)
@@ -312,19 +300,16 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   x_y_offset = x_y_offset.reshape((-1,2))
   x_y_offset = np.expand_dims(x_y_offset, 0)
 
-  prediction.cpu().data[:,:,:2] += x_y_offset
+  prediction_cpu[:,:,:2] += x_y_offset
 
-  #log space transform height and the width
-  anchors = Tensor(anchors)
-
-  anchors = np.tile(anchors.cpu().data, (grid_size*grid_size, 1))
+  anchors = np.tile(anchors, (grid_size*grid_size, 1))
   anchors = np.expand_dims(anchors, 0)
 
-  prediction.cpu().data[:,:,2:4] = np.exp(prediction.cpu().data[:,:,2:4])*anchors
-  prediction.cpu().data[:,:,5: 5 + num_classes] = dsigmoid((prediction.cpu().data[:,:, 5 : 5 + num_classes]))
-  prediction.cpu().data[:,:,:4] *= stride
+  prediction_cpu[:,:,2:4] = np.exp(prediction_cpu[:,:,2:4])*anchors
+  prediction_cpu[:,:,5: 5 + num_classes] = dsigmoid((prediction_cpu[:,:, 5 : 5 + num_classes]))
+  prediction_cpu[:,:,:4] *= stride
 
-  return prediction
+  return Tensor(prediction_cpu)
 
 
 class Darknet:
@@ -531,6 +516,7 @@ class Darknet:
 
     for i, module in enumerate(modules):
       module_type = (module["type"])
+      print("Running forward on", module_type)
       if module_type == "convolutional" or module_type == "upsample":
         for index, layer in enumerate(self.module_list[i]):
           x = layer(x)
@@ -573,8 +559,7 @@ class Darknet:
 
 
 if __name__ == "__main__":
-  # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg') # normal model
-  cfg = fetch('https://raw.githubusercontent.com/ayooshkathuria/YOLO_v3_tutorial_from_scratch/master/cfg/yolov3.cfg') # like normal model, but smaller input size (416*416)
+  cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg') # normal model
   # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg') # tiny model
 
   # Make deterministic
@@ -602,36 +587,40 @@ if __name__ == "__main__":
     while 1:
       _ = cap.grab() # discard one frame to circumvent capture buffering
       ret, frame = cap.read()
-      # img = Image.fromarray(frame[:, :, [2,1,0]]).resize((416, 416))
       img = Image.fromarray(frame[:, :, [2,1,0]])
-      # out, retimg = infer(model, img)
+
       prediction = infer(model, img)
-      show_labels(prediction)
-      # print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
-      #SCALE = 3
-      # simg = cv2.resize(retimg, (224*SCALE, 224*SCALE))
-      # retimg = cv2.cvtColor(simg, cv2.COLOR_RGB2BGR)
-      #retimg = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-      #cv2.imshow('capture', retimg)
-      #if cv2.waitKey(1) & 0xFF == ord('q'):
-      #  break
+      prediction = process_results(prediction)
+
+      boxes = add_boxes(imresize(np.array(img), 608, 608), prediction)
+      boxes = cv2.cvtColor(boxes, cv2.COLOR_RGB2BGR)
+      cv2.imshow('yolo', boxes)
+      if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
     cap.release()
     cv2.destroyAllWindows()
   elif url.startswith('http'):
     img_stream = io.BytesIO(fetch(url))
     img = cv2.imdecode(np.fromstring(img_stream.read(), np.uint8), 1)
-    # img = cv2.resize(img, (416, 416))
   else:
     img = cv2.imread(url)
-    # img = cv2.resize(img, (416, 416))
   
   # Predict
   st = time.time()
   print("running inference…")
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
-  # prediction = show_labels(prediction)
+
   prediction = process_results(prediction)
+  """
+  print("PREDICTION:")
+  print(prediction[0])
+  print("-------------------------")
+  print(prediction[1])
+  print("-------------------------")
+  print(prediction[2])
+  print("-------------------------")
+  """
   boxes = add_boxes(img, prediction)
   # Save img
   cv2.imwrite("boxes.jpg", boxes)
