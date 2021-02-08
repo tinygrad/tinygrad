@@ -51,7 +51,7 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
       probability = image_pred_[indexes[index]][4] * 100
       print("Detected", coco_labels[int(coco_class)], "{:.2f}%".format(probability))
 
-def letterbox_image(img, inp_dim=416):
+def letterbox_image(img, inp_dim=608):
   img_w, img_h = img.shape[1], img.shape[0]
   w, h = inp_dim
   new_w = int(img_w * min(w/img_w, h/img_h))
@@ -68,12 +68,11 @@ def add_boxes(img, prediction):
     return img
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
-  print(img.shape)
   height, width = img.shape[0:2]
-  scale_factor = 416 / width
+  scale_factor = 608 / width
 
-  prediction[:,[1,3]] -= (416 - scale_factor * width) / 2
-  prediction[:,[2,4]] -= (416 - scale_factor * height) / 2
+  prediction[:,[1,3]] -= (608 - scale_factor * width) / 2
+  prediction[:,[2,4]] -= (608 - scale_factor * height) / 2
 
   for i in range(prediction.shape[0]):
     pred = prediction[i]
@@ -220,7 +219,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
 def imresize(img, w, h):
   return np.array(Image.fromarray(img).resize((w, h)))
 
-def resize(img, inp_dim=(416, 416)):
+def resize(img, inp_dim=(608, 608)):
   img_w, img_h = img.shape[1], img.shape[0]
   w, h = inp_dim
   new_w = int(img_w * min(w/img_w, h/img_h))
@@ -234,7 +233,7 @@ def resize(img, inp_dim=(416, 416)):
 
 def infer(model, img):
   img = np.array(img)
-  img = imresize(img, 416, 416)
+  img = imresize(img, 608, 608)
   # img = resize(img)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
@@ -545,8 +544,8 @@ class Darknet:
       
       elif module_type == "yolo":
         anchors = self.module_list[i][0].anchors
-        # inp_dim = int(self.net_info["height"]) TODO: Uncomment this
-        inp_dim = 416
+        inp_dim = int(self.net_info["height"])
+        # inp_dim = 416
 
         num_classes = int(module["classes"])
         # Transform
@@ -557,12 +556,7 @@ class Darknet:
         else:
           detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
       
-      # print('layer took %.2f s' % (time.time() - st))
-      print("Output from layer", i, module_type)
-      if module_type == "yolo":
-        print(x.cpu().data[0][0])
-      else:
-        print(x.cpu().data[0][0][0])
+      # print(module_type, 'layer took %.2f s' % (time.time() - st))
       outputs[i] = x
     
     return detections # Return detections
@@ -602,7 +596,7 @@ if __name__ == "__main__":
       prediction = infer(model, img)
       prediction = process_results(prediction)
 
-      boxes = add_boxes(imresize(np.array(img), 416, 416), prediction)
+      boxes = add_boxes(imresize(np.array(img), 608, 608), prediction)
       boxes = cv2.cvtColor(boxes, cv2.COLOR_RGB2BGR)
       cv2.imshow('yolo', boxes)
       if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -622,13 +616,6 @@ if __name__ == "__main__":
   print('did inference in %.2f s' % (time.time() - st))
 
   prediction = process_results(prediction)
-  print("PREDICTION:")
-  print(prediction[0])
-  print("-------------------------")
-  print(prediction[1])
-  print("-------------------------")
-  print(prediction[2])
-  print("-------------------------")
-  boxes = add_boxes(imresize(img, 416, 416), prediction)
+  boxes = add_boxes(imresize(img, 608, 608), prediction)
   # Save img
   cv2.imwrite("boxes.jpg", boxes)
