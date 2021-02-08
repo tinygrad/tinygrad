@@ -51,7 +51,7 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
       probability = image_pred_[indexes[index]][4] * 100
       print("Detected", coco_labels[int(coco_class)], "{:.2f}%".format(probability))
 
-def letterbox_image(img, inp_dim=608):
+def letterbox_image(img, inp_dim=416):
   img_w, img_h = img.shape[1], img.shape[0]
   w, h = inp_dim
   new_w = int(img_w * min(w/img_w, h/img_h))
@@ -68,16 +68,20 @@ def add_boxes(img, prediction):
     return img
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
+  print(img.shape)
   height, width = img.shape[0:2]
-  scale_factor = 608 / width
+  scale_factor = 416 / width
 
-  prediction[:,[1,3]] -= (608 - scale_factor * width) / 2
-  prediction[:,[2,4]] -= (608 - scale_factor * height) / 2
+  prediction[:,[1,3]] -= (416 - scale_factor * width) / 2
+  prediction[:,[2,4]] -= (416 - scale_factor * height) / 2
 
   for i in range(prediction.shape[0]):
     pred = prediction[i]
     corner1 = tuple(pred[1:3].astype(int))
     corner2 = tuple(pred[3:5].astype(int))
+    w = corner2[0] - corner1[0]
+    h = corner2[1] - corner1[1]
+    corner2 = (corner2[0] + w, corner2[1] + h)
     label = coco_labels[int(pred[-1])]
     img = cv2.rectangle(img, corner1, corner2, (255, 0, 0), 2)
     t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 1 , 1)[0]
@@ -154,11 +158,11 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
     image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
   except:
     print("No detections found!")
-    pass
+    return 0
 
   if image_pred_.shape[0] == 0:
-    print("Exception occurred!")
-    pass
+    print("No detections found!")
+    return 0
   
   def unique(tensor):
     tensor_np = tensor
@@ -174,8 +178,8 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
     # class_mask_ind = np.nonzero()
     image_pred_class = np.reshape(image_pred_[class_mask_ind], (-1, 7))
     
-    #sort the detections such that the entry with the maximum objectness
-    #confidence is at the top
+    # sort the detections such that the entry with the maximum objectness
+    # confidence is at the top
     conf_sort_index = np.argsort(image_pred_class[:,4])
     image_pred_class = image_pred_class[conf_sort_index]
     idx = image_pred_class.shape[0]   #Number of detections
@@ -191,12 +195,11 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
       except IndexError:
         break
   
-      #Zero out all the detections that have IoU > treshhold
+      # Zero out all the detections that have IoU > treshhold
       iou_mask = np.expand_dims((ious < nms_conf), axis=1)
-      # iou_mask = (ious < nms_conf).float().unsqueeze(1)
       image_pred_class[i+1:] *= iou_mask
   
-      #Remove the non-zero entries
+      # Remove the non-zero entries
       non_zero_ind = np.squeeze(np.nonzero(image_pred_class[:,4]))
       image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))    
 
@@ -217,7 +220,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
 def imresize(img, w, h):
   return np.array(Image.fromarray(img).resize((w, h)))
 
-def resize(img, inp_dim=(608, 608)):
+def resize(img, inp_dim=(416, 416)):
   img_w, img_h = img.shape[1], img.shape[0]
   w, h = inp_dim
   new_w = int(img_w * min(w/img_w, h/img_h))
@@ -231,7 +234,7 @@ def resize(img, inp_dim=(608, 608)):
 
 def infer(model, img):
   img = np.array(img)
-  img = imresize(img, 608, 608)
+  img = imresize(img, 416, 416)
   # img = resize(img)
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
@@ -283,12 +286,12 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   # TODO: Fix this
   def dsigmoid(data):
     return 1/(1+np.exp(-data))
-
+  
   prediction_cpu[:,:,0] = dsigmoid(prediction_cpu[:,:,0])
   prediction_cpu[:,:,1] = dsigmoid(prediction_cpu[:,:,1])
   prediction_cpu[:,:,4] = dsigmoid(prediction_cpu[:,:,4])
   
-  #Add the center offsets
+  # Add the center offsets
   grid = np.arange(grid_size)
   a, b = np.meshgrid(grid, grid)
 
@@ -308,6 +311,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   prediction_cpu[:,:,2:4] = np.exp(prediction_cpu[:,:,2:4])*anchors
   prediction_cpu[:,:,5: 5 + num_classes] = dsigmoid((prediction_cpu[:,:, 5 : 5 + num_classes]))
   prediction_cpu[:,:,:4] *= stride
+  prediction.gpu_()
 
   return Tensor(prediction_cpu)
 
@@ -396,13 +400,11 @@ class Darknet:
 
         anchors = x["anchors"].split(",")
         anchors = [int(a) for a in anchors]
-        anchors = [(anchors[i], anchors[i+1]) for i in range(0, len(anchors),2)]
+        anchors = [(anchors[i], anchors[i+1]) for i in range(0, len(anchors), 2)]
         anchors = [anchors[i] for i in mask]
 
         detection = DetectionLayer(anchors)
         module.append(detection)
-      
-
       
       # Append to module_list
       module_list.append(module)
@@ -516,7 +518,7 @@ class Darknet:
 
     for i, module in enumerate(modules):
       module_type = (module["type"])
-      print("Running forward on", module_type)
+      st = time.time()
       if module_type == "convolutional" or module_type == "upsample":
         for index, layer in enumerate(self.module_list[i]):
           x = layer(x)
@@ -543,7 +545,9 @@ class Darknet:
       
       elif module_type == "yolo":
         anchors = self.module_list[i][0].anchors
-        inp_dim = int(self.net_info["height"])
+        # inp_dim = int(self.net_info["height"]) TODO: Uncomment this
+        inp_dim = 416
+
         num_classes = int(module["classes"])
         # Transform
         x = predict_transform(x, inp_dim, anchors, num_classes)
@@ -553,6 +557,12 @@ class Darknet:
         else:
           detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
       
+      # print('layer took %.2f s' % (time.time() - st))
+      print("Output from layer", i, module_type)
+      if module_type == "yolo":
+        print(x.cpu().data[0][0])
+      else:
+        print(x.cpu().data[0][0][0])
       outputs[i] = x
     
     return detections # Return detections
@@ -592,7 +602,7 @@ if __name__ == "__main__":
       prediction = infer(model, img)
       prediction = process_results(prediction)
 
-      boxes = add_boxes(imresize(np.array(img), 608, 608), prediction)
+      boxes = add_boxes(imresize(np.array(img), 416, 416), prediction)
       boxes = cv2.cvtColor(boxes, cv2.COLOR_RGB2BGR)
       cv2.imshow('yolo', boxes)
       if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -612,7 +622,6 @@ if __name__ == "__main__":
   print('did inference in %.2f s' % (time.time() - st))
 
   prediction = process_results(prediction)
-  """
   print("PREDICTION:")
   print(prediction[0])
   print("-------------------------")
@@ -620,7 +629,6 @@ if __name__ == "__main__":
   print("-------------------------")
   print(prediction[2])
   print("-------------------------")
-  """
-  boxes = add_boxes(img, prediction)
+  boxes = add_boxes(imresize(img, 416, 416), prediction)
   # Save img
   cv2.imwrite("boxes.jpg", boxes)
