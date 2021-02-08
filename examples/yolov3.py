@@ -278,7 +278,9 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   prediction = prediction.transpose(order=(0, 2, 1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
   
+  # st = time.time()
   prediction_cpu = prediction.cpu().data
+  # print('put on CPU in %.2f s' % (time.time() - st))
 
   anchors = [(a[0]/stride, a[1]/stride) for a in anchors]
   #Sigmoid the  centre_X, centre_Y. and object confidence
@@ -561,7 +563,6 @@ class Darknet:
     
     return detections # Return detections
 
-
 if __name__ == "__main__":
   cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg') # normal model
   # cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg') # tiny model
@@ -585,7 +586,7 @@ if __name__ == "__main__":
 
   img = None
   # We use cv2 because for some reason, cv2 imread produces better results?
-  if url == "webcam":
+  if url == 'webcam':
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     while 1:
@@ -611,11 +612,12 @@ if __name__ == "__main__":
   
   # Predict
   st = time.time()
-  print("running inference…")
+  print('running inference…')
   prediction = infer(model, img)
   print('did inference in %.2f s' % (time.time() - st))
 
   prediction = process_results(prediction)
+  # print(prediction)
   boxes = add_boxes(imresize(img, 608, 608), prediction)
   # Save img
-  cv2.imwrite("boxes.jpg", boxes)
+  cv2.imwrite('boxes.jpg', boxes)

@@ -88,5 +88,5 @@ class Conv2d:
         x = x.conv2d(self.weight, stride=self.stride, groups=self.groups).add(self.bias)
       else:
         x = x.conv2d(self.weight, stride=self.stride, groups=self.groups)
-    
+
     return x
