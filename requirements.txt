@@ -1,5 +1,6 @@
 numpy
 pyopencl==2020.2.2
+reikna==0.7.5
 # util deps
 requests
 # testing deps
