@@ -330,13 +330,13 @@ def _register_ops(namespace, device=Device.CPU):
 from tinygrad import ops_cpu
 _register_ops(ops_cpu)
 try:
-    import reikna.cluda as cluda
-    from tinygrad import ops_gpu
+  import reikna.cluda as cluda
+  from tinygrad import ops_gpu
 
-    _register_ops(ops_gpu, device=Device.GPU)
-    api = cluda.cuda_api() if os.environ.get("GPAPI", "opencl") == "cuda" else cluda.ocl_api()
-    thr = api.Thread.create()
-    GPU = True
+  _register_ops(ops_gpu, device=Device.GPU)
+  api = cluda.cuda_api() if os.environ.get("GPAPI", "opencl") == "cuda" else cluda.ocl_api()
+  thr = api.Thread.create()
+  GPU = True
 except ImportError:
   # no GPU support
   GPU = False

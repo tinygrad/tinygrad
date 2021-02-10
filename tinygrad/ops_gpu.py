@@ -6,7 +6,7 @@ def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
 def buffer_np(ctx, x):
-    return ctx.thr.to_device(x)
+  return ctx.thr.to_device(x)
 
 @functools.lru_cache()
 def clbuild(cl_ctx, name, prg):
@@ -19,15 +19,15 @@ i32 = np.int32
 # ************* unary ops *************
 
 def unary_op(ctx, code, x):
-    ret = buffer_new(ctx, x.shape)
-    unop = ctx.thr.compile("""
+  ret = buffer_new(ctx, x.shape)
+  unop = ctx.thr.compile("""
   KERNEL void unop(GLOBAL_MEM const float *a_g, GLOBAL_MEM float *res_g) {
     SIZE_T gid = get_global_id(0);
     float a = a_g[gid];
     res_g[gid] = """ + code + """;
   }""")
-    unop.unop(x.cl, ret.cl, global_size=[int(np.prod(ret.shape))])
-    return ret
+  unop.unop(x.cl, ret.cl, global_size=[int(np.prod(ret.shape))])
+  return ret
 
 class ReLU(Function):
   @staticmethod
