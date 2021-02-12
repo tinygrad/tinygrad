@@ -20,13 +20,13 @@ i32 = np.int32
 
 def unary_op(ctx, code, x):
   ret = buffer_new(ctx, x.shape)
-  unop = ctx.thr.compile("""
+  unop = clbuild(ctx.thr, """
   KERNEL void unop(GLOBAL_MEM const float *a_g, GLOBAL_MEM float *res_g) {
     SIZE_T gid = get_global_id(0);
     float a = a_g[gid];
     res_g[gid] = """ + code + """;
-  }""")
-  unop.unop(x.cl, ret.cl, global_size=[int(np.prod(ret.shape))])
+  }""", "unop")
+  unop(x.cl, ret.cl, global_size=[int(np.prod(ret.shape))])
   return ret
 
 class ReLU(Function):
@@ -77,7 +77,7 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
     ret.shape = (1,)
 
   # TODO: this is insanely slow
-  reduce = ctx.thr.compile("""
+  reduce = clbuild(ctx.thr, """
   KERNEL void reduce(GLOBAL_MEM const float *a_g, int sz, GLOBAL_MEM float *res_g, int prod, int n_dims,
                        GLOBAL_MEM const int *shape_x, GLOBAL_MEM const int *shape_ret) {
     SIZE_T gid = get_global_id(0);
@@ -101,8 +101,8 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
       """ + code + """;
     }
     res_g[gid] = """ + code2 + """;
-  }""")
-  reduce.reduce(inp.cl,
+  }""", "reduce")
+  reduce(inp.cl,
     i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
