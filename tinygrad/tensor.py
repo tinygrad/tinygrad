@@ -38,7 +38,7 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     self.shape, self.dtype = tuple(shape), np.float32
     self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
-      thr.to_device(hostbuf.astype(np.float32) if hostbuf is not None else np.zeros(shape, np.float32))
+      thr.to_device(hostbuf.astype(np.float32).ravel() if hostbuf is not None else np.zeros(shape, np.float32))
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r} and data {self.cl.get()}>"
