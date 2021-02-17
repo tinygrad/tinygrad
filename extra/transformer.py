@@ -32,6 +32,7 @@ class TransformerBlock:
     bs = x.shape[0]
     embed_dim = self.num_heads * self.head_size
     inputs = x.reshape(shape=(-1, embed_dim))
+    inputs = layernorm(inputs, embed_dim)
 
     # run multi head attention (bs, T, num_heads, head_size)
     query, key, value = [inputs.dot(y) \
@@ -49,7 +50,6 @@ class TransformerBlock:
     x = inputs + attention.reshape(shape=(-1, embed_dim)).dot(self.final).dropout(0.1)
     x = layernorm(x, embed_dim)
     x = x + x.dot(self.ff1).relu().dot(self.ff2).dropout(0.1)
-    x = layernorm(x, embed_dim)
     return x.reshape(shape=(bs, -1, embed_dim))
 
 class Transformer:
