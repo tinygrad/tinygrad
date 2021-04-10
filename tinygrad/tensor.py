@@ -296,7 +296,7 @@ class Function:
   def __new__(cls, *args, **kwargs):
     cls.forward = staticmethod(cls.forward)
     cls.backward = staticmethod(cls.backward)
-    return super().__new__(cls)
+    return super().__new__(cls) #
 
   def __init__(self, *tensors):
     self.parents = tensors
