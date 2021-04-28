@@ -28,7 +28,6 @@ def compile_relu(ane, sz):
   return compile_wrapper(ane, bytes(dat))
 
 class ReLU(Function):
-  @staticmethod
   def forward(ctx, input):
     ret = ctx.ane.tensor(input.shape)
     ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
