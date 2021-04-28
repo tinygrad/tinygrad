@@ -621,3 +621,4 @@ if __name__ == "__main__":
   boxes = add_boxes(imresize(img, 608, 608), prediction)
   # Save img
   cv2.imwrite('boxes.jpg', boxes)
+  
