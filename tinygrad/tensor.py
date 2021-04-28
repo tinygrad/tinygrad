@@ -110,6 +110,10 @@ class Tensor:
   @classmethod
   def randn(cls, *shape, **kwargs):
     return cls(np.random.randn(*shape).astype(np.float32), **kwargs)
+  
+  @classmethod
+  def arange(cls, stop, start=0, **kwargs):
+    return cls(np.arange(start=start, stop=stop).astype(np.float32), **kwargs)
 
   @classmethod
   def uniform(cls, *shape, **kwargs):
@@ -200,7 +204,7 @@ class Tensor:
     return Tensor(self.data, device=self.device)
 
   # ***** non first class ops *****
-
+  
   def __getitem__(self, val):
     arg = []
     for i,s in enumerate(val if type(val) in [list, tuple] else ([] if val is None else [val])):
