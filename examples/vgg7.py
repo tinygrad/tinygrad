@@ -1,6 +1,6 @@
 from PIL import Image
 from tinygrad.tensor import Tensor
-from tinygrad.optim import Adam
+from tinygrad.optim import SGD
 import extra.waifu2x
 from extra.kinne import KinneDir
 import sys
@@ -114,7 +114,9 @@ elif cmd == "train":
   load_and_save(model, False)
 
   print("Training...")
-  optim = Adam(vgg7.get_parameters())
+  # Adam has a tendency to destroy the state of the network when restarted
+  # Plus it's slower
+  optim = SGD(vgg7.get_parameters())
 
   rnum = 0
   while True:
@@ -135,15 +137,16 @@ elif cmd == "train":
     # This runs the actual network normally
     out = vgg7.forward(sample_x)
     # Subtraction determines error here (as this is an image, not classification).
-    # Mean determines how errors are treated.
-    # Do not use Sum. I tried that. It worked while I was using 1x1 patches...
-    # Then it went exponential.
     # *Abs is the important bit* - at least for me, anyway.
     # The training process seeks to minimize this 'loss' value.
     # Minimization of loss *tends towards negative infinity*, so without the abs,
     #  or without an implicit abs (the mul in the README),
     #  loss will always go haywire in one direction or another.
-    loss = sample_y.sub(out).mean().abs()
+    # Mean determines how errors are treated.
+    # Do not use Sum. I tried that. It worked while I was using 1x1 patches...
+    # Then it went exponential.
+    # Also, Mean goes *after* abs. I realize this should have been obvious to me.
+    loss = sample_y.sub(out).abs().mean()
     # This is the bit where tinygrad works backward from the loss
     optim.zero_grad()
     loss.backward()
