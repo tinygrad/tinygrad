@@ -113,6 +113,26 @@ elif cmd == "train":
 
   load_and_save(model, False)
 
+  # Initialize sample probabilities.
+  # This is used to try and get the network to focus on "interesting" samples,
+  #  which works nicely with the microsample system.
+  sample_probs = None
+  sample_probs_path = model + "/sample_probs.bin"
+  try:
+    # try to read...
+    sample_probs = numpy.fromfile(sample_probs_path, "<f8")
+    if sample_probs.shape[0] != samples_count:
+      print("sample probs size != sample count - initializing")
+      sample_probs = None
+  except:
+    # it's fine
+    print("sample probs could not be loaded - initializing")
+    pass
+
+  if sample_probs is None:
+    # This stupidly high amount is used to force an initial pass over all samples
+    sample_probs = numpy.ones(samples_count) * 1000
+
   print("Training...")
   # Adam has a tendency to destroy the state of the network when restarted
   # Plus it's slower
@@ -124,7 +144,12 @@ elif cmd == "train":
     if rnum == rounds:
       break
 
-    sample_idx = random.randint(0, samples_count - 1)
+    sample_idx = 0
+    try:
+      sample_idx = numpy.random.choice(samples_count, p = sample_probs / sample_probs.sum())
+    except:
+      print("exception occurred (PROBABLY value-probabilities-dont-sum-to-1)")
+      sample_idx = random.randint(0, samples_count - 1)
 
     x_img = extra.waifu2x.image_load(samples_base + "/" + str(sample_idx) + "a.png")
     y_img = extra.waifu2x.image_load(samples_base + "/" + str(sample_idx) + "b.png")
@@ -153,17 +178,27 @@ elif cmd == "train":
     # And this updates the parameters
     optim.step()
 
-    print("Round " + str(rnum) + " : " + str(loss.max().data[0]))
+    # warning: used by sample probability adjuster
+    loss_indicator = loss.max().data[0]
+    print("Round " + str(rnum) + " : " + str(loss_indicator))
 
     if (rnum % rounds_per_save) == 0:
       print("Saving")
       load_and_save(model, True)
+      sample_probs.astype("<f8", "C").tofile(sample_probs_path)
+
+    # Update round state
+    # Number
     rnum = rnum + 1
+    # Probability management
+    # there must always be a probability, no matter how slim, even if loss goes to 0
+    sample_probs[sample_idx] = max(loss_indicator, 1.e-10)
 
   # if we were told to save every round, we already saved
   if rounds_per_save != 1:
     print("Done with all rounds, saving")
     load_and_save(model, True)
+    sample_probs.astype("<f8", "C").tofile(sample_probs_path)
 
 elif cmd == "samplify":
   a_img = sys.argv[2]
