@@ -10,11 +10,11 @@ from extra.utils import fetch, get_parameters
 # mnist loader
 def fetch_mnist():
   import gzip
-  parse = lambda dat: np.frombuffer(gzip.decompress(dat), dtype=np.uint8).copy()
-  X_train = parse(fetch("http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz"))[0x10:].reshape((-1, 28*28)).astype(np.float32)
-  Y_train = parse(fetch("http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz"))[8:]
-  X_test = parse(fetch("http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz"))[0x10:].reshape((-1, 28*28)).astype(np.float32)
-  Y_test = parse(fetch("http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz"))[8:]
+  parse = lambda file: np.frombuffer(gzip.open(file).read(), dtype=np.uint8).copy()
+  X_train = parse("test/mnist/train-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
+  Y_train = parse("test/mnist/train-labels-idx1-ubyte.gz")[8:]
+  X_test = parse("test/mnist/t10k-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
+  Y_test = parse("test/mnist/t10k-labels-idx1-ubyte.gz")[8:]
   return X_train, Y_train, X_test, Y_test
 
 # load the mnist dataset
