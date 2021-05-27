@@ -19,9 +19,10 @@ if DEBUG:
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    self.name, self.x = f"back_{name}" if backward else name, x
+    self.name, self.x, self.output = f"back_{name}" if backward else name, x, None
   def __enter__(self):
     if DEBUG: self.st = time.time()
+    return self
   def __exit__(self, *junk):
     if DEBUG:
       if cl_queue is not None:
@@ -29,7 +30,7 @@ class ProfileOp:
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
-      print(f"{self.name:>20} : {et:>7.2f} ms {[y.shape for y in self.x]}")
+      print(f"{self.name:>20} : {et:>7.2f} ms {str([y.shape for y in self.x]):>40} {'-> '+str(self.output.shape) if self.output is not None else ''}")
 
 # **** GPU functions ****
 
@@ -143,8 +144,8 @@ class Tensor:
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
-      with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
-        grads = t0._ctx.backward(t0._ctx, t0.grad.data)
+      with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
+        po.output = grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
       for t, g in zip(t0._ctx.parents, grads):
@@ -321,8 +322,8 @@ class Function:
     # overwrite with passed params
     for k, v in kwargs.items():
       setattr(ctx, k, v)
-    with ProfileOp(ctx.__class__.__name__, x):
-      ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
+    with ProfileOp(ctx.__class__.__name__, x) as po:
+      po.output = ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
                    device=ctx.device, requires_grad=any([t.requires_grad for t in x]))
     if ret.requires_grad:
       ret._ctx = ctx
