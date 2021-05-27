@@ -234,7 +234,7 @@ class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
     shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    r = GPUBuffer(shape, hostbuf=x)
+    r = GPUBuffer(shape, hostbuf=x)   # NOTE: this is not a copy
     assert np.prod(x.shape) == np.prod(r.shape)
     return r
 
