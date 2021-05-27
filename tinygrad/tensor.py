@@ -354,6 +354,8 @@ def _register_ops(namespace, device=Device.CPU):
 
 from tinygrad import ops_cpu
 _register_ops(ops_cpu)
+from tinygrad import ops_risk
+_register_ops(ops_risk)
 try:
   import pyopencl as cl
   # TODO: move this import to require_init_gpu?
