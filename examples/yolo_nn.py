@@ -90,3 +90,25 @@ class Conv2d:
         x = x.conv2d(self.weight, stride=self.stride, groups=self.groups)
 
     return x
+
+def strided_pool2d(x, kernel_size=(2,2), stride=2, pooling='max'):
+  import numpy as np
+  from numpy.lib.stride_tricks import as_strided
+
+  print("Stride", stride)
+
+  output_shape = ((x.shape[2] - kernel_size[0])//stride + 1, (x.shape[3] - kernel_size[1])//stride + 1)
+  output_array = np.ndarray(shape=(x.shape[0], x.shape[1], output_shape[0], output_shape[1]))
+
+  for i in range(x.shape[1]): # iterate channels (RGB)
+    input_data = x[0][i]
+    output_shape = ((input_data.shape[0] - kernel_size[0])//stride + 1, (input_data.shape[1] - kernel_size[1])//stride + 1)
+    strided = as_strided(input_data, shape = output_shape + kernel_size, strides = (stride * input_data.data.strides[0], stride * input_data.data.strides[1]) + input_data.data.strides)
+    strided = strided.reshape(-1, *kernel_size)
+    if pooling == 'max':
+      output_array[0][i] = strided.max(axis=(1,2)).reshape(output_shape)
+    elif pooling == 'avg':
+      output_array[0][i] = strided.mean(axis=(1,2)).reshape(output_shape)
+    else:
+      raise Exception("strided_pool2d() only supports 'max' and 'avg' pooling options")
+  return output_array
