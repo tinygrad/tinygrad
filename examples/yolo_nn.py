@@ -95,8 +95,6 @@ def strided_pool2d(x, kernel_size=(2,2), stride=2, pooling='max'):
   import numpy as np
   from numpy.lib.stride_tricks import as_strided
 
-  print("Stride", stride)
-
   output_shape = ((x.shape[2] - kernel_size[0])//stride + 1, (x.shape[3] - kernel_size[1])//stride + 1)
   output_array = np.ndarray(shape=(x.shape[0], x.shape[1], output_shape[0], output_shape[1]))
 
