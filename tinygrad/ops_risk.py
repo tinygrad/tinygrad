@@ -1,19 +1,66 @@
 # RISK architecture is going to change everything
+# implement on S7t-VG6
 
 import numpy as np
 from .tensor import Function
 
-# 16x32 * 32x32 -> 16x32 matmul
-# 16x32 ALU
+# 16x32 * 32x32 -> 16x32 matmul = 32768 FLOPS @ 1 GHz = 32 TOPS
+# 16x32 (aka 512 element) ALU
 # 512 wide permute
 # 512 wide load/store (1 cycle to SRAM)
+# all in elements, aka TF32 (19 bits)
 
-def risk_matmul(x, w):
+# targets:
+#   matmul input
+#   matmul weights(0-16)
+#   matmul weights(16-32)
+#   ALU
+#   permute
+
+# 1024x1024x4x19 bits = 10MB
+# fully strided
+# load512 <target>, <address>, <stride x (16)>, <stride y (32)>
+
+# 4 slots
+# <input> <weight> <output> <empty>
+# <empty> <output> <input> <weight>
+# <weight> <input> <empty> <output>
+
+sram = np.zeros((1024*1024*4), dtype=np.float32)
+regfile = {}
+
+from enum import Enum
+class Target(Enum):
+  MATMUL_INPUT = 0
+  MATMUL_WEIGHTS_LO = 1
+  MATMUL_WEIGHTS_HI = 2
+  ALU = 3
+for t in Target:
+  regfile[t] = np.zeros((16, 32))
+  
+
+def risk_instruction_matmul(x, w):
   assert x.shape == (16,32)
   assert w.shape == (32,32)
   return x@w
 
-def risk_matmul_wrapper(x, w):
+def risk_instruction_load512(target, address, stride_x, stride_y):
+  d = regfile[target]
+  for x in range(0, 16):
+    for y in range(0, 32):
+      d[x, y] = sram[address] 
+      address += stride_y
+    address += stride_x
+
+def risk_instruction_store512(target, address, stride_x, stride_y):
+  d = regfile[target]
+  for x in range(0, 16):
+    for y in range(0, 32):
+      sram[address] = d[x, y]
+      address += stride_y
+    address += stride_x
+
+def risk_matmul(x, w):
   pass
 
 
@@ -65,3 +112,4 @@ class Conv2D(Function):
 
   def backward(ctx, grad_output):
     pass
+
