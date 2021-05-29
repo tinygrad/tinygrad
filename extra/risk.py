@@ -96,7 +96,7 @@ def riski_dmar(address, arr):
 def riski_dmaw(address, shp):
   return sram[address:address+np.prod(shp)].reshape(shp)
 
-# *** RISK-V code ***
+# *** RISK-5 code ***
 
 def risk_matmul(x, w):
   # copy matrices into SRAM
