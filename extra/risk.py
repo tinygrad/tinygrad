@@ -28,7 +28,7 @@ from collections import defaultdict
 # <empty> <output> <input> <weight>
 # <weight> <input> <empty> <output>
 
-SZ = 2
+SZ = 32
 
 sram = np.zeros((1024*1024*4), dtype=np.float32)
 regfile = {}
@@ -80,14 +80,14 @@ def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
   d[:] = 0
   for y in range(0, len_y):
     for x in range(0, len_x):
-      d[y, x] = sram[address + x*stride_x + y*stride_y]
+      d[y, x] = sram[address + y*stride_y + x*stride_x]
 
 @count
 def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
   d = regfile[target]
   for y in range(0, len_y):
     for x in range(0, len_x):
-      sram[address + x*stride_x + y*stride_y] = d[y, x]
+      sram[address + y*stride_y + x*stride_x] = d[y, x]
 
 def riski_dmar(address, arr):
   arr = arr.reshape(-1)
@@ -138,7 +138,6 @@ class TestRisk(unittest.TestCase):
     x = np.random.uniform(size=(47, 79)).astype(np.float32)
     w = np.random.uniform(size=(79, 42)).astype(np.float32)
     np.testing.assert_allclose(x @ w, risk_matmul(x, w), rtol=1e-5)
-    
 
 if __name__ == "__main__":
   np.random.seed(1337)
