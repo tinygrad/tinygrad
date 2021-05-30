@@ -1,3 +1,3 @@
 #!/bin/bash
-openocd -d -f digilent_arty.cfg 
+openocd -d -f digilent_arty.cfg
 
