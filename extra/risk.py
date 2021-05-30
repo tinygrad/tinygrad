@@ -94,33 +94,49 @@ def riski_dmar(address, arr):
   sram[address:address+arr.shape[0]] = arr
 
 def riski_dmaw(address, shp):
-  return sram[address:address+np.prod(shp)].reshape(shp)
+  return np.copy(sram[address:address+np.prod(shp)].reshape(shp))
 
 # *** RISK-5 code ***
 
-def risk_matmul(x, w):
+def risk_matmul(x, w, transpose_x=False, transpose_w=False):
   # copy matrices into SRAM
   # x is M x K
   # w is K x N
   # out is M x N
   riski_dmar(SLOT(0), x)
   riski_dmar(SLOT(1), w)
-  M,K,N = x.shape[0], x.shape[1], w.shape[1]
-  assert x.shape == (M,K)
-  assert w.shape == (K,N)
+
+  if transpose_x:
+    K,M = x.shape[-2], x.shape[-1]
+  else:
+    M,K = x.shape[-2], x.shape[-1]
+  if transpose_w:
+    N = w.shape[-2]
+    assert w.shape[-1] == K
+  else:
+    N = w.shape[-1]
+    assert w.shape[-2] == K
+  cnt = np.prod(x.shape[0:-2]) if len(x.shape) > 2 else 1
 
   # do matmul
-  for m in range(0, M, SZ):
-    for n in range(0, N, SZ):
-      riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
-      for k in range(0, K, SZ):
-        riski_load(Reg.MATMUL_INPUT, SLOT(0)+m*K+k, K, 1, min(SZ, M-m), min(SZ, K-k))
-        riski_load(Reg.MATMUL_WEIGHTS, SLOT(1)+k*N+n, N, 1, min(SZ, K-k), min(SZ, N-n))
-        riski_matmul()
-      riski_store(Reg.MATMUL_OUTPUT, SLOT(2)+m*N+n, N, 1, min(SZ, M-m), min(SZ, N-n))
+  for c in range(cnt):
+    for m in range(0, M, SZ):
+      for n in range(0, N, SZ):
+        riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+        for k in range(0, K, SZ):
+          if transpose_x:
+            riski_load(Reg.MATMUL_INPUT, SLOT(0)+c*M*K + k*M+m, 1, M, min(SZ, M-m), min(SZ, K-k))
+          else:
+            riski_load(Reg.MATMUL_INPUT, SLOT(0)+c*M*K + m*K+k, K, 1, min(SZ, M-m), min(SZ, K-k))
+          if transpose_w:
+            riski_load(Reg.MATMUL_WEIGHTS, SLOT(1)+c*K*N + n*K+k, 1, K, min(SZ, K-k), min(SZ, N-n))
+          else:
+            riski_load(Reg.MATMUL_WEIGHTS, SLOT(1)+c*K*N + k*N+n, N, 1, min(SZ, K-k), min(SZ, N-n))
+          riski_matmul()
+        riski_store(Reg.MATMUL_OUTPUT, SLOT(2)+c*M*N + m*N+n, N, 1, min(SZ, M-m), min(SZ, N-n))
 
   # copy back from SRAM
-  return riski_dmaw(SLOT(2), (x.shape[0], w.shape[1]))
+  return riski_dmaw(SLOT(2), (*x.shape[0:-2],M,N))
 
 import unittest
 class TestRisk(unittest.TestCase):
@@ -138,6 +154,24 @@ class TestRisk(unittest.TestCase):
     x = np.random.uniform(size=(47, 79)).astype(np.float32)
     w = np.random.uniform(size=(79, 42)).astype(np.float32)
     np.testing.assert_allclose(x @ w, risk_matmul(x, w), rtol=1e-5)
+
+  def test_matmul_transpose(self):
+    x = np.random.uniform(size=(33, 33)).astype(np.float32)
+    w = np.random.uniform(size=(33, 33)).astype(np.float32)
+    np.testing.assert_allclose(x @ w, risk_matmul(x, w), rtol=1e-5)
+    np.testing.assert_allclose(x.T @ w, risk_matmul(x, w, True), rtol=1e-5)
+    np.testing.assert_allclose(x @ w.T, risk_matmul(x, w, False, True), rtol=1e-5)
+    np.testing.assert_allclose(x.T @ w.T, risk_matmul(x, w, True, True), rtol=1e-5)
+
+  def test_matmul_transpose_uneven_w(self):
+    x = np.random.uniform(size=(47, 79)).astype(np.float32)
+    w = np.random.uniform(size=(42, 79)).astype(np.float32)
+    np.testing.assert_allclose(x @ w.T, risk_matmul(x, w, transpose_w=True), rtol=1e-5)
+
+  def test_matmul_transpose_uneven_x(self):
+    x = np.random.uniform(size=(79, 47)).astype(np.float32)
+    w = np.random.uniform(size=(79, 42)).astype(np.float32)
+    np.testing.assert_allclose(x.T @ w, risk_matmul(x, w, transpose_x=True), rtol=1e-5)
 
 if __name__ == "__main__":
   np.random.seed(1337)
