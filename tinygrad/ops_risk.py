@@ -71,8 +71,8 @@ class Conv2D(Function):
                       H*W, cin*H*W, min(SZ, cin-ci), min(SZ, rcout-c))
                     riski_matmul()
               riski_store(Reg.MATMUL_OUTPUT,
-                SLOT(2) + B*groups*cin*iy*ix + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
-                groups*cin*iy*ix, oy*ox, min(SZ, bs-B), min(SZ, rcout-c))
+                SLOT(2) + B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
+                groups*rcout*oy*ox, oy*ox, min(SZ, bs-B), min(SZ, rcout-c))
     
     #print(x.shape, w.shape, "->", ret.shape)
     return riski_dmaw(SLOT(2), (bs, cout, oy, ox))
