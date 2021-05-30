@@ -56,14 +56,42 @@ class Conv2D(Function):
     print(bs, ctx.groups, rcout, oy, ox, cin, H, W)
 
     for B in range(0, bs):
-      if cin == 1 and rcout == 1 and ctx.groups > 1:
+      if cin == 1 and rcout == 1 and ctx.groups > 1 and False:
+        # hmm, this doesn't work, it's not a matmul
+        # you always have to loop over the groups, since they aren't joint
+        # the idea would be to collapse the HxW into the matmul, but you'd be limited to 9 for 3x3
+        # and while the load is easy in the weight matrix, it's hard in the image matrix (3 strides)
+        # and only the diagonal of the matrix would be useful! groups aren't channels!
+        # [(1, 144, 58, 58), (144, 1, 3, 3)] -> (1, 144, 56, 56)
+
         print("opt1")
+
+        # x:   bs x groups x iy x ix
+        # w:        groups x H  x W
+        # out: bs x groups x oy x ox
+        # ix x (H*W) x ox
         for g in range(0, groups, SZ):
           for Y in range(0, oy):
             for X in range(0, ox, SZ):
               IY,IX = Y*ys,X*xs
+              riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+              for y in range(IY, IY+H):
+                for x in range(IX, IX+W):
+                  riski_load(Reg.MATMUL_INPUT,
+                    SLOT(0) + B*groups*iy*ix + g*iy*ix + y*ix + x,
+                    xs, iy*ix, min(SZ, ox-X), min(SZ, groups-g))
+                  riski_load(Reg.MATMUL_WEIGHTS,
+                    SLOT(1) + g*H*W + (y-IY)*W + (x-IX),
+                    H*W, 1, min(SZ, groups-g), 1)
+                  riski_matmul()
+              riski_store(Reg.MATMUL_OUTPUT,
+                SLOT(2) + B*groups*oy*ox + g*oy*ox + Y*ox + X,
+                1, oy*ox, min(SZ, ox-X), 1)
+
       elif H == 1 and W == 1 and xs == 1 and ys == 1:
         print("opt2")
+        # oxy x cin x rcout -- unstrided 1x1
+        # this is a simple matmul
         for g in range(0, groups):
           for c in range(0, rcout, SZ):
             yx = oy*ox
@@ -83,6 +111,7 @@ class Conv2D(Function):
                 SLOT(2) + B*groups*rcout*yx + g*rcout*yx + c*yx + YX,
                 1, yx, min(SZ, yx-YX), min(SZ, rcout-c))
       else:
+        print("unoptimized")
         # ox x cin x rcout -- unoptimized
         for g in range(0, groups):
           for c in range(0, rcout, SZ):

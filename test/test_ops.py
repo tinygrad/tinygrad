@@ -164,12 +164,12 @@ class TestOps(unittest.TestCase):
   def test_fancy_conv2d(self):
     bs = 2
     cin = 3
+    cout = 1
     groups = 3
-    H = 1
-    W = 1
-    helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
+    H,W = 3,3
+    helper_test_op([(bs,cin,11,28), (groups*cout,cin//groups,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
 
   def test_strided_conv2d(self):
     bs = 4
