@@ -1,6 +1,6 @@
 import numpy as np
 from .tensor import Function
-from extra.risk import risk_matmul
+from extra.risk import *
 
 class Matmul(Function):
   def forward(ctx, input, weight):
@@ -13,8 +13,6 @@ class Matmul(Function):
     grad_weight = risk_matmul(input, grad_output, transpose_x=True)
     return grad_input, grad_weight
 
-
-"""
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     if type(ctx.stride) == int:
@@ -22,25 +20,13 @@ class Conv2D(Function):
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
     bs,cin_ = x.shape[0], x.shape[1]
+    iy,ix = x.shape[2],x.shape[3]
     oy,ox = (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
     assert cin*ctx.groups == cin_
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
-    
-    if H == 1 and W == 1 and ctx.groups == 1 and ctx.stride == (1,1):
-      d1 = x.shape[0] * x.shape[2] * x.shape[3]
-      assert x.shape[1] == w.shape[1]
-      d2 = x.shape[1]
-      d3 = w.shape[0]
-      print("1x1 CONV FAST == %d x %d x %d matmul" % (d1, d2, d3))
 
-      x11 = x.reshape(x.shape[1], x.shape[2]*x.shape[3]).T
-      w11 = w.reshape(w.shape[0], w.shape[1]).T
-      print(x11.shape, w11.shape)
-
-      ret = x11 @ w11
-
-      return ret.T.reshape(1, w.shape[0], x.shape[2], x.shape[3])
+    # if H == 1 and W == 1 and ctx.groups == 1 and ctx.stride == (1,1):
 
     gx = x.reshape(bs,ctx.groups,cin,x.shape[2],x.shape[3])
     tx = np.lib.stride_tricks.as_strided(gx,
@@ -51,15 +37,45 @@ class Conv2D(Function):
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
 
+    """
     ret = np.zeros((bs,ctx.groups,oy,ox,rcout),dtype=x.dtype)
     for g in range(ctx.groups):
       #ijYXyx,kjyx -> iYXk ->ikYX
       ret[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
-    ret = np.moveaxis(ret,4,2).reshape(bs, cout, oy, ox)
 
-    print(x.shape, w.shape, "->", ret.shape)
-    return ret
+    print(bs, ctx.groups, cin)
+    return np.moveaxis(ret,4,2).reshape(bs, cout, oy, ox)
+    """
 
+    riski_dmar(SLOT(0), x)   # bs, groups, cin, x.shape[2], x.shape[3]
+    riski_dmar(SLOT(1), w)   # groups, rcout, cin, H, W
+
+    # bs x cin x rcout
+    print(bs, ctx.groups, rcout, oy, ox, cin, H, W)
+    for B in range(0, bs, SZ):
+      for g in range(ctx.groups):
+        for c in range(0, rcout, SZ):
+          for Y in range(0, oy):
+            for X in range(0, ox):
+              IY,IX = Y*ys,X*xs
+              riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+              for ci in range(0, cin, SZ):
+                # not a loop in 1x1 convs, 9 in 3x3, 25 in 5x5
+                for y in range(IY, IY+H):
+                  for x in range(IX, IX+W):
+                    riski_load(Reg.MATMUL_INPUT,
+                      SLOT(0) + B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x,
+                      groups*cin*iy*ix, iy*ix, min(SZ, bs-B), min(SZ, cin-ci))
+                    riski_load(Reg.MATMUL_WEIGHTS,
+                      SLOT(1) + g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX),
+                      cin*H*W, H*W, min(SZ, rcout-c), min(SZ, cin-ci))
+                    riski_matmul()
+              riski_store(Reg.MATMUL_OUTPUT,
+                SLOT(2) + B*groups*cin*iy*ix + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
+                groups*cin*iy*ix, oy*ox, min(SZ, bs-B), min(SZ, rcout-c))
+    
+    #print(x.shape, w.shape, "->", ret.shape)
+    return riski_dmaw(SLOT(2), (bs, cout, oy, ox))
 
   def backward(ctx, grad_output):
     bs,_,oy,ox = grad_output.shape
@@ -86,5 +102,4 @@ class Conv2D(Function):
         gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-"""
 

@@ -28,7 +28,7 @@ from collections import defaultdict
 # <empty> <output> <input> <weight>
 # <weight> <input> <empty> <output>
 
-SZ = 32
+SZ = 4
 
 sram = np.zeros((1024*1024*4), dtype=np.float32)
 regfile = {}
@@ -52,7 +52,7 @@ def count(func):
   @functools.wraps(func)
   def wrapper(*args, **kwargs):
     cnts[func.__name__] += 1
-    func(*args, **kwargs)
+    return func(*args, **kwargs)
   return wrapper
 
 import atexit
@@ -89,10 +89,12 @@ def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
     for x in range(0, len_x):
       sram[address + y*stride_y + x*stride_x] = d[y, x]
 
+@count
 def riski_dmar(address, arr):
   arr = arr.reshape(-1)
   sram[address:address+arr.shape[0]] = arr
 
+@count
 def riski_dmaw(address, shp):
   return np.copy(sram[address:address+np.prod(shp)].reshape(shp))
 
