@@ -68,7 +68,7 @@ class Conv2D(Function):
                       groups*cin*iy*ix, iy*ix, min(SZ, bs-B), min(SZ, cin-ci))
                     riski_load(Reg.MATMUL_WEIGHTS,
                       SLOT(1) + g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX),
-                      cin*H*W, H*W, min(SZ, rcout-c), min(SZ, cin-ci))
+                      H*W, cin*H*W, min(SZ, cin-ci), min(SZ, rcout-c))
                     riski_matmul()
               riski_store(Reg.MATMUL_OUTPUT,
                 SLOT(2) + B*groups*cin*iy*ix + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
