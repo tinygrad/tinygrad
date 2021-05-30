@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 
 # RISK architecture is going to change everything
-# implement on S7t-VG6
+# implement on S7t-VG6 (lol, too much $$$)
+
+# Arty A7-100T
+#   256 MB of DDR3 with 2.6 GB/s of RAM bandwidth (vs 512 GB/s on S7t-VG6)
+#   255K 19-bit elements
 
 import functools
 import numpy as np
 from collections import defaultdict
 
 # 32x32 * 32x32 -> 32x32 matmul = 65536 FLOPS @ 1 GHz = 64 TOPS
+# mulacc is 2048 FLOPS, 32x less
 # 32x32 (aka 1024 element) ALU
 # 1024 wide permute
 # 1024 wide load/store (1 cycle to SRAM)
@@ -50,6 +55,7 @@ for t in Reg:
 cnts = defaultdict(int)
 tcnts = defaultdict(int)
 utils = defaultdict(int)
+maxdma = 0
 def count(func):
   @functools.wraps(func)
   def wrapper(*args, **kwargs):
@@ -66,6 +72,7 @@ def risk_print_counts():
   print(utils)
   util_n = sum([k[0]*k[1]*v for k,v in utils.items()])
   util_d = sum([SZ*SZ*v for k,v in utils.items()])
+  print("%.2f GOPS %d maxdma" % ((tcnts['riski_matmul']*SZ*SZ*SZ*2 + tcnts['riski_mulacc']*SZ*SZ*2)*1e-9, maxdma))
   print("ran in %.2f us with util %.2f%% total %.2f us" % (sum(cnts.values())*1e-3, util_n*100/(util_d+1), sum(tcnts.values())*1e-3))
 
 def risk_reset_counts():
@@ -115,7 +122,10 @@ def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
 
 @count
 def riski_dmar(address, arr):
+  global maxdma
   arr = arr.reshape(-1)
+  maxdma = max(maxdma, arr.shape[0])
+  print("DMA %d elements" % arr.shape[0])
   sram[address:address+arr.shape[0]] = arr
 
 @count
