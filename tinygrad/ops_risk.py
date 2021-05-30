@@ -52,32 +52,62 @@ class Conv2D(Function):
     riski_dmar(SLOT(0), x)   # bs, groups, cin, x.shape[2], x.shape[3]
     riski_dmar(SLOT(1), w)   # groups, rcout, cin, H, W
 
-    # bs x cin x rcout
+    risk_reset_counts()
     print(bs, ctx.groups, rcout, oy, ox, cin, H, W)
+
     for B in range(0, bs):
-      for g in range(0, groups):
-        for c in range(0, rcout, SZ):
+      if cin == 1 and rcout == 1 and ctx.groups > 1:
+        print("opt1")
+        for g in range(0, groups, SZ):
           for Y in range(0, oy):
             for X in range(0, ox, SZ):
               IY,IX = Y*ys,X*xs
-
+      elif H == 1 and W == 1 and xs == 1 and ys == 1:
+        print("opt2")
+        for g in range(0, groups):
+          for c in range(0, rcout, SZ):
+            yx = oy*ox
+            assert yx == iy*ix
+            for YX in range(0, oy*ox, SZ):   # these are next to each other
               # inner conv
               riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
               for ci in range(0, cin, SZ):
-                # not a loop in 1x1 convs, 9 in 3x3, 25 in 5x5
-                for y in range(IY, IY+H):
-                  for x in range(IX, IX+W):
-                    riski_load(Reg.MATMUL_INPUT,
-                      SLOT(0) + B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x,
-                      xs, iy*ix, min(SZ, ox-X), min(SZ, cin-ci))
-                    riski_load(Reg.MATMUL_WEIGHTS,
-                      SLOT(1) + g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX),
-                      H*W, cin*H*W, min(SZ, cin-ci), min(SZ, rcout-c))
-                    riski_matmul()
+                riski_load(Reg.MATMUL_INPUT,
+                  SLOT(0) + B*groups*cin*yx + g*cin*yx + ci*yx + YX,
+                  1, yx, min(SZ, yx-YX), min(SZ, cin-ci))
+                riski_load(Reg.MATMUL_WEIGHTS,
+                  SLOT(1) + g*rcout*cin + c*cin + ci,
+                  1, cin, min(SZ, cin-ci), min(SZ, rcout-c))
+                riski_matmul()
               riski_store(Reg.MATMUL_OUTPUT,
-                SLOT(2) + B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
-                1, oy*ox, min(SZ, ox-X), min(SZ, rcout-c))
-    
+                SLOT(2) + B*groups*rcout*yx + g*rcout*yx + c*yx + YX,
+                1, yx, min(SZ, yx-YX), min(SZ, rcout-c))
+      else:
+        # ox x cin x rcout -- unoptimized
+        for g in range(0, groups):
+          for c in range(0, rcout, SZ):
+            for Y in range(0, oy):
+              for X in range(0, ox, SZ):
+                IY,IX = Y*ys,X*xs
+
+                # inner conv
+                riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+                for ci in range(0, cin, SZ):
+                  # not a loop in 1x1 convs, 9 in 3x3, 25 in 5x5
+                  for y in range(IY, IY+H):
+                    for x in range(IX, IX+W):
+                      riski_load(Reg.MATMUL_INPUT,
+                        SLOT(0) + B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x,
+                        xs, iy*ix, min(SZ, ox-X), min(SZ, cin-ci))
+                      riski_load(Reg.MATMUL_WEIGHTS,
+                        SLOT(1) + g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX),
+                        H*W, cin*H*W, min(SZ, cin-ci), min(SZ, rcout-c))
+                      riski_matmul()
+                riski_store(Reg.MATMUL_OUTPUT,
+                  SLOT(2) + B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
+                  1, oy*ox, min(SZ, ox-X), min(SZ, rcout-c))
+    risk_print_counts()
+
     #print(x.shape, w.shape, "->", ret.shape)
     return riski_dmaw(SLOT(2), (bs, cout, oy, ox))
 

@@ -28,7 +28,7 @@ from collections import defaultdict
 # <empty> <output> <input> <weight>
 # <weight> <input> <empty> <output>
 
-SZ = 4
+SZ = 32
 
 sram = np.zeros((1024*1024*4), dtype=np.float32)
 regfile = {}
@@ -48,18 +48,30 @@ for t in Reg:
 # *** profiler ***
 
 cnts = defaultdict(int)
+tcnts = defaultdict(int)
+utils = defaultdict(int)
 def count(func):
   @functools.wraps(func)
   def wrapper(*args, **kwargs):
     cnts[func.__name__] += 1
+    tcnts[func.__name__] += 1
     return func(*args, **kwargs)
   return wrapper
 
 import atexit
 @atexit.register
-def debug():
+def risk_print_counts():
   print(cnts)
-  print("ran in %.2f us" % (sum(cnts.values())*1e-3))
+  print(tcnts)
+  print(utils)
+  util_n = sum([k[0]*k[1]*v for k,v in utils.items()])
+  util_d = sum([SZ*SZ*v for k,v in utils.items()])
+  print("ran in %.2f us with util %.2f%% total %.2f us" % (sum(cnts.values())*1e-3, util_n*100/(util_d+1), sum(tcnts.values())*1e-3))
+
+def risk_reset_counts():
+  global cnts, utils
+  cnts = defaultdict(int)
+  utils = defaultdict(int)
 
 # *** instructions ***
 
@@ -76,6 +88,8 @@ def riski_mov(tout, tin):
 
 @count
 def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
+  global util_n, util_d
+  utils[(len_y, len_x)] += 1
   d = regfile[target]
   d[:] = 0
   for y in range(0, len_y):

@@ -145,7 +145,7 @@ class Tensor:
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
-        po.output = grads = t0._ctx.backward(t0._ctx, t0.grad.data)
+        grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
       for t, g in zip(t0._ctx.parents, grads):
