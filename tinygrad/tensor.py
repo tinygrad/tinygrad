@@ -110,7 +110,7 @@ class Tensor:
   @classmethod
   def randn(cls, *shape, **kwargs):
     return cls(np.random.randn(*shape).astype(np.float32), **kwargs)
-
+  
   @classmethod
   def arange(cls, stop, start=0, **kwargs):
     return cls(np.arange(start=start, stop=stop).astype(np.float32), **kwargs)
@@ -204,7 +204,7 @@ class Tensor:
     return Tensor(self.data, device=self.device)
 
   # ***** non first class ops *****
-
+  
   def __getitem__(self, val):
     arg = []
     if val is not None:
