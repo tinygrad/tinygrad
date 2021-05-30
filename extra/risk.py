@@ -37,10 +37,10 @@ SLOT = lambda x: x*1024*1024
 from enum import Enum
 class Reg(Enum):
   ZERO = 0
+  # can the ALU use the same registers?
   MATMUL_INPUT = 1
   MATMUL_WEIGHTS = 2
   MATMUL_OUTPUT = 3
-  ALU = 4
 
 for t in Reg:
   regfile[t] = np.zeros((SZ, SZ), dtype=np.float32)
@@ -73,7 +73,17 @@ def risk_reset_counts():
   cnts = defaultdict(int)
   utils = defaultdict(int)
 
+def risk_regdump():
+  print("\n***** regdump *****")
+  print(regfile[Reg.MATMUL_INPUT])
+  print(regfile[Reg.MATMUL_WEIGHTS])
+  print(regfile[Reg.MATMUL_OUTPUT])
+
 # *** instructions ***
+
+@count
+def riski_mulacc():
+  regfile[Reg.MATMUL_OUTPUT] += regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
 
 @count
 def riski_matmul():

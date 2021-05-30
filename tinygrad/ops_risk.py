@@ -56,7 +56,7 @@ class Conv2D(Function):
     print(bs, ctx.groups, rcout, oy, ox, cin, H, W)
 
     for B in range(0, bs):
-      if cin == 1 and rcout == 1 and ctx.groups > 1 and False:
+      if cin == 1 and rcout == 1 and ctx.groups > 1:
         # hmm, this doesn't work, it's not a matmul
         # you always have to loop over the groups, since they aren't joint
         # the idea would be to collapse the HxW into the matmul, but you'd be limited to 9 for 3x3
@@ -64,12 +64,16 @@ class Conv2D(Function):
         # and only the diagonal of the matrix would be useful! groups aren't channels!
         # [(1, 144, 58, 58), (144, 1, 3, 3)] -> (1, 144, 56, 56)
 
+        # what does a grouped 1x1 conv look like?
+        #    bs x groups x yx -- groups x 1 --> bs x groups x yx
+        #    it looks like a broadcasted multiply
+
         print("opt1")
 
         # x:   bs x groups x iy x ix
         # w:        groups x H  x W
         # out: bs x groups x oy x ox
-        # ix x (H*W) x ox
+        # ix x groups x groups
         for g in range(0, groups, SZ):
           for Y in range(0, oy):
             for X in range(0, ox, SZ):
@@ -80,13 +84,15 @@ class Conv2D(Function):
                   riski_load(Reg.MATMUL_INPUT,
                     SLOT(0) + B*groups*iy*ix + g*iy*ix + y*ix + x,
                     xs, iy*ix, min(SZ, ox-X), min(SZ, groups-g))
+                  # 0 here is for broadcasting
                   riski_load(Reg.MATMUL_WEIGHTS,
                     SLOT(1) + g*H*W + (y-IY)*W + (x-IX),
-                    H*W, 1, min(SZ, groups-g), 1)
-                  riski_matmul()
+                    0, H*W, SZ, min(SZ, groups-g))
+                  riski_mulacc()
+                  #risk_regdump()
               riski_store(Reg.MATMUL_OUTPUT,
                 SLOT(2) + B*groups*oy*ox + g*oy*ox + Y*ox + X,
-                1, oy*ox, min(SZ, ox-X), 1)
+                1, oy*ox, min(SZ, ox-X), min(SZ, groups-g))
 
       elif H == 1 and W == 1 and xs == 1 and ys == 1:
         print("opt2")
