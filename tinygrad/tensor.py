@@ -297,14 +297,14 @@ class Tensor:
       return self._pool2d(*kernel_size).mean(axis=(3,5))
     else:
       from examples.yolo_nn import strided_pool2d
-      return Tensor(strided_pool2d(self.data, kernel_size, stride, 'avg'))
+      return Tensor(strided_pool2d(self.cpu().data, kernel_size, stride, 'avg'))
 
   def max_pool2d(self, kernel_size=(2,2), stride=None):
     if stride is None:
       return self._pool2d(*kernel_size).max(axis=(3,5))
     else:
       from examples.yolo_nn import strided_pool2d
-      return Tensor(strided_pool2d(self.data, kernel_size, stride, 'max'))
+      return Tensor(strided_pool2d(self.cpu().data, kernel_size, stride, 'max'))
 
 # An instantiation of the Function is the Context
 class Function:
