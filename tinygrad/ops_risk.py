@@ -37,6 +37,8 @@ class Conv2D(Function):
     tw = w.reshape(ctx.groups, rcout, cin, H, W)
     ctx.save_for_backward(tx, tw, x.shape)
 
+    print((*gx.strides[0:3], gx.strides[3]*ys, gx.strides[4]*xs, *gx.strides[3:5]))
+
     """
     ret = np.zeros((bs,ctx.groups,oy,ox,rcout),dtype=x.dtype)
     for g in range(ctx.groups):
@@ -52,12 +54,14 @@ class Conv2D(Function):
 
     # bs x cin x rcout
     print(bs, ctx.groups, rcout, oy, ox, cin, H, W)
-    for B in range(0, bs, SZ):
-      for g in range(ctx.groups):
+    for B in range(0, bs):
+      for g in range(0, groups):
         for c in range(0, rcout, SZ):
           for Y in range(0, oy):
-            for X in range(0, ox):
+            for X in range(0, ox, SZ):
               IY,IX = Y*ys,X*xs
+
+              # inner conv
               riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
               for ci in range(0, cin, SZ):
                 # not a loop in 1x1 convs, 9 in 3x3, 25 in 5x5
@@ -65,14 +69,14 @@ class Conv2D(Function):
                   for x in range(IX, IX+W):
                     riski_load(Reg.MATMUL_INPUT,
                       SLOT(0) + B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x,
-                      groups*cin*iy*ix, iy*ix, min(SZ, bs-B), min(SZ, cin-ci))
+                      xs, iy*ix, min(SZ, ox-X), min(SZ, cin-ci))
                     riski_load(Reg.MATMUL_WEIGHTS,
                       SLOT(1) + g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX),
                       H*W, cin*H*W, min(SZ, cin-ci), min(SZ, rcout-c))
                     riski_matmul()
               riski_store(Reg.MATMUL_OUTPUT,
                 SLOT(2) + B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
-                groups*rcout*oy*ox, oy*ox, min(SZ, bs-B), min(SZ, rcout-c))
+                1, oy*ox, min(SZ, ox-X), min(SZ, rcout-c))
     
     #print(x.shape, w.shape, "->", ret.shape)
     return riski_dmaw(SLOT(2), (bs, cout, oy, ox))
