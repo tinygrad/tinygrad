@@ -197,7 +197,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
       # Zero out all the detections that have IoU > treshhold
       iou_mask = np.expand_dims((ious < nms_conf), axis=1)
       image_pred_class[i+1:] *= iou_mask
-
+  
       # Remove the non-zero entries
       non_zero_ind = np.squeeze(np.nonzero(image_pred_class[:,4]))
       image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))    
@@ -287,7 +287,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   # TODO: Fix this
   def dsigmoid(data):
     return 1/(1+np.exp(-data))
-
+  
   prediction_cpu[:,:,0] = dsigmoid(prediction_cpu[:,:,0])
   prediction_cpu[:,:,1] = dsigmoid(prediction_cpu[:,:,1])
   prediction_cpu[:,:,4] = dsigmoid(prediction_cpu[:,:,4])
@@ -412,7 +412,7 @@ class Darknet:
       if filters is not None:
         prev_filters = filters
       output_filters.append(filters)
-
+    
     return (net_info, module_list)
   
   def dump_weights(self):
