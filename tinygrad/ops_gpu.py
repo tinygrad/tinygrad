@@ -151,7 +151,7 @@ def get_binop_prg(cl_ctx, code, complist):
         idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
 
   return cl.Program(cl_ctx, """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
-    int gid0 = get_global_id(0);"""+compute_idx_rets+"""}
+    int gid0 = get_global_id(0);"""+compute_idx_rets+"""
     float a = x_g["""+idx_exprs[0]+"""];
     float b = y_g["""+idx_exprs[1]+"""];
     res_g[gid0] = """+code+""";\n}""").build()
