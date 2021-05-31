@@ -208,7 +208,7 @@ class Tensor:
   def __getitem__(self, val):
     arg = []
     if val is not None:
-      for i, s in enumerate(val if isinstance(list, tuple) else [val]):
+      for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]):
         if isinstance(s, int):
           arg.append((s, s + 1))
         else:
