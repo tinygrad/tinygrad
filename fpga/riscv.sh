@@ -1,6 +1,6 @@
 #!/bin/bash -e
 cd out
-riscv64-unknown-elf-gcc -O2 -march=rv32i -mabi=ilp32 -nostdlib ../src/main.c
+riscv64-unknown-elf-gcc -Os -march=rv32i -mabi=ilp32 -nostdlib ../src/main.c
 #riscv64-unknown-elf-as ../src/riscv.asm
 riscv64-unknown-elf-objdump -d a.out
 riscv64-unknown-elf-objcopy -O binary a.out a.asm
