@@ -17,10 +17,9 @@ module top (input clk_i, input [3:0] sw, output [11:0] led);
 
   //  wire clk = clk_i;
 
-    reg clkdiv;
-    reg [22:0] ctr;
-
-    always @(posedge clk) {clkdiv, ctr} <= ctr + 1'b1;
+    //reg clkdiv;
+    //reg [22:0] ctr;
+    //always @(posedge clk) {clkdiv, ctr} <= ctr + 1'b1;
 
     wire [7:0] soc_led;
     attosoc soc_i(
@@ -29,6 +28,7 @@ module top (input clk_i, input [3:0] sw, output [11:0] led);
         .led(soc_led)
     );
 
+    // this maps 2 bits to each LED
     generate
         genvar i;
         for (i = 0; i < 4; i++) begin
