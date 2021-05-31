@@ -27,7 +27,9 @@
 module attosoc (
 	input clk,
 	input reset,
-	output reg [7:0] led
+	output reg [7:0] led,
+  output ser_tx,
+  input  ser_rx,
 );
 
 	reg [5:0] reset_cnt = 0;
@@ -57,7 +59,7 @@ module attosoc (
 	wire [3:0] mem_wstrb;
 	wire [31:0] mem_rdata;
 
-    wire rom_ready = mem_valid && mem_addr[31:24] == 8'h00;
+  wire rom_ready = mem_valid && mem_addr[31:24] == 8'h00;
 
 	wire iomem_valid;
 	wire iomem_ready;
@@ -74,10 +76,17 @@ module attosoc (
 
 	wire [31:0] spimemio_cfgreg_do;
 
+  // assignment of the LEDs
+  always @(posedge clk)
+    if (iomem_valid && iomem_wstrb[0])
+      led <= iomem_wdata[7:0];
 
-    always @(posedge clk)
-        if (iomem_valid && iomem_wstrb[0])
-            led <= iomem_wdata[7:0];
+  wire        simpleuart_reg_div_sel = mem_valid && (mem_addr == 32'h 0200_0004);
+  wire [31:0] simpleuart_reg_div_do;
+
+  wire        simpleuart_reg_dat_sel = mem_valid && (mem_addr == 32'h 0200_0008);
+  wire [31:0] simpleuart_reg_dat_do;
+  wire        simpleuart_reg_dat_wait;
 
 	assign mem_ready = (iomem_valid && iomem_ready) || rom_ready;
 
@@ -108,7 +117,23 @@ module attosoc (
 		.mem_rdata   (mem_rdata  )
 	);
 
+	simpleuart simpleuart (
+		.clk         (clk         ),
+		.resetn      (resetn      ),
 
+		.ser_tx      (ser_tx      ),
+		.ser_rx      (ser_rx      ),
+
+		.reg_div_we  (simpleuart_reg_div_sel ? mem_wstrb : 4'b 0000),
+		.reg_div_di  (mem_wdata),
+		.reg_div_do  (simpleuart_reg_div_do),
+
+		.reg_dat_we  (simpleuart_reg_dat_sel ? mem_wstrb[0] : 1'b 0),
+		.reg_dat_re  (simpleuart_reg_dat_sel && !mem_wstrb),
+		.reg_dat_di  (mem_wdata),
+		.reg_dat_do  (simpleuart_reg_dat_do),
+		.reg_dat_wait(simpleuart_reg_dat_wait)
+	);
 
 endmodule
 

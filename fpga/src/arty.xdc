@@ -49,3 +49,10 @@ set_property IOSTANDARD LVCMOS33 [get_ports sw[3]]
 
 set_property LOC E3 [get_ports clk_i]
 set_property IOSTANDARD LVCMOS33 [get_ports clk_i]
+
+set_property LOC A9 [get_ports ser_rx]
+set_property IOSTANDARD LVCMOS33 [get_ports ser_rx]
+
+set_property LOC D10 [get_ports ser_tx]
+set_property IOSTANDARD LVCMOS33 [get_ports ser_tx]
+

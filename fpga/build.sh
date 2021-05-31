@@ -7,7 +7,7 @@ BASE=/Users/taylor/fun/fpga
 
 # yosys commit 82f5829aba108be4a3786e7a237fd7bcebe61eb6
 # build normally
-$BASE/yosys/yosys -p "synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top top; write_json attosoc.json" ../src/attosoc.v ../src/attosoc_top.v
+$BASE/yosys/yosys -p "synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top top; write_json attosoc.json" ../src/attosoc.v ../src/attosoc_top.v ../src/simpleuart.v
 
 # nextpnr-xilinx 0be5cc19f3261101730ce9274720aaf3784f83e2
 # cmake -DARCH=xilinx -DBUILD_GUI=no -DBUILD_PYTHON=no -DUSE_OPENMP=No .

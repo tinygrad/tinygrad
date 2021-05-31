@@ -1,4 +1,10 @@
-module top (input clk_i, input [3:0] sw, output [11:0] led);
+module top (
+  input clk_i,
+  input [3:0] sw,
+  output [11:0] led,
+  output ser_tx,
+  input  ser_rx,
+);
 
     //assign led = {&sw, |sw, ^sw, ~^sw};
 
@@ -25,7 +31,9 @@ module top (input clk_i, input [3:0] sw, output [11:0] led);
     attosoc soc_i(
         .clk(clk),
         .reset(sw[0]),
-        .led(soc_led)
+        .led(soc_led),
+        .ser_tx(ser_tx),
+        .ser_rx(ser_rx),
     );
 
     // this maps 2 bits to each LED
