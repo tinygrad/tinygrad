@@ -40,15 +40,13 @@ class Sum(Function):
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-    if isinstance(axis, int):
-      axis = [axis]
+    if isinstance(axis, int): axis = [axis]
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     return grad_output.reshape(shape) + np.zeros_like(input)
 
 class Max(Function):
   def forward(ctx, inp, axis=None):
-    if isinstance(axis, int):
-      axis = [axis]
+    if isinstance(axis, int): axis = [axis]
     ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
     ctx.save_for_backward(inp, axis, ret)
     if axis is not None:
@@ -126,11 +124,10 @@ class Transpose(Function):
     return np.transpose(x, np.argsort(ctx.order))
 
 def inner_slice(x, arg):
-  padding, slicee = [], []
-  for i, p in enumerate(arg):
-    padding.append((max(0, -p[0]), max(0, p[1]-x.shape[i])))
-    slicee.append((p[0] + padding[i][0], p[1] + padding[i][0]))
-  return np.pad(x, padding)[tuple([slice(x[0], x[1], None) for x in slicee])]
+  padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
+  x = np.pad(x, padding)
+  slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
+  return x[tuple([slice(x[0], x[1], None) for x in slicee])]
 
 class Slice(Function):
   def forward(ctx, x, arg=None):
@@ -157,8 +154,7 @@ class Matmul(Function):
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
-    if isinstance(ctx.stride, int):
-      ctx.stride = (ctx.stride, ctx.stride)
+    if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
     bs,cin_ = x.shape[0], x.shape[1]

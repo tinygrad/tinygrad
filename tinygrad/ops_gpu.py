@@ -106,8 +106,7 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
 
 class Sum(Function):
   def forward(ctx, input, axis=None):
-    if isinstance(axis, int):
-      axis = [axis]
+    if isinstance(axis, int): axis = [axis]
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
     if axis is not None:
@@ -122,8 +121,7 @@ class Sum(Function):
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    if isinstance(axis, int):
-      axis = [axis]
+    if isinstance(axis, int): axis = [axis]
     ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
     if axis is not None:
@@ -367,8 +365,7 @@ class Matmul(Function):
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
-    if isinstance(ctx.stride, int):
-      ctx.stride = (ctx.stride, ctx.stride)
+    if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
     bs,cin_,iy,ix = x.shape

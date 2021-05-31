@@ -51,10 +51,10 @@ class KinneDir:
     """
     parameter loads or saves a parameter, given as a tensor.
     """
-    path = self.base + str(self.next_part_index) + ".bin"
+    path = f"{self.base}{self.next_part_index}.bin"
     if self.save:
       t.data.astype("<f4", "C").tofile(path)
-      self.metadata.write(str(self.next_part_index) + ": " + str(t.shape) + "\n")
+      self.metadata.write(f"{self.next_part_index}: {t.shape}\n")
     else:
       t.assign(Tensor(numpy.fromfile(path, "<f4")).reshape(shape=t.shape))
     self.next_part_index += 1
@@ -73,4 +73,3 @@ class KinneDir:
   def close(self):
     if self.save:
       self.metadata.close()
-
