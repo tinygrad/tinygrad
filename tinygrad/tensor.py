@@ -1,5 +1,4 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-import sys
 import inspect
 import functools
 import os
@@ -208,13 +207,15 @@ class Tensor:
   
   def __getitem__(self, val):
     arg = []
-    for i,s in enumerate(val if type(val) in [list, tuple] else ([] if val is None else [val])):
-      if type(s) is int: arg.append((s, s+1))
-      else:
-        arg.append((s.start if s.start is not None else 0,
-          (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
-      if type(s) is not int: assert s.step is None or s.step == 1
-    return self.slice(arg = arg+[(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
+    if val is not None:
+      for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]):
+        if isinstance(s, int):
+          arg.append((s, s + 1))
+        else:
+          arg.append((s.start if s.start is not None else 0,
+            (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+          assert s.step is None or s.step == 1
+    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
 
   def pad2d(self, padding):
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
@@ -303,7 +304,7 @@ class Function:
   def __new__(cls, *args, **kwargs):
     cls.forward = staticmethod(cls.forward)
     cls.backward = staticmethod(cls.backward)
-    return super().__new__(cls) #
+    return super().__new__(cls)
 
   def __init__(self, *tensors):
     self.parents = tensors

@@ -1,5 +1,5 @@
 import numpy as np
-from .tensor import Function, register
+from .tensor import Function
 
 # ************* unary ops *************
 
@@ -40,13 +40,13 @@ class Sum(Function):
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-    axis = [axis] if type(axis) is int else axis
+    if isinstance(axis, int): axis = [axis]
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     return grad_output.reshape(shape) + np.zeros_like(input)
 
 class Max(Function):
   def forward(ctx, inp, axis=None):
-    axis = [axis] if type(axis) == int else axis
+    if isinstance(axis, int): axis = [axis]
     ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
     ctx.save_for_backward(inp, axis, ret)
     if axis is not None:
@@ -154,8 +154,7 @@ class Matmul(Function):
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
-    if type(ctx.stride) == int:
-      ctx.stride = (ctx.stride, ctx.stride)
+    if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
     bs,cin_ = x.shape[0], x.shape[1]

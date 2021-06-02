@@ -64,7 +64,7 @@ def letterbox_image(img, inp_dim=608):
   return canvas
 
 def add_boxes(img, prediction):
-  if type(prediction) is int: # no predictions
+  if isinstance(prediction, int): # no predictions
     return img
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
