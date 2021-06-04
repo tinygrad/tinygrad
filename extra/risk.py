@@ -34,10 +34,10 @@ from collections import defaultdict
 # <weight> <input> <empty> <output>
 
 SZ = 32
-
-sram = np.zeros((1024*1024*4), dtype=np.float32)
+SLOTSIZE = 1024*1024*2   # 5MB, for 20MB total
+sram = np.zeros((SLOTSIZE*4), dtype=np.float32)
 regfile = {}
-SLOT = lambda x: x*1024*1024
+SLOT = lambda x: x*SLOTSIZE
 
 from enum import Enum
 class Reg(Enum):
@@ -46,6 +46,20 @@ class Reg(Enum):
   MATMUL_INPUT = 1
   MATMUL_WEIGHTS = 2
   MATMUL_OUTPUT = 3
+
+# this should be a generic function
+class UnaryOps(Enum):
+  RELU = 0
+  EXP = 1
+  LOG = 2
+  GT0 = 3
+
+class BinaryOps(Enum):
+  ADD = 0
+  SUB = 1
+  MUL = 2
+  DIV = 3
+  MULACC = 4
 
 for t in Reg:
   regfile[t] = np.zeros((SZ, SZ), dtype=np.float32)
@@ -89,8 +103,41 @@ def risk_regdump():
 # *** instructions ***
 
 @count
+def riski_unop(op):
+  if op == UnaryOps.RELU:
+    regfile[Reg.MATMUL_OUTPUT] = np.maximum(regfile[Reg.MATMUL_INPUT], 0)
+  elif op == UnaryOps.LOG:
+    regfile[Reg.MATMUL_OUTPUT] = np.log(regfile[Reg.MATMUL_INPUT])
+  elif op == UnaryOps.EXP:
+    regfile[Reg.MATMUL_OUTPUT] = np.exp(regfile[Reg.MATMUL_INPUT])
+  elif op == UnaryOps.GT0:
+    regfile[Reg.MATMUL_OUTPUT] = (regfile[Reg.MATMUL_INPUT] >= 0)
+
+@count
+def riski_add():
+  regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] + regfile[Reg.MATMUL_WEIGHTS]
+
+@count
+def riski_sub():
+  regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] - regfile[Reg.MATMUL_WEIGHTS]
+
+@count
+def riski_mul():
+  regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
+
+@count
+def riski_div():
+  regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] / regfile[Reg.MATMUL_WEIGHTS]
+
+@count
 def riski_mulacc():
   regfile[Reg.MATMUL_OUTPUT] += regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
+
+binops = {BinaryOps.ADD: riski_add,
+          BinaryOps.SUB: riski_sub,
+          BinaryOps.MUL: riski_mul,
+          BinaryOps.DIV: riski_div,
+          BinaryOps.MULACC: riski_mulacc}
 
 @count
 def riski_matmul():
@@ -124,15 +171,36 @@ def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
 def riski_dmar(address, arr):
   global maxdma
   arr = arr.reshape(-1)
+  assert(arr.shape[0] <= SLOTSIZE)
   maxdma = max(maxdma, arr.shape[0])
-  print("DMA %d elements" % arr.shape[0])
+  print("DMAR %d elements" % arr.shape[0])
   sram[address:address+arr.shape[0]] = arr
 
 @count
 def riski_dmaw(address, shp):
+  print("DMAW %d elements" % np.prod(shp))
   return np.copy(sram[address:address+np.prod(shp)].reshape(shp))
 
 # *** RISK-5 code ***
+
+def risk_unop(x, op):
+  riski_dmar(SLOT(0), x)
+  cnt = np.prod(x.shape)
+  for i in range(0, np.prod(x.shape), SZ*SZ):
+    riski_load(Reg.MATMUL_INPUT, SLOT(0)+i)
+    riski_unop(op)
+    riski_store(Reg.MATMUL_OUTPUT, SLOT(2)+i)
+  return riski_dmaw(SLOT(2), x.shape)
+
+def risk_binop(x, w, op):
+  riski_dmar(SLOT(0), x)
+  riski_dmar(SLOT(1), w)
+  for i in range(0, np.prod(x.shape), SZ*SZ):
+    riski_load(Reg.MATMUL_INPUT, SLOT(0)+i)
+    riski_load(Reg.MATMUL_WEIGHTS, SLOT(1)+i)
+    binops[op]()
+    riski_store(Reg.MATMUL_OUTPUT, SLOT(2)+i)
+  return riski_dmaw(SLOT(2), x.shape)
 
 def risk_matmul(x, w, transpose_x=False, transpose_w=False):
   # copy matrices into SRAM

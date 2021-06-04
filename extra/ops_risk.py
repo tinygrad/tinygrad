@@ -2,6 +2,38 @@ import numpy as np
 from tinygrad.tensor import Function
 from extra.risk import *
 
+# ************* unary ops *************
+
+class ReLU(Function):
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return risk_unop(input, UnaryOps.RELU)
+
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return risk_binop(grad_output, risk_unop(input, UnaryOps.GT0), BinaryOps.MUL)
+
+class Log(Function):
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return risk_unop(input, UnaryOps.LOG)
+
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return risk_binop(grad_output, input, BinaryOps.DIV)
+
+class Exp(Function):
+  def forward(ctx, input):
+    ret = risk_unop(input, UnaryOps.EXP)
+    ctx.save_for_backward(ret)
+    return ret
+
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return risk_binop(grad_output, ret, BinaryOps.MUL)
+
+# ************* processing ops *************
+
 class Matmul(Function):
   def forward(ctx, input, weight):
     ctx.save_for_backward(input, weight)
