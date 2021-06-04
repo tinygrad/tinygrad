@@ -1,5 +1,5 @@
 import numpy as np
-from .tensor import Function
+from tinygrad.tensor import Function
 from extra.risk import *
 
 class Matmul(Function):
