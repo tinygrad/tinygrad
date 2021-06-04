@@ -17,7 +17,7 @@ Eventually, we will build custom hardware for tinygrad, and it will be blindingl
 ### Installation
 
 ```bash
-pip3 install tinygrad --upgrade
+pip3 install git+https://github.com/geohot/tinygrad.git --upgrade
 ```
 
 ### Example
