@@ -21,10 +21,7 @@ class BatchNorm2D:
       if self.num_batches_tracked is None: self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
       self.num_batches_tracked += 1
 
-    if self.training:
-      return self.normalize(x, batch_mean, batch_var)
-
-    return self.normalize(x, self.running_mean, self.running_var)
+    return self.normalize(x, batch_mean, batch_var) if self.training else self.normalize(x, self.running_mean, self.running_var)
 
   def normalize(self, x, mean, var):
     x = (x - mean.reshape(shape=[1, -1, 1, 1])) * self.weight.reshape(shape=[1, -1, 1, 1])
