@@ -32,6 +32,50 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return risk_binop(grad_output, ret, BinaryOps.MUL)
 
+# ************* binary ops *************
+
+def unbroadcast(out, in_sh):
+  # adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i]
+  sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]) if in_sh != (1,) else None
+  return out.sum(axis=sum_axis).reshape(in_sh)
+
+class Add(Function):
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape, y.shape)
+    return risk_binop(x, y, BinaryOps.ADD)
+
+  def backward(ctx, grad_output):
+    shape_x, shape_y = ctx.saved_tensors
+    return unbroadcast(grad_output, shape_x), unbroadcast(grad_output, shape_y)
+
+class Sub(Function):
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape, y.shape)
+    return risk_binop(x, y, BinaryOps.SUB)
+
+  def backward(ctx, grad_output):
+    shape_x, shape_y = ctx.saved_tensors
+    return unbroadcast(grad_output, shape_x), unbroadcast(-grad_output, shape_y)
+
+class Mul(Function):
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return risk_binop(x, y, BinaryOps.MUL)
+
+  def backward(ctx, grad_output):
+    x,y = ctx.saved_tensors
+    return unbroadcast(y*grad_output, x.shape), unbroadcast(x*grad_output, y.shape)
+
+class Pow(Function):
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x, y)
+    return risk_binop(x, y, BinaryOps.POW)
+
+  def backward(ctx, grad_output):
+    x,y = ctx.saved_tensors
+    return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
+           unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
+
 # ************* processing ops *************
 
 class Matmul(Function):
