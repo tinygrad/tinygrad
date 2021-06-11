@@ -164,18 +164,26 @@ def riski_mov(tout, tin):
 def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
   global util_n, util_d
   utils[(len_y, len_x)] += 1
+  stride_y, stride_x = int(stride_y), int(stride_x)
   d = regfile[target]
   d[:] = 0
+  d[:len_y, :len_x] = np.lib.stride_tricks.as_strided(sram[address:], (len_y, len_x), (stride_y*4, stride_x*4))
+  """
   for y in range(0, len_y):
     for x in range(0, len_x):
       d[y, x] = sram[address + y*stride_y + x*stride_x]
+  """
 
 @count
 def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
+  stride_y, stride_x = int(stride_y), int(stride_x)
   d = regfile[target]
+  np.lib.stride_tricks.as_strided(sram[address:], (len_y, len_x), (stride_y*4, stride_x*4))[:, :] = d[:len_y, :len_x]
+  """
   for y in range(0, len_y):
     for x in range(0, len_x):
       sram[address + y*stride_y + x*stride_x] = d[y, x]
+  """
 
 @count
 def riski_dmar(address, arr):
