@@ -43,7 +43,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v2
     - name: Install OpenCL
-      run: sudo apt-get install pocl-opencl-icd
+      run: sudo apt-get update -y && sudo apt-get install pocl-opencl-icd -y
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
@@ -61,7 +61,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v2
     - name: Install OpenCL
-      run: sudo apt-get install pocl-opencl-icd
+      run: sudo apt-get update -y && sudo apt-get install pocl-opencl-icd -y
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
