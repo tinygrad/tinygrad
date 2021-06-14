@@ -9,6 +9,7 @@
 # S7t-VG6
 #   16 GB of GDDR6
 #   189 Mb embedded RAM, aka 9M 19-bit elements
+#   2560 MLP blocks, 2 fp24 MULACC each
 
 import functools
 import numpy as np
