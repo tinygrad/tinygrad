@@ -11,6 +11,7 @@
 #   189 Mb embedded RAM, aka 9M 19-bit elements
 #   2560 MLP blocks, 2 fp24 MULACC each
 
+import os
 import functools
 import numpy as np
 from collections import defaultdict
@@ -161,9 +162,13 @@ def riski_matmul():
 def riski_mov(tout, tin):
   regfile[tout][:] = regfile[tin]
 
+load_log = open("/tmp/risk_load_log", "w") if os.getenv("LOAD_LOG") else None
+
 @count
 def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
   global util_n, util_d
+  if load_log is not None:
+    load_log.write("%d %d %d\n" % (address, stride_y, stride_x))
   utils[(len_y, len_x)] += 1
   stride_y, stride_x = int(stride_y), int(stride_x)
   d = regfile[target]
