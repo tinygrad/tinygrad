@@ -156,7 +156,7 @@ python3 -m pytest
 ### TODO (updated)
 
 ```bash
-PYTHONPATH="." RISK=1 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
+PYTHONPATH="." DEBUG=1 RISK=1 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
 
 * Add reduce instructions to RISK, and fully support forward pass
