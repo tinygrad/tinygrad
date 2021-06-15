@@ -15,6 +15,9 @@ $BASE/yosys/yosys -p "synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top top;
 # ./bbasm -l xilinx/xc7a100t.bba xilinx/xc7a100t.bin
 $BASE/nextpnr-xilinx/nextpnr-xilinx --chipdb $BASE/nextpnr-xilinx/xilinx/xc7a100t.bin --xdc ../src/arty.xdc --json attosoc.json --write attosoc_routed.json --fasm attosoc.fasm
 
+# if you want the GUI (still broken on osx)
+# cmake -DARCH=xilinx -DUSE_OPENMP=No -DPYTHON_INCLUDE_DIR=$(python -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())")  -DPYTHON_LIBRARY=$(python -c "import distutils.sysconfig as sysconfig; print(sysconfig.get_config_var('LIBDIR'))") -DQt5_DIR=$(brew --prefix qt5)/lib/cmake/Qt5 .
+
 XRAY_UTILS_DIR=$BASE/prjxray/utils
 XRAY_TOOLS_DIR=$BASE/prjxray/build/tools
 XRAY_DATABASE_DIR=$BASE/prjxray/database
