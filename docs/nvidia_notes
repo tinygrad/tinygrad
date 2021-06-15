@@ -1,0 +1,26 @@
+A100 has 432 tensor cores
+
+8x4x8 FP16 matmul = 256 FMAs
+8x4x4 TF32 matmul = 128 FMAs
+
+432 * 256 * 1410 mhz * 2(m and a) = 312 TOPS
+
+Why aren't the other accelerators 3D like this?
+
+--
+
+Tesla chip
+
+96x96 array
+32 MiB SRAM
+
+-- 
+
+SNPE is using 4x4x4 -> 4x4 (64 FMAs) in the convs.
+Then it's accumulating in that matrix.
+
+256 ALUs (1 FMA per cycle)
+652 mhz
+---
+319 GFLOPS
+

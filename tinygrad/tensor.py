@@ -1,5 +1,4 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-import sys
 import inspect
 import functools
 import os
@@ -19,9 +18,10 @@ if DEBUG:
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    self.name, self.x = f"back_{name}" if backward else name, x
+    self.name, self.x, self.output = f"back_{name}" if backward else name, x, None
   def __enter__(self):
     if DEBUG: self.st = time.time()
+    return self
   def __exit__(self, *junk):
     if DEBUG:
       if cl_queue is not None:
@@ -29,7 +29,7 @@ class ProfileOp:
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
-      print(f"{self.name:>20} : {et:>7.2f} ms {[y.shape for y in self.x]}")
+      print(f"{self.name:>20} : {et:>7.2f} ms {str([y.shape for y in self.x]):>40} {'-> '+str(self.output.shape) if self.output is not None else ''}")
 
 # **** GPU functions ****
 
@@ -110,6 +110,10 @@ class Tensor:
   @classmethod
   def randn(cls, *shape, **kwargs):
     return cls(np.random.randn(*shape).astype(np.float32), **kwargs)
+  
+  @classmethod
+  def arange(cls, stop, start=0, **kwargs):
+    return cls(np.arange(start=start, stop=stop).astype(np.float32), **kwargs)
 
   @classmethod
   def uniform(cls, *shape, **kwargs):
@@ -139,7 +143,7 @@ class Tensor:
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
-      with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True):
+      with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
@@ -200,14 +204,18 @@ class Tensor:
     return Tensor(self.data, device=self.device)
 
   # ***** non first class ops *****
-
+  
   def __getitem__(self, val):
     arg = []
-    for i,s in enumerate(val if type(val) in [list, tuple] else ([] if val is None else [val])):
-      arg.append((s.start if s.start is not None else 0,
-        (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
-      assert s.step is None or s.step == 1
-    return self.slice(arg = arg+[(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
+    if val is not None:
+      for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]):
+        if isinstance(s, int):
+          arg.append((s, s + 1))
+        else:
+          arg.append((s.start if s.start is not None else 0,
+            (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+          assert s.step is None or s.step == 1
+    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
 
   def pad2d(self, padding):
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
@@ -293,6 +301,11 @@ class Tensor:
 
 # An instantiation of the Function is the Context
 class Function:
+  def __new__(cls, *args, **kwargs):
+    cls.forward = staticmethod(cls.forward)
+    cls.backward = staticmethod(cls.backward)
+    return super().__new__(cls)
+
   def __init__(self, *tensors):
     self.parents = tensors
     self.saved_tensors = []
@@ -310,8 +323,8 @@ class Function:
     # overwrite with passed params
     for k, v in kwargs.items():
       setattr(ctx, k, v)
-    with ProfileOp(ctx.__class__.__name__, x):
-      ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
+    with ProfileOp(ctx.__class__.__name__, x) as po:
+      po.output = ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
                    device=ctx.device, requires_grad=any([t.requires_grad for t in x]))
     if ret.requires_grad:
       ret._ctx = ctx
@@ -342,6 +355,9 @@ def _register_ops(namespace, device=Device.CPU):
 
 from tinygrad import ops_cpu
 _register_ops(ops_cpu)
+if os.getenv("RISK", None) is not None:
+  from extra import ops_risk
+  _register_ops(ops_risk)
 try:
   import pyopencl as cl
   # TODO: move this import to require_init_gpu?
