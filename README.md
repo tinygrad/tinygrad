@@ -155,7 +155,11 @@ python3 -m pytest
 
 ### TODO (updated)
 
-* Add reduce instructions to RISK
-* Make EfficientNet backward pass fully use RISK instructions
+```bash
+PYTHONPATH="." RISK=1 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
+```
 
+* Add reduce instructions to RISK, and fully support forward pass
+* Make EfficientNet backward pass fully use RISK instructions
+* Benchmark that and transformers
 
