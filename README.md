@@ -159,7 +159,8 @@ python3 -m pytest
 PYTHONPATH="." DEBUG=1 RISK=1 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
 ```
 
-* Add reduce instructions to RISK, and fully support forward pass
-* Make EfficientNet backward pass fully use RISK instructions
+* Add reduce ops to RISK, and fully support forward pass. See `extra/ops_risk.py` and `extra/risk.py`
+* Switch convolution backward pass to RISK instead of the numpy placeholder
+* Confirm EfficientNet backward pass fully uses RISK instructions
 * Benchmark that and transformers
 
