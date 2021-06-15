@@ -135,4 +135,4 @@ if __name__ == "__main__":
       X_aug = X_train if epoch == 1 else augment_img(X_train)
       train(model, X_aug, Y_train, optimizer, steps=steps, lossfn=lossfn, BS=BS)
       accuracy = evaluate(model, X_test, Y_test, BS=BS)
-      model.save('examples/checkpoint'+str("%.0f" % (accuracy*1.0e6)))
+      model.save(f'examples/checkpoint{accuracy * 1e6:.0f}')

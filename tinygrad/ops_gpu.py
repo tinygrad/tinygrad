@@ -1,7 +1,7 @@
 import functools
 import pyopencl as cl
 import numpy as np
-from .tensor import Function, register, GPUBuffer, Tensor, Device
+from .tensor import Function, GPUBuffer
 
 def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
@@ -9,7 +9,7 @@ def buffer_new(ctx, shape, zero=False):
 def buffer_np(ctx, x):
   return cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
 
-@functools.lru_cache()
+@functools.lru_cache
 def clbuild(cl_ctx, name, prg):
   return cl.Program(cl_ctx, prg).build().__getattr__(name)
 
@@ -31,35 +31,29 @@ def unary_op(ctx, code, x):
   return ret
 
 class ReLU(Function):
-  @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
     return unary_op(ctx, 'max(a, (float)0.)', input)
 
-  @staticmethod
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
 
 class Log(Function):
-  @staticmethod
   def forward(ctx, input):
     ctx.save_for_backward(input)
     return unary_op(ctx, 'log(a)', input)
 
-  @staticmethod
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return binary_op(ctx, 'a / b', grad_output, input)
 
 class Exp(Function):
-  @staticmethod
   def forward(ctx, input):
     ret = unary_op(ctx, 'exp(a)', input)
     ctx.save_for_backward(ret)
     return ret
 
-  @staticmethod
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
     return binary_op(ctx, 'a * b', grad_output, ret)
@@ -111,16 +105,14 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
   return ret
 
 class Sum(Function):
-  @staticmethod
   def forward(ctx, input, axis=None):
-    axis = [axis] if type(axis) == int else axis
+    if isinstance(axis, int): axis = [axis]
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
     if axis is not None:
       ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
 
-  @staticmethod
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
@@ -128,16 +120,14 @@ class Sum(Function):
     return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
 
 class Max(Function):
-  @staticmethod
   def forward(ctx, input, axis=None):
-    axis = [axis] if type(axis) == int else axis
+    if isinstance(axis, int): axis = [axis]
     ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
     if axis is not None:
       ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
 
-  @staticmethod
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
@@ -148,11 +138,11 @@ class Max(Function):
 
 # ************* binary ops *************
 
-@functools.lru_cache()
+@functools.lru_cache
 def get_binop_prg(cl_ctx, code, complist):
   ndims = len(complist)
-  args = "".join([", int d%d" % i for i in range(ndims)]) + "".join([", int p%d" % i for i in range(ndims-1)])
-  compute_idx_rets = ["\n    int idx_ret"+str(i)+" = (gid0 / "+("p%d"%i if i < ndims-1 else "1")+") % d"+str(i)+";" for i in range(ndims)]
+  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
+  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
 
   idx_exprs = ["0", "0"] # [idx_x, idx_y]
   for i in range(ndims):
@@ -161,7 +151,7 @@ def get_binop_prg(cl_ctx, code, complist):
         idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
 
   return cl.Program(cl_ctx, """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
-    int gid0 = get_global_id(0);"""+"".join(compute_idx_rets)+"""
+    int gid0 = get_global_id(0);"""+compute_idx_rets+"""
     float a = x_g["""+idx_exprs[0]+"""];
     float b = y_g["""+idx_exprs[1]+"""];
     res_g[gid0] = """+code+""";\n}""").build()
@@ -195,36 +185,30 @@ def unbroadcast(ctx, out, in_sh):
   return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
 class Add(Function):
-  @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
     return binary_op(ctx, 'a+b', x, y)
 
-  @staticmethod
   def backward(ctx, grad_output):
     grad_x, grad_y = grad_output, grad_output
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
 
 class Sub(Function):
-  @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
     return binary_op(ctx, 'a-b', x, y)
 
-  @staticmethod
   def backward(ctx, grad_output):
     grad_x, grad_y = grad_output, unary_op(ctx, '-a', grad_output)
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y),
 
 class Mul(Function):
-  @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
     return binary_op(ctx, 'a*b', x, y)
 
-  @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     grad_x = binary_op(ctx, 'a*b', y, grad_output)
@@ -232,12 +216,10 @@ class Mul(Function):
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape),
 
 class Pow(Function):
-  @staticmethod
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
     return binary_op(ctx, 'pow(a,b)', x, y)
 
-  @staticmethod
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     grad_x = binary_op(ctx, 'a*b', grad_output,
@@ -249,15 +231,13 @@ class Pow(Function):
 # ************* movement ops *************
 
 class Reshape(Function):
-  @staticmethod
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
     shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    r = GPUBuffer(shape, hostbuf=x)
+    r = GPUBuffer(shape, hostbuf=x)   # NOTE: this is not a copy
     assert np.prod(x.shape) == np.prod(r.shape)
     return r
 
-  @staticmethod
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
     return GPUBuffer(in_shape, hostbuf=grad_output)
@@ -285,12 +265,10 @@ def perm_axis(ctx, inp, order):
   return ret
 
 class Transpose(Function):
-  @staticmethod
   def forward(ctx, x, order=(1,0)):
     ctx.save_for_backward(order)
     return perm_axis(ctx, x, order)
 
-  @staticmethod
   def backward(ctx, grad_output):
     return perm_axis(ctx, grad_output, np.argsort(ctx.order))
 
@@ -322,12 +300,10 @@ def inner_slice(ctx, x, arg):
   return ret
 
 class Slice(Function):
-  @staticmethod
   def forward(ctx, x, arg=None):
     ctx.save_for_backward(x.shape)
     return inner_slice(ctx, x, arg)
 
-  @staticmethod
   def backward(ctx, grad_output):
     shape, = ctx.saved_tensors
     narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
@@ -336,7 +312,6 @@ class Slice(Function):
 # ************* processing ops *************
 
 class Matmul(Function):
-  @staticmethod
   def forward(ctx, input, weight):
     assert input.shape[-1] == weight.shape[-2]
     cnt = np.prod(input.shape[0:-2]) if len(input.shape) > 2 else 1
@@ -369,7 +344,6 @@ class Matmul(Function):
       msize, i32(1), msize, i32(1), osize, osize)
     return ret
 
-  @staticmethod
   def backward(ctx, grad_output):
     input, weight, matmul, cnt = ctx.saved_tensors
     isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
@@ -390,15 +364,13 @@ class Matmul(Function):
     return grad_input, grad_weight
 
 class Conv2D(Function):
-  @staticmethod
   def forward(ctx, x, w, stride=1, groups=1):
-    if type(ctx.stride) == int:
-      ctx.stride = (ctx.stride, ctx.stride)
+    if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
     bs,cin_,iy,ix = x.shape
     oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
-    assert cin*ctx.groups == cin_
+    if cin*ctx.groups != cin_: raise Exception(f"Input Tensor shape {x.shape} does not match the shape of the weights {w.shape}. ({cin*ctx.groups} vs. {cin_})")
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
@@ -443,7 +415,6 @@ class Conv2D(Function):
     )
     return ret
 
-  @staticmethod
   def backward(ctx, grad_output):
     bs,_,oy,ox = grad_output.shape
     x, w = ctx.saved_tensors

@@ -33,7 +33,7 @@ class RMSprop(Optimizer):
 class Adam(Optimizer):
   def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-8, AdaBelief=False):
     super().__init__(params)
-    self.lr, self.b1, self.b2, self.eps, self.t = lr, b1, b2, eps, 0
+    self.lr, self.b1, self.b2, self.eps, self.t, self.AdaBelief = lr, b1, b2, eps, 0, AdaBelief
 
     self.m = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
     self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
@@ -43,7 +43,7 @@ class Adam(Optimizer):
     a = self.lr * ((1.0 - self.b2**self.t)**0.5) / (1.0 - self.b1**self.t)
     for i, t in enumerate(self.params):
       self.m[i] = self.b1 * self.m[i] + (1.0 - self.b1) * t.grad
-      if AdaBelief:
+      if self.AdaBelief:
         self.v[i] = self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad - self.m[i])**2 + self.eps
       else:
         self.v[i] = self.b2 * self.v[i] + (1.0 - self.b2) * t.grad * t.grad

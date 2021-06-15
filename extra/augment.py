@@ -37,4 +37,4 @@ if __name__ == "__main__":
   for i in range(10):
     im = Image.fromarray(X_train[7353+i])
     im_aug = [Image.fromarray(x) for x in augment_img(np.array([X_train[7353+i]]*100))]
-    im.save("aug"+str(i)+".gif", save_all=True, append_images=im_aug, duration=100, loop=0)
+    im.save(f"aug{i}.gif", save_all=True, append_images=im_aug, duration=100, loop=0)
