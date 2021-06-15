@@ -153,12 +153,9 @@ tinygrad will always be below 1000 lines. If it isn't, we will revert commits un
 python3 -m pytest
 ```
 
-### TODO
+### TODO (updated)
 
-* Train an EfficientNet on ImageNet
-* Add a language model. BERT?
-* Add a detection model. EfficientDet?
-* Reduce code
-* Increase speed
-* Add features
+* Add reduce instructions to RISK
+* Make EfficientNet backward pass fully use RISK instructions
+
 

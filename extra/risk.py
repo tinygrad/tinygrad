@@ -168,7 +168,7 @@ load_log = open("/tmp/risk_load_log", "w") if os.getenv("LOAD_LOG") else None
 def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
   global util_n, util_d
   if load_log is not None:
-    load_log.write("%d %d %d\n" % (address, stride_y, stride_x))
+    load_log.write("%d %d %d %d %d\n" % (address, stride_y, stride_x, len_y, len_x))
   utils[(len_y, len_x)] += 1
   stride_y, stride_x = int(stride_y), int(stride_x)
   d = regfile[target]
