@@ -5,8 +5,7 @@ from tinygrad.tensor import Tensor
 
 class MaxPool2d:
   def __init__(self, kernel_size, stride):
-    if type(kernel_size) == int:
-      self.kernel_size = (kernel_size, kernel_size)
+    if isinstance(kernel_size, int): self.kernel_size = (kernel_size, kernel_size)
     else: self.kernel_size = kernel_size
     self.stride = stride if (stride is not None) else kernel_size
   
@@ -62,9 +61,7 @@ class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride = 1, padding = 0, groups = 1, bias = True):
     self.in_channels, self.out_channels, self.stride, self.padding, self.groups, self.bias = in_channels, out_channels, stride, padding, groups, bias # Wow this is terrible
 
-    if type(kernel_size) == int:
-      self.kernel_size = (kernel_size, kernel_size)
-    else: self.kernel_size = kernel_size
+    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
 
     assert out_channels % groups == 0 and in_channels % groups == 0
 

@@ -161,6 +161,22 @@ class TestOps(unittest.TestCase):
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
                   lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  def test_grouped_conv2d(self):
+    groups = 2
+    helper_test_op([(1,2,5,5), (groups,1,3,3)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+
+  def test_fancy_conv2d(self):
+    bs = 2
+    cin = 3
+    cout = 1
+    groups = 3
+    H,W = 3,3
+    helper_test_op([(bs,cin,11,28), (groups*cout,cin//groups,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+
   def test_strided_conv2d(self):
     bs = 4
     cin = 3
@@ -211,4 +227,5 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
 
 if __name__ == '__main__':
+  np.random.seed(1337)
   unittest.main(verbosity=2)

@@ -1,0 +1,47 @@
+Cherry is designed with thneed in mind. Assuming onboard RAM, it'll run without the host.
+
+Single core RISC-V, superscalar, out of order. Targeting 1+ instructions/cycle.
+
+Compute is straightforward, but two questions about memory:
+* How much striding do we need? How much does it cost us power and transistor wise?
+* Should the copies to SRAM be explicit or caching with the DDR? Caching is a simpler programming model.
+
+Small Board (Arty A7 100T)
+=====
+* Support DMA over the ethernet interface, 12.5 MB/s 
+* 65k elements in on board RAM, 18-bit
+* Optionally, use the 256MB of DDR3L onboard to hold everything. 2.66 GB/s
+* 240 DSP slices, 101k luts
+* 4x4x4 matmul = 64 mults, perhaps 8x8x8 matmul = 512 mults
+* 6.4 GFLOPS @ 50 mhz
+
+Big Board (Alveo U250)
+=====
+* Support DMA over PCI-E. 16 GB/s
+* 8M elements in on board RAM, 18-bit
+* Optionally, use the 64GB of DDR4 onboard to hold everything. 77 GB/s
+* 12288 DSP slices, 1.7M luts
+* 16x16x16 matmul = 4096 mults, perhaps 32x32x32 matmul = 32768 mults
+* 4 TFLOPS @ 500 mhz
+
+Cherry Two (12nm tapeout)
+=====
+* Support DMA over PCI-E. 16 GB/s
+* 8M elements in on board RAM, 19-bit, or 18-bit if that's all we need
+* Hopefully we don't need any DDR, is host RAM fast enough?
+* 32x32x32 matmul = 32768 mults
+* 64 TFLOPS @ 1 ghz
+* Target 75W, even if underclocked. One slot, no external power.
+* This card should be on par with a 3090 and sell for $1000
+
+Cherry Three (5nm tapeout)
+=====
+* Support DMA over PCI-E 4.0. 32 GB/s
+* 16 cores
+* 8M elements in on board RAM of each core (288 MB SRAM on chip)
+* Shared ~16GB GDDR6 between cores. Something like 512 GB/s
+* 16x 32x32x32 matmul = 32768 mults
+* 1 PFLOP @ 1 ghz (finally, a petaflop chip)
+* Target 300W
+* This card should be on par with a DGX A100 and sell for $2000
+

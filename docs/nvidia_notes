@@ -7,6 +7,13 @@ A100 has 432 tensor cores
 
 Why aren't the other accelerators 3D like this?
 
+--
+
+Tesla chip
+
+96x96 array
+32 MiB SRAM
+
 -- 
 
 SNPE is using 4x4x4 -> 4x4 (64 FMAs) in the convs.

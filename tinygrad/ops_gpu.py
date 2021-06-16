@@ -1,7 +1,7 @@
 import functools
 import pyopencl as cl
 import numpy as np
-from .tensor import Function, register, GPUBuffer, Tensor, Device
+from .tensor import Function, GPUBuffer
 
 def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
@@ -9,7 +9,7 @@ def buffer_new(ctx, shape, zero=False):
 def buffer_np(ctx, x):
   return cl.Buffer(ctx.cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
 
-@functools.lru_cache()
+@functools.lru_cache
 def clbuild(cl_ctx, name, prg):
   return cl.Program(cl_ctx, prg).build().__getattr__(name)
 
@@ -106,7 +106,7 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
 
 class Sum(Function):
   def forward(ctx, input, axis=None):
-    axis = [axis] if type(axis) == int else axis
+    if isinstance(axis, int): axis = [axis]
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
     if axis is not None:
@@ -121,7 +121,7 @@ class Sum(Function):
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    axis = [axis] if type(axis) == int else axis
+    if isinstance(axis, int): axis = [axis]
     ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
     if axis is not None:
@@ -138,11 +138,11 @@ class Max(Function):
 
 # ************* binary ops *************
 
-@functools.lru_cache()
+@functools.lru_cache
 def get_binop_prg(cl_ctx, code, complist):
   ndims = len(complist)
-  args = "".join([", int d%d" % i for i in range(ndims)]) + "".join([", int p%d" % i for i in range(ndims-1)])
-  compute_idx_rets = ["\n    int idx_ret"+str(i)+" = (gid0 / "+("p%d"%i if i < ndims-1 else "1")+") % d"+str(i)+";" for i in range(ndims)]
+  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
+  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
 
   idx_exprs = ["0", "0"] # [idx_x, idx_y]
   for i in range(ndims):
@@ -151,7 +151,7 @@ def get_binop_prg(cl_ctx, code, complist):
         idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
 
   return cl.Program(cl_ctx, """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
-    int gid0 = get_global_id(0);"""+"".join(compute_idx_rets)+"""
+    int gid0 = get_global_id(0);"""+compute_idx_rets+"""
     float a = x_g["""+idx_exprs[0]+"""];
     float b = y_g["""+idx_exprs[1]+"""];
     res_g[gid0] = """+code+""";\n}""").build()
@@ -365,8 +365,7 @@ class Matmul(Function):
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
-    if type(ctx.stride) == int:
-      ctx.stride = (ctx.stride, ctx.stride)
+    if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
     cout,cin,H,W = w.shape
     ys,xs = ctx.stride
     bs,cin_,iy,ix = x.shape
