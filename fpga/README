@@ -15,6 +15,10 @@ Small Board (Arty A7 100T)
 * 4x4x4 matmul = 64 mults, perhaps 8x8x8 matmul = 512 mults
 * 6.4 GFLOPS @ 50 mhz
 
+* Forward/backward pass of ResNet-50, EfficientNet-B2, and BERT-large in the simulator
+* Train MNIST models on the real hardware
+* After we've trained MNIST here, buy the big board and a Linux computer for home
+
 Big Board (Alveo U250)
 =====
 * Support DMA over PCI-E. 16 GB/s
@@ -23,6 +27,12 @@ Big Board (Alveo U250)
 * 12288 DSP slices, 1.7M luts
 * 16x16x16 matmul = 4096 mults, perhaps 32x32x32 matmul = 32768 mults
 * 4 TFLOPS @ 500 mhz
+
+* Bring up in one Z840 with one card
+* Train (with tinygrad) ResNet-50, EfficientNet-B2, and BERT-large
+* Now we buy a machine with 8x cards
+* Write 8x multicard training, place on https://mlcommons.org/en/training-normal-07/
+* Now it's funding/kickstarter time, based on our MLPerf results on the Alveos and Cherry Two sim
 
 Cherry Two (12nm tapeout)
 =====
@@ -33,6 +43,10 @@ Cherry Two (12nm tapeout)
 * 64 TFLOPS @ 1 ghz
 * Target 75W, even if underclocked. One slot, no external power.
 * This card should be on par with a 3090 and sell for $1000
+
+* Write PyTorch port to support same training while waiting for tapeout
+* If we are here, we are winning the AI chip market
+* Tile the core and go to a smaller process node
 
 Cherry Three (5nm tapeout)
 =====
