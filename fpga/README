@@ -1,4 +1,4 @@
-Cherry is designed with thneed in mind. Assuming onboard RAM, it'll run without the host.
+Cherry is designed with thneed in mind. We upload small RISC-V programs into the icache and let them run.
 
 Single core RISC-V, superscalar, out of order. Targeting 1+ instructions/cycle.
 
@@ -8,7 +8,7 @@ Compute is straightforward, but two questions about memory:
 
 Small Board (Arty A7 100T)
 =====
-* Support DMA over the ethernet interface, 12.5 MB/s 
+* Support DMA over the ethernet interface. 12.5 MB/s
 * 65k elements in on board RAM, 18-bit
 * Optionally, use the 256MB of DDR3L onboard to hold everything. 2.66 GB/s
 * 240 DSP slices, 101k luts
@@ -17,7 +17,7 @@ Small Board (Arty A7 100T)
 
 * Forward/backward pass of ResNet-50, EfficientNet-B2, and BERT-large in the simulator
 * Train MNIST models on the real hardware
-* After we've trained MNIST here, buy the big board and a Linux computer for home
+* After we've trained MNIST here, buy the big board and a Linux computer for home ($10k cost)
 
 Big Board (Alveo U250)
 =====
@@ -30,9 +30,12 @@ Big Board (Alveo U250)
 
 * Bring up in one Z840 with one card
 * Train (with tinygrad) ResNet-50, EfficientNet-B2, and BERT-large
-* Now we buy a machine with 8x cards
+* Confirm these models train to match the literature
+* Now we buy a big machine with 8x cards ($100k cost)
 * Write 8x multicard training, place on https://mlcommons.org/en/training-normal-07/
 * Now it's funding/kickstarter time, based on our MLPerf results on the Alveos and Cherry Two sim
+* Cherry Two tapeout should be done at a turnkey place where we hand them the Verilog
+* TODO: I want to run exactly the tapeout Verilog in FPGA...how to do this?
 
 Cherry Two (12nm tapeout)
 =====
@@ -45,8 +48,8 @@ Cherry Two (12nm tapeout)
 * This card should be on par with a 3090 and sell for $1000
 
 * Write PyTorch port to support same training while waiting for tapeout
-* If we are here, we are winning the AI chip market
-* Tile the core and go to a smaller process node
+* If we are here and we've sold 10k cards, we are on track to winning the AI chip market
+* Raise big money, hire chip experts, tile the core and go to a smaller process node
 
 Cherry Three (5nm tapeout)
 =====
@@ -56,6 +59,10 @@ Cherry Three (5nm tapeout)
 * Shared ~16GB GDDR6 between cores. Something like 512 GB/s
 * 16x 32x32x32 matmul = 32768 mults
 * 1 PFLOP @ 1 ghz (finally, a petaflop chip)
-* Target 300W
+* Target 300W, power savings from process shrink
 * This card should be on par with a DGX A100 and sell for $2000
+
+* At this point, we have won.
+* The verilog is open source, all the ASIC speed tricks are not.
+* Cherry will dominate the market for years to come, and will be in every cloud.
 
