@@ -31,6 +31,7 @@ Big Board (Alveo U250)
 * Bring up in one Z840 with one card
 * Train (with tinygrad) ResNet-50, EfficientNet-B2, and BERT-large
 * Confirm these models train to match the literature
+* Write PyTorch port to support same training (will likely require minor chip changes)
 * Now we buy a big machine with 8x cards ($100k cost)
 * Write 8x multicard training, place on https://mlcommons.org/en/training-normal-07/
 * Now it's funding/kickstarter time, based on our MLPerf results on the Alveos and Cherry Two sim
@@ -45,11 +46,10 @@ Cherry Two (12nm tapeout)
 * 32x32x32 matmul = 32768 mults
 * 64 TFLOPS @ 1 ghz
 * Target 75W, even if underclocked. One slot, no external power.
-* This card should be on par with a 3090 and sell for $1000
 
-* Write PyTorch port to support same training while waiting for tapeout
+* This card should be on par with a 3090 and sell for $1000, with PyTorch support
 * If we are here and we've sold 10k cards, we are on track to winning the AI chip market
-* Raise big money, hire chip experts, tile the core and go to a smaller process node
+* Raise big money ($100M on $500M), hire chip experts, tile the core and go to a smaller process node
 
 Cherry Three (5nm tapeout)
 =====
@@ -63,6 +63,7 @@ Cherry Three (5nm tapeout)
 * This card should be on par with a DGX A100 and sell for $2000
 
 * At this point, we have won.
-* The verilog is open source, all the ASIC speed tricks are not.
+* The core Verilog is open source, all the ASIC speed tricks are not.
 * Cherry will dominate the market for years to come, and will be in every cloud.
+* Sell the company for $1B+ to anyone but NVIDIA
 
