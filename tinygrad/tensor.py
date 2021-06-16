@@ -267,7 +267,6 @@ class Tensor:
     return self - ss
 
   def dropout(self, p=0.5):
-    # TODO: this needs a test
     if Tensor.training:
       _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
       return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
