@@ -3,7 +3,8 @@ import time
 import cProfile
 import pstats
 import unittest
-import torch
+import pytest
+torch = pytest.importorskip("torch")
 from tinygrad.tensor import Tensor
 
 def start_profile():
@@ -18,6 +19,7 @@ def stop_profile(pr, sort='cumtime'):
   ps.strip_dirs()
   ps.sort_stats(sort)
   ps.print_stats(0.2)
+
 
 class TestConvSpeed(unittest.TestCase):
 

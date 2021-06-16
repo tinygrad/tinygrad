@@ -1,5 +1,6 @@
 import numpy as np
-import torch
+import pytest
+torch = pytest.importorskip("torch")
 import unittest
 from tinygrad.tensor import Tensor, DEFAULT_DEVICE
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck

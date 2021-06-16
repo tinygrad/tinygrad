@@ -1,5 +1,6 @@
 import numpy as np
-import torch
+import pytest
+torch = pytest.importorskip("torch")
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.optim import Adam, SGD, RMSprop

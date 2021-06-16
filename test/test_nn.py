@@ -4,7 +4,8 @@ import numpy as np
 from tinygrad.tensor import Tensor, DEFAULT_DEVICE
 from tinygrad.nn import *
 from extra.utils import get_parameters
-import torch
+import pytest
+torch = pytest.importorskip("torch")
 
 @unittest.skipUnless(not DEFAULT_DEVICE, "Not Implemented")
 class TestNN(unittest.TestCase):
