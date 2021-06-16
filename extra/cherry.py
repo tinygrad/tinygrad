@@ -86,7 +86,7 @@ def count(func):
 
 import atexit
 @atexit.register
-def risk_print_counts():
+def cherry_print_counts():
   print(cnts)
   print(tcnts)
   print(utils)
@@ -95,12 +95,12 @@ def risk_print_counts():
   print("%.2f GOPS %d maxdma" % ((tcnts['riski_matmul']*SZ*SZ*SZ*2 + tcnts['riski_mulacc']*SZ*SZ*2)*1e-9, maxdma))
   print("ran in %.2f us with util %.2f%% total %.2f us" % (sum(cnts.values())*1e-3, util_n*100/(util_d+1), sum(tcnts.values())*1e-3))
 
-def risk_reset_counts():
+def cherry_reset_counts():
   global cnts, utils
   cnts = defaultdict(int)
   utils = defaultdict(int)
 
-def risk_regdump():
+def cherry_regdump():
   print("\n***** regdump *****")
   print(regfile[Reg.MATMUL_INPUT])
   print(regfile[Reg.MATMUL_WEIGHTS])
@@ -192,8 +192,10 @@ def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
       sram[address + y*stride_y + x*stride_x] = d[y, x]
   """
 
+# *** DMA engine ***
+
 @count
-def riski_dmar(address, arr):
+def cherry_dmar(address, arr):
   global maxdma
   arr = arr.reshape(-1)
   assert(arr.shape[0] <= SLOTSIZE)
@@ -202,22 +204,22 @@ def riski_dmar(address, arr):
   sram[address:address+arr.shape[0]] = arr
 
 @count
-def riski_dmaw(address, shp):
+def cherry_dmaw(address, shp):
   print("DMAW %d elements" % np.prod(shp))
   return np.copy(sram[address:address+np.prod(shp)].reshape(shp))
 
-# *** RISK-5 code to be compiled ***
+# *** CHERRY code to be compiled ***
 
-def risk_unop(x, op):
-  riski_dmar(SLOT(0), x)
+def cherry_unop(x, op):
+  cherry_dmar(SLOT(0), x)
   cnt = np.prod(x.shape)
   for i in range(0, np.prod(x.shape), SZ*SZ):
     riski_load(Reg.MATMUL_INPUT, SLOT(0)+i)
     riski_unop(op)
     riski_store(Reg.MATMUL_OUTPUT, SLOT(2)+i)
-  return riski_dmaw(SLOT(2), x.shape)
+  return cherry_dmaw(SLOT(2), x.shape)
 
-def risk_binop(x, y, op):
+def cherry_binop(x, y, op):
   n_dims = max(len(x.shape), len(y.shape))
   shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
   shape_x[:len(x.shape)] = np.array(x.shape, dtype=np.int32)
@@ -238,8 +240,8 @@ def risk_binop(x, y, op):
 
   print(dimlist, complist)
 
-  riski_dmar(SLOT(0), x)
-  riski_dmar(SLOT(1), y)
+  cherry_dmar(SLOT(0), x)
+  cherry_dmar(SLOT(1), y)
   if len(dimlist) <= 1:
     if len(complist) == 0:
       complist = [(True, True)]
@@ -292,15 +294,15 @@ def risk_binop(x, y, op):
             stride_y=dimlist[-1], stride_x=1,
             len_y=min(SZ, dimlist[-2]-j), len_x=min(SZ, dimlist[-1]-k))
 
-  return riski_dmaw(SLOT(2), shape_ret)
+  return cherry_dmaw(SLOT(2), shape_ret)
 
-def risk_matmul(x, w, transpose_x=False, transpose_w=False):
+def cherry_matmul(x, w, transpose_x=False, transpose_w=False):
   # copy matrices into SRAM
   # x is M x K
   # w is K x N
   # out is M x N
-  riski_dmar(SLOT(0), x)
-  riski_dmar(SLOT(1), w)
+  cherry_dmar(SLOT(0), x)
+  cherry_dmar(SLOT(1), w)
 
   if transpose_x:
     K,M = x.shape[-2], x.shape[-1]
@@ -332,42 +334,42 @@ def risk_matmul(x, w, transpose_x=False, transpose_w=False):
         riski_store(Reg.MATMUL_OUTPUT, SLOT(2)+c*M*N + m*N+n, N, 1, min(SZ, M-m), min(SZ, N-n))
 
   # copy back from SRAM
-  return riski_dmaw(SLOT(2), (*x.shape[0:-2],M,N))
+  return cherry_dmaw(SLOT(2), (*x.shape[0:-2],M,N))
 
 import unittest
 class TestRisk(unittest.TestCase):
   def test_matmul_even(self):
     x = np.random.uniform(size=(SZ*8, SZ*8)).astype(np.float32)
     w = np.random.uniform(size=(SZ*8, SZ*8)).astype(np.float32)
-    np.testing.assert_allclose(x @ w, risk_matmul(x, w), rtol=1e-5)
+    np.testing.assert_allclose(x @ w, cherry_matmul(x, w), rtol=1e-5)
 
   def test_matmul_small(self):
     x = np.array([[1,2,3],[4,5,6],[7,8,9]])
     w = np.array([[-1,-2,-3],[-4,-5,-6],[-7,-8,-9]])
-    np.testing.assert_allclose(x @ w, risk_matmul(x, w), rtol=1e-5)
+    np.testing.assert_allclose(x @ w, cherry_matmul(x, w), rtol=1e-5)
 
   def test_matmul_uneven(self):
     x = np.random.uniform(size=(47, 79)).astype(np.float32)
     w = np.random.uniform(size=(79, 42)).astype(np.float32)
-    np.testing.assert_allclose(x @ w, risk_matmul(x, w), rtol=1e-5)
+    np.testing.assert_allclose(x @ w, cherry_matmul(x, w), rtol=1e-5)
 
   def test_matmul_transpose(self):
     x = np.random.uniform(size=(33, 33)).astype(np.float32)
     w = np.random.uniform(size=(33, 33)).astype(np.float32)
-    np.testing.assert_allclose(x @ w, risk_matmul(x, w), rtol=1e-5)
-    np.testing.assert_allclose(x.T @ w, risk_matmul(x, w, True), rtol=1e-5)
-    np.testing.assert_allclose(x @ w.T, risk_matmul(x, w, False, True), rtol=1e-5)
-    np.testing.assert_allclose(x.T @ w.T, risk_matmul(x, w, True, True), rtol=1e-5)
+    np.testing.assert_allclose(x @ w, cherry_matmul(x, w), rtol=1e-5)
+    np.testing.assert_allclose(x.T @ w, cherry_matmul(x, w, True), rtol=1e-5)
+    np.testing.assert_allclose(x @ w.T, cherry_matmul(x, w, False, True), rtol=1e-5)
+    np.testing.assert_allclose(x.T @ w.T, cherry_matmul(x, w, True, True), rtol=1e-5)
 
   def test_matmul_transpose_uneven_w(self):
     x = np.random.uniform(size=(47, 79)).astype(np.float32)
     w = np.random.uniform(size=(42, 79)).astype(np.float32)
-    np.testing.assert_allclose(x @ w.T, risk_matmul(x, w, transpose_w=True), rtol=1e-5)
+    np.testing.assert_allclose(x @ w.T, cherry_matmul(x, w, transpose_w=True), rtol=1e-5)
 
   def test_matmul_transpose_uneven_x(self):
     x = np.random.uniform(size=(79, 47)).astype(np.float32)
     w = np.random.uniform(size=(79, 42)).astype(np.float32)
-    np.testing.assert_allclose(x.T @ w, risk_matmul(x, w, transpose_x=True), rtol=1e-5)
+    np.testing.assert_allclose(x.T @ w, cherry_matmul(x, w, transpose_x=True), rtol=1e-5)
 
 if __name__ == "__main__":
   np.random.seed(1337)

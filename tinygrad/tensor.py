@@ -355,9 +355,9 @@ def _register_ops(namespace, device=Device.CPU):
 
 from tinygrad import ops_cpu
 _register_ops(ops_cpu)
-if os.getenv("RISK", None) is not None:
-  from extra import ops_risk
-  _register_ops(ops_risk)
+if os.getenv("CHERRY", None) is not None:
+  from extra import ops_cherry
+  _register_ops(ops_cherry)
 try:
   import pyopencl as cl
   # TODO: move this import to require_init_gpu?

@@ -1,36 +1,36 @@
 import numpy as np
 from tinygrad.tensor import Function
-from extra.risk import *
+from extra.cherry import *
 
 # ************* unary ops *************
 
 class ReLU(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return risk_unop(input, UnaryOps.RELU)
+    return cherry_unop(input, UnaryOps.RELU)
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    return risk_binop(grad_output, risk_unop(input, UnaryOps.GT0), BinaryOps.MUL)
+    return cherry_binop(grad_output, cherry_unop(input, UnaryOps.GT0), BinaryOps.MUL)
 
 class Log(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return risk_unop(input, UnaryOps.LOG)
+    return cherry_unop(input, UnaryOps.LOG)
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    return risk_binop(grad_output, input, BinaryOps.DIV)
+    return cherry_binop(grad_output, input, BinaryOps.DIV)
 
 class Exp(Function):
   def forward(ctx, input):
-    ret = risk_unop(input, UnaryOps.EXP)
+    ret = cherry_unop(input, UnaryOps.EXP)
     ctx.save_for_backward(ret)
     return ret
 
   def backward(ctx, grad_output):
     ret, = ctx.saved_tensors
-    return risk_binop(grad_output, ret, BinaryOps.MUL)
+    return cherry_binop(grad_output, ret, BinaryOps.MUL)
 
 # ************* binary ops *************
 
@@ -42,7 +42,7 @@ def unbroadcast(out, in_sh):
 class Add(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
-    return risk_binop(x, y, BinaryOps.ADD)
+    return cherry_binop(x, y, BinaryOps.ADD)
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
@@ -51,7 +51,7 @@ class Add(Function):
 class Sub(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
-    return risk_binop(x, y, BinaryOps.SUB)
+    return cherry_binop(x, y, BinaryOps.SUB)
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
@@ -60,7 +60,7 @@ class Sub(Function):
 class Mul(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return risk_binop(x, y, BinaryOps.MUL)
+    return cherry_binop(x, y, BinaryOps.MUL)
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
@@ -69,7 +69,7 @@ class Mul(Function):
 class Pow(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return risk_binop(x, y, BinaryOps.POW)
+    return cherry_binop(x, y, BinaryOps.POW)
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
@@ -81,12 +81,12 @@ class Pow(Function):
 class Matmul(Function):
   def forward(ctx, input, weight):
     ctx.save_for_backward(input, weight)
-    return risk_matmul(input, weight)
+    return cherry_matmul(input, weight)
 
   def backward(ctx, grad_output):
     input, weight = ctx.saved_tensors
-    grad_input = risk_matmul(grad_output, weight, transpose_w=True)
-    grad_weight = risk_matmul(input, grad_output, transpose_x=True)
+    grad_input = cherry_matmul(grad_output, weight, transpose_w=True)
+    grad_weight = cherry_matmul(input, grad_output, transpose_x=True)
     return grad_input, grad_weight
 
 class Conv2D(Function):
@@ -125,10 +125,10 @@ class Conv2D(Function):
     return np.moveaxis(ret,4,2).reshape(bs, cout, oy, ox)
     """
 
-    riski_dmar(SLOT(0), x)   # bs, groups, cin, x.shape[2], x.shape[3]
-    riski_dmar(SLOT(1), w)   # groups, rcout, cin, H, W
+    cherry_dmar(SLOT(0), x)   # bs, groups, cin, x.shape[2], x.shape[3]
+    cherry_dmar(SLOT(1), w)   # groups, rcout, cin, H, W
 
-    risk_reset_counts()
+    cherry_reset_counts()
     print(bs, ctx.groups, rcout, oy, ox, cin, H, W)
 
     for B in range(0, bs):
@@ -217,10 +217,10 @@ class Conv2D(Function):
                 riski_store(Reg.MATMUL_OUTPUT,
                   SLOT(2) + B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
                   1, oy*ox, min(SZ, ox-X), min(SZ, rcout-c))
-    risk_print_counts()
+    cherry_print_counts()
 
     #print(x.shape, w.shape, "->", ret.shape)
-    return riski_dmaw(SLOT(2), (bs, cout, oy, ox))
+    return cherry_dmaw(SLOT(2), (bs, cout, oy, ox))
 
   def backward(ctx, grad_output):
     bs,_,oy,ox = grad_output.shape
