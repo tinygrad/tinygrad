@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/logo.png">
 </p>
-
+##Dominic My fist commit
 --------------------------------------------------------------------
 
 ![Unit Tests](https://github.com/geohot/tinygrad/workflows/Unit%20Tests/badge.svg)
