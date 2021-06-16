@@ -11,6 +11,7 @@ $BASE/yosys/yosys -p "synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top top;
 
 # nextpnr-xilinx 0be5cc19f3261101730ce9274720aaf3784f83e2
 # cmake -DARCH=xilinx -DBUILD_GUI=no -DBUILD_PYTHON=no -DUSE_OPENMP=No .
+# git submodule init && git submodule update
 # python3 xilinx/python/bbaexport.py --device xc7a100tcsg324-1 --bba xilinx/xc7a100t.bba
 # ./bbasm -l xilinx/xc7a100t.bba xilinx/xc7a100t.bin
 $BASE/nextpnr-xilinx/nextpnr-xilinx --chipdb $BASE/nextpnr-xilinx/xilinx/xc7a100t.bin --xdc ../src/arty.xdc --json attosoc.json --write attosoc_routed.json --fasm attosoc.fasm

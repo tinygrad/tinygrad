@@ -152,6 +152,7 @@ binops = {BinaryOps.ADD: riski_add,
           BinaryOps.POW: riski_pow}
 
 @count
+# TODO: add masks to matmul instruction?
 def riski_matmul():
   #print("LLL:\n",regfile[Reg.MATMUL_INPUT],"\n",regfile[Reg.MATMUL_WEIGHTS])
   regfile[Reg.MATMUL_OUTPUT] += \
