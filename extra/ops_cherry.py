@@ -32,6 +32,37 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return cherry_binop(grad_output, ret, BinaryOps.MUL)
 
+# ************* reduce ops *************
+
+"""
+class Sum(Function):
+  def forward(ctx, input, axis=None):
+    ctx.save_for_backward(input, axis)
+    return cherry_reduceop(input, ReduceOps.SUM, axis)
+
+  def backward(ctx, grad_output):
+    input, axis = ctx.saved_tensors
+    if isinstance(axis, int): axis = [axis]
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    return grad_output.reshape(shape) + np.zeros_like(input)
+
+class Max(Function):
+  def forward(ctx, inp, axis=None):
+    if isinstance(axis, int): axis = [axis]
+    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ctx.save_for_backward(inp, axis, ret)
+    if axis is not None:
+      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
+    return ret
+
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    ret2 = (input==ret.reshape(shape))
+    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    return ret2*grad_output.reshape(shape)/div
+"""
+
 # ************* binary ops *************
 
 def unbroadcast(out, in_sh):

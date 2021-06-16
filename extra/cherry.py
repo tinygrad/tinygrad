@@ -67,6 +67,10 @@ class BinaryOps(Enum):
   MULACC = 4
   POW = 5
 
+class ReduceOps(Enum):
+  SUM = 0
+  MAX = 1
+
 for t in Reg:
   regfile[t] = np.zeros((SZ, SZ), dtype=np.float32)
 
@@ -143,6 +147,14 @@ def riski_mulacc():
 def riski_pow():
   regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] ** regfile[Reg.MATMUL_WEIGHTS]
 
+@count
+def riski_reduce_sum():
+  regfile[Reg.MATMUL_OUTPUT][0] = regfile[Reg.MATMUL_INPUT].sum(axis=0)
+
+@count
+def riski_reduce_max():
+  regfile[Reg.MATMUL_OUTPUT][0] = regfile[Reg.MATMUL_INPUT].max(axis=0)
+
 # TODO: make accumulate a bit in the instruction available to all
 binops = {BinaryOps.ADD: riski_add,
           BinaryOps.SUB: riski_sub,
@@ -150,6 +162,9 @@ binops = {BinaryOps.ADD: riski_add,
           BinaryOps.DIV: riski_div,
           BinaryOps.MULACC: riski_mulacc,
           BinaryOps.POW: riski_pow}
+
+reduceops = {ReduceOps.SUM: riski_reduce_sum,
+             ReduceOps.MAX: riski_reduce_max}
 
 @count
 # TODO: add masks to matmul instruction?
@@ -209,6 +224,12 @@ def cherry_dmaw(address, shp):
   return np.copy(sram[address:address+np.prod(shp)].reshape(shp))
 
 # *** CHERRY code to be compiled ***
+
+def cherry_reduceop(x, op, axis):
+  print(op, x.shape, axis)
+  cherry_dmar(SLOT(0), x)
+
+  return cherry_dmaw(SLOT(2), x.shape)
 
 def cherry_unop(x, op):
   cherry_dmar(SLOT(0), x)
@@ -337,7 +358,7 @@ def cherry_matmul(x, w, transpose_x=False, transpose_w=False):
   return cherry_dmaw(SLOT(2), (*x.shape[0:-2],M,N))
 
 import unittest
-class TestRisk(unittest.TestCase):
+class TestCherry(unittest.TestCase):
   def test_matmul_even(self):
     x = np.random.uniform(size=(SZ*8, SZ*8)).astype(np.float32)
     w = np.random.uniform(size=(SZ*8, SZ*8)).astype(np.float32)
