@@ -160,6 +160,7 @@ PYTHONPATH="." DEBUG=1 CHERRY=1 python3 examples/efficientnet.py https://upload.
 ```
 
 * ~~Add reduce ops to CHERRY, and fully support forward pass. See `extra/ops_risk.py` and `extra/risk.py`~~
+* Fix max op
 * Switch convolution backward pass to CHERRY instead of the numpy placeholder
 * Confirm EfficientNet backward pass fully uses CHERRY instructions
 * Benchmark that and transformers

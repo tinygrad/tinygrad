@@ -38,7 +38,7 @@ from collections import defaultdict
 # <empty> <output> <input> <weight>
 # <weight> <input> <empty> <output>
 
-SZ = 4
+SZ = 32
 SLOTSIZE = 1024*1024*2   # 5MB, for 20MB total. 8M elements
 sram = np.zeros((SLOTSIZE*4), dtype=np.float32)
 regfile = {}
