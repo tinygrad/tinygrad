@@ -68,7 +68,7 @@ class Max(Function):
 def unbroadcast(out, in_sh):
   # adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i]
   sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]) if in_sh != (1,) else None
-  return out.sum(axis=sum_axis).reshape(in_sh)
+  return cherry_reduceop(out, ReduceOps.SUM, sum_axis).reshape(in_sh)
 
 class Add(Function):
   def forward(ctx, x, y):
