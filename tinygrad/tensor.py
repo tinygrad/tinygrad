@@ -267,8 +267,11 @@ class Tensor:
     return self - ss
 
   def dropout(self, p=0.5):
-    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    if Tensor.training:
+      _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+      return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    else:
+      return self
 
   def softplus(self, limit=20, beta=1):
     # safe softplus - 1/beta*log(1 + exp(beta*x)) (PyTorch)
@@ -291,7 +294,7 @@ class Tensor:
 
   def avg_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).mean(axis=(3,5))
-
+    
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 

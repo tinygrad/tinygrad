@@ -66,10 +66,10 @@ class TestTinygrad(unittest.TestCase):
 
   @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
   def test_dropout(self):
-    n, rate = 100_000, 0.01
-    x = Tensor.ones(n).dropout(rate)
-
-    non_zeros = np.count_nonzero(x.data)
+    Tensor.training = True
+    n, rate = 1_000_000, 0.1
+    w = Tensor.ones(n).dropout(rate)
+    non_zeros = np.count_nonzero(w.data)
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=1e-3)
 
