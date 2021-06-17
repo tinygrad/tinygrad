@@ -34,7 +34,6 @@ class Exp(Function):
 
 # ************* reduce ops *************
 
-"""
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
@@ -46,6 +45,7 @@ class Sum(Function):
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     return grad_output.reshape(shape) + np.zeros_like(input)
 
+"""
 class Max(Function):
   def forward(ctx, inp, axis=None):
     if isinstance(axis, int): axis = [axis]
