@@ -363,6 +363,86 @@ class Matmul(Function):
 
     return grad_input, grad_weight
 
+class MaxPool2d(Function):
+  def forward(ctx, x, kernel_size=(2,2), stride=None):
+    kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
+    if stride is None: stride = kernel_size
+    elif isinstance(stride, tuple): raise Exception("MaxPool2d doesn't support asymmetrical strides yet.")
+    output_shape = ((x.shape[2] - kernel_size[0])//stride + 1, (x.shape[3] - kernel_size[1])//stride + 1)
+    pooled_output = buffer_new(ctx, output_shape)
+    # TODO: Implement a better maxpooling algorithm
+    maxpool = clbuild(ctx.cl_ctx, "maxpool", """
+    __kernel void maxpool(__global const float* input, __global float* output, const int in_rows, const int out_rows, const int cols, const int kernel_size, const int stride) {
+      const int i = get_global_id(0);
+      if (i >= in_rows) return;
+      const int j = get_global_id(1);
+      if (j >= cols) return;
+
+      // printf(" i: %i j: %i ", i, j);
+      // printf(" in_rows: %i out_rows: %i ", in_rows, out_rows);
+      // printf(" cols: %i", cols);
+
+      float max = input[i + in_rows * j];
+      // printf(" max: %f", input[i + in_rows * j]);
+      int max_coeff = i + in_rows * j;
+
+      for (int p = 1; p < kernel_size; ++p) {
+        float m = input[i + stride * p + in_rows * j];
+        if (m > max) {
+          max = m;
+          max_coeff = i + stride * p + in_rows * j;
+          // printf("max coeff: %f", max_coeff);
+        }
+      }
+
+      if ((i + out_rows * j - 2) < 0) return;
+      // printf("Maxx coeff: %i vs output %f...", max_coeff, output[i + out_rows * j - 2]);
+      if (max_coeff < output[i + out_rows * j - 2]) return;
+      output[i + out_rows * j - 2] = max_coeff;
+      printf("Output after assign: %f", output[i + out_rows * j - 2]);
+      // printf("Index %i  = %i...", (i + out_rows * j - 2), max_coeff);
+    }
+    """)
+    # const int in_rows, const int out_rows, const int cols, const int kernel_size, const int stride) {
+    maxpool(
+      ctx.cl_queue,
+      [x.shape[2], x.shape[3]], None,
+      x.cl, pooled_output.cl,
+      i32(x.shape[2]), # in_rows
+      # i32(x.shape[2] // kernel_size[0]), # out_rows
+      i32(output_shape[0]), # out_rows
+      i32(x.shape[3]), # cols
+      i32(kernel_size[0]), # IQ not high enough for asymmetric pool2d :(
+      i32(stride),
+    )
+    print(pooled_output)
+    return pooled_output
+    # return strided_pool2d(x, kernel_size, stride, 'max')
+
+  def backward(ctx, grad_output):
+    pooled_output = buffer_new(ctx, (x.shape[2] // kernel_size[0], x.shape[3] // kernel_size[1]))
+    maxpool_backward = clbuild(ctx.cl_ctx, "maxpool_backward", """
+    __kernel void maxpool_backward(__global const float* input, __global float* output, const int in_rows, const int out_rows, const int cols, const __global int* indices) {
+      const int i = get_global_id(0);
+      if (i >= input_rows) return;
+      const int j = get_global_id(1);
+      if (j >= cols) return;
+      
+      output[indices[i + input_rows * j]] += input[i + input_rows * j];
+    }
+    """)
+    maxpool_backward(
+      ctx.cl_queue,
+      [grad_output.shape[2], grad_output.shape[3]], None,
+      x.cl, pooled_output.cl,
+      i32(x.shape[2]),
+      i32(x.shape[2] // kernel_size[0]),
+      i32(x.shape[3]),
+      i32(kernel_size[0]),
+      i32(kernel_size[1]),
+    )
+    raise Exception("MaxPool2d backwards pass doesn't work yet.")
+
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
