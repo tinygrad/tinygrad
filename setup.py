@@ -22,7 +22,7 @@ setup(name='tinygrad',
       install_requires=['numpy', 'requests'],
       python_requires='>=3.8',
       extras_require={
-        'gpu': ["pyopencl", "six"],
+        'gpu': ["cupy", "six"],
         'testing': [
             "pytest",
             "torch",
