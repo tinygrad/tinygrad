@@ -9,7 +9,7 @@
 For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
 This may not be the best deep learning framework, but it is a deep learning framework.
-
+##Dominic My fist commit
 Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. Support the simple basic ops, and you get SOTA [vision](https://arxiv.org/abs/1905.11946) `extra/efficientnet.py` and [language](https://arxiv.org/abs/1706.03762) `extra/transformer.py` models. We are working on support for the Apple Neural Engine.
 
 Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blindingly fast. Now, it is slow.
