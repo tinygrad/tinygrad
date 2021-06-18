@@ -148,12 +148,12 @@ def riski_pow():
   regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] ** regfile[Reg.MATMUL_WEIGHTS]
 
 @count
-def riski_reduce_sum(out=0, cnt=SZ):
-  regfile[Reg.MATMUL_OUTPUT][out] = regfile[Reg.MATMUL_INPUT][0:cnt].sum(axis=0)
+def riski_reduce_sum(cnt=SZ):
+  regfile[Reg.MATMUL_OUTPUT][0] = regfile[Reg.MATMUL_INPUT][0:cnt].sum(axis=0)
 
 @count
-def riski_reduce_max(out=0, cnt=SZ):
-  regfile[Reg.MATMUL_OUTPUT][out] = regfile[Reg.MATMUL_INPUT][0:cnt].max(axis=0)
+def riski_reduce_max(cnt=SZ):
+  regfile[Reg.MATMUL_OUTPUT][0] = regfile[Reg.MATMUL_INPUT][0:cnt].max(axis=0)
 
 # TODO: make accumulate a bit in the instruction available to all
 binops = {BinaryOps.ADD: riski_add,
@@ -232,7 +232,7 @@ def cherry_dmaw(address, shp):
 
 # *** CHERRY code to be compiled ***
 
-def cherry_reduceop(inp, op, axis):
+def cherry_reduceop(inp, op, axis, keepdims=False):
   dimlist, redlist = [], []
   if type(axis) == int:
     axis = [axis]
@@ -265,11 +265,13 @@ def cherry_reduceop(inp, op, axis):
         else:
           dimlist.append(inp.shape[i])
           redlist.append(is_reduce_axis)
-    nosize = []
-    for i in range(osize.shape[0]):
-      if i not in axis:
-        nosize.append(osize[i])
-    osize = nosize
+
+    if not keepdims:
+      nosize = []
+      for i in range(osize.shape[0]):
+        if i not in axis:
+          nosize.append(osize[i])
+      osize = nosize
 
   osize = tuple(osize)
   print("reduce", op, inp.shape, axis, "->", osize, dimlist, redlist)
@@ -280,20 +282,21 @@ def cherry_reduceop(inp, op, axis):
   # redlist is always [False, True, False, True, ...., True, False]
 
   # special case if redlist ends with True
-  if redlist[-1] == True:
+  if len(redlist) > 0 and redlist[-1] == True:
     print("special case redlist[-1] == True")
     outside = int(np.prod(dimlist[:-1]))
     for l in range(0, outside, SZ):
       reduce_size = min(SZ, outside-l)
       j = 0
       while j < dimlist[-1]:
+        len_y = min(SZ if j == 0 else SZ-1, dimlist[-1]-j)
         riski_load(Reg.MATMUL_INPUT,
           SLOT(inslot) + l*dimlist[-1] + j,
           stride_y=1, stride_x=dimlist[-1],
-          len_y=min(SZ if j == 0 else SZ-1, dimlist[-1]-j),
+          len_y=len_y,
           len_x=reduce_size,
           zero=j==0, skip_first=j!=0)
-        reduceops[op]()
+        reduceops[op](len_y+(j!=0))
         riski_mov(Reg.MATMUL_INPUT, Reg.MATMUL_OUTPUT)  # move the first row
         j += SZ if j == 0 else SZ-1
       riski_store(Reg.MATMUL_OUTPUT, SLOT(outslot) + l, len_y=1, len_x=reduce_size)
@@ -311,14 +314,15 @@ def cherry_reduceop(inp, op, axis):
         reduce_size = min(SZ, dimlist[-1]-k)
         j = 0
         while j < dimlist[-2]:
+          len_y = min(SZ if j == 0 else SZ-1, dimlist[-2]-j)
           riski_load(Reg.MATMUL_INPUT,
             SLOT(inslot) + l*dimlist[-2]*dimlist[-1] + j*dimlist[-1] + k,
             stride_y=dimlist[-1], stride_x=1,
-            len_y=min(SZ if j == 0 else SZ-1, dimlist[-2]-j),
+            len_y=len_y,
             len_x=reduce_size,
             zero=j==0, skip_first=j!=0)
           #cherry_regdump()
-          reduceops[op]()
+          reduceops[op](len_y+(j!=0))
           riski_mov(Reg.MATMUL_INPUT, Reg.MATMUL_OUTPUT)  # move the first row
           j += SZ if j == 0 else SZ-1
         riski_store(Reg.MATMUL_OUTPUT, SLOT(outslot) + l*dimlist[-1] + k, len_y=1, len_x=reduce_size)

@@ -45,11 +45,11 @@ class Sum(Function):
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     return cherry_binop(grad_output.reshape(shape), np.zeros_like(input), BinaryOps.ADD)
 
-"""
 class Max(Function):
   def forward(ctx, inp, axis=None):
     if isinstance(axis, int): axis = [axis]
-    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    #ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ret = cherry_reduceop(inp, ReduceOps.MAX, None if axis is None else tuple(axis), keepdims=True)
     ctx.save_for_backward(inp, axis, ret)
     if axis is not None:
       ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
@@ -59,9 +59,10 @@ class Max(Function):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
-    return ret2*grad_output.reshape(shape)/div
-"""
+    #div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    #return ret2*grad_output.reshape(shape)/div
+    div = cherry_reduceop(ret2, ReduceOps.SUM, axis=None if axis is None else tuple(axis), keepdims=True)
+    return cherry_binop(cherry_binop(ret2, grad_output.reshape(shape), BinaryOps.MUL), div, BinaryOps.DIV)
 
 # ************* binary ops *************
 
