@@ -294,7 +294,7 @@ class Tensor:
 
   def avg_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).mean(axis=(3,5))
-    
+ 
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
