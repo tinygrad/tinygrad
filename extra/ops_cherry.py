@@ -186,7 +186,7 @@ class Conv2D(Function):
           for Y in range(0, oy):
             for X in range(0, ox, SZ):
               IY,IX = Y*ys,X*xs
-              riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+              riski_zero(Reg.MATMUL_OUTPUT)
               for y in range(IY, IY+H):
                 for x in range(IX, IX+W):
                   riski_load(Reg.MATMUL_INPUT,
@@ -212,7 +212,7 @@ class Conv2D(Function):
             assert yx == iy*ix
             for YX in range(0, oy*ox, SZ):   # these are next to each other
               # inner conv
-              riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+              riski_zero(Reg.MATMUL_OUTPUT)
               for ci in range(0, cin, SZ):
                 riski_load(Reg.MATMUL_INPUT,
                   SLOT(0) + B*groups*cin*yx + g*cin*yx + ci*yx + YX,
@@ -234,7 +234,7 @@ class Conv2D(Function):
                 IY,IX = Y*ys,X*xs
 
                 # inner conv
-                riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+                riski_zero(Reg.MATMUL_OUTPUT)
                 for ci in range(0, cin, SZ):
                   # not a loop in 1x1 convs, 9 in 3x3, 25 in 5x5
                   for y in range(IY, IY+H):

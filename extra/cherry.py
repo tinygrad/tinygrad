@@ -46,7 +46,6 @@ SLOT = lambda x: x*SLOTSIZE
 
 from enum import Enum
 class Reg(Enum):
-  ZERO = 0
   # can the ALU use the same registers?
   MATMUL_INPUT = 1
   MATMUL_WEIGHTS = 2
@@ -175,11 +174,13 @@ def riski_matmul():
     regfile[Reg.MATMUL_WEIGHTS]
 
 @count
-def riski_mov(tout, tin, transpose=False):
+def riski_mov(tout, tin):
   ret = regfile[tin]
-  if transpose:
-    ret = ret.T
   regfile[tout] = np.copy(ret)
+
+@count
+def riski_zero(tout):
+  regfile[tout][:, :] = 0
 
 load_log = open("/tmp/risk_load_log", "w") if os.getenv("LOAD_LOG") else None
 
@@ -444,7 +445,7 @@ def cherry_matmul(x, w, transpose_x=False, transpose_w=False):
   for c in range(cnt):
     for m in range(0, M, SZ):
       for n in range(0, N, SZ):
-        riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+        riski_zero(Reg.MATMUL_OUTPUT)
         for k in range(0, K, SZ):
           if transpose_x:
             riski_load(Reg.MATMUL_INPUT, SLOT(0)+c*M*K + k*M+m, 1, M, min(SZ, M-m), min(SZ, K-k))
