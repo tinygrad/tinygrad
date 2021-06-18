@@ -186,7 +186,7 @@ class Conv2D(Function):
           for Y in range(0, oy):
             for X in range(0, ox, SZ):
               IY,IX = Y*ys,X*xs
-              riski_zero(Reg.MATMUL_OUTPUT)
+              riski_zero(Reg.MATMUL_ACC)
               for y in range(IY, IY+H):
                 for x in range(IX, IX+W):
                   riski_load(Reg.MATMUL_INPUT,
@@ -198,7 +198,7 @@ class Conv2D(Function):
                     0, H*W, SZ, min(SZ, groups-g))
                   riski_mulacc()
                   #risk_regdump()
-              riski_store(Reg.MATMUL_OUTPUT,
+              riski_store(Reg.MATMUL_ACC,
                 SLOT(2) + B*groups*oy*ox + g*oy*ox + Y*ox + X,
                 1, oy*ox, min(SZ, ox-X), min(SZ, groups-g))
 
@@ -212,7 +212,7 @@ class Conv2D(Function):
             assert yx == iy*ix
             for YX in range(0, oy*ox, SZ):   # these are next to each other
               # inner conv
-              riski_zero(Reg.MATMUL_OUTPUT)
+              riski_zero(Reg.MATMUL_ACC)
               for ci in range(0, cin, SZ):
                 riski_load(Reg.MATMUL_INPUT,
                   SLOT(0) + B*groups*cin*yx + g*cin*yx + ci*yx + YX,
@@ -221,7 +221,7 @@ class Conv2D(Function):
                   SLOT(1) + g*rcout*cin + c*cin + ci,
                   1, cin, min(SZ, cin-ci), min(SZ, rcout-c))
                 riski_matmul()
-              riski_store(Reg.MATMUL_OUTPUT,
+              riski_store(Reg.MATMUL_ACC,
                 SLOT(2) + B*groups*rcout*yx + g*rcout*yx + c*yx + YX,
                 1, yx, min(SZ, yx-YX), min(SZ, rcout-c))
       else:
@@ -234,7 +234,7 @@ class Conv2D(Function):
                 IY,IX = Y*ys,X*xs
 
                 # inner conv
-                riski_zero(Reg.MATMUL_OUTPUT)
+                riski_zero(Reg.MATMUL_ACC)
                 for ci in range(0, cin, SZ):
                   # not a loop in 1x1 convs, 9 in 3x3, 25 in 5x5
                   for y in range(IY, IY+H):
@@ -246,7 +246,7 @@ class Conv2D(Function):
                         SLOT(1) + g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX),
                         H*W, cin*H*W, min(SZ, cin-ci), min(SZ, rcout-c))
                       riski_matmul()
-                riski_store(Reg.MATMUL_OUTPUT,
+                riski_store(Reg.MATMUL_ACC,
                   SLOT(2) + B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
                   1, oy*ox, min(SZ, ox-X), min(SZ, rcout-c))
     cherry_print_counts()

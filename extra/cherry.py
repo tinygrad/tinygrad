@@ -50,6 +50,7 @@ class Reg(Enum):
   MATMUL_INPUT = 1
   MATMUL_WEIGHTS = 2
   MATMUL_OUTPUT = 3
+  MATMUL_ACC = 4
 
 # this should be a generic function with a LUT, similar to the ANE
 class UnaryOps(Enum):
@@ -131,8 +132,13 @@ def riski_sub():
   regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] - regfile[Reg.MATMUL_WEIGHTS]
 
 @count
-def riski_mul():
-  regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
+def riski_mul(sel=None):
+  if sel is not None:
+    # for broadcasting too
+    # TODO: put in other ops and work out transpose
+    regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT][sel:sel+1].T * regfile[Reg.MATMUL_WEIGHTS]
+  else:
+    regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
 
 @count
 def riski_div():
@@ -140,19 +146,27 @@ def riski_div():
 
 @count
 def riski_mulacc():
-  regfile[Reg.MATMUL_OUTPUT] += regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
+  # riski_mul / MATMUL_ACC += Reg.MATMUL_OUTPUT
+  regfile[Reg.MATMUL_ACC] += regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
 
 @count
 def riski_pow():
   regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] ** regfile[Reg.MATMUL_WEIGHTS]
 
 @count
-def riski_reduce_sum(cnt=SZ):
-  regfile[Reg.MATMUL_OUTPUT][0] = regfile[Reg.MATMUL_INPUT][0:cnt].sum(axis=0)
+def riski_reduce_sum(cnt=SZ, tgt=0, acc=False):
+  # TODO: use acc in reducer
+  if acc:
+    regfile[Reg.MATMUL_ACC][tgt] += regfile[Reg.MATMUL_OUTPUT][0:cnt].sum(axis=0)
+  else:
+    regfile[Reg.MATMUL_ACC][tgt] = regfile[Reg.MATMUL_OUTPUT][0:cnt].sum(axis=0)
 
 @count
-def riski_reduce_max(cnt=SZ):
-  regfile[Reg.MATMUL_OUTPUT][0] = regfile[Reg.MATMUL_INPUT][0:cnt].max(axis=0)
+def riski_reduce_max(cnt=SZ, tgt=0, acc=False):
+  if acc:
+    regfile[Reg.MATMUL_ACC][tgt] = np.concatenate([regfile[Reg.MATMUL_OUTPUT][0:cnt], regfile[Reg.MATMUL_ACC][tgt]], axis=0).max(axis=0)
+  else:
+    regfile[Reg.MATMUL_ACC][tgt] = regfile[Reg.MATMUL_OUTPUT][0:cnt].max(axis=0)
 
 # TODO: make accumulate a bit in the instruction available to all
 binops = {BinaryOps.ADD: riski_add,
@@ -165,13 +179,18 @@ binops = {BinaryOps.ADD: riski_add,
 reduceops = {ReduceOps.SUM: riski_reduce_sum,
              ReduceOps.MAX: riski_reduce_max}
 
-@count
+#@count
 # TODO: add masks to matmul instruction?
 def riski_matmul():
   #print("LLL:\n",regfile[Reg.MATMUL_INPUT],"\n",regfile[Reg.MATMUL_WEIGHTS])
-  regfile[Reg.MATMUL_OUTPUT] += \
-    regfile[Reg.MATMUL_INPUT] @ \
-    regfile[Reg.MATMUL_WEIGHTS]
+  if False:
+    regfile[Reg.MATMUL_ACC] += \
+      regfile[Reg.MATMUL_INPUT] @ \
+      regfile[Reg.MATMUL_WEIGHTS]
+  else:
+    for l in range(0, SZ):
+      riski_mul(l)
+      riski_reduce_sum(tgt=l, acc=True)
 
 @count
 def riski_mov(tout, tin):
@@ -291,16 +310,16 @@ def cherry_reduceop(inp, op, axis, keepdims=False):
       j = 0
       while j < dimlist[-1]:
         len_y = min(SZ if j == 0 else SZ-1, dimlist[-1]-j)
-        riski_load(Reg.MATMUL_INPUT,
+        riski_load(Reg.MATMUL_OUTPUT,
           SLOT(inslot) + l*dimlist[-1] + j,
           stride_y=1, stride_x=dimlist[-1],
           len_y=len_y,
           len_x=reduce_size,
           zero=j==0, skip_first=j!=0)
         reduceops[op](len_y+(j!=0))
-        riski_mov(Reg.MATMUL_INPUT, Reg.MATMUL_OUTPUT)  # move the first row
+        riski_mov(Reg.MATMUL_OUTPUT, Reg.MATMUL_ACC)  # move the first row
         j += SZ if j == 0 else SZ-1
-      riski_store(Reg.MATMUL_OUTPUT, SLOT(outslot) + l, len_y=1, len_x=reduce_size)
+      riski_store(Reg.MATMUL_ACC, SLOT(outslot) + l, len_y=1, len_x=reduce_size)
     # remove last dimension
     redlist = redlist[:-1]
     dimlist = dimlist[:-1]
@@ -316,7 +335,7 @@ def cherry_reduceop(inp, op, axis, keepdims=False):
         j = 0
         while j < dimlist[-2]:
           len_y = min(SZ if j == 0 else SZ-1, dimlist[-2]-j)
-          riski_load(Reg.MATMUL_INPUT,
+          riski_load(Reg.MATMUL_OUTPUT,
             SLOT(inslot) + l*dimlist[-2]*dimlist[-1] + j*dimlist[-1] + k,
             stride_y=dimlist[-1], stride_x=1,
             len_y=len_y,
@@ -324,9 +343,9 @@ def cherry_reduceop(inp, op, axis, keepdims=False):
             zero=j==0, skip_first=j!=0)
           #cherry_regdump()
           reduceops[op](len_y+(j!=0))
-          riski_mov(Reg.MATMUL_INPUT, Reg.MATMUL_OUTPUT)  # move the first row
+          riski_mov(Reg.MATMUL_OUTPUT, Reg.MATMUL_ACC)  # move the first row
           j += SZ if j == 0 else SZ-1
-        riski_store(Reg.MATMUL_OUTPUT, SLOT(outslot) + l*dimlist[-1] + k, len_y=1, len_x=reduce_size)
+        riski_store(Reg.MATMUL_ACC, SLOT(outslot) + l*dimlist[-1] + k, len_y=1, len_x=reduce_size)
     inslot, outslot = outslot, inslot
     if len(dimlist) <= 2:
       break
@@ -445,7 +464,7 @@ def cherry_matmul(x, w, transpose_x=False, transpose_w=False):
   for c in range(cnt):
     for m in range(0, M, SZ):
       for n in range(0, N, SZ):
-        riski_zero(Reg.MATMUL_OUTPUT)
+        riski_zero(Reg.MATMUL_ACC)
         for k in range(0, K, SZ):
           if transpose_x:
             riski_load(Reg.MATMUL_INPUT, SLOT(0)+c*M*K + k*M+m, 1, M, min(SZ, M-m), min(SZ, K-k))
@@ -456,7 +475,7 @@ def cherry_matmul(x, w, transpose_x=False, transpose_w=False):
           else:
             riski_load(Reg.MATMUL_WEIGHTS, SLOT(1)+c*K*N + k*N+n, N, 1, min(SZ, K-k), min(SZ, N-n))
           riski_matmul()
-        riski_store(Reg.MATMUL_OUTPUT, SLOT(2)+c*M*N + m*N+n, N, 1, min(SZ, M-m), min(SZ, N-n))
+        riski_store(Reg.MATMUL_ACC, SLOT(2)+c*M*N + m*N+n, N, 1, min(SZ, M-m), min(SZ, N-n))
 
   # copy back from SRAM
   return cherry_dmaw(SLOT(2), (*x.shape[0:-2],M,N))
@@ -495,6 +514,25 @@ class TestCherry(unittest.TestCase):
     x = np.random.uniform(size=(79, 47)).astype(np.float32)
     w = np.random.uniform(size=(79, 42)).astype(np.float32)
     np.testing.assert_allclose(x.T @ w, cherry_matmul(x, w, transpose_x=True), rtol=1e-5)
+
+  def test_mulacc_matmul(self):
+    regfile[Reg.MATMUL_INPUT] = np.arange(1, SZ*SZ+1).reshape((SZ, SZ))
+    regfile[Reg.MATMUL_WEIGHTS] = np.arange(1, SZ*SZ+1).reshape((SZ, SZ))*-1
+    print(regfile[Reg.MATMUL_INPUT])
+    print(regfile[Reg.MATMUL_WEIGHTS])
+    riski_zero(Reg.MATMUL_ACC)
+    riski_matmul()
+    tst1 = np.copy(regfile[Reg.MATMUL_ACC])
+
+    for l in range(0, SZ):
+      riski_mul(l)
+      print("TST",l,regfile[Reg.MATMUL_OUTPUT])
+      riski_reduce_sum(tgt=l)
+    tst2 = np.copy(regfile[Reg.MATMUL_ACC])
+    print(tst1)
+    print(tst2) 
+    np.testing.assert_allclose(tst1, tst2)
+
 
 if __name__ == "__main__":
   np.random.seed(1337)
