@@ -176,7 +176,7 @@ class Conv2D(Function):
         #    bs x groups x yx -- groups x 1 --> bs x groups x yx
         #    it looks like a broadcasted multiply
 
-        print("opt1")
+        #print("opt1")
 
         # x:   bs x groups x iy x ix
         # w:        groups x H  x W
@@ -203,7 +203,7 @@ class Conv2D(Function):
                 1, oy*ox, min(SZ, ox-X), min(SZ, groups-g))
 
       elif H == 1 and W == 1 and xs == 1 and ys == 1:
-        print("opt2")
+        #print("opt2")
         # oxy x cin x rcout -- unstrided 1x1
         # this is a simple matmul
         for g in range(0, groups):
@@ -225,7 +225,7 @@ class Conv2D(Function):
                 SLOT(2) + B*groups*rcout*yx + g*rcout*yx + c*yx + YX,
                 1, yx, min(SZ, yx-YX), min(SZ, rcout-c))
       else:
-        print("unoptimized")
+        #print("unoptimized")
         # ox x cin x rcout -- unoptimized
         for g in range(0, groups):
           for c in range(0, rcout, SZ):

@@ -51,10 +51,10 @@ Scalar Unit:
 
 128x Vector Unit:
   32Ki x 32b Vector (Lane) Memory (8 ports)
-  8x:
+  8x: Sublane
      32 x 32b Vector (Lane) Reg File
-     2x ALUs
-     Connections to matrix unix
+     2x ALUs on a float each, 2048 total
+     Connections to matrix unit
 2048 Vector ALUs
 
 2x Matrix Multiply Unit
