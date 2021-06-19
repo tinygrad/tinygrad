@@ -24,14 +24,61 @@ class ProfileOp:
     return self
   def __exit__(self, *junk):
     if DEBUG:
+      if cl_queue is not None:
+        cl_queue.finish()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
       print(f"{self.name:>20} : {et:>7.2f} ms {str([y.shape for y in self.x]):>40} {'-> '+str(self.output.shape) if self.output is not None else ''}")
 
 # **** GPU functions ****
+
+cl_ctx, cl_queue = None, None
 def require_init_gpu():
-  if not GPU: raise Exception("No GPU Support, install cupy")
+  if not GPU: raise Exception("No GPU Support, install pyopencl")
+  # CUDA - no need for any init
+  if CUDA: return
+
+  global cl_ctx, cl_queue
+  if cl_queue is None:
+    devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
+    if len(devices) == 0:
+      devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
+    cl_ctx = cl.Context(devices=devices)
+    # this is an in-order command queue
+    cl_queue = cl.CommandQueue(cl_ctx)
+
+class GPUBuffer:
+  def __init__(self, shape, hostbuf=None):
+    self.shape, self.dtype = tuple(shape), np.float32
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
+      cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
+                hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
+
+  def __repr__(self):
+    return f"<GPUBuffer with shape {self.shape!r}>"
+
+def inGPU(data):
+  return GPU and ( isinstance(data, GPUBuffer) or (CUDA and isinstance(data, cp.ndarray)) )
+
+def gpu2CPU(data):
+
+  if CUDA:
+    return cp.asnumpy(data)
+  
+  old = data
+  data = np.empty(old.shape, dtype=np.float32)
+  with ProfileOp("toCPU", [data]):
+    cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
+  return data
+
+def cpu2GPU(data):
+  
+  if CUDA:
+    return cp.asarray(data)
+
+  with ProfileOp("toGPU", [data]):
+    return GPUBuffer(data.shape, data)
 
 
 # **** ANE functions ****
@@ -137,11 +184,10 @@ class Tensor:
 
   @staticmethod
   def _move_data(data, device):
-    if GPU and isinstance(data, cp.ndarray):
+    if inGPU(data):
       if device == Device.GPU: return data
-      old = data
-      data = cp.asnumpy(old)
-
+      data = gpu2CPU(data)
+      
     elif "ANETensor" in str(type(data)):
       if device == Device.ANE: return data
       with ProfileOp("toCPU", [data]):
@@ -157,7 +203,8 @@ class Tensor:
 
     if device == Device.GPU:
       require_init_gpu()
-      return cp.asarray(data)
+      return cpu2GPU(data)
+      
 
     elif device == Device.ANE:
       require_init_ane()
@@ -312,7 +359,7 @@ def register(name, fxn, device=Device.CPU):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
     f = Tensor.ops[tt.device][name]
-    f.ane, f.device = ane, tt.device
+    f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
@@ -334,12 +381,29 @@ _register_ops(ops_cpu)
 if os.getenv("CHERRY", None) is not None:
   from extra import ops_cherry
   _register_ops(ops_cherry)
+
+# CUDA GPU
+CUDA = False
 try:
   import cupy as cp
-  from tinygrad import ops_gpu
-  _register_ops(ops_gpu, device=Device.GPU)
+  from tinygrad import ops_cuda
+  _register_ops(ops_cuda, device=Device.GPU)
   GPU = True
+  CUDA = True
+
 except ImportError:
   # no GPU support
   GPU = False
+
+if not GPU:
+  try:
+    import pyopencl as cl
+    # TODO: move this import to require_init_gpu?
+    from tinygrad import ops_gpu
+    _register_ops(ops_gpu, device=Device.GPU)
+    GPU = True
+  except ImportError:
+    # no GPU support
+    GPU = False
+
 ANE = False
