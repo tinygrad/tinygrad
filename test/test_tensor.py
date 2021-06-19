@@ -64,6 +64,14 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  def test_dropout(self):
+    Tensor.training = True
+    n, rate = 1_000_000, 0.1
+    w = Tensor.ones(n).dropout(rate)
+    non_zeros = np.count_nonzero(w.cpu().data)
+    expected = n * (1 - rate)
+    np.testing.assert_allclose(non_zeros, expected, rtol=1e-3)
+
   @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
   def test_jacobian(self):
     W = np.random.RandomState(1337).random((10, 5))
