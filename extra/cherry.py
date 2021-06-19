@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+#import faulthandler
+#faulthandler.enable()
+
 # RISK architecture is going to change everything
 
 # Arty A7-100T
@@ -209,6 +212,7 @@ def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ, zer
     load_log.write("%d %d %d %d %d\n" % (address, stride_y, stride_x, len_y, len_x))
   utils[(len_y, len_x)] += 1
   stride_y, stride_x = int(stride_y), int(stride_x)
+  assert (address + stride_y*(len_y-1) + stride_x*(len_x-1)) < sram.shape[0]
   d = regfile[target]
   if zero:
     d[:] = 0
@@ -225,6 +229,7 @@ def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ, zer
 @count
 def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
   stride_y, stride_x = int(stride_y), int(stride_x)
+  assert (address + stride_y*(len_y-1) + stride_x*(len_x-1)) < sram.shape[0]
   d = regfile[target]
   np.lib.stride_tricks.as_strided(sram[address:], (len_y, len_x), (stride_y*4, stride_x*4))[:, :] = d[:len_y, :len_x]
   """
@@ -246,6 +251,7 @@ def cherry_dmar(address, arr):
 
 @count
 def cherry_dmaw(address, shp):
+  assert(np.prod(shp) <= SLOTSIZE)
   #print("DMAW %d elements" % np.prod(shp))
   return np.copy(sram[address:address+np.prod(shp)].reshape(shp))
 
