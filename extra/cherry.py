@@ -120,12 +120,10 @@ def riski_unop(op):
     regfile[Reg.MATMUL_OUTPUT] = np.log(regfile[Reg.MATMUL_INPUT])
   elif op == UnaryOps.EXP:
     # np.clip() clips the output to a threshhold. 88.72 is the max param for 32bit.
-    # effnet b2 passes the gigachicken and b2 confidence is nearly the same as b0. tested 5 others images and predictions are same as b0.
+    # effnet b2 passes gigachicken and b2 confidence is nearly the same as b0. tested 5 others images and predictions are same as b0.
     # with clip seems to benchmark in the same amount of time as without np.clip() (+/- blessed windows antivirus).
-    # errors fixed out of 4 total:
-      # 2. np.exp() overflow
-      # 3. MATMUL "invalid value"
-		regfile[Reg.MATMUL_OUTPUT] = np.exp(np.clip(regfile[Reg.MATMUL_INPUT], -88.72, 88.72))
+    # errors fixed np.exp() overflow, MATMUL "invalid value"
+    regfile[Reg.MATMUL_OUTPUT] = np.exp(np.clip(regfile[Reg.MATMUL_INPUT], -88.72, 88.72))
   elif op == UnaryOps.GT0:
     regfile[Reg.MATMUL_OUTPUT] = (regfile[Reg.MATMUL_INPUT] >= 0)
 
