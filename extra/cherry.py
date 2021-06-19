@@ -119,10 +119,6 @@ def riski_unop(op):
   elif op == UnaryOps.LOG:
     regfile[Reg.MATMUL_OUTPUT] = np.log(regfile[Reg.MATMUL_INPUT])
   elif op == UnaryOps.EXP:
-    # np.clip() clips the output to a threshhold. 88.72 is the max param for 32bit.
-    # effnet b2 passes gigachicken and b2 confidence is nearly the same as b0. tested 5 others images and predictions are same as b0.
-    # with clip seems to benchmark in the same amount of time as without np.clip() (+/- blessed windows antivirus).
-    # errors fixed np.exp() overflow, MATMUL "invalid value"
     regfile[Reg.MATMUL_OUTPUT] = np.exp(np.clip(regfile[Reg.MATMUL_INPUT], -88.72, 88.72))
   elif op == UnaryOps.GT0:
     regfile[Reg.MATMUL_OUTPUT] = (regfile[Reg.MATMUL_INPUT] >= 0)
@@ -155,8 +151,6 @@ def riski_mulacc():
 
 @count
 def riski_pow():
-  # this is due to my noobness. it clears the 'power' and 'div by zero' warnings but effnet outputs the same -
-    # - confidence and prediction with or without but i dont know enough to understand the consequences of inverting the negative outputs.
   regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] <= 0] = np.abs(regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] <= 0]) +.00000001
   regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] ** regfile[Reg.MATMUL_WEIGHTS]
 
