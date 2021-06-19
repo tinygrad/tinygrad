@@ -10,7 +10,7 @@ import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
 from extra.utils import fetch, get_parameters
-from extra.efficientnet import EfficientNet
+from models.efficientnet import EfficientNet
 
 def infer(model, img):
   # preprocess image
