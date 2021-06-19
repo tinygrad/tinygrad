@@ -1,3 +1,4 @@
+import os
 import unittest
 import time
 import tinygrad.optim as optim
@@ -8,7 +9,7 @@ from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
 from models.transformer import Transformer
 
-BS = 4
+BS = int(os.getenv("BS", "4"))
 
 def train_one_step(model,X,Y):
   params = get_parameters(model)

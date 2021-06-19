@@ -41,6 +41,7 @@ from collections import defaultdict
 # <empty> <output> <input> <weight>
 # <weight> <input> <empty> <output>
 
+# TODO: delete slots, write malloc
 SZ = 32
 SLOTSIZE = 1024*1024*2   # 5MB, for 20MB total. 8M elements
 sram = np.zeros((SLOTSIZE*4), dtype=np.float32)
@@ -182,8 +183,9 @@ binops = {BinaryOps.ADD: riski_add,
 reduceops = {ReduceOps.SUM: riski_reduce_sum,
              ReduceOps.MAX: riski_reduce_max}
 
+SLOW_MATMUL = os.getenv("SLOW_MATMUL", False)
 @count
-def riski_matmul(slow=False):
+def riski_matmul(slow=SLOW_MATMUL):
   #print("LLL:\n",regfile[Reg.MATMUL_INPUT],"\n",regfile[Reg.MATMUL_WEIGHTS])
   if not slow:
     regfile[Reg.MATMUL_ACC] += \
