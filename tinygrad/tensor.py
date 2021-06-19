@@ -294,7 +294,8 @@ class Tensor:
     return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
 
   def avg_pool2d(self, kernel_size=(2,2), stride=None):
-    return self.avgpool2d(kernel_size, stride)
+    return self._pool2d(*kernel_size).mean(axis=(3,5))
+    # return self.avgpool2d(kernel_size, stride)
     """
     if stride is None:
       return self._pool2d(*kernel_size).mean(axis=(3,5))
