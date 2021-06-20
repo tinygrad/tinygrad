@@ -152,12 +152,12 @@ def riski_mulacc():
 # from numba import njit
 # @njit
 # def _matpow(inp, wht, out):
-# 	out = np.empty_like(out)
-# 	for i in range(inp.shape[0]):
-# 		for j in range(wht.shape[1]):
-# 			for k in range(wht.shape[0]):
-# 				out[i][k] = np.sign(inp[i][k]) * np.abs(inp[i][k]) ** wht[k][j]
-# 	return out
+#   out = np.empty_like(out)
+#   for i in range(inp.shape[0]):
+#     for j in range(wht.shape[1]):
+#       for k in range(wht.shape[0]):
+#         out[i][k] = np.sign(inp[i][k]) * np.abs(inp[i][k]) ** wht[k][j]
+#   return out
 
 @count
 def riski_pow():
