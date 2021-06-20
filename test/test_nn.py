@@ -52,5 +52,45 @@ class TestNN(unittest.TestCase):
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
 
+  def test_linear(self):
+    def _test_linear(x):
+
+      # create in tinygrad
+      layer = Linear(in_dim, out_dim)
+      z = layer(x)
+
+      # create in torch
+      torch_layer = torch.nn.Linear(in_dim, out_dim)
+      torch_layer.weight[:] = torch.tensor(layer.weight.data.T)
+      torch_layer.bias[:] = torch.tensor(layer.bias.data)
+      torch_x = torch.tensor(x.cpu().data)
+      torch_z = torch_layer(torch_x)
+
+      # test
+      np.testing.assert_allclose(z.data, torch_z.detach().numpy(), rtol=1e-5)
+
+    BS, T, in_dim, out_dim = 4, 10, 16, 128
+    _test_linear(Tensor.randn(BS, in_dim))
+    _test_linear(Tensor.randn(BS, T, in_dim)) # test with muore dims
+
+  def test_conv2d(self):
+    BS, C1, H, W = 4, 16, 224, 224
+    C2, K, S, P = 64, 7, 2, 1
+    
+    # create in tinygrad
+    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
+
+    # create in torch
+    torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
+    torch_layer.weight[:] = torch.tensor(layer.weight.data)
+    torch_layer.bias[:] = torch.tensor(layer.bias.data)
+
+    # test
+    x = Tensor.uniform(BS, C1, H, W)
+    z = layer(x)
+    torch_x = torch.tensor(x.cpu().data)
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.data, torch_z.detach().numpy(), rtol=1e-5)
+
 if __name__ == '__main__':
   unittest.main()
