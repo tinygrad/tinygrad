@@ -8,6 +8,7 @@ from extra.training import train
 from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
 from models.transformer import Transformer
+from models.resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
 
 BS = int(os.getenv("BS", "4"))
 
@@ -37,10 +38,12 @@ class TestTrain(unittest.TestCase):
     Y = np.zeros((BS,6), dtype=np.int32)
     train_one_step(model,X,Y)
 
-  # these next two should be the mlperf models
   def test_resnet(self):
-    # TODO: write this
-    pass
+    X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
+    Y = np.zeros((BS), dtype=np.int32)
+    for resnet_v in [ResNet18, ResNet34, ResNet50, ResNet101, ResNet152]:
+      model = resnet_v(num_classes=10)
+      train_one_step(model, X, Y)
 
   def test_bert(self):
     # TODO: write this
