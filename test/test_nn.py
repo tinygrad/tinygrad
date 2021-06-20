@@ -61,13 +61,13 @@ class TestNN(unittest.TestCase):
 
       # create in torch
       torch_layer = torch.nn.Linear(in_dim, out_dim)
-      torch_layer.weight[:] = torch.tensor(layer.weight.data.T)
-      torch_layer.bias[:] = torch.tensor(layer.bias.data)
-      torch_x = torch.tensor(x.cpu().data)
+      torch_layer.weight[:] = torch.tensor(layer.weight.data.T, dtype=torch.float32)
+      torch_layer.bias[:] = torch.tensor(layer.bias.data, dtype=torch.float32)
+      torch_x = torch.tensor(x.cpu().data, dtype=torch.float32)
       torch_z = torch_layer(torch_x)
 
       # test
-      np.testing.assert_allclose(z.data, torch_z.detach().numpy(), rtol=1e-5)
+      np.testing.assert_allclose(z.data, torch_z.detach().numpy(), rtol=1e-4)
 
     BS, T, in_dim, out_dim = 4, 10, 16, 128
     _test_linear(Tensor.randn(BS, in_dim))
