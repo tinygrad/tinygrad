@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+#import faulthandler
+#faulthandler.enable()
+
 # RISK architecture is going to change everything
 
 # Arty A7-100T
@@ -38,6 +41,7 @@ from collections import defaultdict
 # <empty> <output> <input> <weight>
 # <weight> <input> <empty> <output>
 
+# TODO: delete slots, write malloc
 SZ = 32
 SLOTSIZE = 1024*1024*2   # 5MB, for 20MB total. 8M elements
 sram = np.zeros((SLOTSIZE*4), dtype=np.float32)
@@ -179,11 +183,11 @@ binops = {BinaryOps.ADD: riski_add,
 reduceops = {ReduceOps.SUM: riski_reduce_sum,
              ReduceOps.MAX: riski_reduce_max}
 
-#@count
-# TODO: add masks to matmul instruction?
-def riski_matmul():
+SLOW_MATMUL = os.getenv("SLOW_MATMUL", False)
+@count
+def riski_matmul(slow=SLOW_MATMUL):
   #print("LLL:\n",regfile[Reg.MATMUL_INPUT],"\n",regfile[Reg.MATMUL_WEIGHTS])
-  if False:
+  if not slow:
     regfile[Reg.MATMUL_ACC] += \
       regfile[Reg.MATMUL_INPUT] @ \
       regfile[Reg.MATMUL_WEIGHTS]
@@ -210,6 +214,7 @@ def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ, zer
     load_log.write("%d %d %d %d %d\n" % (address, stride_y, stride_x, len_y, len_x))
   utils[(len_y, len_x)] += 1
   stride_y, stride_x = int(stride_y), int(stride_x)
+  assert (address + stride_y*(len_y-1) + stride_x*(len_x-1)) < sram.shape[0]
   d = regfile[target]
   if zero:
     d[:] = 0
@@ -226,6 +231,7 @@ def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ, zer
 @count
 def riski_store(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ):
   stride_y, stride_x = int(stride_y), int(stride_x)
+  assert (address + stride_y*(len_y-1) + stride_x*(len_x-1)) < sram.shape[0]
   d = regfile[target]
   np.lib.stride_tricks.as_strided(sram[address:], (len_y, len_x), (stride_y*4, stride_x*4))[:, :] = d[:len_y, :len_x]
   """
@@ -242,12 +248,13 @@ def cherry_dmar(address, arr):
   arr = arr.reshape(-1)
   assert(arr.shape[0] <= SLOTSIZE)
   maxdma = max(maxdma, arr.shape[0])
-  print("DMAR %d elements" % arr.shape[0])
+  #print("DMAR %d elements" % arr.shape[0])
   sram[address:address+arr.shape[0]] = arr
 
 @count
 def cherry_dmaw(address, shp):
-  print("DMAW %d elements" % np.prod(shp))
+  assert(np.prod(shp) <= SLOTSIZE)
+  #print("DMAW %d elements" % np.prod(shp))
   return np.copy(sram[address:address+np.prod(shp)].reshape(shp))
 
 # *** CHERRY code to be compiled ***
@@ -294,7 +301,7 @@ def cherry_reduceop(inp, op, axis, keepdims=False):
       osize = nosize
 
   osize = tuple(osize)
-  print("reduce", op, inp.shape, axis, "->", osize, dimlist, redlist)
+  #print("reduce", op, inp.shape, axis, "->", osize, dimlist, redlist)
   inslot, outslot = 0, 2
   cherry_dmar(SLOT(inslot), inp)
 
@@ -303,7 +310,7 @@ def cherry_reduceop(inp, op, axis, keepdims=False):
 
   # special case if redlist ends with True
   if len(redlist) > 0 and redlist[-1] == True:
-    print("special case redlist[-1] == True")
+    #print("special case redlist[-1] == True")
     outside = int(np.prod(dimlist[:-1]))
     for l in range(0, outside, SZ):
       reduce_size = min(SZ, outside-l)
@@ -327,7 +334,7 @@ def cherry_reduceop(inp, op, axis, keepdims=False):
 
   # do the reduce merges one at a time
   while len(dimlist) >= 2:
-    print("proc", dimlist, redlist)
+    #print("proc", dimlist, redlist)
 
     for l in range(0, int(np.prod(dimlist[:-2]))):
       for k in range(0, dimlist[-1], SZ):
@@ -371,7 +378,7 @@ def cherry_binop(x, y, op):
   if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
     raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
   shape_ret = np.maximum(shape_x, shape_y)
-  print(shape_x, shape_y, shape_ret)
+  #print(shape_x, shape_y, shape_ret)
 
   dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
   def push(dim, comp):
@@ -382,7 +389,7 @@ def cherry_binop(x, y, op):
   for i in range(n_dims): # group together any adjacent dimensions that we can to simplify broadcasting
     push(max(shape_x[i], shape_y[i]), (shape_x[i] > 1, shape_y[i] > 1))
 
-  print(dimlist, complist)
+  #print(dimlist, complist)
 
   cherry_dmar(SLOT(0), x)
   cherry_dmar(SLOT(1), y)
@@ -518,19 +525,12 @@ class TestCherry(unittest.TestCase):
   def test_mulacc_matmul(self):
     regfile[Reg.MATMUL_INPUT] = np.arange(1, SZ*SZ+1).reshape((SZ, SZ))
     regfile[Reg.MATMUL_WEIGHTS] = np.arange(1, SZ*SZ+1).reshape((SZ, SZ))*-1
-    print(regfile[Reg.MATMUL_INPUT])
-    print(regfile[Reg.MATMUL_WEIGHTS])
     riski_zero(Reg.MATMUL_ACC)
     riski_matmul()
     tst1 = np.copy(regfile[Reg.MATMUL_ACC])
-
-    for l in range(0, SZ):
-      riski_mul(l)
-      print("TST",l,regfile[Reg.MATMUL_OUTPUT])
-      riski_reduce_sum(tgt=l)
+    riski_zero(Reg.MATMUL_ACC)
+    riski_matmul(True)
     tst2 = np.copy(regfile[Reg.MATMUL_ACC])
-    print(tst1)
-    print(tst2) 
     np.testing.assert_allclose(tst1, tst2)
 
 
