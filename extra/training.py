@@ -43,7 +43,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
 def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False, transform=lambda x: x, 
              target_transform=lambda y: y):
   Tensor.training = False
-  def numpy_eval(num_classes):
+  def numpy_eval(Y_test, num_classes):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
     for i in trange((len(Y_test)-1)//BS+1, disable=os.getenv('CI') is not None):
       x = Tensor(transform(X_test[i*BS:(i+1)*BS]))
@@ -53,7 +53,7 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
     return (Y_test == Y_test_preds).mean(), Y_test_preds
 
   if num_classes is None: num_classes = Y_test.max().astype(int)+1
-  acc, Y_test_pred = numpy_eval(num_classes)
+  acc, Y_test_pred = numpy_eval(Y_test, num_classes)
   print("test set accuracy is %f" % acc)
   return (acc, Y_test_pred) if return_predict else acc
 
