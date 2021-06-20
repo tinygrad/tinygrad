@@ -149,10 +149,23 @@ def riski_mulacc():
   # riski_mul / MATMUL_ACC += Reg.MATMUL_OUTPUT
   regfile[Reg.MATMUL_ACC] += regfile[Reg.MATMUL_INPUT] * regfile[Reg.MATMUL_WEIGHTS]
 
+# from numba import njit
+# @njit
+# def _matpow(inp, wht, out):
+# 	out = np.empty_like(out)
+# 	for i in range(inp.shape[0]):
+# 		for j in range(wht.shape[1]):
+# 			for k in range(wht.shape[0]):
+# 				out[i][k] = np.sign(inp[i][k]) * np.abs(inp[i][k]) ** wht[k][j]
+# 	return out
+
 @count
 def riski_pow():
-  regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] <= 0] = np.abs(regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] <= 0]) +.00000001
-  regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] ** regfile[Reg.MATMUL_WEIGHTS]
+ # # jit function for matmul_pow, outputs array equal to what is generated below. runs about 15% slower but throws no errors for some reason. 
+ # regfile[Reg.MATMUL_OUTPUT] = _matpow(regfile[Reg.MATMUL_INPUT], regfile[Reg.MATMUL_WEIGHTS], regfile[Reg.MATMUL_OUTPUT])
+  with np.errstate(divide='ignore', invalid='ignore'): # ** otional ** (ignores errors from producing nan's but predictions output the same.)
+    regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] ** regfile[Reg.MATMUL_WEIGHTS]
+  regfile[Reg.MATMUL_OUTPUT][np.isnan(regfile[Reg.MATMUL_OUTPUT])] = 0 # ** otional ** (replaces nan's with zeros but prediction output is the same.)
 
 @count
 def riski_reduce_sum(cnt=SZ, tgt=0, acc=False):
