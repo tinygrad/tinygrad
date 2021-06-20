@@ -25,7 +25,7 @@ def load_from_pretrained(model, url):
     par_name = '.'.join(par_name)
     code = f"if np.prod({par_name}.shape) == np.prod(v.shape):\n\t{par_name}.assign(Tensor(v.detach().numpy()))\nelse:\n\tlayers_not_loaded += [k]"
     exec(code)
-    print(f'Loaded from "{url}".')
+  print(f'Loaded from "{url}".')
   if len(layers_not_loaded) > 0:
     for l in layers_not_loaded:
       print(f'- Layer {l} not loaded.')

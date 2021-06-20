@@ -7,7 +7,7 @@ from PIL import Image
 from tinygrad.tensor import Device
 from extra.utils import get_parameters
 from extra.training import train, evaluate
-from extra.resnet import ResNet18, ResNet34, ResNet50
+from models.resnet import ResNet18, ResNet34, ResNet50
 from tinygrad.optim import Adam
 from test.test_mnist import fetch_mnist
 
@@ -26,13 +26,13 @@ if __name__ == "__main__":
   model = ResNet18(num_classes=10, pretrained=True)
 
   X_train, Y_train, X_test, Y_test = fetch_mnist()
+  X_train = (X_train.reshape(-1, 28, 28) / 255.0).astype(np.float32)
+  X_test = (X_test.reshape(-1, 28, 28) / 255.0).astype(np.float32)
   lr = 0.003
   transform = ComposeTransforms([
-    lambda x: x.reshape(-1, 28, 28), 
-    lambda x: [Image.fromarray(xx, mode='L').resize((224, 224)) for xx in x],
-    lambda x: np.expand_dims(np.stack([np.asarray(xx) for xx in x], 0), 1),
-    lambda x: np.tile(x, (1, 3, 1, 1)),
-    lambda x: (x / 255.0).astype(np.float32),
+    lambda x: [Image.fromarray(xx, mode='F').resize((224, 224)) for xx in x],
+    lambda x: np.stack([np.asarray(xx) for xx in x], 0),
+    lambda x: np.tile(np.expand_dims(x, 1), (1, 3, 1, 1)).astype(np.float32),
   ])
   for i in range(10):
     optim = Adam(get_parameters(model), lr=lr)
