@@ -18,12 +18,19 @@ def load_from_pretrained(model, url):
   for k, v in state_dict.items():
     par_name = ['model']
     for kk in k.split('.'):
-      if len(kk) == 1:
+      if kk.isdigit():
         par_name += [f'layers[{int(kk)}]']
       else:
         par_name += [kk]
     par_name = '.'.join(par_name)
-    code = f"if np.prod({par_name}.shape) == np.prod(v.shape):\n\t{par_name}.assign(Tensor(v.detach().numpy()))\nelse:\n\tlayers_not_loaded += [k]"
+    code = f"""
+if np.prod({par_name}.shape) == np.prod(v.shape):\n
+  if "fc.weight" in par_name:\n
+    {par_name}.assign(Tensor(v.detach().numpy().T))\n
+  else:\n
+    {par_name}.assign(Tensor(v.detach().numpy()))\n
+else:\n
+  layers_not_loaded += [k]"""
     exec(code)
   print(f'Loaded from "{url}".')
   if len(layers_not_loaded) > 0:
@@ -105,8 +112,7 @@ class ResNet:
     out = self.layer2(out)
     out = self.layer3(out)
     out = self.layer4(out)
-    out = out.avg_pool2d((7, 7))#out.mean(2).mean(3)
-    out = out.reshape(shape=(out.shape[0], -1))
+    out = out.mean(3).mean(2)
     out = self.fc(out).logsoftmax()
     return out
 
