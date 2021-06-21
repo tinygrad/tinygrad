@@ -1,10 +1,9 @@
-import requests
 import os
 import numpy as np
 import pickle
 import gzip
 
-from datasets.utils import Dataset
+from datasets.utils import Dataset, download_from_url
 
 def download_mnist(root='./data', train=True, download=True):
   if train:
@@ -21,10 +20,12 @@ def download_mnist(root='./data', train=True, download=True):
     if not os.path.exists(root):
       os.makedirs(root)
     if not os.path.exists(data_path):
-      r = requests.get(url_data, allow_redirects=True)
-      open(data_path, 'wb').write(r.content)
-      r = requests.get(url_labels, allow_redirects=True)
-      open(labels_path, 'wb').write(r.content)
+      #r = requests.get(url_data, allow_redirects=True)
+      #open(data_path, 'wb').write(r.content)
+      download_from_url(url_data, data_path)
+      download_from_url(url_labels, labels_path)
+      #r = requests.get(url_labels, allow_redirects=True)
+      #open(labels_path, 'wb').write(r.content)
     else:
       print(f'File {data_path} already downloaded.')
   if not os.path.exists(data_path):

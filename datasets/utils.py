@@ -1,4 +1,26 @@
 import numpy as np
+import requests
+from tqdm import tqdm
+import time
+
+def download_from_url(url, dst):
+  status_code = 503
+  t0 = time.time()
+  while status_code != 200:
+    r = requests.head(url, allow_redirects=True)
+    status_code = r.status_code
+    if (time.time() - t0) > 1.0:
+      print('Waiting for response')
+      t0 = time.time()
+  file_size = int(r.headers["Content-Length"])
+  pbar = tqdm(total=file_size, initial=0, unit='B', unit_scale=True, desc=f'Downloading {url.split("/")[-1]}')
+  r = requests.get(url, allow_redirects=True, stream=True)
+  with open(dst, 'ab') as f:
+    for chunk in r.iter_content(chunk_size=1024):
+      if chunk:
+        f.write(chunk)
+        pbar.update(1024)
+  pbar.close()
 
 class Dataset:
   def __len__(self):
