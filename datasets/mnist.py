@@ -19,14 +19,14 @@ def download_mnist(root='./data', train=True, download=True):
 
   if download:
     if not os.path.exists(root):
-        os.makedirs(root)
+      os.makedirs(root)
     if not os.path.exists(data_path):
-        r = requests.get(url_data, allow_redirects=True)
-        open(data_path, 'wb').write(r.content)
-        r = requests.get(url_labels, allow_redirects=True)
-        open(labels_path, 'wb').write(r.content)
+      r = requests.get(url_data, allow_redirects=True)
+      open(data_path, 'wb').write(r.content)
+      r = requests.get(url_labels, allow_redirects=True)
+      open(labels_path, 'wb').write(r.content)
     else:
-        print(f'File {data_path} already downloaded.')
+      print(f'File {data_path} already downloaded.')
   if not os.path.exists(data_path):
     raise FileNotFoundError()
 
