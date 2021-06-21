@@ -32,12 +32,11 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
 
   def test_transformer(self):
-    pass
     # this should be small GPT-2, but the param count is wrong
-    #model = Transformer(syms=10, maxlen=6, layers=12, embed_dim=768, num_heads=12)
-    #X = np.zeros((BS,6), dtype=np.float32)
-    #Y = np.zeros((BS,6), dtype=np.int32)
-    #train_one_step(model,X,Y)
+    model = Transformer(syms=10, maxlen=6, layers=12, embed_dim=768, num_heads=12)
+    X = np.zeros((BS,6), dtype=np.float32)
+    Y = np.zeros((BS,6), dtype=np.int32)
+    train_one_step(model,X,Y)
 
   def test_resnet(self):
     X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
