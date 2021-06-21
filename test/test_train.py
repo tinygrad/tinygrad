@@ -41,10 +41,9 @@ class TestTrain(unittest.TestCase):
   def test_resnet(self):
     X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
-    for pretrained in [False, True]:
-      for resnet_v in [ResNet18, ResNet34, ResNet50]:
-        model = resnet_v(num_classes=10, pretrained=pretrained)
-        train_one_step(model, X, Y)
+    for resnet_v in [ResNet18, ResNet34, ResNet50]:
+      model = resnet_v(num_classes=1000, pretrained=True)
+      train_one_step(model, X, Y)
 
   def test_bert(self):
     # TODO: write this
