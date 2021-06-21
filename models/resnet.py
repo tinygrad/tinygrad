@@ -116,6 +116,9 @@ class ResNet:
     out = self.fc(out).logsoftmax()
     return out
 
+  def __call__(self, x):
+    return self.forward(x)
+
 def ResNet18(num_classes, pretrained=False):
   model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
   if pretrained:
