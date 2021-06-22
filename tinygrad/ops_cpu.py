@@ -152,8 +152,99 @@ class Matmul(Function):
     grad_weight = np.swapaxes(input, -2, -1) @ grad_output
     return grad_input, grad_weight
 
+def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h, ceil_mode=False):
+  output_shape = ((x.shape[2] - kernel_width)//stride_w + 1, (x.shape[3] - kernel_height)//stride_h + 1)
+  import math
+  if ceil_mode:
+    output_shape = (math.ceil((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.ceil((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
+  else:
+    output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
+
+  print("New output shape", output_shape)
+  # ret = np.ndarray(shape=(x.shape[0], x.shape[1], output_shape[0] * output_shape[1], output_shape[0] * output_shape[1])) # (N, C, amount of windows, items per window)
+  # 4x6 ->
+  ret = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
+  print("SHAP", ret.shape)
+  ti = 0
+  for n in range(x.shape[0]):
+    for c in range(x.shape[1]):
+      for ph in range(output_shape[1]):
+        for pw in range(output_shape[0]):
+          hstart = ph * stride_h - pad_h
+          wstart = pw * stride_w - pad_w
+          hend = min(hstart + kernel_height, x.shape[3])
+          wend = min(wstart + kernel_width, x.shape[2])
+          hstart = max(hstart, 0)
+          wstart = max(wstart, 0)
+          pool_index = ph * output_shape[0] + pw
+          #print("hstart, hend", hstart, hend)
+          #print("wstart, wend", wstart, wend)
+
+          """
+          This one gives correct values -> wrong order though.
+          for w in range(wstart, wend):
+            for h in range(hstart, hend):
+              index = w * x.shape[3] + h
+              print("Pool_index", pool_index, " = ", index)
+          """
+
+          """
+          This one also gives correct values -> wrong order.
+          for w in range(hstart, hend):
+            for h in range(wstart, wend):
+              # TODO: x.shape[3] is critical -> should be width, but here is height? assuming x is WIDTH x HEIGHT, which it should be???
+              index = h * x.shape[3] + w
+              print("Pool index ", pool_index, " = ", index, "index comprised of: h, x.shape[3], w")
+          """
+
+          for h in range(hstart, hend):
+            for w in range(wstart, wend):
+              # TODO: x.shape[3] is critical -> should be width, but here is height? assuming x is WIDTH x HEIGHT, which it should be???
+              index = h * x.shape[3] + w
+              print("Pool index ", pool_index, " = ", index, "index comprised of: h, x.shape[3], w")
+              # print("Index is", index, "comprised of: h, x.shape[3], w")
+              print(h, "*", x.shape[3], "+", w)
+
+
+              # print("POOL IDE", pool_index)
+              #print("Comparing", x.flatten()[index], " vs. ", ret.flatten()[pool_index])
+              # print("Pool index ", pool_index, " = ", x.flatten()[index])
+              # print("H:", h, " w: ", w, " x shape[2]: ", x.shape[2])
+              #print("Setting for pool index: ", pool_index, "value:", x.flatten()[index])
+              #if ret[n][c].shape[0] <= pool_index + ti:
+                #print("Skping, value woulda been ", x.flatten()[index])
+                #print("Index woulda been", pool_index + ti)
+                #continue
+              # print("Setting for pool index: ", pool_index, "value:", x.flatten()[index])
+              #ret[n][c][pool_index + ti] = x.flatten()[index]
+              #ti = ti + 1
+
+              """
+              if (x.flatten()[index] > ret.flatten()[pool_index]):
+                # print("Setting [", pool_index, "] = ", x.flatten()[index])
+                ret[n][c][pool_index] = x.flatten()[index]
+              """
+              
+              """
+              i_x = int(index / x.shape[2])
+              # i_y = int(index % x.shape[2])
+              i_y = int((index / x.shape[2]) % x.shape[3])
+              if i_x >= x.shape[2]:
+                pass
+                # continue
+              # print("SEtting to ", x[n][c][i_x][i_y])
+              # ret[n][c][pool_index][ti % ret.shape[2]] = x[n][c][i_x][i_y]
+              ret[n][c][pool_index][ti % ret.shape[2]] = x.flatten()[index]
+              ti = ti + 1
+              """
+  print("Ret:", ret.shape)
+  print(ret)
+  ret = ret.reshape((x.shape[0], x.shape[1], -1, (output_shape[0] * output_shape[1])))
+  return ret
+
 # Returns an array of windows based on kernel sizes, strides & padding
 # Output shape: (windows, items)
+"""
 def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
   output_shape = ((x.shape[0] - kernel_width)//stride_w + 1, (x.shape[1] - kernel_height)//stride_h + 1)
   #pooled_height = output_shape[1]
@@ -180,6 +271,8 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
           ti = ti + 1
           ret[pool_index][ti % ret.shape[1]] = x[i_x][i_y]
   return ret
+"""
+
 
 class AvgPool2D(Function):
   def forward(ctx, x, kernel_size=(2,2), stride=None):
@@ -187,20 +280,11 @@ class AvgPool2D(Function):
     stride = (stride, stride) if isinstance(stride, int) else stride
     if stride is None: stride = kernel_size
     output_shape = ((x.shape[2] - kernel_size[0])//stride[0] + 1, (x.shape[3] - kernel_size[1])//stride[1] + 1)
-    pools = pool2d(x[0][0], kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
-    ret = np.ndarray(shape=(x.shape[0], x.shape[1], output_shape[0], output_shape[1]), dtype=np.float32)
-    for n in range(x.shape[0]):  # Iterate batch
-      for c in range(x.shape[1]): # Iterate channels
-        pools = pool2d(x[n][c], kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
-        # Calculate avg of pool
-        for i in range(pools.shape[0]):
-          i_x = int(i / output_shape[0])
-          i_y = int(i % output_shape[0])
-          ret[n][c][i_x][i_y] = pools[i].mean()
-    return ret
+    pools = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
+    return pools.mean(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
   def backward(ctx, grad_output):
-    raise Exception("Not implemented yet")
+    raise Exception("AvgPool2D backwards pass not yet implemented.")
 
 class MaxPool2D(Function):
   def forward(ctx, x, kernel_size=(2,2), stride=None):
@@ -208,17 +292,8 @@ class MaxPool2D(Function):
     stride = (stride, stride) if isinstance(stride, int) else stride
     if stride is None: stride = kernel_size
     output_shape = ((x.shape[2] - kernel_size[0])//stride[0] + 1, (x.shape[3] - kernel_size[1])//stride[1] + 1)
-    pools = pool2d(x[0][0], kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
-    ret = np.ndarray(shape=(x.shape[0], x.shape[1], output_shape[0], output_shape[1]), dtype=np.float32)
-    for n in range(x.shape[0]): # Iterate batch
-      for c in range(x.shape[1]): # Iterate channels
-        pools = pool2d(x[n][c], kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
-        # Find max in pools
-        for i in range(pools.shape[0]):
-          i_x = int(i / output_shape[0])
-          i_y = int(i % output_shape[0])
-          ret[n][c][i_x][i_y] = pools[i].max()
-    return ret
+    pools = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
+    return pools.max(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
   def backward(ctx, grad_output):
     raise Exception("MaxPool2D backwards pass not yet implemented.")

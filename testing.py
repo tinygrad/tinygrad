@@ -5,8 +5,15 @@ import torch
 
 
 # x = Tensor.randn(1, 1, 4, 4)
-x = Tensor.arange(9).reshape(shape=(3, 3))
+x = Tensor.arange(12).reshape(shape=(4, 3))
 x = Tensor(np.expand_dims(np.expand_dims(x.cpu().data, axis=0), axis=0))
+
+tx = torch.from_numpy(x.cpu().data).reshape((1, 1, 4, 3))
+print("Torch:")
+print(tx.shape)
+tt = torch.nn.functional.max_pool2d(tx, (2,2), (1, 1))
+print("Torch maxpool output shape: ", tt.shape)
+print(tt)
 
 """
 
@@ -48,10 +55,14 @@ output_shape[0] * output_shape[1]
 
 print(x.shape)
 print("in:")
+print(x.shape)
 print(x.cpu().data)
 print("out:")
 
-print(x.maxpool2d(kernel_size=(2,2), stride=1).cpu().data)
+# print(x.max_pool2d(kernel_size=(2,2), stride=(1,1)).cpu().data)
+my = x.maxpool2d(kernel_size=(2, 2), stride=(1,1))
+print(my.shape)
+print(my.cpu().data)
 print("Should be:")
 print([4, 5])
 print([7, 8])
