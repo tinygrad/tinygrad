@@ -171,7 +171,7 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
           for w in range(wstart, wend):
             for h in range(hstart, hend):
               index = w * x.shape[3] + h
-              ret[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = x.flatten()[index]
+              ret[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = x[n][c].flatten()[index]
               ti = ti + 1
   ret = ret.reshape((x.shape[0], x.shape[1], -1, (kernel_width  * kernel_height)))
   return ret

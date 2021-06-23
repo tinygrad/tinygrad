@@ -3,12 +3,32 @@ from tinygrad.tensor import Tensor
 import numpy as np
 import torch
 
+first = np.arange(9).reshape(3, 3)
+second = np.arange(start=9, stop=18).reshape(3, 3)
+
+third = np.arange(start=18, stop=27).reshape(3, 3)
+fourth = np.arange(start=27, stop=36).reshape(3, 3)
+
+#print(first)
+#print(second)
+
+bc = np.ndarray((2, 2, 3, 3))
+
+# wtf is this XD
+bc[0][0] = first
+bc[0][1] = second
+bc[1][0] = third
+bc[1][1] = fourth
+
+print("BC", bc.shape)
+print(bc)
 
 # x = Tensor.randn(1, 1, 4, 4)
-x = Tensor.arange(9).reshape(shape=(3, 3))
-x = Tensor(np.expand_dims(np.expand_dims(x.cpu().data, axis=0), axis=0))
+#x = Tensor.arange(9).reshape(shape=(3, 3))
+#x = Tensor(np.expand_dims(np.expand_dims(x.cpu().data, axis=0), axis=0))
+x = Tensor(bc)
 
-tx = torch.from_numpy(x.cpu().data).reshape((1, 1, 3, 3))
+tx = torch.from_numpy(x.cpu().data)
 print("Torch:")
 print(tx.shape)
 tt = torch.nn.functional.max_pool2d(tx, (2,2), (1, 1))
@@ -18,7 +38,7 @@ print(tt)
 print(x.shape)
 print("in:")
 print(x.shape)
-print(x.cpu().data)
+# print(x.cpu().data)
 print("out:")
 
 # print(x.max_pool2d(kernel_size=(2,2), stride=(1,1)).cpu().data)
