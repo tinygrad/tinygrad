@@ -86,7 +86,7 @@ class TestTinygrad(unittest.TestCase):
       return v.detach().numpy(), h.detach().numpy()
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
-      np.testing.assert_allclose(x, y, atol=1e-5)
+      np.testing.assert_equal(x, y)
 
   @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
   def test_jacobian(self):
