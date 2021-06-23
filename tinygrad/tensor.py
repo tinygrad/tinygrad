@@ -123,6 +123,11 @@ class Tensor:
   def eye(cls, dim, **kwargs):
     return cls(np.eye(dim).astype(np.float32), **kwargs)
 
+  @classmethod
+  def cat(cls, arrays, axis=0, **kwargs):
+    arrays = [a.cpu().data for a in arrays]
+    return cls(np.concatenate(arrays, axis), **kwargs)
+
   # ***** toposort and backward pass *****
 
   def deepwalk(self):
