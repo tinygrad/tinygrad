@@ -5,53 +5,15 @@ import torch
 
 
 # x = Tensor.randn(1, 1, 4, 4)
-x = Tensor.arange(12).reshape(shape=(4, 3))
+x = Tensor.arange(9).reshape(shape=(3, 3))
 x = Tensor(np.expand_dims(np.expand_dims(x.cpu().data, axis=0), axis=0))
 
-tx = torch.from_numpy(x.cpu().data).reshape((1, 1, 4, 3))
+tx = torch.from_numpy(x.cpu().data).reshape((1, 1, 3, 3))
 print("Torch:")
 print(tx.shape)
 tt = torch.nn.functional.max_pool2d(tx, (2,2), (1, 1))
 print("Torch maxpool output shape: ", tt.shape)
 print(tt)
-
-"""
-
-Pooling algorithm:
-
-[[[[0. 1. 2.]
-   [3. 4. 5.]
-   [6. 7. 8.]]]]
--> [0 1 2 3 4 5 6 7 8]
-pile = 0
-->
-[[[[0. 1. 3. 4.]
-   [1. 2. 4. 5.]
-   [3. 4. 6. 7.]
-   [4. 5. 7. 8.]]]]
-
-Kernel_size = (2, 2), stride = 1
-
-Per window based:
-
-4 windows -> iterate from 0->3
-iterate kernel_height: (0-1)
-
-0 -> [i=0][0:kernel_width] & [i=1][0:kernel_width]
-1 -> [i=0][1:]
-
-We know the output shape:
-output_shape = ((x.shape[2] - kernel_size[0])//stride + 1, (x.shape[3] - kernel_size[1])//stride + 1)
-
-We know the amount of elements per window:
-output_shape[0] * output_shape[1]
-
-We know the amount of windows:
-output_shape[0] * output_shape[1]
-
-0 -> if 0 < row width / kernel_width -> 
-
-"""
 
 print(x.shape)
 print("in:")

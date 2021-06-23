@@ -1,4 +1,5 @@
 import numpy as np
+import math
 from .tensor import Function, Tensor
 
 # ************* unary ops *************
@@ -152,14 +153,8 @@ class Matmul(Function):
     grad_weight = np.swapaxes(input, -2, -1) @ grad_output
     return grad_input, grad_weight
 
-def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h, ceil_mode=False):
-  output_shape = ((x.shape[2] - kernel_width)//stride_w + 1, (x.shape[3] - kernel_height)//stride_h + 1)
-  import math
-  if ceil_mode:
-    output_shape = (math.ceil((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.ceil((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
-  else:
-    output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
-
+def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
+  output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
   ret = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
   ti = 0
   for n in range(x.shape[0]):
@@ -172,48 +167,13 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h, cei
           wend = min(wstart + kernel_width, x.shape[2])
           hstart = max(hstart, 0)
           wstart = max(wstart, 0)
-          pool_index = ph * output_shape[0] + pw
-          # This one gives correct values -> wrong order though.
-          #"""
+          pool_index = ph + (pw * output_shape[1])
           for w in range(wstart, wend):
             for h in range(hstart, hend):
               index = w * x.shape[3] + h
-              i_x = int(pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height)) / output_shape[0])
-              i_y = int((pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height)) / output_shape[0]) % output_shape[1])
-              print("I_X:" , i_x, " i_y", i_y, "POOL_index", pool_index)
               ret[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = x.flatten()[index]
               ti = ti + 1
-          #"""
-          """
-          for h in range(hstart, hend):
-            for w in range(wstart, wend):
-              index = h * x.shape[3] + w
-              print("Pool_index", (pool_index + ti), " = ", x.flatten()[index])
-          """
-
-          """
-          This one also gives correct values -> wrong order.
-          for w in range(hstart, hend):
-            for h in range(wstart, wend):
-              # TODO: x.shape[3] is critical -> should be width, but here is height? assuming x is WIDTH x HEIGHT, which it should be???
-              index = h * x.shape[3] + w
-              print("Pool index ", pool_index, " = ", index, "index comprised of: h, x.shape[3], w")
-          """
-
-          """
-          #ret[n][c][pool_index + ti] = x.flatten()[index]
-          Old way:
-          i_x = int(index / x.shape[2])
-          i_y = int((index / x.shape[2]) % x.shape[3])
-          # ret[n][c][pool_index][ti % ret.shape[2]] = x[n][c][i_x][i_y]
-          ret[n][c][pool_index][ti % ret.shape[2]] = x.flatten()[index]
-          """
-  print("Ret:", ret.shape)
-  print(ret)
-  # ret = ret.reshape((x.shape[0], x.shape[1], -1, (output_shape[0] * output_shape[1])))
   ret = ret.reshape((x.shape[0], x.shape[1], -1, (kernel_width  * kernel_height)))
-  print("pool returns:", ret.shape)
-  print(ret)
   return ret
 
 # Returns an array of windows based on kernel sizes, strides & padding

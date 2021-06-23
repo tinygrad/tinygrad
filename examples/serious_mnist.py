@@ -26,7 +26,7 @@ class SqueezeExciteBlock2D:
     self.bias2 = Tensor.uniform(1, self.filters)
 
   def __call__(self, input):
-    se = input.avg_pool2d(kernel_size=(input.shape[2], input.shape[3])) #GlobalAveragePool2D
+    se = input.avgpool2d(kernel_size=(input.shape[2], input.shape[3])) #GlobalAveragePool2D
     se = se.reshape(shape=(-1, self.filters))
     se = se.dot(self.weight1) + self.bias1
     se = se.relu()
@@ -92,10 +92,10 @@ class BigConvNet:
   def forward(self, x):
     x = self.conv[0](x)
     x = self.conv[1](x)
-    x = x.avg_pool2d(kernel_size=(2,2))
+    x = x.avgpool2d(kernel_size=(2,2))
     x = self.conv[2](x)
-    x1 = x.avg_pool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
-    x2 = x.max_pool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
+    x1 = x.avgpool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
+    x2 = x.maxpool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
     xo = x1.dot(self.weight1) + x2.dot(self.weight2)
     return xo.logsoftmax()
 

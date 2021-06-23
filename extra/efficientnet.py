@@ -45,7 +45,7 @@ class MBConvBlock:
 
     # has_se
     if self.has_se:
-      x_squeezed = x.avg_pool2d(kernel_size=x.shape[2:4])
+      x_squeezed = x.avgpool2d(kernel_size=x.shape[2:4])
       x_squeezed = x_squeezed.conv2d(self._se_reduce).add(self._se_reduce_bias.reshape(shape=[1, -1, 1, 1])).swish()
       x_squeezed = x_squeezed.conv2d(self._se_expand).add(self._se_expand_bias.reshape(shape=[1, -1, 1, 1]))
       x = x.mul(x_squeezed.sigmoid())
@@ -121,7 +121,7 @@ class EfficientNet:
     for block in self._blocks:
       x = block(x)
     x = self._bn1(x.conv2d(self._conv_head)).swish()
-    x = x.avg_pool2d(kernel_size=x.shape[2:4])
+    x = x.avgpool2d(kernel_size=x.shape[2:4])
     x = x.reshape(shape=(-1, x.shape[1]))
     #x = x.dropout(0.2)
     return x.dot(self._fc).add(self._fc_bias.reshape(shape=[1,-1]))

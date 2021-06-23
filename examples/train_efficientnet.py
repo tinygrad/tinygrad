@@ -19,8 +19,8 @@ class TinyConvNet:
     self.l1 = Tensor.uniform(out_chan*6*6, classes)
 
   def forward(self, x):
-    x = x.conv2d(self.c1).relu().max_pool2d()
-    x = x.conv2d(self.c2).relu().max_pool2d()
+    x = x.conv2d(self.c1).relu().maxpool2d()
+    x = x.conv2d(self.c2).relu().maxpool2d()
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1).logsoftmax()
 

@@ -1,7 +1,8 @@
 import functools
 import pyopencl as cl
+import math
 import numpy as np
-from .tensor import Function, GPUBuffer
+from .tensor import Function, GPUBuffer, Tensor
 
 def buffer_new(ctx, shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
@@ -419,19 +420,9 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
 """
 
 def new_pool2d(ctx, x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
-  output_shape = ((x.shape[2] - kernel_width)//stride_w + 1, (x.shape[3] - kernel_height)//stride_h + 1)
-  pooled_output = buffer_new(ctx, (x.shape[0], x.shape[1], output_shape[0], output_shape[1]))
+  output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
+  pooled_output = buffer_new(ctx, (x.shape[0], x.shape[1], (output_shape[0] * output_shape[1]), (kernel_width * kernel_height)))
   pool2d = clbuild(ctx.cl_ctx, "pool2d", """
-  // Used for debugging purposes
-  /*void printArray(__global float array[], int elements) {
-    int i;
-    printf("Array:");
-    for(i = 0; i < elements; i++){
-      printf("%f", array[i]);
-    }
-    printf("------");
-  }*/
-
   __kernel void pool2d(__global const float* input, __global float* output, int input_batches, int input_channels, int input_width, int input_height, int output_width, int output_height, int kernel_width, int kernel_height, int stride_w, int stride_h, int pad_w, int pad_h) {
     const int ph = get_global_id(0);
     const int pw = get_global_id(1);
@@ -444,26 +435,15 @@ def new_pool2d(ctx, x, kernel_width, kernel_height, stride_w, stride_h, pad_w, p
     int wstart = pw * stride_w - pad_w;
     int hend = min(hstart + kernel_height, input_height);
     int wend = min(wstart + kernel_width, input_width);
-    int pool_size = (hend - hstart) * (wend - wstart);
     hstart = max(hstart, 0);
     wstart = max(wstart, 0);
-    int pool_index = ph * output_width + pw;
+    int pool_index = ph + (pw * output_width);
     int ti = 0;
-    for (int h = hstart; h < hend; h++) {
-      for (int w = wstart; w < wend; w++) {
-        int index = h * input_width + w;
-        int i_x = (int) index / input_width;
-        int i_y = (int) (index / input_width) % input_height;
-        // int i_y = (int) index % input_width;
-        // output[n][c][pool_index][ti % (output_width * output_height)] = input[n][c][i_x][i_y];
-        // [pool_index][ti % ret.shape[2]]
-        int outputAccess = pool_index + output_width * (ti % (output_width * output_height));
-        printf("Setting output[%i] = %f %c", pool_index, input[index], 0x0A);
-        // int outputIndex = pool_index 
-        // TODO: We need to add a part that represents the batch and the channels before index.
-        output[pool_index] = input[index];
-        // output[ti] = 2;
-        // printArray(output, 4);
+    for (int w = wstart; w < wend; w++) {
+      for (int h = hstart; h < hend; h++) {
+        int index = w * input_height + h;
+        int adjusted_pool_index = pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height));
+        output[adjusted_pool_index] = input[index];
         ti++;
       }
     }
@@ -484,168 +464,29 @@ def new_pool2d(ctx, x, kernel_width, kernel_height, stride_w, stride_h, pad_w, p
   print(pooled_output)
   return pooled_output
 
-def improved_pool2d(ctx, x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
-  output_shape = ((x.shape[0] - kernel_width)//stride_w + 1, (x.shape[1] - kernel_height)//stride_h + 1)
-  pooled_output = buffer_new(ctx, output_shape)
-  pool2d = clbuild(ctx.cl_ctx, "pool2d", """
-  // Used for debugging purposes
-  void printArray(float array[], int elements) {
-    int i;
-    printf("Array:");
-    printf("\n");
-    for(i = 0; i < elements; i++){
-      printf("%f", array[i]);
-      printf("\n");
-    }
-    printf("------");
-  }
 
-  __kernel void pool2d(__global const float* input, __global float* output, int input_width, int input_height, int output_width, int output_height, int kernel_width, int kernel_height, int stride_w, int stride_h, int pad_w, int pad_h, int type) {
-    const int ph = get_global_id(0);
-    const int pw = get_global_id(1);
-
-    int hstart = ph * stride_h - pad_h;
-    int wstart = pw * stride_w - pad_w;
-    int hend = min(hstart + kernel_height, input_height);
-    int wend = min(wstart + kernel_width, input_width);
-    int pool_size = (hend - hstart) * (wend - wstart);
-    hstart = max(hstart, 0);
-    wstart = max(wstart, 0);
-    pool_index = ph * output_width + pw;
-    for (int h = hstart; h < hend; h++) {
-      for (int w = wstart; w < wend; w++) {
-        int index = h * width + w;
-
-        ti++;
-        output[pool_index] = x[index];
-
-        // Here check if max or ave pooling, continue accordingly
-        // max:
-        if (input[index] > output[pool_index]) {
-          output[pool_index] = input[index];
-        }
-
-        // ave:
-        output[ph * output_width + pw] += input[h * width + w];
-      }
-    }
-    // ave pooling:
-    output[ph * output_width + pw] /= pool_size;
-    /*
-    for h in range(hstart, hend):
-      for w in range(wstart, wend):
-        index = h * x.shape[0] + w
-        // i_x = (int) index / x.shape[0];
-        // i_y = (int) index % x.shape[0];
-        ti++;
-        // ti = ti + 1;
-
-        // Sumn like batch * batch width + pool_index
-        output[pool_index] = x[index]
-        // ret[pool_index][ti % ret.shape[1]] = x[i_x][i_y]
-    */
-  }
-  """)
-  #int pad_w, int pad_h)
-  #for ph in range(output_shape[1]):
-  #  for pw in range(output_shape[0]):
-  pool2d(
-    ctx.cl_queue,
-    [output_shape[0], output_shape[1]], None,
-    x.cl, pooled_output.cl,
-    i32(x.shape[2]),
-    i32(x.shape[3]),
-    i32(output_shape[0]),
-    i32(output_shape[1]),
-    i32(kernel_width),
-    i32(kernel_height),
-    i32(stride_w),
-    i32(stride_h),
-    i32(pad_w),
-    i32(pad_h)
-  )
-  print("GPU Pooled:")
-  print(pooled_output)
-  return pooled_output
-
-def pool2d(ctx, x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
-  output_shape = ((x.shape[2] - kernel_width)//stride_w + 1, (x.shape[3] - kernel_height)//stride_h + 1)
-  # pooled_output = buffer_new(ctx, output_shape)
-  pooled_output = buffer_new(ctx, (x.shape[0], x.shape[1], output_shape[0], output_shape[1]))
-  pool2d = clbuild(ctx.cl_ctx, "pool2d", """
-  __kernel void pool2d(__global const float* input, __global float* output, int input_width, int input_height, int output_width, int output_height, int kernel_width, int kernel_height, int stride_w, int stride_h, int pad_w, int pad_h) {
-    const int b = get_global_id(0);
-    const int c = get_global_id(1);
-    const int ph = get_global_id(2);
-    const int pw = get_global_id(3);
-
-    int hstart = ph * stride_h - pad_h;
-    int wstart = pw * stride_w - pad_w;
-    int hend = min(hstart + kernel_height, input_height);
-    int wend = min(wstart + kernel_width, input_width);
-    int pool_size = (hend - hstart) * (wend - wstart);
-    hstart = max(hstart, 0);
-    wstart = max(wstart, 0);
-    int pool_index = ph * output_width + pw;
-    for (int h = hstart; h < hend; h++) {
-      for (int w = wstart; w < wend; w++) {
-        // int index = h * width + w;
-        int index = h * input_width + w;
-
-        // each batch has channels * ph * pw amount of values
-
-        // Batch = 0
-        // batch * batch_width + channels * channel_width + pool_index
-
-        // batch_width = channels * output_width * output_height;
-
-        // Figure out how to access values by batch, channel
-        output[b * c * ph * pw + pool_index] = input[b * c * ph * pw + index];
-        // output[pool_index] = input[index];
-
-        // Here check if max or ave pooling, continue accordingly
-        // max:
-        /*if (input[index] > output[pool_index]) {
-          output[pool_index] = input[index];
-        }*/
-
-        // ave:
-        // output[ph * output_width + pw] += input[h * width + w];
-      }
-    }
-    // ave pooling:
-    // output[ph * output_width + pw] /= pool_size;
-  }
-  """)
-  pool2d(
-    ctx.cl_queue,
-    [x.shape[0], x.shape[1], output_shape[0], output_shape[1]], None,
-    x.cl, pooled_output.cl,
-    i32(x.shape[2]),
-    i32(x.shape[3]),
-    i32(output_shape[0]),
-    i32(output_shape[1]),
-    i32(kernel_width),
-    i32(kernel_height),
-    i32(stride_w),
-    i32(stride_h),
-    i32(pad_w),
-    i32(pad_h)
-  )
-  print("GPU Pooled:")
-  print(pooled_output)
-  return pooled_output
-  
-
-
-class Max_Pool2d(Function):
-  def forward(ctx, x, kernel_size=(2,2), stride=None):
+class AvgPool2d(Function):
+  def forward(ctx, x, kernel_size=(2,2), stride=None, padding=(0, 0)):
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     stride = (stride, stride) if isinstance(stride, int) else stride
+    padding = (padding, padding) if isinstance(padding, int) else padding
     if stride is None: stride = kernel_size
     output_shape = ((x.shape[2] - kernel_size[0])//stride[0] + 1, (x.shape[3] - kernel_size[1])//stride[1] + 1)
     pooled_output = new_pool2d(ctx, x, kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
-    return pooled_output
+    return Tensor(pooled_output).mean(axis=3).reshape(shape=(x.shape[0], x.shape[1], output_shape[0], output_shape[1])).data
+
+  def backward(ctx, grad_output):
+    raise Exception("AvgPool2d backwards pass not implemented yet.")
+
+class MaxPool2d(Function):
+  def forward(ctx, x, kernel_size=(2,2), stride=None, padding=(0, 0)):
+    kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
+    stride = (stride, stride) if isinstance(stride, int) else stride
+    padding = (padding, padding) if isinstance(padding, int) else padding
+    if stride is None: stride = kernel_size
+    output_shape = ((x.shape[2] - kernel_size[0])//stride[0] + 1, (x.shape[3] - kernel_size[1])//stride[1] + 1)
+    pooled_output = new_pool2d(ctx, x, kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
+    return Tensor(pooled_output).max(axis=3).reshape(shape=(x.shape[0], x.shape[1], output_shape[0], output_shape[1])).data
 
   def backward(ctx, grad_output):
     raise Exception("MaxPool2d backwards pass not implemented yet.")
