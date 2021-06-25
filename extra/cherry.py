@@ -119,61 +119,62 @@ threshold = limit*0.99
 from numba import njit
 @njit('float32(float32)', cache=True)
 def soft_clip(n):
-	if np.isnan(n):
-		return 0
-	amplitude = np.abs(n)
-	sign = 1 if n >= 0 else -1
-	if amplitude < threshold:
-		return n
-	if amplitude >= threshold:
-		lim = limit * sign
-	scale = lim - threshold
-	compressed = scale * np.sin((amplitude - threshold) / scale)
-	if n >= limit:
-		print(n)
-	return (threshold + int(compressed)) * sign
+  if np.isnan(n):
+    return 0
+  amplitude = np.abs(n)
+  sign = 1 if n >= 0 else -1
+  if amplitude < threshold:
+    return n
+  if amplitude >= threshold:
+    lim = limit * sign
+  scale = lim - threshold
+  compressed = scale * np.sin((amplitude - threshold) / scale)
+  if n >= limit:
+    print(n)
+  return (threshold + int(compressed)) * sign
 
 ### get indexes of input greater than f32 limit ###
 exp_count = 0
 def check_index(inp):
-	global exp_count
-	for i in range(inp.shape[0]):
-		for j in range(inp.shape[1]):
-			if inp[i][j] > limit:
-				print(i, j)
-				print(exp_count)
+  global exp_count
+  for i in range(inp.shape[0]):
+    for j in range(inp.shape[1]):
+      if inp[i][j] > limit:
+        print(i, j)
+        print(exp_count)
 
 # *** instructions ***
 @count
 def riski_unop(op):
-	if op == UnaryOps.RELU:
-		regfile[Reg.MATMUL_OUTPUT] = np.maximum(regfile[Reg.MATMUL_INPUT], 0)
-	elif op == UnaryOps.LOG:
-		regfile[Reg.MATMUL_OUTPUT] = np.log(regfile[Reg.MATMUL_INPUT])
-	elif op == UnaryOps.EXP:
-    ### get naughty index
-		check_index(regfile[Reg.MATMUL_INPUT])
-		global exp_count
-		exp_count += 1
+  if op == UnaryOps.RELU:
+    regfile[Reg.MATMUL_OUTPUT] = np.maximum(regfile[Reg.MATMUL_INPUT], 0)
+  elif op == UnaryOps.LOG:
+    regfile[Reg.MATMUL_OUTPUT] = np.log(regfile[Reg.MATMUL_INPUT])
+  elif op == UnaryOps.EXP:
 
-		# easiest and fastest run time
-		regfile[Reg.MATMUL_OUTPUT] = np.exp(np.clip(regfile[Reg.MATMUL_INPUT], -limit, limit))
+    check_index(regfile[Reg.MATMUL_INPUT])
+    global exp_count
+    exp_count += 1
 
-# 		#### this is essentially the same as above .clip() ####
-# 		regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] > limit] = limit
-# 		regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] < -limit] = -limit
-# 		regfile[Reg.MATMUL_OUTPUT] = np.exp(regfile[Reg.MATMUL_INPUT])
+    # easiest implementation and fastest run time
+    regfile[Reg.MATMUL_OUTPUT] = np.exp(np.clip(regfile[Reg.MATMUL_INPUT], -limit, limit))
 
-# 		# soft clipping (redudant compared to clipping)
-# 		if regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] >= limit].any():
-# 			x = np.array([np.exp(np.fromiter(map(soft_clip, regfile[Reg.MATMUL_INPUT][i]), dtype=np.float32)) for i in range(regfile[Reg.MATMUL_INPUT].shape[0])])
-# 			regfile[Reg.MATMUL_OUTPUT] = x
-# 			# regfile[Reg.MATMUL_OUTPUT] = np.array([np.exp(np.fromiter(map(soft_clip, regfile[Reg.MATMUL_INPUT][i]), dtype=np.float32)) for i in range(regfile[Reg.MATMUL_INPUT].shape[0])])
-# 		else:
-# 			regfile[Reg.MATMUL_OUTPUT] = np.exp(regfile[Reg.MATMUL_INPUT])
+    # #### this is essentially the same as above .clip() ####
+    # regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] > limit] = limit
+    # regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] < -limit] = -limit
+    # regfile[Reg.MATMUL_OUTPUT] = np.exp(regfile[Reg.MATMUL_INPUT])
 
-	elif op == UnaryOps.GT0:
-		regfile[Reg.MATMUL_OUTPUT] = (regfile[Reg.MATMUL_INPUT] >= 0)
+    # ##### soft clipping (redudant compared to clipping)
+    # if regfile[Reg.MATMUL_INPUT][regfile[Reg.MATMUL_INPUT] >= limit].any():
+    #   x = np.array([np.exp(np.fromiter(map(soft_clip, regfile[Reg.MATMUL_INPUT][i]), dtype=np.float32)) for i in range(regfile[Reg.MATMUL_INPUT].shape[0])])
+    #   regfile[Reg.MATMUL_OUTPUT] = x
+    #   # regfile[Reg.MATMUL_OUTPUT] = np.array([np.exp(np.fromiter(map(soft_clip, regfile[Reg.MATMUL_INPUT][i]), dtype=np.float32)) for i in range(regfile[Reg.MATMUL_INPUT].shape[0])])
+    # else:
+    #   regfile[Reg.MATMUL_OUTPUT] = np.exp(regfile[Reg.MATMUL_INPUT])
+
+  elif op == UnaryOps.GT0:
+    regfile[Reg.MATMUL_OUTPUT] = (regfile[Reg.MATMUL_INPUT] >= 0)
+
 @count
 def riski_add():
   regfile[Reg.MATMUL_OUTPUT] = regfile[Reg.MATMUL_INPUT] + regfile[Reg.MATMUL_WEIGHTS]
