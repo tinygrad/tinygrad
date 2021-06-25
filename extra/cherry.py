@@ -111,8 +111,9 @@ def cherry_regdump():
   print(regfile[Reg.MATMUL_OUTPUT])
 
 
-f32 = 3.4028237 * 10**38 # max 32 bit flaoting point value
+f32 = 3.4028237 * 10**38 # max 32 bit floating point value
 limit = np.log(f32) # 88.72283912072155
+limit = round(limit, 4)) # -0.00003912072155 # max limit still causes overflow
 
 ### soft clipping ###
 threshold = limit*0.99
