@@ -135,15 +135,15 @@ def soft_clip(n):
 ### get indexes of input greater than f32 limit ###
 exp_count = 0
 def check_index(inp):
-	global exp_count
-	exp_count += 1
-	for i in range(inp.shape[0]):
-		for j in range(inp.shape[1]):
-			if inp[i][j] > limit:
-				print('EXP op number:', exp_count)
-				print(f'row: {i}  column: {j}')
-				print('value:', inp[i][j])
-        print()
+  global exp_count
+  exp_count += 1
+    for i in range(inp.shape[0]):
+      for j in range(inp.shape[1]):
+        if inp[i][j] > limit:
+          print('EXP op number:', exp_count)
+          print(f'row: {i}  column: {j}')
+          print('value:', inp[i][j])
+          print()
 
 # *** instructions ***
 @count
