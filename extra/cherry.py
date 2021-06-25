@@ -130,19 +130,20 @@ def soft_clip(n):
     lim = limit * sign
   scale = lim - threshold
   compressed = scale * np.sin((amplitude - threshold) / scale)
-  if n >= limit:
-    print(n)
   return (threshold + int(compressed)) * sign
 
 ### get indexes of input greater than f32 limit ###
 exp_count = 0
 def check_index(inp):
-  global exp_count
-  for i in range(inp.shape[0]):
-    for j in range(inp.shape[1]):
-      if inp[i][j] > limit:
-        print(i, j)
-        print(exp_count)
+	global exp_count
+	exp_count += 1
+	for i in range(inp.shape[0]):
+		for j in range(inp.shape[1]):
+			if inp[i][j] > limit:
+				print('EXP op number:', exp_count)
+				print(f'row: {i}  column: {j}')
+				print('value:', inp[i][j])
+        print()
 
 # *** instructions ***
 @count
@@ -152,10 +153,7 @@ def riski_unop(op):
   elif op == UnaryOps.LOG:
     regfile[Reg.MATMUL_OUTPUT] = np.log(regfile[Reg.MATMUL_INPUT])
   elif op == UnaryOps.EXP:
-
-    check_index(regfile[Reg.MATMUL_INPUT])
-    global exp_count
-    exp_count += 1
+#     check_index(regfile[Reg.MATMUL_INPUT])
 
     # easiest implementation and fastest run time
     regfile[Reg.MATMUL_OUTPUT] = np.exp(np.clip(regfile[Reg.MATMUL_INPUT], -limit, limit))
