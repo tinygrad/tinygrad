@@ -156,6 +156,7 @@ class Matmul(Function):
 def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
   output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
   ret = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
+  indices = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
   ti = 0
   for n in range(x.shape[0]):
     for c in range(x.shape[1]):
@@ -172,9 +173,11 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
             for h in range(hstart, hend):
               index = w * x.shape[3] + h
               ret[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = x[n][c].flatten()[index]
+              indices[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = index
               ti = ti + 1
   ret = ret.reshape((x.shape[0], x.shape[1], -1, (kernel_width  * kernel_height)))
-  return ret
+  indices = indices.reshape((x.shape[0], x.shape[1], -1, (kernel_width  * kernel_height)))
+  return ret, indices
 
 # Returns an array of windows based on kernel sizes, strides & padding
 # Output shape: (windows, items)
@@ -209,119 +212,61 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
 
 
 class AvgPool2D(Function):
-  def forward(ctx, x, kernel_size=(2,2), stride=None):
+  def forward(ctx, x, kernel_size=(2,2), stride=None, padding=(0, 0)):
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     stride = (stride, stride) if isinstance(stride, int) else stride
+    padding = (padding, padding) if isinstance(padding, int) else padding
     if stride is None: stride = kernel_size
     output_shape = ((x.shape[2] - kernel_size[0])//stride[0] + 1, (x.shape[3] - kernel_size[1])//stride[1] + 1)
-    pools = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
+    pools, indices = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], padding[0], padding[1])
+    ctx.save_for_backward(pools, x.shape, kernel_size)
     return pools.mean(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
   def backward(ctx, grad_output):
-    raise Exception("AvgPool2D backwards pass not yet implemented.")
+    bs, c, w, h = grad_output.shape
+    pools, in_shape, kernel_size = ctx.saved_tensors
+    ret = np.zeros((bs, c, in_shape[2] * in_shape[3]))
+    for batch in range(bs):
+      for channel in range(c):
+        pass
+    print("Grad output")
+    print(grad_output)
+    ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
+    return ret
 
 class MaxPool2D(Function):
   def forward(ctx, x, kernel_size=(2,2), stride=None, padding=(0, 0)):
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     stride = (stride, stride) if isinstance(stride, int) else stride
+    padding = (padding, padding) if isinstance(padding, int) else padding
     if stride is None: stride = kernel_size
-    import math
     output_shape = (math.floor((x.shape[2] + 2 * padding[0] - kernel_size[0])/stride[0]) + 1, math.floor((x.shape[3] + 2 * padding[1] - kernel_size[1])/stride[1]) + 1)
-    pools = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], 0, 0)
+    pools, indices = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], padding[0], padding[1])
+
+    def arrange_indices(indices, max_indices):
+      ret = np.zeros(shape=(x.shape[0], x.shape[1], indices.shape[2]), dtype=np.float32)
+      for b in range(ret.shape[0]):
+        for c in range(ret.shape[1]):
+          for i in range(ret.shape[2]):
+            ret[b][c][i] = indices[b][c][i][max_indices[b][c][i]]
+      return ret
+    
+    max_indices = np.argmax(pools, axis=3)
+    indices = arrange_indices(indices, max_indices) # Then, sort indices with max_indices
+    ctx.save_for_backward(pools, indices, x.shape)
     return pools.max(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
   def backward(ctx, grad_output):
-    raise Exception("MaxPool2D backwards pass not yet implemented.")
-
-"""
-class MaxPool2D(Function):
-  def forward(ctx, x, w, stride=1, groups=1):
-    if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
-    # cout,cin,H,W = w.shape
-    ys,xs = ctx.stride
-    bs,cin_ = x.shape[0], x.shape[1]
-    oy,ox = (x.shape[2]-(H-ys))//ys, (x.shape[3]-(W-xs))//xs
-    # assert cin*ctx.groups == cin_
-    # assert cout % ctx.groups == 0
-    # rcout = cout//ctx.groups
-
-    gx = x.reshape(bs,ctx.groups,x.shape[1],x.shape[2],x.shape[3])
-    tx = np.lib.stride_tricks.as_strided(gx,
-      shape=(bs, ctx.groups, cin, oy, ox, H, W),
-      strides=(*gx.strides[0:3], gx.strides[3]*ys, gx.strides[4]*xs, *gx.strides[3:5]),
-      writeable=False,
-    )
-    tw = w.reshape(ctx.groups, rcout, cin, H, W)
-    ctx.save_for_backward(tx, tw, x.shape)
-
-    ret = np.zeros((bs,ctx.groups,oy,ox,rcout),dtype=x.dtype)
-    for g in range(ctx.groups):
-      #ijYXyx,kjyx -> iYXk ->ikYX
-      ret[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
-    return np.moveaxis(ret,4,2).reshape(bs, cout, oy, ox)
-
-  def backward(ctx, grad_output):
-    bs,_,oy,ox = grad_output.shape
-    tx, tw, x_shape = ctx.saved_tensors
-    _,rcout,cin,H,W = tw.shape
-    ys,xs = ctx.stride
-    OY,OX = x_shape[2:4]
-
-    ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
-
-    gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
-    for g in range(ctx.groups):
-      #'ikYX,ijYXyx -> kjyx'
-      gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
-
-    # needs to be optimized
-    gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
-    for k in range(oy*ox):
-      Y, X = k//ox, k%ox
-      iY,iX = Y*ys, X*xs
-      #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
-      for g in range(ctx.groups):
-        tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
-        gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
-
-    return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-"""
-
-"""
-class MaxPool2d(Function):
-  def forward(ctx, x, kernel_size=(2,2), stride=None):
-    kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
-    if stride is None: stride = kernel_size
-    elif isinstance(stride, tuple): raise Exception("MaxPool2d doesn't support asymmetrical strides yet.")
-    output_shape = ((x.shape[2] - kernel_size[0])//stride + 1, (x.shape[3] - kernel_size[1])//stride + 1)
-    print("Output shape", output_shape)
-    ret = np.ndarray(shape=(output_shape[0] * output_shape[1]))
-    for i in range(output_shape[0]):
-      for j in range(x.shape[3]):
-        max = x[0][0][i][j]
-        max_coeff = i * x.shape[2] * j
-
-        for k in range(1, kernel_size[0]):
-          m = x[0][0][i + stride * k, j]
-          if m > max:
-            max = m
-            max_coeff = i + stride * k + x.shape[2] * j
-        
-        # print("Index: ", (i + output_shape[1] * j - 2), " is: ", max_coeff, " j: ", j, " i: ", i)
-
-        if (i + output_shape[1] * j - j >= ret.shape[0]): continue
-        ret[i + output_shape[1] * j - j] = max_coeff
-    # print(ret.reshape(2, 2).shape)
-    ret = ret.reshape(output_shape[1], output_shape[0])
-    print("RET")
-    print(ret)
+    bs, c, w, h = grad_output.shape
+    pools, indices, in_shape = ctx.saved_tensors
+    ret = np.zeros((bs, c, in_shape[2] * in_shape[3]))
+    for batch in range(bs):
+      for channel in range(c):
+        for ind in range(indices.shape[2]):
+          ret[batch][channel][int(indices[batch][channel][ind])] = grad_output[batch][channel].flatten()[ind]
+    
+    ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
     return ret
-    # return strided_pool2d(x, kernel_size, stride, 'max')
-
-  def backward(ctx, grad_output):
-    raise Exception("Not implemented yet")
-"""
-
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):

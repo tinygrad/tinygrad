@@ -20,20 +20,35 @@ bc[0][1] = second
 bc[1][0] = third
 bc[1][1] = fourth
 
-print("BC", bc.shape)
-print(bc)
+#print("BC", bc.shape)
+#print(bc)
 
 # x = Tensor.randn(1, 1, 4, 4)
 #x = Tensor.arange(9).reshape(shape=(3, 3))
 #x = Tensor(np.expand_dims(np.expand_dims(x.cpu().data, axis=0), axis=0))
-x = Tensor(bc)
+# x = Tensor(bc)
+np.random.seed(1337)
+x = Tensor.randn(2, 2, 3, 3)
 
-tx = torch.from_numpy(x.cpu().data)
-print("Torch:")
+print("==============================")
+print("Input data:")
+print(x.cpu().data)
+print("==============================")
+
+# tx = torch.from_numpy(x.cpu().data, requires_grad=True)
+tx = torch.tensor(x.cpu().data, requires_grad=True)
+tx.retain_grad()
+print("Torch:", tx.dtype)
 print(tx.shape)
-tt = torch.nn.functional.max_pool2d(tx, (2,2), (1, 1))
+# tt, indices = torch.nn.functional.max_pool2d(tx, (2,2), (1, 1), return_indices=True)
+tt = torch.nn.functional.avg_pool2d(tx, (2,2), (1, 1))
+tt.retain_grad()
+# tt = torch.nn.MaxPool2d((2, 2), stride=(1, 1), return_indices=True)
+# o, indices = tt(tx)
 print("Torch maxpool output shape: ", tt.shape)
 print(tt)
+# print("Torch indices", indices.shape)
+# print(indices)
 
 print(x.shape)
 print("in:")
@@ -42,12 +57,29 @@ print(x.shape)
 print("out:")
 
 # print(x.max_pool2d(kernel_size=(2,2), stride=(1,1)).cpu().data)
-my = x.maxpool2d(kernel_size=(2, 2), stride=(1,1))
+my = x.avgpool2d(kernel_size=(2, 2), stride=(1,1))
 print(my.shape)
 print(my.cpu().data)
-print("Should be:")
-print([4, 5])
-print([7, 8])
+
+print("Running backward")
+
+my.mean().backward()
+tt.mean().backward()
+
+print("x grad", x.grad.shape)
+print(x.grad)
+print("tt grad", tt.grad.shape)
+print(tt.grad)
+print("correct grad")
+print(tx.grad)
+
+"""
+for t, tt in zip(tx, x):
+  print("PyTorch grad:")
+  print(t.grad)
+  print("Tinygrad grad:")
+  print(tt.cpu().grad.data)
+"""
 
 # print([1, 2])
 # print([4, 5])

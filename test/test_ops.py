@@ -196,7 +196,7 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           # TODO: why is this tolerance so high?
-          lambda x: Tensor.maxpool2d(x, kernel_size=ksz), grad_atol=1e-4)
+          lambda x: x.maxpool2d(kernel_size=ksz), grad_atol=1e-4)
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
@@ -204,25 +204,25 @@ class TestOps(unittest.TestCase):
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
-          lambda x: Tensor.avgpool2d(x, kernel_size=ksz), rtol=1e-5)
+          lambda x: x.avgpool2d(kernel_size=ksz), rtol=1e-5)
 
   def test_strided_maxpool2d(self): # forward only for now
     kernel_sizes = [(2,2), (3,3), (3,2), (5,5), (5,1)]
-    strides = [2, 1, 3, 4, 5]
+    strides = [(2,2), (1, 2), (3, 3), (4, 4), (5, 1)]
     for i, ksz in enumerate(kernel_sizes):
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, stride=(strides[i], strides[i])),
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, stride=strides[i]),
           # TODO: why is this tolerance so high?
           lambda x: Tensor.maxpool2d(x, kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
   
   def test_strided_avgpool2d(self): # forward only for now
     kernel_sizes = [(2,2), (3,3), (3,2), (5,5), (5,1)]
-    strides = [2, 1, 3, 4, 5]
+    strides = [(2,2), (1, 2), (3, 3), (4, 4), (5, 1)]
     for i, ksz in enumerate(kernel_sizes):
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, stride=(strides[i], strides[i])),
+          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, stride=strides[i]),
           # TODO: why is this tolerance so high?
           lambda x: Tensor.avgpool2d(x, kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
 
