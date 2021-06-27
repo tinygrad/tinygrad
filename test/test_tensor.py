@@ -72,18 +72,21 @@ class TestTinygrad(unittest.TestCase):
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=1e-3)
 
+  @unittest.skipUnless(not DEFAULT_DEVICE, "not implemented yet")
   def test_cat(self):
     def test_tinygrad():
       x = Tensor(x_init)
-      v = Tensor.cat((x, x, x), 0)
-      h = Tensor.cat((x, x, x), 1)
-      return v.cpu().data, h.cpu().data
+      m = Tensor(m_init)
+      y = x.cat(m, axis=0)
+      z = x.cat(m, axis=1)
+      return y.cpu().data, z.cpu().data
 
     def test_pytorch():
       x = torch.Tensor(x_init)
-      v = torch.cat((x, x, x), 0)
-      h = torch.cat((x, x, x), 1)
-      return v.detach().numpy(), h.detach().numpy()
+      m = torch.Tensor(m_init)
+      y = torch.cat((x, m), 0)
+      z = torch.cat((x, m), 1)
+      return y.detach().numpy(), z.detach().numpy()
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_equal(x, y)
