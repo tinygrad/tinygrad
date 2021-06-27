@@ -72,25 +72,6 @@ class TestTinygrad(unittest.TestCase):
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=1e-3)
 
-  @unittest.skipUnless(not DEFAULT_DEVICE, "not implemented yet")
-  def test_cat(self):
-    def test_tinygrad():
-      x = Tensor(x_init)
-      m = Tensor(m_init)
-      y = x.cat(m, axis=0)
-      z = x.cat(m, axis=1)
-      return y.cpu().data, z.cpu().data
-
-    def test_pytorch():
-      x = torch.Tensor(x_init)
-      m = torch.Tensor(m_init)
-      y = torch.cat((x, m), 0)
-      z = torch.cat((x, m), 1)
-      return y.detach().numpy(), z.detach().numpy()
-
-    for x,y in zip(test_tinygrad(), test_pytorch()):
-      np.testing.assert_equal(x, y)
-
   @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
   def test_jacobian(self):
     W = np.random.RandomState(1337).random((10, 5))
