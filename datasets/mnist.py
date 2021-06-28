@@ -22,7 +22,7 @@ def download_mnist(root='./data', train=True, download=True):
     else: print(f'File {data_path} already downloaded.')
   if not os.path.exists(data_path): raise FileNotFoundError()
   parse = lambda file: np.frombuffer(gzip.open(file).read(), dtype=np.uint8).copy()
-  x = parse(data_path)[0x10:].reshape((-1, 1, 28, 28)).astype(np.float32) / 255.0
+  x = parse(data_path)[0x10:].reshape((-1, 1, 28, 28)).astype(np.float32) / 255.0 # x in [0, 1]
   y = parse(labels_path)[8:].astype(dtype=np.int32)
   return x, y, np.arange(10).astype(np.int32)
 

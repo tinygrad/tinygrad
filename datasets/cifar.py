@@ -40,7 +40,7 @@ def download_cifar(root='./data', train=True, download=True, version='cifar-10')
     data_dict = unpickle(os.path.join(root, f'{version}-python', 'train' if train else 'test'))
     x, y = data_dict[b'data'], data_dict[b'fine_labels']
     classes = np.load(os.path.join(root, f'{version}-python', 'meta'), allow_pickle=True)['fine_label_names']
-  return x.reshape(-1, 3, 32, 32).astype(np.float32) / 255.0, np.array(y, dtype=np.int32), classes
+  return x.reshape(-1, 3, 32, 32).astype(np.float32) / 255.0, np.array(y, dtype=np.int32), classes # x in [0, 1]
 
 class __CIFAR(ImageDataset):
   sample_shape = (3, 32, 32)
