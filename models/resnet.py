@@ -11,6 +11,8 @@ model_urls = {
   'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
   'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
 
 def load_from_pretrained(model, url):
   state_dict = load_state_dict_from_url(url, progress=True)
@@ -92,7 +94,7 @@ class ResNet:
 
     self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
     self.bn1 = nn.BatchNorm2D(64)
-    self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=2)
+    self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
     self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
     self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
     self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
@@ -107,7 +109,7 @@ class ResNet:
     return nn.Sequential(*layers)
 
   def forward(self, x):
-    out = self.bn1(self.conv1(x)).relu()
+    out = self.bn1(self.conv1(x)).relu().max_pool2d(kernel_size=(2, 2))
     out = self.layer1(out)
     out = self.layer2(out)
     out = self.layer3(out)
