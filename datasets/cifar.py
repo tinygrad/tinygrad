@@ -40,7 +40,7 @@ def download_cifar(root='./data', train=True, download=True, version='cifar-10')
     data_dict = unpickle(os.path.join(root, f'{version}-python', 'train' if train else 'test'))
     x, y = data_dict[b'data'], data_dict[b'fine_labels']
     classes = np.load(os.path.join(root, f'{version}-python', 'meta'), allow_pickle=True)['fine_label_names']
-  return x.reshape(-1, 3, 32, 32).astype(np.float32) / 255.0, np.array(y, dtype=np.int32), classes.astype(np.int32)
+  return x.reshape(-1, 3, 32, 32).astype(np.float32) / 255.0, np.array(y, dtype=np.int32), classes
 
 class __CIFAR(ImageDataset):
   sample_shape = (3, 32, 32)
@@ -51,5 +51,7 @@ class __CIFAR(ImageDataset):
     self.num_classes = len(classes)
     super().__init__(x, y, classes=classes, transform=transform, target_transform=target_transform)
 
-class CIFAR10(__CIFAR): def __init__(self, *args, **kwargs): super().__init__('cifar-10', *args, **kwargs)
-class CIFAR100(__CIFAR): def __init__(self, *args, **kwargs): super().__init__('cifar-100', *args, **kwargs)
+class CIFAR10(__CIFAR): 
+  def __init__(self, *args, **kwargs): super().__init__('cifar-10', *args, **kwargs)
+class CIFAR100(__CIFAR): 
+  def __init__(self, *args, **kwargs): super().__init__('cifar-100', *args, **kwargs)
