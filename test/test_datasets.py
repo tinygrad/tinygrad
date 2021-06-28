@@ -4,36 +4,24 @@ import numpy as np
 from datasets import *
 
 class TestDatasets(unittest.TestCase):
-  def test_mnist(self):
-    ds = MNIST(root='./data', train=True, download=True)
-    self.__test_dataset(ds, sample_shape=(1, 28, 28))
-    self.__test_dataloader(ds, sample_shape=(1, 28, 28))
+  def test_datasets(self):
+    for ds_cls in [MNIST, CIFAR10, CIFAR100]:
+      print(f'Testing {ds_cls}')
+      ds = ds_cls(root='./data', train=True, download=True)
+      dl = ds.dataloader(batch_size=4) # or DataLoader(dataset, ...) like torch
+      self.__test_dataiterator(ds)
+      self.__test_dataiterator(dl, batch_size=dl.batch_size)
 
-  def test_cifar10(self):
-    ds = CIFAR10(root='./data', train=True, download=True)
-    self.__test_dataset(ds, sample_shape=(3, 32, 32))
-    self.__test_dataloader(ds, sample_shape=(3, 32, 32))
-
-  def test_cifar100(self):
-    ds = CIFAR100(root='./data', train=True, download=True)
-    self.__test_dataset(ds, sample_shape=(3, 32, 32))
-    self.__test_dataloader(ds, sample_shape=(3, 32, 32))
-
-  def __test_dataset(self, dataset, sample_shape):
-    x, y = next(iter(dataset))
-    dims = x.shape
+  def __test_dataiterator(self, di, batch_size=None):
+    x, y = next(iter(di))
+    if batch_size is None:
+      dims, sample_shape = x.shape, di.sample_shape
+    else:
+      B, *dims = x.shape
+      sample_shape = di.dataset.sample_shape
+      assert B == batch_size
     assert x.min() >= 0 
     assert x.max() <= 1.0
-    assert list(dims) == list(sample_shape)
-    assert x.dtype == np.float32
-    assert y.dtype == np.int32
-
-  def __test_dataloader(self, dataset, sample_shape):
-    batch_size = 4
-    dl = dataset.dataloader(batch_size=batch_size) # or DataLoader(dataset, ...) like torch
-    x, y = next(iter(dl))
-    B, *dims = x.shape
-    assert B == batch_size
     assert list(dims) == list(sample_shape)
     assert x.dtype == np.float32
     assert y.dtype == np.int32

@@ -22,16 +22,22 @@ def download_from_url(url, dst):
   pbar.close()
 
 class Dataset:
-  def __len__(self):
-    raise NotImplementedError()
-
-  def __getitem__(self, idx):
-    raise NotImplementedError()
-
+  def __len__(self): raise NotImplementedError()
+  def __getitem__(self, idx): raise NotImplementedError()
   def dataloader(self, *args, **kwargs):
     """Convert a dataset into its related dataloader.
     """
     return DataLoader(self, *args, **kwargs)
+
+class ImageDataset(Dataset)
+  def __init__(self, x, y, classes=None, transform=lambda x: x, target_transform=lambda t: t):
+    super().__init__()
+    self.x, self.y, self.classes = x, y, classes
+    if classes is None: 
+      self.classes = sorted(list(set(self.y)))
+    self.transform, self.target_transform = transform, target_transform
+  def __len__(self): return len(self.x)
+  def __getitem__(self, idx): return self.transform(self.x[idx]), self.target_transform(self.y[idx])
 
 class DataLoader:
   def __init__(self, ds, batch_size, shuffle=False, seed=35771):
@@ -39,7 +45,6 @@ class DataLoader:
     self.dataset = ds
     self.batch_size = batch_size
     self.shuffle = shuffle
-
     self.num_batches = int(np.ceil(len(self.dataset) / self.batch_size))
     self.idxs = np.arange(len(self.dataset))
     if shuffle:

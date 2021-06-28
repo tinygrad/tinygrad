@@ -59,29 +59,23 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
   return (acc, Y_test_pred) if return_predict else acc
 
 def train_w_dataloaders(model, dl_train, dl_test, optim, epochs, lossfn=sparse_categorical_crossentropy):
-  losses_tr, accuracies_tr = [], []
-  accuracies_te = []
+  losses, accuracies = {'train': [], 'eval': []}, {'train': [], 'eval': []}
+  dls = {'train': dl_train, 'eval': dl_test}
   for epoch in range(epochs):
-    loss, accuracy = single_datalaoder_pass(model, dl_train, optim, mode='train', lossfn=lossfn)
-    losses_tr += [loss]
-    accuracies_tr += [accuracy]
-
-    accuracy = single_datalaoder_pass(model, dl_test, optim, mode='eval', lossfn=lossfn)
-    accuracies_te += [accuracy]
-    print(f'test set accuracy is {accuracy}')
-
+    for mode in ['train', 'eval']:
+      loss, accuracy = single_datalaoder_pass(model, dls[mode], optim, mode=mode, lossfn=lossfn)
+      losses[mode] += [loss]
+      accuracies[mode] += [accuracy]
+      if mode == 'eval':
+        print(f'test set accuracy is {accuracy}')
 
 def evaluate_w_dataloader(model, dataloader, optim, epochs, lossfn=sparse_categorical_crossentropy):
   return single_datalaoder_pass(model, dataloader, optim, mode='eval', lossfn=lossfn)
 
 def single_datalaoder_pass(model, dataloader, optim, mode='train', return_predict=False,
                            lossfn=sparse_categorical_crossentropy):
-  if mode == 'train':
-    Tensor.training = True
-  else:
-    Tensor.training = False
-  preds = []
-  losses, accuracies = [], []
+  Tensor.training = mode == 'train'
+  losses, accuracies, preds = [], [], []
   for x, y in (t := tqdm(dataloader, desc=mode.capitalize())):
     x = Tensor(x)
     out = model.forward(x)
@@ -91,23 +85,15 @@ def single_datalaoder_pass(model, dataloader, optim, mode='train', return_predic
     optim.zero_grad()
     loss.backward()
     optim.step()
-
     cat = np.argmax(out.cpu().data, axis=-1)
     accuracy = (cat == y).mean()
 
     # printing
     loss = loss.cpu().data
-    losses.append(loss[0])
-    accuracies.append(accuracy)
+    losses += [loss[0]]
+    accuracies += [accuracy]
     t.set_description(f'loss {loss[0]:.2f} accuracy {accuracy:.2f}')
-  if mode == 'train':
-    if return_predict:
-      return np.mean(losses), np.mean(accuracies), np.concatenate(preds, 0)
-    else:
-      return np.mean(losses), np.mean(accuracies)
-  else:
-    if return_predict:
-      return np.mean(accuracies), np.concatenate(preds, 0)
-    else:
-      return np.mean(accuracies)
-
+  outs = [np.mean(losses), np.mean(accuracies)]
+  if return_predict:
+    outs += [np.concatenate(preds, 0)]
+  return outs
