@@ -214,7 +214,7 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, stride=strides[i]),
           # TODO: why is this tolerance so high?
-          lambda x: Tensor.maxpool2d(x, kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
+          lambda x: x.maxpool2d(kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
   
   def test_strided_avgpool2d(self): # forward only for now
     kernel_sizes = [(2,2), (3,3), (3,2), (5,5), (5,1)]
@@ -224,7 +224,7 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, stride=strides[i]),
           # TODO: why is this tolerance so high?
-          lambda x: Tensor.avgpool2d(x, kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
+          lambda x: x.avgpool2d(kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
 
 if __name__ == '__main__':
   np.random.seed(1337)

@@ -219,18 +219,30 @@ class AvgPool2D(Function):
     if stride is None: stride = kernel_size
     output_shape = ((x.shape[2] - kernel_size[0])//stride[0] + 1, (x.shape[3] - kernel_size[1])//stride[1] + 1)
     pools, indices = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], padding[0], padding[1])
-    ctx.save_for_backward(pools, x.shape, kernel_size)
+    ctx.save_for_backward(pools, x.shape, kernel_size, stride, padding)
     return pools.mean(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
   def backward(ctx, grad_output):
     bs, c, w, h = grad_output.shape
-    pools, in_shape, kernel_size = ctx.saved_tensors
+    pools, in_shape, kernel_size, stride, padding = ctx.saved_tensors
     ret = np.zeros((bs, c, in_shape[2] * in_shape[3]))
+
     for batch in range(bs):
       for channel in range(c):
-        pass
-    print("Grad output")
-    print(grad_output)
+        for ph in range(h):
+          for pw in range(w):
+            hstart = ph * stride[1] - padding[1]
+            wstart = pw * stride[0] - padding[0]
+            hend = min(hstart + kernel_size[1], in_shape[3] + padding[1])
+            wend = min(wstart + kernel_size[0], in_shape[2] + padding[0])
+            pool_size = (hend - hstart) * (wend - wstart)
+            hstart = max(hstart, 0)
+            wstart = max(wstart, 0)
+            hend = min(hend, in_shape[3])
+            wend = min(wend, in_shape[2])
+            for h in range(hstart, hend):
+              for w in range(wstart, wend):
+                ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_output[batch][channel].flatten()[ph * w + pw] / pool_size
     ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
     return ret
 

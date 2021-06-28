@@ -18,6 +18,12 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   tst = [Tensor(x.detach().numpy()) for x in ts]
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
+  
+  print("RUNNING FUNC", tinygrad_fxn)
+  print("Tinygrad returns:")
+  print(ret.cpu().data)
+  print("Correct is:")
+  print(out.detach().numpy())
 
   np.testing.assert_allclose(ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
 
@@ -52,26 +58,6 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           # TODO: why is this tolerance so high?
           lambda x: x.maxpool2d(kernel_size=ksz), grad_atol=1e-4)
-
-  def test_strided_maxpool2d(self): # forward only for now
-    kernel_sizes = [(2,2), (3,3), (3,2), (5,5), (5,1)]
-    strides = [2, 1, 3, 4, 5]
-    for i, ksz in enumerate(kernel_sizes):
-      with self.subTest(kernel_size=ksz):
-        helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, stride=(strides[i], strides[i])),
-          # TODO: why is this tolerance so high?
-          lambda x: Tensor.maxpool2d(x, kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
-  
-  def test_strided_avgpool2d(self): # forward only for now
-    kernel_sizes = [(2,2), (3,3), (3,2), (5,5), (5,1)]
-    strides = [2, 1, 3, 4, 5]
-    for i, ksz in enumerate(kernel_sizes):
-      with self.subTest(kernel_size=ksz):
-        helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, stride=(strides[i], strides[i])),
-          # TODO: why is this tolerance so high?
-          lambda x: Tensor.avgpool2d(x, kernel_size=ksz, stride=strides[i]), grad_atol=1e-4, forward_only=True)
 
 if __name__ == '__main__':
   np.random.seed(1337)
