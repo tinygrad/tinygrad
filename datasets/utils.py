@@ -8,7 +8,7 @@ def download_from_url(url, dst):
   status_code = r.status_code
   while status_code != 200:
     print('Waiting for response...')
-    time.sleep(2.0)
+    time.sleep(3.0)
     r = requests.head(url, allow_redirects=True)
     status_code = r.status_code
   file_size = int(r.headers["Content-Length"])
