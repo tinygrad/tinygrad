@@ -4,34 +4,26 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 import tinygrad.optim as optim
+import tinygrad.nn as nn
 from extra.training import train, evaluate
 from extra.utils import fetch, get_parameters
-
-# mnist loader
-def fetch_mnist():
-  import gzip
-  parse = lambda file: np.frombuffer(gzip.open(file).read(), dtype=np.uint8).copy()
-  X_train = parse("test/mnist/train-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
-  Y_train = parse("test/mnist/train-labels-idx1-ubyte.gz")[8:]
-  X_test = parse("test/mnist/t10k-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
-  Y_test = parse("test/mnist/t10k-labels-idx1-ubyte.gz")[8:]
-  return X_train, Y_train, X_test, Y_test
+from datasets import MNIST
 
 # load the mnist dataset
-X_train, Y_train, X_test, Y_test = fetch_mnist()
+ds_train, dl_test = MNIST(train=True), MNIST(train=False).dataloader(batch_size=32)
 
 # create a model
 class TinyBobNet:
 
   def __init__(self):
-    self.l1 = Tensor.uniform(784, 128)
-    self.l2 = Tensor.uniform(128, 10)
+    self.l1 = nn.Linear(784, 128)
+    self.l2 = nn.Linear(128, 10)
 
   def parameters(self):
     return get_parameters(self)
 
   def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
+    return self.l2(self.l1(255 * x.reshape(shape=(x.shape[0], -1))).relu()).logsoftmax()
 
 # create a model with a conv layer
 class TinyConvNet:
@@ -56,26 +48,29 @@ class TinyConvNet:
 
 class TestMNIST(unittest.TestCase):
 
-  def test_conv(self):
+  def __test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=200)
-    assert evaluate(model, X_test, Y_test) > 0.95
+    dl_train = ds_train.dataloader(batch_size=32, steps=500)
+    _, acc = train(model, optimizer, dl_train, dl_test)
+    assert acc['eval'][-1] > 0.95
 
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=1000)
-    assert evaluate(model, X_test, Y_test) > 0.95
+    dl_train = ds_train.dataloader(batch_size=32, steps=1000)
+    _, acc = train(model, optimizer, dl_train, dl_test)
+    assert acc['eval'][-1] > 0.95
 
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
-    train(model,  X_train, Y_train, optimizer, steps=1000)
-    assert evaluate(model, X_test, Y_test) > 0.95
+    dl_train = ds_train.dataloader(batch_size=32, steps=1000)
+    _, acc = train(model, optimizer, dl_train, dl_test)
+    assert acc['eval'][-1] > 0.95
 
 if __name__ == '__main__':
   unittest.main()

@@ -9,6 +9,7 @@ from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
 from models.transformer import Transformer
 from models.resnet import ResNet18, ResNet34, ResNet50
+from datasets.utils import TensorDataset
 
 BS = int(os.getenv("BS", "4"))
 
@@ -20,16 +21,16 @@ def train_one_step(model,X,Y):
   optimizer = optim.Adam(params, lr=0.001)
   print("stepping %r with %.1fM params bs %d" % (type(model), pcount/1e6, BS))
   st = time.time()
-  train(model, X, Y, optimizer, steps=1, BS=BS)
+  train(model, optimizer, TensorDataset(X, Y).dataloader(batch_size=BS, steps=1))
   et = time.time()-st
   print("done in %.2f ms" % (et*1000.))
 
 class TestTrain(unittest.TestCase):
   def test_efficientnet(self):
     model = EfficientNet(0)
-    X = np.zeros((BS,3,224,224), dtype=np.float32)
+    X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
-    train_one_step(model,X,Y)
+    train_one_step(model, X, Y)
 
   def test_transformer(self):
     # this should be small GPT-2, but the param count is wrong

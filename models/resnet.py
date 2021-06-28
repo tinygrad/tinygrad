@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
-from extra.utils import fetch, fake_torch_load
+from extra.utils import get_parameters
 from torch.hub import load_state_dict_from_url
 import numpy as np
 
@@ -117,6 +117,9 @@ class ResNet:
     out = out.mean(3).mean(2)
     out = self.fc(out).logsoftmax()
     return out
+
+  def parameters(self):
+    return get_parameters(self)
 
   def __call__(self, x):
     return self.forward(x)

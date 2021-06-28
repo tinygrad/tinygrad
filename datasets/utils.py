@@ -31,10 +31,17 @@ class ImageDataset(Dataset):
     super().__init__()
     self.x, self.y, self.classes = x, y, classes
     if classes is None: 
-      self.classes = sorted(list(set(self.y)))
+      self.classes = sorted(list(set(self.y.tolist())))
     self.transform, self.target_transform = transform, target_transform
   def __len__(self): return len(self.x)
   def __getitem__(self, idx): return self.transform(self.x[idx]), self.target_transform(self.y[idx])
+
+class TensorDataset(Dataset):
+  def __init__(self, *tensors): 
+    super().__init__()
+    self.tensors = tensors
+  def __len__(self): return len(self.tensors[0])
+  def __getitem__(self, idx): return [t[idx] for t in self.tensors]
 
 class DataLoader:
   def __init__(self, ds, batch_size, shuffle=False, seed=35771, steps=None):
