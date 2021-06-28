@@ -318,16 +318,26 @@ def concatenate(ctx, x, y, axis):
                        __global float *output, int axis, int n_dims,
                        __global const int *shape_x, __global int *shape_y,
                        __global const int *shape_ret) {
-    int size_x = 1, size_y = 1;
+    int size_x = 1, size_y = 1, lim = 1, row = -1, n_cols = 0;
     for (int dim = 0; dim < n_dims; dim++) {
       size_x *= shape_x[dim];
       size_y *= shape_y[dim];
     }
-    for (int i = 0; i < size_x; i++) {
-      output[i] = input_x[i];
+    for (int i = n_dims - 1; i >= axis; i--) {
+      lim *= shape_x[i];
     }
+    for (int i = 0; i < n_dims; i++) {
+      if (i != axis) continue;
+      n_cols += (shape_x[i] + shape_y[i]);
+    }
+    for (int i = 0; i < size_x; i++) {
+      if (i % lim == 0) ++row;
+      output[row * n_cols + i % lim] = input_x[i];
+    }
+    row = -1;
     for (int i = 0; i < size_y; i++) {
-      output[i+size_x] = input_y[i];
+      if (i % lim == 0) ++row;
+      output[row * n_cols + (i % lim) + lim] = input_y[i];
     }
   }""")
   combind(ctx.cl_queue, [np.prod(oshape)], None,

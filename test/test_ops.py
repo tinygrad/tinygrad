@@ -134,8 +134,8 @@ class TestOps(unittest.TestCase):
           helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
 
   def test_cat(self):
-    helper_test_op([(1,3,3,7)], lambda x: torch.cat((x, x), axis=0), lambda x: x.cat(x, axis=0))
-    helper_test_op([(1,3,3,7)], lambda x: torch.cat((x, x), axis=1), lambda x: x.cat(x, axis=1))
+    helper_test_op([(1,2)], lambda x: torch.cat((x, x), axis=0), lambda x: x.cat(x, axis=0), forward_only=True)
+    helper_test_op([(3,4)], lambda x: torch.cat((x, x), axis=1), lambda x: x.cat(x, axis=1), forward_only=True)
 
   def test_slice(self):
     helper_test_op([(3,3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
