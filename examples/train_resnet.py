@@ -18,4 +18,4 @@ if __name__ == "__main__":
     transform = T.Compose([T.Normalize(IMAGENET_MEAN, IMAGENET_STD), T.G2RGB()])
     dl_train = ds_cls(transform=transform, train=True).dataloader(batch_size=16, shuffle=True, steps=100)
     dl_test = ds_cls(transform=transform, train=False).dataloader(batch_size=16, steps=100)
-    train(model, Adam(model.parameters(), dl_train, dl_test, lr=1e-4), epochs=1)
+    train(model, Adam(model.parameters(), lr=1e-4), dl_train, dl_test, epochs=1)
