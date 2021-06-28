@@ -4,7 +4,6 @@ import pickle
 import gzip
 
 from datasets.utils import ImageDataset, download_from_url
-from datasets import transforms as T
 
 def download_mnist(root='./data', train=True, download=True):
   url_data = 'http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz' if train else \
