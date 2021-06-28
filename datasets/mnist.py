@@ -2,7 +2,6 @@ import os
 import numpy as np
 import pickle
 import gzip
-from PIL import Image
 
 from datasets.utils import ImageDataset, download_from_url
 from datasets import transforms as T
