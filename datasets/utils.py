@@ -8,7 +8,7 @@ def download_from_url(url, dst):
   status_code = r.status_code
   while status_code != 200:
     print('Waiting for response...')
-    time.sleep(1.0)
+    time.sleep(2.0)
     r = requests.head(url, allow_redirects=True)
     status_code = r.status_code
   file_size = int(r.headers["Content-Length"])
@@ -24,12 +24,9 @@ def download_from_url(url, dst):
 class Dataset:
   def __len__(self): raise NotImplementedError()
   def __getitem__(self, idx): raise NotImplementedError()
-  def dataloader(self, *args, **kwargs):
-    """Convert a dataset into its related dataloader.
-    """
-    return DataLoader(self, *args, **kwargs)
+  def dataloader(self, *args, **kwargs): return DataLoader(self, *args, **kwargs)
 
-class ImageDataset(Dataset)
+class ImageDataset(Dataset):
   def __init__(self, x, y, classes=None, transform=lambda x: x, target_transform=lambda t: t):
     super().__init__()
     self.x, self.y, self.classes = x, y, classes
@@ -40,14 +37,16 @@ class ImageDataset(Dataset)
   def __getitem__(self, idx): return self.transform(self.x[idx]), self.target_transform(self.y[idx])
 
 class DataLoader:
-  def __init__(self, ds, batch_size, shuffle=False, seed=35771):
+  def __init__(self, ds, batch_size, shuffle=False, seed=35771, steps=None):
     # TODO: implement num_workers, for paralellization.
     self.dataset = ds
     self.batch_size = batch_size
     self.shuffle = shuffle
-    self.num_batches = int(np.ceil(len(self.dataset) / self.batch_size))
+    self.steps = steps
+    num_batches = int(np.ceil(len(self.dataset) / self.batch_size))
+    self.num_batches = num_batches if self.steps is None else min(num_batches, self.steps)
     self.idxs = np.arange(len(self.dataset))
-    if shuffle:
+    if self.shuffle:
       np.random.seed(seed)
       np.random.shuffle(self.idxs)
 
@@ -83,11 +82,14 @@ class DataLoader:
   def __getitem__(self, idx):
     """Return a batch.
     """
+    if idx == self.num_batches:
+      raise StopIteration
     samples_idxs = self.idxs[idx * self.batch_size: (idx + 1) * self.batch_size]
     samples = [self.dataset.__getitem__(s_idx) for s_idx in samples_idxs]
     batch = self.__collate(samples)
     if idx == self.num_batches - 1:
       np.random.shuffle(self.idxs)
+
     return batch
 
   def __len__(self):
