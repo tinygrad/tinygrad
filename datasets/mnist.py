@@ -6,10 +6,10 @@ import gzip
 from datasets.utils import ImageDataset, download_from_url
 
 def download_mnist(root='./data', train=True, download=True):
-  url_data = 'http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz' if train else \
-             'http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz'
-  url_labels = 'http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz' if train else \
-               'http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz'
+  url_data = 'https://ossci-datasets.s3.amazonaws.com/mnist/train-images-idx3-ubyte.gz' if train else \
+             'https://ossci-datasets.s3.amazonaws.com/mnist/t10k-images-idx3-ubyte.gz'
+  url_labels = 'https://ossci-datasets.s3.amazonaws.com/mnist/train-labels-idx1-ubyte.gz' if train else \
+               'https://ossci-datasets.s3.amazonaws.com/mnist/t10k-labels-idx1-ubyte.gz'
   data_path = os.path.join(root, url_data.split('/')[-1])
   labels_path = os.path.join(root, url_labels.split('/')[-1])
   if download:
