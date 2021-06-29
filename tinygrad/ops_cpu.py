@@ -156,7 +156,7 @@ class Matmul(Function):
 def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
   output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
   ret = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
-  indices = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
+  indices = np.zeros(shape=(x.shape[0], x.shape[1], (output_shape[0] * output_shape[1])), dtype=np.float32)
   ti = 0
   for n in range(x.shape[0]):
     for c in range(x.shape[1]):
@@ -169,47 +169,18 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
           hstart = max(hstart, 0)
           wstart = max(wstart, 0)
           pool_index = ph + (pw * output_shape[1])
+          maxval = -float("inf")
           for w in range(wstart, wend):
             for h in range(hstart, hend):
               index = w * x.shape[3] + h
               ret[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = x[n][c].flatten()[index]
-              indices[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = index
+              # indices[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = index
+              if x[n][c].flatten()[index] > maxval:
+                indices[n][c][pool_index] = index
+                maxval = x[n][c].flatten()[index]
               ti = ti + 1
   ret = ret.reshape((x.shape[0], x.shape[1], -1, (kernel_width  * kernel_height)))
-  indices = indices.reshape((x.shape[0], x.shape[1], -1, (kernel_width  * kernel_height)))
   return ret, indices
-
-# Returns an array of windows based on kernel sizes, strides & padding
-# Output shape: (windows, items)
-"""
-def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
-  output_shape = ((x.shape[0] - kernel_width)//stride_w + 1, (x.shape[1] - kernel_height)//stride_h + 1)
-  #pooled_height = output_shape[1]
-  #pooled_width = output_shape[0]
-  ##width = x.shape[0]
-  #height = x.shape[1]
-  # num_windows = output_shape[0] * output_shape[1]
-  ret = np.ndarray(shape=(output_shape[0] * output_shape[1], output_shape[0] * output_shape[1])) # (amount of windows, items per window)
-  ti = 0
-  for ph in range(output_shape[1]):
-    for pw in range(output_shape[0]):
-      hstart = ph * stride_h - pad_h
-      wstart = pw * stride_w - pad_w
-      hend = min(hstart + kernel_height, x.shape[1])
-      wend = min(wstart + kernel_width, x.shape[0])
-      hstart = max(hstart, 0)
-      wstart = max(wstart, 0)
-      pool_index = ph * output_shape[0] + pw
-      for h in range(hstart, hend):
-        for w in range(wstart, wend):
-          index = h * x.shape[0] + w
-          i_x = int(index / x.shape[0])
-          i_y = int(index % x.shape[0])
-          ti = ti + 1
-          ret[pool_index][ti % ret.shape[1]] = x[i_x][i_y]
-  return ret
-"""
-
 
 class AvgPool2D(Function):
   def forward(ctx, x, kernel_size=(2,2), stride=None, padding=(0, 0)):
@@ -219,18 +190,18 @@ class AvgPool2D(Function):
     if stride is None: stride = kernel_size
     output_shape = ((x.shape[2] - kernel_size[0])//stride[0] + 1, (x.shape[3] - kernel_size[1])//stride[1] + 1)
     pools, indices = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], padding[0], padding[1])
-    ctx.save_for_backward(pools, x.shape, kernel_size, stride, padding)
+    ctx.save_for_backward(x.shape, kernel_size, stride, padding)
     return pools.mean(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
   def backward(ctx, grad_output):
-    bs, c, w, h = grad_output.shape
-    pools, in_shape, kernel_size, stride, padding = ctx.saved_tensors
+    bs, c, wx, hx = grad_output.shape
+    in_shape, kernel_size, stride, padding = ctx.saved_tensors
     ret = np.zeros((bs, c, in_shape[2] * in_shape[3]))
 
     for batch in range(bs):
       for channel in range(c):
-        for ph in range(h):
-          for pw in range(w):
+        for ph in range(hx):
+          for pw in range(wx):
             hstart = ph * stride[1] - padding[1]
             wstart = pw * stride[0] - padding[0]
             hend = min(hstart + kernel_size[1], in_shape[3] + padding[1])
@@ -242,7 +213,7 @@ class AvgPool2D(Function):
             wend = min(wend, in_shape[2])
             for h in range(hstart, hend):
               for w in range(wstart, wend):
-                ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_output[batch][channel].flatten()[ph * w + pw] / pool_size
+                ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_output[batch][channel].flatten()[ph * wx + pw] / pool_size
     ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
     return ret
 
@@ -255,6 +226,7 @@ class MaxPool2D(Function):
     output_shape = (math.floor((x.shape[2] + 2 * padding[0] - kernel_size[0])/stride[0]) + 1, math.floor((x.shape[3] + 2 * padding[1] - kernel_size[1])/stride[1]) + 1)
     pools, indices = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], padding[0], padding[1])
 
+    """
     def arrange_indices(indices, max_indices):
       ret = np.zeros(shape=(x.shape[0], x.shape[1], indices.shape[2]), dtype=np.float32)
       for b in range(ret.shape[0]):
@@ -265,12 +237,14 @@ class MaxPool2D(Function):
     
     max_indices = np.argmax(pools, axis=3)
     indices = arrange_indices(indices, max_indices) # Then, sort indices with max_indices
-    ctx.save_for_backward(pools, indices, x.shape)
+    """
+
+    ctx.save_for_backward(indices, x.shape)
     return pools.max(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
   def backward(ctx, grad_output):
     bs, c, w, h = grad_output.shape
-    pools, indices, in_shape = ctx.saved_tensors
+    indices, in_shape = ctx.saved_tensors
     ret = np.zeros((bs, c, in_shape[2] * in_shape[3]))
     for batch in range(bs):
       for channel in range(c):

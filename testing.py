@@ -28,7 +28,8 @@ bc[1][1] = fourth
 #x = Tensor(np.expand_dims(np.expand_dims(x.cpu().data, axis=0), axis=0))
 # x = Tensor(bc)
 np.random.seed(1337)
-x = Tensor.randn(2, 2, 3, 3)
+# x = Tensor.randn(2, 2, 3, 3)
+x = Tensor.randn(2, 2, 6, 6)
 
 print("==============================")
 print("Input data:")
@@ -41,7 +42,7 @@ tx.retain_grad()
 print("Torch:", tx.dtype)
 print(tx.shape)
 # tt, indices = torch.nn.functional.max_pool2d(tx, (2,2), (1, 1), return_indices=True)
-tt = torch.nn.functional.avg_pool2d(tx, (2,2), (1, 1))
+tt = torch.nn.functional.avg_pool2d(tx, (3, 3), (2, 1))
 tt.retain_grad()
 # tt = torch.nn.MaxPool2d((2, 2), stride=(1, 1), return_indices=True)
 # o, indices = tt(tx)
@@ -57,11 +58,13 @@ print(x.shape)
 print("out:")
 
 # print(x.max_pool2d(kernel_size=(2,2), stride=(1,1)).cpu().data)
-my = x.avgpool2d(kernel_size=(2, 2), stride=(1,1))
+my = x.maxpool2d(kernel_size=(3, 3), stride=(2,1))
 print(my.shape)
 print(my.cpu().data)
 
 print("Running backward")
+
+exit()
 
 my.mean().backward()
 tt.mean().backward()
