@@ -10,7 +10,7 @@ def roundup(x, v):
 
 @lru_cache
 def compile_relu(ane, sz):
-  dat = list(open("ane/ops/relu.hwx", "rb").read())
+  dat = list(open("accel/ane/ops/relu.hwx", "rb").read())
   # TODO: make this all nice and once
   # number of engines? (max 0x100)
   l2_stride = max(0x100, roundup(sz*2, 0x10))
