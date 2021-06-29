@@ -382,17 +382,19 @@ def pool2d(ctx, x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h
     int wend = min(wstart + kernel_width, input_width);
     hstart = max(hstart, 0);
     wstart = max(wstart, 0);
-    int pool_index = ph + (pw * output_width);
+    // OLD ONE WAS: int pool_index = ph + (pw * output_width);
+    int pool_index = ph + (pw * output_height);
     int ti = 0;
     float maxval = -FLT_MAX;
     for (int w = wstart; w < wend; w++) {
       for (int h = hstart; h < hend; h++) {
         int index = w * input_height + h;
+        // int relative_pool_index = pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height));
         int relative_pool_index = pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height));
+        // printf("Relative pool index: %i and index: %i %c", relative_pool_index, index, 0x0a);
+        // printf("pool index: %i and index: %i %c", pool_index, index, 0x0a);
         int absolute_pool_index = nxc * pooled_width * pooled_height + relative_pool_index;
         int absolute_index = nxc * input_width * input_height + index;
-        // printf("Index is %i, should go up to %i %c", index, pooled_width * pooled_height, 0x0a);
-        // printf("Absolute index is %i %c", absolute_pool_index, 0x0a);
         output[absolute_pool_index] = input[absolute_index];
         if (input[absolute_index] > maxval) {
           indices[nxc * output_width * output_height + pool_index] = index;

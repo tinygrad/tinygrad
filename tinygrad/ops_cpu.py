@@ -157,6 +157,7 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
   output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
   ret = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
   indices = np.zeros(shape=(x.shape[0], x.shape[1], (output_shape[0] * output_shape[1])), dtype=np.float32)
+  print("OUTPUT _SHAPE ", output_shape)
   ti = 0
   for n in range(x.shape[0]):
     for c in range(x.shape[1]):
