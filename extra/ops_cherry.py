@@ -34,7 +34,6 @@ class Exp(Function):
 
 # ************* reduce ops *************
 
-"""
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
@@ -44,12 +43,13 @@ class Sum(Function):
     input, axis = ctx.saved_tensors
     if isinstance(axis, int): axis = [axis]
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    return grad_output.reshape(shape) + np.zeros_like(input)
+    return cherry_binop(grad_output.reshape(shape), np.zeros_like(input), BinaryOps.ADD)
 
 class Max(Function):
   def forward(ctx, inp, axis=None):
     if isinstance(axis, int): axis = [axis]
-    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    #ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ret = cherry_reduceop(inp, ReduceOps.MAX, None if axis is None else tuple(axis), keepdims=True)
     ctx.save_for_backward(inp, axis, ret)
     if axis is not None:
       ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
@@ -59,16 +59,17 @@ class Max(Function):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
-    return ret2*grad_output.reshape(shape)/div
-"""
+    #div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    #return ret2*grad_output.reshape(shape)/div
+    div = cherry_reduceop(ret2, ReduceOps.SUM, axis=None if axis is None else tuple(axis), keepdims=True)
+    return cherry_binop(cherry_binop(ret2, grad_output.reshape(shape), BinaryOps.MUL), div, BinaryOps.DIV)
 
 # ************* binary ops *************
 
 def unbroadcast(out, in_sh):
   # adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i]
   sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]) if in_sh != (1,) else None
-  return out.sum(axis=sum_axis).reshape(in_sh)
+  return cherry_reduceop(out, ReduceOps.SUM, sum_axis).reshape(in_sh)
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -175,7 +176,7 @@ class Conv2D(Function):
         #    bs x groups x yx -- groups x 1 --> bs x groups x yx
         #    it looks like a broadcasted multiply
 
-        print("opt1")
+        #print("opt1")
 
         # x:   bs x groups x iy x ix
         # w:        groups x H  x W
@@ -185,7 +186,7 @@ class Conv2D(Function):
           for Y in range(0, oy):
             for X in range(0, ox, SZ):
               IY,IX = Y*ys,X*xs
-              riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+              riski_zero(Reg.MATMUL_ACC)
               for y in range(IY, IY+H):
                 for x in range(IX, IX+W):
                   riski_load(Reg.MATMUL_INPUT,
@@ -197,12 +198,12 @@ class Conv2D(Function):
                     0, H*W, SZ, min(SZ, groups-g))
                   riski_mulacc()
                   #risk_regdump()
-              riski_store(Reg.MATMUL_OUTPUT,
+              riski_store(Reg.MATMUL_ACC,
                 SLOT(2) + B*groups*oy*ox + g*oy*ox + Y*ox + X,
                 1, oy*ox, min(SZ, ox-X), min(SZ, groups-g))
 
       elif H == 1 and W == 1 and xs == 1 and ys == 1:
-        print("opt2")
+        #print("opt2")
         # oxy x cin x rcout -- unstrided 1x1
         # this is a simple matmul
         for g in range(0, groups):
@@ -211,7 +212,7 @@ class Conv2D(Function):
             assert yx == iy*ix
             for YX in range(0, oy*ox, SZ):   # these are next to each other
               # inner conv
-              riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+              riski_zero(Reg.MATMUL_ACC)
               for ci in range(0, cin, SZ):
                 riski_load(Reg.MATMUL_INPUT,
                   SLOT(0) + B*groups*cin*yx + g*cin*yx + ci*yx + YX,
@@ -220,11 +221,11 @@ class Conv2D(Function):
                   SLOT(1) + g*rcout*cin + c*cin + ci,
                   1, cin, min(SZ, cin-ci), min(SZ, rcout-c))
                 riski_matmul()
-              riski_store(Reg.MATMUL_OUTPUT,
+              riski_store(Reg.MATMUL_ACC,
                 SLOT(2) + B*groups*rcout*yx + g*rcout*yx + c*yx + YX,
                 1, yx, min(SZ, yx-YX), min(SZ, rcout-c))
       else:
-        print("unoptimized")
+        #print("unoptimized")
         # ox x cin x rcout -- unoptimized
         for g in range(0, groups):
           for c in range(0, rcout, SZ):
@@ -233,7 +234,7 @@ class Conv2D(Function):
                 IY,IX = Y*ys,X*xs
 
                 # inner conv
-                riski_mov(Reg.MATMUL_OUTPUT, Reg.ZERO)
+                riski_zero(Reg.MATMUL_ACC)
                 for ci in range(0, cin, SZ):
                   # not a loop in 1x1 convs, 9 in 3x3, 25 in 5x5
                   for y in range(IY, IY+H):
@@ -245,7 +246,7 @@ class Conv2D(Function):
                         SLOT(1) + g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX),
                         H*W, cin*H*W, min(SZ, cin-ci), min(SZ, rcout-c))
                       riski_matmul()
-                riski_store(Reg.MATMUL_OUTPUT,
+                riski_store(Reg.MATMUL_ACC,
                   SLOT(2) + B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X,
                   1, oy*ox, min(SZ, ox-X), min(SZ, rcout-c))
     cherry_print_counts()

@@ -53,12 +53,12 @@ class TransformerBlock:
     return x.reshape(shape=(bs, -1, embed_dim))
 
 class Transformer:
-  # L = cnt, H = embed_dim, A = num_heads
-  def __init__(self, syms, maxlen, cnt, embed_dim, num_heads):
+  # L = layers, H = embed_dim, A = num_heads
+  def __init__(self, syms, maxlen, layers, embed_dim, num_heads):
     self.maxlen, self.syms = maxlen, syms
     self.embed = Tensor.uniform(maxlen+syms, embed_dim, requires_grad=False)
     self.tbs = []
-    for i in range(cnt):
+    for i in range(layers):
       self.tbs.append(TransformerBlock(embed_dim, num_heads))
     self.final = Tensor.uniform(embed_dim, syms)
 

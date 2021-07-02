@@ -6,7 +6,7 @@ import random
 from tinygrad.tensor import Device
 from extra.utils import get_parameters
 from extra.training import train, evaluate
-from extra.transformer import Transformer
+from models.transformer import Transformer
 from tinygrad.optim import Adam
 
 # dataset idea from https://github.com/karpathy/minGPT/blob/master/play_math.ipynb

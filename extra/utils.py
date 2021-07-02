@@ -1,4 +1,5 @@
 from tinygrad.tensor import Tensor
+import tinygrad.nn as nn
 import pickle
 import numpy as np
 
@@ -24,8 +25,13 @@ def get_parameters(obj):
     for x in obj:
       parameters.extend(get_parameters(x))
   elif hasattr(obj, '__dict__'):
-    for v in obj.__dict__.values():
-      parameters.extend(get_parameters(v))
+    if isinstance(obj, nn.Sequential):
+      for layer in obj.layers:
+        for v in layer.__dict__.values():
+          parameters.extend(get_parameters(v))
+    else:
+      for v in obj.__dict__.values():
+        parameters.extend(get_parameters(v))
   return parameters
 
 def my_unpickle(fb0):

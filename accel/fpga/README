@@ -1,0 +1,69 @@
+Cherry is designed with thneed in mind. We upload small RISC-V programs into the icache and let them run.
+
+Single core RISC-V, superscalar, out of order. Targeting 1+ instructions/cycle.
+
+Compute is straightforward, but two questions about memory:
+* How much striding do we need? How much does it cost us power and transistor wise?
+* Should the copies to SRAM be explicit or caching with the DDR? Caching is a simpler programming model.
+
+Small Board (Arty A7 100T)
+=====
+* Support DMA over the ethernet interface. 12.5 MB/s
+* 65k elements in on board RAM, 18-bit
+* Optionally, use the 256MB of DDR3L onboard to hold everything. 2.66 GB/s
+* 240 DSP slices, 101k luts
+* 4x4x4 matmul = 64 mults, perhaps 8x8x8 matmul = 512 mults
+* 6.4 GFLOPS @ 50 mhz
+
+* Forward/backward pass of ResNet-50, EfficientNet-B2, and BERT-large in the simulator
+* Train MNIST models on the real hardware
+* After we've trained MNIST here, buy the big board and a Linux computer for home ($10k cost)
+
+Big Board (Alveo U250)
+=====
+* Support DMA over PCI-E. 16 GB/s
+* 8M elements in on board RAM, 18-bit
+* Optionally, use the 64GB of DDR4 onboard to hold everything. 77 GB/s
+* 12288 DSP slices, 1.7M luts
+* 16x16x16 matmul = 4096 mults, perhaps 32x32x32 matmul = 32768 mults
+* 4 TFLOPS @ 500 mhz
+
+* Bring up in one Z840 with one card
+* Train (with tinygrad) ResNet-50, EfficientNet-B2, and BERT-large
+* Confirm these models train to match the literature
+* Write PyTorch port to support same training (will likely require minor chip changes)
+* Now we buy a big machine with 8x cards ($100k cost)
+* Write 8x multicard training, place on https://mlcommons.org/en/training-normal-07/
+* Now it's funding/kickstarter time, based on our MLPerf results on the Alveos and Cherry Two sim
+* Cherry Two tapeout should be done at a turnkey place where we hand them the Verilog
+* TODO: I want to run exactly the tapeout Verilog in FPGA...how to do this?
+
+Cherry Two (12nm tapeout)
+=====
+* Support DMA over PCI-E. 16 GB/s
+* 8M elements in on board RAM, 19-bit, or 18-bit if that's all we need
+* Hopefully we don't need any DDR, is host RAM fast enough?
+* 32x32x32 matmul = 32768 mults
+* 64 TFLOPS @ 1 ghz
+* Target 75W, even if underclocked. One slot, no external power.
+
+* This card should be on par with a 3090 and sell for $1000, with PyTorch support
+* If we are here and we've sold 10k cards, we are on track to winning the AI chip market
+* Raise big money ($100M on $500M), hire chip experts, tile the core and go to a smaller process node
+
+Cherry Three (5nm tapeout)
+=====
+* Support DMA over PCI-E 4.0. 32 GB/s
+* 16 cores
+* 8M elements in on board RAM of each core (288 MB SRAM on chip)
+* Shared ~16GB GDDR6 between cores. Something like 512 GB/s
+* 16x 32x32x32 matmul = 32768 mults
+* 1 PFLOP @ 1 ghz (finally, a petaflop chip)
+* Target 300W, power savings from process shrink
+* This card should be on par with a DGX A100 and sell for $2000
+
+* At this point, we have won.
+* The core Verilog is open source, all the ASIC speed tricks are not.
+* Cherry will dominate the market for years to come, and will be in every cloud.
+* Sell the company for $1B+ to anyone but NVIDIA
+

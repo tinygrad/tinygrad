@@ -1,0 +1,30 @@
+For SZ = 32
+
+31 vector registers: v0-v31
+* 1024 element (19-bit TF32) wide
+* 32x32 "matrix"
+# Support masked execution of everything with v0
+# Helper instructions to load sz into mask?
+
+Movement:
+mov v1, v2
+mov v1, x0   # load 0
+
+Vector Engine (1024 ALUs):
+vfadd.vv vd, vs2, vs1, vm
+
+add sub mul div pow mac
+add v3, v1, v2   # vector/vector add
+add v3, v1, t0   # vector/scalar add
+
+Matrix Engine:
+matmul v3, v1, v2
+
+Load/Store Engine (R-type instructions):
+load v1, t0(<address>), t1(<stride_y>)
+store t0(<address>), v1, t1(<stride_y>)
+
+Permute Engine:
+# interleave - shuffle - unpack lo/hi - table interleave
+transpose v1, v0
+

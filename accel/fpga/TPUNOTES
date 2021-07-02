@@ -1,0 +1,69 @@
+SuperScalar is hard
+VLIW is scam but maybe okay if we remove V? (322-bit is only 41 bytes)
+Google TPU is nice. Admit it!!!!! U just jealous U don't have one
+
+TPUv1:
+256x256 = 64K MACs
+
+TPUv2:
+MXU (128x128) supports BF16
+compiler-controlled memory hierarchy
+322-bit VLIW instructions from local memory
+
+TPUv3:
+2x 128x128 MXU
+2x HBM capacity, 900 GB/s
+"midlife kicker"
+32MB on chip
+Same 322-bit wide as TPUv2
+
+TPUv4i:
+7 nm
+4x 128x128 MXU
+Is it inference only just because they removed the interconnect?
+144MB on chip
+Still HBM (SRAM is 20x more energy efficient than DRAM)
+four-dimensional (triple-strided) tensor DMA architecture (DRAM -> SRAM)
+  This lessens the stride burden on the SRAM
+Custom on-chip interconnect (OCI)
+512B native access size (64 uint8)
+The VLIW instruction needed extra fields to handle the four MXUs and the CMEM scratchpad memory, which were easy to add given no need for binary compatibility. The TPUv4i instruction is 25% wider than TPUv3
+https://www.researchgate.net/figure/Architecture-of-a-systolic-array-based-DNN-accelerator-that-serves-as-a-baseline-for_fig1_325861610
+TPUv4i first sums groups of four multiplication results together
+custom four-input floating point adder that eliminates the rounding and normalization logic for the intermediate results.
+
+https://www.hotchips.org/assets/program/conference/day2/HotChips2020_ML_Training_Google_Norrie_Patil.v01.pdf
+322b VLIW bundle
+
+* 2 scalar slots
+* 4 vector slots (2 for load/store, 2 for ALU?)
+  * 128 wide vector
+* 2 matrix slots (push, pop)
+  * bfloat16 multiply {1,8,7}
+  * float32 accumulation
+* 1 misc slot
+* 6 immediates
+
+Scalar Unit:
+4Ki x 32b Scalar Memory
+32 x 32b Scalar Reg File
+2x ALUs
+
+128x Vector Unit:
+  32Ki x 32b Vector (Lane) Memory (8 ports)
+  8x: Sublane
+     32 x 32b Vector (Lane) Reg File
+     2x ALUs on a float each, 2048 total
+     Connections to matrix unit
+2048 Vector ALUs
+
+2x Matrix Multiply Unit
+  128 x 128 systolic array
+  Streaming LHS and results
+  Stationary RHS (w/ optional transpose)
+
+Transpose / Permute Unit
+  Transpose, Reduction, Permutation
+  allow reshuffling of data across vector lanes
+
+
