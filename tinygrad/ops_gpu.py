@@ -442,7 +442,7 @@ class AvgPool2d(Function):
       wend = min(wend, input_width);
       for (int h = hstart; h < hend; h++) {
         for (int w = wstart; w < wend; w++) {
-          output[nxc * input_width * input_height + (h * input_width + w)] += input[nxc * grad_width * grad_height + (ph * grad_width + pw)] / pool_size;
+          output[nxc * input_width * input_height + (w * input_height + h)] += input[nxc * grad_width * grad_height + (ph + (pw * grad_height))] / pool_size;
         }
       }
     }

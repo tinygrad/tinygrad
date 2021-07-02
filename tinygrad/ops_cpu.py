@@ -170,7 +170,6 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
           hstart = max(hstart, 0)
           wstart = max(wstart, 0)
           pool_index = ph + (pw * output_shape[1])
-          # input_flattened = x[n][c].flatten()
           maxval = -float("inf")
           ti = 0
           for w in range(wstart, wend):
@@ -216,7 +215,8 @@ class AvgPool2D(Function):
             wend = min(wend, in_shape[2])
             for h in range(hstart, hend):
               for w in range(wstart, wend):
-                ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_flattened[ph * wx + pw] / pool_size
+                ret[batch][channel][w * in_shape[3] + h] = ret[batch][channel][w * in_shape[3] + h] + grad_flattened[ph + (pw * hx)] / pool_size
+                # ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_flattened[ph * wx + pw] / pool_size --> correct one
     ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
     return ret
 
