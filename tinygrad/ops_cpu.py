@@ -157,10 +157,10 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
   output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
   ret = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
   indices = np.zeros(shape=(x.shape[0], x.shape[1], (output_shape[0] * output_shape[1])), dtype=np.float32)
-  print("OUTPUT _SHAPE ", output_shape)
   ti = 0
   for n in range(x.shape[0]):
     for c in range(x.shape[1]):
+      input_flattened = x[n][c].flatten()
       for ph in range(output_shape[1]):
         for pw in range(output_shape[0]):
           hstart = ph * stride_h - pad_h
@@ -170,15 +170,16 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
           hstart = max(hstart, 0)
           wstart = max(wstart, 0)
           pool_index = ph + (pw * output_shape[1])
+          # input_flattened = x[n][c].flatten()
           maxval = -float("inf")
+          ti = 0
           for w in range(wstart, wend):
             for h in range(hstart, hend):
               index = w * x.shape[3] + h
-              ret[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = x[n][c].flatten()[index]
-              # indices[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = index
-              if x[n][c].flatten()[index] > maxval:
+              ret[n][c][pool_index * (kernel_width * kernel_height) + (ti % (kernel_width * kernel_height))] = input_flattened[index]
+              if input_flattened[index] > maxval:
                 indices[n][c][pool_index] = index
-                maxval = x[n][c].flatten()[index]
+                maxval = input_flattened[index]
               ti = ti + 1
   ret = ret.reshape((x.shape[0], x.shape[1], -1, (kernel_width  * kernel_height)))
   return ret, indices
@@ -201,6 +202,7 @@ class AvgPool2D(Function):
 
     for batch in range(bs):
       for channel in range(c):
+        grad_flattened = grad_output[batch][channel].flatten()
         for ph in range(hx):
           for pw in range(wx):
             hstart = ph * stride[1] - padding[1]
@@ -214,7 +216,7 @@ class AvgPool2D(Function):
             wend = min(wend, in_shape[2])
             for h in range(hstart, hend):
               for w in range(wstart, wend):
-                ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_output[batch][channel].flatten()[ph * wx + pw] / pool_size
+                ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_flattened[ph * wx + pw] / pool_size
     ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
     return ret
 
@@ -226,20 +228,6 @@ class MaxPool2D(Function):
     if stride is None: stride = kernel_size
     output_shape = (math.floor((x.shape[2] + 2 * padding[0] - kernel_size[0])/stride[0]) + 1, math.floor((x.shape[3] + 2 * padding[1] - kernel_size[1])/stride[1]) + 1)
     pools, indices = pool2d(x, kernel_size[0], kernel_size[1], stride[0], stride[1], padding[0], padding[1])
-
-    """
-    def arrange_indices(indices, max_indices):
-      ret = np.zeros(shape=(x.shape[0], x.shape[1], indices.shape[2]), dtype=np.float32)
-      for b in range(ret.shape[0]):
-        for c in range(ret.shape[1]):
-          for i in range(ret.shape[2]):
-            ret[b][c][i] = indices[b][c][i][max_indices[b][c][i]]
-      return ret
-    
-    max_indices = np.argmax(pools, axis=3)
-    indices = arrange_indices(indices, max_indices) # Then, sort indices with max_indices
-    """
-
     ctx.save_for_backward(indices, x.shape)
     return pools.max(axis=(3)).reshape(x.shape[0], x.shape[1], output_shape[0], output_shape[1])
 
@@ -249,8 +237,9 @@ class MaxPool2D(Function):
     ret = np.zeros((bs, c, in_shape[2] * in_shape[3]))
     for batch in range(bs):
       for channel in range(c):
+        grad_flattened = grad_output[batch][channel].flatten()
         for ind in range(indices.shape[2]):
-          ret[batch][channel][int(indices[batch][channel][ind])] = grad_output[batch][channel].flatten()[ind]
+          ret[batch][channel][int(indices[batch][channel][ind])] = grad_flattened[ind]
     
     ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
     return ret
