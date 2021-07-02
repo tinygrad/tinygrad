@@ -157,7 +157,6 @@ def pool2d(x, kernel_width, kernel_height, stride_w, stride_h, pad_w, pad_h):
   output_shape = (math.floor((x.shape[2] + 2 * pad_w - kernel_width)/stride_w) + 1, math.floor((x.shape[3] + 2 * pad_h - kernel_height)/stride_h) + 1)
   ret = np.zeros(shape=(x.shape[0], x.shape[1], (kernel_width * kernel_height) * (output_shape[0] * output_shape[1])), dtype=np.float32)
   indices = np.zeros(shape=(x.shape[0], x.shape[1], (output_shape[0] * output_shape[1])), dtype=np.float32)
-  ti = 0
   for n in range(x.shape[0]):
     for c in range(x.shape[1]):
       input_flattened = x[n][c].flatten()
@@ -216,7 +215,6 @@ class AvgPool2D(Function):
             for h in range(hstart, hend):
               for w in range(wstart, wend):
                 ret[batch][channel][w * in_shape[3] + h] = ret[batch][channel][w * in_shape[3] + h] + grad_flattened[ph + (pw * hx)] / pool_size
-                # ret[batch][channel][h * in_shape[2] + w] = ret[batch][channel][h * in_shape[2] + w] + grad_flattened[ph * wx + pw] / pool_size --> correct one
     ret = ret.reshape(bs, c, in_shape[2], in_shape[3])
     return ret
 
