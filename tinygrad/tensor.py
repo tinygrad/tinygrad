@@ -61,8 +61,8 @@ ane = None
 def require_init_ane():
   global ane
   if ane is None:
-    import ane.lib.ane, tinygrad.ops_ane
-    ane = ane.lib.ane.ANE()
+    import accel.ane.lib.ane as anelib, tinygrad.ops_ane
+    ane = anelib.ANE()
 
 # **** start with two base classes, Tensor and Function ****
 

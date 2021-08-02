@@ -11,12 +11,17 @@ opts.usesCPUOnly = false
 class MNISTInput : MLFeatureProvider {
   var featureNames: Set<String> {
     get {
-      return ["image"]
+      return ["image", "image2"]
     }
   }
   func featureValue(for featureName: String) -> MLFeatureValue? {
     if (featureName == "image") {
-      let tokenIDMultiArray = try? MLMultiArray(shape: [3], dataType: MLMultiArrayDataType.float32)
+      let tokenIDMultiArray = try? MLMultiArray(shape: [64], dataType: MLMultiArrayDataType.float32)
+      tokenIDMultiArray?[0] = NSNumber(value: 1337)
+      return MLFeatureValue(multiArray: tokenIDMultiArray!)
+    }
+    if (featureName == "image2") {
+      let tokenIDMultiArray = try? MLMultiArray(shape: [64], dataType: MLMultiArrayDataType.float32)
       tokenIDMultiArray?[0] = NSNumber(value: 1337)
       return MLFeatureValue(multiArray: tokenIDMultiArray!)
     }
