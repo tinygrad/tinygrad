@@ -32,4 +32,8 @@ class ReLU(Function):
     ret = ctx.ane.tensor(input.shape)
     ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
     return ret
+
+  def backward(ctx, grad_output):
+    return 0
+
 register('relu', ReLU, device=Device.ANE)
