@@ -264,13 +264,26 @@ class Conv2D(Function):
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
 
     gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
-    for g in range(ctx.groups):
-      #'ikYX,ijYXyx -> kjyx'
-      for i in range(ggg[:,g].shape[1]):
-        for j in range(tx[:,g].shape[1]):
+
+    if cin >= 16:
+      # optimize for large channel count
+      for g in range(ctx.groups):
+        #'ikYX,ijYXyx -> kjyx'
+        for i in range(ggg[:,g].shape[1]):
           for m in range(tx[:,g].shape[4]):
-            big_matrix = tx[:,g][:,j, :, :, m].reshape(-1, tx[:,g].shape[5])
-            gdw[g][i, j, m] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), big_matrix).flatten()
+            for n in range(tx[:,g].shape[5]):
+              # Use transposes to ensure reshape keeps the correct dimension (channel dimension) when multiple dimensions have the same size
+              big_matrix = np.transpose(tx[:,g][:, :, :, :, m, n], (1, 0, 2, 3)).reshape(tx[:,g].shape[1], -1).T
+              gdw[g][i, :, m, n] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), big_matrix).flatten()
+    else:
+      # unoptimized
+      for g in range(ctx.groups):
+        #'ikYX,ijYXyx -> kjyx'
+        for i in range(ggg[:,g].shape[1]):
+          for j in range(tx[:,g].shape[1]):
+            for m in range(tx[:,g].shape[4]):
+              big_matrix = tx[:,g][:,j, :, :, m].reshape(-1, tx[:,g].shape[5])
+              gdw[g][i, j, m] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), big_matrix).flatten()
 
     # needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
