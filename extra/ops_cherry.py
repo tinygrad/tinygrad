@@ -266,7 +266,7 @@ class Conv2D(Function):
     gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
     for g in range(ctx.groups):
       #'ikYX,ijYXyx -> kjyx'
-      gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
+      gdw[g] = np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
 
     # needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
