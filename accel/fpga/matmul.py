@@ -15,7 +15,7 @@ B = np.random.rand(N,N)
 #B = np.arange(1,17).reshape(4,4) + 10
 C = A @ B
 
-def reset():
+def reset(D):
   global acc, acache, wcache
   acc = np.zeros((D,D))
   acache = np.zeros((D,D))
@@ -55,11 +55,11 @@ print(C)
 print("**************************")
 print("Weight Stationary Systolic Array") # static weights inside systolic array units
 
-reset()
+reset(D)
 AA = apad(A.T)
 wcache = B.copy()
 out = []
-for n in range(AA.shape[1]): # since we padded on both sides we have N zeros on the end of the array to finish accumulation
+for n in range(3*N-1): # since we padded on both sides we have N zeros on the end of the array to finish accumulation
   r = mxu(AA[:, -(n+1)])
   out.append(r)
 ret = unapad(np.array(out)[N:][::-1])
@@ -94,7 +94,7 @@ def apad_mxm(a):
 print("**************************")
 print("Output Stationary Systolic Array") # static accumulators inside systolic array units
 
-reset_mxm(D,D)
+reset(D)
 AA = apad_mxm(A).T
 BB = apad_mxm(B.T)
 
@@ -125,7 +125,7 @@ reset()
 AA = apad(A.T)
 wcache = B.copy()
 out = []
-for n in range(AA.shape[1]): # since we padded on both sides we have N zeros on the end of the array to finish accumulation
+for n in range(2*N+X-1): # since we padded on both sides we have N zeros on the end of the array to finish accumulation
   r = mxu(AA[:, -(n+1)])
   out.append(r)
 ret3 = unapad(np.array(out)[N:][::-1])
