@@ -285,12 +285,15 @@ class Conv2D(Function):
               big_matrix = tx[:,g][:,j, :, :, m].reshape(-1, tx[:,g].shape[5])
               gdw[g][i, j, m] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), big_matrix).flatten()
 
-    # needs to be optimized
+    # needs to be optimized separately for large oy and ox, versus large ctx.groups
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
     for k in range(oy*ox):
       Y, X = k//ox, k%ox
       iY,iX = Y*ys, X*xs
-      gdx[:,:,:, iY:iY+H, iX:iX+W] = cherry_binop(gdx[:,:,: , iY:iY+H, iX:iX+W], np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw), BinaryOps.ADD)
+      big_matrix = []
+      for g in range(ctx.groups):
+        big_matrix.append(cherry_matmul(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1)).reshape((bs, cin, H, W)))
+      gdx[:, :, :, iY:iY+H, iX:iX+W] = cherry_binop(gdx[:, :, :, iY:iY+H, iX:iX+W], np.array(np.transpose(big_matrix, (1, 0, 2, 3, 4))), BinaryOps.ADD)
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 
