@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from abc import ABC, abstractmethod
 import numpy as np
 np.set_printoptions(linewidth=200)
 
@@ -23,11 +24,9 @@ def reset():
 def mxu(a):
   global acc, acache, wcache
   assert a.shape == (D,)
-  acache[:, 1:] = acache[:, :-1]
-  acache[:, 0] = a
+  acache = np.concatenate([a[:, None], acache[:, :-1]], axis=1)
   ret = np.copy(acc[0])
-  acc[0:-1] = acc[1:]
-  acc[-1] = 0
+  acc = np.concatenate([acc[1:], np.zeros((1, D), acc.dtype)], axis=0)
   acc += acache * wcache
   """
   print("****")
@@ -38,18 +37,17 @@ def mxu(a):
   return ret
 
 def apad(a):
-  ret = np.zeros((a.shape[0], a.shape[1]+(2*a.shape[0])-1)) # length of the flowing dim can be theoretically infinite (though not in this impl)
+  ret = np.zeros((a.shape[0], a.shape[1]+(2*a.shape[0])-1)) # length of the flowing dim can be theoretically infinite
   for i in range(0, a.shape[0]):                            # A.shape = (X, D), B.shape = (D, D) -> C.shape = (X, D)
-    ret[i, i+a.shape[0]:i+(2*a.shape[0])] = a[i]            # padding needed for a.shape[0] steps on each side
+    ret[i, i+a.shape[0]:i+a.shape[1]+a.shape[0]] = a[i]     # padding needed for a.shape[0] steps on each side
   return ret
 
 def unapad(a):
-  ret = np.zeros(((a.shape[0]+1)//2, a.shape[1]))
-  for i in range(0, a.shape[1]):
-    ret[:, i] = a[ret.shape[0]-i-1:a.shape[0]-i, i]
+  ret = np.zeros(((a.shape[0] - a.shape[1] +1), a.shape[1]))
+  for i in range(0, ret.shape[1]):
+    ret[:, i] = a[a.shape[1]-i-1:ret.shape[0]+a.shape[1]-i-1, i]
   return ret
   
-
 
 print(A)
 print(B)
@@ -61,12 +59,10 @@ reset()
 AA = apad(A.T)
 wcache = B.copy()
 out = []
-for n in range(3*N - 1): # since we padded on both sides we have N zeros on the end of the array to finish accumulation
-  r = mxu(AA[:, -1-n])
-  if n >= N:
-    out.append(r)
-
-ret = unapad(np.array(out)[::-1])
+for n in range(AA.shape[1]): # since we padded on both sides we have N zeros on the end of the array to finish accumulation
+  r = mxu(AA[:, -(n+1)])
+  out.append(r)
+ret = unapad(np.array(out)[N:][::-1])
 print(ret)
 assert np.allclose(C, ret)
 
@@ -109,6 +105,36 @@ ret2 = acc
 print(ret2)
 assert np.allclose(C, ret2)
 
+print("")
+print("**************************")
+print("")
+print("**************************")
+print("Weight Stationary Systolic Array - Dynamic Flow Size")
+
+
+D = 8
+X = 16 # Free dimension, matmul efficiency goes to 1 as X->inf (X / (X + 2D))
+
+N = D
+A = np.random.rand(X,N)
+B = np.random.rand(N,N)
+C = A @ B
+print(C)
+
+reset()
+AA = apad(A.T)
+wcache = B.copy()
+out = []
+for n in range(AA.shape[1]): # since we padded on both sides we have N zeros on the end of the array to finish accumulation
+  r = mxu(AA[:, -(n+1)])
+  out.append(r)
+ret3 = unapad(np.array(out)[N:][::-1])
+print("**************************")
+print(ret3)
+assert np.allclose(C, ret3)
+
+
+print("")
 print("**************************")
 print("")
 print("**************************")
@@ -127,7 +153,6 @@ print(C)
 reset_mxm(N,X)
 AA = apad_mxm(A).T
 BB = apad_mxm(B.T)
-print(AA.shape, BB.shape)
 for n in range(2*N+X-1):
   mxm(AA[n, :], BB[:, n]) # no need for unpad since acc has results
 
