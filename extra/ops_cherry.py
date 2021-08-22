@@ -273,10 +273,7 @@ class Conv2D(Function):
     for k in range(oy*ox):
       Y, X = k//ox, k%ox
       iY,iX = Y*ys, X*xs
-      #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
-      for g in range(ctx.groups):
-        tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
-        gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
+      gdx[:,:,:, iY:iY+H, iX:iX+W] = cherry_binop(gdx[:,:,: , iY:iY+H, iX:iX+W], np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw), BinaryOps.ADD)
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 
