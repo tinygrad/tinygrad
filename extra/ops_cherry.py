@@ -266,7 +266,11 @@ class Conv2D(Function):
     gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
     for g in range(ctx.groups):
       #'ikYX,ijYXyx -> kjyx'
-      gdw[g] = np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
+      for i in range(ggg[:,g].shape[1]):
+        for j in range(tx[:,g].shape[1]):
+          for m in range(tx[:,g].shape[4]):
+            for n in range(tx[:,g].shape[5]):
+              gdw[g][i, j, m, n] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), tx[:,g][:,j, :, :, m, n].reshape(-1, 1))
 
     # needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
