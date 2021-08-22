@@ -269,8 +269,8 @@ class Conv2D(Function):
       for i in range(ggg[:,g].shape[1]):
         for j in range(tx[:,g].shape[1]):
           for m in range(tx[:,g].shape[4]):
-            for n in range(tx[:,g].shape[5]):
-              gdw[g][i, j, m, n] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), tx[:,g][:,j, :, :, m, n].reshape(-1, 1))
+            big_matrix = tx[:,g][:,j, :, :, m].reshape(-1, tx[:,g].shape[5])
+            gdw[g][i, j, m] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), big_matrix).flatten()
 
     # needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
