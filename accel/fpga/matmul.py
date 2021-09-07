@@ -93,7 +93,7 @@ def apad_mxm(a):
 print("**************************")
 print("Output Stationary Systolic Array") # static accumulators inside systolic array units
 
-reset(D)
+reset_mxm(D, D)
 AA = apad_mxm(A).T
 BB = apad_mxm(B.T)
 
@@ -120,7 +120,7 @@ B = np.random.rand(N,N)
 C = A @ B
 print(C)
 
-reset()
+reset(D)
 AA = apad(A.T)
 wcache = B.copy()
 out = []
@@ -155,6 +155,45 @@ BB = apad_mxm(B.T)
 for n in range(2*N+X-1):
   mxm(AA[n, :], BB[:, n]) # no need for unpad since acc has results
 
+ret3 = acc
+
+print("**************************")
+print(ret3)
+assert np.allclose(C, ret3)
+
+print("")
+print("**************************")
+print("")
+print("**************************")
+print("Output Stationary Systolic Array - Dynamic Flow Size, broadcasted dim loading")
+
+
+def bmxm(a_col, b_row): # broadcasing the inputs across dims on every clk makes padding unnecessary 
+  global acc, acache, bcache
+
+  # length of the flowing dim can be theoretically infinite
+  # A.shape = (D, X) , B.shape = (X, D) -> C.shape = (D, D)
+  # this impl just broadcasts an input across the dimension that way we can dump the padding
+  # we can support all 3 ways but it might be a problem with regard to wire density
+  acache = np.repeat(a_col[:, None], len(a_col), axis=1) # flow the cols of A
+  bcache = np.repeat(b_row[None, :], len(b_row), axis=0) # flow the rows of B
+  acc += acache * bcache # FMAC
+
+D = 8
+X = 16 # Free dimension
+
+N = D
+A = np.random.rand(N,X)
+B = np.random.rand(X,N)
+C = A @ B
+print(C)
+
+
+reset_mxm(N,X)
+AA = A
+BB = B
+for x in range(X):
+  bmxm(AA[:, x], BB[x, :]) # no need for unpad since acc has results
 ret3 = acc
 
 print("**************************")
