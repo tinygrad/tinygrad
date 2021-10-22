@@ -148,22 +148,28 @@ class EfficientNet:
       b0 = fake_torch_load(b0)
 
     for k,v in b0.items():
-      if '_blocks.' in k:
-        k = "%s[%s].%s" % tuple(k.split(".", 2))
-      mk = "self."+k
+      for cat in ['_conv_head', '_conv_stem', '_depthwise_conv', '_expand_conv', '_fc', '_project_conv', '_se_reduce', '_se_expand']:
+        if cat in k:
+          k = k.replace('.bias', '_bias')
+          k = k.replace('.weight', '')
+
       #print(k, v.shape)
-      try:
-        mv = eval(mk)
-      except AttributeError:
-        try:
-          mv = eval(mk.replace(".weight", ""))
-        except AttributeError:
-          mv = eval(mk.replace(".bias", "_bias"))
+      mv = _get_child(self, k)
       vnp = v.numpy().astype(np.float32) if USE_TORCH else v.astype(np.float32)
-      vnp = vnp if k != '_fc.weight' else vnp.T
+      vnp = vnp if k != '_fc' else vnp.T
       vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
         mv.assign(Tensor(vnp))
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
+
+
+def _get_child(parent, key):
+  obj = parent
+  for k in key.split('.'):
+    if k.isnumeric():
+      obj = obj[int(k)]
+    else:
+      obj = getattr(obj, k)
+  return obj
