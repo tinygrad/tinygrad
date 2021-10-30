@@ -61,7 +61,7 @@ ane = None
 def require_init_ane():
   global ane
   if ane is None:
-    import accel.ane.lib.ane as anelib, tinygrad.ops_ane
+    import accel.ane.lib.ane as anelib, accel.ane.tinygrad.ops_ane as ops_ane
     ane = anelib.ANE()
 
 # **** start with two base classes, Tensor and Function ****
@@ -355,7 +355,7 @@ def _register_ops(namespace, device=Device.CPU):
 from tinygrad import ops_cpu
 _register_ops(ops_cpu)
 if os.getenv("CHERRY", None) is not None:
-  from extra import ops_cherry
+  from accel.cherry.tinygrad import ops_cherry
   _register_ops(ops_cherry)
 try:
   import pyopencl as cl
