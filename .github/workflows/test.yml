@@ -16,7 +16,7 @@ jobs:
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
   linter:
-    name: Indentation  Linter
+    name: Indentation Linter
     runs-on: ubuntu-latest
 
     steps:
@@ -46,10 +46,10 @@ jobs:
       run: sudo apt-get update
     - name: Install OpenCL
       run: sudo apt-get install pocl-opencl-icd
-    - name: Set up Python 3.8
+    - name: Set up Python 3.9
       uses: actions/setup-python@v2
       with:
-        python-version: 3.8
+        python-version: 3.9
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
@@ -66,10 +66,10 @@ jobs:
       run: sudo apt-get update
     - name: Install OpenCL
       run: sudo apt-get install pocl-opencl-icd
-    - name: Set up Python 3.8
+    - name: Set up Python 3.9
       uses: actions/setup-python@v2
       with:
-        python-version: 3.8
+        python-version: 3.9
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
