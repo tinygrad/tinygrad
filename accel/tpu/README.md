@@ -1,3 +1,6 @@
+Google's TPU
+--------------------------------------------------------------------
+
 We document the Google TPU v2/v3 in order to support it in tinygrad without the XLA compiler.
 
 ## Creating a Google Cloud TPU VM
