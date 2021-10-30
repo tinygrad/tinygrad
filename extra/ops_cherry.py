@@ -264,19 +264,36 @@ class Conv2D(Function):
     ggg = grad_output.reshape(bs,ctx.groups,rcout,oy,ox)
 
     gdw = np.zeros((ctx.groups,rcout,cin,H,W), dtype=tx.dtype)
-    for g in range(ctx.groups):
-      #'ikYX,ijYXyx -> kjyx'
-      gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
 
-    # needs to be optimized
+    if cin >= 16:
+      # optimize for large channel count
+      for g in range(ctx.groups):
+        #'ikYX,ijYXyx -> kjyx'
+        for i in range(ggg[:,g].shape[1]):
+          for m in range(tx[:,g].shape[4]):
+            for n in range(tx[:,g].shape[5]):
+              # Use transposes to ensure reshape keeps the correct dimension (channel dimension) when multiple dimensions have the same size
+              big_matrix = np.transpose(tx[:,g][:, :, :, :, m, n], (1, 0, 2, 3)).reshape(tx[:,g].shape[1], -1).T
+              gdw[g][i, :, m, n] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), big_matrix).flatten()
+    else:
+      # unoptimized
+      for g in range(ctx.groups):
+        #'ikYX,ijYXyx -> kjyx'
+        for i in range(ggg[:,g].shape[1]):
+          for j in range(tx[:,g].shape[1]):
+            for m in range(tx[:,g].shape[4]):
+              big_matrix = tx[:,g][:,j, :, :, m].reshape(-1, tx[:,g].shape[5])
+              gdw[g][i, j, m] = cherry_matmul(ggg[:,g][:,i].reshape(1, -1), big_matrix).flatten()
+
+    # needs to be optimized separately for large oy and ox, versus large ctx.groups
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
     for k in range(oy*ox):
       Y, X = k//ox, k%ox
       iY,iX = Y*ys, X*xs
-      #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
+      big_matrix = []
       for g in range(ctx.groups):
-        tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
-        gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
+        big_matrix.append(cherry_matmul(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1)).reshape((bs, cin, H, W)))
+      gdx[:, :, :, iY:iY+H, iX:iX+W] = cherry_binop(gdx[:, :, :, iY:iY+H, iX:iX+W], np.array(np.transpose(big_matrix, (1, 0, 2, 3, 4))), BinaryOps.ADD)
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
 
