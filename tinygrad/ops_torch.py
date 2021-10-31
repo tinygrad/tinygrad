@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from .tensor import Function
 
 # ************* unary ops *************
@@ -39,7 +40,11 @@ def unbroadcast(out, in_sh):
     return out.sum().reshape((1,))
   else:
     sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1])
-    return out.sum(axis=sum_axis).reshape(in_sh)
+    if len(sum_axis) == 0:
+      # no unbroadcasting required
+      return out
+    else:
+      return out.sum(axis=sum_axis).reshape(in_sh)
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -107,7 +112,10 @@ class Max(Function):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    if axis is None:
+      div = ret2.sum()
+    else:
+      div = ret2.sum(tuple(axis), keepdims=True)
     return ret2*grad_output.reshape(shape)/div
 
 # ************* movement ops *************
@@ -124,14 +132,15 @@ class Reshape(Function):
 class Transpose(Function):
   def forward(ctx, x, order):
     ctx.save_for_backward(order)
-    return torch.transpose(x, order)
+    print(order)
+    return x.permute(order)
 
   def backward(ctx, x):
-    return torch.transpose(x, torch.argsort(ctx.order))
+    return x.permute(tuple(np.argsort(ctx.order)))
 
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
-  x = torch.nn.functional.pad(x, [item for sublist in padding for item in sublist])
+  x = torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
   slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
   return x[tuple([slice(x[0], x[1], None) for x in slicee])]
 
@@ -160,11 +169,11 @@ class Matmul(Function):
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
-    ctx.save_for_backward(x, w)
+    ctx.save_for_backward(x, w, stride, groups)
     return torch.nn.functional.conv2d(x, w, stride=stride, groups=groups)
 
   def backward(ctx, grad_output):
-    x, w = ctx.saved_tensors
-    grad_input = torch.nn.grad.conv2d_input(x.shape, w, grad_output)
-    grad_weight = torch.nn.grad.conv2d_weight(x, w.shape, grad_output)
+    x, w, stride, groups = ctx.saved_tensors
+    grad_input = torch.nn.grad.conv2d_input(x.shape, w, grad_output, stride=stride, groups=groups)
+    grad_weight = torch.nn.grad.conv2d_weight(x, w.shape, grad_output, stride=stride, groups=groups)
     return grad_input, grad_weight
