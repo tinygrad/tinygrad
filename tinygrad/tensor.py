@@ -55,20 +55,11 @@ class GPUBuffer:
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
 
-# **** ANE functions ****
-
-ane = None
-def require_init_ane():
-  global ane
-  if ane is None:
-    import accel.ane.lib.ane as anelib, accel.ane.tinygrad.ops_ane as ops_ane
-    ane = anelib.ANE()
-
 # **** start with two base classes, Tensor and Function ****
 
-class Device: CPU, GPU, ANE = 0, 1, 2
+class Device: CPU, GPU, TORCH = 0, 1, 2
 
-DEFAULT_DEVICE = Device.CPU if os.environ.get("GPU", 0) != "1" else Device.GPU
+DEFAULT_DEVICE = (Device.CPU if os.environ.get("GPU", 0) != "1" else Device.GPU) if os.environ.get("TORCH", 0) != "1" else Device.TORCH
 
 class Tensor:
   did_float_warning = False
@@ -95,7 +86,10 @@ class Tensor:
 
   @property
   def dtype(self):
-    return self.data.dtype
+    if self.device == Device.TORCH:
+      return np.float32
+    else:
+      return self.data.dtype
 
   # ***** creation helper functions *****
 
@@ -165,10 +159,8 @@ class Tensor:
       with ProfileOp("toCPU", [data]):
         cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
 
-    elif "ANETensor" in str(type(data)):
-      if device == Device.ANE: return data
-      with ProfileOp("toCPU", [data]):
-        data = data.data().astype(np.float32)
+    if str(type(data)).startswith("torch"):
+      data = data.numpy()
 
     if not isinstance(data, np.ndarray):
       data = np.array(data, dtype=np.float32)
@@ -183,12 +175,11 @@ class Tensor:
       with ProfileOp("toGPU", [data]):
         return GPUBuffer(data.shape, data)
 
-    elif device == Device.ANE:
-      require_init_ane()
-      with ProfileOp("toANE", [data]):
-        ndata = ane.tensor(data.shape)
-        ndata.data()[:] = data
-        return ndata
+    if device == Device.TORCH:
+      import torch
+      with ProfileOp("toTORCH", [data]):
+        return torch.from_numpy(data)
+
     return data
 
   def to_(self, device):
@@ -335,7 +326,7 @@ def register(name, fxn, device=Device.CPU):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
     f = Tensor.ops[tt.device][name]
-    f.cl_ctx, f.cl_queue, f.ane, f.device = cl_ctx, cl_queue, ane, tt.device
+    f.cl_ctx, f.cl_queue, f.device = cl_ctx, cl_queue, tt.device
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
@@ -354,9 +345,6 @@ def _register_ops(namespace, device=Device.CPU):
 
 from tinygrad import ops_cpu
 _register_ops(ops_cpu)
-if os.getenv("CHERRY", None) is not None:
-  from accel.cherry.tinygrad import ops_cherry
-  _register_ops(ops_cherry)
 try:
   import pyopencl as cl
   # TODO: move this import to require_init_gpu?
@@ -366,4 +354,9 @@ try:
 except ImportError:
   # no GPU support
   GPU = False
-ANE = False
+try:
+  import torch
+  from tinygrad import ops_torch
+  _register_ops(ops_torch, device=Device.TORCH)
+except ImportError:
+  pass
