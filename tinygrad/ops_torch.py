@@ -16,7 +16,7 @@ class ReLU(Function):
 class Log(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return torch.log(input)
+    return input.log()
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
@@ -24,7 +24,7 @@ class Log(Function):
 
 class Exp(Function):
   def forward(ctx, input):
-    ret = torch.exp(input)
+    ret = input.exp()
     ctx.save_for_backward(ret)
     return ret
 
@@ -34,44 +34,7 @@ class Exp(Function):
 
 # ************* binary ops *************
 
-def unbroadcast(out, in_sh):
-  # adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i]
-  if in_sh == (1,):
-    return out.sum().reshape((1,))
-  else:
-    sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1])
-    if len(sum_axis) == 0:
-      # no unbroadcasting required
-      return out
-    else:
-      return out.sum(axis=sum_axis).reshape(in_sh)
-
-class Add(Function):
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
-    return x+y
-
-  def backward(ctx, grad_output):
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(grad_output, shape_x), unbroadcast(grad_output, shape_y)
-
-class Sub(Function):
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
-    return x-y
-
-  def backward(ctx, grad_output):
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(grad_output, shape_x), unbroadcast(-grad_output, shape_y)
-
-class Mul(Function):
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return x*y
-
-  def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
-    return unbroadcast(y*grad_output, x.shape), unbroadcast(x*grad_output, y.shape)
+from tinygrad.ops_cpu import Add, Sub, Mul, unbroadcast
 
 class Pow(Function):
   def forward(ctx, x, y):
@@ -88,10 +51,7 @@ class Pow(Function):
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
-    if axis == None:
-      return input.sum().reshape((1,))
-    else:
-      return input.sum(axis)
+    return input.sum(axis) if axis != None else input.sum().reshape((1,))
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
@@ -112,27 +72,16 @@ class Max(Function):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = (input==ret.reshape(shape))
-    if axis is None:
-      div = ret2.sum()
-    else:
-      div = ret2.sum(tuple(axis), keepdims=True)
+    div = ret2.sum(axis=tuple(axis), keepdims=True) if axis is not None else ret2.sum()
     return ret2*grad_output.reshape(shape)/div
 
 # ************* movement ops *************
 
-class Reshape(Function):
-  def forward(ctx, x, shape):
-    ctx.save_for_backward(x.shape)
-    return x.reshape(shape)
-
-  def backward(ctx, grad_output):
-    in_shape, = ctx.saved_tensors
-    return grad_output.reshape(in_shape)
+from tinygrad.ops_cpu import Reshape
 
 class Transpose(Function):
   def forward(ctx, x, order):
     ctx.save_for_backward(order)
-    print(order)
     return x.permute(order)
 
   def backward(ctx, x):
@@ -156,16 +105,7 @@ class Slice(Function):
 
 # ************* processing ops *************
 
-class Matmul(Function):
-  def forward(ctx, input, weight):
-    ctx.save_for_backward(input, weight)
-    return input @ weight
-
-  def backward(ctx, grad_output):
-    input, weight = ctx.saved_tensors
-    grad_input = grad_output @ torch.swapaxes(weight, -2, -1)
-    grad_weight = torch.swapaxes(input, -2, -1) @ grad_output
-    return grad_input, grad_weight
+from tinygrad.ops_cpu import Matmul
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):

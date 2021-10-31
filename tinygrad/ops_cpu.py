@@ -57,15 +57,18 @@ class Max(Function):
     input, axis, ret = ctx.saved_tensors
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=None if axis is None else tuple(axis), keepdims=True)
+    div = ret2.sum(axis=tuple(axis), keepdims=True) if axis is not None else ret2.sum()
     return ret2*grad_output.reshape(shape)/div
 
 # ************* binary ops *************
 
 def unbroadcast(out, in_sh):
   # adjoint operation to broadcast is sum. Need to sum all axis with 1 = in_sh[i] < out.shape[i]
-  sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1]) if in_sh != (1,) else None
-  return out.sum(axis=sum_axis).reshape(in_sh)
+  if in_sh == (1,):
+    return out.sum().reshape((1,))
+  else:
+    sum_axis = tuple([i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1])
+    return out.sum(axis=sum_axis).reshape(in_sh) if len(sum_axis) > 0 else out
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -148,8 +151,8 @@ class Matmul(Function):
 
   def backward(ctx, grad_output):
     input, weight = ctx.saved_tensors
-    grad_input = grad_output @ np.swapaxes(weight, -2, -1)
-    grad_weight = np.swapaxes(input, -2, -1) @ grad_output
+    grad_input = grad_output @ weight.swapaxes(-2, -1)
+    grad_weight = input.swapaxes(-2, -1) @ grad_output
     return grad_input, grad_weight
 
 class Conv2D(Function):

@@ -178,7 +178,7 @@ class Tensor:
     if device == Device.TORCH:
       import torch
       with ProfileOp("toTORCH", [data]):
-        return torch.from_numpy(data)
+        return torch.from_numpy(data).requires_grad_(False)
 
     return data
 
