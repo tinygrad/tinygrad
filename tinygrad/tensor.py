@@ -185,6 +185,8 @@ class Tensor:
           return np.amax(x, *args, **kwargs)
         def permute(x, order):
           return x.transpose(order)
+        def type(x, tt):
+          return x.astype(tt)
       data = data.view(CPUBuffer)
 
     if device == Device.GPU:

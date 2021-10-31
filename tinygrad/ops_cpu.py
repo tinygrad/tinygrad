@@ -58,7 +58,7 @@ class Max(Function):
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = (input==ret.reshape(shape))
     div = ret2.sum(axis=tuple(axis), keepdims=True) if axis is not None else ret2.sum()
-    return ret2*grad_output.reshape(shape)/div
+    return ret2*grad_output.reshape(shape)/div.type(input.dtype)
 
 # ************* binary ops *************
 

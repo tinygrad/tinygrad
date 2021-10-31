@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 import tinygrad.optim as optim
 from extra.training import train, evaluate
-from extra.utils import fetch, get_parameters
+from extra.utils import get_parameters
 from datasets import fetch_mnist
 
 # load the mnist dataset
