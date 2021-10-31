@@ -2,50 +2,13 @@ import torch
 import numpy as np
 from .tensor import Function
 
-# ************* unary+binary ops *************
+# ************* unary+binary+reduce ops *************
 
-from tinygrad.ops_cpu import ReLU, Log, Exp, Add, Sub, Mul, Pow
-
-# ************* reduce ops *************
-
-class Sum(Function):
-  def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input, axis)
-    return input.sum(axis) if axis != None else input.sum().reshape((1,))
-
-  def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    if isinstance(axis, int): axis = [axis]
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    return grad_output.reshape(shape) + torch.zeros_like(input)
-
-class Max(Function):
-  def forward(ctx, inp, axis=None):
-    if isinstance(axis, int): axis = [axis]
-    ret = torch.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
-    ctx.save_for_backward(inp, axis, ret)
-    if axis is not None:
-      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
-    return ret
-
-  def backward(ctx, grad_output):
-    input, axis, ret = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = (input==ret.reshape(shape))
-    div = ret2.sum(axis=tuple(axis), keepdims=True) if axis is not None else ret2.sum()
-    return ret2*grad_output.reshape(shape)/div
+from tinygrad.ops_cpu import ReLU, Log, Exp, Add, Sub, Mul, Pow, Sum, Max
 
 # ************* movement ops *************
 
-from tinygrad.ops_cpu import Reshape
-
-class Transpose(Function):
-  def forward(ctx, x, order):
-    ctx.save_for_backward(order)
-    return x.permute(order)
-
-  def backward(ctx, x):
-    return x.permute(tuple(np.argsort(ctx.order)))
+from tinygrad.ops_cpu import Reshape, Transpose
 
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]

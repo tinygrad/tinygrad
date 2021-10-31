@@ -42,12 +42,12 @@ class Sum(Function):
     input, axis = ctx.saved_tensors
     if isinstance(axis, int): axis = [axis]
     shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
-    return grad_output.reshape(shape) + np.zeros_like(input)
+    return grad_output.reshape(shape).expand(input.shape)
 
 class Max(Function):
   def forward(ctx, inp, axis=None):
     if isinstance(axis, int): axis = [axis]
-    ret = np.amax(inp, axis=None if axis is None else tuple(axis), keepdims=True)
+    ret = inp.amax(axis=None if axis is None else tuple(axis), keepdims=True)
     ctx.save_for_backward(inp, axis, ret)
     if axis is not None:
       ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
@@ -121,10 +121,10 @@ class Reshape(Function):
 class Transpose(Function):
   def forward(ctx, x, order):
     ctx.save_for_backward(order)
-    return np.transpose(x, order)
+    return x.permute(order)
 
   def backward(ctx, x):
-    return np.transpose(x, np.argsort(ctx.order))
+    return x.permute(tuple(np.argsort(ctx.order)))
 
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]

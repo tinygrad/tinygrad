@@ -179,6 +179,12 @@ class Tensor:
           return np.exp(x)
         def relu(x):
           return np.maximum(x, 0)
+        def expand(x, shp):
+          return np.broadcast_to(x, shp)
+        def amax(x, *args, **kwargs):
+          return np.amax(x, *args, **kwargs)
+        def permute(x, order):
+          return x.transpose(order)
       data = data.view(CPUBuffer)
 
     if device == Device.GPU:
