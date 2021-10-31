@@ -14,6 +14,7 @@ model_urls = {
 
 def load_from_pretrained(model, url):
   state_dict = load_state_dict_from_url(url, progress=True)
+  #state_dict = fake_torch_load(fetch(url))
   layers_not_loaded = []
   for k, v in state_dict.items():
     par_name = ['model']
