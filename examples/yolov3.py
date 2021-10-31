@@ -10,7 +10,7 @@ import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
 from extra.utils import fetch, get_parameters
-from yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
+from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
 from tinygrad.nn import BatchNorm2D, Conv2d
 
 import cv2

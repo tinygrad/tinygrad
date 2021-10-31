@@ -1,8 +1,8 @@
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.optim import SGD
-import extra.waifu2x
-from extra.kinne import KinneDir
+import examples.yolo.waifu2x
+from examples.yolo.kinne import KinneDir
 import sys
 import os
 import random
