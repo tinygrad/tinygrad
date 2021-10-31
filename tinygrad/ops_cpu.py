@@ -6,7 +6,7 @@ from .tensor import Function
 class ReLU(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return np.maximum(input, 0)
+    return input.relu()
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
@@ -15,7 +15,7 @@ class ReLU(Function):
 class Log(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return np.log(input)
+    return input.log()
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
@@ -23,7 +23,7 @@ class Log(Function):
 
 class Exp(Function):
   def forward(ctx, input):
-    ret = np.exp(input)
+    ret = input.exp()
     ctx.save_for_backward(ret)
     return ret
 
@@ -36,7 +36,7 @@ class Exp(Function):
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
-    return np.array([input.sum()]) if axis is None else input.sum(axis=axis)
+    return input.sum(axis) if axis != None else input.sum().reshape((1,))
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
@@ -105,7 +105,7 @@ class Pow(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
-           unbroadcast((x**y) * np.log(x) * grad_output, y.shape)
+           unbroadcast((x**y) * x.log() * grad_output, y.shape)
 
 # ************* movement ops *************
 

@@ -170,6 +170,17 @@ class Tensor:
       print(f"warning, {data.shape!r} isn't float32, it's {data.dtype}")
       Tensor.did_float_warning = True
 
+    if device == Device.CPU:
+      # add these functions to ndarray
+      class CPUBuffer(np.ndarray):
+        def log(x):
+          return np.log(x)
+        def exp(x):
+          return np.exp(x)
+        def relu(x):
+          return np.maximum(x, 0)
+      data = data.view(CPUBuffer)
+
     if device == Device.GPU:
       require_init_gpu()
       with ProfileOp("toGPU", [data]):

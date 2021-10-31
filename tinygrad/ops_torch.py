@@ -2,49 +2,9 @@ import torch
 import numpy as np
 from .tensor import Function
 
-# ************* unary ops *************
+# ************* unary+binary ops *************
 
-class ReLU(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return input.relu()
-
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output * (input >= 0)
-
-class Log(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return input.log()
-
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return grad_output / input
-
-class Exp(Function):
-  def forward(ctx, input):
-    ret = input.exp()
-    ctx.save_for_backward(ret)
-    return ret
-
-  def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return grad_output * ret
-
-# ************* binary ops *************
-
-from tinygrad.ops_cpu import Add, Sub, Mul, unbroadcast
-
-class Pow(Function):
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return x ** y
-
-  def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
-    return unbroadcast(y * (x**(y-1.0)) * grad_output, x.shape), \
-           unbroadcast((x**y) * torch.log(x) * grad_output, y.shape)
+from tinygrad.ops_cpu import ReLU, Log, Exp, Add, Sub, Mul, Pow
 
 # ************* reduce ops *************
 
