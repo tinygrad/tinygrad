@@ -1,14 +1,12 @@
 import os
 import time
 import numpy as np
-from extra.efficientnet import EfficientNet
+from models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
-from extra.utils import get_parameters, fetch
+from extra.utils import get_parameters
 from tqdm import trange
 import tinygrad.optim as optim
-import io
-import tarfile
-import pickle
+from datasets import fetch_cifar
 
 class TinyConvNet:
   def __init__(self, classes=10):
@@ -24,15 +22,8 @@ class TinyConvNet:
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1).logsoftmax()
 
-def load_cifar():
-  tt = tarfile.open(fileobj=io.BytesIO(fetch('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz')), mode='r:gz')
-  db = pickle.load(tt.extractfile('cifar-10-batches-py/data_batch_1'), encoding="bytes")
-  X = db[b'data'].reshape((-1, 3, 32, 32))
-  Y = np.array(db[b'labels'])
-  return X, Y
-
 if __name__ == "__main__":
-  X_train, Y_train = load_cifar()
+  X_train, Y_train = fetch_cifar()
   classes = 10
 
   Tensor.default_gpu = os.getenv("GPU") is not None

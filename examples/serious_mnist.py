@@ -9,7 +9,7 @@ import numpy as np
 from tinygrad.tensor import Tensor, GPU
 from tinygrad.nn import BatchNorm2D
 from extra.utils import get_parameters
-from test_mnist import fetch_mnist
+from datasets import fetch_mnist
 from extra.training import train, evaluate, sparse_categorical_crossentropy
 import tinygrad.optim as optim
 from extra.augment import augment_img
