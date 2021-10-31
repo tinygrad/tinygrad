@@ -8,3 +8,4 @@ dist
 *.egg-info
 /env
 a.out
+boxes.jpg
