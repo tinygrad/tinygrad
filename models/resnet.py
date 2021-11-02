@@ -14,6 +14,7 @@ model_urls = {
 
 def load_from_pretrained(model, url):
   state_dict = load_state_dict_from_url(url, progress=True)
+  #state_dict = fake_torch_load(fetch(url))
   layers_not_loaded = []
   for k, v in state_dict.items():
     par_name = ['model']
@@ -87,7 +88,7 @@ class Bottleneck:
     return out
 
 class ResNet:
-  def __init__(self, block, num_blocks, num_classes=10, pretrained=False):
+  def __init__(self, block, num_blocks, num_classes=10):
     self.in_planes = 64
 
     self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
@@ -144,7 +145,7 @@ def ResNet101(num_classes, pretrained=False):
   return model
 
 def ResNet152(num_classes, pretrained=False):
-  model = ResNet(Bottleneck, [3, 8, 36, 3], num_classes, pretrained=pretrained)
+  model = ResNet(Bottleneck, [3, 8, 36, 3], num_classes)
   if pretrained:
     model = load_from_pretrained(model, model_urls['resnet152'])
   return model

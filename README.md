@@ -10,14 +10,21 @@ For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
-Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. Support the simple basic ops, and you get SOTA [vision](https://arxiv.org/abs/1905.11946) `extra/efficientnet.py` and [language](https://arxiv.org/abs/1706.03762) `extra/transformer.py` models. We are working on support for the Apple Neural Engine.
+The sub 1000 line core of it is in `tinygrad/`
 
-Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blindingly fast. Now, it is slow.
+Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. Support the simple basic ops, and you get SOTA [vision](https://arxiv.org/abs/1905.11946) `models/efficientnet.py` and [language](https://arxiv.org/abs/1706.03762) `models/transformer.py` models.
+
+We are working on support for the Apple Neural Engine and the Google TPU in the `accel/` folder. Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blindingly fast. Now, it is slow.
 
 ### Installation
 
 ```bash
 pip3 install git+https://github.com/geohot/tinygrad.git --upgrade
+
+# or for development
+git clone https://github.com/geohot/tinygrad.git
+cd tinygrad
+python3 setup.py develop
 ```
 
 ### Example
@@ -87,7 +94,7 @@ from tinygrad.tensor import Tensor
 (Tensor.ones(4,4).gpu() + Tensor.ones(4,4).gpu()).cpu()
 ```
 
-### ANE Support?!
+### ANE Support?! (broken)
 
 If all you want to do is ReLU, you are in luck! You can do very fast ReLU (at least 30 MEGAReLUs/sec confirmed)
 
@@ -135,12 +142,20 @@ PROTIP: Set "GPU=1" environment variable if you want this to go faster.
 
 PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
-### tinygrad also supports GANs
+### tinygrad supports GANs
 
 See `examples/mnist_gan.py`
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/mnist_by_tinygrad.jpg">
+</p>
+
+### tinygrad supports yolo
+
+See `examples/yolov3.py`
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/yolo_by_tinygrad.jpg">
 </p>
 
 ## The promise of small
@@ -152,15 +167,4 @@ tinygrad will always be below 1000 lines. If it isn't, we will revert commits un
 ```bash
 python3 -m pytest
 ```
-
-### TODO (updated)
-
-```bash
-PYTHONPATH="." DEBUG=1 CHERRY=1 python3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
-```
-
-* ~~Add reduce ops to CHERRY, and fully support forward pass. See `extra/ops_risk.py` and `extra/risk.py`~~
-* Switch convolution backward pass to CHERRY instead of the numpy placeholder
-* Confirm EfficientNet backward pass fully uses CHERRY instructions
-* Benchmark that and transformers
 

@@ -56,34 +56,3 @@ class LeakyReLU:
   def __call__(self, input):
     return input.leakyrelu(self.neg_slope)
 
-
-class Conv2d:
-  def __init__(self, in_channels, out_channels, kernel_size, stride = 1, padding = 0, groups = 1, bias = True):
-    self.in_channels, self.out_channels, self.stride, self.padding, self.groups, self.bias = in_channels, out_channels, stride, padding, groups, bias # Wow this is terrible
-
-    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
-
-    assert out_channels % groups == 0 and in_channels % groups == 0
-
-    self.weight = Tensor.uniform(out_channels, in_channels // groups, *self.kernel_size)
-    if self.bias:
-      self.bias = Tensor.uniform(1, out_channels, 1, 1)
-    else:
-      self.bias = None
-  
-  def __repr__(self):
-    return f"Conv2d({self.in_channels!r}, {self.out_channels!r}, kernel_size={self.kernel_size!r} stride={self.stride!r}"
-  
-  def __call__(self, x):
-    if self.padding != 0:
-      if self.bias is not None:
-        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weight, stride=self.stride, groups=self.groups).add(self.bias)
-      else:
-        x = x.pad2d(padding=[self.padding] * 4).conv2d(self.weight, stride=self.stride, groups=self.groups)
-    else:
-      if self.bias is not None:
-        x = x.conv2d(self.weight, stride=self.stride, groups=self.groups).add(self.bias)
-      else:
-        x = x.conv2d(self.weight, stride=self.stride, groups=self.groups)
-
-    return x

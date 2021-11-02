@@ -10,8 +10,8 @@ import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
 from extra.utils import fetch, get_parameters
-from yolo_nn import Conv2d, Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
-from tinygrad.nn import BatchNorm2D
+from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
+from tinygrad.nn import BatchNorm2D, Conv2d
 
 import cv2
 from PIL import Image
@@ -241,7 +241,7 @@ def infer(model, img):
   img = img[:,:,::-1].transpose((2,0,1))
   img = img[np.newaxis,:,:,:]/255.0
 
-  prediction = model.forward(Tensor(img))
+  prediction = model.forward(Tensor(img.astype(np.float32)))
   return prediction
 
 
