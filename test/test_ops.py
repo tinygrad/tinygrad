@@ -136,7 +136,10 @@ class TestOps(unittest.TestCase):
   def test_cat(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.cat((x, x), axis=0), lambda x: x.cat(x, axis=0))
     helper_test_op([(3,3,3,3)], lambda x: torch.cat((x, x), axis=1), lambda x: x.cat(x, axis=1))
+    helper_test_op([(3,3,3,3)], lambda x: torch.cat((x, x), axis=2), lambda x: x.cat(x, axis=2))
+    helper_test_op([(3,3,3,3)], lambda x: torch.cat((x, x), axis=3), lambda x: x.cat(x, axis=3))
     helper_test_op([(45,65), (45,65)], lambda x, y: torch.cat((x, y), axis=0), lambda x, y: x.cat(y, axis=0))
+    helper_test_op([(45,65), (45,65)], lambda x, y: torch.cat((x, y), axis=1), lambda x, y: x.cat(y, axis=1))
 
   def test_slice(self):
     helper_test_op([(3,3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
