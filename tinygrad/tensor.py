@@ -34,8 +34,8 @@ class ProfileOp:
 
 # **** start with two base classes, Tensor and Function ****
 
-class Device: CPU, GPU, TORCH, buffers = 0, 1, 2, {}
-
+# TODO: make this class creation generic
+class Device: CPU, GPU, TORCH, buffers, imports = 0, 1, 2, {}, {0:"ops_cpu", 1:"ops_gpu", 2:"ops_torch"}
 DEFAULT_DEVICE = (Device.CPU if os.environ.get("GPU", 0) != "1" else Device.GPU) if os.environ.get("TORCH", 0) != "1" else Device.TORCH
 
 class Tensor:
@@ -305,16 +305,6 @@ def _register_ops(namespace, device=Device.CPU):
     if name.endswith("Buffer"):  Device.buffers[device] = cls
     elif name[0] != "_":  register(name.lower(), cls, device=device)
 
-# TODO: refactor this
-from tinygrad import ops_cpu
-_register_ops(ops_cpu)
-try:
-  from tinygrad import ops_gpu
-  _register_ops(ops_gpu, device=Device.GPU)
-except ImportError:
-  pass
-try:
-  from tinygrad import ops_torch
-  _register_ops(ops_torch, device=Device.TORCH)
-except ImportError:
-  pass
+import importlib
+for d,ops in Device.imports.items():
+  _register_ops(importlib.import_module('tinygrad.'+ops), d)
