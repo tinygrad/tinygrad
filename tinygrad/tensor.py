@@ -307,4 +307,7 @@ def _register_ops(namespace, device=Device.CPU):
 
 import importlib
 for d,ops in Device.imports.items():
-  _register_ops(importlib.import_module('tinygrad.'+ops), d)
+  try:
+    _register_ops(importlib.import_module('tinygrad.'+ops), d)
+  except ImportError:
+    pass
