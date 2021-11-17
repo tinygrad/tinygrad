@@ -1,6 +1,27 @@
 import numpy as np
 from .tensor import Function
 
+class CPUBuffer(np.ndarray):
+  def log(x):
+    return np.log(x)
+  def exp(x):
+    return np.exp(x)
+  def relu(x):
+    return np.maximum(x, 0)
+  def expand(x, shp):
+    return np.broadcast_to(x, shp)
+  def amax(x, *args, **kwargs):
+    return np.amax(x, *args, **kwargs)
+  def permute(x, order):
+    return x.transpose(order)
+  def type(x, tt):
+    return x.astype(tt)
+  def toCPU(x):
+    return x
+  @staticmethod
+  def fromCPU(x):
+    return x
+
 # ************* unary ops *************
 
 class ReLU(Function):

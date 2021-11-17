@@ -2,6 +2,13 @@ import torch
 import numpy as np
 from .tensor import Function
 
+class TorchBuffer(torch.Tensor):
+  @staticmethod
+  def fromCPU(data):
+    return TorchBuffer(torch.from_numpy(data).requires_grad_(False))
+  def toCPU(x):
+    return x.numpy()
+
 # ************* unary+binary+reduce ops *************
 
 from tinygrad.ops_cpu import ReLU, Log, Exp, Add, Sub, Mul, Pow, Sum, Max

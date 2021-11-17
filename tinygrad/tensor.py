@@ -24,40 +24,17 @@ class ProfileOp:
     return self
   def __exit__(self, *junk):
     if DEBUG:
-      if cl_queue is not None:
-        cl_queue.finish()
+      # TODO: fix this
+      #if cl_queue is not None:
+      #  cl_queue.finish()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et
       print(f"{self.name:>20} : {et:>7.2f} ms {str([y.shape for y in self.x]):>40} {'-> '+str(self.output.shape) if self.output is not None else ''}")
 
-# **** GPU functions ****
-
-cl_ctx, cl_queue = None, None
-def require_init_gpu():
-  if not GPU: raise Exception("No GPU Support, install pyopencl")
-  global cl_ctx, cl_queue
-  if cl_queue is None:
-    devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
-    if len(devices) == 0:
-      devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
-    cl_ctx = cl.Context(devices=devices)
-    # this is an in-order command queue
-    cl_queue = cl.CommandQueue(cl_ctx)
-
-class GPUBuffer:
-  def __init__(self, shape, hostbuf=None):
-    self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
-      cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
-                hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
-
-  def __repr__(self):
-    return f"<GPUBuffer with shape {self.shape!r}>"
-
 # **** start with two base classes, Tensor and Function ****
 
-class Device: CPU, GPU, TORCH = 0, 1, 2
+class Device: CPU, GPU, TORCH, buffers = 0, 1, 2, {}
 
 DEFAULT_DEVICE = (Device.CPU if os.environ.get("GPU", 0) != "1" else Device.GPU) if os.environ.get("TORCH", 0) != "1" else Device.TORCH
 
@@ -148,58 +125,22 @@ class Tensor:
           gt = Tensor(g, device=self.device, requires_grad=False)
           t.grad = gt if t.grad is None else (t.grad + gt)
 
-  # ***** tinygrad supports CPU and GPU *****
+  # ***** tinygrad supports many devices *****
 
   @staticmethod
   def _move_data(data, device):
-    if isinstance(data, GPUBuffer):
-      if device == Device.GPU: return data
-      old = data
-      data = np.empty(old.shape, dtype=np.float32)
-      with ProfileOp("toCPU", [data]):
-        cl.enqueue_copy(cl_queue, data, old.cl, is_blocking=True)
-
-    if str(type(data)).startswith("torch"):
-      data = data.numpy()
-
-    if not isinstance(data, np.ndarray):
-      data = np.array(data, dtype=np.float32)
+    if isinstance(data, np.ndarray):
+      data = data.view(Device.buffers[Device.CPU])
+    if isinstance(data, Device.buffers[device]):
+      return data
 
     if data.dtype != np.float32 and not Tensor.did_float_warning:
       # warning? float64 is actually needed for numerical jacobian
       print(f"warning, {data.shape!r} isn't float32, it's {data.dtype}")
       Tensor.did_float_warning = True
 
-    if device == Device.CPU:
-      # add these functions to ndarray
-      class CPUBuffer(np.ndarray):
-        def log(x):
-          return np.log(x)
-        def exp(x):
-          return np.exp(x)
-        def relu(x):
-          return np.maximum(x, 0)
-        def expand(x, shp):
-          return np.broadcast_to(x, shp)
-        def amax(x, *args, **kwargs):
-          return np.amax(x, *args, **kwargs)
-        def permute(x, order):
-          return x.transpose(order)
-        def type(x, tt):
-          return x.astype(tt)
-      data = data.view(CPUBuffer)
-
-    if device == Device.GPU:
-      require_init_gpu()
-      with ProfileOp("toGPU", [data]):
-        return GPUBuffer(data.shape, data)
-
-    if device == Device.TORCH:
-      import torch
-      with ProfileOp("toTORCH", [data]):
-        return torch.from_numpy(data).requires_grad_(False)
-
-    return data
+    data = data.toCPU().view(Device.buffers[Device.CPU])
+    return Device.buffers[device].fromCPU(data)
 
   def to_(self, device):
     self.data, self.device = self._move_data(self.data, device), device
@@ -345,7 +286,8 @@ def register(name, fxn, device=Device.CPU):
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
     f = Tensor.ops[tt.device][name]
-    f.cl_ctx, f.cl_queue, f.device = cl_ctx, cl_queue, tt.device
+    #f.cl_ctx, f.cl_queue, f.device = cl_ctx, cl_queue, tt.device
+    f.device = tt.device
     return f.apply(f, *x, **kwargs)
   setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
@@ -360,21 +302,18 @@ for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
 # this registers all the operations
 def _register_ops(namespace, device=Device.CPU):
   for name, cls in inspect.getmembers(namespace, inspect.isclass):
-    if name[0] != "_":  register(name.lower(), cls, device=device)
+    if name.endswith("Buffer"):  Device.buffers[device] = cls
+    elif name[0] != "_":  register(name.lower(), cls, device=device)
 
+# TODO: refactor this
 from tinygrad import ops_cpu
 _register_ops(ops_cpu)
 try:
-  import pyopencl as cl
-  # TODO: move this import to require_init_gpu?
   from tinygrad import ops_gpu
   _register_ops(ops_gpu, device=Device.GPU)
-  GPU = True
 except ImportError:
-  # no GPU support
-  GPU = False
+  pass
 try:
-  import torch
   from tinygrad import ops_torch
   _register_ops(ops_torch, device=Device.TORCH)
 except ImportError:
