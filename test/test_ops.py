@@ -166,9 +166,8 @@ class TestOps(unittest.TestCase):
                   lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_cat(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: torch.cat((x,y), -1), lambda x,y: x.cat(y, -1), forward_only=True)
-    helper_test_op([(45,65), (45,65)], lambda x,y: torch.cat((x,y), 0), lambda x,y: x.cat(y, 0), forward_only=True)
-    helper_test_op([(45,65), (45,65)], lambda x,y: torch.cat((x,y), 1), lambda x,y: x.cat(y, 1), forward_only=True)
+    for dim in range(-1, 2):
+      helper_test_op([(45,65), (45,65)], lambda x,y: torch.cat((x,y), dim), lambda x,y: x.cat(y, dim), forward_only=True)
                
   def test_large_input_conv2d(self):
     bs = 4
