@@ -308,9 +308,9 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
-  def cat(self, y, dim=0):
-    tensors = [self, y]
+  def cat(self, tensors, dim=0):
     num_dims = len(self.shape)
+    tensors = [self, tensors]
     # So you can set dim=-1 for last dim
     if dim < 0:
       dim += num_dims
@@ -320,7 +320,7 @@ class Tensor:
       order = np.arange(len(self.shape))
       order[dim] = last_dim
       order[last_dim] = dim
-      tensors = [t.transpose(order=order) for t in tensors]
+      tensors = [t.transpose(order=tuple(order)) for t in tensors]
     sizes = [t.shape[-1] for t in tensors]
     # Size of result along concat dim
     total_size = sum(sizes) 
@@ -335,7 +335,7 @@ class Tensor:
       start += sizes[i]
     if dim != last_dim:
       # Undo transpose
-      concat = concat.transpose(order=order)
+      concat = concat.transpose(order=tuple(order))
     return concat
 
 # An instantiation of the Function is the Context
