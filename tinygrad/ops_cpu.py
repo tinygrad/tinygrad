@@ -126,10 +126,6 @@ class Transpose(Function):
   def backward(ctx, x):
     return x.permute(tuple(np.argsort(ctx.order)))
 
-  def backward(ctx, x):
-    index, axis = ctx.saved_tensors
-    return np.split(x, [index], axis=axis)
-
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
   x = np.pad(x, padding)
