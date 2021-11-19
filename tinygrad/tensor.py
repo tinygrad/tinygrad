@@ -308,9 +308,9 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
-  def cat(self, tensors, dim=0):
+  def cat(self, y, dim=0):
     num_dims = len(self.shape)
-    tensors = [self, tensors]
+    tensors = [self, y]
     # So you can set dim=-1 for last dim
     if dim < 0:
       dim += num_dims
