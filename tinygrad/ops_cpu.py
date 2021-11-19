@@ -126,11 +126,6 @@ class Transpose(Function):
   def backward(ctx, x):
     return x.permute(tuple(np.argsort(ctx.order)))
 
-class Cat(Function):
-  def forward(ctx, x, y, axis=0):
-    ctx.save_for_backward(x.shape[axis], axis)
-    return np.concatenate((x, y), axis=axis)
-
   def backward(ctx, x):
     index, axis = ctx.saved_tensors
     return np.split(x, [index], axis=axis)

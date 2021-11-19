@@ -309,54 +309,6 @@ class Slice(Function):
     narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
     return inner_slice(ctx, grad_output, narg)
 
-def concatenate(ctx, x, y, axis):
-  assert(all([u == v for i, (u, v) in enumerate(zip(x.shape, y.shape)) if i != axis]))
-  oshape = [u + v if i == axis else u for i, (u, v) in enumerate(zip(x.shape, y.shape))]
-  ret = buffer_new(ctx, oshape)
-  combind = clbuild(ctx.cl_ctx, "combind", """
-  __kernel void combind(__global const float *input_x, __global const float *input_y,
-                       __global float *output, int axis, int n_dims,
-                       __global const int *shape_x, __global int *shape_y,
-                       __global const int *shape_ret) {
-    int size_x = 1, size_y = 1, lim = 1, row = -1, n_cols = 0;
-    for (int dim = 0; dim < n_dims; dim++) {
-      size_x *= shape_x[dim];
-      size_y *= shape_y[dim];
-    }
-    for (int i = n_dims - 1; i >= axis; i--) {
-      lim *= shape_x[i];
-    }
-    for (int i = 0; i < n_dims; i++) {
-      if (i != axis) continue;
-      n_cols += (shape_x[i] + shape_y[i]);
-    }
-    for (int i = 0; i < size_x; i++) {
-      if (i % lim == 0) ++row;
-      output[row * n_cols + i % lim] = input_x[i];
-    }
-    row = -1;
-    for (int i = 0; i < size_y; i++) {
-      if (i % lim == 0) ++row;
-      output[row * n_cols + (i % lim) + lim] = input_y[i];
-    }
-  }""")
-  combind(ctx.cl_queue, [np.prod(oshape)], None,
-    x.cl, y.cl, ret.cl, i32(axis), i32(len(ret.shape)),
-    buffer_np(ctx, np.array(x.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(y.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(ret.shape, dtype=np.int32)))
-  return ret
-
-class Cat(Function):
-  def forward(ctx, x, y, axis=0):
-    ctx.save_for_backward(x.shape[axis], axis)
-    return concatenate(ctx, x, y, axis)
-
-  def backward(ctx, x):
-    index, axis = ctx.saved_tensors
-    # TODO: apply inner_slice
-    pass
-
 # ************* processing ops *************
 
 class Matmul(Function):

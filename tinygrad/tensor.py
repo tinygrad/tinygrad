@@ -308,6 +308,36 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
+  def cat(self, y, dim=0):
+    tensors = [self, y]
+    num_dims = len(self.shape)
+    # So you can set dim=-1 for last dim
+    if dim < 0:
+      dim += num_dims
+    last_dim = num_dims - 1
+    # If dim is not last, transpose tensor so that the concat dim is last
+    if dim != last_dim:
+      order = np.arange(len(self.shape))
+      order[dim] = last_dim
+      order[last_dim] = dim
+      tensors = [t.transpose(order=order) for t in tensors]
+    sizes = [t.shape[-1] for t in tensors]
+    # Size of result along concat dim
+    total_size = sum(sizes) 
+    iden = Tensor.eye(total_size)
+    # Start result as all zeros
+    concat = Tensor.zeros(*tensors[0].shape[:-1], total_size)
+    start = 0
+    for i, t in enumerate(tensors):
+      # dot each tensor with a slice of the identity so it has the same size as concat and it's values 
+      # are in the right spots with zeros everywhere else
+      concat = concat.add(t.dot(iden[start:start+sizes[i], :]))
+      start += sizes[i]
+    if dim != last_dim:
+      # Undo transpose
+      concat = concat.transpose(order=order)
+    return concat
+
 # An instantiation of the Function is the Context
 class Function:
   def __new__(cls, *args, **kwargs):
