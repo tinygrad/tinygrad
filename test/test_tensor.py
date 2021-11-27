@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor, DEFAULT_DEVICE
+from tinygrad.tensor import Tensor, Device
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -72,7 +72,7 @@ class TestTinygrad(unittest.TestCase):
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=1e-3)
 
-  @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
+  @unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   def test_jacobian(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5
@@ -91,7 +91,7 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(PJ, J, atol = 1e-5)
     np.testing.assert_allclose(PJ, NJ, atol = 1e-5)
 
-  @unittest.skipUnless(not DEFAULT_DEVICE, "float64 not supported on GPU")
+  @unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   def test_gradcheck(self):
     W = np.random.RandomState(1337).random((10, 5))
     x = np.random.RandomState(7331).random((1, 10)) - 0.5

@@ -32,20 +32,20 @@ class ProfileOp:
       debug_times[self.name] += et
       print(f"{self.name:>20} : {et:>7.2f} ms {str([y.shape for y in self.x]):>40} {'-> '+str(self.output.shape) if self.output is not None else ''}")
 
-# **** start with two base classes, Tensor and Function ****
+# **** enumerate supported devices ****
 
 class Device:
-  buffers = {}
-  imports = {}
   _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ops")))
+  imports = dict(enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]))
   DEFAULT = None
-  for i,o in enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]):
-    name = o[len("ops_"):].upper()
-    if os.environ.get(name, 0) == "1":
-      DEFAULT = i
+  buffers = {}
+  for i,op in imports.items():
+    name = op[len("ops_"):].upper()
     vars()[name] = i
-    imports[i] = o
+    DEFAULT = i if os.environ.get(name, 0) == "1" else DEFAULT
   DEFAULT = CPU if DEFAULT is None else DEFAULT
+
+# **** start with two base classes, Tensor and Function ****
 
 class Tensor:
   did_float_warning = False

@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, DEFAULT_DEVICE
+from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import *
 from extra.utils import get_parameters
 import torch
 
-@unittest.skipUnless(not DEFAULT_DEVICE, "Not Implemented")
+@unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
 class TestNN(unittest.TestCase):
 
   def test_batchnorm2d(self, training=False):
