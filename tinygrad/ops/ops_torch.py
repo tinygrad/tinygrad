@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .tensor import Function
+from ..tensor import Function
 
 class TorchBuffer(torch.Tensor):
   @staticmethod
@@ -8,14 +8,16 @@ class TorchBuffer(torch.Tensor):
     return TorchBuffer(torch.from_numpy(data).requires_grad_(False))
   def toCPU(x):
     return x.numpy()
+  def getdtype(self):
+    return np.float32
 
 # ************* unary+binary+reduce ops *************
 
-from tinygrad.ops_cpu import ReLU, Log, Exp, Add, Sub, Mul, Pow, Sum, Max
+from tinygrad.ops.ops_cpu import ReLU, Log, Exp, Add, Sub, Mul, Pow, Sum, Max
 
 # ************* movement ops *************
 
-from tinygrad.ops_cpu import Reshape, Transpose
+from tinygrad.ops.ops_cpu import Reshape, Transpose
 
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
@@ -35,7 +37,7 @@ class Slice(Function):
 
 # ************* processing ops *************
 
-from tinygrad.ops_cpu import Matmul
+from tinygrad.ops.ops_cpu import Matmul
 
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):

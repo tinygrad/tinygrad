@@ -34,16 +34,25 @@ class ProfileOp:
 
 # **** start with two base classes, Tensor and Function ****
 
-# TODO: make this class creation generic
-class Device: CPU, GPU, TORCH, buffers, imports = 0, 1, 2, {}, {0:"ops_cpu", 1:"ops_gpu", 2:"ops_torch"}
-DEFAULT_DEVICE = (Device.CPU if os.environ.get("GPU", 0) != "1" else Device.GPU) if os.environ.get("TORCH", 0) != "1" else Device.TORCH
+class Device:
+  buffers = {}
+  imports = {}
+  _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ops")))
+  DEFAULT = None
+  for i,o in enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]):
+    name = o[len("ops_"):].upper()
+    if os.environ.get(name, 0) == "1":
+      DEFAULT = i
+    vars()[name] = i
+    imports[i] = o
+  DEFAULT = CPU if DEFAULT is None else DEFAULT
 
 class Tensor:
   did_float_warning = False
   training = True
   ops = defaultdict(dict)
 
-  def __init__(self, data, device=DEFAULT_DEVICE, requires_grad=True):
+  def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
     self.device, self.data = device, self._move_data(data, device)
 
     self.grad, self.requires_grad = None, requires_grad
@@ -63,8 +72,8 @@ class Tensor:
 
   @property
   def dtype(self):
-    if self.device == Device.TORCH:
-      return np.float32
+    if getattr(self.data, 'getdtype', None):
+      return self.data.getdtype()
     else:
       return self.data.dtype
 
@@ -308,6 +317,6 @@ def _register_ops(namespace, device=Device.CPU):
 import importlib
 for d,ops in Device.imports.items():
   try:
-    _register_ops(importlib.import_module('tinygrad.'+ops), d)
+    _register_ops(importlib.import_module('tinygrad.ops.'+ops), d)
   except ImportError:
     pass

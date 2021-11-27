@@ -1,7 +1,7 @@
 import functools
 import pyopencl as cl
 import numpy as np
-from .tensor import Function
+from ..tensor import Function
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():

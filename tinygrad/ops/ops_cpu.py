@@ -1,5 +1,5 @@
 import numpy as np
-from .tensor import Function
+from ..tensor import Function
 
 class CPUBuffer(np.ndarray):
   def log(x):
