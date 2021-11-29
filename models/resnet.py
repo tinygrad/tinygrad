@@ -97,7 +97,7 @@ class ResNet:
     self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
     self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
     self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
-    self.fc = nn.Linear(512 * block.expansion, num_classes)
+    self.fc = (Tensor.uniform(512 * block.expansion, num_classes), Tensor.zeros(num_classes))
 
   def _make_layer(self, block, planes, num_blocks, stride):
     strides = [stride] + [1] * (num_blocks-1)
@@ -114,7 +114,7 @@ class ResNet:
     out = out.sequential(self.layer3)
     out = out.sequential(self.layer4)
     out = out.mean(3).mean(2)
-    out = self.fc(out).logsoftmax()
+    out = out.linear(self.fc).logsoftmax()
     return out
 
   def __call__(self, x):
@@ -122,30 +122,30 @@ class ResNet:
 
 def ResNet18(num_classes, pretrained=False):
   model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
-  if pretrained:
-    model = load_from_pretrained(model, model_urls['resnet18'])
+  #if pretrained:
+  #  model = load_from_pretrained(model, model_urls['resnet18'])
   return model
 
 def ResNet34(num_classes, pretrained=False):
   model = ResNet(BasicBlock, [3, 4, 6, 3], num_classes)
-  if pretrained:
-    model = load_from_pretrained(model, model_urls['resnet34'])
+  #if pretrained:
+  #  model = load_from_pretrained(model, model_urls['resnet34'])
   return model
 
 def ResNet50(num_classes, pretrained=False):
   model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes)
-  if pretrained:
-    model = load_from_pretrained(model, model_urls['resnet50'])
+  #if pretrained:
+  #  model = load_from_pretrained(model, model_urls['resnet50'])
   return model
 
 def ResNet101(num_classes, pretrained=False):
   model = ResNet(Bottleneck, [3, 4, 23, 3], num_classes)
-  if pretrained:
-    model = load_from_pretrained(model, model_urls['resnet101'])
+  #if pretrained:
+  #  model = load_from_pretrained(model, model_urls['resnet101'])
   return model
 
 def ResNet152(num_classes, pretrained=False):
   model = ResNet(Bottleneck, [3, 8, 36, 3], num_classes)
-  if pretrained:
-    model = load_from_pretrained(model, model_urls['resnet152'])
+  #if pretrained:
+  #  model = load_from_pretrained(model, model_urls['resnet152'])
   return model
