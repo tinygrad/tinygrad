@@ -51,7 +51,7 @@ class TransformerBlock:
 
     x = inputs + attention.reshape(shape=(-1, embed_dim)).affine(self.final).dropout(0.1)
     x = layernorm(x, embed_dim).affine(self.ln1)
-    x = x + x.affine(self.ff1).gelu().affine(self.ff2).dropout(0.1)
+    x = x + x.affine(self.ff1).relu().affine(self.ff2).dropout(0.1)
     x = layernorm(x, embed_dim).affine(self.ln2)
     return x.reshape(shape=(bs, -1, embed_dim))
 

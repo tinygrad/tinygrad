@@ -1,4 +1,5 @@
 
+import numpy as np
 """
 fn = "gs://vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0.npz"
 import tensorflow as tf
@@ -13,25 +14,79 @@ from extra.utils import fetch
 
 from tinygrad.tensor import Tensor
 from models.transformer import TransformerBlock, layernorm
+
+class ViTBlock:
+  def __init__(self, embed_dim, num_heads, ff_dim):
+    # Multi-Head Attention
+    self.num_heads = num_heads
+    self.head_size = embed_dim // num_heads
+    assert self.head_size * self.num_heads == embed_dim
+
+    # added bias
+    self.query_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+    self.key_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+    self.value_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+
+    self.final = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+
+    self.ff1 = (Tensor.uniform(embed_dim, ff_dim), Tensor.zeros(ff_dim))
+    self.ff2 = (Tensor.uniform(ff_dim, embed_dim), Tensor.zeros(embed_dim))
+
+    self.ln1 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
+    self.ln2 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
+
+  def attn(self, x, bs):
+    embed_dim = self.num_heads * self.head_size
+
+    query, key, value = [x.affine(y) \
+      .reshape(shape=(bs, -1, self.num_heads, self.head_size)) \
+      for y in [self.query_dense, self.key_dense, self.value_dense]]
+
+    query = query.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
+    key = key.transpose(order=(0,2,3,1))      # (bs, num_heads, head_size, T)
+    value = value.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
+
+    score = query.dot(key) * (1 / np.sqrt(self.head_size))
+    weights = score.softmax()                                   # (bs, num_heads, T, T)
+    attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
+
+    return attention.reshape(shape=(-1, embed_dim)).affine(self.final)
+
+  def __call__(self, x):
+    # bs x T x embed_dim
+    bs = x.shape[0]
+    embed_dim = self.num_heads * self.head_size
+    inputs = x.reshape(shape=(-1, embed_dim))
+
+    # run multi head attention (bs, T, num_heads, head_size)
+    x = layernorm(inputs, embed_dim).affine(self.ln1)
+    x = inputs + self.attn(x, bs).dropout(0.1)
+
+    xin = layernorm(x, embed_dim).affine(self.ln2)
+    x = x + xin.affine(self.ff1).gelu().affine(self.ff2).dropout(0.1)
+    return x.reshape(shape=(bs, -1, embed_dim))
+
 class ViT:
   def __init__(self):
     self.conv_weight = Tensor.uniform(192, 3, 16, 16)
     self.conv_bias = Tensor.zeros(192)
     self.cls_token = Tensor.ones(1, 1, 192)
-    self.tbs = [TransformerBlock(embed_dim=192, num_heads=3, ff_dim=768) for i in range(12)]
+    self.tbs = [ViTBlock(embed_dim=192, num_heads=3, ff_dim=768) for i in range(12)]
     self.pos_embed = Tensor.ones(1, 197, 192)
     self.head = (Tensor.uniform(192, 1000), Tensor.zeros(1000))
     self.norm = (Tensor.uniform(192), Tensor.zeros(192))
 
-  def forward(self, x):
-    print(x.shape)
+  def patch_embed(self, x):
     x = x.conv2d(self.conv_weight, stride=16)
     x = x.add(self.conv_bias.reshape(shape=(1,-1,1,1)))
-    print(x.shape)
     x = x.reshape(shape=(x.shape[0], 192, -1)).transpose(order=(0,2,1))
+    return x
+
+  def forward(self, x):
+    pe = self.patch_embed(x)
     print(x.shape)
     # TODO: expand cls_token for batch
-    x = self.cls_token.cat(x, dim=1).add(self.pos_embed)
+    x = self.cls_token.cat(pe, dim=1) + self.pos_embed
     print(x.shape)
     print(x.mean())
     for l in self.tbs:
@@ -41,9 +96,9 @@ class ViT:
     x = layernorm(x, 192).affine(self.norm)
     return x[:, 0].affine(self.head)
 
+Tensor.training = False
 m = ViT()
 
-import numpy as np
 # https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
 dat = np.load(io.BytesIO(fetch("https://storage.googleapis.com/vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0--imagenet2012-steps_20k-lr_0.03-res_224.npz")))
 for x in dat.keys():
@@ -78,14 +133,14 @@ for i in range(12):
   m.tbs[i].ln1[1].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_0/bias'])
   m.tbs[i].ln2[0].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_2/scale'])
   m.tbs[i].ln2[1].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_2/bias'])
-  
-url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
-#url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
 
 # category labels
 import ast
 lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
 lbls = ast.literal_eval(lbls.decode('utf-8'))
+
+url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
+#url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
 
 # junk
 from PIL import Image
@@ -100,13 +155,43 @@ img = img.astype(np.float32)[:3].reshape(1,3,224,224)
 img /= 255.0
 img -= 0.5
 img /= 0.5
-img[:] = 0
+#img[:] = 0
+
+"""
+import torch
+from timm.models.vision_transformer import vit_tiny_patch16_224
+mdl = vit_tiny_patch16_224(pretrained=True)
+#out = mdl(torch.Tensor(img))
+#choice = out.argmax(axis=1).item()
+#print(out[0, choice], lbls[choice])
+
+pe = m.patch_embed(Tensor(img))
+x = m.cls_token.cat(pe, dim=1) + m.pos_embed
+x = m.tbs[0](x)
+#x = layernorm(x, 192).affine(m.tbs[0].ln1)
+
+xp = mdl.patch_embed(torch.Tensor(img))
+xp = torch.cat((mdl.cls_token, xp), dim=1) + mdl.pos_embed
+xp = mdl.blocks[0](xp)
+#xp = mdl.blocks[0].norm1(xp)
+
+print(x.shape, xp.shape)
+print(np.max(x.data), np.max(xp.detach().numpy()))
+print(np.max(np.abs(x.data - xp.detach().numpy())))
+
+
+
+exit(0)
+"""
+
+
+  
+
 
 #import matplotlib.pyplot as plt
 #plt.imshow(np.transpose(img[0], (1,2,0)))
 #plt.show()
 
-Tensor.training = False
 out = m.forward(Tensor(img))
 outnp = out.cpu().data.ravel()
 choice = outnp.argmax()
