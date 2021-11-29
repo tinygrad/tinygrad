@@ -1,5 +1,6 @@
 # pip3 install pyobjc-framework-MetalPerformanceShaders
 from tinygrad.tensor import Function
+from tinygrad.helpers import binary_broadcast
 import numpy as np
 import Metal
 import MetalPerformanceShaders

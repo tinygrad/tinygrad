@@ -1,6 +1,7 @@
 import functools
 import pyopencl as cl
 import numpy as np
+from tinygrad.helpers import binary_broadcast
 from ..tensor import Function
 
 cl_ctx, cl_queue = None, None
@@ -188,26 +189,11 @@ def get_binop_prg(cl_ctx, code, complist):
     res_g[gid0] = """+code+""";\n}""").build()
 
 def binary_op(ctx, code, x, y):
-  n_dims = max(len(x.shape), len(y.shape))
-  shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
-  shape_x[:len(x.shape)] = np.array(x.shape, dtype=np.int32)
-  shape_y[:len(y.shape)] = np.array(y.shape, dtype=np.int32)
-  if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
-    raise Exception(f"binary op unbroadcastable shape mismatch: {x.shape} vs {y.shape}")
-  shape_ret = np.maximum(shape_x, shape_y)
-
-  dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
-  def push(dim, comp):
-    if len(complist) > 0 and complist[-1] == comp:
-      dimlist[-1] *= dim
-    elif comp != (False, False):
-      dimlist.append(dim); complist.append(comp)
-  for i in range(n_dims): # group together any adjacent dimensions that we can to simplify broadcasting
-    push(i32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
+  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
+  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
 
   prg = get_binop_prg(cl_ctx, code, tuple(complist))
   ret = buffer_new(ctx, shape_ret, zero=True)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
