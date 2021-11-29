@@ -177,6 +177,20 @@ class Tensor:
           assert s.step is None or s.step == 1
     return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
 
+  def cat(self, y, dim=0):
+    assert len(self.shape) == len(y.shape)
+    dim = (dim + len(self.shape)) if dim < 0 else dim
+    s1, s2 = [], []
+    for i in range(len(self.shape)):
+      if i != dim:
+        assert self.shape[i] == y.shape[i]
+        s1.append((0, self.shape[i]))
+        s2.append((0, self.shape[i]))
+      else:
+        s1.append((0, self.shape[i]+y.shape[i]))
+        s2.append((-self.shape[i], y.shape[i]))
+    return self.slice(arg=s1) + y.slice(arg=s2)
+
   def pad2d(self, padding):
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
