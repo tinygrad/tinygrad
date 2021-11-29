@@ -33,10 +33,10 @@ class ViT:
     # TODO: expand cls_token for batch
     x = self.cls_token.cat(x, dim=1).add(self.pos_embed)
     print(x.shape)
-    #print(x.sum())
+    print(x.mean())
     for l in self.tbs:
       x = l(x)
-      #print(x.sum())
+      print(x.mean())
     print(x.shape)
     x = layernorm(x, 192).affine(self.norm)
     return x[:, 0].affine(self.head)
@@ -49,7 +49,7 @@ dat = np.load(io.BytesIO(fetch("https://storage.googleapis.com/vit_models/augreg
 for x in dat.keys():
   print(x, dat[x].shape, dat[x].dtype)
 
-m.conv_weight.assign(np.transpose(dat['embedding/kernel'], (3,2,1,0)))
+m.conv_weight.assign(np.transpose(dat['embedding/kernel'], (3,2,0,1)))
 m.conv_bias.assign(dat['embedding/bias'])
 
 m.norm[0].assign(dat['Transformer/encoder_norm/scale'])
@@ -57,6 +57,7 @@ m.norm[1].assign(dat['Transformer/encoder_norm/bias'])
 
 m.head[0].assign(dat['head/kernel'])
 m.head[1].assign(dat['head/bias'])
+
 m.cls_token.assign(dat['cls'])
 m.pos_embed.assign(dat['Transformer/posembed_input/pos_embedding'])
 
@@ -78,8 +79,8 @@ for i in range(12):
   m.tbs[i].ln2[0].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_2/scale'])
   m.tbs[i].ln2[1].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_2/bias'])
   
-#url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
-url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
+url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
+#url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
 
 # category labels
 import ast
@@ -97,8 +98,13 @@ img = img[y0:y0+224, x0:x0+224]
 img = np.moveaxis(img, [2,0,1], [0,1,2])
 img = img.astype(np.float32)[:3].reshape(1,3,224,224)
 img /= 255.0
-img -= np.array([0.485, 0.456, 0.406]).reshape((1,-1,1,1))
-img /= np.array([0.229, 0.224, 0.225]).reshape((1,-1,1,1))
+img -= 0.5
+img /= 0.5
+img[:] = 0
+
+#import matplotlib.pyplot as plt
+#plt.imshow(np.transpose(img[0], (1,2,0)))
+#plt.show()
 
 Tensor.training = False
 out = m.forward(Tensor(img))
