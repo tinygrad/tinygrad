@@ -33,8 +33,10 @@ class ViT:
     # TODO: expand cls_token for batch
     x = self.cls_token.cat(x, dim=1).add(self.pos_embed)
     print(x.shape)
+    #print(x.sum())
     for l in self.tbs:
       x = l(x)
+      #print(x.sum())
     x = x.affine(self.norm)
     return x[:, 0].affine(self.head)
 
@@ -95,6 +97,7 @@ img = np.moveaxis(img, [2,0,1], [0,1,2])
 img = img.astype(np.float32)[:3].reshape(1,3,224,224)
 img /= 255.0
 
+Tensor.training = False
 out = m.forward(Tensor(img))
 outnp = out.cpu().data.ravel()
 choice = outnp.argmax()
