@@ -55,28 +55,25 @@ class Exp(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(ctx, input, axis=None):
+  def forward(ctx, input, axis):
     ctx.save_for_backward(input, axis)
-    return input.sum(axis) if axis != None else input.sum().reshape((1,))
+    return input.sum(axis)
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-    if isinstance(axis, int): axis = [axis]
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    shape = [1 if i in axis else input.shape[i] for i in range(len(input.shape))]
     return grad_output.reshape(shape).expand(input.shape)
 
 class Max(Function):
-  def forward(ctx, inp, axis=None):
-    if isinstance(axis, int): axis = [axis]
-    ret = inp.amax(axis=None if axis is None else tuple(axis), keepdims=True)
+  def forward(ctx, inp, axis):
+    ret = inp.amax(axis=axis, keepdims=True)
     ctx.save_for_backward(inp, axis, ret)
-    if axis is not None:
-      ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
+    ret = ret.reshape([inp.shape[i] for i in range(len(inp.shape)) if i not in axis])
     return ret
 
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    shape = [1 if i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = (input==ret.reshape(shape))
     div = ret2.sum(axis=tuple(axis), keepdims=True) if axis is not None else ret2.sum()
     return ret2*grad_output.reshape(shape)/div.type(input.dtype)

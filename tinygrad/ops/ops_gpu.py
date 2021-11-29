@@ -138,31 +138,27 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
 
 class Sum(Function):
   def forward(ctx, input, axis=None):
-    if isinstance(axis, int): axis = [axis]
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
-    if axis is not None:
-      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+    ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    shape = [1 if i in axis else input.shape[i] for i in range(len(input.shape))]
     output = GPUBuffer(shape, hostbuf=grad_output)
     return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    if isinstance(axis, int): axis = [axis]
     ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
-    if axis is not None:
-      ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
+    ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
 
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
-    shape = [1 if axis is None or i in axis else input.shape[i] for i in range(len(input.shape))]
+    shape = [1 if i in axis else input.shape[i] for i in range(len(input.shape))]
     ret2 = binary_op(ctx, "1.0*(a==b)", input, GPUBuffer(shape, ret))
     div = reduce_op(ctx, "out += a", "out+1e-10", ret2, axis=axis)
     ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))

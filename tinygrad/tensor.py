@@ -206,9 +206,18 @@ class Tensor:
   def dot(self, w):
     return self.matmul(w)
 
-  # override for sum to support keepdim
+  def _canonicalize_axis(self, axis):
+    if axis is None: axis = range(len(self.shape))
+    if isinstance(axis, int): axis = [axis]
+    return tuple([x if x >= 0 else x+len(self.shape) for x in axis])
+
   def sum(self, axis=None):
-    return self._sum(axis=axis)
+    ret = self._sum(axis=self._canonicalize_axis(axis))
+    return ret.reshape(shape=(1,)) if ret.shape == () else ret
+
+  def max(self, axis=None):
+    ret = self._max(axis=self._canonicalize_axis(axis))
+    return ret.reshape(shape=(1,)) if ret.shape == () else ret
 
   def mean(self, axis=None):
     out = self.sum(axis=axis)
