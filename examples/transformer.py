@@ -27,7 +27,7 @@ def make_dataset():
 
 from tinygrad.optim import Adam
 if __name__ == "__main__":
-  model = Transformer(10, 6, 2, 128, 4)
+  model = Transformer(10, 6, 2, 128, 4, 32)
 
   X_train, Y_train, X_test, Y_test = make_dataset()
   lr = 0.003

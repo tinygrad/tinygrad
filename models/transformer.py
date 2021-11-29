@@ -11,7 +11,7 @@ def layernorm(x, sz, eps=1e-5):
   return ret.reshape(shape=in_shape)
 
 class TransformerBlock:
-  def __init__(self, embed_dim, num_heads):
+  def __init__(self, embed_dim, num_heads, ff_dim):
     # Multi-Head Attention
     self.num_heads = num_heads
     self.head_size = embed_dim // num_heads
@@ -24,8 +24,8 @@ class TransformerBlock:
 
     self.final = Tensor.uniform(embed_dim, embed_dim)
 
-    self.ff1 = Tensor.uniform(embed_dim, embed_dim)
-    self.ff2 = Tensor.uniform(embed_dim, embed_dim)
+    self.ff1 = Tensor.uniform(embed_dim, ff_dim)
+    self.ff2 = Tensor.uniform(ff_dim, embed_dim)
 
   def __call__(self, x):
     # bs x T x embed_dim
@@ -54,12 +54,12 @@ class TransformerBlock:
 
 class Transformer:
   # L = layers, H = embed_dim, A = num_heads
-  def __init__(self, syms, maxlen, layers, embed_dim, num_heads):
+  def __init__(self, syms, maxlen, layers, embed_dim, num_heads, ff_dim):
     self.maxlen, self.syms = maxlen, syms
     self.embed = Tensor.uniform(maxlen+syms, embed_dim, requires_grad=False)
     self.tbs = []
     for i in range(layers):
-      self.tbs.append(TransformerBlock(embed_dim, num_heads))
+      self.tbs.append(TransformerBlock(embed_dim, num_heads, ff_dim))
     self.final = Tensor.uniform(embed_dim, syms)
 
   def forward(self, x):
