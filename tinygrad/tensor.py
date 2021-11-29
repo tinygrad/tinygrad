@@ -317,6 +317,10 @@ class Tensor:
       ret = l(ret)
     return ret
 
+  def layernorm(x, eps=1e-5):
+    y = (x - x.mean(axis=-1, keepdim=True))
+    return y.div((y*y).mean(axis=-1, keepdim=True).add(eps).sqrt())
+
 # An instantiation of the Function is the Context
 class Function:
   def __new__(cls, *args, **kwargs):
