@@ -275,6 +275,9 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
+  def affine(self, params):
+    return self.dot(params[0]).add(params[1].reshape(shape=[1, -1]))
+
 # An instantiation of the Function is the Context
 class Function:
   def __new__(cls, *args, **kwargs):
