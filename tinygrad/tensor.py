@@ -276,7 +276,10 @@ class Tensor:
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
   def affine(self, params):
-    return self.dot(params[0]).add(params[1].reshape(shape=[1, -1]))
+    if len(params[0].shape) == 1:   # elementwise affine
+      return self.mul(params[0].reshape(shape=[1, -1])).add(params[1].reshape(shape=[1, -1]))
+    else:
+      return self.dot(params[0]).add(params[1].reshape(shape=[1, -1]))
 
 # An instantiation of the Function is the Context
 class Function:
