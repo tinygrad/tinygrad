@@ -57,7 +57,7 @@ class Exp(Function):
 class Sum(Function):
   def forward(ctx, input, axis):
     ctx.save_for_backward(input, axis)
-    return input.sum(axis)
+    return input.sum(axis, keepdims=True)
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors

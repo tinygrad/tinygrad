@@ -140,7 +140,6 @@ class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
     ret = reduce_op(ctx, "out += a", "out", input, axis=axis)
-    ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
 
   def backward(ctx, grad_output):
@@ -153,7 +152,6 @@ class Max(Function):
   def forward(ctx, input, axis=None):
     ret = reduce_op(ctx, "out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
-    ret.shape = tuple([input.shape[i] for i in range(len(input.shape)) if i not in axis])
     return ret
 
   def backward(ctx, grad_output):

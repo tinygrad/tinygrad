@@ -206,21 +206,26 @@ class Tensor:
   def dot(self, w):
     return self.matmul(w)
 
-  def _canonicalize_axis(self, axis):
+  def _canonicalize_reduce_axis(self, axis):
     if axis is None: axis = range(len(self.shape))
     if isinstance(axis, int): axis = [axis]
-    return tuple([x if x >= 0 else x+len(self.shape) for x in axis])
+    axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
+    shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
+    shape = [1] if shape == [] else shape
+    return axis, shape
 
-  def sum(self, axis=None):
-    ret = self._sum(axis=self._canonicalize_axis(axis))
-    return ret.reshape(shape=(1,)) if ret.shape == () else ret
+  def sum(self, axis=None, keepdim=False):
+    axis, out_shape = self._canonicalize_reduce_axis(axis)
+    ret = self._sum(axis=axis)
+    return ret if keepdim else ret.reshape(shape=out_shape)
 
-  def max(self, axis=None):
-    ret = self._max(axis=self._canonicalize_axis(axis))
-    return ret.reshape(shape=(1,)) if ret.shape == () else ret
+  def max(self, axis=None, keepdim=False):
+    axis, out_shape = self._canonicalize_reduce_axis(axis)
+    ret = self._max(axis=axis)
+    return ret if keepdim else ret.reshape(shape=out_shape)
 
-  def mean(self, axis=None):
-    out = self.sum(axis=axis)
+  def mean(self, axis=None, keepdim=False):
+    out = self.sum(axis=axis, keepdim=keepdim)
     return out * (np.prod(out.shape)/np.prod(self.shape))
 
   def sqrt(self):
