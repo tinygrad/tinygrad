@@ -222,7 +222,7 @@ class TestOps(unittest.TestCase):
 
   def test_cat(self):
     for dim in range(-1, 2):
-      helper_test_op([(45,65), (45,65)], lambda x,y: torch.cat((x,y), dim), lambda x,y: x.cat(y, dim), forward_only=True)
+      helper_test_op([(45,65), (45,65)], lambda x,y: torch.cat((x,y), dim), lambda x,y: x.cat(y, dim))
 
 if __name__ == '__main__':
   np.random.seed(1337)
