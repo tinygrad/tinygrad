@@ -30,15 +30,11 @@ class TransformerBlock:
     self.ln1 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
     self.ln2 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
 
-  def __call__(self, x):
-    # bs x T x embed_dim
-    bs = x.shape[0]
+  def attn(self, x):
     embed_dim = self.num_heads * self.head_size
-    inputs = x.reshape(shape=(-1, embed_dim))
 
-    # run multi head attention (bs, T, num_heads, head_size)
-    query, key, value = [inputs.linear(y) \
-      .reshape(shape=(bs, -1, self.num_heads, self.head_size)) \
+    query, key, value = [x.linear(y) \
+      .reshape(shape=(x.shape[0], -1, self.num_heads, self.head_size)) \
       for y in [self.query_dense, self.key_dense, self.value_dense]]
 
     query = query.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
@@ -49,7 +45,17 @@ class TransformerBlock:
     weights = score.softmax()                                   # (bs, num_heads, T, T)
     attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
 
-    x = inputs + attention.reshape(shape=(-1, embed_dim)).linear(self.final).dropout(0.1)
+    return attention.reshape(shape=(x.shape[0], -1, embed_dim)).linear(self.final)
+
+  def __call__(self, x):
+    # bs x T x embed_dim
+    bs = x.shape[0]
+    embed_dim = self.num_heads * self.head_size
+    #inputs = x.reshape(shape=(-1, embed_dim))
+    inputs = x
+    attention = self.attn(x)
+
+    x = inputs + attention.dropout(0.1)
     x = layernorm(x, embed_dim).linear(self.ln1)
     x = x + x.linear(self.ff1).relu().linear(self.ff2).dropout(0.1)
     x = layernorm(x, embed_dim).linear(self.ln2)

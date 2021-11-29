@@ -34,11 +34,11 @@ class ViTBlock:
     self.ln1 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
     self.ln2 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
 
-  def attn(self, x, bs):
+  def attn(self, x):
     embed_dim = self.num_heads * self.head_size
 
     query, key, value = [x.linear(y) \
-      .reshape(shape=(bs, -1, self.num_heads, self.head_size)) \
+      .reshape(shape=(x.shape[0], -1, self.num_heads, self.head_size)) \
       for y in [self.query_dense, self.key_dense, self.value_dense]]
 
     query = query.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
@@ -49,21 +49,12 @@ class ViTBlock:
     weights = score.softmax()                                   # (bs, num_heads, T, T)
     attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
 
-    return attention.reshape(shape=(-1, embed_dim)).linear(self.final)
+    return attention.reshape(shape=(x.shape[0], -1, embed_dim)).linear(self.final)
 
   def __call__(self, x):
-    # bs x T x embed_dim
-    bs = x.shape[0]
-    embed_dim = self.num_heads * self.head_size
-    inputs = x.reshape(shape=(-1, embed_dim))
-
-    # run multi head attention (bs, T, num_heads, head_size)
-    x = inputs.layernorm().linear(self.ln1)
-    x = inputs + self.attn(x, bs).dropout(0.1)
-
-    xin = x.layernorm().linear(self.ln2)
-    x = x + xin.linear(self.ff1).gelu().linear(self.ff2).dropout(0.1)
-    return x.reshape(shape=(bs, -1, embed_dim))
+    x = x + self.attn(x.layernorm().linear(self.ln1)).dropout(0.1)
+    x = x + x.layernorm().linear(self.ln2).linear(self.ff1).gelu().linear(self.ff2).dropout(0.1)
+    return x
 
 class ViT:
   def __init__(self, embed_dim=192):
@@ -133,8 +124,8 @@ import ast
 lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
 lbls = ast.literal_eval(lbls.decode('utf-8'))
 
-url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
-#url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
+#url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
+url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
 
 # junk
 from PIL import Image

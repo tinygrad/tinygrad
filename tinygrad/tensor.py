@@ -203,8 +203,12 @@ class Tensor:
   def pad2d(self, padding):
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
-  def dot(self, w):
-    return self.matmul(w)
+  def matmul(self, w):
+    if len(self.shape) > 2 and len(w.shape) == 2:
+      return self.reshape(shape=(-1, self.shape[-1]))._matmul(w).reshape(shape=list(self.shape[0:-1]) + [-1])
+    else:
+      return self._matmul(w)
+  dot = matmul
 
   def _canonicalize_reduce_axis(self, axis):
     if axis is None: axis = range(len(self.shape))
