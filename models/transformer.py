@@ -17,10 +17,10 @@ class TransformerBlock:
     self.head_size = embed_dim // num_heads
     assert self.head_size * self.num_heads == embed_dim
 
-    # looks like bias is useless
-    self.query_dense = Tensor.uniform(embed_dim, embed_dim)
-    self.key_dense = Tensor.uniform(embed_dim, embed_dim)
-    self.value_dense = Tensor.uniform(embed_dim, embed_dim)
+    # added bias
+    self.query_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.uniform(embed_dim))
+    self.key_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.uniform(embed_dim))
+    self.value_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.uniform(embed_dim))
 
     self.final = Tensor.uniform(embed_dim, embed_dim)
 
@@ -34,7 +34,7 @@ class TransformerBlock:
     inputs = x.reshape(shape=(-1, embed_dim))
 
     # run multi head attention (bs, T, num_heads, head_size)
-    query, key, value = [inputs.dot(y) \
+    query, key, value = [inputs.dot(y[0]).add(y[1].reshape(shape=[1, -1])) \
       .reshape(shape=(bs, -1, self.num_heads, self.head_size)) \
       for y in [self.query_dense, self.key_dense, self.value_dense]]
 

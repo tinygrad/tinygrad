@@ -21,7 +21,7 @@ def get_parameters(obj):
   parameters = []
   if isinstance(obj, Tensor):
     parameters.append(obj)
-  elif isinstance(obj, list):
+  elif isinstance(obj, list) or isinstance(obj, tuple):
     for x in obj:
       parameters.extend(get_parameters(x))
   elif hasattr(obj, '__dict__'):
