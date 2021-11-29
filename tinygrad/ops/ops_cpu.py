@@ -44,7 +44,7 @@ class Log(Function):
 
 class Exp(Function):
   def forward(ctx, input):
-    ret = input.exp()
+    ret = np.clip(input, -88, 88).exp()
     ctx.save_for_backward(ret)
     return ret
 

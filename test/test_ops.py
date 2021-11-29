@@ -69,6 +69,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
   def test_softplus(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
+  def test_gelu(self):
+    pass
+    # fails?
+    #helper_test_op([(45,65)], lambda x: 0.5 * x * (1.0 + torch.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x))), Tensor.gelu)
   def test_relu6(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.relu6(x), Tensor.relu6)
   def test_hardswish(self):

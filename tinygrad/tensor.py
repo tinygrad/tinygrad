@@ -218,8 +218,8 @@ class Tensor:
   __truediv__ = div
 
   def sigmoid(self):
-    e = self.exp()
-    return e.div(1 + e)
+    #e = self.exp(); return e.div(1 + e)
+    return (1.0 + (0.0-self).exp()) ** -1.0
 
   def swish(self):
     return self * self.sigmoid()
@@ -232,6 +232,10 @@ class Tensor:
 
   def tanh(self):
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+
+  def gelu(x):
+    # https://github.com/huggingface/transformers/blob/master/src/transformers/activations.py
+    return 0.5 * x * (1 + (x * 0.7978845608 * (1 + 0.044715 * x * x)).tanh())
 
   def leakyrelu(self, neg_slope=0.01):
     return self.relu() - (-neg_slope*self).relu()
