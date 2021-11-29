@@ -47,17 +47,17 @@ class BasicBlock:
     self.bn1 = nn.BatchNorm2D(planes)
     self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
     self.bn2 = nn.BatchNorm2D(planes)
-    self.downsample = nn.Sequential()
+    self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
-      self.downsample = nn.Sequential(
+      self.downsample = [
         nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
         nn.BatchNorm2D(self.expansion*planes)
-      )
+      ]
 
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out))
-    out = out + self.downsample(x)
+    out = out + x.sequential(self.downsample)
     out = out.relu()
     return out
 
@@ -72,12 +72,12 @@ class Bottleneck:
     self.bn2 = nn.BatchNorm2D(planes)
     self.conv3 = nn.Conv2d(planes, self.expansion *planes, kernel_size=1, bias=False)
     self.bn3 = nn.BatchNorm2D(self.expansion*planes)
-    self.downsample = nn.Sequential()
+    self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
-      self.downsample = nn.Sequential(
+      self.downsample = [
         nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
         nn.BatchNorm2D(self.expansion*planes)
-      )
+      ]
 
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
@@ -105,14 +105,14 @@ class ResNet:
     for stride in strides:
       layers.append(block(self.in_planes, planes, stride))
       self.in_planes = planes * block.expansion
-    return nn.Sequential(*layers)
+    return layers
 
   def forward(self, x):
     out = self.bn1(self.conv1(x)).relu()
-    out = self.layer1(out)
-    out = self.layer2(out)
-    out = self.layer3(out)
-    out = self.layer4(out)
+    out = out.sequential(self.layer1)
+    out = out.sequential(self.layer2)
+    out = out.sequential(self.layer3)
+    out = out.sequential(self.layer4)
     out = out.mean(3).mean(2)
     out = self.fc(out).logsoftmax()
     return out

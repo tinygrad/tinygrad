@@ -304,12 +304,18 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
-  def affine(self, params):
+  # ***** functional nn ops *****
+
+  def linear(self, params):
     shp = [1] * (len(self.shape)-1) + [-1]
-    if len(params[0].shape) == 1:   # elementwise affine
-      return self.mul(params[0].reshape(shape=shp)).add(params[1].reshape(shape=shp))
-    else:
-      return self.dot(params[0]).add(params[1].reshape(shape=shp))
+    ret = self.mul(params[0].reshape(shape=shp)) if len(params[0].shape) == 1 else self.dot(params[0])
+    return ret.add(params[1].reshape(shape=shp))
+
+  def sequential(self, ll):
+    ret = self
+    for l in ll:
+      ret = l(ret)
+    return ret
 
 # An instantiation of the Function is the Context
 class Function:

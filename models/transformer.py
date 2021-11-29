@@ -37,7 +37,7 @@ class TransformerBlock:
     inputs = x.reshape(shape=(-1, embed_dim))
 
     # run multi head attention (bs, T, num_heads, head_size)
-    query, key, value = [inputs.affine(y) \
+    query, key, value = [inputs.linear(y) \
       .reshape(shape=(bs, -1, self.num_heads, self.head_size)) \
       for y in [self.query_dense, self.key_dense, self.value_dense]]
 
@@ -49,10 +49,10 @@ class TransformerBlock:
     weights = score.softmax()                                   # (bs, num_heads, T, T)
     attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
 
-    x = inputs + attention.reshape(shape=(-1, embed_dim)).affine(self.final).dropout(0.1)
-    x = layernorm(x, embed_dim).affine(self.ln1)
-    x = x + x.affine(self.ff1).relu().affine(self.ff2).dropout(0.1)
-    x = layernorm(x, embed_dim).affine(self.ln2)
+    x = inputs + attention.reshape(shape=(-1, embed_dim)).linear(self.final).dropout(0.1)
+    x = layernorm(x, embed_dim).linear(self.ln1)
+    x = x + x.linear(self.ff1).relu().linear(self.ff2).dropout(0.1)
+    x = layernorm(x, embed_dim).linear(self.ln2)
     return x.reshape(shape=(bs, -1, embed_dim))
 
 class Transformer:

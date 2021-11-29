@@ -31,35 +31,6 @@ class BatchNorm2D:
     x = (x - mean.reshape(shape=[1, -1, 1, 1])) * self.weight.reshape(shape=[1, -1, 1, 1])
     return x.div(var.add(self.eps).reshape(shape=[1, -1, 1, 1])**0.5) + self.bias.reshape(shape=[1, -1, 1, 1])
 
-class Linear:
-  def __init__(self, in_dim, out_dim, bias=True):
-    self.in_dim = in_dim
-    self.out_dim = out_dim
-    self.use_bias = bias
-    self.weight = Tensor.uniform(in_dim, out_dim)
-    if self.use_bias:
-      self.bias = Tensor.zeros(out_dim)
-
-  def __call__(self, x):
-    B, *dims, D = x.shape
-    x = x.reshape(shape=(B * np.prod(dims).astype(np.int32), D))
-    x = x.dot(self.weight)
-    if self.use_bias:
-      x = x.add(self.bias.reshape(shape=[1, -1]))
-    x = x.reshape(shape=(B, *dims, -1))
-    return x
-
-class Dropout:
-  def __init__(self, p=0.5):
-    self.p = p
-
-  def __call__(self, x):
-    return x.dropout(p=self.p)
-
-class Identity:
-  def __call__(self, x):
-    return x
-
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):
     self.out_channels = out_channels
@@ -79,11 +50,3 @@ class Conv2d:
       x = x.add(self.bias.reshape(shape=(1, -1, 1, 1)))
     return x
 
-class Sequential:
-  def __init__(self, *layers):
-    self.layers = layers
-
-  def __call__(self, x):
-    for l in self.layers:
-      x = l(x)
-    return x

@@ -25,13 +25,8 @@ def get_parameters(obj):
     for x in obj:
       parameters.extend(get_parameters(x))
   elif hasattr(obj, '__dict__'):
-    if isinstance(obj, nn.Sequential):
-      for layer in obj.layers:
-        for v in layer.__dict__.values():
-          parameters.extend(get_parameters(v))
-    else:
-      for v in obj.__dict__.values():
-        parameters.extend(get_parameters(v))
+    for v in obj.__dict__.values():
+      parameters.extend(get_parameters(v))
   return parameters
 
 def my_unpickle(fb0):
