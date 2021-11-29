@@ -235,6 +235,7 @@ class Tensor:
 
   def gelu(x):
     # https://github.com/huggingface/transformers/blob/master/src/transformers/activations.py
+    #import torch; return Tensor(torch.nn.functional.gelu(torch.tensor(x.data)).numpy())
     return 0.5 * x * (1 + (x * 0.7978845608 * (1 + 0.044715 * x * x)).tanh())
 
   def leakyrelu(self, neg_slope=0.01):
@@ -286,10 +287,11 @@ class Tensor:
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
   def affine(self, params):
+    shp = [1] * (len(self.shape)-1) + [-1]
     if len(params[0].shape) == 1:   # elementwise affine
-      return self.mul(params[0].reshape(shape=[1, -1])).add(params[1].reshape(shape=[1, -1]))
+      return self.mul(params[0].reshape(shape=shp)).add(params[1].reshape(shape=shp))
     else:
-      return self.dot(params[0]).add(params[1].reshape(shape=[1, -1]))
+      return self.dot(params[0]).add(params[1].reshape(shape=shp))
 
 # An instantiation of the Function is the Context
 class Function:
