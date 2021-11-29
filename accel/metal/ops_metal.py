@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
   from tinygrad.tensor import Tensor, Device
 
-  r1 = Tensor(np.random.random(16).astype(np.float32)-0.5, device=Device.METAL)
+  r1 = Tensor([-2,-1,0,1,2], device=Device.METAL)
   r2 = r1.relu()
   print(r1.cpu())
   print(r2.cpu())

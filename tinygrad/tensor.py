@@ -139,6 +139,8 @@ class Tensor:
 
   @staticmethod
   def _move_data(data, device):
+    if isinstance(data, list):
+      data = np.array(data, dtype=np.float32)
     if isinstance(data, np.ndarray):
       data = data.view(Device.buffers[Device.CPU])
     if isinstance(data, Device.buffers[device]):
