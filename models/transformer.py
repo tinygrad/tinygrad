@@ -1,21 +1,13 @@
 import numpy as np
 from tinygrad.tensor import Tensor
 
-def layernorm(x, sz, eps=1e-5):
-  in_shape = x.shape
-  x = x.reshape(shape=(-1, sz))
-  layer_mean = x.mean(axis=(1,))
-  y = (x - layer_mean.reshape(shape=[-1, 1]))
-  layer_var = (y*y).mean(axis=(1,))
-  ret = y.div(layer_var.add(eps).reshape(shape=[-1, 1]).sqrt())
-  return ret.reshape(shape=in_shape)
-
 class TransformerBlock:
-  def __init__(self, embed_dim, num_heads, ff_dim):
+  def __init__(self, embed_dim, num_heads, ff_dim, prenorm=False):
     # Multi-Head Attention
     self.num_heads = num_heads
     self.head_size = embed_dim // num_heads
     assert self.head_size * self.num_heads == embed_dim
+    self.prenorm = prenorm
 
     # added bias
     self.query_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
@@ -48,18 +40,15 @@ class TransformerBlock:
     return attention.reshape(shape=(x.shape[0], -1, embed_dim)).linear(self.final)
 
   def __call__(self, x):
-    # bs x T x embed_dim
-    bs = x.shape[0]
-    embed_dim = self.num_heads * self.head_size
-    #inputs = x.reshape(shape=(-1, embed_dim))
-    inputs = x
-    attention = self.attn(x)
-
-    x = inputs + attention.dropout(0.1)
-    x = layernorm(x, embed_dim).linear(self.ln1)
-    x = x + x.linear(self.ff1).relu().linear(self.ff2).dropout(0.1)
-    x = layernorm(x, embed_dim).linear(self.ln2)
-    return x.reshape(shape=(bs, -1, embed_dim))
+    if self.prenorm:
+      x = x + self.attn(x.layernorm().linear(self.ln1)).dropout(0.1)
+      x = x + x.layernorm().linear(self.ln2).linear(self.ff1).gelu().linear(self.ff2).dropout(0.1)
+    else:
+      x = x + self.attn(x).dropout(0.1)
+      x = x.layernorm().linear(self.ln1)
+      x = x + x.linear(self.ff1).relu().linear(self.ff2).dropout(0.1)
+      x = x.layernorm().linear(self.ln2)
+    return x
 
 class Transformer:
   # L = layers, H = embed_dim, A = num_heads

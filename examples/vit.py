@@ -13,55 +13,14 @@ import io
 from extra.utils import fetch
 
 from tinygrad.tensor import Tensor
-
-class ViTBlock:
-  def __init__(self, embed_dim, num_heads, ff_dim):
-    # Multi-Head Attention
-    self.num_heads = num_heads
-    self.head_size = embed_dim // num_heads
-    assert self.head_size * self.num_heads == embed_dim
-
-    # added bias
-    self.query_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-    self.key_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-    self.value_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-
-    self.final = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-
-    self.ff1 = (Tensor.uniform(embed_dim, ff_dim), Tensor.zeros(ff_dim))
-    self.ff2 = (Tensor.uniform(ff_dim, embed_dim), Tensor.zeros(embed_dim))
-
-    self.ln1 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
-    self.ln2 = (Tensor.ones(embed_dim), Tensor.zeros(embed_dim))
-
-  def attn(self, x):
-    embed_dim = self.num_heads * self.head_size
-
-    query, key, value = [x.linear(y) \
-      .reshape(shape=(x.shape[0], -1, self.num_heads, self.head_size)) \
-      for y in [self.query_dense, self.key_dense, self.value_dense]]
-
-    query = query.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
-    key = key.transpose(order=(0,2,3,1))      # (bs, num_heads, head_size, T)
-    value = value.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
-
-    score = query.dot(key) * (1 / np.sqrt(self.head_size))
-    weights = score.softmax()                                   # (bs, num_heads, T, T)
-    attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
-
-    return attention.reshape(shape=(x.shape[0], -1, embed_dim)).linear(self.final)
-
-  def __call__(self, x):
-    x = x + self.attn(x.layernorm().linear(self.ln1)).dropout(0.1)
-    x = x + x.layernorm().linear(self.ln2).linear(self.ff1).gelu().linear(self.ff2).dropout(0.1)
-    return x
+from models.transformer import TransformerBlock
 
 class ViT:
   def __init__(self, embed_dim=192):
     self.conv_weight = Tensor.uniform(embed_dim, 3, 16, 16)
     self.conv_bias = Tensor.zeros(embed_dim)
     self.cls_token = Tensor.ones(1, 1, embed_dim)
-    self.tbs = [ViTBlock(embed_dim=embed_dim, num_heads=3, ff_dim=768) for i in range(12)]
+    self.tbs = [TransformerBlock(embed_dim=embed_dim, num_heads=3, ff_dim=768, prenorm=True) for i in range(12)]
     self.pos_embed = Tensor.ones(1, 197, embed_dim)
     self.head = (Tensor.uniform(embed_dim, 1000), Tensor.zeros(1000))
     self.norm = (Tensor.uniform(embed_dim), Tensor.zeros(embed_dim))
