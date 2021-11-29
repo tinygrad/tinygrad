@@ -64,6 +64,9 @@ class Tensor:
     return f"<Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}>"
 
   def assign(self, x):
+    if not isinstance(x, Tensor):
+      x = Tensor(x)
+    assert self.shape == x.shape
     self.data = x.data
 
   @property
@@ -170,6 +173,7 @@ class Tensor:
   
   def __getitem__(self, val):
     arg = []
+    new_shape = []
     if val is not None:
       for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]):
         if isinstance(s, int):
@@ -177,8 +181,10 @@ class Tensor:
         else:
           arg.append((s.start if s.start is not None else 0,
             (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+          new_shape.append(arg[-1][1] - arg[-1][0])
           assert s.step is None or s.step == 1
-    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
+    new_shape += self.shape[len(arg):]
+    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))]).reshape(shape=new_shape)
 
   def cat(self, y, dim=0):
     assert len(self.shape) == len(y.shape)
