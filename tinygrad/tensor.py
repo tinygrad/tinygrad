@@ -206,6 +206,10 @@ class Tensor:
   def dot(self, w):
     return self.matmul(w)
 
+  # override for sum to support keepdim
+  def sum(self, axis=None):
+    return self._sum(axis=axis)
+
   def mean(self, axis=None):
     out = self.sum(axis=axis)
     return out * (np.prod(out.shape)/np.prod(self.shape))
@@ -333,7 +337,10 @@ def register(name, fxn, device=Device.CPU):
     #f.cl_ctx, f.cl_queue, f.device = cl_ctx, cl_queue, tt.device
     f.device = tt.device
     return f.apply(f, *x, **kwargs)
-  setattr(Tensor, name, dispatch)
+  if getattr(Tensor, name, None) is not None:
+    setattr(Tensor, "_"+name, dispatch)
+  else:
+    setattr(Tensor, name, dispatch)
   if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
     setattr(Tensor, f"__{name}__", dispatch)
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
