@@ -16,6 +16,8 @@ class CPUBuffer(np.ndarray):
     return x.transpose(order)
   def type(x, tt):
     return x.astype(tt)
+  def custompad(x, padding):
+    return np.pad(x, padding)
   def toCPU(x):
     return x
   @staticmethod
@@ -143,7 +145,7 @@ class Transpose(Function):
 
 def inner_slice(x, arg):
   padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
-  x = np.pad(x, padding)
+  x = x.custompad(padding)
   slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
   return x[tuple([slice(x[0], x[1], None) for x in slicee])]
 
