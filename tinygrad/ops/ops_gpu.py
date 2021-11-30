@@ -144,8 +144,7 @@ class Sum(Function):
 
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
-    shape = [1 if i in axis else input.shape[i] for i in range(len(input.shape))]
-    output = GPUBuffer(shape, hostbuf=grad_output)
+    output = GPUBuffer(grad_output.shape, hostbuf=grad_output)
     return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
 
 class Max(Function):
@@ -156,11 +155,10 @@ class Max(Function):
 
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
-    shape = [1 if i in axis else input.shape[i] for i in range(len(input.shape))]
-    ret2 = binary_op(ctx, "1.0*(a==b)", input, GPUBuffer(shape, ret))
+    ret2 = binary_op(ctx, "1.0*(a==b)", input, ret)
     div = reduce_op(ctx, "out += a", "out+1e-10", ret2, axis=axis)
-    ret3 = binary_op(ctx, "a/b", ret2, GPUBuffer(shape, div))
-    return binary_op(ctx, 'a*b', ret3, GPUBuffer(shape, grad_output))
+    ret3 = binary_op(ctx, "a/b", ret2, div)
+    return binary_op(ctx, 'a*b', ret3, grad_output)
 
 # ************* binary ops *************
 
