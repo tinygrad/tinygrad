@@ -20,9 +20,10 @@ class ViT:
     return x
 
   def forward(self, x):
+    ce = self.cls.add(Tensor.zeros(x.shape[0],1,1))
     pe = self.patch_embed(x)
-    x = self.cls.add(Tensor.zeros(pe.shape[0],1,1)).cat(pe, dim=1) + self.pos_embedding
-    x = x.sequential(self.tbs)
+    x = ce.cat(pe, dim=1)
+    x = x.add(self.pos_embedding).sequential(self.tbs)
     x = x.layernorm().linear(*self.encoder_norm)
     return x[:, 0].linear(*self.head)
 
@@ -40,14 +41,14 @@ class ViT:
     m.embedding[0].assign(np.transpose(dat['embedding/kernel'], (3,2,0,1)))
     m.embedding[1].assign(dat['embedding/bias'])
 
-    m.encoder_norm[0].assign(dat['Transformer/encoder_norm/scale'])
-    m.encoder_norm[1].assign(dat['Transformer/encoder_norm/bias'])
+    m.cls.assign(dat['cls'])
 
     m.head[0].assign(dat['head/kernel'])
     m.head[1].assign(dat['head/bias'])
 
-    m.cls.assign(dat['cls'])
     m.pos_embedding.assign(dat['Transformer/posembed_input/pos_embedding'])
+    m.encoder_norm[0].assign(dat['Transformer/encoder_norm/scale'])
+    m.encoder_norm[1].assign(dat['Transformer/encoder_norm/bias'])
 
     for i in range(12):
       m.tbs[i].query[0].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/query/kernel'].reshape(192, 192))

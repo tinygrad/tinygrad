@@ -83,7 +83,7 @@ class Bottleneck:
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out)).relu()
     out = self.bn3(self.conv3(out))
-    out = out + self.downsample(x)
+    out = out + x.sequential(self.downsample)
     out = out.relu()
     return out
 

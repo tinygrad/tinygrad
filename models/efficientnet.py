@@ -41,7 +41,6 @@ class MBConvBlock:
     x = x.conv2d(self._depthwise_conv, stride=self.strides, groups=self._depthwise_conv.shape[0])
     x = self._bn1(x).swish()
 
-    # has_se
     if self.has_se:
       x_squeezed = x.avg_pool2d(kernel_size=x.shape[2:4])
       x_squeezed = x_squeezed.conv2d(self._se_reduce, self._se_reduce_bias).swish()
