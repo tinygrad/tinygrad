@@ -70,8 +70,7 @@ class Transformer:
     onehot = onehot.reshape(bs*x.shape[1], self.maxlen+self.syms)
 
     x = Tensor(onehot, device=x.device).dot(self.embed).reshape(shape=(bs, x.shape[1], -1))
-    for t in self.tbs:
-      x = t(x)
+    x = x.sequential(self.tbs)
     x = x.reshape(shape=(-1, x.shape[-1])).dot(self.final).logsoftmax()
     return x.reshape(shape=(bs, -1, x.shape[-1]))
 
@@ -94,8 +93,7 @@ class ViT:
   def forward(self, x):
     pe = self.patch_embed(x)
     x = self.cls_token.add(Tensor.zeros(pe.shape[0],1,1)).cat(pe, dim=1) + self.pos_embed
-    for l in self.tbs:
-      x = l(x)
+    x = x.sequential(self.tbs)
     x = x.layernorm().linear(self.norm)
     return x[:, 0].linear(self.head)
 

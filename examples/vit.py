@@ -74,49 +74,10 @@ img = img.astype(np.float32)[:3].reshape(1,3,224,224)
 img /= 255.0
 img -= 0.5
 img /= 0.5
-#img[:] = 0
-
-"""
-import torch
-from timm.models.vision_transformer import vit_tiny_patch16_224
-mdl = vit_tiny_patch16_224(pretrained=True)
-#out = mdl(torch.Tensor(img))
-#choice = out.argmax(axis=1).item()
-#print(out[0, choice], lbls[choice])
-
-pe = m.patch_embed(Tensor(img))
-x = m.cls_token.cat(pe, dim=1) + m.pos_embed
-x = m.tbs[0](x)
-#x = layernorm(x, 192).linear(m.tbs[0].ln1)
-
-xp = mdl.patch_embed(torch.Tensor(img))
-xp = torch.cat((mdl.cls_token, xp), dim=1) + mdl.pos_embed
-xp = mdl.blocks[0](xp)
-#xp = mdl.blocks[0].norm1(xp)
-
-print(x.shape, xp.shape)
-print(np.max(x.data), np.max(xp.detach().numpy()))
-print(np.max(np.abs(x.data - xp.detach().numpy())))
-
-exit(0)
-"""
-
-
-  
-
-
-#import matplotlib.pyplot as plt
-#plt.imshow(np.transpose(img[0], (1,2,0)))
-#plt.show()
 
 out = m.forward(Tensor(img))
 outnp = out.cpu().data.ravel()
 choice = outnp.argmax()
 print(out.shape, choice, outnp[choice], lbls[choice])
-
-#lookup = dict([x.split(" ") for x in open("cache/classids.txt").read().strip().split("\n")])
-#cls = open("cache/imagenet21k_wordnet_ids.txt").read().strip().split("\n")
-#print(cls[choice], lookup[cls[choice]])
-
 
 
