@@ -8,11 +8,11 @@ class TransformerBlock:
     assert self.head_size * self.num_heads == embed_dim
     self.prenorm, self.act = prenorm, act
 
-    self.query_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-    self.key_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-    self.value_dense = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+    self.query = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+    self.key = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+    self.value = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
 
-    self.final = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+    self.out = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
 
     self.ff1 = (Tensor.uniform(embed_dim, ff_dim), Tensor.zeros(ff_dim))
     self.ff2 = (Tensor.uniform(ff_dim, embed_dim), Tensor.zeros(embed_dim))
@@ -23,7 +23,7 @@ class TransformerBlock:
   def attn(self, x):
     query, key, value = [x.linear(*y) \
       .reshape(shape=(x.shape[0], -1, self.num_heads, self.head_size)) \
-      for y in [self.query_dense, self.key_dense, self.value_dense]]
+      for y in [self.query, self.key, self.value]]
 
     query = query.transpose(order=(0,2,1,3))  # (bs, num_heads, T, head_size)
     key = key.transpose(order=(0,2,3,1))      # (bs, num_heads, head_size, T)
@@ -33,7 +33,7 @@ class TransformerBlock:
     weights = score.softmax()                                   # (bs, num_heads, T, T)
     attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
 
-    return attention.reshape(shape=(x.shape[0], -1, self.num_heads * self.head_size)).linear(*self.final)
+    return attention.reshape(shape=(x.shape[0], -1, self.num_heads * self.head_size)).linear(*self.out)
 
   def __call__(self, x):
     if self.prenorm:
