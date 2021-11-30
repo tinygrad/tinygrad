@@ -320,10 +320,8 @@ class Tensor:
     return ret.add(bias.reshape(shape=shp))
 
   def sequential(self, ll):
-    ret = self
-    for l in ll:
-      ret = l(ret)
-    return ret
+    for l in ll: self = l(self)
+    return self
 
   def layernorm(x, eps=1e-5):
     y = (x - x.mean(axis=-1, keepdim=True))
