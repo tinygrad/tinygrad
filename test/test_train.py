@@ -7,7 +7,8 @@ from tinygrad.tensor import Tensor
 from extra.training import train
 from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
-from models.transformer import Transformer, ViT
+from models.transformer import Transformer
+from models.vit import ViT
 from models.resnet import ResNet18
 
 BS = int(os.getenv("BS", "4"))
@@ -49,7 +50,8 @@ class TestTrain(unittest.TestCase):
     X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     for resnet_v in [ResNet18]:
-      model = resnet_v(num_classes=1000, pretrained=True)
+      model = resnet_v()
+      model.load_from_pretrained()
       train_one_step(model, X, Y)
 
   def test_bert(self):

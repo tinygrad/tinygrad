@@ -2,7 +2,7 @@ import math
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2D
-from extra.utils import fetch, fake_torch_load
+from extra.utils import fetch, fake_torch_load, get_child
 
 class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se):
@@ -133,14 +133,6 @@ class EfficientNet:
       7: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b7-dcc49843.pth"
     }
 
-    def _get_child(parent, key):
-      obj = parent
-      for k in key.split('.'):
-        if k.isnumeric():
-          obj = obj[int(k)]
-        else:
-          obj = getattr(obj, k)
-      return obj
 
     b0 = fake_torch_load(fetch(model_urls[self.number]))
     for k,v in b0.items():
@@ -150,7 +142,7 @@ class EfficientNet:
           k = k.replace('.weight', '')
 
       #print(k, v.shape)
-      mv = _get_child(self, k)
+      mv = get_child(self, k)
       vnp = v.astype(np.float32)
       vnp = vnp if k != '_fc' else vnp.T
       vnp = vnp if vnp.shape != () else np.array([vnp])
