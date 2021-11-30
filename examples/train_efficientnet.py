@@ -33,7 +33,7 @@ if __name__ == "__main__":
     model = TinyConvNet(classes)
   elif TRANSFER:
     model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
-    model.load_weights_from_torch()
+    model.load_from_pretrained()
   else:
     model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=False)
 

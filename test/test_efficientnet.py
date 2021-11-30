@@ -42,7 +42,7 @@ class TestEfficientNet(unittest.TestCase):
   def test_chicken(self):
     chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')
     model = EfficientNet(number=0)
-    model.load_weights_from_torch()
+    model.load_from_pretrained()
     label = _infer(model, chicken_img)
     self.assertEqual(label, "hen", f"Expected hen but got {label} for number=0")
 

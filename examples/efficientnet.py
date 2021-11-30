@@ -49,7 +49,7 @@ def infer(model, img):
 if __name__ == "__main__":
   # instantiate my net
   model = EfficientNet(int(os.getenv("NUM", "0")))
-  model.load_weights_from_torch()
+  model.load_from_pretrained()
 
   # category labels
   import ast

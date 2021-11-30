@@ -122,7 +122,7 @@ class EfficientNet:
     x = x.reshape(shape=(-1, x.shape[1]))
     return x.linear(self._fc, self._fc_bias)
 
-  def load_weights_from_torch(self):
+  def load_from_pretrained(self):
     model_urls = {
       0: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth",
       1: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b1-f1951068.pth",
@@ -157,7 +157,7 @@ class EfficientNet:
       vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
-        mv.assign(Tensor(vnp))
+        mv.assign(vnp)
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 
