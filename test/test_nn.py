@@ -57,7 +57,7 @@ class TestNN(unittest.TestCase):
 
       # create in tinygrad
       layer = (Tensor.uniform(in_dim, out_dim), Tensor.zeros(out_dim))
-      z = x.linear(layer)
+      z = x.linear(*layer)
 
       # create in torch
       with torch.no_grad():

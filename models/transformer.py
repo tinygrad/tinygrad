@@ -25,7 +25,7 @@ class TransformerBlock:
   def attn(self, x):
     embed_dim = self.num_heads * self.head_size
 
-    query, key, value = [x.linear(y) \
+    query, key, value = [x.linear(*y) \
       .reshape(shape=(x.shape[0], -1, self.num_heads, self.head_size)) \
       for y in [self.query_dense, self.key_dense, self.value_dense]]
 
@@ -37,12 +37,12 @@ class TransformerBlock:
     weights = score.softmax()                                   # (bs, num_heads, T, T)
     attention = weights.dot(value).transpose(order=(0,2,1,3))   # (bs, T, num_heads, head_size)
 
-    return attention.reshape(shape=(x.shape[0], -1, embed_dim)).linear(self.final)
+    return attention.reshape(shape=(x.shape[0], -1, embed_dim)).linear(*self.final)
 
   def __call__(self, x):
     if self.prenorm:
-      x = x + self.attn(x.layernorm().linear(self.ln1)).dropout(0.1)
-      x = x + x.layernorm().linear(self.ln2).linear(self.ff1).gelu().linear(self.ff2).dropout(0.1)
+      x = x + self.attn(x.layernorm().linear(*self.ln1)).dropout(0.1)
+      x = x + x.layernorm().linear(*self.ln2).linear(*self.ff1).gelu().linear(*self.ff2).dropout(0.1)
     else:
       x = x + self.attn(x).dropout(0.1)
       x = x.layernorm().linear(self.ln1)
@@ -94,6 +94,6 @@ class ViT:
     pe = self.patch_embed(x)
     x = self.cls_token.add(Tensor.zeros(pe.shape[0],1,1)).cat(pe, dim=1) + self.pos_embed
     x = x.sequential(self.tbs)
-    x = x.layernorm().linear(self.norm)
-    return x[:, 0].linear(self.head)
+    x = x.layernorm().linear(*self.norm)
+    return x[:, 0].linear(*self.head)
 

@@ -310,10 +310,10 @@ class Tensor:
 
   # ***** functional nn ops *****
 
-  def linear(self, params):
+  def linear(self, weight, bias):
     shp = [1] * (len(self.shape)-1) + [-1]
-    ret = self.mul(params[0].reshape(shape=shp)) if len(params[0].shape) == 1 else self.dot(params[0])
-    return ret.add(params[1].reshape(shape=shp))
+    ret = self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)
+    return ret.add(bias.reshape(shape=shp))
 
   def sequential(self, ll):
     ret = self

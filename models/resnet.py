@@ -114,7 +114,7 @@ class ResNet:
     out = out.sequential(self.layer3)
     out = out.sequential(self.layer4)
     out = out.mean(3).mean(2)
-    out = out.linear(self.fc).logsoftmax()
+    out = out.linear(*self.fc).logsoftmax()
     return out
 
   def __call__(self, x):

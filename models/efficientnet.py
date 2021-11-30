@@ -4,17 +4,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2D
 from extra.utils import fetch, fake_torch_load
 
-model_urls = {
-  0: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth",
-  1: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b1-f1951068.pth",
-  2: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b2-8bb594d6.pth",
-  3: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b3-5fb5a3c3.pth",
-  4: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b4-6ed6700e.pth",
-  5: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b5-b6417697.pth",
-  6: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b6-c76e70fd.pth",
-  7: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b7-dcc49843.pth"
-}
-
 class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se):
     oup = expand_ratio * input_filters
@@ -105,8 +94,9 @@ class EfficientNet:
       [4, 5, (2,2), 6, 112, 192, 0.25],
       [1, 3, (1,1), 6, 192, 320, 0.25],
     ]
-    self._blocks = []
     # num_repeats, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio
+
+    self._blocks = []
     for b in blocks_args:
       args = b[1:]
       args[3] = round_filters(args[3])
@@ -126,19 +116,34 @@ class EfficientNet:
   def forward(self, x):
     x = x.pad2d(padding=(0,1,0,1))
     x = self._bn0(x.conv2d(self._conv_stem, stride=2)).swish()
-    #print(x.shape, x.data[:, 0, 0, 0])
-    for block in self._blocks:
-      x = block(x)
+    x = x.sequential(self._blocks)
     x = self._bn1(x.conv2d(self._conv_head)).swish()
     x = x.avg_pool2d(kernel_size=x.shape[2:4])
     x = x.reshape(shape=(-1, x.shape[1]))
-    #x = x.dropout(0.2)
-    return x.dot(self._fc).add(self._fc_bias.reshape(shape=[1,-1]))
-
+    return x.linear(self._fc, self._fc_bias)
 
   def load_weights_from_torch(self):
-    b0 = fake_torch_load(fetch(model_urls[self.number]))
+    model_urls = {
+      0: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth",
+      1: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b1-f1951068.pth",
+      2: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b2-8bb594d6.pth",
+      3: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b3-5fb5a3c3.pth",
+      4: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b4-6ed6700e.pth",
+      5: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b5-b6417697.pth",
+      6: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b6-c76e70fd.pth",
+      7: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b7-dcc49843.pth"
+    }
 
+    def _get_child(parent, key):
+      obj = parent
+      for k in key.split('.'):
+        if k.isnumeric():
+          obj = obj[int(k)]
+        else:
+          obj = getattr(obj, k)
+      return obj
+
+    b0 = fake_torch_load(fetch(model_urls[self.number]))
     for k,v in b0.items():
       for cat in ['_conv_head', '_conv_stem', '_depthwise_conv', '_expand_conv', '_fc', '_project_conv', '_se_reduce', '_se_expand']:
         if cat in k:
@@ -156,12 +161,3 @@ class EfficientNet:
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 
-
-def _get_child(parent, key):
-  obj = parent
-  for k in key.split('.'):
-    if k.isnumeric():
-      obj = obj[int(k)]
-    else:
-      obj = getattr(obj, k)
-  return obj
