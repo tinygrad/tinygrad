@@ -9,52 +9,18 @@ with tf.io.gfile.GFile(fn, "rb") as f:
     g.write(dat)
 """
 
-import io
-from extra.utils import fetch
 
 from tinygrad.tensor import Tensor
-from models.transformer import ViT
+from models.vit import ViT
 
 Tensor.training = False
 m = ViT()
-
-# https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
-dat = np.load(io.BytesIO(fetch("https://storage.googleapis.com/vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0--imagenet2012-steps_20k-lr_0.03-res_224.npz")))
-#for x in dat.keys():
-#  print(x, dat[x].shape, dat[x].dtype)
-
-m.conv[0].assign(np.transpose(dat['embedding/kernel'], (3,2,0,1)))
-m.conv[1].assign(dat['embedding/bias'])
-
-m.norm[0].assign(dat['Transformer/encoder_norm/scale'])
-m.norm[1].assign(dat['Transformer/encoder_norm/bias'])
-
-m.head[0].assign(dat['head/kernel'])
-m.head[1].assign(dat['head/bias'])
-
-m.cls_token.assign(dat['cls'])
-m.pos_embed.assign(dat['Transformer/posembed_input/pos_embedding'])
-
-for i in range(12):
-  m.tbs[i].query_dense[0].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/query/kernel'].reshape(192, 192))
-  m.tbs[i].query_dense[1].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/query/bias'].reshape(192))
-  m.tbs[i].key_dense[0].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/key/kernel'].reshape(192, 192))
-  m.tbs[i].key_dense[1].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/key/bias'].reshape(192))
-  m.tbs[i].value_dense[0].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/value/kernel'].reshape(192, 192))
-  m.tbs[i].value_dense[1].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/value/bias'].reshape(192))
-  m.tbs[i].final[0].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/out/kernel'].reshape(192, 192))
-  m.tbs[i].final[1].assign(dat[f'Transformer/encoderblock_{i}/MultiHeadDotProductAttention_1/out/bias'].reshape(192))
-  m.tbs[i].ff1[0].assign(dat[f'Transformer/encoderblock_{i}/MlpBlock_3/Dense_0/kernel'])
-  m.tbs[i].ff1[1].assign(dat[f'Transformer/encoderblock_{i}/MlpBlock_3/Dense_0/bias'])
-  m.tbs[i].ff2[0].assign(dat[f'Transformer/encoderblock_{i}/MlpBlock_3/Dense_1/kernel'])
-  m.tbs[i].ff2[1].assign(dat[f'Transformer/encoderblock_{i}/MlpBlock_3/Dense_1/bias'])
-  m.tbs[i].ln1[0].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_0/scale'])
-  m.tbs[i].ln1[1].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_0/bias'])
-  m.tbs[i].ln2[0].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_2/scale'])
-  m.tbs[i].ln2[1].assign(dat[f'Transformer/encoderblock_{i}/LayerNorm_2/bias'])
+m.load_from_pretrained()
 
 # category labels
 import ast
+import io
+from extra.utils import fetch
 lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
 lbls = ast.literal_eval(lbls.decode('utf-8'))
 
