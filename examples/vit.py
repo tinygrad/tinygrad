@@ -23,8 +23,8 @@ dat = np.load(io.BytesIO(fetch("https://storage.googleapis.com/vit_models/augreg
 #for x in dat.keys():
 #  print(x, dat[x].shape, dat[x].dtype)
 
-m.conv_weight.assign(np.transpose(dat['embedding/kernel'], (3,2,0,1)))
-m.conv_bias.assign(dat['embedding/bias'])
+m.conv[0].assign(np.transpose(dat['embedding/kernel'], (3,2,0,1)))
+m.conv[1].assign(dat['embedding/bias'])
 
 m.norm[0].assign(dat['Transformer/encoder_norm/scale'])
 m.norm[1].assign(dat['Transformer/encoder_norm/bias'])
