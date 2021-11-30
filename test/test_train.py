@@ -7,7 +7,7 @@ from tinygrad.tensor import Tensor
 from extra.training import train
 from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
-from models.transformer import Transformer
+from models.transformer import Transformer, ViT
 from models.resnet import ResNet18
 
 BS = int(os.getenv("BS", "4"))
@@ -29,6 +29,12 @@ class TestTrain(unittest.TestCase):
     model = EfficientNet(0)
     X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
+    train_one_step(model,X,Y)
+
+  def test_vit(self):
+    model = ViT()
+    X = np.zeros((BS,3,224,224), dtype=np.float32)
+    Y = np.zeros((BS,), dtype=np.int32)
     train_one_step(model,X,Y)
 
   def test_transformer(self):
