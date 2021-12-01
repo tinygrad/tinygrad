@@ -86,18 +86,22 @@ class ResNet:
     return self.forward(x)
 
   def load_from_pretrained(self):
-    # TODO: replace with fake torch load
+    
     from torch.hub import load_state_dict_from_url
     state_dict = load_state_dict_from_url(self.url, progress=True)
     for k, v in state_dict.items():
       obj = get_child(self, k)
       dat = v.detach().numpy().T if "fc.weight" in k else v.detach().numpy()
-      assert obj.shape == dat.shape
+
+      if 'fc.' in k and obj.shape != dat.shape:
+        continue # Skip FC if transfer learning
+
+      assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
 
-ResNet18 = lambda: ResNet(BasicBlock, [2,2,2,2], 1000, 'https://download.pytorch.org/models/resnet18-5c106cde.pth')
-ResNet34 = lambda: ResNet(BasicBlock, [3,4,6,3], 1000, 'https://download.pytorch.org/models/resnet34-333f7ec4.pth')
-ResNet50 = lambda: ResNet(Bottleneck, [3,4,6,3], 1000, 'https://download.pytorch.org/models/resnet50-19c8e357.pth')
-ResNet101 = lambda: ResNet(Bottleneck, [3,4,23,3], 1000, 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
-ResNet101 = lambda: ResNet(Bottleneck, [3,8,36,3], 1000, 'https://download.pytorch.org/models/resnet152-b121ed2d.pth')
+ResNet18 = lambda num_classes=1000: ResNet(BasicBlock, [2,2,2,2], num_classes=num_classes, url='https://download.pytorch.org/models/resnet18-5c106cde.pth')
+ResNet34 = lambda num_classes=1000: ResNet(BasicBlock, [3,4,6,3], num_classes=num_classes, url='https://download.pytorch.org/models/resnet34-333f7ec4.pth')
+ResNet50 = lambda num_classes=1000: ResNet(Bottleneck, [3,4,6,3], num_classes=num_classes, url='https://download.pytorch.org/models/resnet50-19c8e357.pth')
+ResNet101 = lambda num_classes=1000: ResNet(Bottleneck, [3,4,23,3], num_classes=num_classes, url='https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
+ResNet101 = lambda num_classes=1000: ResNet(Bottleneck, [3,8,36,3], num_classes=num_classes, url='https://download.pytorch.org/models/resnet152-b121ed2d.pth')
 
