@@ -12,9 +12,14 @@ with tf.io.gfile.GFile(fn, "rb") as f:
 
 from tinygrad.tensor import Tensor
 from models.vit import ViT
+import os
 
 Tensor.training = False
-m = ViT()
+if int(os.getenv("LARGE", "0")) == 1:
+  m = ViT(embed_dim=768, num_heads=12)
+else:
+  # tiny
+  m = ViT(embed_dim=192, num_heads=3)
 m.load_from_pretrained()
 
 # category labels
