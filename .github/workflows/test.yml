@@ -87,9 +87,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: |
-        pip install pybind11
-        pip install -e '.[gpu,testing]'
+      run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
       run: GPU=1 python -m pytest -s -v
 
