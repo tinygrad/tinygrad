@@ -17,11 +17,16 @@ def cmd_buffer():
 class MetalBuffer:
   def __init__(self, shape, hostbuf=None):
     self.sz = np.prod(shape)*4
+    # TODO: fix this limit
+    assert self.sz < 16384
     if hostbuf is not None:
-      self.mtl = device.newBufferWithBytes_length_options_(
-        hostbuf.astype(np.float32).data,
-        self.sz,
-        Metal.MTLResourceStorageModeShared)
+      if isinstance(hostbuf, MetalBuffer):
+        self.mtl = hostbuf.mtl
+      else:
+        self.mtl = device.newBufferWithBytes_length_options_(
+          hostbuf.astype(np.float32).data,
+          self.sz,
+          Metal.MTLResourceStorageModeShared)
     else:
       self.mtl = device.newBufferWithLength_options_(
         self.sz,
@@ -77,7 +82,7 @@ def binary_op(shader, x, y):
 
 class Sum(Function):
   def forward(ctx, input, axis=None):
-    assert axis is None
+    assert axis is None or len(axis) == len(input.shape)
     ctx.save_for_backward(input.shape, axis)
     out = MetalBuffer((1,), None)
     mtl_buffer = cmd_buffer()
@@ -131,6 +136,18 @@ class Mul(Function):
     grad_y = binary_op(mul_shader, x, grad_output)
     return grad_x, grad_y
 
+class Reshape(Function):
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    # TODO: move this into global reshape?
+    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    return MetalBuffer(shape, x)
+
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return MetalBuffer(in_shape, grad_output)
+
+# METAL=1 python3 test/test_ops.py TestOps.test_relu
 if __name__ == "__main__":
   b1 = MetalBuffer(10, np.ones(10))
   b2 = MetalBuffer(10, np.ones(10))
