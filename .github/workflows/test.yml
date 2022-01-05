@@ -81,7 +81,7 @@ jobs:
     - name: Update packages
       run: sudo apt-get update
     - name: Install OpenCL
-      run: sudo apt-get install pocl-opencl-icd
+      run: sudo apt-get install -y pocl-opencl-icd
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
