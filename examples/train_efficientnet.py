@@ -1,4 +1,5 @@
 import os
+import traceback
 import time
 import numpy as np
 from models.efficientnet import EfficientNet
@@ -53,7 +54,10 @@ if __name__ == "__main__":
     from multiprocessing import Process, Queue
     def loader(q):
       while 1:
-        q.put(fetch_batch(BS))
+        try:
+          q.put(fetch_batch(BS))
+        except Exception:
+          traceback.print_exc()
     q = Queue(16)
     for i in range(2):
       p = Process(target=loader, args=(q,))

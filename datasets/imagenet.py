@@ -5,8 +5,8 @@ from PIL import Image
 import torchvision.transforms as transforms
 
 BASEDIR = "/home/batman/imagenet"
-train_files = open(os.path.join(BASEDIR, "train_files")).read().split("\n")
-val_files = open(os.path.join(BASEDIR, "val_files")).read().split("\n")
+train_files = open(os.path.join(BASEDIR, "train_files")).read().strip().split("\n")
+val_files = open(os.path.join(BASEDIR, "val_files")).read().strip().split("\n")
 ci = json.load(open(os.path.join(BASEDIR, "imagenet_class_index.json")))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
