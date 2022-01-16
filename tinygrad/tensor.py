@@ -24,9 +24,10 @@ class ProfileOp:
     return self
   def __exit__(self, *junk):
     if DEBUG:
-      # TODO: fix this
-      #if cl_queue is not None:
-      #  cl_queue.finish()
+      if self.output is not None:
+        self.output.data.toCPU()
+      elif self.x[0] is not None:
+        self.x[0].data.toCPU()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
       debug_times[self.name] += et

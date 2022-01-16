@@ -45,7 +45,7 @@ if __name__ == "__main__":
   print("parameter count", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 
-  BS, steps = int(os.getenv("BS", "64" if TINY else "16")), 2048
+  BS, steps = int(os.getenv("BS", "64" if TINY else "16")), int(os.getenv("STEPS", "2048"))
   print("training with batch size %d for %d steps" % (BS, steps))
 
   Tensor.training = True

@@ -14,10 +14,10 @@ def require_init_gpu():
     cl_ctx = cl.Context(devices=devices)
     # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
-require_init_gpu()
 
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
+    require_init_gpu()
     self.shape, self.dtype = tuple(shape), np.float32
     self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
       cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
@@ -32,6 +32,7 @@ class GPUBuffer:
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
+    cl_queue.finish()
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
