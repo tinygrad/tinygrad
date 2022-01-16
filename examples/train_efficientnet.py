@@ -55,13 +55,13 @@ if __name__ == "__main__":
     img = X_train[samp].astype(np.float32)
 
     st = time.time()
-    out = model.forward(Tensor(img))
+    out = model.forward(Tensor(img, requires_grad=False))
     fp_time = (time.time()-st)*1000.0
 
     Y = Y_train[samp]
     y = np.zeros((BS,classes), np.float32)
     y[range(y.shape[0]),Y] = -classes
-    y = Tensor(y)
+    y = Tensor(y, requires_grad=False)
     loss = out.logsoftmax().mul(y).mean()
 
     optimizer.zero_grad()
