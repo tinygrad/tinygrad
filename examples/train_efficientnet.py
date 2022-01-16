@@ -28,8 +28,13 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 if __name__ == "__main__":
-  X_train, Y_train = fetch_cifar()
-  classes = 10
+  IMAGENET = os.getenv("IMAGENET") is not None
+  if IMAGENET:
+    from datasets.imagenet import fetch_batch
+    classes = 1000
+  else:
+    X_train, Y_train = fetch_cifar()
+    classes = 10
 
   TINY = os.getenv("TINY") is not None
   TRANSFER = os.getenv("TRANSFER") is not None
@@ -50,15 +55,18 @@ if __name__ == "__main__":
 
   Tensor.training = True
   for i in (t := trange(steps)):
-    samp = np.random.randint(0, X_train.shape[0], size=(BS))
-
-    img = X_train[samp].astype(np.float32)
+    if IMAGENET:
+      X,Y = fetch_batch(BS)
+      X = X.astype(np.float32)
+    else:
+      samp = np.random.randint(0, X_train.shape[0], size=(BS))
+      X = X_train[samp].astype(np.float32)
+      Y = Y_train[samp]
 
     st = time.time()
-    out = model.forward(Tensor(img, requires_grad=False))
+    out = model.forward(Tensor(X, requires_grad=False))
     fp_time = (time.time()-st)*1000.0
 
-    Y = Y_train[samp]
     y = np.zeros((BS,classes), np.float32)
     y[range(y.shape[0]),Y] = -classes
     y = Tensor(y, requires_grad=False)
