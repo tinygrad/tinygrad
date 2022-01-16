@@ -49,7 +49,7 @@ class Device:
 
 class Tensor:
   did_float_warning = False
-  training = True
+  training = False
   ops = defaultdict(dict)
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=True):

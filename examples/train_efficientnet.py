@@ -48,6 +48,7 @@ if __name__ == "__main__":
   BS, steps = int(os.getenv("BS", "64" if TINY else "16")), 2048
   print("training with batch size %d for %d steps" % (BS, steps))
 
+  Tensor.training = True
   for i in (t := trange(steps)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
 
