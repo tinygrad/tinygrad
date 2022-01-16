@@ -2,8 +2,9 @@ from tinygrad.tensor import Tensor
 import numpy as np
 
 class BatchNorm2D:
-  def __init__(self, sz, eps=1e-5, track_running_stats=False, training=False, momentum=0.1):
-    self.eps, self.track_running_stats, self.training, self.momentum = eps, track_running_stats, training, momentum
+  def __init__(self, sz, eps=1e-5, track_running_stats=False, momentum=0.1):
+    # TODO: add affine?
+    self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
 
@@ -11,7 +12,7 @@ class BatchNorm2D:
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x):
-    if self.track_running_stats or self.training:
+    if self.track_running_stats or Tensor.training:
       batch_mean = x.mean(axis=(0,2,3))
       y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
@@ -22,7 +23,7 @@ class BatchNorm2D:
       if self.num_batches_tracked is None: self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
       self.num_batches_tracked += 1
 
-    if self.training:
+    if Tensor.training:
       return self.normalize(x, batch_mean, batch_var)
 
     return self.normalize(x, self.running_mean, self.running_var)
