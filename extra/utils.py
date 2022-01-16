@@ -11,7 +11,9 @@ def fetch(url):
       dat = f.read()
   else:
     print("fetching %s" % url)
-    dat = requests.get(url).content
+    r = requests.get(url)
+    assert r.status_code == 200
+    dat = r.content
     with open(fp+".tmp", "wb") as f:
       f.write(dat)
     os.rename(fp+".tmp", fp)

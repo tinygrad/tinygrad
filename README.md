@@ -129,7 +129,7 @@ While more ops may be added, I think this base is stable.
 Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture to discover what it is.
 
 ```bash
-ipython3 examples/efficientnet.py https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg
+ipython3 examples/efficientnet.py https://media.istockphoto.com/photos/hen-picture-id831791190
 ```
 
 Or, if you have a webcam and cv2 installed
