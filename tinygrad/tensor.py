@@ -30,12 +30,22 @@ class ProfileOp:
     return self
   def __exit__(self, *junk):
     if GRAPH:
-      for y in self.output:
-        for x in self.x:
+      saved_tensors = filter(lambda x: any([isinstance(x, v) for v in Device.buffers.values()]), self.ctx.saved_tensors)
+      for x in self.x:
+        for y in self.output:
           G.add_edge(id(x.data), id(y.data), label=self.name, color="blue" if self.backward else "black")
           G.nodes[id(x.data)]['label'], G.nodes[id(y.data)]['label'] = str(x.shape), str(y.shape)
-        for x in filter(lambda x: any([isinstance(x, v) for v in Device.buffers.values()]) and self.backward, self.ctx.saved_tensors):
-          G.add_edge(id(x), id(y.data), label=self.name, color="red")
+      # which saved tensors does this backward depend on?
+      if self.backward:
+        for x in saved_tensors:
+          for y in self.output:
+            G.add_edge(id(x), id(y.data), label=self.name, color="red")
+      # did this forward create any intermediate tensors?
+      if not self.backward:
+        for x in self.x:
+          for y in saved_tensors:
+            if id(x.data) != id(y):
+              G.add_edge(id(x.data), id(y), label=self.name, color="purple")
     if DEBUG:
       self.output[0].data.toCPU()
       et = (time.time()-self.st)*1000.
@@ -348,10 +358,12 @@ class Function:
 
   def __init__(self, *tensors):
     self.parents = tensors
+    self.requires_grad = any([t.requires_grad for t in tensors])
     self.saved_tensors = []
 
   def save_for_backward(self, *x):
-    self.saved_tensors.extend(x)
+    if self.requires_grad:
+      self.saved_tensors.extend(x)
 
   def apply(self, *x, **kwargs):
     ctx = self(*x) # self - operation i.e 'add', 'sub', etc.
