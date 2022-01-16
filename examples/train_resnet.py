@@ -7,7 +7,7 @@ from PIL import Image
 from tinygrad.tensor import Device
 from extra.utils import get_parameters
 from extra.training import train, evaluate
-from models.resnet import ResNet18, ResNet34, ResNet50
+from models.resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
 from tinygrad.optim import Adam
 from test.test_mnist import fetch_mnist
 
