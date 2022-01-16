@@ -1,11 +1,11 @@
 # pip3 install pycuda
 import pycuda.driver as cuda
-import pycuda.autoinit
-
 import numpy as np
 
 class CudaBuffer:
   def __init__(self, shape, hostbuf=None):
+    import pycuda.autoinit
+
     # TODO: these are generic
     self.shape = shape
     self.sz = int(np.prod(shape)*4)
