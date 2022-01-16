@@ -13,7 +13,8 @@ class TestNN(unittest.TestCase):
     sz = 4
 
     # create in tinygrad
-    bn = BatchNorm2D(sz, eps=1e-5, training=training, track_running_stats=training)
+    Tensor.training = training
+    bn = BatchNorm2D(sz, eps=1e-5, track_running_stats=training)
     bn.weight = Tensor.randn(sz)
     bn.bias = Tensor.randn(sz)
     bn.running_mean = Tensor.randn(sz)

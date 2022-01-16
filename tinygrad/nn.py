@@ -2,8 +2,8 @@ from tinygrad.tensor import Tensor
 import numpy as np
 
 class BatchNorm2D:
-  def __init__(self, sz, eps=1e-5, track_running_stats=False, momentum=0.1):
-    # TODO: add affine?
+  def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=False, momentum=0.1):
+    assert affine == True
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
