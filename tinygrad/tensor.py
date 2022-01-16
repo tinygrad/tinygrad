@@ -1,30 +1,26 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-import inspect
-import functools
-import os
+import os, atexit, time, inspect, functools
 from collections import defaultdict
 import numpy as np
 
 # **** profiler ****
 
+GRAPH = os.getenv("GRAPH", None) is not None
+if GRAPH:
+  import networkx as nx
+  G = nx.DiGraph()
+  def save_graph_exit():
+    print("saving", G)
+    nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
+  atexit.register(save_graph_exit)
+
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
-  G = None
-  if os.getenv("GRAPH", None) is not None:
-    import networkx as nx
-    G = nx.DiGraph()
-  import atexit, time
   debug_counts, debug_times = defaultdict(int), defaultdict(float)
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
       print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
-    if G is not None:
-      print("saving", G)
-      nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
   atexit.register(print_debug_exit)
-
-def is_buffer(x):
-  return any([isinstance(x, v) for v in Device.buffers.values()])
 
 class ProfileOp:
   def __init__(self, ctx, name, x, backward=False):
@@ -33,16 +29,14 @@ class ProfileOp:
     if DEBUG: self.st = time.time()
     return self
   def __exit__(self, *junk):
-    if DEBUG:
-      if G is not None:
+    if GRAPH:
+      for y in self.output:
         for x in self.x:
-          for y in self.output:
-            G.add_edge(id(x.data), id(y.data), label=self.name, color="blue" if self.backward else "black")
-            G.nodes[id(x.data)]['label'], G.nodes[id(y.data)]['label'] = str(x.shape), str(y.shape)
-        if self.backward:
-          for x in filter(is_buffer, self.ctx.saved_tensors):
-            for y in self.output:
-              G.add_edge(id(x), id(y.data), label=self.name, color="red")
+          G.add_edge(id(x.data), id(y.data), label=self.name, color="blue" if self.backward else "black")
+          G.nodes[id(x.data)]['label'], G.nodes[id(y.data)]['label'] = str(x.shape), str(y.shape)
+        for x in filter(lambda x: any([isinstance(x, v) for v in Device.buffers.values()]) and self.backward, self.ctx.saved_tensors):
+          G.add_edge(id(x), id(y.data), label=self.name, color="red")
+    if DEBUG:
       self.output[0].data.toCPU()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1
