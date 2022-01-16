@@ -29,12 +29,7 @@ class TinyConvNet:
 
 if __name__ == "__main__":
   IMAGENET = os.getenv("IMAGENET") is not None
-  if IMAGENET:
-    from datasets.imagenet import fetch_batch
-    classes = 1000
-  else:
-    X_train, Y_train = fetch_cifar()
-    classes = 10
+  classes = 1000 if IMAGENET else 10
 
   TINY = os.getenv("TINY") is not None
   TRANSFER = os.getenv("TRANSFER") is not None
@@ -53,18 +48,30 @@ if __name__ == "__main__":
   BS, steps = int(os.getenv("BS", "64" if TINY else "16")), int(os.getenv("STEPS", "2048"))
   print("training with batch size %d for %d steps" % (BS, steps))
 
+  if IMAGENET:
+    from datasets.imagenet import fetch_batch
+    from multiprocessing import Process, Queue
+    def loader(q):
+      while 1:
+        q.put(fetch_batch(BS))
+    q = Queue(16)
+    for i in range(2):
+      p = Process(target=loader, args=(q,))
+      p.daemon = True
+      p.start()
+  else:
+    X_train, Y_train = fetch_cifar()
+
   Tensor.training = True
   for i in (t := trange(steps)):
     if IMAGENET:
-      X,Y = fetch_batch(BS)
-      X = X.astype(np.float32)
+      X, Y = q.get(True)
     else:
       samp = np.random.randint(0, X_train.shape[0], size=(BS))
-      X = X_train[samp].astype(np.float32)
-      Y = Y_train[samp]
+      X, Y = X_train[samp], Y_train[samp]
 
     st = time.time()
-    out = model.forward(Tensor(X, requires_grad=False))
+    out = model.forward(Tensor(X.astype(np.float32), requires_grad=False))
     fp_time = (time.time()-st)*1000.0
 
     y = np.zeros((BS,classes), np.float32)
