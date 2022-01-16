@@ -169,7 +169,7 @@ class Tensor:
     return ret
 
   def detach(self):
-    return Tensor(self.data, device=self.device)
+    return Tensor(self.data, device=self.device, requires_grad=False)
 
   # ***** non first class ops *****
   
