@@ -110,13 +110,14 @@ class Tensor:
   # ***** toposort and backward pass *****
 
   def deepwalk(self):
-    def _deepwalk(node, visited, nodes):
+    visited, nodes = set(), []
+    def _deepwalk(node):
       visited.add(node)
       if node._ctx:
-        [_deepwalk(i, visited, nodes) for i in node._ctx.parents if i not in visited]
+        [_deepwalk(i) for i in node._ctx.parents if i not in visited]
         nodes.append(node)
-      return nodes
-    return _deepwalk(self, set(), [])
+    _deepwalk(self)
+    return nodes
 
   def backward(self):
     assert self.shape == (1,)
