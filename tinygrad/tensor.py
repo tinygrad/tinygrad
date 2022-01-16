@@ -127,12 +127,14 @@ class Tensor:
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
+      if not any([x.requires_grad for x in t0._ctx.parents]):
+        continue
       with ProfileOp(t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
       if len(t0._ctx.parents) == 1:
         grads = [grads]
       for t, g in zip(t0._ctx.parents, grads):
-        if g is not None:
+        if g is not None and t.requires_grad:
           assert g.shape == t.shape, \
             f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
           gt = Tensor(g, device=self.device, requires_grad=False)
