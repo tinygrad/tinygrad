@@ -9,21 +9,32 @@ import numpy as np
 
 DEBUG = os.getenv("DEBUG", None) is not None
 if DEBUG:
+  G = None
+  if os.getenv("GRAPH", None) is not None:
+    import networkx as nx
+    G = nx.DiGraph()
   import atexit, time
   debug_counts, debug_times = defaultdict(int), defaultdict(float)
   def print_debug_exit():
     for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
       print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
+    if G is not None:
+      nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
   atexit.register(print_debug_exit)
 
 class ProfileOp:
   def __init__(self, name, x, backward=False):
-    self.name, self.x, self.output = f"back_{name}" if backward else name, x, None
+    self.name, self.x, self.output, self.backward = f"back_{name}" if backward else name, x, None, backward
   def __enter__(self):
     if DEBUG: self.st = time.time()
     return self
   def __exit__(self, *junk):
     if DEBUG:
+      if G is not None:
+        for x in self.x:
+          for y in self.output:
+            G.add_edge(id(x.data), id(y.data), label=self.name, color="blue" if self.backward else "black")
+            G.nodes[id(x.data)]['label'], G.nodes[id(y.data)]['label'] = str(x.shape), str(y.shape)
       self.output[0].data.toCPU()
       et = (time.time()-self.st)*1000.
       debug_counts[self.name] += 1

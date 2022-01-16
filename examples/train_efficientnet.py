@@ -15,18 +15,18 @@ class TinyConvNet:
     conv = 3
     inter_chan, out_chan = 8, 16   # for speed
     self.c1 = Tensor.uniform(inter_chan,3,conv,conv)
-    self.bn1 = BatchNorm2D(inter_chan)
+    #self.bn1 = BatchNorm2D(inter_chan)
     self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv)
-    self.bn2 = BatchNorm2D(out_chan)
+    #self.bn2 = BatchNorm2D(out_chan)
     self.l1 = Tensor.uniform(out_chan*6*6, classes)
 
   def forward(self, x):
     x = x.conv2d(self.c1).relu().max_pool2d()
-    x = self.bn1(x)
+    #x = self.bn1(x)
     x = x.conv2d(self.c2).relu().max_pool2d()
-    x = self.bn2(x)
+    #x = self.bn2(x)
     x = x.reshape(shape=[x.shape[0], -1])
-    return x.dot(self.l1).logsoftmax()
+    return x.dot(self.l1)
 
 if __name__ == "__main__":
   IMAGENET = os.getenv("IMAGENET") is not None
