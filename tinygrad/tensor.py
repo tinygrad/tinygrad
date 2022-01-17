@@ -1,5 +1,5 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-import os, atexit, time, inspect, functools
+import os, atexit, time, inspect, functools, importlib
 from collections import defaultdict
 import numpy as np
 
@@ -30,12 +30,13 @@ class ProfileOp:
     return self
   def __exit__(self, *junk):
     if GRAPH:
-      saved_tensors = filter(lambda x: any([isinstance(x, v) for v in Device.buffers.values()]), self.ctx.saved_tensors)
+      # connect inputs to outputs
       for x in self.x:
         for y in self.output:
           G.add_edge(id(x.data), id(y.data), label=self.name, color="blue" if self.backward else "black")
           G.nodes[id(x.data)]['label'], G.nodes[id(y.data)]['label'] = str(x.shape), str(y.shape)
       # which saved tensors does this backward depend on?
+      saved_tensors = filter(lambda x: any([isinstance(x, v) for v in Device.buffers.values()]), self.ctx.saved_tensors)
       if self.backward:
         for x in saved_tensors:
           for y in self.output:
@@ -243,12 +244,12 @@ class Tensor:
   def sum(self, axis=None, keepdim=False):
     axis, out_shape = self._canonicalize_reduce_axis(axis)
     ret = self._sum(axis=axis)
-    return ret if keepdim else ret.reshape(shape=out_shape)
+    return ret if keepdim or ret.shape == out_shape else ret.reshape(shape=out_shape)
 
   def max(self, axis=None, keepdim=False):
     axis, out_shape = self._canonicalize_reduce_axis(axis)
     ret = self._max(axis=axis)
-    return ret if keepdim else ret.reshape(shape=out_shape)
+    return ret if keepdim or ret.shape == out_shape else ret.reshape(shape=out_shape)
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
@@ -410,7 +411,6 @@ def _register_ops(namespace, device=Device.CPU):
     if name.endswith("Buffer"):  Device.buffers[device] = cls
     elif name[0] != "_":  register(name.lower(), cls, device=device)
 
-import importlib
 for d,ops in Device.imports.items():
   try:
     _register_ops(importlib.import_module('tinygrad.ops.'+ops), d)

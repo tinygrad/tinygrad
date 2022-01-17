@@ -2,22 +2,15 @@ import numpy as np
 from ..tensor import Function
 
 class CPUBuffer(np.ndarray):
-  def log(x):
-    return np.log(x)
-  def exp(x):
-    return np.exp(x)
-  def relu(x):
-    return np.maximum(x, 0)
-  def expand(x, shp):
-    return np.broadcast_to(x, shp)
+  log = lambda x: np.log(x)
+  exp = lambda x: np.exp(x)
+  relu = lambda x: np.maximum(x, 0)
+  expand = lambda x,shp: np.broadcast_to(x, shp)
+  permute = lambda x,order: x.transpose(order)
+  type = lambda x,tt: x.astype(tt)
+  custompad = lambda x,padding: np.pad(x, padding)
   def amax(x, *args, **kwargs):
     return np.amax(x, *args, **kwargs)
-  def permute(x, order):
-    return x.transpose(order)
-  def type(x, tt):
-    return x.astype(tt)
-  def custompad(x, padding):
-    return np.pad(x, padding)
   def toCPU(x):
     return x
   @staticmethod
