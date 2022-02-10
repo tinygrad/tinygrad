@@ -14,7 +14,7 @@ class MaxPool2d:
   
   def __call__(self, input):
     # TODO: Implement strided max_pool2d, and maxpool2d for 3d inputs
-    return x.max_pool2d(kernel_size=self.kernel_size)
+    return input.max_pool2d(kernel_size=self.kernel_size)
 
 
 class DetectionLayer:
