@@ -9,7 +9,7 @@ with open(os.path.join(directory, 'README.md'), encoding='utf-8') as f:
 
 setup(name='tinygrad',
       version='0.3.0',
-      description='You like pytorch? You like micrograd? You love tinygrad! heart',
+      description='You like pytorch? You like micrograd? You love tinygrad! ❤️',
       author='George Hotz',
       license='MIT',
       long_description=long_description,
