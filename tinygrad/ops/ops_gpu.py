@@ -386,7 +386,7 @@ class Conv2D(Function):
     ctx.save_for_backward(x,w)
 
     # output buffer
-    ret = buffer_new(ctx, (bs, cout, oy, ox))
+    ret = buffer_newk(ctx, (bs, cout, oy, ox))
 
     # input  = (bs, groups, cin, iy, ix)
     # weight = (groups, rcout, cin, H, W)
