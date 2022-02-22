@@ -1,3 +1,1 @@
-import tinygrad.optim
-import tinygrad.tensor
-import tinygrad.nn
+from tinygrad import optim, tensor, nn
