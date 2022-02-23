@@ -121,7 +121,10 @@ def binary_op(code, x, y):
   prg.binop([prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
+
 def reduce_op(code, code2, x, axis=None, start="0.0"):
+  print('start')
+  axis =[1]
   if len(x.shape) == 1:
     M,N = 1,x.shape[0]
   elif len(x.shape) == 2:
@@ -133,33 +136,43 @@ def reduce_op(code, code2, x, axis=None, start="0.0"):
 
   if axis is None:
     # full reduce
-    osize = [1]*len(x.shape)
+    osize = (1,1)
   else:
     osize = np.array(x.shape)
     osize[list(axis)] = 1
-  ret = buffer_new(osize)
+    if len(osize)>2:
+        osize = list(filter(lambda x: x != 1, osize))
+  ret = buffer_new(osize, True)
   if axis is None:
     ret.shape = (1,)
 
   block,grid = get_block_grid(x.shape)
-  print(ret.buf)
 
   mod = SourceModule(f"""
   __global__ void unop(float *dest, float *a_g, int M, int N)
   {{
-    const int i = blockDim.x*blockIdx.x+threadIdx.x;
-    const int j = blockDim.y*blockIdx.y+threadIdx.y;
-    const int k = threadIdx.z;
-    //printf("k: %d, \\n", k);
-    float a = a_g[i+M*j+M*N*k];
-    //printf("i: %d, j: %d, k: %d, a: %f \\n", i,j,k,a);
-    const ind d_idx = 0;
-    {code};
-    dest[d_idx] = {code2};
+    float tmp[10];
+
+    const int d_idx = threadIdx.x;
+    //const int i = blockDim.x*blockIdx.x+threadIdx.x;
+    //const int j = blockDim.y*blockIdx.y+threadIdx.y;
+    //const int k = threadIdx.z;
+    //const int d_idx = (i+M*j+M*N*k)/N;
+    const int idx = (d_idx)*N;
+
+    float t = 0;
+    for (int i=idx; i < idx + N ; i++) {{ 
+        float a = a_g[i];
+        t += a;
+    }}
+    tmp[d_idx] = t;
+
+    dest[d_idx] = tmp[d_idx];
   }}
   """)
   unop = mod.get_function("unop")
-  unop(ret.buf, x.buf, M, N, block=block, grid=grid)
+  unop(ret.buf, x.buf, M, N, block=(10,1,1), grid=(1,1))
+  print(ret.toCPU())
   return ret
 
 class ReLU(Function):
