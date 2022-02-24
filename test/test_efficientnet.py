@@ -1,18 +1,12 @@
-import ast
-import pathlib
-import sys
-import unittest
-
+import ast, pathlib, sys, unittest
 import numpy as np
 from PIL import Image
-
 from models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 
 def _load_labels():
   labels_filename = pathlib.Path(__file__).parent / 'efficientnet/imagenet1000_clsidx_to_labels.txt'
   return ast.literal_eval(labels_filename.read_text())
-
 
 _LABELS = _load_labels()
 
@@ -37,7 +31,6 @@ def _infer(model: EfficientNet, img):
   class_id = np.argmax(out.data)
   return _LABELS[np.argmax(out.data)]
 
-
 class TestEfficientNet(unittest.TestCase):
   def test_chicken(self):
     chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')
@@ -45,7 +38,6 @@ class TestEfficientNet(unittest.TestCase):
     model.load_from_pretrained()
     label = _infer(model, chicken_img)
     self.assertEqual(label, "hen", f"Expected hen but got {label} for number=0")
-
 
 if __name__ == '__main__':
   unittest.main()
