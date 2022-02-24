@@ -1,6 +1,6 @@
 import numpy as np
 from tinygrad.tensor import Function
-from extra.cherry import *
+from extra.cherry import*
 
 # ************* unary ops *************
 
@@ -296,4 +296,3 @@ class Conv2D(Function):
       gdx[:, :, :, iY:iY+H, iX:iX+W] = cherry_binop(gdx[:, :, :, iY:iY+H, iX:iX+W], np.array(np.transpose(big_matrix, (1, 0, 2, 3, 4))), BinaryOps.ADD)
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
-
