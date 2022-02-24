@@ -1,6 +1,4 @@
-import os
-import json
-import numpy as np
+import os, json, numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
 
@@ -27,4 +25,3 @@ def fetch_batch(bs, val=False):
 if __name__ == "__main__":
   X,Y = fetch_batch(64)
   print(X.shape, Y)
-
