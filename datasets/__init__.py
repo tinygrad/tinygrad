@@ -1,8 +1,4 @@
-import io
-import numpy as np
-import gzip
-import tarfile
-import pickle
+import io, numpy as np, gzip, tarfile, pickle
 from extra.utils import fetch
 
 def fetch_mnist():
