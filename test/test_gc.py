@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-import gc
-import unittest
+import gc, unittest
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
