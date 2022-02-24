@@ -1,7 +1,5 @@
 #!/usr/bin/env python
-import os
-import sys
-import numpy as np
+import os, sys, numpy as np
 from tqdm import tqdm
 sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
