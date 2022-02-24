@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 import os
-from ctypes import *
-import json
-import collections
-import numpy as np
-import faulthandler
-import struct
+from ctypes import*
+import json, collections, numpy as np, faulthandler, struct
 faulthandler.enable()
 
 basedir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
@@ -219,4 +215,3 @@ if __name__ == "__main__":
   print("** after **")
   print(tind)
   print(toutd)
-
