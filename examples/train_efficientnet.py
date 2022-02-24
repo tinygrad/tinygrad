@@ -1,7 +1,4 @@
-import os
-import traceback
-import time
-import numpy as np
+import os, traceback, time, numpy as np
 from models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from extra.utils import get_parameters
