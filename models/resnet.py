@@ -25,7 +25,6 @@ class BasicBlock:
     out = out.relu()
     return out
 
-
 class Bottleneck:
   expansion = 4
 
