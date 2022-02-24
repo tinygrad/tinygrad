@@ -2,8 +2,7 @@
 from tinygrad.tensor import Function
 from tinygrad.helpers import binary_broadcast
 import numpy as np
-import Metal
-import MetalPerformanceShaders
+import Metal, MetalPerformanceShaders
 
 device = Metal.MTLCreateSystemDefaultDevice()
 mtl_queue = device.newCommandQueue()
@@ -172,4 +171,3 @@ if __name__ == "__main__":
   print(r1.cpu())
   print(r2.cpu())
   print(r3.cpu())
-
