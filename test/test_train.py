@@ -1,6 +1,4 @@
-import os
-import unittest
-import time
+import os, unittest, time
 import tinygrad.optim as optim
 import numpy as np
 from tinygrad.tensor import Tensor
