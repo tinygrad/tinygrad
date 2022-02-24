@@ -1,4 +1,3 @@
-
 import numpy as np
 """
 fn = "gs://vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0.npz"
@@ -8,8 +7,6 @@ with tf.io.gfile.GFile(fn, "rb") as f:
   with open("cache/"+ fn.rsplit("/", 1)[1], "wb") as g:
     g.write(dat)
 """
-
-
 from tinygrad.tensor import Tensor
 from models.vit import ViT
 import os
@@ -50,5 +47,3 @@ out = m.forward(Tensor(img))
 outnp = out.cpu().data.ravel()
 choice = outnp.argmax()
 print(out.shape, choice, outnp[choice], lbls[choice])
-
-
