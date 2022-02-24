@@ -1,6 +1,5 @@
 import numpy as np
-import torch
-import unittest
+import torch, unittest
 from tinygrad.tensor import Tensor, Device
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
