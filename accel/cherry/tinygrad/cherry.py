@@ -14,8 +14,7 @@
 #   189 Mb embedded RAM, aka 9M 19-bit elements
 #   2560 MLP blocks, 2 fp24 MULACC each
 
-import os
-import functools
+import os, functools
 import numpy as np
 from collections import defaultdict
 
@@ -533,8 +532,6 @@ class TestCherry(unittest.TestCase):
     tst2 = np.copy(regfile[Reg.MATMUL_ACC])
     np.testing.assert_allclose(tst1, tst2)
 
-
 if __name__ == "__main__":
   np.random.seed(1337)
   unittest.main(verbosity=2)
-
