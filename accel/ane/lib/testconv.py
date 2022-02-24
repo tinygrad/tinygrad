@@ -19,7 +19,6 @@ def benchmark(ane):
 
   print("%.2f ms, %.2f gigaops/sec" % (ts*1000, ops*1e-9/ts))
 
-
 if __name__ == "__main__":
   ane = ANE()
 
