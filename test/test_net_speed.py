@@ -1,9 +1,5 @@
 #!/usr/bin/env python
-import time
-import cProfile
-import pstats
-import unittest
-import torch
+import time, cProfile, pstats, unittest, torch
 from tinygrad.tensor import Tensor
 
 def start_profile():
@@ -91,7 +87,6 @@ class TestConvSpeed(unittest.TestCase):
     bpt = (bpt*1000/cnt)
     print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
     print("backward pass: %.3f ms, %.2fx off baseline %.3f ms" % (bpt, bpt/bpt_baseline, bpt_baseline))
-
 
 if __name__ == '__main__':
   unittest.main()
