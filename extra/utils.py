@@ -1,7 +1,5 @@
 from tinygrad.tensor import Tensor
-import tinygrad.nn as nn
-import pickle
-import numpy as np
+import pickle as pi, numpy as np
 
 def fetch(url):
   import requests, os, hashlib, tempfile
@@ -51,7 +49,7 @@ def my_unpickle(fb0):
   class Dummy:
     pass
 
-  class MyPickle(pickle.Unpickler):
+  class MyPickle(pi.Unpickler):
     def find_class(self, module, name):
       #print(module, name)
       if name == 'FloatStorage':
@@ -67,7 +65,7 @@ def my_unpickle(fb0):
           return HackParameter
       else:
         try:
-          return pickle.Unpickler.find_class(self, module, name)
+          return pi.Unpickler.find_class(self, module, name)
         except Exception:
           return Dummy
 
@@ -84,14 +82,14 @@ def fake_torch_load(b0):
   fb0 = io.BytesIO(b0)
 
   # skip three junk pickles
-  pickle.load(fb0)
-  pickle.load(fb0)
-  pickle.load(fb0)
+  pi.load(fb0)
+  pi.load(fb0)
+  pi.load(fb0)
 
   ret, key_prelookup = my_unpickle(fb0)
 
   # create key_lookup
-  key_lookup = pickle.load(fb0)
+  key_lookup = pi.load(fb0)
   key_real = [None] * len(key_lookup)
   for k,v in key_prelookup.items():
     key_real[key_lookup.index(k)] = v
