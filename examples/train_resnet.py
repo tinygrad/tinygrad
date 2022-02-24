@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, numpy as np, random
+import os, numpy as np
 from PIL import Image
 from tinygrad.tensor import Device
 from extra.utils import get_parameters
