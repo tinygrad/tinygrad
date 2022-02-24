@@ -1,5 +1,4 @@
-import os
-import torch
+import os, torch
 import numpy as np
 import unittest
 import timeit
