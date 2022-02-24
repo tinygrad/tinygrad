@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 #inspired by https://github.com/Matuzas77/MNIST-0.17/blob/master/MNIST_final_solution.ipynb
-import os
-import sys
+import os, sys
 sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
 
