@@ -1,7 +1,6 @@
 import numpy as np
 from PIL import Image
-import os
-import sys
+import os, sys
 sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
 from test_mnist import fetch_mnist
