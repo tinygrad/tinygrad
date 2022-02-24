@@ -1,6 +1,5 @@
 # pip3 install pycuda
-import pycuda.driver as cuda
-import numpy as np
+import pycuda.driver as cuda, numpy as np
 
 class CudaBuffer:
   def __init__(self, shape, hostbuf=None):
@@ -23,5 +22,3 @@ class CudaBuffer:
     ret = numpy.empty(self.shape)
     cuda.memcpy_dtoh(ret, self.buf)
     return ret
-
-
