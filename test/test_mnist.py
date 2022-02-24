@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-import os, unittest
-import numpy as np
+import unittest, numpy as np
 from tinygrad.tensor import Tensor
 import tinygrad.optim as optim
 from extra.training import train, evaluate
