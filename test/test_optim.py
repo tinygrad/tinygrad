@@ -1,6 +1,5 @@
 import numpy as np
-import torch
-import unittest
+import torch, unittest
 from tinygrad.tensor import Tensor
 from tinygrad.optim import Adam, SGD, RMSprop
 from extra.utils import get_parameters
@@ -25,7 +24,6 @@ def step_pytorch(optim, kwargs={}):
   optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
-
 class TinyNet():
   def __init__(self):
     self.x = Tensor(x_init.copy())
@@ -38,7 +36,6 @@ class TinyNet():
     out = out.mul(self.m).add(self.m).sum()
     return out
 
-
 class TorchNet():
   def __init__(self):
     self.x = torch.tensor(x_init.copy(), requires_grad=True)
@@ -50,7 +47,6 @@ class TorchNet():
     out = torch.nn.functional.log_softmax(out, dim=1)
     out = out.mul(self.m).add(self.m).sum()
     return out
-
 
 class TestOptim(unittest.TestCase):
 
