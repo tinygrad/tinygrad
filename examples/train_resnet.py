@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-import os
-import numpy as np
-import random
+import os, numpy as np, random
 from PIL import Image
-
 from tinygrad.tensor import Device
 from extra.utils import get_parameters
 from extra.training import train, evaluate
