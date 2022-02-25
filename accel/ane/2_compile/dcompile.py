@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-import os
-import sys
-import networkx as nx
-import pylab as plt
+import os, sys, networkx as nx, pylab as plt
 from networkx.drawing.nx_pydot import read_dot
 
 ret = os.system("./a.out "+sys.argv[1]+" debug")
