@@ -1,6 +1,5 @@
 from tinygrad.tensor import Tensor
-import numpy
-import os
+import numpy, os
 
 # Format Details:
 #  A KINNE parameter set is stored as a set of files named "snoop_bin_*.bin",
