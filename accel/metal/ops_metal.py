@@ -1,8 +1,7 @@
 # pip3 install pyobjc-framework-MetalPerformanceShaders
 from tinygrad.tensor import Function
 from tinygrad.helpers import binary_broadcast
-import numpy as np
-import Metal, MetalPerformanceShaders
+import numpy as np, Metal, MetalPerformanceShaders
 
 device = Metal.MTLCreateSystemDefaultDevice()
 mtl_queue = device.newCommandQueue()
