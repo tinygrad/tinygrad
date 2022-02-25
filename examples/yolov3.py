@@ -3,10 +3,7 @@
 
 import os
 GPU = os.getenv("GPU", None) is not None
-import sys
-import io
-import time
-import numpy as np
+import sys, io, time, numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
 from extra.utils import fetch, get_parameters
