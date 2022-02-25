@@ -1,5 +1,4 @@
-import os
-import numpy as np
+import os, numpy as np
 from tqdm import trange
 from extra.utils import get_parameters
 from tinygrad.tensor import Tensor, Device
@@ -56,4 +55,3 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
   acc, Y_test_pred = numpy_eval(Y_test, num_classes)
   print("test set accuracy is %f" % acc)
   return (acc, Y_test_pred) if return_predict else acc
-
