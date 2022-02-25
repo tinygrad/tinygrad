@@ -1,6 +1,4 @@
-import os
-import torch
-import numpy as np
+import os, torch, numpy as np
 from ..tensor import Function
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
