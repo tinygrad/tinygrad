@@ -1,5 +1,4 @@
-import numpy as np
-import torch, unittest
+import numpy as np, torch, unittest
 from tinygrad.tensor import Tensor
 from tinygrad.optim import Adam, SGD, RMSprop
 from extra.utils import get_parameters
