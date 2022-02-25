@@ -1,6 +1,4 @@
-import functools
-import pyopencl as cl
-import numpy as np
+import functools, pyopencl as cl, numpy as np
 from tinygrad.helpers import binary_broadcast
 from ..tensor import Function
 
