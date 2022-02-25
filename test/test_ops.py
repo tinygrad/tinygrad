@@ -1,6 +1,4 @@
-import os, torch
-import numpy as np
-import unittest, timeit, functools
+import os, torch, numpy as np, unittest, timeit, functools
 from tinygrad.tensor import Tensor, Device
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
