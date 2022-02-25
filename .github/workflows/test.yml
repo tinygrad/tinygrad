@@ -90,4 +90,3 @@ jobs:
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
       run: GPU=1 python -m pytest -s -v
-
