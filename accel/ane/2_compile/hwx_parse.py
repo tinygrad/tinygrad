@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import os
-import sys
+import os, sys
 from hexdump import hexdump
 from macholib import MachO
 def get_macho(fn):
