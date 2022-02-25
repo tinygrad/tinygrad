@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-import unittest, torch
-import numpy as np
+import unittest, torch, numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import *
+from tinygrad.nn import*
 from extra.utils import get_parameters
 
 @unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
