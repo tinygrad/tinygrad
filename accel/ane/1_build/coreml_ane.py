@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import numpy as np
-import coremltools as ct
+import numpy as np, coremltools as ct
 from coremltools.models.neural_network import datatypes, NeuralNetworkBuilder
 
 # KxK GEMM with bias
