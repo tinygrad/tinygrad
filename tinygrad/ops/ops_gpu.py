@@ -2,7 +2,7 @@ import functools
 import pyopencl as cl
 import numpy as np
 from tinygrad.helpers import binary_broadcast
-from ..tensor import Function
+from tinygrad.tensor import Function
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -99,14 +99,14 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
     osize = [1]*len(inp.shape)
   else:
     osize = np.array(inp.shape)
-    osize[list(axis)] = 1
+    osize[axis if isinstance(axis, int) else list(axis)] = 1
   ret = buffer_new(ctx, osize)
   if axis is None:
     ret.shape = (1,)
 
   # TODO: this is insanely slow
   reduce = clbuild(cl_ctx, "reduce", """
-  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
+  __kernel void reduce(__global const float *a_g, __global float *res_g, int sz, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret) {
     int gid = get_global_id(0);
 
@@ -130,8 +130,9 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
     }
     res_g[gid] = """+code2+""";
   }""")
-  reduce(cl_queue, [np.prod(osize)], None, inp.cl,
-    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
+  reduce(cl_queue, [np.prod(osize)], None,
+    inp.cl, ret.cl,
+    i32(np.prod(inp.shape)//np.prod(osize)),
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
     buffer_np(ctx, np.array(osize, dtype=np.int32)))
@@ -492,3 +493,18 @@ class Conv2D(Function):
     convw(cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
     convx(cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
+
+if __name__ == '__main__':
+  b1 = GPUBuffer((5000,5000), np.arange(5000**2))
+  #b2 = GPUBuffer((5,1), np.arange(5))
+
+  #a = reduce_op(None, 'a', '   b', b1, b2)
+  import time
+  s = time.time()
+  a = reduce_op(None, "out += a", "out", b1, axis=(0,1))
+  print(time.time()-s)
+  #a = binary_op(None, 'a * b', b1, b2)
+
+  #print(b1.toCPU())
+
+  print(a.toCPU())

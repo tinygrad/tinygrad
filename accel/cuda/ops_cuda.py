@@ -6,7 +6,7 @@ from tinygrad.helpers import binary_broadcast
 import pycuda.autoinit
 import pycuda.driver as cuda
 from pycuda.compiler import SourceModule
-from pycuda.tools import DeviceData 
+from pycuda.tools import DeviceData
 
 from rich import print
 
@@ -14,7 +14,6 @@ dev = cuda.Context.get_device()
 devdata = DeviceData(dev)
 
 MAX_THREADS_BLOCK = dev.get_attribute(cuda.device_attribute.MAX_THREADS_PER_BLOCK)
-#MAX_THREADS_MULTIPROCESSOR = dev.get_attribute(cuda.device_attribute.MAX_THREADS_PER_MULTIPROCESSOR)
 
 class CudaBuffer:
   def __init__(self, shape, hostbuf=None):
@@ -23,6 +22,9 @@ class CudaBuffer:
 
     self.buf = cuda.mem_alloc(self.sz)
     if hostbuf is not None:
+      if isinstance(hostbuf, CudaBuffer):
+        self.buf = hostbuf.buf
+      else:
         cuda.memcpy_htod(self.buf, hostbuf)
 
   @staticmethod
@@ -40,54 +42,24 @@ def buffer_new(shape, zero=False):
   return CudaBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
 def get_block_grid(shape):
-  if len(shape) == 1:
-    nelem = int(np.prod(shape))
-    block = (MAX_THREADS_BLOCK if nelem>MAX_THREADS_BLOCK else nelem, 1, 1)
-    d,r = divmod(shape[0], block[0])
-    grid = (d+(r>0), 1)
-  elif len(shape) == 2:
-    h,l = 1<<int(np.ceil(np.log2(MAX_THREADS_BLOCK)/2)), 1<<int(np.floor(np.log2(MAX_THREADS_BLOCK)/2))
-    block = (l if shape[0]>l else shape[0], h if shape[1]>h else shape[1], 1)
-    d1,r1 = divmod(shape[0], block[0])
-    d2,r2 = divmod(shape[1], block[1])
-    grid = (d1+(r1>0), d2+(r2>0))
-  #TODO: make better algo for choosing block size for 3D tensors
-  elif len(shape) == 3:
-    c1,c2 = 1<<int(np.ceil(np.log2(MAX_THREADS_BLOCK)/3)), 1<<int(np.ceil(np.log2(MAX_THREADS_BLOCK)/3))
-    block = (c1, c2, 3)
-    d1,r1 = divmod(shape[1], block[0])
-    d2,r2 = divmod(shape[2], block[1])
-    grid = (d1+(r1>0), d2+(r2>0), 3)
-  else: assert False, f"Invalid tensor shape: {shape}"
+  nelem = int(np.prod(shape))
+  block = (MAX_THREADS_BLOCK if nelem>MAX_THREADS_BLOCK else nelem, 1, 1)
+  d,r = divmod(nelem, block[0])
+  grid = (d+(r>0), 1)
   return block, grid
 
 def unary_op(code, x):
-  if len(x.shape) == 1:
-    M,N = 1,x.shape[0]
-  elif len(x.shape) == 2:
-    M,N = x.shape
-  elif len(x.shape) == 3:
-    M,N = x.shape[1],x.shape[2]
-  else: assert False, f"Invalid tensor shape: {x.shape}"
-  M,N = np.int32(M),np.int32(N)
-
   block,grid = get_block_grid(x.shape)
   ret = buffer_new(x.shape)
-
   mod = SourceModule(f"""
-  __global__ void unop(float *dest, float *a_g, int M, int N)
-  {{
+  __global__ void unop(float *dest, float *a_g) {{
     const int i = blockDim.x*blockIdx.x+threadIdx.x;
-    const int j = blockDim.y*blockIdx.y+threadIdx.y;
-    const int k = threadIdx.z;
-    //printf("k: %d, \\n", k);
-    float a = a_g[i+M*j+M*N*k];
-    //printf("i: %d, j: %d, k: %d, a: %f \\n", i,j,k,a);
-    dest[i+M*j+M*N*k] = {code};
+    float a = a_g[i];
+    dest[i] = {code};
   }}
   """)
   unop = mod.get_function("unop")
-  unop(ret.buf, x.buf, M, N, block=block, grid=grid)
+  unop(ret.buf, x.buf, block=block, grid=grid)
   return ret
 
 @lru_cache
@@ -100,80 +72,94 @@ def get_binop_prg(code, complist):
   for i in range(ndims):
     for j in range(2):
       if complist[i][j]:
-        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
+        idx_exprs[j] = f"idx_ret{i} + d{i}*({idx_exprs[j]})"
 
-  return SourceModule(f"""
-  __kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g{args}")
-  {{
-    int gid0 = get_global_id(0);{compute_idx_rets}
-    float a = x_g[{idx_exprs[0]}];
-    float b = y_g[{idx_exprs[1]}];
-    res_g[gid0] = {code};\n
+  print(idx_exprs, compute_idx_rets)
+  mod = SourceModule(f"""
+  __global__ void binop(float *res, float *a_g, float *b_g{args}) {{
+    const int gid0 = blockIdx.x*blockDim.x + threadIdx.x;{compute_idx_rets}
+    float a = a_g[{idx_exprs[0]}];
+    float b = b_g[{idx_exprs[1]}];
+    res[gid0] = {code};
   }}
   """)
+  return mod
 
 def binary_op(code, x, y):
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
+  prod_list = np.array(dimlist, dtype=np.int32)[-1::-1].cumprod(dtype=np.int32)[1::-1] # take cumprod from back to front
 
-  prg = get_binop_prg(code, tuple(complist))
-  ret = buffer_new(ctx, shape_ret, zero=True)
-  prg.binop([prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
+  prg = get_binop_prg(code, tuple(complist)).get_function('binop')
+  ret = buffer_new(shape_ret, zero=True)
+  block,grid = get_block_grid(shape_ret)
+  print("dimlist", dimlist)
+  print("prodlist", prod_list[1:], prod_list)
+  prg(ret.buf, x.buf, y.buf, *dimlist, *(prod_list[1:]), block=block, grid=grid)
+
   return ret
 
+def unbroadcast(ctx, out, in_sh):
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
+  return reduce_op(ctx, "out += a", "out", out, sum_axis)
 
-def reduce_op(code, code2, x, axis=None, start="0.0"):
-  print('start')
-  axis =[1]
-  if len(x.shape) == 1:
-    M,N = 1,x.shape[0]
-  elif len(x.shape) == 2:
-    M,N = x.shape
-  elif len(x.shape) == 3:
-    M,N = x.shape[1],x.shape[2]
-  else: assert False, f"Invalid tensor shape: {x.shape}"
-  M,N = np.int32(M),np.int32(N)
 
-  if axis is None:
-    # full reduce
-    osize = (1,1)
-  else:
-    osize = np.array(x.shape)
-    osize[list(axis)] = 1
-    if len(osize)>2:
-        osize = list(filter(lambda x: x != 1, osize))
-  ret = buffer_new(osize, True)
-  if axis is None:
-    ret.shape = (1,)
+def sum_prg(x,axis):
+  rshape = x.shape[:1] if sum(x.shape[:axis+1]) == axis else x.shape[:axis] + x.shape[axis+1:]
+  stride = np.prod(x.shape[axis+1:], dtype=np.int32)
+  jmplen = np.prod(x.shape[axis:], dtype=np.int32) # distance to next "block"
+  nsums = np.prod(rshape, dtype=np.int32)
 
-  block,grid = get_block_grid(x.shape)
+  ret = buffer_new(rshape, True)
+  block = (int(MAX_THREADS_BLOCK if nsums>MAX_THREADS_BLOCK else nsums), 1, 1)
+  grid = (int(nsums//MAX_THREADS_BLOCK + (nsums%MAX_THREADS_BLOCK>0)), 1)
 
   mod = SourceModule(f"""
-  __global__ void unop(float *dest, float *a_g, int M, int N)
-  {{
-    float tmp[10];
+  __global__ void sum(float *res, float *a_g, int stride, int jmplen, int nsums, int axis_dim) {{
+    const int d_idx = blockIdx.x*blockDim.x + threadIdx.x;
+    const int idx = d_idx%stride;
+    const int n = d_idx/stride;
 
-    const int d_idx = threadIdx.x;
-    //const int i = blockDim.x*blockIdx.x+threadIdx.x;
-    //const int j = blockDim.y*blockIdx.y+threadIdx.y;
-    //const int k = threadIdx.z;
-    //const int d_idx = (i+M*j+M*N*k)/N;
-    const int idx = (d_idx)*N;
-
-    float t = 0;
-    for (int i=idx; i < idx + N ; i++) {{ 
-        float a = a_g[i];
-        t += a;
+    float sum = 0;
+    if (d_idx<nsums) {{
+      for (int i=0; i<axis_dim ; i++) {{
+        sum += a_g[idx+stride*i+n*jmplen];
+      }}
+      res[d_idx] = sum;
     }}
-    tmp[d_idx] = t;
-
-    dest[d_idx] = tmp[d_idx];
   }}
   """)
-  unop = mod.get_function("unop")
-  unop(ret.buf, x.buf, M, N, block=(10,1,1), grid=(1,1))
+
+  prg = mod.get_function("sum")
+  import time
+  s = time.time()
+  prg(ret.buf, x.buf, stride, jmplen, nsums, np.int32(x.shape[axis]), block=block, grid=grid)
+  print("real time: ", time.time()-s)
+  return ret
+
+def sum_op(ret, axis):
+    if isinstance(axis,int): axis = [axis]
+    axis = sorted(axis)
+    for i in range(len(axis)):
+      ls = list(map(lambda x: x-1, axis[i+1:]))
+      axis = axis[:i+1]+ls
+    for ax in axis:
+      ret = sum_prg(ret, ax)
+    return ret
+
+def reduce_op(code, code2, x, axis=None, start="0.0"):
+  axis = 3 # tmp
   print(ret.toCPU())
   return ret
+
+class Add(Function):
+  def forward(ctx, x, y):
+    ctx.save_for_backward(x.shape, y.shape)
+    return binary_op('a+b', x, y)
+
+  def backward(ctx, grad_output):
+    grad_x, grad_y = grad_output, grad_output
+    shape_x, shape_y = ctx.saved_tensors
+    return unbroadcast(ctx, grad_x, shape_x), unbroadcast(ctx, grad_y, shape_y)
 
 class ReLU(Function):
   def forward(ctx, input):
@@ -184,81 +170,78 @@ class ReLU(Function):
     input, = ctx.saved_tensors
     return binary_op('a * (b >= 0)', grad_output, input)
 
+class Log(Function):
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op(ctx, 'log(a)', input)
+
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a / b', grad_output, input)
+
+class Exp(Function):
+  def forward(ctx, input):
+    ret = unary_op(ctx, 'exp(a)', input)
+    ctx.save_for_backward(ret)
+    return ret
+
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return binary_op(ctx, 'a * b', grad_output, ret)
+
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input)
-    return reduce_op('out += a', 'out', input, axis=axis)
+    return sum_op(input, axis)
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
     return binary_op('a * (b >= 0)', grad_output, input)
 
+class Reshape(Function):
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    r = CudaBuffer(shape, hostbuf=x)   # NOTE: this is not a copy
+    assert np.prod(x.shape) == np.prod(r.shape)
+    return r
+
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return CudaBuffer(in_shape, hostbuf=grad_output)
+
 if __name__ == "__main__":
 
   from tinygrad.tensor import Tensor, Device
 
-  n = 10
-  test = np.arange(n**2)-((n**2)//2)
-  test = test.reshape(n,n)
+  n = 5
+  test = np.arange(3*n**2)
+  test = test.reshape(3,n,n)
   test = test.astype(np.float32)
 
   r1 = Tensor(test, device=Device.CUDA)
-  r2 = r1.relu()
-  print(r2.data.toCPU())
-  r3 = r2.sum()
+  r2 = Tensor(np.arange(50**2).reshape(50,50).astype(np.float32), device=Device.CUDA)
+  #b1 = CudaBuffer((50000,5000), np.arange(5000*50000).astype(np.float32))
+
+  #r3 = r1 + r2
+
+  #print(r1.data.toCPU())
+  #print(r2.data.toCPU())
+  #print(r3.data.toCPU())
+
+  #print('@@@@@')
+  #r2 = r1.relu()
+  #print(r2.data.toCPU())
+  #r2 = Tensor(np.ones((3,n,n), dtype=np.float32), device=Device.CUDA)
+  #r2 = Tensor(np.arange(2*2*2*2).reshape(2,2,2,2).astype(np.float32), device=Device.CUDA)
+
+  #print('@@@@@')
+
+  import time
+  s = time.time()
+  r3 = r2.sum(axis=0)
+  #r3 = sum_op(r2, 0)
+  #r3 = sum_op(b1, 1)
+  print(time.time()-s)
   print(r3.data.toCPU())
- # r2.backward()
- # print(r2)
-
-  '''
-def binary_op(code, x, y):
-  if len(x.shape) == 1:
-      M,N = 1,x.shape[0]
-  elif len(x.shape) == 2:
-      M,N = x.shape
-  elif len(x.shape) == 3:
-      M,N = x.shape[1],x.shape[2]
-  else: assert False, f"Invalid tensor shape: {x.shape}"
-  M,N = np.int32(M),np.int32(N)
-
-  block,grid = block_grid(x.shape)
-  ret = np.empty(x.shape).astype(np.float32)
-
-  mod = SourceModule(f"""
-  __global__ void unop(float *dest, float *a_g, float *a_g, int M, int N)
-  {{
-    const int i = blockDim.x*blockIdx.x+threadIdx.x;
-    const int j = blockDim.y*blockIdx.y+threadIdx.y;
-    const int k = threadIdx.z;
-    //printf("k: %d, \\n", k);
-    float a = a_g[i+M*j+M*N*k];
-    float b = b_g[i+M*j+M*N*k];
-    //printf("i: %d, j: %d, k: %d, a: %f \\n", i,j,k,a);
-    dest[i+M*j+M*N*k] = {code};
-  }}
-  """)
-  unop = mod.get_function("unop")
-  unop(cuda.Out(ret), cuda.In(x), cuda.In(y), M, N, block=block, grid=grid)
-  return ret
-
-
-  from tinygrad.tensor import Tensor, Device
-  n = 25
-  test = np.arange(n**2)-((n**2)//2)
-  test = test.reshape(n,n)
-  tens = Tensor(test, device=Device.CUDA)
-  r = ReLU()
-  print(r.forward(test))
-
-
-
-  n = 1000
-  test = np.arange(3*n**2)
-  test = test.reshape(3,n,n).astype(np.float32)-((n**2//2))
-  test = test.astype(np.float32)
-
-  k = unary_op('max(a, (float)0.)', test)
-  print(test, test.shape)
-  print("\n")
-  print(k)
-  '''
+  #r2.backward()
