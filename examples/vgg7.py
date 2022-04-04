@@ -158,7 +158,7 @@ elif cmd == "train":
     sample_y = Tensor(y_img, requires_grad = False)
 
     # magic code roughly from readme example
-    # An explaination, in case anyone else has to go down this path:
+    # An explanation, in case anyone else has to go down this path:
     # This runs the actual network normally
     out = vgg7.forward(sample_x)
     # Subtraction determines error here (as this is an image, not classification).

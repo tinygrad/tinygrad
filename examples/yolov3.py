@@ -104,7 +104,7 @@ def bbox_iou(box1, box2):
   b1_x1, b1_y1, b1_x2, b1_y2 = box1[:,0], box1[:,1], box1[:,2], box1[:,3]
   b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,0], box2[:,1], box2[:,2], box2[:,3]
 
-  # get the corrdinates of the intersection rectangle
+  # get the coordinates of the intersection rectangle
   inter_rect_x1 = np.maximum(b1_x1, b2_x1)
   inter_rect_y1 = np.maximum(b1_y1, b2_y1)
   inter_rect_x2 = np.maximum(b1_x2, b2_x2)
@@ -197,7 +197,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
       except IndexError:
         break
   
-      # Zero out all the detections that have IoU > treshhold
+      # Zero out all the detections that have IoU > threshold
       iou_mask = np.expand_dims((ious < nms_conf), axis=1)
       image_pred_class[i+1:] *= iou_mask
   
@@ -493,7 +493,7 @@ class Darknet:
           # load biases of the conv layer
           num_biases = numel(conv.bias)
 
-          # Load wieghts
+          # Load weights
           conv_biases = Tensor(weights[ptr: ptr+num_biases])
           ptr += num_biases
 
