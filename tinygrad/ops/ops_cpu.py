@@ -7,7 +7,7 @@ class CPUBuffer(np.ndarray):
   def exp(x): return np.exp(x)
   def relu(x): return np.maximum(x, 0)
   def type(x, tt): return x.astype(tt)
-  def custompad(x, padding): np.pad(x, padding)
+  def custompad(x, padding): return np.pad(x, padding)
   def permute(x, order): return x.transpose(order)
   def expand(x, shp): return np.broadcast_to(x, shp)
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
