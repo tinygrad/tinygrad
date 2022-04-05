@@ -36,7 +36,7 @@ class ProfileOp:
           G.add_edge(id(x.data), id(y.data), label=self.name, color="blue" if self.backward else "black")
           G.nodes[id(x.data)]['label'], G.nodes[id(y.data)]['label'] = str(x.shape), str(y.shape)
       # which saved tensors does this backward depend on?
-      saved_tensors = filter(lambda x: any([isinstance(x, v) for v in Device.buffers.values()]), self.ctx.saved_tensors)
+      saved_tensors = filter(lambda x: any(isinstance(x, v) for v in Device.buffers.values()), self.ctx.saved_tensors)
       if self.backward:
         for x in saved_tensors:
           for y in self.output:
@@ -148,7 +148,7 @@ class Tensor:
     self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not any([x.requires_grad for x in t0._ctx.parents]):
+      if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx, t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
@@ -359,7 +359,7 @@ class Function:
 
   def __init__(self, *tensors):
     self.parents = tensors
-    self.requires_grad = any([t.requires_grad for t in tensors])
+    self.requires_grad = any(t.requires_grad for t in tensors)
     self.saved_tensors = []
 
   def save_for_backward(self, *x):
@@ -378,7 +378,7 @@ class Function:
       setattr(ctx, k, v)
     with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
       ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
-                   device=ctx.device, requires_grad=any([t.requires_grad for t in x]))
+                   device=ctx.device, requires_grad=any(t.requires_grad for t in x))
       po.output = [ret]
     if ret.requires_grad:
       ret._ctx = ctx
