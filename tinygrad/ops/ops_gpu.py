@@ -328,6 +328,8 @@ class Matmul(Function):
     isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
     ret = buffer_new(ctx, list(input.shape[0:-2])+[isize, osize])
 
+    print(input.shape, weight.shape, "WHHIH")
+
     matmul = clbuild(cl_ctx, "matmul", """
     __kernel void matmul(
       __global const float *input, __global const float *weight, __global float *res,
@@ -495,16 +497,25 @@ class Conv2D(Function):
     return dx, dw
 
 if __name__ == '__main__':
-  b1 = GPUBuffer((5000,5000), np.arange(5000**2))
+
+  from tinygrad.tensor import Tensor, Device
+
+  #b1 = GPUBuffer((2,50,50), np.arange(2*50**2))
+  #b2 = GPUBuffer((50,50), np.arange(50**2))
+  M = np.arange(2*50*50).reshape(2,50,50).astype(np.float32)
+  N = np.arange(100).reshape(50,2).astype(np.float32)
+  r2 = Tensor(M, device=Device.GPU)
+  r22 = Tensor(N, device=Device.GPU)
+  #b1 = Tensor(np.arange(2*5*50**2).reshape(2,5,50,50), device=Device.GPU)
+  #b2 = Tensor(np.arange(50).reshape(50,1), device=Device.GPU)
   #b2 = GPUBuffer((5,1), np.arange(5))
 
   #a = reduce_op(None, 'a', '   b', b1, b2)
-  import time
-  s = time.time()
-  a = reduce_op(None, "out += a", "out", b1, axis=(0,1))
-  print(time.time()-s)
+  r3 = r2@r22
+
+  print(r3.data.toCPU())
+
+
   #a = binary_op(None, 'a * b', b1, b2)
 
   #print(b1.toCPU())
-
-  print(a.toCPU())
