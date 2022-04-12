@@ -205,12 +205,17 @@ class Conv2D(Function):
 
     # needs to be optimized
     gdx = np.zeros((bs,ctx.groups,cin,OY,OX), dtype=tx.dtype)
+    # add path via np.einsum_path
+    # path[0] is the algorithm to execute,
+    # path[1] is the information of the calculated steps and time comsumption
+    path = np.einsum_path('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw, optimize='optimized')[0]
     for k in range(oy*ox):
       Y, X = k//ox, k%ox
       iY,iX = Y*ys, X*xs
-      #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
-      for g in range(ctx.groups):
-        tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
-        gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
+      # add path via einsum
+      gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw, optimize=path)
+      #for g in range(ctx.groups):
+        #tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
+        #gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
 
     return gdx.reshape((bs, ctx.groups*cin, OY, OX)), gdw.reshape((ctx.groups*rcout, cin, H, W))
