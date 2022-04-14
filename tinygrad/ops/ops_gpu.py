@@ -182,11 +182,15 @@ def get_binop_prg(cl_ctx, code, complist):
     res_g[gid0] = """+code+""";\n}""").build()
 
 def binary_op(ctx, code, x, y):
+  print(x.shape, y.shape)
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
+  print(shape_ret, dimlist, complist)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-
+  print(prod_list)
   prg = get_binop_prg(cl_ctx, code, tuple(complist))
   ret = buffer_new(ctx, shape_ret, zero=True)
+
+  print([prod_list[0]] if len(dimlist) > 0 else [1])
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 

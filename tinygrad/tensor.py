@@ -157,7 +157,7 @@ class Tensor:
           for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
-          assert list(g.shape) == list(t.shape), \
+          assert g.shape == t.shape, \
             f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
 
@@ -229,11 +229,6 @@ class Tensor:
   def matmul(self, w):
     if len(self.shape) > 2 and len(w.shape) == 2:
       return self.reshape(shape=(-1, self.shape[-1]))._matmul(w).reshape(shape=list(self.shape[0:-1]) + [-1])
-    elif len(self.shape) == 2 and len(w.shape) > 2:
-      print("HSDLFHJ:LDFJKDSFJDF")
-      print(self.shape, w.shape, list(self.shape[0:-1]) + [-1], (-1, self.shape[-1]))
-      print()
-      return self._matmul(w.reshape(shape=(w.shape[0], -1))).reshape(shape=(2,2,3))
     else:
       return self._matmul(w)
   dot = matmul
@@ -249,6 +244,8 @@ class Tensor:
   def sum(self, axis=None, keepdim=False):
     axis, out_shape = self._canonicalize_reduce_axis(axis)
     ret = self._sum(axis=axis)
+
+    print(ret.shape, out_shape)
     return ret if keepdim or ret.shape == out_shape else ret.reshape(shape=out_shape)
 
   def max(self, axis=None, keepdim=False):

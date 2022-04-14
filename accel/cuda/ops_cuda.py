@@ -1,22 +1,21 @@
+from turtle import shape
 import numpy as np
 from functools import lru_cache
 from tinygrad.ops.ops_cpu import CPUBuffer
 from tinygrad.tensor import Function
 from tinygrad.helpers import binary_broadcast
 
+import pycuda.autoinit
 import pycuda.driver as cuda
 from pycuda.compiler import SourceModule
 from pycuda.tools import DeviceData
 import pycuda.autoinit
 
-from rich import print
+#from rich import print
 import time
-import gc
 
 def init():
-  import pycuda.autoinit
   dev = cuda.Context.get_device()
-  devdata = DeviceData(dev)
   return dev.get_attribute(cuda.device_attribute.MAX_THREADS_PER_BLOCK)
 
 MAX_THREADS_BLOCK = init()
@@ -25,8 +24,7 @@ i32 = np.int32
 
 class CudaBuffer:
   def __init__(self, shape, hostbuf=None):
-    gc.collect()
-    self.shape = shape
+    self.shape = tuple(shape)
     self.dtype = np.float32
     self.sz = int(np.prod(shape)*4)
     self.buf = cuda.mem_alloc(self.sz)
@@ -70,14 +68,16 @@ def unary_op(code, x):
   block,grid = get_block_grid(x.shape)
   ret = buffer_new(x.shape)
   mod = SourceModule(f"""
-  __global__ void unop(float *dest, float *a_g) {{
+  __global__ void unop(float *dest, float *a_g, int sz) {{
     const int i = blockDim.x*blockIdx.x+threadIdx.x;
-    float a = a_g[i];
-    dest[i] = {code};
+    if (i < sz) {{
+      float a = a_g[i];
+      dest[i] = {code};
+    }}
   }}
   """)
   unop = mod.get_function("unop")
-  unop(ret.buf, x.buf, block=block, grid=grid)
+  unop(ret.buf, x.buf, i32(np.prod(x.shape)), block=block, grid=grid)
   return ret
 
 @lru_cache
@@ -93,24 +93,28 @@ def get_binop_prg(code, complist):
         idx_exprs[j] = f"idx_ret{i} + d{i}*({idx_exprs[j]})"
 
   mod = SourceModule(f"""
-  __global__ void binop(float *res, float *a_g, float *b_g{args}) {{
+  __global__ void binop(float *res, float *a_g, float *b_g, int sz{args}) {{
     const int gid0 = blockIdx.x*blockDim.x + threadIdx.x;{compute_idx_rets}
-    float a = a_g[{idx_exprs[0]}];
+    //printf("%d,%d\\n", gid0, sz);
+    float a = a_g[{idx_exprs[0]}];  
     float b = b_g[{idx_exprs[1]}];
-    res[gid0] = {code};
+    if (gid0 < sz) {{
+      res[gid0] = {code};
+    }}
   }}
   """)
   return mod
 
 def binary_op(code, x, y):
-  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[1::-1] # take cumprod from back to front
 
+  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
+  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
   prg = get_binop_prg(code, tuple(complist)).get_function('binop')
   ret = buffer_new(shape_ret, zero=True)
   block,grid = get_block_grid(shape_ret)
-  prg(ret.buf, x.buf, y.buf, *dimlist, *(prod_list[1:]), block=block, grid=grid)
 
+  sz = prod_list[0] if len(dimlist) > 0 else 1
+  prg(ret.buf, x.buf, y.buf, i32(sz), *dimlist, *(prod_list[1:]), block=block, grid=grid)
   return ret
 
 def sum_prg(x,axis):
@@ -146,10 +150,11 @@ def sum_prg(x,axis):
   return ret
 
 def sum_op(ret, axis):
+  if axis is None:
+    axis = list(range(len(ret.shape)))
   if isinstance(axis,int): axis = [axis]
   axis = sorted(axis)
   for i in range(len(axis)):
-    print( axis[i]-i)
     ret = sum_prg(ret, axis[i]-i)
   return ret
 
@@ -164,53 +169,61 @@ def reduce_op(code, code2, inp, axis=None, start="0.0"):
   if axis is None:
     ret.shape = (1,)
 
-  block,grid = get_block_grid(ret.shape)
+  block,grid = get_block_grid(np.prod(osize))
 
-  # TODO: this is insanely slow
   reduce = SourceModule(f"""
   __global__ void reduce(float *a_g, float *res_g, int sz, int prod, int n_dims, float *shape_x, float *shape_ret) {{
-    int gid = blockIdx.x*blockDim.x + threadIdx.x;
+    const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
     float out = {start};
-    for (int x = 0; x < sz; x++) {{
-      int idx = 0;  // compute index into a_g
-      int tprod = prod;
-      int tsz = sz;
-      for (int dim = 0; dim < n_dims; dim++) {{
-        int tshapex = (int) shape_x[dim];
-        idx *= tshapex;
-        if (tshapex == (int) shape_ret[dim]) {{   // dim from gid, don't reduce
-          tprod /= tshapex;
-          idx += (gid / tprod) % tshapex;
-        }} else {{  // dim from x
-          tsz /= tshapex;
-          idx += (x / tsz) % tshapex;
+    if (gid < prod) {{
+      for (int x = 0; x < sz; x++) {{
+        int idx = 0;  // compute index into a_g
+        int tprod = prod;
+        int tsz = sz;
+        for (int dim = 0; dim < n_dims; dim++) {{
+          int tshapex = (int)shape_x[dim];
+          idx *= tshapex;
+          if (tshapex == (int)shape_ret[dim]) {{   // dim from gid, don't reduce
+            tprod /= tshapex;
+            idx += (gid / tprod) % tshapex;
+          }} else {{  // dim from x
+            tsz /= tshapex;
+            idx += (x / tsz) % tshapex;
+          }}
         }}
+        float a = a_g[idx];
+        {code};
       }}
-      float a = a_g[idx];
-      {code};
+      res_g[gid] = {code2};
     }}
-    res_g[gid] = {code2};
   }}""").get_function("reduce")
 
-  reduce(
-    inp.buf, ret.buf,
+  reduce(inp.buf, ret.buf,
     i32(np.prod(inp.shape)//np.prod(osize)),
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.float32)),
     buffer_np(np.array(osize, dtype=np.float32)),
     block=block, grid=grid)
+  
   return ret
 
 def unbroadcast(out, in_sh):
-  axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
-  #return reduce_op("out += a", "out", out, sum_axis)
-  if axis is None:
-    # full reduce
-    axis = list(range(len(in_sh)))
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
+  return reduce_op("out += a", "out", out, sum_axis)
 
-  print(out, axis)
-  return sum_op(out, axis)
+class Sum(Function):
+  def forward(ctx, input, axis=None):
+    ctx.save_for_backward(input, axis)
+    #return sum_op(input, axis)
+    return reduce_op("out += a", "out", input, axis=axis)
+    
+  def backward(ctx, grad_output):
+    input, axis = ctx.saved_tensors
+    output = CudaBuffer(grad_output.shape, hostbuf=grad_output)
+    ret=binary_op('a+b', grad_output, buffer_new(input.shape, zero=True))
+    #print(ret.toCPU())
+    return ret
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -284,15 +297,6 @@ class Exp(Function):
     ret, = ctx.saved_tensors
     return binary_op('a * b', grad_output, ret)
 
-class Sum(Function):
-  def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input)
-    return sum_op(input, axis)
-
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op('a * (b >= 0)', grad_output, input)
-
 class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
@@ -321,9 +325,9 @@ def perm_axis(inp, order):
     int idx = 0;
     for(int i = n_axis-1; i>-1; i--) {{
       int stride = 1;
-      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
-      idx += (gi % shape[order[i]])*stride;
-      gi /= shape[order[i]];
+      for(int j=(int)order[i]+1; j<n_axis; j++) stride *= (int)shape[j];
+      idx += (gi % (int)shape[(int)order[i]])*stride;
+      gi /= (int)shape[(int)order[i]];
     }}
     res_g[gid] = a_g[idx];
     }}""").get_function("perm")
@@ -402,7 +406,7 @@ class Matmul(Function):
     matmul = SourceModule(f"""
     __global__ void matmul(float *input, float *weight, float *res,
                             int isize, int is0, int msize,
-                            int ws1, int osize) {{
+                            int ws1, int osize, int sz) {{
       int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
       int stride = gid/(osize*isize);
@@ -410,19 +414,21 @@ class Matmul(Function):
       int X = gid%isize; // isize
       int Y = (gid/isize)%osize; // osize
 
-      float ret = 0.0;
-      for (int x = 0; x < msize; x++) {{
-        ret += input[X * msize + x + isize*msize*stride] * weight[Y + x * osize + osize*msize*stride];
-      }}
+      if ((X * osize + Y + isize*osize*stride) < sz) {{
+        float ret = 0.0;
+        for (int x = 0; x < msize; x++) {{
+          ret += input[X * msize + x + isize*msize*stride] * weight[Y + x * osize + osize*msize*stride];
+        }}
 
-      res[X * osize + Y + isize*osize*stride] = ret;
+        res[X * osize + Y + isize*osize*stride] = ret;
+      }}
     }}""").get_function('matmul')
     
     ctx.save_for_backward(input, weight, matmul, cnt)
 
     # (isize,msize) x (msize,osize) = (isize,osize)
     matmul(input.buf, weight.buf, ret.buf, i32(isize),
-      i32(msize), i32(msize), i32(osize), i32(osize), block=block, grid=grid)
+      i32(msize), i32(msize), i32(osize), i32(osize), i32(nthr), block=block, grid=grid)
     return ret
 
   def backward(ctx, grad_output):
@@ -583,17 +589,27 @@ if __name__ == "__main__":
 
   #r1 = Tensor(test, device=Device.CUDA)
   #r2 = Tensor(np.arange(2*50000*5000).reshape(2,50000,5000).astype(np.float32), device=Device.CUDA)
-  M = np.arange(2*2*3*50*40).reshape(2,2,3,50,40).astype(np.float32)
-#  N = np.arange(3*10*400).reshape(3,400,10).astype(np.float32)
+  x = (3,4,5,6)
+  a,b = -0.5, 20
+  np.random.seed(42)
+  M = (np.random.random(size=x).astype(np.float32)+a)*b
+  #N = (np.random.random(size=x).astype(np.float32)+a)*b
+
   r2 = Tensor(M, device=Device.CUDA)
- # r22 = Tensor(N, device=Device.CUDA)
+  #r22 = Tensor(N, device=Device.CUDA)
   #r22 = CudaBuffer((2,50000,5000),np.arange(2*50000*5000).reshape(2,50000,5000).astype(np.float32))
 
 
 
-  r3 = r2.sum(axis=(1,3,4,2)).data.toCPU()
-  l = M.sum(axis=(1,4,3,2))
-  print(r3, l, np.allclose(r3,l))
+  #r3 = r2.sum(axis=(1,3,4,2)).data.toCPU()
+  r3 = r2.sum(axis=(1,3))
+  #print(r3.data.toCPU())
+  r3.mean().backward()
+  print("\n\n\n\n\n")
+  print("++++++++++++++++++++++++++++++++++++")
+  print(r2.grad.data.toCPU())
+  print("\n\n\n\n\n")
+  #print(r2.grad.data.toCPU())
   exit()
   r3= r2.matmul(r22)
   r3 = r3.data.toCPU()
