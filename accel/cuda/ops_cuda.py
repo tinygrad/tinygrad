@@ -225,6 +225,19 @@ class Sum(Function):
     #print(ret.toCPU())
     return ret
 
+class Max(Function):
+  def forward(ctx, input, axis=None):
+    ret = reduce_op("out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
+    ctx.save_for_backward(input, axis, ret)
+    return ret
+
+  def backward(ctx, grad_output):
+    input, axis, ret = ctx.saved_tensors
+    ret2 = binary_op("1.0*(a==b)", input, ret)
+    div = reduce_op("out += a", "out+1e-10", ret2, axis=axis)
+    ret3 = binary_op("a/b", ret2, div)
+    return binary_op('a*b', ret3, grad_output)
+
 class Add(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
@@ -364,15 +377,15 @@ def inner_slice(x, arg):
     int iptr = 0;
     int zero = 1;
     for (int dim = 0; dim < n_dims; dim++) {
-      prod /= shape_ret[dim];
-      int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
-      zero &= (sidx >= 0 && sidx < shape_x[dim]);
-      iptr = (iptr * shape_x[dim]) + sidx;
+      prod /= (int)shape_ret[dim];
+      int sidx = (gid / prod) % (int)shape_ret[dim] + (int)shift[dim];
+      zero &= (sidx >= 0 && sidx < (int)shape_x[dim]);
+      iptr = (iptr * (int)shape_x[dim]) + sidx;
     }
     output[gid] = zero ? input[iptr] : 0.0;
   }""").get_function('gslice')
 
-  gslice(x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
+  gslice(x.buf, ret.buf, i32(np.prod(ret.shape)), i32(len(ret.shape)),
     buffer_np(np.array(x.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)),
     buffer_np(np.array(shift, dtype=np.int32)),
@@ -405,8 +418,8 @@ class Matmul(Function):
 
     matmul = SourceModule(f"""
     __global__ void matmul(float *input, float *weight, float *res,
-                            int isize, int is0, int msize,
-                            int ws1, int osize, int sz) {{
+                            int isize, int is0, int is1, int msize,
+                            int ws0, int ws1, int osize, int sz) {{
       int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
       int stride = gid/(osize*isize);
@@ -417,7 +430,8 @@ class Matmul(Function):
       if ((X * osize + Y + isize*osize*stride) < sz) {{
         float ret = 0.0;
         for (int x = 0; x < msize; x++) {{
-          ret += input[X * msize + x + isize*msize*stride] * weight[Y + x * osize + osize*msize*stride];
+          ret += input[X * is0 + x * is1 + isize*msize*stride] *
+            weight[Y * ws0 + x * ws1 + msize*osize*stride];
         }}
 
         res[X * osize + Y + isize*osize*stride] = ret;
@@ -428,7 +442,9 @@ class Matmul(Function):
 
     # (isize,msize) x (msize,osize) = (isize,osize)
     matmul(input.buf, weight.buf, ret.buf, i32(isize),
-      i32(msize), i32(msize), i32(osize), i32(osize), i32(nthr), block=block, grid=grid)
+      i32(msize), i32(1), i32(msize), i32(1), i32(osize),
+      i32(osize), i32(nthr), block=block, grid=grid)
+
     return ret
 
   def backward(ctx, grad_output):
@@ -438,17 +454,23 @@ class Matmul(Function):
     grad_input = buffer_new(input.shape)
     grad_weight = buffer_new(weight.shape)
 
-    nthr = int(cnt*isize*osize)
+    nthr = int(cnt*isize*msize)
     block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
     grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
 
     # (isize,osize) x (msize,osize) = (isize,msize)
-    matmul(grad_output.buf, weight.buf, grad_input.buf, isize,
-      osize, osize, osize, msize, block=block, grid=grid)
+    matmul(grad_output.buf, weight.buf, grad_input.buf, i32(isize),
+      i32(osize), i32(1), i32(osize), i32(osize), i32(1),
+      i32(msize), i32(np.prod(grad_input.shape)), block=block, grid=grid)
+
+    nthr = int(cnt*msize*osize)
+    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
+    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
 
     # (isize,msize) x (isize,osize) = (msize,osize)
-    matmul(input.buf, grad_output.buf, grad_weight.buf, msize,
-      msize, isize, osize, osize, block=block, grid=grid)
+    matmul(input.buf, grad_output.buf, grad_weight.buf, i32(msize), i32(1),
+      i32(msize), i32(isize), i32(1), i32(osize),
+      i32(osize), i32(np.prod(grad_weight.shape)), block=block, grid=grid)
 
     return grad_input, grad_weight
 
@@ -467,9 +489,11 @@ class Conv2D(Function):
     ctx.save_for_backward(x,w)
 
     # output buffer
+
     ret = buffer_new((bs, cout, oy, ox))
 
-    nthr = int(bs*groups*rcout, oy, ox)
+
+    nthr = int(bs*groups*rcout * oy * ox)
     block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
     grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
 
@@ -477,16 +501,22 @@ class Conv2D(Function):
     # weight = (groups, rcout, cin, H, W)
     # output = (bs, groups, rcout, oy, ox)
 
+    #nthr = int(bs*groups*rcout, oy, ox)
     conv = SourceModule(f"""
-    __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs) {{
+    __global__ void conv(float *input, float *weight, float *output,
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {{
+      
+      const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
-      int B = get_global_id(0)/(groups*rcout);  // range 0-bs
-      int g = (get_global_id(0)/rcout)%groups;
-      int c = get_global_id(0) % rcout;
+      //int B = gid/(groups*rcout*oy*ox);  // range 0-bs
+      int B = gid/(groups*rcout*oy*ox);  // range 0-bs
+      int g = (gid/(rcout*oy*ox))%groups;
+      int c = (gid/(oy*ox))%rcout;
 
-      int Y = get_global_id(1);  // range 0-oy
-      int X = get_global_id(2);  // range 0-ox
+
+      int Y = gid%oy;  // range 0-oy
+      int X = (gid/oy)%ox;  // range 0-ox
+      //printf("%d %d %d\\n", B, Y, X);
       int IY = Y*ys;
       int IX = X*xs;
 
@@ -494,7 +524,7 @@ class Conv2D(Function):
       for (int ci = 0; ci < cin; ci++) {{
         for (int y = IY; y < IY+H; y++) {{
           for (int x = IX; x < IX+W; x++) {{
-            acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
+            acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * 
               weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
           }}
         }}
@@ -502,11 +532,12 @@ class Conv2D(Function):
       output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
     }}""").get_function('conv')
 
+
     conv(x.buf, w.buf, ret.buf,
       i32(H), i32(W), i32(groups), i32(rcout), i32(cin),
-      i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs),
-      block=block, grid=grid
-    )
+      i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs),
+      block=block, grid=grid)
+
     return ret
 
   def backward(ctx, grad_output):
@@ -527,15 +558,22 @@ class Conv2D(Function):
     # tensw = (groups*rcout, cin, H, W)
     # ggg = (bs, groups*rout, oy, ox)
 
+    #ctx.groups*rcout*cin*H*W
+    print("here?")
+    print("hhhh", ctx.groups, rcout, cin, H, W)
     convw = SourceModule("""
-    __kernel void convw(__global const float *tensx, __global const float *ggg, __global float *dw,
+    __global__ void convw(float *tensx, float *ggg, float *dw,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
 
-      int g = get_global_id(0)/(rcout*cin) ; // range 0-groups
-      int c = (get_global_id(0)/(cin)) %rcout; // range 0-rcout
-      int ci = get_global_id(0) % cin;        // range 0-cin
-      int y = get_global_id(1);  // range 0-H
-      int x = get_global_id(2);  // range 0-W
+      const int gid = blockIdx.x*blockDim.x + threadIdx.x;
+
+      int g = gid/(rcout*cin*H*W); // range 0-groups
+      int c = (gid/(cin*H*W))%rcout; // range 0-rcout
+      int ci = (gid/(H*W))%cin;        // range 0-cin
+      int y = gid%H;  // range 0-H
+      int x = (gid/H)%W;  // range 0-W
+      
+      //printf("kk %d %d %d %d\\n", c, ci, g,y,x);
 
       float acc = 0.0;
       for (int Y = 0; Y < oy; Y++) {
@@ -546,15 +584,19 @@ class Conv2D(Function):
           }
         }
       }
-      dw[get_global_id(0)*H*W + y*W + x] = acc;
-    }""")
+      dw[(gid/(H*W))*H*W + y*W + x] = acc;
+    }""").get_function('convw')
     convx = SourceModule("""
-    __kernel void convx(__global const float *tensw, __global const float *ggg, __global float *dx,
+    __global__ void convx(float *tensw, float *ggg, float *dx,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
 
-      int B = get_global_id(0);
-      int g = get_global_id(1);
-      int ci = get_global_id(2);
+      const int gid = blockIdx.x*blockDim.x + threadIdx.x;
+
+      int B = gid/(groups*cin);
+      int g = gid%groups;
+      int ci = (gid/groups)%cin;
+
+      printf("ttt %d %d %d\\n", B,g,ci);
 
       for (int Y = 0; Y < oy; Y++) {
         for (int X = 0; X < ox; X++) {
@@ -571,11 +613,22 @@ class Conv2D(Function):
         }
       }
     }
-    """)
+    """).get_function('convx')
 
     conv_args = i32(H), i32(W), i32(ctx.groups), i32(rcout), i32(cin), i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs)
-    convw(cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
-    convx(cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
+
+    nthr = int(ctx.groups*rcout*cin*H*W)
+    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
+    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+
+    convw(x.buf, grad_output.buf, dw.buf, *conv_args, block=block, grid=grid)
+
+    nthr = int(bs*ctx.groups*cin)
+    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
+    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+
+    convx(w.buf, grad_output.buf, dx.buf, *conv_args, block=block, grid=grid)
+
     return dx, dw
 
 if __name__ == "__main__":
@@ -659,5 +712,3 @@ if __name__ == "__main__":
   #r2 = Tensor(np.arange(2*2*2*2).reshape(2,2,2,2).astype(np.float32), device=Device.CUDA)
 
   #print('@@@@@')
-
-  #import time

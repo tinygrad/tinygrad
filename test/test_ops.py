@@ -5,15 +5,14 @@ import unittest
 import timeit
 import functools
 from tinygrad.tensor import Tensor, Device
-import gc
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
-  gc.collect()
   torch.manual_seed(0)
   if shps is None:
     ts = [torch.tensor(x, requires_grad=True) for x in vals]
   else:
     ts = [torch.tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=True) for x in shps]
+
 
   tst = [Tensor(x.detach().numpy()) for x in ts]
   out = torch_fxn(*ts)
@@ -71,7 +70,7 @@ class TestOps(unittest.TestCase):
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
   def test_softplus(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.si(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
   def test_gelu(self):
     pass
     # fails?
@@ -89,6 +88,7 @@ class TestOps(unittest.TestCase):
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     #helper_test_op([(2,2), (2,2,3)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
+
   def test_multidot(self):
     helper_test_op([(10,45,65), (10,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
