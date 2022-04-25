@@ -244,8 +244,6 @@ class Tensor:
   def sum(self, axis=None, keepdim=False):
     axis, out_shape = self._canonicalize_reduce_axis(axis)
     ret = self._sum(axis=axis)
-
-    print(ret.shape, out_shape)
     return ret if keepdim or ret.shape == out_shape else ret.reshape(shape=out_shape)
 
   def max(self, axis=None, keepdim=False):

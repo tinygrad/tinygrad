@@ -11,7 +11,6 @@ from pycuda.compiler import SourceModule
 from pycuda.tools import DeviceData
 import pycuda.autoinit
 
-#from rich import print
 import time
 
 def init():
@@ -32,8 +31,6 @@ class CudaBuffer:
     if hostbuf is not None:
       if isinstance(hostbuf, CudaBuffer):
         self.buf = hostbuf.buf
-#      elif isinstance(hostbuf, CPUBuffer):
-#        cuda.memcpy_htod(self.buf, hostbuf.flatten().astype(np.float32))
       else:
         cuda.memcpy_htod(self.buf, hostbuf.flatten().astype(np.float32))
 
@@ -57,15 +54,15 @@ def buffer_np(x):
   cuda.memcpy_htod(buf, x)
   return buf
 
-def get_block_grid(shape):
-  nelem = int(np.prod(shape))
+def get_block_grid(shape=None, nelem=None):
+  if shape is not None:
+    nelem = int(np.prod(shape))
   block = (MAX_THREADS_BLOCK if nelem>MAX_THREADS_BLOCK else nelem, 1, 1)
   d,r = divmod(nelem, block[0])
   grid = (d+(r>0), 1)
   return block, grid
 
 def unary_op(code, x):
-  print("unary!")
   block,grid = get_block_grid(x.shape)
   ret = buffer_new(x.shape)
   mod = SourceModule(f"""
@@ -97,7 +94,7 @@ def get_binop_prg(code, complist):
   __global__ void binop(float *res, float *a_g, float *b_g, int sz{args}) {{
     const int gid0 = blockIdx.x*blockDim.x + threadIdx.x;{compute_idx_rets}
     //printf("%d,%d\\n", gid0, sz);
-    float a = a_g[{idx_exprs[0]}];  
+    float a = a_g[{idx_exprs[0]}];
     float b = b_g[{idx_exprs[1]}];
     if (gid0 < sz) {{
       res[gid0] = {code};
@@ -107,8 +104,6 @@ def get_binop_prg(code, complist):
   return mod
 
 def binary_op(code, x, y):
-  print("binary!")
-
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
   prg = get_binop_prg(code, tuple(complist)).get_function('binop')
@@ -171,7 +166,6 @@ def reduce_op(code, code2, inp, axis=None, start="0.0"):
   if axis is None:
     ret.shape = (1,)
 
-  print("reduce")
   block,grid = get_block_grid(np.prod(osize))
 
   reduce = SourceModule(f"""
@@ -208,7 +202,7 @@ def reduce_op(code, code2, inp, axis=None, start="0.0"):
     buffer_np(np.array(inp.shape, dtype=np.float32)),
     buffer_np(np.array(osize, dtype=np.float32)),
     block=block, grid=grid)
-  
+
   return ret
 
 def unbroadcast(out, in_sh):
@@ -218,14 +212,12 @@ def unbroadcast(out, in_sh):
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
-    #return sum_op(input, axis)
     return reduce_op("out += a", "out", input, axis=axis)
-    
+
   def backward(ctx, grad_output):
     input, axis = ctx.saved_tensors
     output = CudaBuffer(grad_output.shape, hostbuf=grad_output)
     ret=binary_op('a+b', grad_output, buffer_new(input.shape, zero=True))
-    #print(ret.toCPU())
     return ret
 
 class Max(Function):
@@ -333,20 +325,22 @@ def perm_axis(inp, order):
   block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
   grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
 
-  perm = SourceModule(f"""
+  perm = SourceModule("""
   __global__ void perm(float *a_g, float *res_g, int n_axis,
-                       float *shape, float *order) {{
+                       float *shape, float *order, int sz) {
     int gid = blockIdx.x*blockDim.x + threadIdx.x;
     int gi = gid;
     int idx = 0;
-    for(int i = n_axis-1; i>-1; i--) {{
-      int stride = 1;
-      for(int j=(int)order[i]+1; j<n_axis; j++) stride *= (int)shape[j];
-      idx += (gi % (int)shape[(int)order[i]])*stride;
-      gi /= (int)shape[(int)order[i]];
-    }}
-    res_g[gid] = a_g[idx];
-    }}""").get_function("perm")
+    if (gid < sz) {
+      for(int i = n_axis-1; i>-1; i--) {
+        int stride = 1;
+        for(int j=(int)order[i]+1; j<n_axis; j++) stride *= (int)shape[j];
+        idx += (gi % (int)shape[(int)order[i]])*stride;
+        gi /= (int)shape[(int)order[i]];
+      }
+      res_g[gid] = a_g[idx];
+    }
+  }""").get_function("perm")
 
   perm(inp.buf, ret.buf, i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.float32)),
@@ -372,26 +366,29 @@ def inner_slice(x, arg):
   nthr = int(np.prod(ret.shape))
   block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
   grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
- 
+  sz = np.prod(oshape)
+
   gslice = SourceModule("""
   __global__ void gslice(float *input, float *output, int prod, int n_dims,
-                         float *shape_x, float *shape_ret, float *shift) {
+                         float *shape_x, float *shape_ret, float *shift, int sz) {
     int gid = blockIdx.x*blockDim.x + threadIdx.x;
-    int iptr = 0;
-    int zero = 1;
-    for (int dim = 0; dim < n_dims; dim++) {
-      prod /= (int)shape_ret[dim];
-      int sidx = (gid / prod) % (int)shape_ret[dim] + (int)shift[dim];
-      zero &= (sidx >= 0 && sidx < (int)shape_x[dim]);
-      iptr = (iptr * (int)shape_x[dim]) + sidx;
+    if (gid < sz) {
+      int iptr = 0;
+      int zero = 1;
+      for (int dim = 0; dim < n_dims; dim++) {
+        prod /= (int)shape_ret[dim];
+        int sidx = (gid / prod) % (int)shape_ret[dim] + (int)shift[dim];
+        zero &= (sidx >= 0 && sidx < (int)shape_x[dim]);
+        iptr = (iptr * (int)shape_x[dim]) + sidx;
+      }
+      output[gid] = zero ? input[iptr] : 0.0;
     }
-    output[gid] = zero ? input[iptr] : 0.0;
   }""").get_function('gslice')
 
   gslice(x.buf, ret.buf, i32(np.prod(ret.shape)), i32(len(ret.shape)),
     buffer_np(np.array(x.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)),
-    buffer_np(np.array(shift, dtype=np.int32)),
+    buffer_np(np.array(shift, dtype=np.int32)), i32(sz),
     block=block, grid=grid)
 
   return ret
@@ -419,11 +416,10 @@ class Matmul(Function):
     block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
     grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
 
-    print("matmul")
-    matmul = SourceModule(f"""
+    matmul = SourceModule("""
     __global__ void matmul(float *input, float *weight, float *res,
                             int isize, int is0, int is1, int msize,
-                            int ws0, int ws1, int osize, int sz) {{
+                            int ws0, int ws1, int osize, int sz) {
       int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
       int stride = gid/(osize*isize);
@@ -431,17 +427,17 @@ class Matmul(Function):
       int X = gid%isize; // isize
       int Y = (gid/isize)%osize; // osize
 
-      if ((X * osize + Y + isize*osize*stride) < sz) {{
+      int ind = X * osize + Y + isize*osize*stride;
+      if (ind < sz) {
         float ret = 0.0;
-        for (int x = 0; x < msize; x++) {{
+        for (int x = 0; x < msize; x++) {
           ret += input[X * is0 + x * is1 + isize*msize*stride] *
             weight[Y * ws0 + x * ws1 + msize*osize*stride];
-        }}
+        }
+        res[ind] = ret;
+      }
+    }""").get_function('matmul')
 
-        res[X * osize + Y + isize*osize*stride] = ret;
-      }}
-    }}""").get_function('matmul')
-    
     ctx.save_for_backward(input, weight, matmul, cnt)
 
     # (isize,msize) x (msize,osize) = (isize,osize)
@@ -457,7 +453,6 @@ class Matmul(Function):
 
     grad_input = buffer_new(input.shape)
     grad_weight = buffer_new(weight.shape)
-    print("matmulb")
 
     nthr = int(cnt*isize*msize)
     block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
@@ -494,59 +489,48 @@ class Conv2D(Function):
     ctx.save_for_backward(x,w)
 
     # output buffer
-
     ret = buffer_new((bs, cout, oy, ox))
 
-
-    print("conv")
     nthr = int(bs*groups*rcout * oy * ox)
     block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
     grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
 
-    # input  = (bs, groups, cin, iy, ix)
-    # weight = (groups, rcout, cin, H, W)
-    # output = (bs, groups, rcout, oy, ox)
-
-    #nthr = int(bs*groups*rcout, oy, ox)
-    conv = SourceModule(f"""
+    conv = SourceModule("""
     __global__ void conv(float *input, float *weight, float *output,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int sz) {{
-      
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int sz) {
+
       const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
-      //int B = gid/(groups*rcout*oy*ox);  // range 0-bs
       int B = gid/(groups*rcout*oy*ox);  // range 0-bs
       int g = (gid/(rcout*oy*ox))%groups;
       int c = (gid/(oy*ox))%rcout;
 
-
       int Y = gid%oy;  // range 0-oy
       int X = (gid/oy)%ox;  // range 0-ox
-      //printf("%d %d %d\\n", B, Y, X);
       int IY = Y*ys;
       int IX = X*xs;
-      if ((B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X) < sz) {{
+
+      int ind = B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X;
+      if (ind < sz) {
         float acc = 0.0;
-        for (int ci = 0; ci < cin; ci++) {{
-          for (int y = IY; y < IY+H; y++) {{
-            for (int x = IX; x < IX+W; x++) {{
-              acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * 
+        for (int ci = 0; ci < cin; ci++) {
+          for (int y = IY; y < IY+H; y++) {
+            for (int x = IX; x < IX+W; x++) {
+              acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] *
                 weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
-            }}
-          }}
-        }}
-        output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
-      }}
-    }}""").get_function('conv')
+            }
+          }
+        }
+        output[ind] = acc;
+      }
+    }""").get_function('conv')
 
 
-    sz = bs*cout*oy*ox 
+    sz = bs*cout*oy*ox
     conv(x.buf, w.buf, ret.buf,
       i32(H), i32(W), i32(groups), i32(rcout), i32(cin),
       i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs), i32(sz),
       block=block, grid=grid)
-
-    print("nice conv")
 
     return ret
 
@@ -564,12 +548,6 @@ class Conv2D(Function):
     dx = buffer_new((bs, cin_, iy, ix), zero=True)
     dw = buffer_new((cout, cin, H, W))
 
-    # tensx = (bs, groups*cin, iy, ix)
-    # tensw = (groups*rcout, cin, H, W)
-    # ggg = (bs, groups*rout, oy, ox)
-
-    #ctx.groups*rcout*cin*H*W
-    print("convb")
     convw = SourceModule("""
     __global__ void convw(float *tensx, float *ggg, float *dw,
       int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int sz) {
@@ -581,8 +559,9 @@ class Conv2D(Function):
       int ci = (gid/(H*W))%cin;        // range 0-cin
       int y = gid%H;  // range 0-H
       int x = (gid/H)%W;  // range 0-W
-      
-      if (((gid/(H*W))*H*W + y*W + x) < sz) {{
+
+      int ind = (gid/(H*W))*H*W + y*W + x;
+      if (ind < sz) {
         float acc = 0.0;
         for (int Y = 0; Y < oy; Y++) {
           for (int X = 0; X < ox; X++) {
@@ -592,8 +571,8 @@ class Conv2D(Function):
             }
           }
         }
-        dw[(gid/(H*W))*H*W + y*W + x] = acc;
-      }}
+        dw[ind] = acc;
+      }
     }""").get_function('convw')
     convx = SourceModule("""
     __global__ void convx(float *tensw, float *ggg, float *dx,
@@ -609,14 +588,15 @@ class Conv2D(Function):
         for (int X = 0; X < ox; X++) {
           for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
-              if ((B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x) < sz) {
+              int ind = B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x;
+              if (ind < sz) {
                 float acc = 0.0;
                 for (int c = 0; c < rcout; c++) {
                   acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] *
                     tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
                 }
-                dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x] += acc;
-              }                  
+                dx[ind] += acc;
+              }
             }
           }
         }
@@ -629,6 +609,7 @@ class Conv2D(Function):
     nthr = int(ctx.groups*rcout*cin*H*W)
     block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
     grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+    b,g = get_block_grid(nelem=nthr)
     sz = cout*cin*H*W
 
     convw(x.buf, grad_output.buf, dw.buf, *conv_args, i32(sz), block=block, grid=grid)
@@ -639,88 +620,5 @@ class Conv2D(Function):
     sz = bs*cin_*iy*ix
 
     convx(w.buf, grad_output.buf, dx.buf, *conv_args, i32(sz), block=block, grid=grid)
-    print("nice convb")
 
     return dx, dw
-
-if __name__ == "__main__":
-
-  from tinygrad.tensor import Tensor, Device
-
-  n = 5
-  test = np.arange(3*n**2)
-  test = test.reshape(3,n,n)
-  test = test.astype(np.float32)
-
-  #r1 = Tensor(test, device=Device.CUDA)
-  #r2 = Tensor(np.arange(2*50000*5000).reshape(2,50000,5000).astype(np.float32), device=Device.CUDA)
-  x = (3,4,5,6)
-  a,b = -0.5, 20
-  np.random.seed(42)
-  M = (np.random.random(size=x).astype(np.float32)+a)*b
-  #N = (np.random.random(size=x).astype(np.float32)+a)*b
-
-  r2 = Tensor(M, device=Device.CUDA)
-  #r22 = Tensor(N, device=Device.CUDA)
-  #r22 = CudaBuffer((2,50000,5000),np.arange(2*50000*5000).reshape(2,50000,5000).astype(np.float32))
-
-
-
-  #r3 = r2.sum(axis=(1,3,4,2)).data.toCPU()
-  r3 = r2.sum(axis=(1,3))
-  #print(r3.data.toCPU())
-  r3.mean().backward()
-  print("\n\n\n\n\n")
-  print("++++++++++++++++++++++++++++++++++++")
-  print(r2.grad.data.toCPU())
-  print("\n\n\n\n\n")
-  #print(r2.grad.data.toCPU())
-  exit()
-  r3= r2.matmul(r22)
-  r3 = r3.data.toCPU()
-  print(r3)
-  print()
-  print('fasit')
-  a=(M@N).astype(np.float32)
-  print(a)
-  print(np.allclose(a,r3))
-  exit()
-  binary_op('a+b', r22, r22)
-  #print(r1.data.toCPU())
-  print("steg1")
-  import time
-  s = time.time()
-  a = sum_op(r22,0)
-  #$a = r2.sum(axis=1)
-  print(time.time()-s)
-  print(a.toCPU())
-
-  exit()
-  r2 = r1+r1
-  print(r2.data.toCPU())
-  print("steg2")
-  r3 = r2.sum()
-  print(r3.data.toCPU())
-
-  r3.backward()
-
-  print(r3.data.toCPU())
-  print("grad")
-  print(r3.grad.data.toCPU())
-  print(r1.grad.data.toCPU())
-
-  #b1 = CudaBuffer((50000,5000), np.arange(5000*50000).astype(np.float32))
-
-  #r3 = r1 + r2
-
-  #print(r1.data.toCPU())
-  #print(r2.data.toCPU())
-  #print(r3.data.toCPU())
-
-  #print('@@@@@')
-  #r2 = r1.relu()
-  #print(r2.data.toCPU())
-  #r2 = Tensor(np.ones((4,n,n), dtype=np.float32), device=Device.CUDA)
-  #r2 = Tensor(np.arange(2*2*2*2).reshape(2,2,2,2).astype(np.float32), device=Device.CUDA)
-
-  #print('@@@@@')

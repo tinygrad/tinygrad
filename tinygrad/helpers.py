@@ -19,3 +19,4 @@ def binary_broadcast(x_shape, y_shape):
     push(np.int32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
 
   return shape_ret, dimlist, complist
+

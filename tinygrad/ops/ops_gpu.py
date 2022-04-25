@@ -2,7 +2,7 @@ import functools
 import pyopencl as cl
 import numpy as np
 from tinygrad.helpers import binary_broadcast
-from tinygrad.tensor import Function
+from ..tensor import Function
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -99,14 +99,14 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
     osize = [1]*len(inp.shape)
   else:
     osize = np.array(inp.shape)
-    osize[axis if isinstance(axis, int) else list(axis)] = 1
+    osize[list(axis)] = 1
   ret = buffer_new(ctx, osize)
   if axis is None:
     ret.shape = (1,)
 
   # TODO: this is insanely slow
   reduce = clbuild(cl_ctx, "reduce", """
-  __kernel void reduce(__global const float *a_g, __global float *res_g, int sz, int prod, int n_dims,
+  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret) {
     int gid = get_global_id(0);
 
@@ -130,9 +130,8 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
     }
     res_g[gid] = """+code2+""";
   }""")
-  reduce(cl_queue, [np.prod(osize)], None,
-    inp.cl, ret.cl,
-    i32(np.prod(inp.shape)//np.prod(osize)),
+  reduce(cl_queue, [np.prod(osize)], None, inp.cl,
+    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
     buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
     buffer_np(ctx, np.array(osize, dtype=np.int32)))
@@ -182,15 +181,11 @@ def get_binop_prg(cl_ctx, code, complist):
     res_g[gid0] = """+code+""";\n}""").build()
 
 def binary_op(ctx, code, x, y):
-  print(x.shape, y.shape)
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
-  print(shape_ret, dimlist, complist)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-  print(prod_list)
+
   prg = get_binop_prg(cl_ctx, code, tuple(complist))
   ret = buffer_new(ctx, shape_ret, zero=True)
-
-  print([prod_list[0]] if len(dimlist) > 0 else [1])
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
@@ -331,8 +326,6 @@ class Matmul(Function):
     cnt = np.prod(input.shape[0:-2]) if len(input.shape) > 2 else 1
     isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
     ret = buffer_new(ctx, list(input.shape[0:-2])+[isize, osize])
-
-    print(input.shape, weight.shape, "WHHIH")
 
     matmul = clbuild(cl_ctx, "matmul", """
     __kernel void matmul(
@@ -499,27 +492,3 @@ class Conv2D(Function):
     convw(cl_queue, [ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
     convx(cl_queue, [bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
     return dx, dw
-
-if __name__ == '__main__':
-
-  from tinygrad.tensor import Tensor, Device
-
-  #b1 = GPUBuffer((2,50,50), np.arange(2*50**2))
-  #b2 = GPUBuffer((50,50), np.arange(50**2))
-  M = np.arange(2*50*50).reshape(2,50,50).astype(np.float32)
-  N = np.arange(100).reshape(50,2).astype(np.float32)
-  r2 = Tensor(M, device=Device.GPU)
-  r22 = Tensor(N, device=Device.GPU)
-  #b1 = Tensor(np.arange(2*5*50**2).reshape(2,5,50,50), device=Device.GPU)
-  #b2 = Tensor(np.arange(50).reshape(50,1), device=Device.GPU)
-  #b2 = GPUBuffer((5,1), np.arange(5))
-
-  #a = reduce_op(None, 'a', '   b', b1, b2)
-  r3 = r2@r22
-
-  print(r3.data.toCPU())
-
-
-  #a = binary_op(None, 'a * b', b1, b2)
-
-  #print(b1.toCPU())

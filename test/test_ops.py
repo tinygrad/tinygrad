@@ -13,7 +13,6 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   else:
     ts = [torch.tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=True) for x in shps]
 
-
   tst = [Tensor(x.detach().numpy()) for x in ts]
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
@@ -21,7 +20,6 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   np.testing.assert_allclose(ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
 
   if not forward_only:
-
     out.mean().backward()
     ret.mean().backward()
 
@@ -43,7 +41,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
 class TestOps(unittest.TestCase):
 
   def test_add(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, a=0)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
   def test_mul(self):
@@ -87,8 +85,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
-    #helper_test_op([(2,2), (2,2,3)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
-
   def test_multidot(self):
     helper_test_op([(10,45,65), (10,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
