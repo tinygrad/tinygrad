@@ -1,23 +1,14 @@
-from turtle import shape
 import numpy as np
 from functools import lru_cache
-from tinygrad.ops.ops_cpu import CPUBuffer
 from tinygrad.tensor import Function
 from tinygrad.helpers import binary_broadcast
 
-import pycuda.autoinit
 import pycuda.driver as cuda
 from pycuda.compiler import SourceModule
-from pycuda.tools import DeviceData
 import pycuda.autoinit
 
-import time
-
-def init():
-  dev = cuda.Context.get_device()
-  return dev.get_attribute(cuda.device_attribute.MAX_THREADS_PER_BLOCK)
-
-MAX_THREADS_BLOCK = init()
+dev = cuda.Context.get_device()
+MAX_THREADS_BLOCK = dev.get_attribute(cuda.device_attribute.MAX_THREADS_PER_BLOCK)
 
 i32 = np.int32
 
