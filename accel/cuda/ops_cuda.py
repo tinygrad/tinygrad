@@ -48,18 +48,17 @@ def buffer_np(x):
 def get_block_grid(shape=None, nelem=None):
   if shape is not None:
     nelem = int(np.prod(shape))
-  block = (MAX_THREADS_BLOCK if nelem>MAX_THREADS_BLOCK else nelem, 1, 1)
-  d,r = divmod(nelem, block[0])
-  grid = (d+(r>0), 1)
+  block = (int([nelem, MAX_THREADS_BLOCK][int(nelem > MAX_THREADS_BLOCK)]), 1, 1)
+  grid = (int(1+(nelem-1)//MAX_THREADS_BLOCK), 1)
   return block, grid
 
 def unary_op(code, x):
-  block,grid = get_block_grid(x.shape)
+  block, grid = get_block_grid(x.shape)
   ret = buffer_new(x.shape)
   mod = SourceModule(f"""
-  __global__ void unop(float *dest, float *a_g, int sz) {{
+  __global__ void unop(float *dest, float *a_g, int nthr) {{
     const int i = blockDim.x*blockIdx.x+threadIdx.x;
-    if (i < sz) {{
+    if (i < nthr) {{
       float a = a_g[i];
       dest[i] = {code};
     }}
@@ -82,12 +81,11 @@ def get_binop_prg(code, complist):
         idx_exprs[j] = f"idx_ret{i} + d{i}*({idx_exprs[j]})"
 
   mod = SourceModule(f"""
-  __global__ void binop(float *res, float *a_g, float *b_g, int sz{args}) {{
+  __global__ void binop(float *res, float *a_g, float *b_g, int nthr{args}) {{
     const int gid0 = blockIdx.x*blockDim.x + threadIdx.x;{compute_idx_rets}
-    //printf("%d,%d\\n", gid0, sz);
     float a = a_g[{idx_exprs[0]}];
     float b = b_g[{idx_exprs[1]}];
-    if (gid0 < sz) {{
+    if (gid0 < nthr) {{
       res[gid0] = {code};
     }}
   }}
@@ -99,101 +97,57 @@ def binary_op(code, x, y):
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
   prg = get_binop_prg(code, tuple(complist)).get_function('binop')
   ret = buffer_new(shape_ret, zero=True)
-  block,grid = get_block_grid(shape_ret)
+  block, grid = get_block_grid(shape_ret)
 
-  sz = prod_list[0] if len(dimlist) > 0 else 1
-  prg(ret.buf, x.buf, y.buf, i32(sz), *dimlist, *(prod_list[1:]), block=block, grid=grid)
+  nthr = prod_list[0] if len(dimlist) > 0 else 1
+  prg(ret.buf, x.buf, y.buf, i32(np.prod(shape_ret)), *dimlist, *(prod_list[1:]), block=block, grid=grid)
   return ret
 
-def sum_prg(x,axis):
+@lru_cache
+def reduce_prg(x, axis, code, code2, start):
   rshape = x.shape[:1] if sum(x.shape[:axis+1]) == axis else list(x.shape[:axis]) + list(x.shape[axis+1:])
   stride = np.prod(x.shape[axis+1:], dtype=i32)
   jmplen = np.prod(x.shape[axis:], dtype=i32) # distance to next "block"
   nsums = np.prod(rshape, dtype=i32)
 
-  # very costly
   ret = buffer_new(rshape, True)
-
-  block = (int(MAX_THREADS_BLOCK if nsums>MAX_THREADS_BLOCK else nsums), 1, 1)
-  grid = (int(nsums//MAX_THREADS_BLOCK + (nsums%MAX_THREADS_BLOCK>0)), 1)
-
   mod = SourceModule(f"""
-  __global__ void sum(float *res, float *a_g, int stride, int jmplen, int nsums, int axis_dim) {{
+  __global__ void prg(float *res, float *a_g, int stride, int jmplen, int nsums, int axis_dim) {{
     const int d_idx = blockIdx.x*blockDim.x + threadIdx.x;
     const int idx = d_idx%stride;
     const int n = d_idx/stride;
 
-    float sum = 0;
+    float out = {start};
     if (d_idx<nsums) {{
       for (int i=0; i<axis_dim ; i++) {{
-        sum += a_g[idx+stride*i+n*jmplen];
+        float a = a_g[idx+stride*i+n*jmplen];
+        {code};
       }}
-      res[d_idx] = sum;
+      res[d_idx] = {code2};
     }}
   }}
   """)
+  prg = mod.get_function("prg")
 
-  prg = mod.get_function("sum")
+  block, grid = get_block_grid(nelem=nsums)
   prg(ret.buf, x.buf, stride, jmplen, nsums, i32(x.shape[axis]), block=block, grid=grid)
   return ret
 
-def sum_op(ret, axis):
+def reduce_op(code, code2, ret, axis=None, start='0.0'):
   if axis is None:
     axis = list(range(len(ret.shape)))
-  if isinstance(axis,int): axis = [axis]
-  axis = sorted(axis)
-  for i in range(len(axis)):
-    ret = sum_prg(ret, axis[i]-i)
-  return ret
-
-def reduce_op(code, code2, inp, axis=None, start="0.0"):
-  if axis is None:
-    # full reduce
-    osize = [1]*len(inp.shape)
+    new_shape = (1,)
   else:
-    osize = np.array(inp.shape)
-    osize[axis if isinstance(axis, int) else list(axis)] = 1
-  ret = buffer_new(osize)
-  if axis is None:
-    ret.shape = (1,)
+    new_shape = np.array(ret.shape)
+    new_shape[axis if isinstance(axis, int) else list(axis)] = 1
+    new_shape = tuple(new_shape)
+  axis = sorted(axis)
 
-  block,grid = get_block_grid(np.prod(osize))
+  # reduces one axis at a time
+  for i in range(len(axis)):
+    ret = reduce_prg(ret, axis[i]-i, code, code2, start)
 
-  reduce = SourceModule(f"""
-  __global__ void reduce(float *a_g, float *res_g, int sz, int prod, int n_dims, float *shape_x, float *shape_ret) {{
-    const int gid = blockIdx.x*blockDim.x + threadIdx.x;
-
-    float out = {start};
-    if (gid < prod) {{
-      for (int x = 0; x < sz; x++) {{
-        int idx = 0;  // compute index into a_g
-        int tprod = prod;
-        int tsz = sz;
-        for (int dim = 0; dim < n_dims; dim++) {{
-          int tshapex = (int)shape_x[dim];
-          idx *= tshapex;
-          if (tshapex == (int)shape_ret[dim]) {{   // dim from gid, don't reduce
-            tprod /= tshapex;
-            idx += (gid / tprod) % tshapex;
-          }} else {{  // dim from x
-            tsz /= tshapex;
-            idx += (x / tsz) % tshapex;
-          }}
-        }}
-        float a = a_g[idx];
-        {code};
-      }}
-      res_g[gid] = {code2};
-    }}
-  }}""").get_function("reduce")
-
-  reduce(inp.buf, ret.buf,
-    i32(np.prod(inp.shape)//np.prod(osize)),
-    i32(np.prod(osize)), i32(len(osize)),
-    buffer_np(np.array(inp.shape, dtype=np.float32)),
-    buffer_np(np.array(osize, dtype=np.float32)),
-    block=block, grid=grid)
-
+  ret.shape = new_shape
   return ret
 
 def unbroadcast(out, in_sh):
@@ -313,16 +267,15 @@ def perm_axis(inp, order):
   ret = buffer_new(osize)
 
   nthr = int(np.prod(osize))
-  block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-  grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+  block, grid = get_block_grid(osize)
 
   perm = SourceModule("""
   __global__ void perm(float *a_g, float *res_g, int n_axis,
-                       float *shape, float *order, int sz) {
+                       float *shape, float *order, int nthr) {
     int gid = blockIdx.x*blockDim.x + threadIdx.x;
     int gi = gid;
     int idx = 0;
-    if (gid < sz) {
+    if (gid < nthr) {
       for(int i = n_axis-1; i>-1; i--) {
         int stride = 1;
         for(int j=(int)order[i]+1; j<n_axis; j++) stride *= (int)shape[j];
@@ -335,7 +288,7 @@ def perm_axis(inp, order):
 
   perm(inp.buf, ret.buf, i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.float32)),
-    buffer_np(np.array(order, dtype=np.float32)),
+    buffer_np(np.array(order, dtype=np.float32)), i32(nthr),
     block=block, grid=grid)
 
   return ret
@@ -354,16 +307,14 @@ def inner_slice(x, arg):
   oshape = [y[1]-y[0] for y in arg]
   ret = buffer_new(oshape)
 
-  nthr = int(np.prod(ret.shape))
-  block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-  grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
-  sz = np.prod(oshape)
+  nthr = int(np.prod(oshape))
+  block, grid = get_block_grid(oshape)
 
   gslice = SourceModule("""
   __global__ void gslice(float *input, float *output, int prod, int n_dims,
-                         float *shape_x, float *shape_ret, float *shift, int sz) {
+                         float *shape_x, float *shape_ret, float *shift, int nthr) {
     int gid = blockIdx.x*blockDim.x + threadIdx.x;
-    if (gid < sz) {
+    if (gid < nthr) {
       int iptr = 0;
       int zero = 1;
       for (int dim = 0; dim < n_dims; dim++) {
@@ -379,7 +330,7 @@ def inner_slice(x, arg):
   gslice(x.buf, ret.buf, i32(np.prod(ret.shape)), i32(len(ret.shape)),
     buffer_np(np.array(x.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)),
-    buffer_np(np.array(shift, dtype=np.int32)), i32(sz),
+    buffer_np(np.array(shift, dtype=np.int32)), i32(nthr),
     block=block, grid=grid)
 
   return ret
@@ -403,14 +354,13 @@ class Matmul(Function):
     isize, msize, osize = i32(input.shape[-2]), i32(input.shape[-1]), i32(weight.shape[-1])
     ret = buffer_new(list(input.shape[0:-2])+[isize, osize])
 
-    nthr = int(cnt*isize*osize)
-    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+    nthr = int(np.prod(ret.shape))
+    block, grid = get_block_grid(nelem=nthr)
 
     matmul = SourceModule("""
     __global__ void matmul(float *input, float *weight, float *res,
-                            int isize, int is0, int is1, int msize,
-                            int ws0, int ws1, int osize, int sz) {
+                           int isize, int is0, int is1, int msize,
+                           int ws0, int ws1, int osize, int nthr) {
       int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
       int stride = gid/(osize*isize);
@@ -419,7 +369,7 @@ class Matmul(Function):
       int Y = (gid/isize)%osize; // osize
 
       int ind = X * osize + Y + isize*osize*stride;
-      if (ind < sz) {
+      if (ind < nthr) {
         float ret = 0.0;
         for (int x = 0; x < msize; x++) {
           ret += input[X * is0 + x * is1 + isize*msize*stride] *
@@ -445,23 +395,21 @@ class Matmul(Function):
     grad_input = buffer_new(input.shape)
     grad_weight = buffer_new(weight.shape)
 
-    nthr = int(cnt*isize*msize)
-    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+    nthr = int(np.prod(grad_input.shape))
+    block, grid = get_block_grid(nelem=nthr)
 
     # (isize,osize) x (msize,osize) = (isize,msize)
     matmul(grad_output.buf, weight.buf, grad_input.buf, i32(isize),
       i32(osize), i32(1), i32(osize), i32(osize), i32(1),
-      i32(msize), i32(np.prod(grad_input.shape)), block=block, grid=grid)
+      i32(msize), i32(nthr), block=block, grid=grid)
 
-    nthr = int(cnt*msize*osize)
-    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+    nthr = int(np.prod(grad_weight.shape))
+    block, grid = get_block_grid(nelem=nthr)
 
     # (isize,msize) x (isize,osize) = (msize,osize)
     matmul(input.buf, grad_output.buf, grad_weight.buf, i32(msize), i32(1),
       i32(msize), i32(isize), i32(1), i32(osize),
-      i32(osize), i32(np.prod(grad_weight.shape)), block=block, grid=grid)
+      i32(osize), i32(nthr), block=block, grid=grid)
 
     return grad_input, grad_weight
 
@@ -482,13 +430,12 @@ class Conv2D(Function):
     # output buffer
     ret = buffer_new((bs, cout, oy, ox))
 
-    nthr = int(bs*groups*rcout * oy * ox)
-    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
+    nthr = int(np.prod(ret.shape))
+    block, grid = get_block_grid(nelem=nthr)
 
     conv = SourceModule("""
     __global__ void conv(float *input, float *weight, float *output,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int sz) {
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int nthr) {
 
       const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -502,7 +449,7 @@ class Conv2D(Function):
       int IX = X*xs;
 
       int ind = B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X;
-      if (ind < sz) {
+      if (ind < nthr) {
         float acc = 0.0;
         for (int ci = 0; ci < cin; ci++) {
           for (int y = IY; y < IY+H; y++) {
@@ -517,10 +464,9 @@ class Conv2D(Function):
     }""").get_function('conv')
 
 
-    sz = bs*cout*oy*ox
     conv(x.buf, w.buf, ret.buf,
       i32(H), i32(W), i32(groups), i32(rcout), i32(cin),
-      i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs), i32(sz),
+      i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs), i32(nthr),
       block=block, grid=grid)
 
     return ret
@@ -536,12 +482,9 @@ class Conv2D(Function):
     assert cout % ctx.groups == 0
     rcout = cout//ctx.groups
 
-    dx = buffer_new((bs, cin_, iy, ix), zero=True)
-    dw = buffer_new((cout, cin, H, W))
-
     convw = SourceModule("""
     __global__ void convw(float *tensx, float *ggg, float *dw,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int sz) {
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int nthr) {
 
       const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -552,7 +495,7 @@ class Conv2D(Function):
       int x = (gid/H)%W;  // range 0-W
 
       int ind = (gid/(H*W))*H*W + y*W + x;
-      if (ind < sz) {
+      if (ind < nthr) {
         float acc = 0.0;
         for (int Y = 0; Y < oy; Y++) {
           for (int X = 0; X < ox; X++) {
@@ -565,9 +508,10 @@ class Conv2D(Function):
         dw[ind] = acc;
       }
     }""").get_function('convw')
+
     convx = SourceModule("""
     __global__ void convx(float *tensw, float *ggg, float *dx,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int sz) {
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int nthr) {
 
       const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -580,7 +524,7 @@ class Conv2D(Function):
           for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
               int ind = B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x;
-              if (ind < sz) {
+              if (ind < nthr) {
                 float acc = 0.0;
                 for (int c = 0; c < rcout; c++) {
                   acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] *
@@ -597,19 +541,15 @@ class Conv2D(Function):
 
     conv_args = i32(H), i32(W), i32(ctx.groups), i32(rcout), i32(cin), i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs)
 
+    dw = buffer_new(w.shape)
     nthr = int(ctx.groups*rcout*cin*H*W)
-    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
-    b,g = get_block_grid(nelem=nthr)
-    sz = cout*cin*H*W
+    block, grid = get_block_grid(nelem=nthr)
+    convw(x.buf, grad_output.buf, dw.buf, *conv_args, i32(np.prod(w.shape)), block=block, grid=grid)
 
-    convw(x.buf, grad_output.buf, dw.buf, *conv_args, i32(sz), block=block, grid=grid)
-
+    dx = buffer_new(x.shape, zero=True)
     nthr = int(bs*ctx.groups*cin)
-    block = ([nthr, MAX_THREADS_BLOCK][nthr > MAX_THREADS_BLOCK], 1, 1)
-    grid = (1+(nthr-1)//MAX_THREADS_BLOCK, 1)
-    sz = bs*cin_*iy*ix
-
-    convx(w.buf, grad_output.buf, dx.buf, *conv_args, i32(sz), block=block, grid=grid)
+    block, grid = get_block_grid(nelem=nthr)
+    convx(w.buf, grad_output.buf, dx.buf, *conv_args, i32(np.prod(x.shape)), block=block, grid=grid)
 
     return dx, dw
+
