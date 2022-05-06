@@ -52,67 +52,65 @@ def get_block_grid(shape=None, nelem=None):
   grid = (int(1+(nelem-1)//MAX_THREADS_BLOCK), 1)
   return block, grid
 
+# ************* unary ops *************
+
 def unary_op(code, x):
   block, grid = get_block_grid(x.shape)
-  ret = buffer_new(x.shape)
+
   mod = SourceModule(f"""
-  __global__ void unop(float *dest, float *a_g, int nthr) {{
+  __global__ void unop(float *dest, float *a_g, int bufsz) {{
     const int i = blockDim.x*blockIdx.x+threadIdx.x;
-    if (i < nthr) {{
+    if (i < bufsz) {{
       float a = a_g[i];
       dest[i] = {code};
     }}
   }}
   """)
   unop = mod.get_function("unop")
+
+  ret = buffer_new(x.shape)
   unop(ret.buf, x.buf, i32(np.prod(x.shape)), block=block, grid=grid)
   return ret
 
-@lru_cache
-def get_binop_prg(code, complist):
-  ndims = len(complist)
-  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
-  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
+class ReLU(Function):
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op('max(a, (float)0.)', input)
 
-  idx_exprs = ["0", "0"] # [idx_x, idx_y]
-  for i in range(ndims):
-    for j in range(2):
-      if complist[i][j]:
-        idx_exprs[j] = f"idx_ret{i} + d{i}*({idx_exprs[j]})"
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op('a * (b >= 0)', grad_output, input)
 
-  mod = SourceModule(f"""
-  __global__ void binop(float *res, float *a_g, float *b_g, int nthr{args}) {{
-    const int gid0 = blockIdx.x*blockDim.x + threadIdx.x;{compute_idx_rets}
-    float a = a_g[{idx_exprs[0]}];
-    float b = b_g[{idx_exprs[1]}];
-    if (gid0 < nthr) {{
-      res[gid0] = {code};
-    }}
-  }}
-  """)
-  return mod
+class Log(Function):
+  def forward(ctx, input):
+    ctx.save_for_backward(input)
+    return unary_op('log(a)', input)
 
-def binary_op(code, x, y):
-  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-  prg = get_binop_prg(code, tuple(complist)).get_function('binop')
-  ret = buffer_new(shape_ret, zero=True)
-  block, grid = get_block_grid(shape_ret)
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return binary_op('a / b', grad_output, input)
 
-  nthr = prod_list[0] if len(dimlist) > 0 else 1
-  prg(ret.buf, x.buf, y.buf, i32(np.prod(shape_ret)), *dimlist, *(prod_list[1:]), block=block, grid=grid)
-  return ret
+class Exp(Function):
+  def forward(ctx, input):
+    ret = unary_op('exp(a)', input)
+    ctx.save_for_backward(ret)
+    return ret
 
-@lru_cache
+  def backward(ctx, grad_output):
+    ret, = ctx.saved_tensors
+    return binary_op('a * b', grad_output, ret)
+
+# ************* reduce ops *************
+
 def reduce_prg(x, axis, code, code2, start):
   rshape = x.shape[:1] if sum(x.shape[:axis+1]) == axis else list(x.shape[:axis]) + list(x.shape[axis+1:])
   stride = np.prod(x.shape[axis+1:], dtype=i32)
-  jmplen = np.prod(x.shape[axis:], dtype=i32) # distance to next "block"
+  bstride = np.prod(x.shape[axis:], dtype=i32) # stride to next "block"
   nsums = np.prod(rshape, dtype=i32)
+  block, grid = get_block_grid(nelem=nsums)
 
-  ret = buffer_new(rshape, True)
   mod = SourceModule(f"""
-  __global__ void prg(float *res, float *a_g, int stride, int jmplen, int nsums, int axis_dim) {{
+  __global__ void prg(float *res, float *a_g, int stride, int bstride, int axis_dim, int nsums) {{
     const int d_idx = blockIdx.x*blockDim.x + threadIdx.x;
     const int idx = d_idx%stride;
     const int n = d_idx/stride;
@@ -120,7 +118,7 @@ def reduce_prg(x, axis, code, code2, start):
     float out = {start};
     if (d_idx<nsums) {{
       for (int i=0; i<axis_dim ; i++) {{
-        float a = a_g[idx+stride*i+n*jmplen];
+        float a = a_g[idx+stride*i+n*bstride];
         {code};
       }}
       res[d_idx] = {code2};
@@ -129,8 +127,8 @@ def reduce_prg(x, axis, code, code2, start):
   """)
   prg = mod.get_function("prg")
 
-  block, grid = get_block_grid(nelem=nsums)
-  prg(ret.buf, x.buf, stride, jmplen, nsums, i32(x.shape[axis]), block=block, grid=grid)
+  ret = buffer_new(rshape)
+  prg(ret.buf, x.buf, stride, bstride, i32(x.shape[axis]), nsums, block=block, grid=grid)
   return ret
 
 def reduce_op(code, code2, ret, axis=None, start='0.0'):
@@ -141,8 +139,8 @@ def reduce_op(code, code2, ret, axis=None, start='0.0'):
     new_shape = np.array(ret.shape)
     new_shape[axis if isinstance(axis, int) else list(axis)] = 1
     new_shape = tuple(new_shape)
-  axis = sorted(axis)
 
+  axis = sorted(axis)
   # reduces one axis at a time
   for i in range(len(axis)):
     ret = reduce_prg(ret, axis[i]-i, code, code2, start)
@@ -150,18 +148,13 @@ def reduce_op(code, code2, ret, axis=None, start='0.0'):
   ret.shape = new_shape
   return ret
 
-def unbroadcast(out, in_sh):
-  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
-  return reduce_op("out += a", "out", out, sum_axis)
-
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input, axis)
     return reduce_op("out += a", "out", input, axis=axis)
 
   def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
-    output = CudaBuffer(grad_output.shape, hostbuf=grad_output)
+    input, _ = ctx.saved_tensors
     ret=binary_op('a+b', grad_output, buffer_new(input.shape, zero=True))
     return ret
 
@@ -177,6 +170,47 @@ class Max(Function):
     div = reduce_op("out += a", "out+1e-10", ret2, axis=axis)
     ret3 = binary_op("a/b", ret2, div)
     return binary_op('a*b', ret3, grad_output)
+
+# ************* binary ops *************
+
+@lru_cache
+def get_binop_prg(code, complist):
+  ndims = len(complist)
+  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
+  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
+
+  idx_exprs = ["0", "0"] # [idx_x, idx_y]
+  for i in range(ndims):
+    for j in range(2):
+      if complist[i][j]:
+        idx_exprs[j] = f"idx_ret{i} + d{i}*({idx_exprs[j]})"
+
+  mod = SourceModule(f"""
+  __global__ void binop(float *res, float *a_g, float *b_g, int bufsz{args}) {{
+    const int gid0 = blockIdx.x*blockDim.x + threadIdx.x;{compute_idx_rets}
+    float a = a_g[{idx_exprs[0]}];
+    float b = b_g[{idx_exprs[1]}];
+    if (gid0 < bufsz) {{
+      res[gid0] = {code};
+    }}
+  }}
+  """)
+  return mod
+
+def binary_op(code, x, y):
+  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
+  block, grid = get_block_grid(shape_ret)
+  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
+
+  prg = get_binop_prg(code, tuple(complist)).get_function('binop')
+
+  ret = buffer_new(shape_ret, zero=True)
+  prg(ret.buf, x.buf, y.buf, i32(np.prod(shape_ret)), *dimlist, *(prod_list[1:]), block=block, grid=grid)
+  return ret
+
+def unbroadcast(out, in_sh):
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
+  return reduce_op("out += a", "out", out, sum_axis)
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -222,33 +256,7 @@ class Pow(Function):
                       binary_op('pow(a, (float)b) * log(a);', x, y))
     return unbroadcast(grad_x, x.shape), unbroadcast(grad_y, y.shape)
 
-class ReLU(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op('max(a, (float)0.)', input)
-
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op('a * (b >= 0)', grad_output, input)
-
-class Log(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op('log(a)', input)
-
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op('a / b', grad_output, input)
-
-class Exp(Function):
-  def forward(ctx, input):
-    ret = unary_op('exp(a)', input)
-    ctx.save_for_backward(ret)
-    return ret
-
-  def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return binary_op('a * b', grad_output, ret)
+# ************* movement ops *************
 
 class Reshape(Function):
   def forward(ctx, x, shape):
@@ -271,11 +279,11 @@ def perm_axis(inp, order):
 
   perm = SourceModule("""
   __global__ void perm(float *a_g, float *res_g, int n_axis,
-                       float *shape, float *order, int nthr) {
+                       float *shape, float *order, int bufsz) {
     int gid = blockIdx.x*blockDim.x + threadIdx.x;
     int gi = gid;
     int idx = 0;
-    if (gid < nthr) {
+    if (gid < bufsz) {
       for(int i = n_axis-1; i>-1; i--) {
         int stride = 1;
         for(int j=(int)order[i]+1; j<n_axis; j++) stride *= (int)shape[j];
@@ -312,9 +320,9 @@ def inner_slice(x, arg):
 
   gslice = SourceModule("""
   __global__ void gslice(float *input, float *output, int prod, int n_dims,
-                         float *shape_x, float *shape_ret, float *shift, int nthr) {
+                         float *shape_x, float *shape_ret, float *shift, int bufsz) {
     int gid = blockIdx.x*blockDim.x + threadIdx.x;
-    if (gid < nthr) {
+    if (gid < bufsz) {
       int iptr = 0;
       int zero = 1;
       for (int dim = 0; dim < n_dims; dim++) {
@@ -360,7 +368,7 @@ class Matmul(Function):
     matmul = SourceModule("""
     __global__ void matmul(float *input, float *weight, float *res,
                            int isize, int is0, int is1, int msize,
-                           int ws0, int ws1, int osize, int nthr) {
+                           int ws0, int ws1, int osize, int bufsz) {
       int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
       int stride = gid/(osize*isize);
@@ -369,7 +377,7 @@ class Matmul(Function):
       int Y = (gid/isize)%osize; // osize
 
       int ind = X * osize + Y + isize*osize*stride;
-      if (ind < nthr) {
+      if (ind < bufsz) {
         float ret = 0.0;
         for (int x = 0; x < msize; x++) {
           ret += input[X * is0 + x * is1 + isize*msize*stride] *
@@ -435,7 +443,7 @@ class Conv2D(Function):
 
     conv = SourceModule("""
     __global__ void conv(float *input, float *weight, float *output,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int nthr) {
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int bufsz) {
 
       const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -449,7 +457,7 @@ class Conv2D(Function):
       int IX = X*xs;
 
       int ind = B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X;
-      if (ind < nthr) {
+      if (ind < bufsz) {
         float acc = 0.0;
         for (int ci = 0; ci < cin; ci++) {
           for (int y = IY; y < IY+H; y++) {
@@ -484,7 +492,7 @@ class Conv2D(Function):
 
     convw = SourceModule("""
     __global__ void convw(float *tensx, float *ggg, float *dw,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int nthr) {
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int bufsz) {
 
       const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -495,7 +503,7 @@ class Conv2D(Function):
       int x = (gid/H)%W;  // range 0-W
 
       int ind = (gid/(H*W))*H*W + y*W + x;
-      if (ind < nthr) {
+      if (ind < bufsz) {
         float acc = 0.0;
         for (int Y = 0; Y < oy; Y++) {
           for (int X = 0; X < ox; X++) {
@@ -511,7 +519,7 @@ class Conv2D(Function):
 
     convx = SourceModule("""
     __global__ void convx(float *tensw, float *ggg, float *dx,
-      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int nthr) {
+      int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int bufsz) {
 
       const int gid = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -524,7 +532,7 @@ class Conv2D(Function):
           for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
               int ind = B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x;
-              if (ind < nthr) {
+              if (ind < bufsz) {
                 float acc = 0.0;
                 for (int c = 0; c < rcout; c++) {
                   acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] *
@@ -546,10 +554,9 @@ class Conv2D(Function):
     block, grid = get_block_grid(nelem=nthr)
     convw(x.buf, grad_output.buf, dw.buf, *conv_args, i32(np.prod(w.shape)), block=block, grid=grid)
 
-    dx = buffer_new(x.shape, zero=True)
+    dx = buffer_new(x.shape, True)
     nthr = int(bs*ctx.groups*cin)
     block, grid = get_block_grid(nelem=nthr)
     convx(w.buf, grad_output.buf, dx.buf, *conv_args, i32(np.prod(x.shape)), block=block, grid=grid)
 
     return dx, dw
-
