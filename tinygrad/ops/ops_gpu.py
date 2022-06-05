@@ -139,13 +139,13 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
 
 class Sum(Function):
   def forward(ctx, input, axis=None):
-    ctx.save_for_backward(input, axis)
+    ctx.save_for_backward(input.shape)
     return reduce_op(ctx, "out += a", "out", input, axis=axis)
 
   def backward(ctx, grad_output):
-    input, axis = ctx.saved_tensors
+    shape_input, = ctx.saved_tensors
     output = GPUBuffer(grad_output.shape, hostbuf=grad_output)
-    return binary_op(ctx, 'a+b', output, buffer_new(ctx, input.shape, zero=True))
+    return binary_op(ctx, 'a+b', output, buffer_new(ctx, shape_input, zero=True))
 
 class Max(Function):
   def forward(ctx, input, axis=None):

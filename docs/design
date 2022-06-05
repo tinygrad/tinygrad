@@ -1,0 +1,60 @@
+Getting the core instruction set correct is the value of tinygrad
+
+
+
+Unary Ops
+===
+
+These are the simplest to reason about, and have pointwise mem access.
+
+Forward          :    A      -> B
+Backward (binary):   (B', A) -> A'
+
+
+
+
+Reduce Ops (with axis)
+===
+
+These take in an axis argument. B is smaller than A
+Max and Sum are pretty different, do we really need Max?
+
+Forward          :    A      -> B
+Backward         :    B'     -> A'
+
+
+
+Binary Ops (with broadcasting)
+===
+
+Pointwise mem access also.
+Broadcasting adds complexity, aliased input.
+Unbroadcasting for grad is a sum, but should be combined with the ternary op.
+
+Forward           :   (A,  B)     -> C
+Backward (ternary):   (C', A, B)  -> (A', B')
+
+C.shape = max(A.shape, B.shape)
+
+
+
+Movement Ops
+===
+
+Reshape, Transpose, Slice
+
+Depending on your Tensor implementation, these are free.
+Reshape is almost always free.
+Slice can be made free.
+Transpose is hard to make free except in trivial cases.
+
+Regardless, these are "reindexings" of existing arrays
+
+
+
+
+Processing Ops
+===
+
+Matmul is 1 matmul for forward, 2 for backward.
+Conv2D is very complex.
