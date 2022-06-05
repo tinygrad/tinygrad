@@ -171,9 +171,8 @@ tinygrad will always be below 1000 lines. If it isn't, we will revert commits un
 * Purple edge is intermediates created in the forward
 
 ```bash
-GRAPH=1 python3 test/test_mnist.py TestMNIST.test_conv_onestep
-dot -Tsvg /tmp/net.dot -o /tmp/net.svg
-open /tmp/net.svg
+GRAPH=1 python3 test/test_mnist.py TestMNIST.test_sgd_onestep
+dot -Tsvg /tmp/net.dot -o /tmp/net.svg && open /tmp/net.svg
 ```
 
 ### Running tests

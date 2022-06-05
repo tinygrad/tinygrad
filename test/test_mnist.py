@@ -13,7 +13,6 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 
 # create a model
 class TinyBobNet:
-
   def __init__(self):
     self.l1 = Tensor.uniform(784, 128)
     self.l2 = Tensor.uniform(128, 10)
@@ -46,11 +45,11 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 class TestMNIST(unittest.TestCase):
-  def test_conv_onestep(self):
+  def test_sgd_onestep(self):
     np.random.seed(1337)
-    model = TinyConvNet()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=1)
+    model = TinyBobNet()
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
+    train(model, X_train, Y_train, optimizer, BS=69, steps=1)
 
   def test_conv(self):
     np.random.seed(1337)
