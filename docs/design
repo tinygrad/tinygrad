@@ -1,15 +1,15 @@
 Getting the core instruction set correct is the value of tinygrad
 
-
+Max size tensor is 6-D for the pool2d
 
 Unary Ops
 ===
 
 These are the simplest to reason about, and have pointwise mem access.
+A and B are always the same size
 
 Forward          :    A      -> B
 Backward (binary):   (B', A) -> A'
-
 
 
 
