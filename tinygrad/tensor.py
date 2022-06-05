@@ -43,10 +43,11 @@ class ProfileOp:
             G.add_edge(id(x), id(y.data), label=self.name, color="red")
       # did this forward create any intermediate tensors?
       if not self.backward:
-        for x in self.x:
-          for y in saved_tensors:
-            if id(x.data) != id(y):
-              G.add_edge(id(x.data), id(y), label=self.name, color="purple")
+        x_data = [x.data for x in self.x]
+        for y in saved_tensors:
+          if y not in x_data:    # if intermediate tensors are inputs they don't count
+            for x in x_data:
+              G.add_edge(id(x), id(y), label=self.name, color="purple")
     if DEBUG:
       self.output[0].data.toCPU()
       et = (time.time()-self.st)*1000.
