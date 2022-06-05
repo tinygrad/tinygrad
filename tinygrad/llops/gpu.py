@@ -189,3 +189,39 @@ def inner_slice(ctx, x, arg):
     buffer_np(ctx, np.array(ret.shape, dtype=np.int32)),
     buffer_np(ctx, np.array(shift, dtype=np.int32)))
   return ret
+
+# c = a@b
+def matmul(a, b, c, transpose_a=False, transpose_b=False):
+    cnt = np.prod(a.shape[0:-2]) if len(a.shape) > 2 else 1
+    isize, msize, osize = i32(a.shape[-2]), i32(a.shape[-1]), i32(c.shape[-1])
+    if transpose_a: isize,msize = msize,isize
+    assert isize == c.shape[-2]
+    assert (msize == b.shape[-1]) if transpose_b else (msize == b.shape[-2])
+    assert (osize == b.shape[-2]) if transpose_b else (osize == b.shape[-1])
+    
+    matmul_prg = clbuild("matmul", """
+    __kernel void matmul(
+      __global const float *input, __global const float *weight, __global float *res,
+      int isize, int is0, int is1, int msize, int ws0, int ws1, int osize
+   ) {
+      int stride = get_global_id(2);
+
+      int X = get_global_id(0); // isize
+      int Y = get_global_id(1); // osize
+
+      float ret = 0.0;
+      for (int x = 0; x < msize; x++) {
+        ret += input[X * is0 + x * is1 + isize*msize*stride] *
+          weight[Y * ws0 + x * ws1 + msize*osize*stride];
+      }
+
+      res[X * osize + Y + isize*osize*stride] = ret;
+    }""")
+
+    matmul_prg([isize, osize, cnt], None,
+      a.cl, b.cl, c.cl,
+      isize,
+      msize if not transpose_a else i32(1), i32(1) if not transpose_a else isize,
+      msize,
+      i32(1) if not transpose_b else msize, osize if not transpose_b else i32(1),
+      osize)
