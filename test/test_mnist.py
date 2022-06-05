@@ -46,6 +46,11 @@ class TinyConvNet:
     return x.dot(self.l1).logsoftmax()
 
 class TestMNIST(unittest.TestCase):
+  def test_conv_onestep(self):
+    np.random.seed(1337)
+    model = TinyConvNet()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    train(model, X_train, Y_train, optimizer, steps=1)
 
   def test_conv(self):
     np.random.seed(1337)

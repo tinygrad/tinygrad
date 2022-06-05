@@ -119,7 +119,7 @@ Relu, Log, Exp                  # unary ops
 Sum, Max                        # reduce ops (with axis argument)
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Reshape, Transpose, Slice       # movement ops
-Matmul, Conv2D                  # processing ops
+Matmul, Conv2D(NCHW)            # processing ops
 ```
 
 While more ops may be added, I think this base is stable.
@@ -161,6 +161,13 @@ See `examples/yolov3.py`
 ## The promise of small
 
 tinygrad will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
+
+### Drawing Execution Graph
+```bash
+GRAPH=1 python3 test/test_mnist.py TestMNIST.test_conv_onestep
+dot -Tsvg /tmp/net.dot -o /tmp/net.svg
+open /tmp/net.svg
+```
 
 ### Running tests
 
