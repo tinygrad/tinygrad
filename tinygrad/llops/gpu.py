@@ -211,8 +211,7 @@ def matmul(a, b, c, transpose_a=False, transpose_b=False):
 
     float ret = 0.0;
     for (int x = 0; x < msize; x++) {
-      ret += input[X * is0 + x * is1 + isize*msize*stride] *
-        weight[Y * ws0 + x * ws1 + msize*osize*stride];
+      ret += input[X * is0 + x * is1 + isize*msize*stride] * weight[Y * ws0 + x * ws1 + msize*osize*stride];
     }
 
     res[X * osize + Y + isize*osize*stride] = ret;
@@ -250,12 +249,10 @@ def conv(x,w,ret,conv_args):
 
     float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
-      for (int y = IY; y < IY+H; y++) {
-        for (int x = IX; x < IX+W; x++) {
-          acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
-            weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
-        }
-      }
+      for (int y = IY; y < IY+H; y++) { for (int x = IX; x < IX+W; x++) {
+        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
+          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
+      } }
     }
     output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
   }""")
@@ -280,14 +277,12 @@ def convdw(x,grad_output,dw,conv_args):
     int x = get_global_id(2);  // range 0-W
 
     float acc = 0.0;
-    for (int Y = 0; Y < oy; Y++) {
-      for (int X = 0; X < ox; X++) {
-        for (int B = 0; B < bs; B++) {
-          acc += ggg[B*groups*rcout*oy*ox + +g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
-            tensx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
+    for (int Y = 0; Y < oy; Y++) { for (int X = 0; X < ox; X++) {
+      for (int B = 0; B < bs; B++) {
+        acc += ggg[B*groups*rcout*oy*ox + +g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
+          tensx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
         }
-      }
-    }
+    } }
     dw[get_global_id(0)*H*W + y*W + x] = acc;
   }""")
   convdw_prg([groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in conv_args])
@@ -303,20 +298,16 @@ def convdx(w,grad_output,dx,conv_args):
     int g = get_global_id(1);
     int ci = get_global_id(2);
 
-    for (int Y = 0; Y < oy; Y++) {
-      for (int X = 0; X < ox; X++) {
-        for (int y = 0; y < H; y++) {
-          for (int x = 0; x < W; x++) {
-            float acc = 0.0;
-            for (int c = 0; c < rcout; c++) {
-              acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
-                tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-            }
-            dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x] += acc;
-          }
+    for (int Y = 0; Y < oy; Y++) { for (int X = 0; X < ox; X++) {
+      for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
+        float acc = 0.0;
+        for (int c = 0; c < rcout; c++) {
+          acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
+            tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
         }
-      }
-    }
+        dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x] += acc;
+      } }
+    } }
   }
   """)
   convdx_prg([bs, groups, cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in conv_args])
