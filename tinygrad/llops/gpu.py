@@ -39,10 +39,10 @@ class GPUBuffer:
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
-def buffer_new(ctx, shape, zero=False):
+def buffer_new(shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
-def buffer_np(ctx, x):
+def buffer_np(x):
   return cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
 
 def clbuffer(hostbuf, shape):
@@ -58,8 +58,8 @@ def clbuild(name, prg):
   return run
 
 # x -> ret
-def unary_op(ctx, code, x):
-  ret = buffer_new(ctx, x.shape)
+def unary_op(code, x):
+  ret = buffer_new(x.shape)
   unop = clbuild("unop", """
   __kernel void unop(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0);
@@ -70,7 +70,7 @@ def unary_op(ctx, code, x):
   return ret
 
 @functools.lru_cache
-def get_binop_prg(cl_ctx, code, complist):
+def get_binop_prg(code, complist):
   ndims = len(complist)
   args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
   compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
@@ -87,23 +87,23 @@ def get_binop_prg(cl_ctx, code, complist):
     float b = y_g["""+idx_exprs[1]+"""];
     res_g[gid0] = """+code+""";\n}""").build()
 
-def binary_op(ctx, code, x, y):
+def binary_op(code, x, y):
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
 
-  prg = get_binop_prg(cl_ctx, code, tuple(complist))
-  ret = buffer_new(ctx, shape_ret, zero=True)
+  prg = get_binop_prg(code, tuple(complist))
+  ret = buffer_new(shape_ret, zero=True)
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
-def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
+def reduce_op(code, code2, inp, axis=None, start="0.0"):
   if axis is None:
     # full reduce
     osize = [1]*len(inp.shape)
   else:
     osize = np.array(inp.shape)
     osize[list(axis)] = 1
-  ret = buffer_new(ctx, osize)
+  ret = buffer_new(osize)
   if axis is None:
     ret.shape = (1,)
 
@@ -136,14 +136,14 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
   reduce([np.prod(osize)], None, inp.cl,
     i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
     i32(np.prod(osize)), i32(len(osize)),
-    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(osize, dtype=np.int32)))
+    buffer_np(np.array(inp.shape, dtype=np.int32)),
+    buffer_np(np.array(osize, dtype=np.int32)))
   return ret
 
 
-def perm_axis(ctx, inp, order):
+def perm_axis(inp, order):
   osize = np.array(inp.shape)[list(order)]
-  ret = buffer_new(ctx, osize)
+  ret = buffer_new(osize)
   perm = clbuild("perm", """
   __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
                        __global const int *shape, __global const int *order) {
@@ -159,15 +159,15 @@ def perm_axis(ctx, inp, order):
     res_g[gid] = a_g[idx];
     }""")
   perm([np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
-    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(order, dtype=np.int32)))
+    buffer_np(np.array(inp.shape, dtype=np.int32)),
+    buffer_np(np.array(order, dtype=np.int32)))
   return ret
 
 # TODO: merge this with perm axis
-def inner_slice(ctx, x, arg):
+def inner_slice(x, arg):
   shift = [y[0] for y in arg]
   oshape = [y[1]-y[0] for y in arg]
-  ret = buffer_new(ctx, oshape)
+  ret = buffer_new(oshape)
   gslice = clbuild("gslice", """
   __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret,
@@ -185,9 +185,9 @@ def inner_slice(ctx, x, arg):
   }""")
   gslice([np.prod(ret.shape)], None,
     x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
-    buffer_np(ctx, np.array(x.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(ret.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(shift, dtype=np.int32)))
+    buffer_np(np.array(x.shape, dtype=np.int32)),
+    buffer_np(np.array(ret.shape, dtype=np.int32)),
+    buffer_np(np.array(shift, dtype=np.int32)))
   return ret
 
 # c = a@b
