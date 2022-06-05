@@ -33,7 +33,7 @@ class Exp(UnaryOp):
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input.shape)
-    return reduce_op("out += a", "out", input, axis=axis)
+    return reduce_op("out += a", input, axis=axis)
 
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
@@ -42,14 +42,14 @@ class Sum(Function):
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    ret = reduce_op("out = max(a,out)", "out", input, axis=axis, start="-INFINITY")
+    ret = reduce_op("out = max(a,out)", input, axis=axis, start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
     return ret
 
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
     ret2 = binary_op("1.0*(a==b)", input, ret)
-    div = reduce_op("out += a", "out+1e-10", ret2, axis=axis)
+    div = reduce_op("out += a", ret2, axis=axis, start="1e-10")
     ret3 = binary_op("a/b", ret2, div)
     return binary_op('a*b', ret3, grad_output)
 
@@ -57,7 +57,7 @@ class Max(Function):
 
 def unbroadcast(out, in_sh):
   sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
-  return reduce_op("out += a", "out", out, sum_axis)
+  return reduce_op("out += a", out, sum_axis)
 
 class Add(Function):
   def forward(ctx, x, y):

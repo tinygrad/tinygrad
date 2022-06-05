@@ -96,7 +96,7 @@ def binary_op(code, x, y):
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
-def reduce_op(code, code2, inp, axis=None, start="0.0"):
+def reduce_op(code, inp, axis=None, start="0.0"):
   if axis is None:
     # full reduce
     osize = [1]*len(inp.shape)
@@ -131,7 +131,7 @@ def reduce_op(code, code2, inp, axis=None, start="0.0"):
       float a = a_g[idx];
       """+code+""";
     }
-    res_g[gid] = """+code2+""";
+    res_g[gid] = out;
   }""")
   reduce([np.prod(osize)], None, inp.cl,
     i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
