@@ -163,6 +163,13 @@ See `examples/yolov3.py`
 tinygrad will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
 
 ### Drawing Execution Graph
+
+* Nodes are Tensors
+* Black edge is a forward pass
+* Blue edge is a backward pass
+* Red edge is data the backward pass depends on
+* Purple edge is intermediates created in the forward
+
 ```bash
 GRAPH=1 python3 test/test_mnist.py TestMNIST.test_conv_onestep
 dot -Tsvg /tmp/net.dot -o /tmp/net.svg
