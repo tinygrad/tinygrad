@@ -1,7 +1,7 @@
 import pyopencl as cl
 import numpy as np
 from ..tensor import Function
-from ..llops.gpu import GPUBuffer, clbuild, buffer_new, buffer_np, unary_op, binary_op, reduce_op
+from ..llops.gpu import GPUBuffer, clbuild, buffer_new, unary_op, binary_op, reduce_op, perm_axis, inner_slice
 
 def uint2(x, y):
   return np.array((x,y), dtype=cl.cltypes.uint2)
@@ -29,13 +29,13 @@ class Log(Function):
 
 class Exp(Function):
   def forward(ctx, input):
+    ctx.save_for_backward(input)
     ret = unary_op(ctx, 'exp(a)', input)
-    ctx.save_for_backward(ret)
     return ret
 
   def backward(ctx, grad_output):
-    ret, = ctx.saved_tensors
-    return binary_op(ctx, 'a * b', grad_output, ret)
+    input, = ctx.saved_tensors
+    return binary_op(ctx, 'a * exp(b)', grad_output, input)
 
 # ************* reduce ops *************
 
@@ -46,8 +46,7 @@ class Sum(Function):
 
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
-    output = GPUBuffer(grad_output.shape, hostbuf=grad_output)
-    return binary_op(ctx, 'a+b', output, buffer_new(ctx, shape_input, zero=True))
+    return binary_op(ctx, 'a+b', grad_output, buffer_new(ctx, shape_input, zero=True))
 
 class Max(Function):
   def forward(ctx, input, axis=None):
@@ -106,10 +105,10 @@ class Pow(Function):
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x = binary_op(ctx, 'a*b', grad_output,
-                      binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y))
-    grad_y = binary_op(ctx, 'a*b', grad_output,
-                      binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y))
+    grad_x_inter = binary_op(ctx, 'b * (pow((float)a, (float)(b-1.0)))', x, y)
+    grad_x = binary_op(ctx, 'a*b', grad_output, grad_x_inter)
+    grad_y_inter = binary_op(ctx, 'pow(a, (float)b) * log(a);', x, y)
+    grad_y = binary_op(ctx, 'a*b', grad_output, grad_y_inter)
     return unbroadcast(ctx, grad_x, x.shape), unbroadcast(ctx, grad_y, y.shape)
 
 # ************* movement ops *************
@@ -126,27 +125,6 @@ class Reshape(Function):
     in_shape, = ctx.saved_tensors
     return GPUBuffer(in_shape, hostbuf=grad_output)
 
-def perm_axis(ctx, inp, order):
-  osize = np.array(inp.shape)[list(order)]
-  ret = buffer_new(ctx, osize)
-  perm = clbuild("perm", """
-  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
-                       __global const int *shape, __global const int *order) {
-    int gid = get_global_id(0);
-    int gi = gid;
-    int idx = 0;
-    for(int i = n_axis-1; i>-1; i--) {
-      int stride = 1;
-      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
-      idx += (gi % shape[order[i]])*stride;
-      gi /= shape[order[i]];
-    }
-    res_g[gid] = a_g[idx];
-    }""")
-  perm([np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
-    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(order, dtype=np.int32)))
-  return ret
 
 class Transpose(Function):
   def forward(ctx, x, order=(1,0)):
@@ -155,33 +133,6 @@ class Transpose(Function):
 
   def backward(ctx, grad_output):
     return perm_axis(ctx, grad_output, np.argsort(ctx.order))
-
-# TODO: merge this with perm axis
-def inner_slice(ctx, x, arg):
-  shift = [y[0] for y in arg]
-  oshape = [y[1]-y[0] for y in arg]
-  ret = buffer_new(ctx, oshape)
-  gslice = clbuild("gslice", """
-  __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
-                       __global const int *shape_x, __global const int *shape_ret,
-                       __global const int *shift) {
-    int gid = get_global_id(0);
-    int iptr = 0;
-    int zero = 1;
-    for (int dim = 0; dim < n_dims; dim++) {
-      prod /= shape_ret[dim];
-      int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
-      zero &= (sidx >= 0 && sidx < shape_x[dim]);
-      iptr = (iptr * shape_x[dim]) + sidx;
-    }
-    output[gid] = zero ? input[iptr] : 0.0;
-  }""")
-  gslice([np.prod(ret.shape)], None,
-    x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
-    buffer_np(ctx, np.array(x.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(ret.shape, dtype=np.int32)),
-    buffer_np(ctx, np.array(shift, dtype=np.int32)))
-  return ret
 
 class Slice(Function):
   def forward(ctx, x, arg=None):

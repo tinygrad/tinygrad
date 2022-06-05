@@ -139,3 +139,53 @@ def reduce_op(ctx, code, code2, inp, axis=None, start="0.0"):
     buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
     buffer_np(ctx, np.array(osize, dtype=np.int32)))
   return ret
+
+
+def perm_axis(ctx, inp, order):
+  osize = np.array(inp.shape)[list(order)]
+  ret = buffer_new(ctx, osize)
+  perm = clbuild("perm", """
+  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
+                       __global const int *shape, __global const int *order) {
+    int gid = get_global_id(0);
+    int gi = gid;
+    int idx = 0;
+    for(int i = n_axis-1; i>-1; i--) {
+      int stride = 1;
+      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
+      idx += (gi % shape[order[i]])*stride;
+      gi /= shape[order[i]];
+    }
+    res_g[gid] = a_g[idx];
+    }""")
+  perm([np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
+    buffer_np(ctx, np.array(inp.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(order, dtype=np.int32)))
+  return ret
+
+# TODO: merge this with perm axis
+def inner_slice(ctx, x, arg):
+  shift = [y[0] for y in arg]
+  oshape = [y[1]-y[0] for y in arg]
+  ret = buffer_new(ctx, oshape)
+  gslice = clbuild("gslice", """
+  __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
+                       __global const int *shape_x, __global const int *shape_ret,
+                       __global const int *shift) {
+    int gid = get_global_id(0);
+    int iptr = 0;
+    int zero = 1;
+    for (int dim = 0; dim < n_dims; dim++) {
+      prod /= shape_ret[dim];
+      int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
+      zero &= (sidx >= 0 && sidx < shape_x[dim]);
+      iptr = (iptr * shape_x[dim]) + sidx;
+    }
+    output[gid] = zero ? input[iptr] : 0.0;
+  }""")
+  gslice([np.prod(ret.shape)], None,
+    x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
+    buffer_np(ctx, np.array(x.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(ret.shape, dtype=np.int32)),
+    buffer_np(ctx, np.array(shift, dtype=np.int32)))
+  return ret
