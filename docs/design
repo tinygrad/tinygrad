@@ -38,23 +38,31 @@ C.shape = max(A.shape, B.shape)
 
 
 
-Movement Ops
+Movement Ops (2 or 1)
 ===
 
 Reshape, Transpose, Slice
 
 Depending on your Tensor implementation, these are free.
 Reshape is almost always free.
-Slice can be made free.
+Slice can be made free, but probably shouldn't be.
 Transpose is hard to make free except in trivial cases.
 
 Regardless, these are "reindexings" of existing arrays
+Transpose and Slice are similar enough I think they can be merged.
+They should use a DMA engine
 
 
 
-
-Processing Ops
+Processing Ops (4)
 ===
 
 Matmul is 1 matmul for forward, 2 for backward.
-Conv2D is very complex.
+* It's actually three matmuls transposed
+* cublasSgemm()
+
+Conv2D is very complex. It seems to need three.
+* cudnnConvolutionForward()
+* cudnnConvolutionBackwardData()
+* cudnnConvolutionBackwardFilter()
+NOTE: Tensor Cores require that the tensors be in the NHWC data layout

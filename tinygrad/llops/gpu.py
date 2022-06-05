@@ -1,5 +1,4 @@
 # llops don't know about derivatives
-
 import functools
 import numpy as np
 import pyopencl as cl
@@ -44,11 +43,6 @@ def buffer_new(shape, zero=False):
 
 def buffer_np(x):
   return cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-
-def clbuffer(hostbuf, shape):
-  return cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0),
-            4*np.prod(shape),
-            hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
 
 @functools.lru_cache
 def clbuild(name, prg):
