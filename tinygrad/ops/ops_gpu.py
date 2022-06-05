@@ -199,11 +199,8 @@ class Conv2D(Function):
       output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
     }""")
 
-    conv([bs*groups*rcout, oy, ox], None,
-      x.cl, w.cl, ret.cl,
-      i32(H), i32(W), i32(groups), i32(rcout), i32(cin),
-      i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs)
-    )
+    conv_args = H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs
+    conv([bs*groups*rcout, oy, ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in conv_args])
     return ret
 
   def backward(ctx, grad_output):
@@ -270,7 +267,7 @@ class Conv2D(Function):
     }
     """)
 
-    conv_args = i32(H), i32(W), i32(ctx.groups), i32(rcout), i32(cin), i32(oy), i32(ox), i32(iy), i32(ix), i32(ys), i32(xs), i32(bs)
-    convw([ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *conv_args)
-    convx([bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *conv_args)
+    conv_args = H, W, ctx.groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs
+    convw([ctx.groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in conv_args])
+    convx([bs, ctx.groups, cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in conv_args])
     return dx, dw
