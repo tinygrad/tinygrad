@@ -12,19 +12,18 @@ class BatchNorm2D:
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x):
-    if self.track_running_stats or Tensor.training:
+    if Tensor.training:
       x_detached = x.detach()
       batch_mean = x_detached.mean(axis=(0,2,3))
       y = (x_detached - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
 
-    if self.track_running_stats:
-      self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
-      self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
-      if self.num_batches_tracked is None: self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
-      self.num_batches_tracked += 1
+      if self.track_running_stats:
+        self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
+        self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
+        if self.num_batches_tracked is None: self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+        self.num_batches_tracked += 1
 
-    if Tensor.training:
       return self.normalize(x, batch_mean, batch_var)
 
     return self.normalize(x, self.running_mean, self.running_var)
