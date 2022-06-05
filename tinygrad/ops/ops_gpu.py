@@ -3,39 +3,30 @@ import numpy as np
 from ..tensor import Function
 from ..llops.gpu import GPUBuffer, clbuild, buffer_new, unary_op, binary_op, reduce_op, perm_axis, inner_slice
 
-def uint2(x, y):
-  return np.array((x,y), dtype=cl.cltypes.uint2)
 i32 = np.int32
 
 # ************* unary ops *************
 
-class ReLU(Function):
+class UnaryOp(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return unary_op(ctx, 'max(a, (float)0.)', input)
+    return unary_op(ctx, ctx.fop, input)
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    return binary_op(ctx, 'a * (b >= 0)', grad_output, input)
+    return binary_op(ctx, ctx.bop, grad_output, input)
 
-class Log(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    return unary_op(ctx, 'log(a)', input)
+class ReLU(UnaryOp):
+  fop = 'max(a, (float)0.)'
+  bop = 'a * (b >= 0)'
 
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a / b', grad_output, input)
+class Log(UnaryOp):
+  fop = 'log(a)'
+  bop = 'a / b'
 
-class Exp(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
-    ret = unary_op(ctx, 'exp(a)', input)
-    return ret
-
-  def backward(ctx, grad_output):
-    input, = ctx.saved_tensors
-    return binary_op(ctx, 'a * exp(b)', grad_output, input)
+class Exp(UnaryOp):
+  fop = 'exp(a)'
+  bop = 'a * exp(b)'
 
 # ************* reduce ops *************
 
