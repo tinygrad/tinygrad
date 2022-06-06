@@ -2,9 +2,9 @@ import pyopencl as cl
 import numpy as np
 from tinygrad.helpers import binary_broadcast
 from ..tensor import Function
-from ..llops.gpu import GPUBuffer
-from ..llops.gpu import unary_op, binary_op, reduce_op, perm_axis, inner_slice
-from ..llops.gpu import matmul, conv, convdw, convdx
+from ..llops.opencl import GPUBuffer
+from ..llops.opencl import unary_op, binary_op, reduce_op, perm_axis, inner_slice
+from ..llops.opencl import matmul, conv, convdw, convdx
 
 def buffer_new(shape, zero=False):
   return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
