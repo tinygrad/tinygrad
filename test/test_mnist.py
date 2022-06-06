@@ -57,6 +57,12 @@ class TestMNIST(unittest.TestCase):
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1)
 
+  def test_adam_threestep(self):
+    np.random.seed(1337)
+    model = TinyBobNet()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    train(model, X_train, Y_train, optimizer, BS=69, steps=3)
+
   def test_conv_onestep(self):
     np.random.seed(1337)
     model = TinyConvNet()
