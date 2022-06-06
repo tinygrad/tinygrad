@@ -31,9 +31,7 @@ class Exp(UnaryOp):
 # ************* reduce ops *************
 
 def reduce_shape(shape, axis):
-  osize = np.array(shape)
-  osize[list(axis)] = 1
-  return osize
+  return [1 if i in axis else shape[i] for i in range(len(shape))]
 
 class Sum(Function):
   def forward(ctx, input, axis=None):
@@ -49,20 +47,20 @@ class Sum(Function):
 class Max(Function):
   def forward(ctx, input, axis=None):
     ret = reduce_op("out = max(a,out)", input, Buffer(reduce_shape(input.shape, axis)), start="-INFINITY")
-    ctx.save_for_backward(input, axis, ret)
+    ctx.save_for_backward(input, ret)
     return ret
 
   def backward(ctx, grad_output):
-    input, axis, ret = ctx.saved_tensors
+    input, ret = ctx.saved_tensors
     ret2 = binary_op("1.0*(a==b)", input, ret, Buffer(input.shape))
-    div = reduce_op("out += a", ret2, Buffer(reduce_shape(ret2.shape, axis)), start="1e-10")
+    div = reduce_op("out += a", ret2, Buffer(grad_output.shape), start="1e-10")
     binary_op("a/b", ret2, div, ret2)
     return binary_op('a*b', ret2, grad_output, ret2)
 
 # ************* binary ops *************
 
-def unbroadcast(out, in_sh):
-  return reduce_op("out += a", out, Buffer(in_sh))
+def unbroadcast(out, in_sh, code="out += a"):
+  return reduce_op(code, out, Buffer(in_sh))
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -82,7 +80,7 @@ class Sub(Function):
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
-           unbroadcast(unary_op('-a', grad_output, Buffer(grad_output.shape)), shape_y) if ctx.needs_input_grad[1] else None
+           unbroadcast(grad_output, shape_y, code="out -= a") if ctx.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(ctx, x, y):
