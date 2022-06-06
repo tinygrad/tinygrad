@@ -1,4 +1,4 @@
-# llops don't know about derivatives
+# llops don't know about derivatives or memory allocation
 import functools
 import numpy as np
 import pyopencl as cl
@@ -47,7 +47,6 @@ def clbuild(name, prg):
   def run(*args): clprg(cl_queue, *args)
   return run
 
-# x -> ret
 def unary_op(code, x, ret):
   unop = clbuild("unop", """
   __kernel void unop(__global const float *a_g, __global float *res_g) {
@@ -86,6 +85,7 @@ def binary_op(code, x, y, ret):
 
 def reduce_op(code, inp, ret, start="0.0"):
   # TODO: this is insanely slow
+  # NOTE: ret.shape can be (1,), it's mostly by luck that this works
   reduce = clbuild("reduce", """
   __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret) {
