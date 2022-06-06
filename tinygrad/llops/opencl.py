@@ -21,9 +21,9 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else \
-      cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | (cl.mem_flags.COPY_HOST_PTR if hostbuf is not None else 0), 4*np.prod(shape),
-                hostbuf=hostbuf.astype(np.float32).ravel() if hostbuf is not None else None)
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape)+0x10)  # padding
+    if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
+      cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
