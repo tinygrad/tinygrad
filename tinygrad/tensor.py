@@ -36,7 +36,7 @@ class ProfileOp:
         if getattr(x, 'global_num', None) is None:
           setattr(x, 'global_num', global_num_max)
           global_num_max += 1
-        return x.global_num
+        return f"<<< {x.global_num} >>>"
       # connect inputs to outputs
       for x in self.x:
         for y in self.output:
