@@ -104,7 +104,7 @@ class Pow(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     tmp = Buffer(grad_output.shape)
-    grad_x = unbroadcast(binary_op('a*b', grad_output, binary_op('b * pow(a, b-1.0)', x, y, tmp), tmp), x.shape) if ctx.needs_input_grad[0] else None
+    grad_x = unbroadcast(binary_op('a*b', grad_output, binary_op('b * pow(a, b-1.0f)', x, y, tmp), tmp), x.shape) if ctx.needs_input_grad[0] else None
     grad_y = unbroadcast(binary_op('a*b', grad_output, binary_op('log(a) * pow(a, b)', x, y, tmp), tmp), y.shape) if ctx.needs_input_grad[1] else None
     return grad_x, grad_y
 
