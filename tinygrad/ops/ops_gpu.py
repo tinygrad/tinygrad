@@ -52,8 +52,8 @@ class Max(Function):
     input, axis, ret = ctx.saved_tensors
     ret2 = binary_op("1.0*(a==b)", input, ret, buffer_new(input.shape))
     div = reduce_op("out += a", ret2, axis=axis, start="1e-10")
-    ret3 = binary_op("a/b", ret2, div, buffer_new(input.shape))
-    return binary_op('a*b', ret3, grad_output, buffer_new(input.shape))
+    binary_op("a/b", ret2, div, ret2)
+    return binary_op('a*b', ret2, grad_output, ret2)
 
 # ************* binary ops *************
 
@@ -67,9 +67,8 @@ class Add(Function):
     return binary_op('a+b', x, y, buffer_new(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
-    grad_x, grad_y = grad_output, grad_output
     shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(grad_x, shape_x), unbroadcast(grad_y, shape_y)
+    return unbroadcast(grad_output, shape_x), unbroadcast(grad_output, shape_y)
 
 class Sub(Function):
   def forward(ctx, x, y):
@@ -77,8 +76,8 @@ class Sub(Function):
     return binary_op('a-b', x, y, buffer_new(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
-    grad_x, grad_y = grad_output, unary_op('-a', grad_output, buffer_new(grad_output.shape))
     shape_x, shape_y = ctx.saved_tensors
+    grad_x, grad_y = grad_output, unary_op('-a', grad_output, buffer_new(grad_output.shape))
     return unbroadcast(grad_x, shape_x), unbroadcast(grad_y, shape_y)
 
 class Mul(Function):
@@ -88,8 +87,8 @@ class Mul(Function):
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x = binary_op('a*b', y, grad_output, buffer_new(binary_broadcast(y.shape, grad_output.shape)))
-    grad_y = binary_op('a*b', x, grad_output, buffer_new(binary_broadcast(x.shape, grad_output.shape)))
+    grad_x = binary_op('a*b', y, grad_output, buffer_new(grad_output.shape))
+    grad_y = binary_op('a*b', x, grad_output, buffer_new(grad_output.shape))
     return unbroadcast(grad_x, x.shape), unbroadcast(grad_y, y.shape)
 
 class Pow(Function):
@@ -100,10 +99,9 @@ class Pow(Function):
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     grad_x_inter = binary_op('b * (pow((float)a, (float)(b-1.0)))', x, y, buffer_new(grad_output.shape))
-    grad_x = binary_op('a*b', grad_output, grad_x_inter, buffer_new(grad_output.shape))
     grad_y_inter = binary_op('pow(a, (float)b) * log(a);', x, y, buffer_new(grad_output.shape))
-    grad_y = binary_op('a*b', grad_output, grad_y_inter, buffer_new(grad_output.shape))
-    return unbroadcast(grad_x, x.shape), unbroadcast(grad_y, y.shape)
+    return unbroadcast(binary_op('a*b', grad_output, grad_x_inter, grad_x_inter), x.shape), \
+           unbroadcast(binary_op('a*b', grad_output, grad_y_inter, grad_y_inter), y.shape)
 
 # ************* movement ops *************
 
@@ -148,10 +146,8 @@ class Matmul(Function):
 
   def backward(ctx, grad_output):
     input, weight = ctx.saved_tensors
-    grad_input = buffer_new(input.shape)
-    grad_weight = buffer_new(weight.shape)
-    matmul(grad_output, weight, grad_input, transpose_b=True)
-    matmul(input, grad_output, grad_weight, transpose_a=True)
+    grad_input = matmul(grad_output, weight, buffer_new(input.shape), transpose_b=True)
+    grad_weight = matmul(input, grad_output, buffer_new(weight.shape), transpose_a=True)
     return grad_input, grad_weight
 
 class Conv2D(Function):

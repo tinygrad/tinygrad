@@ -47,8 +47,7 @@ def buffer_np(x):
 @functools.lru_cache
 def clbuild(name, prg):
   clprg = cl.Program(cl_ctx, prg).build().__getattr__(name)
-  def run(*args):
-    clprg(cl_queue, *args)
+  def run(*args): clprg(cl_queue, *args)
   return run
 
 # x -> ret
@@ -149,7 +148,7 @@ def perm_axis(inp, order):
       gi /= shape[order[i]];
     }
     res_g[gid] = a_g[idx];
-    }""")
+  }""")
   perm([np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(order, dtype=np.int32)))
