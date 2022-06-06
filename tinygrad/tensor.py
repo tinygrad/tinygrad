@@ -50,7 +50,7 @@ class ProfileOp:
             G.add_edge(nm(x), nm(y.data), label=self.name, color="red")
       # did this forward create any intermediate tensors?
       if not self.backward:
-        x_data = [nm(x.data) for x in self.x]
+        x_data = [nm(x.data) for x in self.x] + [nm(x.data) for x in self.output]
         for y in saved_tensors:
           if nm(y) not in x_data:    # if intermediate tensors are inputs they don't count
             for x in self.x:
