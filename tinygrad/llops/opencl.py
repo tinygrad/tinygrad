@@ -272,6 +272,10 @@ def convdx(w,grad_output,dx,conv_args):
     int g = get_global_id(1);
     int ci = get_global_id(2);
 
+    for (int Y = 0; Y < iy; Y++) { for (int X = 0; X < ix; X++) {
+      dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + Y*ix + X] = 0.0;
+    } }
+
     for (int Y = 0; Y < oy; Y++) { for (int X = 0; X < ox; X++) {
       for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
         float acc = 0.0;
