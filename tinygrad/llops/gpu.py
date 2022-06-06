@@ -38,9 +38,6 @@ class GPUBuffer:
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
-def buffer_new(shape, zero=False):
-  return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
-
 def buffer_np(x):
   return cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
 
@@ -87,17 +84,7 @@ def binary_op(code, x, y, ret):
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
-def reduce_op(code, inp, axis=None, start="0.0"):
-  if axis is None:
-    # full reduce
-    osize = [1]*len(inp.shape)
-  else:
-    osize = np.array(inp.shape)
-    osize[list(axis)] = 1
-  ret = buffer_new(osize)
-  if axis is None:
-    ret.shape = (1,)
-
+def reduce_op(code, inp, ret, start="0.0"):
   # TODO: this is insanely slow
   reduce = clbuild("reduce", """
   __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
@@ -124,17 +111,15 @@ def reduce_op(code, inp, axis=None, start="0.0"):
     }
     res_g[gid] = out;
   }""")
-  reduce([np.prod(osize)], None, inp.cl,
-    i32(np.prod(inp.shape)//np.prod(osize)), ret.cl,
-    i32(np.prod(osize)), i32(len(osize)),
+  reduce([np.prod(ret.shape)], None, inp.cl,
+    i32(np.prod(inp.shape)//np.prod(ret.shape)), ret.cl,
+    i32(np.prod(ret.shape)), i32(len(ret.shape)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(osize, dtype=np.int32)))
+    buffer_np(np.array(ret.shape, dtype=np.int32)))
   return ret
 
 
-def perm_axis(inp, order):
-  osize = np.array(inp.shape)[list(order)]
-  ret = buffer_new(osize)
+def perm_axis(inp, order, ret):
   perm = clbuild("perm", """
   __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
                        __global const int *shape, __global const int *order) {
@@ -149,16 +134,14 @@ def perm_axis(inp, order):
     }
     res_g[gid] = a_g[idx];
   }""")
-  perm([np.prod(osize)], None, inp.cl, ret.cl, i32(len(osize)),
+  perm([np.prod(inp.shape)], None, inp.cl, ret.cl, i32(len(inp.shape)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(order, dtype=np.int32)))
   return ret
 
 # TODO: merge this with perm axis
-def inner_slice(x, arg):
+def inner_slice(x, arg, ret):
   shift = [y[0] for y in arg]
-  oshape = [y[1]-y[0] for y in arg]
-  ret = buffer_new(oshape)
   gslice = clbuild("gslice", """
   __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret,

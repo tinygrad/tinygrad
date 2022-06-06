@@ -2,9 +2,12 @@ import pyopencl as cl
 import numpy as np
 from tinygrad.helpers import binary_broadcast
 from ..tensor import Function
-from ..llops.gpu import GPUBuffer, buffer_new
+from ..llops.gpu import GPUBuffer
 from ..llops.gpu import unary_op, binary_op, reduce_op, perm_axis, inner_slice
 from ..llops.gpu import matmul, conv, convdw, convdx
+
+def buffer_new(shape, zero=False):
+  return GPUBuffer(shape, hostbuf=None if not zero else np.zeros(shape, dtype=np.float32))
 
 # ************* unary ops *************
 
@@ -31,10 +34,15 @@ class Exp(UnaryOp):
 
 # ************* reduce ops *************
 
+def reduce_shape(shape, axis):
+  osize = np.array(shape)
+  osize[list(axis)] = 1
+  return osize
+
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input.shape)
-    return reduce_op("out += a", input, axis=axis)
+    return reduce_op("out += a", input, buffer_new(reduce_shape(input.shape, axis)))
 
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
@@ -44,22 +52,24 @@ class Sum(Function):
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    ret = reduce_op("out = max(a,out)", input, axis=axis, start="-INFINITY")
+    osize = np.array(input.shape)
+    osize[list(axis)] = 1
+    ret = reduce_op("out = max(a,out)", input, buffer_new(reduce_shape(input.shape, axis)), start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
     return ret
 
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
     ret2 = binary_op("1.0*(a==b)", input, ret, buffer_new(input.shape))
-    div = reduce_op("out += a", ret2, axis=axis, start="1e-10")
+    div = reduce_op("out += a", ret2, buffer_new(reduce_shape(ret2.shape, axis)), start="1e-10")
     binary_op("a/b", ret2, div, ret2)
     return binary_op('a*b', ret2, grad_output, ret2)
 
 # ************* binary ops *************
 
 def unbroadcast(out, in_sh):
-  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else None
-  return reduce_op("out += a", out, sum_axis)
+  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else range(len(out.shape))
+  return reduce_op("out += a", out, buffer_new(reduce_shape(out.shape, sum_axis)))
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -120,20 +130,25 @@ class Reshape(Function):
 class Transpose(Function):
   def forward(ctx, x, order=(1,0)):
     ctx.save_for_backward(order)
-    return perm_axis(x, order)
+    ret = buffer_new(np.array(x.shape)[list(order)])
+    return perm_axis(x, order, ret)
 
   def backward(ctx, grad_output):
-    return perm_axis(grad_output, np.argsort(ctx.order))
+    norder = np.argsort(ctx.order)
+    ret = buffer_new(np.array(grad_output.shape)[list(norder)])
+    return perm_axis(grad_output, norder, ret)
 
 class Slice(Function):
   def forward(ctx, x, arg=None):
     ctx.save_for_backward(x.shape)
-    return inner_slice(x, arg)
+    ret = buffer_new([y[1]-y[0] for y in arg])
+    return inner_slice(x, arg, ret)
 
   def backward(ctx, grad_output):
     shape, = ctx.saved_tensors
     narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
-    return inner_slice(grad_output, narg)
+    ret = buffer_new([y[1]-y[0] for y in narg])
+    return inner_slice(grad_output, narg, ret)
 
 # ************* processing ops *************
 
