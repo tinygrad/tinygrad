@@ -153,7 +153,7 @@ class Tensor:
 
     # fill in the first grad with one
     # this is "implicit gradient creation"
-    self.grad = Tensor(np.ones(self.shape, dtype=self.dtype), device=self.device, requires_grad=False)
+    self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       if not any(x.requires_grad for x in t0._ctx.parents):

@@ -71,7 +71,8 @@ class Add(Function):
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(grad_output, shape_x), unbroadcast(grad_output, shape_y)
+    return unbroadcast(grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
+           unbroadcast(grad_output, shape_y) if ctx.needs_input_grad[1] else None
 
 class Sub(Function):
   def forward(ctx, x, y):
@@ -80,8 +81,8 @@ class Sub(Function):
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
-    grad_x, grad_y = grad_output, unary_op('-a', grad_output, Buffer(grad_output.shape))
-    return unbroadcast(grad_x, shape_x), unbroadcast(grad_y, shape_y)
+    return unbroadcast(grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
+           unbroadcast(unary_op('-a', grad_output, Buffer(grad_output.shape)), shape_y) if ctx.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(ctx, x, y):
@@ -90,9 +91,10 @@ class Mul(Function):
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x = binary_op('a*b', y, grad_output, Buffer(grad_output.shape))
-    grad_y = binary_op('a*b', x, grad_output, Buffer(grad_output.shape))
-    return unbroadcast(grad_x, x.shape), unbroadcast(grad_y, y.shape)
+    tmp = Buffer(grad_output.shape)
+    grad_x = unbroadcast(binary_op('a*b', y, grad_output, tmp), x.shape) if ctx.needs_input_grad[0] else None
+    grad_y = unbroadcast(binary_op('a*b', x, grad_output, tmp), y.shape) if ctx.needs_input_grad[1] else None
+    return grad_x, grad_y
 
 class Pow(Function):
   def forward(ctx, x, y):
@@ -101,10 +103,10 @@ class Pow(Function):
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x_inter = binary_op('b * pow(a, b-1.0)', x, y, Buffer(grad_output.shape))
-    grad_y_inter = binary_op('log(a) * pow(a, b)', x, y, Buffer(grad_output.shape))
-    return unbroadcast(binary_op('a*b', grad_output, grad_x_inter, grad_x_inter), x.shape), \
-           unbroadcast(binary_op('a*b', grad_output, grad_y_inter, grad_y_inter), y.shape)
+    tmp = Buffer(grad_output.shape)
+    grad_x = unbroadcast(binary_op('a*b', grad_output, binary_op('b * pow(a, b-1.0)', x, y, tmp), tmp), x.shape) if ctx.needs_input_grad[0] else None
+    grad_y = unbroadcast(binary_op('a*b', grad_output, binary_op('log(a) * pow(a, b)', x, y, tmp), tmp), y.shape) if ctx.needs_input_grad[1] else None
+    return grad_x, grad_y
 
 # ************* movement ops *************
 
@@ -172,7 +174,7 @@ class Conv2D(Function):
     ctx.save_for_backward(x,w)
 
     # output buffer
-    conv_args = H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs
+    conv_args = H, W, ctx.groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs
     return conv(x, w, Buffer((bs, cout, oy, ox)), conv_args)
 
   def backward(ctx, grad_output):
