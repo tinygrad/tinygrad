@@ -52,8 +52,6 @@ class Sum(Function):
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    osize = np.array(input.shape)
-    osize[list(axis)] = 1
     ret = reduce_op("out = max(a,out)", input, buffer_new(reduce_shape(input.shape, axis)), start="-INFINITY")
     ctx.save_for_backward(input, axis, ret)
     return ret
@@ -68,8 +66,7 @@ class Max(Function):
 # ************* binary ops *************
 
 def unbroadcast(out, in_sh):
-  sum_axis = [i for i in range(len(in_sh)) if in_sh[i]==1 and out.shape[i]>1] if in_sh != (1,) else range(len(out.shape))
-  return reduce_op("out += a", out, buffer_new(reduce_shape(out.shape, sum_axis)))
+  return reduce_op("out += a", out, buffer_new(in_sh))
 
 class Add(Function):
   def forward(ctx, x, y):
