@@ -216,7 +216,8 @@ class Tensor:
           new_shape.append(arg[-1][1] - arg[-1][0])
           assert s.step is None or s.step == 1
     new_shape += self.shape[len(arg):]
-    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))]).reshape(shape=new_shape)
+    ret = self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
+    return ret.reshape(shape=new_shape) if tuple(ret.shape) != tuple(new_shape) else ret
 
   def cat(self, y, dim=0):
     assert len(self.shape) == len(y.shape)
@@ -329,7 +330,7 @@ class Tensor:
     return self / (self.abs() + 1e-10)
 
   def _pool2d(self, py, px):
-    xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px]
+    xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px] if (self.shape[2]%py != 0) or (self.shape[3]%px != 0) else self
     return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
 
   def avg_pool2d(self, kernel_size=(2,2)):

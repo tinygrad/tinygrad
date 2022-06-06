@@ -78,7 +78,7 @@ def get_binop_prg(code, complist):
 
 def binary_op(code, x, y, ret):
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape, True)
-  assert (shape_ret == ret.shape).all()
+  assert tuple(shape_ret) == tuple(ret.shape)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
   prg = get_binop_prg(code, tuple(complist))
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
