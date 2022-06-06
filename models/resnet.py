@@ -123,6 +123,7 @@ class ResNet:
       dat = v.detach().numpy().T if "fc.weight" in k else v.detach().numpy()
 
       if 'fc.' in k and obj.shape != dat.shape:
+        print("skipping fully connected layer")
         continue # Skip FC if transfer learning
 
       assert obj.shape == dat.shape, (k, obj.shape, dat.shape)

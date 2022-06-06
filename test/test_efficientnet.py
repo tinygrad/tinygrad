@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 
 from models.efficientnet import EfficientNet
+from models.vit import ViT
 from tinygrad.tensor import Tensor
 
 def _load_labels():
@@ -34,18 +35,38 @@ def _infer(model: EfficientNet, img):
 
   # run the net
   out = model.forward(Tensor(img)).cpu()
-  class_id = np.argmax(out.data)
   return _LABELS[np.argmax(out.data)]
 
+chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')
+car_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/car.jpg')
 
 class TestEfficientNet(unittest.TestCase):
-  def test_chicken(self):
-    chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')
-    model = EfficientNet(number=0)
-    model.load_from_pretrained()
-    label = _infer(model, chicken_img)
-    self.assertEqual(label, "hen", f"Expected hen but got {label} for number=0")
+  @classmethod
+  def setUpClass(cls):
+    cls.model = EfficientNet(number=0)
+    cls.model.load_from_pretrained()
 
+  def test_chicken(self):
+    label = _infer(self.model, chicken_img)
+    self.assertEqual(label, "hen")
+
+  def test_car(self):
+    label = _infer(self.model, car_img)
+    self.assertEqual(label, "sports car, sport car")
+
+class TestViT(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls.model = ViT()
+    cls.model.load_from_pretrained()
+
+  def test_chicken(self):
+    label = _infer(self.model, chicken_img)
+    self.assertEqual(label, "cock")
+
+  def test_car(self):
+    label = _infer(self.model, car_img)
+    self.assertEqual(label, "racer, race car, racing car")
 
 if __name__ == '__main__':
   unittest.main()
