@@ -101,8 +101,8 @@ class Pow(Function):
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x_inter = binary_op('b * (pow((float)a, (float)(b-1.0)))', x, y, Buffer(grad_output.shape))
-    grad_y_inter = binary_op('pow(a, (float)b) * log(a);', x, y, Buffer(grad_output.shape))
+    grad_x_inter = binary_op('b * pow(a, b-1.0)', x, y, Buffer(grad_output.shape))
+    grad_y_inter = binary_op('log(a) * pow(a, b)', x, y, Buffer(grad_output.shape))
     return unbroadcast(binary_op('a*b', grad_output, grad_x_inter, grad_x_inter), x.shape), \
            unbroadcast(binary_op('a*b', grad_output, grad_y_inter, grad_y_inter), y.shape)
 
@@ -123,12 +123,12 @@ class Reshape(Function):
 class Transpose(Function):
   def forward(ctx, x, order=(1,0)):
     ctx.save_for_backward(order)
-    ret = Buffer(np.array(x.shape)[list(order)])
+    ret = Buffer([x.shape[i] for i in order])
     return perm_axis(x, order, ret)
 
   def backward(ctx, grad_output):
     norder = np.argsort(ctx.order)
-    ret = Buffer(np.array(grad_output.shape)[list(norder)])
+    ret = Buffer([grad_output.shape[i] for i in norder])
     return perm_axis(grad_output, norder, ret)
 
 class Slice(Function):
