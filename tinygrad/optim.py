@@ -27,7 +27,7 @@ class RMSprop(Optimizer):
 
   def step(self):
     for i, t in enumerate(self.params):
-      self.v[i] = self.decay * self.v[i] + (1.0 - self.decay) * t.grad * t.grad
+      self.v[i] = self.decay * self.v[i] + (1.0 - self.decay) * (t.grad * t.grad)
       t -= (t.grad * self.lr).mul(self.v[i].add(self.eps).pow(-0.5))
 
 class Adam(Optimizer):
@@ -43,5 +43,5 @@ class Adam(Optimizer):
     a = self.lr * ((1.0 - self.b2**self.t)**0.5) / (1.0 - self.b1**self.t)
     for i, t in enumerate(self.params):
       self.m[i] = self.b1 * self.m[i] + (1.0 - self.b1) * t.grad
-      self.v[i] = self.b2 * self.v[i] + (1.0 - self.b2) * t.grad * t.grad
+      self.v[i] = self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad)
       t -= a * self.m[i].mul(self.v[i].add(self.eps).pow(-0.5))
