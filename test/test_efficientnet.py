@@ -46,6 +46,10 @@ class TestEfficientNet(unittest.TestCase):
     cls.model = EfficientNet(number=0)
     cls.model.load_from_pretrained()
 
+  @classmethod
+  def tearDownClass(cls):
+    del cls.model
+
   def test_chicken(self):
     label = _infer(self.model, chicken_img)
     self.assertEqual(label, "hen")
@@ -59,6 +63,10 @@ class TestViT(unittest.TestCase):
   def setUpClass(cls):
     cls.model = ViT()
     cls.model.load_from_pretrained()
+
+  @classmethod
+  def tearDownClass(cls):
+    del cls.model
 
   def test_chicken(self):
     label = _infer(self.model, chicken_img)
