@@ -161,8 +161,9 @@ class Tensor:
       assert (t0.grad is not None)
       with ProfileOp(t0._ctx, t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
         grads = t0._ctx.backward(t0._ctx, t0.grad.data)
-        po.output = grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+        grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
           for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
+        po.output = [x for x in grads if x is not None]   # backward can return None if no required gradient, don't profile it
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, \
@@ -382,9 +383,10 @@ class Function:
     # overwrite with passed params
     for k, v in kwargs.items():
       setattr(ctx, k, v)
+    ctx.needs_input_grad = [t.requires_grad for t in x]
     with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
       ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
-                   device=ctx.device, requires_grad=any(t.requires_grad for t in x))
+                   device=ctx.device, requires_grad=any(ctx.needs_input_grad))
       po.output = [ret]
     if ret.requires_grad:
       ret._ctx = ctx

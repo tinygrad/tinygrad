@@ -158,8 +158,8 @@ class Matmul(Function):
 
   def backward(ctx, grad_output):
     input, weight = ctx.saved_tensors
-    grad_input = matmul(grad_output, weight, buffer_new(input.shape), transpose_b=True)
-    grad_weight = matmul(input, grad_output, buffer_new(weight.shape), transpose_a=True)
+    grad_input = matmul(grad_output, weight, buffer_new(input.shape), transpose_b=True) if ctx.needs_input_grad[0] else None
+    grad_weight = matmul(input, grad_output, buffer_new(weight.shape), transpose_a=True) if ctx.needs_input_grad[1] else None
     return grad_input, grad_weight
 
 class Conv2D(Function):
@@ -191,6 +191,6 @@ class Conv2D(Function):
     rcout = cout//ctx.groups
 
     conv_args = H, W, ctx.groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs
-    dw = convdw(x, grad_output, buffer_new((cout, cin, H, W)), conv_args)
-    dx = convdx(w, grad_output, buffer_new((bs, cin_, iy, ix), zero=True), conv_args)
+    dx = convdx(w, grad_output, buffer_new((bs, cin_, iy, ix), zero=True), conv_args) if ctx.needs_input_grad[0] else None
+    dw = convdw(x, grad_output, buffer_new((cout, cin, H, W)), conv_args) if ctx.needs_input_grad[1] else None
     return dx, dw
