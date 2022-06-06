@@ -17,11 +17,14 @@ def require_init_gpu():
     # this is an in-order command queue
     cl_queue = cl.CommandQueue(cl_ctx)
 
+def roundup(x, n=4):
+  return (x+(n-1))//n * n
+
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*np.prod(shape)+0x10)  # padding
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(np.prod(shape)))  # padding
     if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
 
@@ -49,12 +52,12 @@ def clbuild(name, prg):
 
 def unary_op(code, x, ret):
   unop = clbuild("unop", """
-  __kernel void unop(__global const float *a_g, __global float *res_g) {
+  __kernel void unop(__global const float4 *a_g, __global float4 *res_g) {
     int gid = get_global_id(0);
-    float a = a_g[gid];
+    float4 a = a_g[gid];
     res_g[gid] = """+code+""";
   }""")
-  unop([np.prod(ret.shape)], None, x.cl, ret.cl)
+  unop([roundup(np.prod(ret.shape))//4], None, x.cl, ret.cl)
   return ret
 
 @functools.lru_cache
