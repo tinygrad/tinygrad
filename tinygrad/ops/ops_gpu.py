@@ -1,5 +1,6 @@
 import pyopencl as cl
 import numpy as np
+from tinygrad.helpers import binary_broadcast
 from ..tensor import Function
 from ..llops.gpu import GPUBuffer, buffer_new
 from ..llops.gpu import unary_op, binary_op, reduce_op, perm_axis, inner_slice
@@ -10,11 +11,11 @@ from ..llops.gpu import matmul, conv, convdw, convdx
 class UnaryOp(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
-    return unary_op(ctx.fop, input)
+    return unary_op(ctx.fop, input, buffer_new(input.shape))
 
   def backward(ctx, grad_output):
     input, = ctx.saved_tensors
-    return binary_op(ctx.bop, input, grad_output)
+    return binary_op(ctx.bop, input, grad_output, buffer_new(input.shape))
 
 class ReLU(UnaryOp):
   fop = 'max(a, (float)0.)'
@@ -38,7 +39,8 @@ class Sum(Function):
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
     # NOTE: the b buffer_new isn't used, since this is just for broadcast
-    return binary_op('a', grad_output, buffer_new(shape_input))
+    ret = buffer_new(shape_input)
+    return binary_op('a', grad_output, ret, ret)
 
 class Max(Function):
   def forward(ctx, input, axis=None):
@@ -48,10 +50,10 @@ class Max(Function):
 
   def backward(ctx, grad_output):
     input, axis, ret = ctx.saved_tensors
-    ret2 = binary_op("1.0*(a==b)", input, ret)
+    ret2 = binary_op("1.0*(a==b)", input, ret, buffer_new(input.shape))
     div = reduce_op("out += a", ret2, axis=axis, start="1e-10")
-    ret3 = binary_op("a/b", ret2, div)
-    return binary_op('a*b', ret3, grad_output)
+    ret3 = binary_op("a/b", ret2, div, buffer_new(input.shape))
+    return binary_op('a*b', ret3, grad_output, buffer_new(input.shape))
 
 # ************* binary ops *************
 
@@ -62,7 +64,7 @@ def unbroadcast(out, in_sh):
 class Add(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
-    return binary_op('a+b', x, y)
+    return binary_op('a+b', x, y, buffer_new(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     grad_x, grad_y = grad_output, grad_output
@@ -72,35 +74,35 @@ class Add(Function):
 class Sub(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
-    return binary_op('a-b', x, y)
+    return binary_op('a-b', x, y, buffer_new(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
-    grad_x, grad_y = grad_output, unary_op('-a', grad_output)
+    grad_x, grad_y = grad_output, unary_op('-a', grad_output, buffer_new(grad_output.shape))
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_x, shape_x), unbroadcast(grad_y, shape_y)
 
 class Mul(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return binary_op('a*b', x, y)
+    return binary_op('a*b', x, y, buffer_new(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x = binary_op('a*b', y, grad_output)
-    grad_y = binary_op('a*b', x, grad_output)
+    grad_x = binary_op('a*b', y, grad_output, buffer_new(binary_broadcast(y.shape, grad_output.shape)))
+    grad_y = binary_op('a*b', x, grad_output, buffer_new(binary_broadcast(x.shape, grad_output.shape)))
     return unbroadcast(grad_x, x.shape), unbroadcast(grad_y, y.shape)
 
 class Pow(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return binary_op('pow(a,b)', x, y)
+    return binary_op('pow(a,b)', x, y, buffer_new(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x_inter = binary_op('b * (pow((float)a, (float)(b-1.0)))', x, y)
-    grad_x = binary_op('a*b', grad_output, grad_x_inter)
-    grad_y_inter = binary_op('pow(a, (float)b) * log(a);', x, y)
-    grad_y = binary_op('a*b', grad_output, grad_y_inter)
+    grad_x_inter = binary_op('b * (pow((float)a, (float)(b-1.0)))', x, y, buffer_new(grad_output.shape))
+    grad_x = binary_op('a*b', grad_output, grad_x_inter, buffer_new(grad_output.shape))
+    grad_y_inter = binary_op('pow(a, (float)b) * log(a);', x, y, buffer_new(grad_output.shape))
+    grad_y = binary_op('a*b', grad_output, grad_y_inter, buffer_new(grad_output.shape))
     return unbroadcast(grad_x, x.shape), unbroadcast(grad_y, y.shape)
 
 # ************* movement ops *************

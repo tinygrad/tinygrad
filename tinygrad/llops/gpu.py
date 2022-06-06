@@ -52,8 +52,7 @@ def clbuild(name, prg):
   return run
 
 # x -> ret
-def unary_op(code, x):
-  ret = buffer_new(x.shape)
+def unary_op(code, x, ret):
   unop = clbuild("unop", """
   __kernel void unop(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0);
@@ -81,12 +80,11 @@ def get_binop_prg(code, complist):
     float b = y_g["""+idx_exprs[1]+"""];
     res_g[gid0] = """+code+""";\n}""").build()
 
-def binary_op(code, x, y):
-  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape)
+def binary_op(code, x, y, ret):
+  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape, True)
+  assert (shape_ret == ret.shape).all()
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-
   prg = get_binop_prg(code, tuple(complist))
-  ret = buffer_new(shape_ret, zero=True)
   prg.binop(cl_queue, [prod_list[0]] if len(dimlist) > 0 else [1], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
