@@ -93,17 +93,14 @@ class EfficientNet:
       [4, 5, (2,2), 6, 112, 192, 0.25],
       [1, 3, (1,1), 6, 192, 320, 0.25],
     ]
-    # num_repeats, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio
 
     self._blocks = []
-    for b in blocks_args:
-      args = b[1:]
-      args[3] = round_filters(args[3])
-      args[4] = round_filters(args[4])
-      for n in range(round_repeats(b[0])):
-        self._blocks.append(MBConvBlock(*args, has_se=has_se))
-        args[3] = args[4]
-        args[1] = (1,1)
+    for num_repeats, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio in blocks_args:
+      input_filters, output_filters = round_filters(input_filters), round_filters(output_filters)
+      for n in range(round_repeats(num_repeats)):
+        self._blocks.append(MBConvBlock(kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se=has_se))
+        input_filters = output_filters
+        strides = (1,1)
 
     in_channels = round_filters(320)
     out_channels = round_filters(1280)
