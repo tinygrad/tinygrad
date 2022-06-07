@@ -76,7 +76,21 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
+def fake_torch_load_zipped(b0):
+  import io, zipfile
+  with zipfile.ZipFile(io.BytesIO(b0), 'r') as myzip:
+    with myzip.open('archive/data.pkl') as myfile:
+      ret = my_unpickle(myfile)
+    for k,v in ret[1].items():
+      with myzip.open(f'archive/data/{k}') as myfile:
+        v[2][:] = np.frombuffer(myfile.read(), v[2].dtype)
+        v[2].shape = v[3]
+  return ret[0]
+
 def fake_torch_load(b0):
+  if b0[0:2] == b"\x50\x4b":
+    return fake_torch_load_zipped(b0)
+
   import io
   import struct
 
