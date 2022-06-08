@@ -110,6 +110,10 @@ print(b.cpu())
 
 Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doing something important with tinygrad and wanted to use the ANE, you might have a bad time.
 
+### hlops (in tensor.py)
+
+hlops are syntactic sugar around mlops.
+
 ### mlops
 
 mlops are mid level ops, there's 14 of them. They understand memory allocation and derivatives
@@ -126,13 +130,13 @@ You no longer need to write mlops for a new accelerator
 
 ### Adding an accelerator (llops)
 
-The autodiff stuff is all in mlops now, so you can focus on the raw operations
+The autodiff stuff is all in mlops now so you can focus on the raw operations
 
 ```
 Buffer                                           # class of memory on this device
 unary_op  (RELU, EXP, LOG, NEG, SIGN)            # A -> A
 binary_op (ADD, SUB, MUL, DIV, POW, A, CMPEQ)    # A + B -> C (broadcasting supported)
-reduce_op (SUM, MAX)                             # A -> B (smaller size, B can have 1s in the shape)
+reduce_op (SUM, MAX)                             # A -> B (smaller size, B has 1 in shape)
 perm_axis                                        # A -> A
 inner_slice                                      # A -> B (different size)
 matmul                                           # A + B -> C
