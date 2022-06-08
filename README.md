@@ -135,8 +135,8 @@ The autodiff stuff is all in mlops now so you can focus on the raw operations
 ```
 Buffer                                           # class of memory on this device
 unary_op  (RELU, EXP, LOG, NEG, SIGN)            # A -> A
-binary_op (ADD, SUB, MUL, DIV, POW, A, CMPEQ)    # A + B -> C (broadcasting supported)
 reduce_op (SUM, MAX)                             # A -> B (smaller size, B has 1 in shape)
+binary_op (ADD, SUB, MUL, DIV, POW, A, CMPEQ)    # A + B -> C (broadcasting supported)
 perm_axis                                        # A -> A
 inner_slice                                      # A -> B (different size)
 matmul                                           # A + B -> C
