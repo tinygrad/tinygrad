@@ -18,7 +18,7 @@ class UnaryOp(Function):
 
 class ReLU(UnaryOp):
   fop = 'max(a, (float)0.)'
-  bop = 'b * (a >= 0)'
+  bop = 'b * max(sign(a), (float)0.)'
 
 class Log(UnaryOp):
   fop = 'log(a)'
@@ -52,7 +52,7 @@ class Max(Function):
 
   def backward(ctx, grad_output):
     input, ret = ctx.saved_tensors
-    ret2 = binary_op("1.0*(a==b)", input, ret, Buffer(input.shape))
+    ret2 = binary_op("1.0f*(a==b)", input, ret, Buffer(input.shape))
     div = reduce_op("out += a", ret2, Buffer(grad_output.shape), start="1e-10")
     binary_op("a/b", ret2, div, ret2)
     return binary_op('a*b', ret2, grad_output, ret2)

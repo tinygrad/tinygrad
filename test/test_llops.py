@@ -20,8 +20,8 @@ class TestBenchmarkCL(unittest.TestCase):
     shape = (1024,1024)
     buf = GPUBuffer(shape, hostbuf=np.ones(shape, dtype=np.float32))
     def fxn():
-      unary_op('1.01*a', buf, buf)
-    its_sec = timeit(fxn, 100000, done=lambda: sync())
+      unary_op('1.01f*a', buf, buf)
+    its_sec = timeit(fxn, 100000, done=sync)
     print(f"unary op (no sync) {its_sec:.2f} its/sec")
     self.assertGreater(its_sec, 10000)
 
@@ -29,7 +29,7 @@ class TestBenchmarkCL(unittest.TestCase):
     shape = (1,)
     buf = GPUBuffer(shape, hostbuf=np.ones(shape, dtype=np.float32))
     def fxn():
-      unary_op('1.01*a', buf, buf)
+      unary_op('1.01f*a', buf, buf)
       sync()
     its_sec = timeit(fxn, 1000)
     print(f"unary op tiny {its_sec:.2f} its/sec")
@@ -39,10 +39,20 @@ class TestBenchmarkCL(unittest.TestCase):
     shape = (1024,1024)
     buf = GPUBuffer(shape, hostbuf=np.ones(shape, dtype=np.float32))
     def fxn():
-      unary_op('1.01*a', buf, buf)
+      unary_op('1.01f*a', buf, buf)
       sync()
     its_sec = timeit(fxn, 1000)
     print(f"unary op {its_sec:.2f} its/sec")
+    self.assertGreater(its_sec, 1000)
+
+  def test_benchmark_binary_nosync(self):
+    shape = (1024,1024)
+    buf_a = GPUBuffer(shape, hostbuf=np.ones(shape, dtype=np.float32))
+    buf_b = GPUBuffer(shape, hostbuf=np.ones(shape, dtype=np.float32))
+    def fxn():
+      binary_op('a+b', buf_a, buf_b, buf_a)
+    its_sec = timeit(fxn, 10000, done=sync)
+    print(f"binary op (no sync) {its_sec:.2f} its/sec")
     self.assertGreater(its_sec, 1000)
 
   def test_benchmark_binary(self):
