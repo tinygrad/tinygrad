@@ -4,10 +4,9 @@ from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
 class CPUBuffer(np.ndarray):
   def __new__(cls, shape, hostbuf=None):
     if hostbuf is not None:
-      #print(shape, hostbuf.shape)
-      return super().__new__(cls, shape, buffer=hostbuf.data)
+      return super().__new__(cls, shape, dtype=np.float32, buffer=hostbuf.data)
     else:
-      return super().__new__(cls, shape)
+      return super().__new__(cls, shape, dtype=np.float32)
   def toCPU(x): return x
   def log(x): return np.log(x)
   def exp(x): return np.exp(x)
@@ -38,7 +37,7 @@ def binary_op(op, x, y, ret):
   elif op == BinaryOps.DIV: ret[:] = y/x
   elif op == BinaryOps.POW: ret[:] = x**y
   elif op == BinaryOps.A: ret[:] = x
-  elif op == BinaryOps.CMPEQ: code = "1.0f*(a==b)"
+  elif op == BinaryOps.CMPEQ: ret[:] = 1.0*(x==y)
   else: raise Exception(f"{op} isn't supported")
   return ret
 
