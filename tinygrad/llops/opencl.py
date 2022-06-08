@@ -102,9 +102,13 @@ def binary_op(op, x, y, ret):
   prg.binop(cl_queue, [kernel_size], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
-def reduce_op(op, inp, ret, start="0.0"):
-  if op == ReduceOps.SUM: code = "out += a"
-  elif op == ReduceOps.MAX: code = "out = max(a,out)"
+def reduce_op(op, inp, ret):
+  if op == ReduceOps.SUM:
+    code = "out += a"
+    start = "0.0"
+  elif op == ReduceOps.MAX:
+    code = "out = max(a,out)"
+    start = "-INFINITY"
   else: raise Exception(f"{op} isn't supported")
   # TODO: this is insanely slow
   # NOTE: ret.shape can be (1,), it's mostly by luck that this works

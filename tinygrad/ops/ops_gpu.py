@@ -56,14 +56,14 @@ class Sum(Function):
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    ret = reduce_op(ReduceOps.MAX, input, Buffer(reduce_shape(input.shape, axis)), start="-INFINITY")
+    ret = reduce_op(ReduceOps.MAX, input, Buffer(reduce_shape(input.shape, axis)))
     ctx.save_for_backward(input, ret)
     return ret
 
   def backward(ctx, grad_output):
     input, ret = ctx.saved_tensors
     ret2 = binary_op(BinaryOps.CMPEQ, input, ret, Buffer(input.shape))
-    div = reduce_op(ReduceOps.SUM, ret2, Buffer(grad_output.shape), start="1e-10")
+    div = reduce_op(ReduceOps.SUM, ret2, Buffer(grad_output.shape))
     binary_op(BinaryOps.DIV, div, ret2, ret2)
     return binary_op(BinaryOps.MUL, ret2, grad_output, ret2)
 

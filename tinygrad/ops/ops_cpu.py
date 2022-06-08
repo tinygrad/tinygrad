@@ -5,6 +5,7 @@ class CPUBuffer(np.ndarray):
   def toCPU(x): return x
   def log(x): return np.log(x)
   def exp(x): return np.exp(x)
+  def sign(x): return np.sign(x)
   def relu(x): return np.maximum(x, 0)
   def type(x, tt): return x.astype(tt)
   def custompad(x, padding): return np.pad(x, padding)
