@@ -4,6 +4,7 @@ import unittest
 from tqdm import trange
 import numpy as np
 from tinygrad.llops.opencl import GPUBuffer, sync, unary_op, binary_op, reduce_op
+from tinygrad.tensor import Device
 
 def timeit(fxn, its=1000):
   fxn()
@@ -12,6 +13,7 @@ def timeit(fxn, its=1000):
     fxn()
   return its/(time.monotonic() - st)
 
+@unittest.skipUnless(Device.DEFAULT == Device.GPU, "Not Implemented")
 class TestBenchmarkCL(unittest.TestCase):
   def test_benchmark_unary_nosync(self):
     shape = (1024,1024)
@@ -22,6 +24,16 @@ class TestBenchmarkCL(unittest.TestCase):
     its_sec = timeit(fxn, 100000)
     print(f"unary op (no sync) {its_sec:.2f} its/sec")
     self.assertGreater(its_sec, 10000)
+
+  def test_benchmark_unary_tiny(self):
+    shape = (1,)
+    buf = GPUBuffer(shape, hostbuf=np.ones(shape, dtype=np.float32))
+    def fxn():
+      unary_op('1.01*a', buf, buf)
+      sync()
+    its_sec = timeit(fxn, 1000)
+    print(f"unary op tiny {its_sec:.2f} its/sec")
+    self.assertGreater(its_sec, 1000)
 
   def test_benchmark_unary(self):
     shape = (1024,1024)
