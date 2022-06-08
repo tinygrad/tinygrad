@@ -4,21 +4,19 @@ import numpy as np
 import pyopencl as cl
 from tinygrad.helpers import binary_broadcast
 
-i32 = np.int32
-
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
   global cl_ctx, cl_queue
   if cl_ctx is None:
     devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
-    if len(devices) == 0:
+    if len(devices) == 0:  # settle for CPU
       devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
     cl_ctx = cl.Context(devices=devices)
-    # this is an in-order command queue
-    cl_queue = cl.CommandQueue(cl_ctx)
+    cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
-def roundup(x, n=4):
-  return (x+(n-1))//n * n
+i32 = np.int32
+def roundup(x, n=4): return (x+(n-1))//n * n
+def sync(): cl_queue.finish()
 
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
@@ -37,7 +35,7 @@ class GPUBuffer:
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    cl_queue.finish()
+    sync()
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
