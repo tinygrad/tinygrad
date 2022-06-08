@@ -3,14 +3,15 @@ import time
 import unittest
 from tqdm import trange
 import numpy as np
-from tinygrad.llops.opencl import GPUBuffer, sync, unary_op, binary_op, reduce_op
 from tinygrad.tensor import Device
+if Device.DEFAULT == Device.GPU:
+  from tinygrad.llops.opencl import GPUBuffer, sync, unary_op, binary_op, reduce_op
 
-def timeit(fxn, its=1000):
+def timeit(fxn, its=1000, done=lambda:None):
   fxn()
   st = time.monotonic()
-  for _ in trange(its):
-    fxn()
+  for _ in trange(its): fxn()
+  done()
   return its/(time.monotonic() - st)
 
 @unittest.skipUnless(Device.DEFAULT == Device.GPU, "Not Implemented")
@@ -20,8 +21,7 @@ class TestBenchmarkCL(unittest.TestCase):
     buf = GPUBuffer(shape, hostbuf=np.ones(shape, dtype=np.float32))
     def fxn():
       unary_op('1.01*a', buf, buf)
-    sync()
-    its_sec = timeit(fxn, 100000)
+    its_sec = timeit(fxn, 100000, done=lambda: sync())
     print(f"unary op (no sync) {its_sec:.2f} its/sec")
     self.assertGreater(its_sec, 10000)
 
