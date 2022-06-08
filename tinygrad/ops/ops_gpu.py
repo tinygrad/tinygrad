@@ -1,9 +1,16 @@
+import os
 import numpy as np
 from tinygrad.helpers import binary_broadcast, UnaryOps, BinaryOps, ReduceOps
 from ..tensor import Function
-from ..llops.opencl import GPUBuffer as Buffer
-from ..llops.opencl import unary_op, binary_op, reduce_op, perm_axis, inner_slice
-from ..llops.opencl import matmul, conv, convdw, convdx
+
+if int(os.getenv("LLCPU", 0)) == 1:
+  from ..llops.cpu import CPUBuffer as Buffer
+  from ..llops.cpu import unary_op, binary_op, reduce_op, perm_axis, inner_slice
+  from ..llops.cpu import matmul, conv, convdw, convdx
+else:
+  from ..llops.opencl import GPUBuffer as Buffer
+  from ..llops.opencl import unary_op, binary_op, reduce_op, perm_axis, inner_slice
+  from ..llops.opencl import matmul, conv, convdw, convdx
 
 # ************* unary ops *************
 
