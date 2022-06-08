@@ -27,6 +27,7 @@ class UnaryOps(Enum):
   EXP = 1
   LOG = 2
   NEG = 3
+  SIGN = 4
 
 class BinaryOps(Enum):
   ADD = 0
@@ -37,13 +38,9 @@ class BinaryOps(Enum):
   A = 5
   CMP = 6
   # these are "complex" ops, and should probably be replaced
-  EXPMUL = 7
-  POW_D1 = 8
-  POW_D2 = 9
-  RELU_D = 10
+  POW_D1 = 7
+  POW_D2 = 8
 
 class ReduceOps(Enum):
   SUM = 0
   MAX = 1
-  # this is "complex"
-  NEGSUM = 2

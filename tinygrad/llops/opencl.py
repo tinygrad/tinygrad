@@ -53,6 +53,7 @@ def unary_op(op, x, ret):
   elif op == UnaryOps.EXP: code = 'exp(a)'
   elif op == UnaryOps.LOG: code = 'log(a)'
   elif op == UnaryOps.NEG: code = '-a'
+  elif op == UnaryOps.SIGN: code = 'sign(a)'
   else: raise Exception(f"{op} isn't supported")
   unop = clbuild("unop", """
   __kernel void unop(__global const float4 *a_g, __global float4 *res_g) {
@@ -91,10 +92,8 @@ def binary_op(op, x, y, ret):
   elif op == BinaryOps.POW: code = "pow(a,b)"
   elif op == BinaryOps.A: code = "a"
   elif op == BinaryOps.CMP: code = "1.0f*(a==b)"
-  elif op == BinaryOps.EXPMUL: code = "exp(a) * b"
   elif op == BinaryOps.POW_D1: code = 'b * pow(a, b-1.0f)'
   elif op == BinaryOps.POW_D2: code = 'log(a) * pow(a, b)'
-  elif op == BinaryOps.RELU_D: code = 'b * max(sign(a), (float)0.)'
   else: raise Exception(f"{op} isn't supported")
 
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape, True)
@@ -108,7 +107,6 @@ def binary_op(op, x, y, ret):
 def reduce_op(op, inp, ret, start="0.0"):
   if op == ReduceOps.SUM: code = "out += a"
   elif op == ReduceOps.MAX: code = "out = max(a,out)"
-  elif op == ReduceOps.NEGSUM: code = "out -= a"
   else: raise Exception(f"{op} isn't supported")
   # TODO: this is insanely slow
   # NOTE: ret.shape can be (1,), it's mostly by luck that this works

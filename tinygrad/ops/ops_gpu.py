@@ -18,15 +18,25 @@ class UnaryOp(Function):
 
 class ReLU(UnaryOp):
   fop = UnaryOps.RELU
-  bop = BinaryOps.RELU_D
+
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    ret = Buffer(input.shape)
+    unary_op(UnaryOps.SIGN, input, ret)
+    unary_op(UnaryOps.RELU, ret, ret)
+    return binary_op(BinaryOps.MUL, ret, grad_output, ret)
 
 class Log(UnaryOp):
   fop = UnaryOps.LOG
   bop = BinaryOps.DIV
 
 class Exp(UnaryOp):
-  fop = UnaryOps.EXP
-  bop = BinaryOps.EXPMUL
+  def forward(ctx, input):
+    ret = unary_op(UnaryOps.EXP, input, Buffer(input.shape))
+    ctx.save_for_backward(ret)   # we save the output here, not the input
+    return ret
+
+  bop = BinaryOps.MUL
 
 # ************* reduce ops *************
 
@@ -59,8 +69,8 @@ class Max(Function):
 
 # ************* binary ops *************
 
-def unbroadcast(out, in_sh, op=ReduceOps.SUM):
-  return reduce_op(op, out, Buffer(in_sh))
+def unbroadcast(out, in_sh):
+  return reduce_op(ReduceOps.SUM, out, Buffer(in_sh))
 
 class Add(Function):
   def forward(ctx, x, y):
@@ -79,8 +89,9 @@ class Sub(Function):
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
+    neg_grad_output = unary_op(UnaryOps.NEG, grad_output, Buffer(grad_output.shape))
     return unbroadcast(grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
-           unbroadcast(grad_output, shape_y, ReduceOps.NEGSUM) if ctx.needs_input_grad[1] else None
+           unbroadcast(neg_grad_output, shape_y) if ctx.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(ctx, x, y):
@@ -96,11 +107,12 @@ class Mul(Function):
 
 class Pow(Function):
   def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
-    return binary_op(BinaryOps.POW, x, y, Buffer(binary_broadcast(x.shape, y.shape)))
+    ret = Buffer(binary_broadcast(x.shape, y.shape))
+    ctx.save_for_backward(x, y, ret)
+    return binary_op(BinaryOps.POW, x, y, ret)
 
   def backward(ctx, grad_output):
-    x,y = ctx.saved_tensors
+    x,y,ret = ctx.saved_tensors
     tmp = Buffer(grad_output.shape)
     grad_x = unbroadcast(binary_op(BinaryOps.MUL, grad_output, binary_op(BinaryOps.POW_D1, x, y, tmp), tmp), x.shape) if ctx.needs_input_grad[0] else None
     grad_y = unbroadcast(binary_op(BinaryOps.MUL, grad_output, binary_op(BinaryOps.POW_D2, x, y, tmp), tmp), y.shape) if ctx.needs_input_grad[1] else None
