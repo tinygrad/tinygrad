@@ -36,10 +36,7 @@ class BinaryOps(Enum):
   DIV = 3
   POW = 4
   A = 5
-  CMP = 6
-  # these are "complex" ops, and should probably be replaced
-  POW_D1 = 7
-  POW_D2 = 8
+  CMPEQ = 6
 
 class ReduceOps(Enum):
   SUM = 0
