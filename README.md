@@ -110,9 +110,9 @@ print(b.cpu())
 
 Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doing something important with tinygrad and wanted to use the ANE, you might have a bad time.
 
-### Adding an accelerator
+### mlops
 
-You need to support 14 first class ops:
+mlops are mid level ops, there's 14 of them. They understand memory allocation and derivatives
 
 ```
 Relu, Log, Exp                  # unary ops
@@ -122,7 +122,24 @@ Reshape, Transpose, Slice       # movement ops
 Matmul, Conv2D(NCHW)            # processing ops
 ```
 
-While more ops may be added, I think this base is stable.
+You no longer need to write mlops for a new accelerator
+
+### Adding an accelerator (llops)
+
+The autodiff stuff is all in mlops now, so you can focus on the raw operations
+
+```
+Buffer                                           # class of memory on this device
+unary_op (RELU, EXP, LOG, NEG, SIGN)             # A -> A
+binary_op (ADD, SUB, MUL, DIV, POW, A, CMQEQ)    # A + B -> C
+reduce_op (SUM, MAX)                             # A -> B (smaller size)
+perm_axis                                        # A -> A
+inner_slice                                      # A -> B (different size)
+matmul                                           # A + B -> C
+conv, convdw, convdx                             # A + B -> C
+```
+
+When tinygrad moves to lazy evaluation, optimizations will happen here.
 
 ## ImageNet inference
 
