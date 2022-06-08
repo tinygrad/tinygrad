@@ -20,3 +20,30 @@ def binary_broadcast(x_shape, y_shape, extra=False):
       push(np.int32(max(shape_x[i], shape_y[i])), (shape_x[i] > 1, shape_y[i] > 1))
 
   return (shape_ret, dimlist, complist) if extra else shape_ret
+
+from enum import Enum
+class UnaryOps(Enum):
+  RELU = 0
+  EXP = 1
+  LOG = 2
+  NEG = 3
+
+class BinaryOps(Enum):
+  ADD = 0
+  SUB = 1
+  MUL = 2
+  DIV = 3
+  POW = 4
+  A = 5
+  CMP = 6
+  # these are "complex" ops, and should probably be replaced
+  EXPMUL = 7
+  POW_D1 = 8
+  POW_D2 = 9
+  RELU_D = 10
+
+class ReduceOps(Enum):
+  SUM = 0
+  MAX = 1
+  # this is "complex"
+  NEGSUM = 2

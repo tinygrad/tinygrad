@@ -2,7 +2,7 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import binary_broadcast
+from tinygrad.helpers import binary_broadcast, UnaryOps, BinaryOps, ReduceOps
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -48,7 +48,12 @@ def clbuild(name, prg):
   def run(*args): clprg(cl_queue, *args)
   return run
 
-def unary_op(code, x, ret):
+def unary_op(op, x, ret):
+  if op == UnaryOps.RELU: code = 'max(a, (float)0.)'
+  elif op == UnaryOps.EXP: code = 'exp(a)'
+  elif op == UnaryOps.LOG: code = 'log(a)'
+  elif op == UnaryOps.NEG: code = '-a'
+  else: raise Exception(f"{op} isn't supported")
   unop = clbuild("unop", """
   __kernel void unop(__global const float4 *a_g, __global float4 *res_g) {
     int gid = get_global_id(0);
@@ -78,16 +83,33 @@ def get_binop_prg(code, complist):
     res_g[gid0] = """+code+""";\n}"""
   return cl.Program(cl_ctx, prg).build(), dtype[2] == "float4"
 
-def binary_op(code, x, y, ret):
+def binary_op(op, x, y, ret):
+  if op == BinaryOps.ADD: code = "a+b"
+  elif op == BinaryOps.SUB: code = "a-b"
+  elif op == BinaryOps.MUL: code = "a*b"
+  elif op == BinaryOps.DIV: code = "b/a"
+  elif op == BinaryOps.POW: code = "pow(a,b)"
+  elif op == BinaryOps.A: code = "a"
+  elif op == BinaryOps.CMP: code = "1.0f*(a==b)"
+  elif op == BinaryOps.EXPMUL: code = "exp(a) * b"
+  elif op == BinaryOps.POW_D1: code = 'b * pow(a, b-1.0f)'
+  elif op == BinaryOps.POW_D2: code = 'log(a) * pow(a, b)'
+  elif op == BinaryOps.RELU_D: code = 'b * max(sign(a), (float)0.)'
+  else: raise Exception(f"{op} isn't supported")
+
   shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape, True)
   assert tuple(shape_ret) == tuple(ret.shape)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
   prg, is_float4 = get_binop_prg(code, tuple(complist))
-  kernel_size = [(roundup(prod_list[0])//4) if is_float4 else prod_list[0]] if len(dimlist) > 0 else [1]
-  prg.binop(cl_queue, kernel_size, None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
+  kernel_size = ((roundup(prod_list[0])//4) if is_float4 else prod_list[0]) if len(dimlist) > 0 else 1
+  prg.binop(cl_queue, [kernel_size], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
   return ret
 
-def reduce_op(code, inp, ret, start="0.0"):
+def reduce_op(op, inp, ret, start="0.0"):
+  if op == ReduceOps.SUM: code = "out += a"
+  elif op == ReduceOps.MAX: code = "out = max(a,out)"
+  elif op == ReduceOps.NEGSUM: code = "out -= a"
+  else: raise Exception(f"{op} isn't supported")
   # TODO: this is insanely slow
   # NOTE: ret.shape can be (1,), it's mostly by luck that this works
   reduce = clbuild("reduce", """

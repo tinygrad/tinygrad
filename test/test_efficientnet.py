@@ -17,7 +17,7 @@ def _load_labels():
 
 _LABELS = _load_labels()
 
-def _infer(model: EfficientNet, img):
+def _infer(model: EfficientNet, img, bs=1):
   # preprocess image
   aspect_ratio = img.size[0] / img.size[1]
   img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
@@ -34,8 +34,9 @@ def _infer(model: EfficientNet, img):
   img /= np.array([0.229, 0.224, 0.225]).reshape((1, -1, 1, 1))
 
   # run the net
+  if bs > 1: img = img.repeat(bs, axis=0)
   out = model.forward(Tensor(img)).cpu()
-  return _LABELS[np.argmax(out.data)]
+  return _LABELS[np.argmax(out.data[0])]
 
 chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')
 car_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/car.jpg')
@@ -52,6 +53,10 @@ class TestEfficientNet(unittest.TestCase):
 
   def test_chicken(self):
     label = _infer(self.model, chicken_img)
+    self.assertEqual(label, "hen")
+
+  def test_chicken_bigbatch(self):
+    label = _infer(self.model, chicken_img, 16)
     self.assertEqual(label, "hen")
 
   def test_car(self):

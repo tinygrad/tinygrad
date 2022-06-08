@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import binary_broadcast
+from tinygrad.helpers import binary_broadcast, UnaryOps, BinaryOps, ReduceOps
 from ..tensor import Function
 from ..llops.opencl import GPUBuffer as Buffer
 from ..llops.opencl import unary_op, binary_op, reduce_op, perm_axis, inner_slice
@@ -17,16 +17,16 @@ class UnaryOp(Function):
     return binary_op(ctx.bop, input, grad_output, Buffer(input.shape))
 
 class ReLU(UnaryOp):
-  fop = 'max(a, (float)0.)'
-  bop = 'b * max(sign(a), (float)0.)'
+  fop = UnaryOps.RELU
+  bop = BinaryOps.RELU_D
 
 class Log(UnaryOp):
-  fop = 'log(a)'
-  bop = 'b / a'
+  fop = UnaryOps.LOG
+  bop = BinaryOps.DIV
 
 class Exp(UnaryOp):
-  fop = 'exp(a)'
-  bop = 'b * exp(a)'
+  fop = UnaryOps.EXP
+  bop = BinaryOps.EXPMUL
 
 # ************* reduce ops *************
 
@@ -36,36 +36,36 @@ def reduce_shape(shape, axis):
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input.shape)
-    return reduce_op("out += a", input, Buffer(reduce_shape(input.shape, axis)))
+    return reduce_op(ReduceOps.SUM, input, Buffer(reduce_shape(input.shape, axis)))
 
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
     # NOTE: the b Buffer isn't used, since this is just for broadcast
     ret = Buffer(shape_input)
-    return binary_op('a', grad_output, ret, ret)
+    return binary_op(BinaryOps.A, grad_output, ret, ret)
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    ret = reduce_op("out = max(a,out)", input, Buffer(reduce_shape(input.shape, axis)), start="-INFINITY")
+    ret = reduce_op(ReduceOps.MAX, input, Buffer(reduce_shape(input.shape, axis)), start="-INFINITY")
     ctx.save_for_backward(input, ret)
     return ret
 
   def backward(ctx, grad_output):
     input, ret = ctx.saved_tensors
-    ret2 = binary_op("1.0f*(a==b)", input, ret, Buffer(input.shape))
-    div = reduce_op("out += a", ret2, Buffer(grad_output.shape), start="1e-10")
-    binary_op("a/b", ret2, div, ret2)
-    return binary_op('a*b', ret2, grad_output, ret2)
+    ret2 = binary_op(BinaryOps.CMP, input, ret, Buffer(input.shape))
+    div = reduce_op(ReduceOps.SUM, ret2, Buffer(grad_output.shape), start="1e-10")
+    binary_op(BinaryOps.DIV, div, ret2, ret2)
+    return binary_op(BinaryOps.MUL, ret2, grad_output, ret2)
 
 # ************* binary ops *************
 
-def unbroadcast(out, in_sh, code="out += a"):
-  return reduce_op(code, out, Buffer(in_sh))
+def unbroadcast(out, in_sh, op=ReduceOps.SUM):
+  return reduce_op(op, out, Buffer(in_sh))
 
 class Add(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
-    return binary_op('a+b', x, y, Buffer(binary_broadcast(x.shape, y.shape)))
+    return binary_op(BinaryOps.ADD, x, y, Buffer(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
@@ -75,35 +75,35 @@ class Add(Function):
 class Sub(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
-    return binary_op('a-b', x, y, Buffer(binary_broadcast(x.shape, y.shape)))
+    return binary_op(BinaryOps.SUB, x, y, Buffer(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
     return unbroadcast(grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
-           unbroadcast(grad_output, shape_y, code="out -= a") if ctx.needs_input_grad[1] else None
+           unbroadcast(grad_output, shape_y, ReduceOps.NEGSUM) if ctx.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return binary_op('a*b', x, y, Buffer(binary_broadcast(x.shape, y.shape)))
+    return binary_op(BinaryOps.MUL, x, y, Buffer(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     tmp = Buffer(grad_output.shape)
-    grad_x = unbroadcast(binary_op('a*b', y, grad_output, tmp), x.shape) if ctx.needs_input_grad[0] else None
-    grad_y = unbroadcast(binary_op('a*b', x, grad_output, tmp), y.shape) if ctx.needs_input_grad[1] else None
+    grad_x = unbroadcast(binary_op(BinaryOps.MUL, y, grad_output, tmp), x.shape) if ctx.needs_input_grad[0] else None
+    grad_y = unbroadcast(binary_op(BinaryOps.MUL, x, grad_output, tmp), y.shape) if ctx.needs_input_grad[1] else None
     return grad_x, grad_y
 
 class Pow(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x, y)
-    return binary_op('pow(a,b)', x, y, Buffer(binary_broadcast(x.shape, y.shape)))
+    return binary_op(BinaryOps.POW, x, y, Buffer(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
     tmp = Buffer(grad_output.shape)
-    grad_x = unbroadcast(binary_op('a*b', grad_output, binary_op('b * pow(a, b-1.0f)', x, y, tmp), tmp), x.shape) if ctx.needs_input_grad[0] else None
-    grad_y = unbroadcast(binary_op('a*b', grad_output, binary_op('log(a) * pow(a, b)', x, y, tmp), tmp), y.shape) if ctx.needs_input_grad[1] else None
+    grad_x = unbroadcast(binary_op(BinaryOps.MUL, grad_output, binary_op(BinaryOps.POW_D1, x, y, tmp), tmp), x.shape) if ctx.needs_input_grad[0] else None
+    grad_y = unbroadcast(binary_op(BinaryOps.MUL, grad_output, binary_op(BinaryOps.POW_D2, x, y, tmp), tmp), y.shape) if ctx.needs_input_grad[1] else None
     return grad_x, grad_y
 
 # ************* movement ops *************
