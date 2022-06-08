@@ -1,7 +1,7 @@
 import numpy as np
 from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
 
-class CPUBuffer(np.ndarray):
+class Buffer(np.ndarray):
   def __new__(cls, shape, hostbuf=None):
     if hostbuf is not None:
       return super().__new__(cls, shape, dtype=np.float32, buffer=hostbuf.data)

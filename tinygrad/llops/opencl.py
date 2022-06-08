@@ -18,20 +18,20 @@ i32 = np.int32
 def roundup(x, n=4): return (x+(n-1))//n * n
 def sync(): cl_queue.finish()
 
-class GPUBuffer:
+class Buffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(np.prod(shape)))  # padding
-    if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
+    self.cl = hostbuf.cl if isinstance(hostbuf, Buffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(np.prod(shape)))  # padding
+    if hostbuf is not None and not isinstance(hostbuf, Buffer):
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
 
   def __repr__(self):
-    return f"<GPUBuffer with shape {self.shape!r}>"
+    return f"<GPU Buffer with shape {self.shape!r}>"
 
   @staticmethod
   def fromCPU(x):
-    return GPUBuffer(x.shape, x.view(np.ndarray))
+    return Buffer(x.shape, x.view(np.ndarray))
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
@@ -316,4 +316,3 @@ def convdx(w,grad_output,dx,conv_args):
   """)
   convdx_prg([bs, groups, cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in conv_args])
   return dx
-
