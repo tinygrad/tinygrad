@@ -400,6 +400,7 @@ def register(name, fxn, device=Device.CPU):
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
     f = Tensor.ops[tt.device][name]
     f.device = tt.device
+    f.op = importlib.import_module(f".cpu", f"tinygrad.llops")
     return f.apply(f, *x, **kwargs)
   if getattr(Tensor, name, None) is not None:
     setattr(Tensor, "_"+name, dispatch)
