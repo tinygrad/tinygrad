@@ -5,6 +5,11 @@ from ..tensor import Function
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Buffer(torch.Tensor):
+  def __new__(cls, shape):
+    if isinstance(shape, torch.Tensor):
+      return super().__new__(cls, shape)
+    else:
+      return Buffer(torch.zeros(shape))
   custompad = lambda x,padding: torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
   @staticmethod
   def fromCPU(data):
@@ -16,7 +21,7 @@ class Buffer(torch.Tensor):
 
 # ************* unary+binary+reduce+movement ops *************
 
-from tinygrad.llops.cpu import unary_op, binary_op, reduce_op, perm_axis, inner_slice, matmul
+from tinygrad.llops.cpu import unary_op, binary_op, reduce_op, reshape, perm_axis, inner_slice, matmul
 
 # ************* processing ops *************
 

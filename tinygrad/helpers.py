@@ -7,7 +7,7 @@ def binary_broadcast(x_shape, y_shape, extra=False):
   shape_y[:len(y_shape)] = np.array(y_shape, dtype=np.int32)
   if not np.all((shape_x == 1) | (shape_y == 1) | (shape_x == shape_y)):
     raise Exception(f"binary op unbroadcastable shape mismatch: {x_shape} vs {y_shape}")
-  shape_ret = np.maximum(shape_x, shape_y)
+  shape_ret = tuple([int(x) for x in np.maximum(shape_x, shape_y)])
 
   if extra:
     dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims

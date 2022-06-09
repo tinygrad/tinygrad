@@ -79,7 +79,8 @@ def unbroadcast(out, in_sh):
 class Add(Function):
   def forward(ctx, x, y):
     ctx.save_for_backward(x.shape, y.shape)
-    return ll.binary_op(BinaryOps.ADD, x, y, ll.Buffer(binary_broadcast(x.shape, y.shape)))
+    buf = ll.Buffer(binary_broadcast(x.shape, y.shape))
+    return ll.binary_op(BinaryOps.ADD, x, y, buf) #ll.Buffer(binary_broadcast(x.shape, y.shape)))
 
   def backward(ctx, grad_output):
     shape_x, shape_y = ctx.saved_tensors
@@ -145,7 +146,7 @@ class Transpose(Function):
     return ll.perm_axis(x, order, ret)
 
   def backward(ctx, grad_output):
-    norder = np.argsort(ctx.order)
+    norder = np.argsort(ctx.order).tolist()
     ret = ll.Buffer([grad_output.shape[i] for i in norder])
     return ll.perm_axis(grad_output, norder, ret)
 

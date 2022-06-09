@@ -37,10 +37,14 @@ def binary_op(op, x, y, ret):
   return ret
 
 def reduce_op(op, inp, ret):
-  if ret.shape == (1,): axis=None
+  if inp.shape == ret.shape:   # this is just a copy
+    ret[:] = inp
+    return ret
+  if ret.shape == (1,): axis=tuple(range(len(inp.shape)))
   else: axis = tuple([i for i,(a,b) in enumerate(zip(inp.shape, ret.shape)) if a != b])
   if op == ReduceOps.SUM: ret[:] = inp.sum(axis, keepdims=True)
-  if op == ReduceOps.MAX: ret[:] = inp.amax(axis, keepdims=True)
+  elif op == ReduceOps.MAX: ret[:] = inp.amax(axis, keepdims=True)
+  else: raise Exception(f"{op} isn't supported")
   return ret
 
 def reshape(x, shape):
