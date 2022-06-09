@@ -1,13 +1,6 @@
-import numpy as np
+import numpy as np    # TODO: remove this, it's used for np.prod and np.argsort
 from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps
 from tinygrad.tensor import Function
-
-ll = None
-def select_llops(ops):
-  global ll
-  import importlib
-  ll = importlib.import_module(f".{ops}", f"tinygrad.llops")
-  return ll.Buffer
 
 # ************* unary ops *************
 
