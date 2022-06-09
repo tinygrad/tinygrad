@@ -11,7 +11,7 @@ def select_llops(ops):
 
 # ************* unary ops *************
 
-class UnaryOp(Function):
+class _UnaryOp(Function):
   def forward(ctx, input):
     ctx.save_for_backward(input)
     return ctx.op.unary_op(ctx.fop, input, ctx.op.Buffer(input.shape))
@@ -20,7 +20,7 @@ class UnaryOp(Function):
     input, = ctx.saved_tensors
     return ctx.op.binary_op(ctx.bop, input, grad_output, ctx.op.Buffer(input.shape))
 
-class ReLU(UnaryOp):
+class ReLU(_UnaryOp):
   fop = UnaryOps.RELU
 
   def backward(ctx, grad_output):
@@ -30,11 +30,11 @@ class ReLU(UnaryOp):
     ctx.op.unary_op(UnaryOps.RELU, ret, ret)
     return ctx.op.binary_op(BinaryOps.MUL, ret, grad_output, ret)
 
-class Log(UnaryOp):
+class Log(_UnaryOp):
   fop = UnaryOps.LOG
   bop = BinaryOps.DIV
 
-class Exp(UnaryOp):
+class Exp(_UnaryOp):
   def forward(ctx, input):
     ret = ctx.op.unary_op(UnaryOps.EXP, input, ctx.op.Buffer(input.shape))
     ctx.save_for_backward(ret)   # we save the output here, not the input

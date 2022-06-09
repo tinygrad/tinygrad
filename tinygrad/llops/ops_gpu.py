@@ -1,4 +1,3 @@
-# llops don't know about derivatives or memory allocation
 import functools
 import numpy as np
 import pyopencl as cl

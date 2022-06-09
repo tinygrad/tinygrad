@@ -1,7 +1,5 @@
-import os
 import torch
 import numpy as np
-from ..tensor import Function
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Buffer(torch.Tensor):
@@ -21,7 +19,7 @@ class Buffer(torch.Tensor):
 
 # ************* unary+binary+reduce+movement ops *************
 
-from tinygrad.llops.cpu import unary_op, binary_op, reduce_op, reshape, perm_axis, inner_slice, matmul
+from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, reshape, perm_axis, inner_slice, matmul
 
 # ************* processing ops *************
 

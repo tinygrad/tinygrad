@@ -65,14 +65,19 @@ class ProfileOp:
 # **** enumerate supported devices ****
 
 class Device:
-  _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ops")))
+  _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops")))
   imports = dict(enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]))
   DEFAULT = None
-  buffers = {}
+  buffers, llops = {}, {}
   for i,op in imports.items():
     name = op[len("ops_"):].upper()
     vars()[name] = i
     DEFAULT = i if os.environ.get(name, 0) == "1" else DEFAULT
+    try:
+      llops[i] = importlib.import_module('tinygrad.llops.'+op)
+      buffers[i] = llops[i].Buffer
+    except ImportError as e:
+      print(op, "not available", e)
   DEFAULT = CPU if DEFAULT is None else DEFAULT
 
 # **** start with two base classes, Tensor and Function ****
@@ -80,7 +85,7 @@ class Device:
 class Tensor:
   did_float_warning = False
   training = False
-  ops = defaultdict(dict)
+  ops = {}
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
     self.device, self.data = device, self._move_data(data, device)
@@ -370,15 +375,8 @@ class Function:
     self.requires_grad = any(t.requires_grad for t in tensors)
     self.saved_tensors = []
 
-  @property
-  def op(f):
-    # uhhh, obviously stupid
-    if f.device == 0:
-      return importlib.import_module(f".cpu", f"tinygrad.llops")
-    elif f.device == 1:
-      return importlib.import_module(f".opencl", f"tinygrad.llops")
-    elif f.device == 2:
-      return importlib.import_module(f".torch", f"tinygrad.llops")
+  buffer = property(lambda self: Device.buffers[self.device])
+  op = property(lambda self: Device.llops[self.device])
 
   def save_for_backward(self, *x):
     if self.requires_grad:
@@ -400,15 +398,17 @@ class Function:
                    device=ctx.device, requires_grad=any(ctx.needs_input_grad))
       po.output = [ret]
     if ret.requires_grad:
-      ret._ctx = ctx
+      ret._ctx = ctx    # used by autograd engine
     return ret
 
-def register(name, fxn, device=Device.CPU):
-  Tensor.ops[device][name] = fxn
+def register(name, fxn):
+  Tensor.ops[name] = fxn
   def dispatch(*x, **kwargs):
+    # get first tensor in args to determine device
     tt = [arg for arg in x if isinstance(arg, Tensor)][0]
+    # create tensors from number arguments
     x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    f = Tensor.ops[tt.device][name]
+    f = Tensor.ops[name]  # get the function by device and name
     f.device = tt.device
     return f.apply(f, *x, **kwargs)
   if getattr(Tensor, name, None) is not None:
@@ -420,18 +420,11 @@ def register(name, fxn, device=Device.CPU):
     setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
+# register functions to move between devices
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
 
-# this registers all the operations
-def _register_ops(namespace, device=Device.CPU):
-  for name, cls in inspect.getmembers(namespace, inspect.isclass):
-    if name.endswith("Buffer"):  Device.buffers[device] = cls
-    elif name[0] != "_":  register(name.lower(), cls, device=device)
-
-for d,ops in Device.imports.items():
-  try:
-    _register_ops(importlib.import_module('tinygrad.ops.'+ops), d)
-  except ImportError:
-    pass
+# this registers all the mlops "math" operations
+for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
+  if name[0] != "_" and name != "Function": register(name.lower(), cls)
