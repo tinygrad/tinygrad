@@ -2,19 +2,17 @@ import numpy as np
 from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
 
 class CPUBuffer(np.ndarray):
-  def toCPU(x): return x
-  def log(x): return np.log(x)
-  def exp(x): return np.exp(x)
-  def sign(x): return np.sign(x)
   def relu(x): return np.maximum(x, 0)
-  def type(x, tt): return x.astype(tt)
-  def custompad(x, padding): return np.pad(x, padding)
-  def permute(x, order): return x.transpose(order)
-  def expand(x, shp): return np.broadcast_to(x, shp)
+  def exp(x): return np.exp(x)
+  def log(x): return np.log(x)
+  def sign(x): return np.sign(x)
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
+  def permute(x, order): return x.transpose(order)
+  def custompad(x, padding): return np.pad(x, padding)
 
   @staticmethod
   def fromCPU(x): return x
+  def toCPU(x): return x
 
 def unary_op(op, x, ret):
   if op == UnaryOps.RELU: ret[:] = x.relu()
