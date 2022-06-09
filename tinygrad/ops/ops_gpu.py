@@ -1,2 +1,2 @@
 from ..mlops import *
-#Buffer = select_llops("opencl")
+Buffer = select_llops("opencl")
