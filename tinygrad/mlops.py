@@ -132,13 +132,11 @@ class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
     shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    r = ll.Buffer(shape, hostbuf=x)   # NOTE: this is not a copy
-    assert np.prod(x.shape) == np.prod(r.shape)
-    return r
+    return ll.reshape(x, shape) # NOTE: this is not a copy
 
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
-    return ll.Buffer(in_shape, hostbuf=grad_output)
+    return ll.reshape(grad_output, in_shape)
 
 class Transpose(Function):
   def forward(ctx, x, order=(1,0)):

@@ -2,11 +2,6 @@ import numpy as np
 from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
 
 class Buffer(np.ndarray):
-  def __new__(cls, shape, hostbuf=None):
-    if hostbuf is not None:
-      return super().__new__(cls, shape, dtype=np.float32, buffer=hostbuf.data)
-    else:
-      return super().__new__(cls, shape, dtype=np.float32)
   def toCPU(x): return x
   def log(x): return np.log(x)
   def exp(x): return np.exp(x)
@@ -47,6 +42,10 @@ def reduce_op(op, inp, ret):
   if op == ReduceOps.SUM: ret[:] = inp.sum(axis, keepdims=True)
   if op == ReduceOps.MAX: ret[:] = inp.amax(axis, keepdims=True)
   return ret
+
+def reshape(x, shape):
+  assert np.prod(x.shape) == np.prod(shape)
+  return x.reshape(shape)
 
 def perm_axis(x, order, ret):
   ret[:] = x.permute(order)

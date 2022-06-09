@@ -144,6 +144,9 @@ def reduce_op(op, inp, ret):
     buffer_np(np.array(ret.shape, dtype=np.int32)))
   return ret
 
+def reshape(x, shape):
+  assert np.prod(x.shape) == np.prod(shape)
+  return Buffer(shape, hostbuf=x)
 
 def perm_axis(inp, order, ret):
   perm = clbuild("perm", """
