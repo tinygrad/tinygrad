@@ -21,6 +21,16 @@ def binary_broadcast(x_shape, y_shape, extra=False):
 
   return (shape_ret, dimlist, complist) if extra else shape_ret
 
+def get_conv_args(x_shape, w_shape, stride, groups):
+  cout,cin,H,W = w_shape
+  ys,xs = stride
+  bs,cin_,iy,ix = x_shape
+  oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
+  if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w.shape}. ({cin*ctx.groups} vs. {cin_})")
+  assert cout % groups == 0
+  rcout = cout//groups
+  return H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs
+
 from enum import Enum
 UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])

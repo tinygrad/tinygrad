@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import binary_broadcast, UnaryOps, BinaryOps, ReduceOps
+from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps
 from tinygrad.tensor import Function
 
 ll = None
@@ -180,32 +180,13 @@ class Matmul(Function):
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     if isinstance(ctx.stride, int): ctx.stride = (ctx.stride, ctx.stride)
-    cout,cin,H,W = w.shape
-    ys,xs = ctx.stride
-    bs,cin_,iy,ix = x.shape
-    oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
-    if cin*ctx.groups != cin_: raise Exception(f"Input Tensor shape {x.shape} does not match the shape of the weights {w.shape}. ({cin*ctx.groups} vs. {cin_})")
-    assert cout % ctx.groups == 0
-    rcout = cout//ctx.groups
-
     ctx.save_for_backward(x,w)
-
-    # output buffer
-    conv_args = H, W, ctx.groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs
-    return ctx.op.conv(x, w, ctx.buffer((bs, cout, oy, ox)), conv_args)
+    H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args = get_conv_args(x.shape, w.shape, ctx.stride, ctx.groups)
+    return ctx.op.conv(x, w, ctx.buffer((bs, groups*rcout, oy, ox)), conv_args)
 
   def backward(ctx, grad_output):
-    bs,_,oy,ox = grad_output.shape
     x, w = ctx.saved_tensors
-    cout,cin,H,W = w.shape
-    ys,xs = ctx.stride
-    bs,cin_,iy,ix = x.shape
-    oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
-    assert cin*ctx.groups == cin_
-    assert cout % ctx.groups == 0
-    rcout = cout//ctx.groups
-
-    conv_args = H, W, ctx.groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs
-    dx = ctx.op.convdx(w, grad_output, ctx.buffer((bs, cin_, iy, ix)), conv_args) if ctx.needs_input_grad[0] else None
-    dw = ctx.op.convdw(x, grad_output, ctx.buffer((cout, cin, H, W)), conv_args) if ctx.needs_input_grad[1] else None
+    H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args = get_conv_args(x.shape, w.shape, ctx.stride, ctx.groups)
+    dx = ctx.op.convdx(w, grad_output, ctx.buffer((bs, groups*cin, iy, ix)), conv_args) if ctx.needs_input_grad[0] else None
+    dw = ctx.op.convdw(x, grad_output, ctx.buffer((groups*rcout, cin, H, W)), conv_args) if ctx.needs_input_grad[1] else None
     return dx, dw
