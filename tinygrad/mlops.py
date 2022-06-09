@@ -139,19 +139,20 @@ class Transpose(Function):
     return ctx.op.perm_axis(x, order, ret)
 
   def backward(ctx, grad_output):
-    norder = np.argsort(ctx.order).tolist()
+    order, = ctx.saved_tensors
+    norder = np.argsort(order).tolist()
     ret = ctx.buffer([grad_output.shape[i] for i in norder])
     return ctx.op.perm_axis(grad_output, norder, ret)
 
 class Slice(Function):
   def forward(ctx, x, arg=None):
-    ctx.save_for_backward(x.shape)
+    ctx.save_for_backward(x.shape, arg)
     ret = ctx.buffer([y[1]-y[0] for y in arg])
     return ctx.op.inner_slice(x, arg, ret)
 
   def backward(ctx, grad_output):
-    shape, = ctx.saved_tensors
-    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(ctx.arg)]
+    shape, arg = ctx.saved_tensors
+    narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(arg)]
     ret = ctx.buffer([y[1]-y[0] for y in narg])
     return ctx.op.inner_slice(grad_output, narg, ret)
 

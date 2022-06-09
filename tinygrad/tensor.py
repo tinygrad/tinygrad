@@ -384,14 +384,6 @@ class Function:
   def apply(self, device, *x, **kwargs):
     ctx = self(*x) # self - operation i.e 'add', 'sub', etc.
     ctx.device = device
-    # use default params
-    params = inspect.signature(self.forward).parameters
-    for p in params.values():
-      if p.default is not p.empty:
-        setattr(ctx, p.name, p.default)
-    # overwrite with passed params
-    for k, v in kwargs.items():
-      setattr(ctx, k, v)
     ctx.needs_input_grad = [t.requires_grad for t in x]
     with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
       ret = Tensor(self.forward(ctx, *[t.data for t in x], **kwargs),
