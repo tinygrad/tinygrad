@@ -228,11 +228,7 @@ def matmul(a, b, c, transpose_a=False, transpose_b=False):
     osize)
   return c
 
-
-# TODO: combine any of these three?
-def conv(x,w,ret,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-
+def conv(x,w,ret,C):
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
@@ -259,15 +255,14 @@ def conv(x,w,ret,conv_args):
     output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
   }""")
 
-  conv_prg([bs*groups*rcout, oy, ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in conv_args])
+  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in C])
   return ret
 
 # tensx = (bs, groups*cin, iy, ix)
 # tensw = (groups*rcout, cin, H, W)
 # ggg = (bs, groups*rout, oy, ox)
 
-def convdw(x,grad_output,dw,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
+def convdw(x,grad_output,dw,C):
   convdw_prg = clbuild("convdw", """
   __kernel void convdw(__global const float *tensx, __global const float *ggg, __global float *dw,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
@@ -287,11 +282,10 @@ def convdw(x,grad_output,dw,conv_args):
     } }
     dw[get_global_id(0)*H*W + y*W + x] = acc;
   }""")
-  convdw_prg([groups*rcout*cin, H, W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in conv_args])
+  convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C])
   return dw
 
-def convdx(w,grad_output,dx,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
+def convdx(w,grad_output,dx,C):
   convdx_prg = clbuild("convdx", """
   __kernel void convdx(__global const float *tensw, __global const float *ggg, __global float *dx,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
@@ -316,5 +310,5 @@ def convdx(w,grad_output,dx,conv_args):
     } }
   }
   """)
-  convdx_prg([bs, groups, cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in conv_args])
+  convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C])
   return dx

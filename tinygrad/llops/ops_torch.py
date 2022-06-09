@@ -23,18 +23,14 @@ from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, reshape, perm
 
 # ************* processing ops *************
 
-def conv(x,w,ret,conv_args):
-  # TODO: replace conv_args with stride and groups everywhere
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-  ret[:] = torch.nn.functional.conv2d(x, w, stride=(ys,xs), groups=groups)
+def conv(x,w,ret,C):
+  ret[:] = torch.nn.functional.conv2d(x, w, stride=(C.ys,C.xs), groups=C.groups)
   return ret
 
-def convdw(x,grad_output,dw,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-  dw[:] = torch.nn.grad.conv2d_weight(x, dw.shape, grad_output, stride=(ys,xs), groups=groups)
+def convdw(x,grad_output,dw,C):
+  dw[:] = torch.nn.grad.conv2d_weight(x, dw.shape, grad_output, stride=(C.ys,C.xs), groups=C.groups)
   return dw
 
-def convdx(w,grad_output,dx,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-  dx[:] = torch.nn.grad.conv2d_input(dx.shape, w, grad_output, stride=(ys,xs), groups=groups)
+def convdx(w,grad_output,dx,C):
+  dx[:] = torch.nn.grad.conv2d_input(dx.shape, w, grad_output, stride=(C.ys,C.xs), groups=C.groups)
   return dx
