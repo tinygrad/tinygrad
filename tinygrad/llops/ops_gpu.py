@@ -17,20 +17,20 @@ i32 = np.int32
 def roundup(x, n=4): return (x+(n-1))//n * n
 def sync(): cl_queue.finish()
 
-class Buffer:
+class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = hostbuf.cl if isinstance(hostbuf, Buffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(np.prod(shape)))  # padding
-    if hostbuf is not None and not isinstance(hostbuf, Buffer):
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(np.prod(shape)))  # padding
+    if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
 
   def __repr__(self):
-    return f"<GPU Buffer with shape {self.shape!r}>"
+    return f"<GPUBuffer with shape {self.shape!r}>"
 
   @staticmethod
   def fromCPU(x):
-    return Buffer(x.shape, x.view(np.ndarray))
+    return GPUBuffer(x.shape, x.view(np.ndarray))
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
@@ -145,7 +145,7 @@ def reduce_op(op, inp, ret):
 
 def reshape(x, shape):
   assert np.prod(x.shape) == np.prod(shape)
-  return Buffer(shape, hostbuf=x)
+  return GPUBuffer(shape, hostbuf=x)
 
 def perm_axis(inp, order, ret):
   perm = clbuild("perm", """

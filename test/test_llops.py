@@ -6,7 +6,7 @@ import numpy as np
 from tinygrad.tensor import Device
 from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
 if Device.DEFAULT == Device.GPU:
-  from tinygrad.llops.opencl import GPUBuffer, sync, unary_op, binary_op, reduce_op
+  from tinygrad.llops.ops_gpu import GPUBuffer, sync, unary_op, binary_op, reduce_op
 
 def timeit(fxn, its=1000, done=lambda:None):
   fxn()

@@ -1,7 +1,7 @@
 import numpy as np
 from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
 
-class Buffer(np.ndarray):
+class CPUBuffer(np.ndarray):
   def toCPU(x): return x
   def log(x): return np.log(x)
   def exp(x): return np.exp(x)

@@ -2,16 +2,16 @@ import torch
 import numpy as np
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-class Buffer(torch.Tensor):
+class TorchBuffer(torch.Tensor):
   def __new__(cls, shape):
     if isinstance(shape, torch.Tensor):
       return super().__new__(cls, shape)
     else:
-      return Buffer(torch.zeros(shape))
+      return TorchBuffer(torch.zeros(shape))
   custompad = lambda x,padding: torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
   @staticmethod
   def fromCPU(data):
-    return Buffer(torch.from_numpy(data).requires_grad_(False)).to(device)
+    return TorchBuffer(torch.from_numpy(data).requires_grad_(False)).to(device)
   def toCPU(x):
     return x.cpu().numpy()
   def getdtype(self):
