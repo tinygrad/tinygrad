@@ -71,48 +71,44 @@ def matmul(a, b, c, transpose_a=False, transpose_b=False):
   c[:] = a @ b
   return c
 
-def get_tx(x, conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-  gx = x.reshape(bs,groups,cin,x.shape[2],x.shape[3])
+def get_tx(x, C):
+  gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
   return np.lib.stride_tricks.as_strided(gx,
-    shape=(bs, groups, cin, oy, ox, H, W),
-    strides=(*gx.strides[0:3], gx.strides[3]*ys, gx.strides[4]*xs, *gx.strides[3:5]),
+    shape=(C.bs, C.groups, C.cin, C.oy, C.ox, C.H, C.W),
+    strides=(*gx.strides[0:3], gx.strides[3]*C.ys, gx.strides[4]*C.xs, *gx.strides[3:5]),
     writeable=False,
   )
 
-def conv(x,w,ret,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-  tx = get_tx(x, conv_args)
-  tw = w.reshape(groups, rcout, cin, H, W)
-  tmp = np.zeros((bs,groups,oy,ox,rcout),dtype=x.dtype)
-  for g in range(groups):
+def conv(x,w,ret,C):
+  tx = get_tx(x, C)
+  tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
+  tmp = np.zeros((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
+  for g in range(C.groups):
     #ijYXyx,kjyx -> iYXk ->ikYX
     tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
-  ret[:] = np.moveaxis(tmp,4,2).reshape(bs, groups*rcout, oy, ox)
+  ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
   return ret
 
-def convdw(x,grad_output,dw,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-  tx = get_tx(x, conv_args)
-  ggg = grad_output.reshape(bs,groups,rcout,oy,ox)
-  gdw = dw.reshape((groups,rcout,cin,H,W))
+def convdw(x,grad_output,dw,C):
+  tx = get_tx(x, C)
+  ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
+  gdw = dw.reshape((C.groups, C.rcout, C.cin, C.H, C.W))
   gdw[:] = 0
-  for g in range(groups):
+  for g in range(C.groups):
     #'ikYX,ijYXyx -> kjyx'
     gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
   return dw
 
-def convdx(w,grad_output,dx,conv_args):
-  H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs = conv_args
-  ggg = grad_output.reshape(bs,groups,rcout,oy,ox)
-  tw = w.reshape(groups, rcout, cin, H, W)
-  gdx = dx.reshape((bs,groups,cin,iy,ix))
+def convdx(w,grad_output,dx,C):
+  ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
+  tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
+  gdx = dx.reshape((C.bs, C.groups, C.cin, C.iy, C.ix))
   gdx[:] = 0
-  for k in range(oy*ox):
-    Y, X = k//ox, k%ox
-    iY,iX = Y*ys, X*xs
+  for k in range(C.oy*C.ox):
+    Y, X = k//C.ox, k%C.ox
+    iY,iX = Y*C.ys, X*C.xs
     #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
-    for g in range(groups):
-      tg = np.dot(ggg[:,g,:,Y,X].reshape(bs, -1), tw[g].reshape(rcout, -1))
-      gdx[:, g, :, iY:iY+H, iX:iX+W] += tg.reshape((bs, cin, H, W))
+    for g in range(C.groups):
+      tg = np.dot(ggg[:,g,:,Y,X].reshape(C.bs, -1), tw[g].reshape(C.rcout, -1))
+      gdx[:, g, :, iY:iY+C.H, iX:iX+C.W] += tg.reshape((C.bs, C.cin, C.H, C.W))
   return dx
