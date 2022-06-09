@@ -22,22 +22,6 @@ def binary_broadcast(x_shape, y_shape, extra=False):
   return (shape_ret, dimlist, complist) if extra else shape_ret
 
 from enum import Enum
-class UnaryOps(Enum):
-  RELU = 0
-  EXP = 1
-  LOG = 2
-  NEG = 3
-  SIGN = 4
-
-class BinaryOps(Enum):
-  ADD = 0
-  SUB = 1
-  MUL = 2
-  DIV = 3
-  POW = 4
-  A = 5
-  CMPEQ = 6
-
-class ReduceOps(Enum):
-  SUM = 0
-  MAX = 1
+UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
+BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
+ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])

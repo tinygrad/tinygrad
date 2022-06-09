@@ -427,4 +427,4 @@ for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
 
 # this registers all the mlops "math" operations
 for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
-  if name[0] != "_" and name != "Function": register(name.lower(), cls)
+  if name[0] != "_" and name != "Function" and not name.endswith("Ops"): register(name.lower(), cls)
