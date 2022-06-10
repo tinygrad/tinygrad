@@ -2,6 +2,7 @@
 import os, atexit, time, inspect, functools, importlib
 from collections import defaultdict
 import numpy as np
+from tinygrad.helpers import prod
 
 # **** profiler ****
 
@@ -135,7 +136,7 @@ class Tensor:
 
   @classmethod
   def uniform(cls, *shape, **kwargs):
-    return cls((np.random.uniform(-1., 1., size=shape)/np.sqrt(np.prod(shape))).astype(np.float32), **kwargs)
+    return cls((np.random.uniform(-1., 1., size=shape)/np.sqrt(prod(shape))).astype(np.float32), **kwargs)
 
   @classmethod
   def eye(cls, dim, **kwargs):
@@ -240,11 +241,20 @@ class Tensor:
   def pad2d(self, padding):
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
-  def matmul(self, w):
-    if len(self.shape) > 2 and len(w.shape) == 2:
-      return self.reshape(shape=(-1, self.shape[-1]))._matmul(w).reshape(shape=list(self.shape[0:-1]) + [-1])
-    else:
-      return self._matmul(w)
+  def matmul(x, w):
+    bs, groups = prod(x.shape[0:-2]), prod(w.shape[0:-2])
+    cin, cout = w.shape[-2], w.shape[-1]
+    out_shape_t = tuple(list(x.shape[0:-2])+[cout,-1])
+    order = tuple(list(range(len(x.shape)-2))+[len(x.shape)-1, len(x.shape)-2])
+    worder = tuple(list(range(len(w.shape)-2))+[len(w.shape)-1, len(w.shape)-2])
+
+    # NOTE: with NHWC we can remove the transposes
+    # bs x groups*cin x H x W
+    cx = x.transpose(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
+    # groups*cout x cin x H, W
+    cw = w.transpose(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
+    return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).transpose(order=order)
+
   dot = matmul
 
   def _canonicalize_reduce_axis(self, axis):
@@ -267,7 +277,7 @@ class Tensor:
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out * (np.prod(out.shape)/np.prod(self.shape))
+    return out * (prod(out.shape)/prod(self.shape))
 
   def sqrt(self):
     return self.pow(0.5)
