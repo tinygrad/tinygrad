@@ -182,10 +182,13 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_grouped_conv2d(self):
-    groups = 2
-    helper_test_op([(1,2,5,5), (groups,1,3,3)],
+    bs = 4
+    groups = 5
+    rcout = 7
+    cin = 3
+    helper_test_op([(bs,groups*cin,5,5), (groups*rcout,cin,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_fancy_conv2d(self):
     bs = 2
