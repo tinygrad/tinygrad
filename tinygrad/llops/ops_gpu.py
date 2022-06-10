@@ -1,7 +1,7 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import binary_broadcast, UnaryOps, BinaryOps, ReduceOps
+from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -228,7 +228,8 @@ def matmul(a, b, c, transpose_a=False, transpose_b=False):
     osize)
   return c
 
-def conv(x,w,ret,C):
+def conv(x,w,ret,stride,groups):
+  C = get_conv_args(x.shape, w.shape, stride, groups)
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
@@ -262,7 +263,8 @@ def conv(x,w,ret,C):
 # tensw = (groups*rcout, cin, H, W)
 # ggg = (bs, groups*rout, oy, ox)
 
-def convdw(x,grad_output,dw,C):
+def convdw(x,grad_output,dw,stride,groups):
+  C = get_conv_args(x.shape, dw.shape, stride, groups)
   convdw_prg = clbuild("convdw", """
   __kernel void convdw(__global const float *tensx, __global const float *ggg, __global float *dw,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
@@ -285,7 +287,8 @@ def convdw(x,grad_output,dw,C):
   convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C])
   return dw
 
-def convdx(w,grad_output,dx,C):
+def convdx(w,grad_output,dx,stride,groups):
+  C = get_conv_args(dx.shape, w.shape, stride, groups)
   convdx_prg = clbuild("convdx", """
   __kernel void convdx(__global const float *tensw, __global const float *ggg, __global float *dx,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {

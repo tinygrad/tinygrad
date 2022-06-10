@@ -23,14 +23,14 @@ from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, reshape, perm
 
 # ************* processing ops *************
 
-def conv(x,w,ret,C):
-  ret[:] = torch.nn.functional.conv2d(x, w, stride=(C.ys,C.xs), groups=C.groups)
+def conv(x,w,ret,stride,groups):
+  ret[:] = torch.nn.functional.conv2d(x, w, stride=stride, groups=groups)
   return ret
 
-def convdw(x,grad_output,dw,C):
-  dw[:] = torch.nn.grad.conv2d_weight(x, dw.shape, grad_output, stride=(C.ys,C.xs), groups=C.groups)
+def convdw(x,grad_output,dw,stride,groups):
+  dw[:] = torch.nn.grad.conv2d_weight(x, dw.shape, grad_output, stride=stride, groups=groups)
   return dw
 
-def convdx(w,grad_output,dx,C):
-  dx[:] = torch.nn.grad.conv2d_input(dx.shape, w, grad_output, stride=(C.ys,C.xs), groups=C.groups)
+def convdx(w,grad_output,dx,stride,groups):
+  dx[:] = torch.nn.grad.conv2d_input(dx.shape, w, grad_output, stride=stride, groups=groups)
   return dx

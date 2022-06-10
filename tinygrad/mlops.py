@@ -174,11 +174,11 @@ class Matmul(Function):
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     C = get_conv_args(x.shape, w.shape, stride, groups)
-    ctx.save_for_backward(x,w,C)
-    return ctx.op.conv(x, w, ctx.buffer((C.bs, C.groups*C.rcout, C.oy, C.ox)), C)
+    ctx.save_for_backward(x,w,(C.ys,C.xs), C.groups)
+    return ctx.op.conv(x, w, ctx.buffer((C.bs, C.groups*C.rcout, C.oy, C.ox)), (C.ys,C.xs), C.groups)
 
   def backward(ctx, grad_output):
-    x, w, C = ctx.saved_tensors
-    dx = ctx.op.convdx(w, grad_output, ctx.buffer((C.bs, C.groups*C.cin, C.iy, C.ix)), C) if ctx.needs_input_grad[0] else None
-    dw = ctx.op.convdw(x, grad_output, ctx.buffer((C.groups*C.rcout, C.cin, C.H, C.W)), C) if ctx.needs_input_grad[1] else None
+    x, w, stride, groups = ctx.saved_tensors
+    dx = ctx.op.convdx(w, grad_output, ctx.buffer(x.shape), stride, groups) if ctx.needs_input_grad[0] else None
+    dw = ctx.op.convdw(x, grad_output, ctx.buffer(w.shape), stride, groups) if ctx.needs_input_grad[1] else None
     return dx, dw

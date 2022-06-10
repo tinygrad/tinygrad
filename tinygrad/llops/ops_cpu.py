@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
+from tinygrad.helpers import get_conv_args, UnaryOps, BinaryOps, ReduceOps
 
 class CPUBuffer(np.ndarray):
   def relu(x): return np.maximum(x, 0)
@@ -77,7 +77,8 @@ def get_tx(x, C):
     writeable=False,
   )
 
-def conv(x,w,ret,C):
+def conv(x,w,ret,stride,groups):
+  C = get_conv_args(x.shape, w.shape, stride, groups)
   tx = get_tx(x, C)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
   tmp = np.zeros((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
@@ -87,7 +88,8 @@ def conv(x,w,ret,C):
   ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
   return ret
 
-def convdw(x,grad_output,dw,C):
+def convdw(x,grad_output,dw,stride,groups):
+  C = get_conv_args(x.shape, dw.shape, stride, groups)
   tx = get_tx(x, C)
   ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
   gdw = dw.reshape((C.groups, C.rcout, C.cin, C.H, C.W))
@@ -97,7 +99,8 @@ def convdw(x,grad_output,dw,C):
     gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
   return dw
 
-def convdx(w,grad_output,dx,C):
+def convdx(w,grad_output,dx,stride,groups):
+  C = get_conv_args(x.shape, dw.shape, stride, groups)
   ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
   gdx = dx.reshape((C.bs, C.groups, C.cin, C.iy, C.ix))
