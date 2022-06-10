@@ -160,6 +160,11 @@ class TestOps(unittest.TestCase):
   def test_detach(self):
     helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), forward_only=True)
 
+  def test_simple_conv2d(self):
+    helper_test_op([(1,1,9,9), (1,1,3,3)],
+      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
+      lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
   def test_conv2d(self):
     for bs in [1,8]:
       for cin in [1,3]:
@@ -178,6 +183,24 @@ class TestOps(unittest.TestCase):
     H = 5
     W = 2
     helper_test_op([(bs,cin,64,64), (6,cin//groups,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_simple_grouped_conv2d(self):
+    bs = 1
+    groups = 2
+    rcout = 1
+    cin = 2
+    helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_medium_grouped_conv2d(self):
+    bs = 1
+    groups = 2
+    rcout = 2
+    cin = 2
+    helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
       lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 

@@ -1,6 +1,8 @@
 import numpy as np
 from collections import namedtuple
 
+def prod(x): return int(np.prod(x))
+
 def binary_broadcast(x_shape, y_shape, extra=False):
   n_dims = max(len(x_shape), len(y_shape))
   shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
