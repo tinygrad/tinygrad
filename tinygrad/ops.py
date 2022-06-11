@@ -55,8 +55,9 @@ class Ops:
 
   def reduce_op(ctx, op:BinaryOps, x, new_shape):
     ret = ctx.buffer(new_shape)
+    ctx.op.reduce_op(op, x, ret)
     log_op(op, ret, [x])
-    return ctx.op.reduce_op(op, x, ret)
+    return ret
 
   def binary_op(ctx, op:ReduceOps, x, y):
     ret = ctx.buffer(binary_broadcast(x.shape, y.shape))
