@@ -36,7 +36,6 @@ def convdw(x,grad_output,dw,stride,groups):
   grad_weight = torch.conv2d(x, grad_output, dilation=stride, groups=C.bs*C.groups*C.cin)
   grad_weight = grad_weight.reshape(C.bs, C.groups, C.cin, C.rcout, *grad_weight.shape[2:]).sum(dim=0).transpose(2, 1)
   dw[:] = grad_weight.reshape(C.groups*C.rcout, C.cin, *grad_weight.shape[3:])[:, :, :dw.shape[2], :dw.shape[3]]
-  return dw
 
 def processing_op(op,x,w,ret,stride,groups):
   if op == ProcessingOps.CONV:
@@ -52,4 +51,3 @@ def processing_op(op,x,w,ret,stride,groups):
       ret[:] = torch.conv_transpose2d(x, w, stride=stride, groups=groups, output_padding=output_padding)
   elif op == ProcessingOps.CONVDW:
     convdw(x,w,ret,stride,groups)
-  return ret

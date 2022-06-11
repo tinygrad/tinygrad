@@ -61,7 +61,7 @@ def unary_op(op, x, ret):
     float4 a = a_g[gid];
     res_g[gid] = """+code+""";
   }""")
-  unop([roundup(np.prod(ret.shape))//4], None, x.cl, ret.cl)
+  unop([roundup(prod(ret.shape))//4], None, x.cl, ret.cl)
   return ret
 
 @functools.lru_cache
@@ -100,7 +100,6 @@ def binary_op(op, x, y, ret):
   prg, is_float4 = get_binop_prg(code, tuple(complist))
   kernel_size = ((roundup(prod_list[0])//4) if is_float4 else prod_list[0]) if len(dimlist) > 0 else 1
   prg.binop(cl_queue, [kernel_size], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
-  return ret
 
 def reduce_op(op, inp, ret):
   if op == ReduceOps.SUM:
@@ -137,12 +136,11 @@ def reduce_op(op, inp, ret):
     }
     res_g[gid] = out;
   }""")
-  reduce([np.prod(ret.shape)], None, inp.cl,
-    i32(np.prod(inp.shape)//np.prod(ret.shape)), ret.cl,
-    i32(np.prod(ret.shape)), i32(len(ret.shape)),
+  reduce([prod(ret.shape)], None, inp.cl,
+    i32(prod(inp.shape)//prod(ret.shape)), ret.cl,
+    i32(prod(ret.shape)), i32(len(ret.shape)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)))
-  return ret
 
 def reshape(x, ret):
   cl.enqueue_copy(cl_queue, ret.cl, x.cl)
@@ -162,10 +160,9 @@ def perm_axis(inp, order, ret):
     }
     res_g[gid] = a_g[idx];
   }""")
-  perm([np.prod(inp.shape)], None, inp.cl, ret.cl, i32(len(inp.shape)),
+  perm([prod(inp.shape)], None, inp.cl, ret.cl, i32(len(inp.shape)),
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(order, dtype=np.int32)))
-  return ret
 
 # TODO: merge this with perm axis
 def inner_slice(x, arg, ret):
@@ -185,18 +182,16 @@ def inner_slice(x, arg, ret):
     }
     output[gid] = zero ? input[iptr] : 0.0;
   }""")
-  gslice([np.prod(ret.shape)], None,
-    x.cl, ret.cl, i32(np.prod(ret.shape)), i32(len(ret.shape)),
+  gslice([prod(ret.shape)], None,
+    x.cl, ret.cl, i32(prod(ret.shape)), i32(len(ret.shape)),
     buffer_np(np.array(x.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)),
     buffer_np(np.array(shift, dtype=np.int32)))
-  return ret
 
 def movement_op(op, x, ret, arg=None):
   if op == MovementOps.RESHAPE: reshape(x, ret)
   elif op == MovementOps.PERMUTE: perm_axis(x, arg, ret)
   elif op == MovementOps.SLICE: inner_slice(x, arg, ret)
-  return ret
 
 def conv(x,w,ret,stride,groups):
   C = get_conv_args(x.shape, w.shape, stride, groups)
@@ -227,7 +222,6 @@ def conv(x,w,ret,stride,groups):
   }""")
 
   conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in C])
-  return ret
 
 # tensx = (bs, groups*cin, iy, ix)
 # tensw = (groups*rcout, cin, H, W)
@@ -255,7 +249,6 @@ def convdw(x,grad_output,dw,stride,groups):
     dw[get_global_id(0)*H*W + y*W + x] = acc;
   }""")
   convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C])
-  return dw
 
 def convdx(grad_output,w,dx,stride,groups):
   C = get_conv_args(dx.shape, w.shape, stride, groups)
@@ -284,10 +277,8 @@ def convdx(grad_output,w,dx,stride,groups):
   }
   """)
   convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C])
-  return dx
 
 def processing_op(op,a,b,ret,stride,groups):
   if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
   elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
   elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
-  return ret

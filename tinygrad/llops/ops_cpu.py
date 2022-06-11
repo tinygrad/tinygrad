@@ -22,7 +22,6 @@ def unary_op(op, x, ret):
   elif op == UnaryOps.NEG: ret[:] = -x
   elif op == UnaryOps.SIGN: ret[:] = x.sign()
   else: raise Exception(f"{op} isn't supported")
-  return ret
 
 def binary_op(op, x, y, ret):
   if op == BinaryOps.ADD: ret[:] = x+y
@@ -33,7 +32,6 @@ def binary_op(op, x, y, ret):
   elif op == BinaryOps.A: ret[:] = x
   elif op == BinaryOps.CMPEQ: ret[:] = 1.0*(x==y)
   else: raise Exception(f"{op} isn't supported")
-  return ret
 
 def reduce_op(op, inp, ret):
   if inp.shape == ret.shape:   # this is just a copy, regardless of the reduce op
@@ -47,7 +45,6 @@ def reduce_op(op, inp, ret):
     if op == ReduceOps.SUM: ret[:] = inp.sum(axis, keepdims=True)
     elif op == ReduceOps.MAX: ret[:] = inp.amax(axis, keepdims=True)
     else: raise Exception(f"{op} isn't supported")
-  return ret
 
 def movement_op(op, x, ret, arg=None):
   if op == MovementOps.RESHAPE: ret[:] = x.reshape(ret.shape)
@@ -58,7 +55,6 @@ def movement_op(op, x, ret, arg=None):
     slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
     ret[:] = x[tuple([slice(x[0], x[1], None) for x in slicee])]
   else: raise Exception(f"{op} isn't supported")
-  return ret
 
 def get_tx(x, C):
   gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
@@ -77,7 +73,6 @@ def conv(x,w,ret,stride,groups):
     #ijYXyx,kjyx -> iYXk ->ikYX
     tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
   ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
-  return ret
 
 def convdw(x,grad_output,dw,stride,groups):
   C = get_conv_args(x.shape, dw.shape, stride, groups)
@@ -88,7 +83,6 @@ def convdw(x,grad_output,dw,stride,groups):
   for g in range(C.groups):
     #'ikYX,ijYXyx -> kjyx'
     gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
-  return dw
 
 def convdx(grad_output,w,dx,stride,groups):
   C = get_conv_args(dx.shape, w.shape, stride, groups)
@@ -103,10 +97,8 @@ def convdx(grad_output,w,dx,stride,groups):
     for g in range(C.groups):
       tg = np.dot(ggg[:,g,:,Y,X].reshape(C.bs, -1), tw[g].reshape(C.rcout, -1))
       gdx[:, g, :, iY:iY+C.H, iX:iX+C.W] += tg.reshape((C.bs, C.cin, C.H, C.W))
-  return dx
 
 def processing_op(op,a,b,ret,stride,groups):
   if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
   elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
   elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
-  return ret
