@@ -20,7 +20,7 @@ class TorchBuffer(torch.Tensor):
 
 # ************* unary+binary+reduce+movement ops *************
 
-from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, reshape, perm_axis, inner_slice
+from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, movement_op
 
 # ************* processing ops *************
 

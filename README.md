@@ -137,9 +137,7 @@ Buffer                                           # class of memory on this devic
 unary_op  (RELU, EXP, LOG, NEG, SIGN)            # A -> A
 reduce_op (SUM, MAX)                             # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, A, CMPEQ)    # A + B -> C (broadcasting supported)
-reshape                                          # A -> B (different size, same dim count)
-perm_axis                                        # A -> A
-inner_slice                                      # A -> B (different size)
+movement_op (RESHAPE, PERMUTE, SLICE)            # A -> B (different size)
 conv, convdw, convdx                             # A + B -> C
 ```
 

@@ -1,5 +1,5 @@
 import numpy as np    # TODO: remove this, it's used for np.prod and np.argsort
-from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps
+from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps
 from tinygrad.tensor import Function
 
 # ************* unary ops *************
@@ -126,35 +126,35 @@ class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
     shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    return ctx.op.reshape(x, ctx.buffer(shape))
+    return ctx.op.movement_op(MovementOps.RESHAPE, x, ctx.buffer(shape))
 
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
-    return ctx.op.reshape(grad_output, ctx.buffer(in_shape))
+    return ctx.op.movement_op(MovementOps.RESHAPE, grad_output, ctx.buffer(in_shape))
 
 class Permute(Function):
   def forward(ctx, x, order=(1,0)):
     ctx.save_for_backward(order)
     ret = ctx.buffer([x.shape[i] for i in order])
-    return ctx.op.perm_axis(x, order, ret)
+    return ctx.op.movement_op(MovementOps.PERMUTE, x, ret, order)
 
   def backward(ctx, grad_output):
     order, = ctx.saved_tensors
     norder = np.argsort(order).tolist()
     ret = ctx.buffer([grad_output.shape[i] for i in norder])
-    return ctx.op.perm_axis(grad_output, norder, ret)
+    return ctx.op.movement_op(MovementOps.PERMUTE, grad_output, ret, norder)
 
 class Slice(Function):
   def forward(ctx, x, arg=None):
     ctx.save_for_backward(x.shape, arg)
     ret = ctx.buffer([y[1]-y[0] for y in arg])
-    return ctx.op.inner_slice(x, arg, ret)
+    return ctx.op.movement_op(MovementOps.SLICE, x, ret, arg)
 
   def backward(ctx, grad_output):
     shape, arg = ctx.saved_tensors
     narg = [(0-p[0], grad_output.shape[i]+(shape[i]-p[1])) for i,p in enumerate(arg)]
     ret = ctx.buffer([y[1]-y[0] for y in narg])
-    return ctx.op.inner_slice(grad_output, narg, ret)
+    return ctx.op.movement_op(MovementOps.SLICE, grad_output, ret, narg)
 
 # ************* processing ops *************
 

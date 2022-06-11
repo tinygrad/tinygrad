@@ -1,7 +1,7 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps
+from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -143,9 +143,8 @@ def reduce_op(op, inp, ret):
     buffer_np(np.array(ret.shape, dtype=np.int32)))
   return ret
 
-def reshape(x, shape):
-  assert np.prod(x.shape) == np.prod(shape)
-  return GPUBuffer(shape, hostbuf=x)
+def reshape(x, ret):
+  cl.enqueue_copy(cl_queue, ret.cl, x.cl)
 
 def perm_axis(inp, order, ret):
   perm = clbuild("perm", """
@@ -190,6 +189,12 @@ def inner_slice(x, arg, ret):
     buffer_np(np.array(x.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)),
     buffer_np(np.array(shift, dtype=np.int32)))
+  return ret
+
+def movement_op(op, x, ret, arg=None):
+  if op == MovementOps.RESHAPE: reshape(x, ret)
+  elif op == MovementOps.PERMUTE: perm_axis(x, arg, ret)
+  elif op == MovementOps.SLICE: inner_slice(x, arg, ret)
   return ret
 
 def conv(x,w,ret,stride,groups):

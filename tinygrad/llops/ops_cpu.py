@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import get_conv_args, UnaryOps, BinaryOps, ReduceOps
+from tinygrad.helpers import get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps
 
 class CPUBuffer(np.ndarray):
   def relu(x): return np.maximum(x, 0)
@@ -48,20 +48,15 @@ def reduce_op(op, inp, ret):
     else: raise Exception(f"{op} isn't supported")
   return ret
 
-def reshape(x, ret):
-  assert np.prod(x.shape) == np.prod(ret.shape)
-  ret[:] = x.reshape(ret.shape)
-  return ret
-
-def perm_axis(x, order, ret):
-  ret[:] = x.permute(order)
-  return ret
-
-def inner_slice(x, arg, ret):
-  padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
-  x = x.custompad(padding)
-  slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
-  ret[:] = x[tuple([slice(x[0], x[1], None) for x in slicee])]
+def movement_op(op, x, ret, arg=None):
+  if op == MovementOps.RESHAPE: ret[:] = x.reshape(ret.shape)
+  elif op == MovementOps.PERMUTE: ret[:] = x.permute(arg)
+  elif op == MovementOps.SLICE:
+    padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
+    x = x.custompad(padding)
+    slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
+    ret[:] = x[tuple([slice(x[0], x[1], None) for x in slicee])]
+  else: raise Exception(f"{op} isn't supported")
   return ret
 
 def get_tx(x, C):
