@@ -227,19 +227,27 @@ class Tensor:
     ret = self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
     return ret.reshape(shape=new_shape) if tuple(ret.shape) != tuple(new_shape) else ret
 
-  def cat(self, y, dim=0):
-    assert len(self.shape) == len(y.shape)
+  def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
-    s1, s2 = [], []
+    for y in args: assert len(self.shape) == len(y.shape)
+    args = [self] + list(args)
+    s = [[] for _ in range(len(args))]
     for i in range(len(self.shape)):
       if i != dim:
         assert self.shape[i] == y.shape[i]
-        s1.append((0, self.shape[i]))
-        s2.append((0, self.shape[i]))
+        for j in range(len(args)):
+          s[j].append((0, self.shape[i]))
       else:
-        s1.append((0, self.shape[i]+y.shape[i]))
-        s2.append((-self.shape[i], y.shape[i]))
-    return self.slice(arg=s1) + y.slice(arg=s2)
+        shape_sum = 0
+        for y in args: shape_sum += y.shape[i]
+        k = 0
+        for j,y in enumerate(args):
+          s[j].append((-k, shape_sum-k))
+          k += y.shape[i]
+    ret = self.slice(arg=s[0])
+    for ts,y in zip(s[1:], args[1:]):
+      ret = ret + y.slice(arg=ts)
+    return ret
 
   def pad2d(self, padding):
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
@@ -428,7 +436,8 @@ def register(name, fxn):
   setattr(Tensor, "_"+name if (getattr(Tensor, name, None) is not None) else name, dispatch)
   if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
     setattr(Tensor, f"__{name}__", dispatch)
-    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
+    # TODO: += is broken!
+    #setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
 # register functions to move between devices

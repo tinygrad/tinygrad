@@ -49,13 +49,8 @@ def run_onnx(onnx_model, inputs={}):
     elif n.op_type == "Add": ret = inp[0] + inp[1]
     elif n.op_type == "Sub": ret = inp[0] - inp[1]
     elif n.op_type == "Mul": ret = inp[0] * inp[1]
-    elif n.op_type == "Flatten":
-      ret = inp[0].flatten(opt['axis'])
-    elif n.op_type == "Concat":
-      # TODO: add multicat to tinygrad
-      ret = inp[0]
-      for x in inp[1:]:
-        ret = ret.cat(x, dim=opt['axis'])
+    elif n.op_type == "Flatten": ret = inp[0].flatten(opt['axis'])
+    elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
     elif n.op_type == "Split":
       i = 0
       arg = [(0,x) for x in inp[0].shape]
@@ -86,8 +81,8 @@ def run_onnx_torch(onnx_model, inputs):
     torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
   return torch_out
 
-class TestOpenpilotModel(unittest.TestCase):
-  def test(self):
+class TestOnnxModel(unittest.TestCase):
+  def test_openpilot_model(self):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
     onnx_model = onnx.load(io.BytesIO(dat))
     inputs = {
@@ -100,6 +95,7 @@ class TestOpenpilotModel(unittest.TestCase):
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
     tinygrad_out = run_onnx(onnx_model, inputs)['outputs'].numpy()
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
+    print(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
 if __name__ == "__main__":
