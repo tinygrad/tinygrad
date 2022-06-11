@@ -132,7 +132,7 @@ class Reshape(Function):
     in_shape, = ctx.saved_tensors
     return ctx.op.reshape(grad_output, in_shape)
 
-class Transpose(Function):
+class Permute(Function):
   def forward(ctx, x, order=(1,0)):
     ctx.save_for_backward(order)
     ret = ctx.buffer([x.shape[i] for i in order])

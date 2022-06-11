@@ -122,7 +122,7 @@ mlops are mid level ops, there's 13 of them. They understand memory allocation a
 Relu, Log, Exp                  # unary ops
 Sum, Max                        # reduce ops (with axis argument)
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
-Reshape, Transpose, Slice       # movement ops
+Reshape, Permute, Slice         # movement ops
 Conv2D(NCHW)                    # processing op (Matmul is also Conv2D)
 ```
 

@@ -257,6 +257,9 @@ class Tensor:
 
   dot = matmul
 
+  def transpose(self, order=(1,0)):
+    return self.permute(order=order)
+
   def _canonicalize_reduce_axis(self, axis):
     if axis is None: axis = range(len(self.shape))
     if isinstance(axis, int): axis = [axis]
