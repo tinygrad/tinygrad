@@ -45,18 +45,23 @@ def log_op(op, ret, inp):
     G.nodes[nm(ret)]['fillcolor'] = top_colors[top]
     G.nodes[nm(ret)]['style'] = 'filled'
 
+from tinygrad.helpers import binary_broadcast
 class Ops:
-  def unary_op(ctx, op:UnaryOps, x, ret):
+  def unary_op(ctx, op:UnaryOps, x):
+    ret = ctx.buffer(x.shape)
+    ctx.op.unary_op(op, x, ret)
     log_op(op, ret, [x])
-    return ctx.op.unary_op(op, x, ret)
+    return ret
 
   def reduce_op(ctx, op:BinaryOps, x, ret):
     log_op(op, ret, [x])
     return ctx.op.reduce_op(op, x, ret)
 
-  def binary_op(ctx, op:ReduceOps, x, y, ret):
+  def binary_op(ctx, op:ReduceOps, x, y):
+    ret = ctx.buffer(binary_broadcast(x.shape, y.shape))
+    ctx.op.binary_op(op, x, y, ret)
     log_op(op, ret, [x, y])
-    return ctx.op.binary_op(op, x, y, ret)
+    return ret
 
   def movement_op(ctx, op:MovementOps, x, ret, arg=None):
     log_op(op, ret, [x])
