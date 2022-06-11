@@ -85,7 +85,7 @@ def run_onnx(onnx_model, inputs={}, debug=False):
       ret = a.linear(w,b)
     elif n.op_type == "BatchNormalization":
       from tinygrad.nn import batch_normalize
-      ret = batch_normalize(inp[0], inp[3], inp[4], inp[1], inp[2], opt['epsilon'])
+      ret = batch_normalize(inp[0], inp[1], inp[2], inp[3], inp[4], opt['epsilon'])
     elif n.op_type == "MaxPool":
       ret = inp[0].pad2d(opt['pads'])
       ret = ret.max_pool2d(opt['kernel_shape'])
@@ -132,7 +132,7 @@ class TestOnnxModel(unittest.TestCase):
     onnx_model = onnx.load(io.BytesIO(dat))
     from test.test_efficientnet import chicken_img, car_img, _LABELS
     inputs = {"data": chicken_img}
-    tinygrad_out = run_onnx(onnx_model, inputs)['resnetv15_dense0_fwd'].numpy()
+    tinygrad_out = run_onnx(onnx_model, inputs, False)['resnetv15_dense0_fwd'].numpy()
     cls = tinygrad_out.argmax()
     print(cls, _LABELS[cls])
 
