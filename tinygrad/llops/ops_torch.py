@@ -25,10 +25,6 @@ from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, movement_op
 
 from tinygrad.helpers import get_conv_args, ProcessingOps
 
-def conv(x,w,ret,stride,groups):
-  ret[:] = torch.conv2d(x, w, stride=stride, groups=groups)
-  return ret
-
 def convdw(x,grad_output,dw,stride,groups):
   # NOTE: torch.nn.grad.conv2d_weight is wrong for groups in pytorch, wonder who it affects 
   # https://github.com/pytorch/pytorch/issues/51430
@@ -45,17 +41,16 @@ def convdw(x,grad_output,dw,stride,groups):
             2, 0, dw.shape[2]).narrow(3, 0, dw.shape[3])
   return dw
 
-def convdx(grad_output,w,dx,stride,groups):
-  dx[:] = torch.nn.grad.conv2d_input(dx.shape, w, grad_output, stride=stride, groups=groups)
-  # correct for non strided
-  # strided needs weird padding: https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
-  #C = get_conv_args(dx.shape, w.shape, stride, groups)
-  #w = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W).flip(3, 4).transpose(2, 1).reshape(C.groups*C.cin, C.rcout, C.H, C.W)
-  #ret = torch.conv2d(grad_output, w, padding=(C.H-1,C.W-1), groups=groups)
-  return dx
-
-def processing_op(op,a,b,ret,stride,groups):
-  if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
-  elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
-  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
+def processing_op(op,x,w,ret,stride,groups):
+  if op == ProcessingOps.CONV:
+    ret[:] = torch.conv2d(x, w, stride=stride, groups=groups)
+  elif op == ProcessingOps.CONVT:
+    output_padding = [ret.shape[d+2] - ((x.shape[d+2] - 1) * stride[d] + 1 + (w.shape[d+2] - 1)) for d in range(2)]
+    ret[:] = torch.conv_transpose2d(x, w, stride=stride, groups=groups, output_padding=output_padding)
+    # wrong, strided needs weird padding: https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+    #C = get_conv_args(ret.shape, w.shape, stride, groups)
+    #w = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W).flip(3, 4).transpose(2, 1).reshape(C.groups*C.cin, C.rcout, C.H, C.W)
+    #ret[:] = torch.conv2d(x, w, padding=(C.H-1,C.W-1), groups=groups)
+  elif op == ProcessingOps.CONVDW:
+    convdw(x,w,ret,stride,groups)
   return ret
