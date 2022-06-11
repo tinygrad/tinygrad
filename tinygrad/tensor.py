@@ -246,6 +246,7 @@ class Tensor:
           k += y.shape[i]
     ret = self.slice(arg=s[0])
     for ts,y in zip(s[1:], args[1:]):
+      # TODO: investigate why += doesn't work here
       ret = ret + y.slice(arg=ts)
     return ret
 
@@ -436,8 +437,7 @@ def register(name, fxn):
   setattr(Tensor, "_"+name if (getattr(Tensor, name, None) is not None) else name, dispatch)
   if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
     setattr(Tensor, f"__{name}__", dispatch)
-    # TODO: += is broken!
-    #setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
+    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
     setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
 
 # register functions to move between devices
