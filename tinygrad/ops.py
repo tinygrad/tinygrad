@@ -64,9 +64,14 @@ class Ops:
     log_op(op, ret, [x, y])
     return ret
 
-  def movement_op(ctx, op:MovementOps, x, ret, arg=None):
+  def movement_op(ctx, op:MovementOps, x, arg=None):
+    if op == MovementOps.RESHAPE: new_shape = arg
+    if op == MovementOps.PERMUTE: new_shape = [x.shape[i] for i in arg]
+    if op == MovementOps.SLICE: new_shape = [y-x for x,y in arg]
+    ret = ctx.buffer(new_shape)
+    ctx.op.movement_op(op, x, ret, arg)
     log_op(op, ret, [x])
-    return ctx.op.movement_op(op, x, ret, arg)
+    return ret
 
   def processing_op(ctx, op:ProcessingOps, x, y, ret, stride, groups):
     log_op(op, ret, [x, y])
