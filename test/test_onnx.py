@@ -64,6 +64,7 @@ def run_onnx(onnx_model, inputs={}, debug=False):
     elif n.op_type == "Sigmoid": ret = inp[0].sigmoid()
     elif n.op_type == "Tanh": ret = inp[0].tanh()
     elif n.op_type == "Softmax": ret = inp[0].softmax()
+    elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
     # one liners
     elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
     elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt['min'], opt['max'])))
@@ -73,7 +74,6 @@ def run_onnx(onnx_model, inputs={}, debug=False):
     elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
     elif n.op_type == "GlobalAveragePool": ret = inp[0].mean(axis=tuple(range(2, len(inp[0].shape))), keepdim=True)
     elif n.op_type == "BatchNormalization": ret = batch_normalize(inp[0], inp[1], inp[2], inp[3], inp[4], opt.get('epsilon', 1e-5))
-    elif n.op_type == "MatMul": ret = inp[0].dot(inp[1])
     elif n.op_type == "Gemm": ret = inp[0].linear(inp[1].transpose() if opt.get('transB', 0) == 1 else inp[1], inp[2])
     elif n.op_type == "Conv":
       x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)

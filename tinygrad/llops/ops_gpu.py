@@ -1,7 +1,8 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import prod, binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.helpers import prod, binary_broadcast, get_conv_args
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():

@@ -35,11 +35,3 @@ def get_conv_args(x_shape, w_shape, stride, groups):
   assert cout % groups == 0
   rcout = cout//groups
   return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs)
-
-# TODO: move to ops.py
-from enum import Enum
-UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
-BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
-ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE"])
-ProcessingOps = Enum("ProcessingOps", ["CONV", "CONVT", "CONVDW"])

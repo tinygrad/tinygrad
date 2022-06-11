@@ -4,7 +4,7 @@ import unittest
 from tqdm import trange
 import numpy as np
 from tinygrad.tensor import Device
-from tinygrad.helpers import UnaryOps, BinaryOps, ReduceOps
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps
 if Device.DEFAULT == Device.GPU:
   from tinygrad.llops.ops_gpu import GPUBuffer, sync, unary_op, binary_op, reduce_op
 

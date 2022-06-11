@@ -1,5 +1,6 @@
 import numpy as np
-from tinygrad.helpers import get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.helpers import get_conv_args
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 class CPUBuffer(np.ndarray):
   def relu(x): return np.maximum(x, 0)

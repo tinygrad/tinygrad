@@ -23,7 +23,8 @@ from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, movement_op
 
 # ************* processing ops *************
 
-from tinygrad.helpers import get_conv_args, ProcessingOps
+from tinygrad.helpers import get_conv_args
+from tinygrad.ops import ProcessingOps
 
 def convdw(x,grad_output,dw,stride,groups):
   # NOTE: torch.nn.grad.conv2d_weight is wrong for groups in pytorch, wonder who it affects 

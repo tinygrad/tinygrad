@@ -1,5 +1,6 @@
 import numpy as np    # TODO: remove this, it's used for np.prod and np.argsort
-from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.helpers import prod, binary_broadcast, get_conv_args
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
 # ************* unary ops *************
@@ -125,7 +126,7 @@ class Pow(Function):
 class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
-    shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
+    shape = tuple(-prod(x.shape) // prod(shape) if s == -1 else s for s in shape)
     return ctx.movement_op(MovementOps.RESHAPE, x, ctx.buffer(shape))
 
   def backward(ctx, grad_output):
