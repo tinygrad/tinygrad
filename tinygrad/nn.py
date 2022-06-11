@@ -1,6 +1,10 @@
 from tinygrad.tensor import Tensor
 import numpy as np
 
+def batch_normalize(x, mean, var, weight, bias, eps):
+  x = (x - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
+  return x.mul(var.add(eps).reshape(shape=[1, -1, 1, 1])**-0.5) + bias.reshape(shape=[1, -1, 1, 1])
+
 class BatchNorm2D:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     assert affine == True, "BatchNorm2D is only supported with affine"
@@ -24,13 +28,9 @@ class BatchNorm2D:
         if self.num_batches_tracked is None: self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
         self.num_batches_tracked += 1
 
-      return self.normalize(x, batch_mean, batch_var)
+      return batch_normalize(x, batch_mean, batch_var, self.weight, self.bias, self.eps)
 
-    return self.normalize(x, self.running_mean, self.running_var)
-
-  def normalize(self, x, mean, var):
-    x = (x - mean.reshape(shape=[1, -1, 1, 1])) * self.weight.reshape(shape=[1, -1, 1, 1])
-    return x.mul(var.add(self.eps).reshape(shape=[1, -1, 1, 1])**-0.5) + self.bias.reshape(shape=[1, -1, 1, 1])
+    return batch_normalize(x, self.running_mean, self.running_var, self.weight, self.bias, self.eps)
 
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):

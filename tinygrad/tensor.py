@@ -257,7 +257,8 @@ class Tensor:
     bs, groups = prod(x.shape[0:-2]), prod(w.shape[0:-2])
     cin, cout = w.shape[-2], w.shape[-1]
     out_shape_t = tuple(list(x.shape[0:-2])+[cout,-1])
-    order = tuple(list(range(len(x.shape)-2))+[len(x.shape)-1, len(x.shape)-2])
+    if len(x.shape) == 1: order, out_shape_t = (0,), (cout, )
+    else: order = tuple(list(range(len(x.shape)-2))+[len(x.shape)-1, len(x.shape)-2])
     worder = tuple(list(range(len(w.shape)-2))+[len(w.shape)-1, len(w.shape)-2])
 
     # NOTE: with NHWC we can remove the transposes
@@ -316,6 +317,9 @@ class Tensor:
 
   def relu6(self):
     return self.relu() - (self-6).relu()
+
+  def clip(self, min, max):
+    return ((self-min).relu()+min) - (self-max).relu()
 
   def hardswish(self):
     return self * (self+3).relu6() * (1/6)
@@ -379,6 +383,9 @@ class Tensor:
     return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
 
   # ***** functional nn ops *****
+
+  def reshape(self, shape):
+    return self._reshape(shape=shape)
 
   def linear(self, weight, bias):
     shp = [1] * (len(self.shape)-1) + [-1]
