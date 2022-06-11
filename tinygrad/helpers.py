@@ -40,3 +40,4 @@ from enum import Enum
 UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE"])

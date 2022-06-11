@@ -48,9 +48,10 @@ def reduce_op(op, inp, ret):
     else: raise Exception(f"{op} isn't supported")
   return ret
 
-def reshape(x, shape):
-  assert np.prod(x.shape) == np.prod(shape)
-  return x.reshape(shape)
+def reshape(x, ret):
+  assert np.prod(x.shape) == np.prod(ret.shape)
+  ret[:] = x.reshape(ret.shape)
+  return ret
 
 def perm_axis(x, order, ret):
   ret[:] = x.permute(order)

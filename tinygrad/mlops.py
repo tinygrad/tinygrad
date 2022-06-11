@@ -126,11 +126,11 @@ class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
     shape = tuple(-np.prod(x.shape) // np.prod(shape) if s == -1 else s for s in shape)
-    return ctx.op.reshape(x, shape) # NOTE: this is not a copy
+    return ctx.op.reshape(x, ctx.buffer(shape))
 
   def backward(ctx, grad_output):
     in_shape, = ctx.saved_tensors
-    return ctx.op.reshape(grad_output, in_shape)
+    return ctx.op.reshape(grad_output, ctx.buffer(in_shape))
 
 class Permute(Function):
   def forward(ctx, x, order=(1,0)):
