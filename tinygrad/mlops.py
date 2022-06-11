@@ -1,5 +1,5 @@
 import numpy as np    # TODO: remove this, it's used for np.prod and np.argsort
-from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps
+from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
 # ************* unary ops *************
@@ -162,10 +162,10 @@ class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     C = get_conv_args(x.shape, w.shape, stride, groups)
     ctx.save_for_backward(x,w,(C.ys,C.xs), C.groups)
-    return ctx.op.conv(x, w, ctx.buffer((C.bs, C.groups*C.rcout, C.oy, C.ox)), (C.ys,C.xs), C.groups)
+    return ctx.op.processing_op(ProcessingOps.CONV, x, w, ctx.buffer((C.bs, C.groups*C.rcout, C.oy, C.ox)), (C.ys,C.xs), C.groups)
 
   def backward(ctx, grad_output):
     x, w, stride, groups = ctx.saved_tensors
-    dx = ctx.op.convdx(w, grad_output, ctx.buffer(x.shape), stride, groups) if ctx.needs_input_grad[0] else None
-    dw = ctx.op.convdw(x, grad_output, ctx.buffer(w.shape), stride, groups) if ctx.needs_input_grad[1] else None
+    dx = ctx.op.processing_op(ProcessingOps.CONVT, grad_output, w, ctx.buffer(x.shape), stride, groups) if ctx.needs_input_grad[0] else None
+    dw = ctx.op.processing_op(ProcessingOps.CONVDW, x, grad_output, ctx.buffer(w.shape), stride, groups) if ctx.needs_input_grad[1] else None
     return dx, dw

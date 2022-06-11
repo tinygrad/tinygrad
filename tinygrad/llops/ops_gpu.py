@@ -1,7 +1,7 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps
+from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -256,7 +256,7 @@ def convdw(x,grad_output,dw,stride,groups):
   convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C])
   return dw
 
-def convdx(w,grad_output,dx,stride,groups):
+def convdx(grad_output,w,dx,stride,groups):
   C = get_conv_args(dx.shape, w.shape, stride, groups)
   convdx_prg = clbuild("convdx", """
   __kernel void convdx(__global const float *tensw, __global const float *ggg, __global float *dx,
@@ -284,3 +284,9 @@ def convdx(w,grad_output,dx,stride,groups):
   """)
   convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C])
   return dx
+
+def processing_op(op,a,b,ret,stride,groups):
+  if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
+  elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
+  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
+  return ret

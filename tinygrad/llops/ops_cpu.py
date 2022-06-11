@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps
+from tinygrad.helpers import get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 class CPUBuffer(np.ndarray):
   def relu(x): return np.maximum(x, 0)
@@ -89,7 +89,7 @@ def convdw(x,grad_output,dw,stride,groups):
     gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
   return dw
 
-def convdx(w,grad_output,dx,stride,groups):
+def convdx(grad_output,w,dx,stride,groups):
   C = get_conv_args(dx.shape, w.shape, stride, groups)
   ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
@@ -103,3 +103,9 @@ def convdx(w,grad_output,dx,stride,groups):
       tg = np.dot(ggg[:,g,:,Y,X].reshape(C.bs, -1), tw[g].reshape(C.rcout, -1))
       gdx[:, g, :, iY:iY+C.H, iX:iX+C.W] += tg.reshape((C.bs, C.cin, C.H, C.W))
   return dx
+
+def processing_op(op,a,b,ret,stride,groups):
+  if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
+  elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
+  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
+  return ret

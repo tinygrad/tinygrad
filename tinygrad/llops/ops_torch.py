@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from tinygrad.helpers import get_conv_args
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class TorchBuffer(torch.Tensor):
@@ -24,18 +23,21 @@ from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, movement_op
 
 # ************* processing ops *************
 
+from tinygrad.helpers import get_conv_args, ProcessingOps
+
 def conv(x,w,ret,stride,groups):
-  ret[:] = torch.nn.functional.conv2d(x, w, stride=stride, groups=groups)
+  ret[:] = torch.conv2d(x, w, stride=stride, groups=groups)
   return ret
 
-def convdw(input,grad_output,dw,stride,groups):
+def convdw(x,grad_output,dw,stride,groups):
   # NOTE: torch.nn.grad.conv2d_weight is wrong for groups in pytorch, wonder who it affects 
   # https://github.com/pytorch/pytorch/issues/51430
-  C = get_conv_args(input.shape, dw.shape, stride, groups)
+  C = get_conv_args(x.shape, dw.shape, stride, groups)
   grad_output = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox).repeat(1, 1, C.cin, 1, 1)
   grad_output = grad_output.reshape(C.bs * C.groups * C.rcout * C.cin, 1, C.oy, C.ox)
-  input = input.reshape(1, C.bs * C.groups * C.cin, C.iy, C.ix)
-  grad_weight = torch.nn.functional.conv2d(input, grad_output, dilation=stride, groups=C.bs*C.groups*C.cin)
+  x = x.reshape(1, C.bs * C.groups * C.cin, C.iy, C.ix)
+  #print(input.shape, grad_output.shape)
+  grad_weight = torch.conv2d(x, grad_output, dilation=stride, groups=C.bs*C.groups*C.cin)
   grad_weight = grad_weight.reshape(C.bs, grad_weight.shape[1] // C.bs, *grad_weight.shape[2:]).sum(dim=0)
   grad_weight = grad_weight.view(C.groups, C.cin, C.rcout, *grad_weight.shape[1:]).transpose(2, 1)
   # narrow removes excess for strided
@@ -43,6 +45,17 @@ def convdw(input,grad_output,dw,stride,groups):
             2, 0, dw.shape[2]).narrow(3, 0, dw.shape[3])
   return dw
 
-def convdx(w,grad_output,dx,stride,groups):
+def convdx(grad_output,w,dx,stride,groups):
   dx[:] = torch.nn.grad.conv2d_input(dx.shape, w, grad_output, stride=stride, groups=groups)
+  # correct for non strided
+  # strided needs weird padding: https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+  #C = get_conv_args(dx.shape, w.shape, stride, groups)
+  #w = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W).flip(3, 4).transpose(2, 1).reshape(C.groups*C.cin, C.rcout, C.H, C.W)
+  #ret = torch.conv2d(grad_output, w, padding=(C.H-1,C.W-1), groups=groups)
   return dx
+
+def processing_op(op,a,b,ret,stride,groups):
+  if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
+  elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
+  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
+  return ret
