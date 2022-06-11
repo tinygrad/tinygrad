@@ -158,19 +158,6 @@ class Slice(Function):
 
 # ************* processing ops *************
 
-class Matmul(Function):
-  def forward(ctx, input, weight):
-    assert input.shape[-1] == weight.shape[-2]
-    ret = ctx.buffer(list(input.shape[0:-1])+[weight.shape[-1]])
-    ctx.save_for_backward(input, weight)
-    return ctx.op.matmul(input, weight, ret)
-
-  def backward(ctx, grad_output):
-    input, weight = ctx.saved_tensors
-    grad_input = ctx.op.matmul(grad_output, weight, ctx.buffer(input.shape), transpose_b=True) if ctx.needs_input_grad[0] else None
-    grad_weight = ctx.op.matmul(input, grad_output, ctx.buffer(weight.shape), transpose_a=True) if ctx.needs_input_grad[1] else None
-    return grad_input, grad_weight
-
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     C = get_conv_args(x.shape, w.shape, stride, groups)

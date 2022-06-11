@@ -116,14 +116,14 @@ hlops are syntactic sugar around mlops.
 
 ### mlops
 
-mlops are mid level ops, there's 14 of them. They understand memory allocation and derivatives
+mlops are mid level ops, there's 13 of them. They understand memory allocation and derivatives
 
 ```
 Relu, Log, Exp                  # unary ops
 Sum, Max                        # reduce ops (with axis argument)
 Add, Sub, Mul, Pow              # binary ops (with broadcasting)
 Reshape, Transpose, Slice       # movement ops
-Matmul, Conv2D(NCHW)            # processing ops
+Conv2D(NCHW)                    # processing op (Matmul is also Conv2D)
 ```
 
 You no longer need to write mlops for a new accelerator
@@ -137,9 +137,9 @@ Buffer                                           # class of memory on this devic
 unary_op  (RELU, EXP, LOG, NEG, SIGN)            # A -> A
 reduce_op (SUM, MAX)                             # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, A, CMPEQ)    # A + B -> C (broadcasting supported)
+reshape                                          # A -> B (different size, same dim count)
 perm_axis                                        # A -> A
 inner_slice                                      # A -> B (different size)
-matmul                                           # A + B -> C
 conv, convdw, convdx                             # A + B -> C
 ```
 

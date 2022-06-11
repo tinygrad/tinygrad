@@ -63,12 +63,6 @@ def inner_slice(x, arg, ret):
   ret[:] = x[tuple([slice(x[0], x[1], None) for x in slicee])]
   return ret
 
-def matmul(a, b, c, transpose_a=False, transpose_b=False):
-  if transpose_a: a = a.swapaxes(-2, -1)
-  if transpose_b: b = b.swapaxes(-2, -1)
-  c[:] = a @ b
-  return c
-
 def get_tx(x, C):
   gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
   return np.lib.stride_tricks.as_strided(gx,
