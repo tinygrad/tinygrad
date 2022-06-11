@@ -1,7 +1,7 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.helpers import prod, binary_broadcast, get_conv_args, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 cl_ctx, cl_queue = None, None
 def require_init_gpu():
@@ -21,7 +21,7 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(np.prod(shape)))  # padding
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))  # padding
     if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
 
