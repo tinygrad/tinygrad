@@ -1,5 +1,5 @@
 import numpy as np    # TODO: remove this, it's used for np.prod and np.argsort
-from tinygrad.helpers import prod, binary_broadcast, get_conv_args
+from tinygrad.helpers import prod, reduce_shape, get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
@@ -37,13 +37,10 @@ class Exp(_UnaryOp):
 
 # ************* reduce ops *************
 
-def reduce_shape(shape, axis):
-  return [1 if i in axis else shape[i] for i in range(len(shape))]
-
 class Sum(Function):
   def forward(ctx, input, axis=None):
     ctx.save_for_backward(input.shape)
-    return ctx.reduce_op(ReduceOps.SUM, input, ctx.buffer(reduce_shape(input.shape, axis)))
+    return ctx.reduce_op(ReduceOps.SUM, input, reduce_shape(input.shape, axis))
 
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
@@ -53,21 +50,21 @@ class Sum(Function):
 
 class Max(Function):
   def forward(ctx, input, axis=None):
-    ret = ctx.reduce_op(ReduceOps.MAX, input, ctx.buffer(reduce_shape(input.shape, axis)))
+    ret = ctx.reduce_op(ReduceOps.MAX, input, reduce_shape(input.shape, axis))
     ctx.save_for_backward(input, ret)
     return ret
 
   def backward(ctx, grad_output):
     input, ret = ctx.saved_tensors
     ret2 = ctx.binary_op(BinaryOps.CMPEQ, input, ret)
-    div = ctx.reduce_op(ReduceOps.SUM, ret2, ctx.buffer(grad_output.shape))
+    div = ctx.reduce_op(ReduceOps.SUM, ret2, grad_output.shape)
     ret2 = ctx.binary_op(BinaryOps.DIV, div, ret2)
     return ctx.binary_op(BinaryOps.MUL, ret2, grad_output)
 
 # ************* binary ops *************
 
 def unbroadcast(ctx, out, in_sh):
-  return ctx.reduce_op(ReduceOps.SUM, out, ctx.buffer(in_sh))
+  return ctx.reduce_op(ReduceOps.SUM, out, in_sh)
 
 class Add(Function):
   def forward(ctx, x, y):
