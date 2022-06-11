@@ -36,6 +36,7 @@ def get_conv_args(x_shape, w_shape, stride, groups):
   rcout = cout//groups
   return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs)
 
+# TODO: move to ops.py
 from enum import Enum
 UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
