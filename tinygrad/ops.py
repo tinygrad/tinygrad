@@ -73,6 +73,9 @@ class Ops:
     log_op(op, ret, [x])
     return ret
 
-  def processing_op(ctx, op:ProcessingOps, x, y, ret, stride, groups):
+  def processing_op(ctx, op:ProcessingOps, x, y, out_shape, stride, groups):
+    # TODO: can we do better than out_shape?
+    ret = ctx.buffer(out_shape)
+    ctx.op.processing_op(op, x, y, ret, stride, groups)
     log_op(op, ret, [x, y])
-    return ctx.op.processing_op(op, x, y, ret, stride, groups)
+    return ret
