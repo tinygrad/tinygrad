@@ -27,6 +27,7 @@ setup(name='tinygrad',
             "pytest",
             "torch",
             "tqdm",
+            "onnx",
         ],
       },
       include_package_data=True)
