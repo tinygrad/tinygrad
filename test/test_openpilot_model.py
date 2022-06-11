@@ -6,9 +6,7 @@ import onnx
 from extra.utils import fetch
 from tinygrad.tensor import Tensor
 
-def run_onnx(dat, inputs={}):
-  onnx_model = onnx.load_model(dat)
-
+def run_onnx(onnx_model, inputs={}):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def attribute_parse(a):
     if a.type == 7: return tuple([int(x) for x in a.ints])
@@ -25,7 +23,7 @@ def run_onnx(dat, inputs={}):
     if inp.name in inputs:
       input_shape = inputs[inp.name].shape
       assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-      tensors[inp.name] = Tensor(inputs[inp.name].astype(np.float32))
+      tensors[inp.name] = Tensor(inputs[inp.name])
     else:
       print(f"filling {inp.name} shape {shape} with 0")
       tensors[inp.name] = Tensor.zeros(*shape)
@@ -80,9 +78,18 @@ def run_onnx(dat, inputs={}):
 
   return {outp.name:tensors[outp.name] for outp in onnx_model.graph.output}
 
+def run_onnx_torch(onnx_model, inputs):
+  import torch
+  from onnx2torch import convert
+  torch_model = convert(onnx_model)
+  with torch.no_grad():
+    torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
+  return torch_out
+
 class TestOpenpilotModel(unittest.TestCase):
   def test(self):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
+    onnx_model = onnx.load(io.BytesIO(dat))
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
       "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -90,8 +97,10 @@ class TestOpenpilotModel(unittest.TestCase):
       "traffic_convention": np.array([[1., 0.]]),
       "initial_state": np.zeros((1, 512))
     }
-    out = run_onnx(io.BytesIO(dat), inputs)
-    print(out)
+    inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
+    tinygrad_out = run_onnx(onnx_model, inputs)['outputs'].numpy()
+    torch_out = run_onnx_torch(onnx_model, inputs).numpy()
+    np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
 if __name__ == "__main__":
   unittest.main()

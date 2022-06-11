@@ -9,4 +9,6 @@ torch==1.6.0+cpu
 torchvision==0.7.0+cpu
 pytest
 tqdm
+protobuf~=3.19.0
 onnx
+onnx2torch

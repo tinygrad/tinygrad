@@ -206,6 +206,9 @@ class Tensor:
   def detach(self):
     return Tensor(self.data, device=self.device, requires_grad=False)
 
+  def numpy(self):
+    return np.array(self.cpu().data)
+
   # ***** non first class ops *****
   
   def __getitem__(self, val):
