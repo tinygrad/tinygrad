@@ -293,6 +293,9 @@ class Tensor:
     #e = self.exp(); return e.div(1 + e)
     return (1.0 + (0.0-self).exp()) ** -1.0
 
+  def elu(self, alpha=1.0):
+    return self.relu() - (-alpha*(self.exp() - 1)).relu()
+
   def swish(self):
     return self * self.sigmoid()
 
