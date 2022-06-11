@@ -27,7 +27,7 @@ def run_onnx(dat):
   for inp in onnx_model.graph.initializer:
     assert inp.data_type == 1
     #print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
-    tensors[inp.name] = Tensor(np.frombuffer(inp.raw_data, dtype=np.float32).reshape(inp.dims))
+    tensors[inp.name] = Tensor(np.frombuffer(inp.raw_data, dtype=np.float32).reshape(inp.dims).copy())
 
   for num,n in enumerate(onnx_model.graph.node):
     #print(f"{num}: op {n.op_type}")
@@ -45,10 +45,9 @@ def run_onnx(dat):
     elif n.op_type == "Sub": ret = inp[0] - inp[1]
     elif n.op_type == "Mul": ret = inp[0] * inp[1]
     elif n.op_type == "Flatten":
-      # TODO: add to tinygrad?
-      ret = inp[0].reshape(shape=tuple(list(inp[0].shape[0:opt['axis']]) + [-1]))
+      ret = inp[0].flatten(opt['axis'])
     elif n.op_type == "Concat":
-      # terribly slow
+      # TODO: add multicat to tinygrad
       ret = inp[0]
       for x in inp[1:]:
         ret = ret.cat(x, dim=opt['axis'])
@@ -72,13 +71,13 @@ def run_onnx(dat):
     assert len(n.output) == 1
     tensors[n.output[0]] = ret
 
-  #for k,v in tensors.items():
-  #  print(k, v.shape)
+  return {outp.name:tensors[outp.name] for outp in onnx_model.graph.output}
 
 class TestOpenpilotModel(unittest.TestCase):
   def test(self):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
-    onnx_model = run_onnx(io.BytesIO(dat))
+    out = run_onnx(io.BytesIO(dat))
+    print(out)
 
 if __name__ == "__main__":
   unittest.main()

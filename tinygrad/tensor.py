@@ -260,6 +260,9 @@ class Tensor:
   def transpose(self, order=(1,0)):
     return self.permute(order=order)
 
+  def flatten(self, dim=0):
+    return self.reshape(shape=tuple(list(self.shape[0:dim]) + [-1]))
+
   def _canonicalize_reduce_axis(self, axis):
     if axis is None: axis = range(len(self.shape))
     if isinstance(axis, int): axis = [axis]
