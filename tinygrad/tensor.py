@@ -103,6 +103,7 @@ class Tensor:
       x = Tensor(x)
     assert self.shape == x.shape
     self.data = x.data
+    return x
 
   @property
   def shape(self):
@@ -246,8 +247,7 @@ class Tensor:
           k += y.shape[i]
     ret = self.slice(arg=s[0])
     for ts,y in zip(s[1:], args[1:]):
-      # TODO: investigate why += doesn't work here
-      ret = ret + y.slice(arg=ts)
+      ret += y.slice(arg=ts)
     return ret
 
   def pad2d(self, padding):

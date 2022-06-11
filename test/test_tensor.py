@@ -11,6 +11,14 @@ W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
+  def test_plus_equals(self):
+    a = Tensor.randn(10,10)
+    b = Tensor.randn(10,10)
+    c = a + b
+    val1 = c.numpy()
+    a += b
+    val2 = a.numpy()
+    np.testing.assert_allclose(val1, val2)
 
   def test_backward_pass(self):
     def test_tinygrad():
