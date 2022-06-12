@@ -44,9 +44,7 @@ class Sum(Function):
 
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
-    # NOTE: the b Buffer isn't used, since this is just for broadcast
-    ret = ctx.buffer(shape_input)
-    return ctx.binary_op(BinaryOps.A, grad_output, ret)
+    return ctx.movement_op(MovementOps.EXPAND, grad_output, shape_input)
 
 class Max(Function):
   def forward(ctx, input, axis=None):
@@ -110,6 +108,7 @@ class Pow(Function):
 
 # ************* movement ops *************
 
+# NOTE: this is sum in reverse
 class Expand(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)

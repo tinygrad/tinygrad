@@ -92,7 +92,6 @@ def binary_op(op, x, y, ret):
   elif op == BinaryOps.MUL: code = "a*b"
   elif op == BinaryOps.DIV: code = "b/a"
   elif op == BinaryOps.POW: code = "pow(a,b)"
-  elif op == BinaryOps.A: code = "a"
   elif op == BinaryOps.CMPEQ: code = "1.0f*(a==b)"
   else: raise Exception(f"{op} isn't supported")
 

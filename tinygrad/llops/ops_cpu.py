@@ -31,7 +31,6 @@ def binary_op(op, x, y, ret):
   elif op == BinaryOps.MUL: ret[:] = x*y
   elif op == BinaryOps.DIV: ret[:] = y/x
   elif op == BinaryOps.POW: ret[:] = x**y
-  elif op == BinaryOps.A: ret[:] = x
   elif op == BinaryOps.CMPEQ: ret[:] = 1.0*(x==y)
   else: raise Exception(f"{op} isn't supported")
 

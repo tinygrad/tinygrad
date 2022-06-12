@@ -1,7 +1,7 @@
 # TODO: move Device to here and proxy buffer call
 from enum import Enum
 UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
-BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
+BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND"])
 ProcessingOps = Enum("ProcessingOps", ["CONV", "CONVT", "CONVDW"])
@@ -62,7 +62,7 @@ class Ops:
   def binary_op(ctx, op:ReduceOps, x, y):
     ret = ctx.buffer(binary_broadcast(x.shape, y.shape))
     ctx.op.binary_op(op, x, y, ret)
-    log_op(op, ret, [x] if op == BinaryOps.A else [x, y])
+    log_op(op, ret, [x, y])
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg=None):
