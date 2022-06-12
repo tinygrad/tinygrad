@@ -82,23 +82,29 @@ def conv(x,w,ret,C):
   w.toImage(wi)
   options = ("-DDEPTHWISE",) if C.groups > 1 else tuple()
   conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), options)
+  assert C.cin%4 == 0
+  assert C.cout%4 == 0
+  kernel_args = [C.cout//4, (C.ox+3)//4, C.oy]
   conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.W, C.H, 0, 0, C.xs, C.ys]
-  print(conv_args)
-  conv_prg([8, 32, 64], None, xi, wi, reti, *[np.int16(x) for x in conv_args])
+  print(conv_args, kernel_args)
+  conv_prg(kernel_args, None, xi, wi, reti, *[np.int16(x) for x in conv_args])
   ret.fromImage(reti)
+  #print(ret.toCPU())
 
 def processing_op(op,a,b,ret,C):
   if op == ProcessingOps.CONV: conv(a,b,ret,C)
   else: raise Exception(f"{op} not implemented")
 
 def test_image():
-  x = OpenCLBuffer((4,8,4), np.ones((4,8,4), dtype=np.float32))
-  y = OpenCLBuffer((4,8,4), np.zeros((4,8,4), dtype=np.float32))
+  x = OpenCLBuffer((5,8,4), np.random.randn(5,8,4).astype(np.float32))
+  y = OpenCLBuffer((5,8,4), np.random.randn(5,8,4).astype(np.float32))
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
   xi = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(x.shape[1], x.shape[0]))
   print(xi.shape)
   x.toImage(xi)
   y.fromImage(xi)
+  assert np.allclose(x.toCPU(), y.toCPU())
+  print(x.toCPU())
   print(y.toCPU())
 
 if __name__ == "__main__":

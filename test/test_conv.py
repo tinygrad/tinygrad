@@ -1,4 +1,5 @@
 import unittest
+import numpy as np
 from tinygrad.tensor import Tensor
 
 class TestConv(unittest.TestCase):
@@ -11,6 +12,13 @@ class TestConv(unittest.TestCase):
     assert (ret[:, :, 1:-1, 1:-1] == 108).all()
     assert ret[0,0,0,0] == 48
     assert ret[0,0,0,1] == 72
+
+  def test_many_simple(self):
+    x = Tensor(np.arange(8*1*8).reshape(1,8,1,8).astype(np.float32))
+    #w = Tensor(np.arange(8*8*1*1).reshape(8,8,1,1).astype(np.float32))
+    w = Tensor.eye(8).reshape((8,8,1,1))
+    ret = x.conv2d(w, stride=(1,1), padding=(0,0)).numpy()
+    print(ret)
 
   def test_first_three(self):
     x = Tensor.ones(1,12,128,256)

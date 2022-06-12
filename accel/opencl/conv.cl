@@ -25,7 +25,7 @@
   weightLocation.y = packedOutputChannel;
 
   short startOutputColumn = mul24((short)get_global_id(1), NUM_OUTPUTS);
-  short startX = mad24(startOutputColumn, strideX, -paddingX);
+  short startX = mul24(mad24(startOutputColumn, strideX, -paddingX), totalNumPackedInputChannels);
   short strideWithChannels = mul24(strideX, totalNumPackedInputChannels);
 
   short outputRow = get_global_id(2);
