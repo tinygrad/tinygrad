@@ -3,7 +3,7 @@ from enum import Enum
 UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND"])
 ProcessingOps = Enum("ProcessingOps", ["CONV", "CONVT", "CONVDW"])
 
 import os
@@ -69,6 +69,7 @@ class Ops:
     if op == MovementOps.RESHAPE: new_shape = arg
     if op == MovementOps.PERMUTE: new_shape = [x.shape[i] for i in arg]
     if op == MovementOps.SLICE: new_shape = [y-x for x,y in arg]
+    if op == MovementOps.EXPAND: new_shape = arg
     ret = ctx.buffer(new_shape)
     ctx.op.movement_op(op, x, ret, arg)
     log_op(op, ret, [x])

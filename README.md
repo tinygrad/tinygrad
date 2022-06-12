@@ -112,18 +112,18 @@ Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doi
 
 ### hlops (in tensor.py)
 
-hlops are syntactic sugar around mlops.
+hlops are syntactic sugar around mlops. They support most things torch does.
 
 ### mlops
 
 mlops are mid level ops, there's 13 of them. They understand memory allocation and derivatives
 
 ```
-Relu, Log, Exp                  # unary ops
-Sum, Max                        # reduce ops (with axis argument)
-Add, Sub, Mul, Pow              # binary ops (with broadcasting)
-Reshape, Permute, Slice         # movement ops
-Conv2D(NCHW)                    # processing op (Matmul is also Conv2D)
+Relu, Log, Exp                   # unary ops
+Sum, Max                         # reduce ops (with axis argument)
+Add, Sub, Mul, Pow               # binary ops (no broadcasting, use repeat)
+Reshape, Permute, Slice, Repeat  # movement ops
+Conv2D(NCHW)                     # processing op (Matmul is also Conv2D)
 ```
 
 You no longer need to write mlops for a new accelerator
@@ -137,7 +137,7 @@ Buffer                                           # class of memory on this devic
 unary_op  (RELU, EXP, LOG, NEG, SIGN)            # A -> A
 reduce_op (SUM, MAX)                             # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, A, CMPEQ)    # A + B -> C (broadcasting supported)
-movement_op (RESHAPE, PERMUTE, SLICE)            # A -> B (different size)
+movement_op (RESHAPE, PERMUTE, SLICE, REPEAT)    # A -> B (different size)
 processing_op (CONV, CONVT, CONVDW)              # A + B -> C
 ```
 

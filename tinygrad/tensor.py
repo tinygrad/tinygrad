@@ -349,10 +349,38 @@ class Tensor:
     ret = x._conv2d(weight, stride=stride, groups=groups)
     return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
 
+  # ***** broadcasted binary ops *****
+
+  @staticmethod
+  def broadcasted(fxn, x, y):
+    tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
+    if not isinstance(x, Tensor):
+      x = Tensor(np.array([x], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+    if not isinstance(y, Tensor):
+      y = Tensor(np.array([y], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+    n_dims = max(len(x.shape), len(y.shape))
+    shape_x, shape_y = np.ones(n_dims, dtype=np.int32), np.ones(n_dims, dtype=np.int32)
+    shape_x[:len(x.shape)] = np.array(x.shape, dtype=np.int32)
+    shape_y[:len(y.shape)] = np.array(y.shape, dtype=np.int32)
+    shape_x, shape_y = tuple(shape_x), tuple(shape_y)
+    if shape_x != x.shape: x = x.reshape(shape_x)
+    if shape_y != y.shape: y = y.reshape(shape_y)
+    shape_ret = tuple([int(x) for x in np.maximum(shape_x, shape_y)])
+    if shape_x != shape_ret: x = x.expand(shape_ret)
+    if shape_y != shape_ret: y = y.expand(shape_ret)
+    return fxn(x, y)
+
+  # TODO: are these the only ones that can take number arguments?
+  def add(self, x): return self.broadcasted(Tensor._add, self, x)
+  def sub(self, x): return self.broadcasted(Tensor._sub, self, x)
+  def mul(self, x): return self.broadcasted(Tensor._mul, self, x)
+  def pow(self, x): return self.broadcasted(Tensor._pow, self, x)
+
   # ***** functional nn ops *****
 
-  def reshape(self, shape):
-    return self._reshape(shape=shape)
+  # TODO: fix the kwargs problem
+  def reshape(self, shape): return self._reshape(shape=shape)
+  def expand(self, shape): return self._expand(shape=shape)
 
   def linear(self, weight, bias):
     shp = [1] * (len(self.shape)-1) + [-1]

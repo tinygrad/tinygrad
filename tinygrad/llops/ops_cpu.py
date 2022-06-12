@@ -11,6 +11,7 @@ class CPUBuffer(np.ndarray):
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
   def permute(x, order): return x.transpose(order)
   def custompad(x, padding): return np.pad(x, padding)
+  def expand(x, new_shape): return np.broadcast_to(x, new_shape)
 
   @staticmethod
   def fromCPU(x): return x
@@ -48,13 +49,14 @@ def reduce_op(op, inp, ret):
     else: raise Exception(f"{op} isn't supported")
 
 def movement_op(op, x, ret, arg=None):
-  if op == MovementOps.RESHAPE: ret[:] = x.reshape(ret.shape)
+  if op == MovementOps.RESHAPE: ret[:] = x.reshape(arg)
   elif op == MovementOps.PERMUTE: ret[:] = x.permute(arg)
   elif op == MovementOps.SLICE:
     padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
     x = x.custompad(padding)
     slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
     ret[:] = x[tuple([slice(x[0], x[1], None) for x in slicee])]
+  elif op == MovementOps.EXPAND: ret[:] = x.expand(arg)
   else: raise Exception(f"{op} isn't supported")
 
 def get_tx(x, C):

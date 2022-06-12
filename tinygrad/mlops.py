@@ -115,6 +115,15 @@ class Pow(Function):
 
 # ************* movement ops *************
 
+class Expand(Function):
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    return ctx.movement_op(MovementOps.EXPAND, x, shape)
+
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return ctx.reduce_op(ReduceOps.SUM, grad_output, in_shape)
+
 class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)
