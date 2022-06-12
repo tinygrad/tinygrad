@@ -222,7 +222,7 @@ def conv(x,w,ret,C):
     output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
   }""")
 
-  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in C])
+  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in C[0:12]])
 
 # tensx = (bs, groups*cin, iy, ix)
 # tensw = (groups*rcout, cin, H, W)
@@ -248,7 +248,7 @@ def convdw(x,grad_output,dw,C):
     } }
     dw[get_global_id(0)*H*W + y*W + x] = acc;
   }""")
-  convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C])
+  convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C[0:12]])
 
 def convdx(grad_output,w,dx,C):
   convdx_prg = clbuild("convdx", """
@@ -275,7 +275,7 @@ def convdx(grad_output,w,dx,C):
     } }
   }
   """)
-  convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C])
+  convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C[0:12]])
 
 def processing_op(op,a,b,ret,C):
   if op == ProcessingOps.CONV: conv(a,b,ret,C)

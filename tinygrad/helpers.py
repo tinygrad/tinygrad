@@ -30,7 +30,7 @@ def binary_broadcast(x_shape, y_shape, extra=False):
 def get_conv_args(x_shape, w_shape, stride, groups):
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   conv_args = namedtuple('conv_args',
-    ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs'])
+    ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout'])
   cout,cin,H,W = w_shape
   ys,xs = (stride, stride) if isinstance(stride, int) else stride
   bs,cin_,iy,ix = x_shape
@@ -38,4 +38,4 @@ def get_conv_args(x_shape, w_shape, stride, groups):
   if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0
   rcout = cout//groups
-  return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs)
+  return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs, cout)
