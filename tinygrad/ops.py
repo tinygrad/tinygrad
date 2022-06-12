@@ -62,7 +62,7 @@ class Ops:
   def binary_op(ctx, op:ReduceOps, x, y):
     ret = ctx.buffer(binary_broadcast(x.shape, y.shape))
     ctx.op.binary_op(op, x, y, ret)
-    log_op(op, ret, [x, y])
+    log_op(op, ret, [x] if op == BinaryOps.A else [x, y])
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg=None):
