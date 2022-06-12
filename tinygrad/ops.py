@@ -8,7 +8,7 @@ ProcessingOps = Enum("ProcessingOps", ["CONV", "CONVT", "CONVDW"])
 
 import os
 DEBUG = int(os.getenv("PRINT_LLOPS", "0"))
-GRAPH = int(os.getenv("GRAPH_LLOPS", "0"))
+GRAPH = int(os.getenv("GRAPH", "0"))
 if GRAPH:
   import atexit
   import networkx as nx
