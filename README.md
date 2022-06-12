@@ -122,7 +122,7 @@ mlops are mid level ops, there's 13 of them. They understand memory allocation a
 Relu, Log, Exp                   # unary ops
 Sum, Max                         # reduce ops (with axis argument)
 Add, Sub, Mul, Pow               # binary ops (no broadcasting, use repeat)
-Reshape, Permute, Slice, Repeat  # movement ops
+Reshape, Permute, Slice, Expand  # movement ops
 Conv2D(NCHW)                     # processing op (Matmul is also Conv2D)
 ```
 
@@ -137,7 +137,7 @@ Buffer                                           # class of memory on this devic
 unary_op  (RELU, EXP, LOG, NEG, SIGN)            # A -> A
 reduce_op (SUM, MAX)                             # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, A, CMPEQ)    # A + B -> C (broadcasting supported)
-movement_op (RESHAPE, PERMUTE, SLICE, REPEAT)    # A -> B (different size)
+movement_op (RESHAPE, PERMUTE, SLICE, EXPAND)    # A -> B (different size)
 processing_op (CONV, CONVT, CONVDW)              # A + B -> C
 ```
 
