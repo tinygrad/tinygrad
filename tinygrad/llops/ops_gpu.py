@@ -1,7 +1,7 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import prod, binary_broadcast, get_conv_args
+from tinygrad.helpers import prod
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 cl_ctx, cl_queue = None, None
@@ -65,32 +65,6 @@ def unary_op(op, x, ret):
   }""")
   unop([roundup(prod(ret.shape))//4], None, x.cl, ret.cl)
   return ret
-
-@functools.lru_cache
-def get_binop_prg(code, complist):
-  ndims = len(complist)
-  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
-  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
-
-  idx_exprs = ["0", "0"] # [idx_x, idx_y]
-  for i in range(ndims):
-    for j in range(2):
-      if complist[i][j]:
-        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
-
-  prg = """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
-    int gid0 = get_global_id(0);"""+compute_idx_rets+"""
-    float a = x_g["""+idx_exprs[0]+"""];
-    float b = y_g["""+idx_exprs[1]+"""];
-    res_g[gid0] = """+code+""";\n}"""
-  return cl.Program(cl_ctx, prg).build()
-
-def expand(x, ret):
-  shape_ret, dimlist, complist = binary_broadcast(x.shape, ret.shape, True)
-  assert tuple(shape_ret) == tuple(ret.shape)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-  prg = get_binop_prg("a", tuple(complist))
-  prg.binop(cl_queue, [prod_list[0] if len(dimlist) > 0 else 1], None, x.cl, None, ret.cl, *dimlist, *(prod_list[1:]))
 
 def binary_op(op, x, y, ret):
   if op == BinaryOps.ADD: code = "a+b"
@@ -197,6 +171,34 @@ def inner_slice(x, arg, ret):
     buffer_np(np.array(x.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)),
     buffer_np(np.array(shift, dtype=np.int32)))
+
+def expand(x, ret):
+  assert len(x.shape) == len(ret.shape)
+
+  dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
+  def push(dim, comp):
+    if len(complist) > 0 and complist[-1] == comp:
+      dimlist[-1] *= dim
+    elif comp != (False, False):
+      dimlist.append(dim); complist.append(comp)
+  for i,j in zip(x.shape, ret.shape): # group together any adjacent dimensions that we can to simplify broadcasting
+    push(np.int32(max(i,j)), (i > 1, j > 1))
+  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
+
+  ndims = len(complist)
+  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
+  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
+
+  idx_exprs = ["0", "0"] # [idx_x, idx_y]
+  for i in range(ndims):
+    for j in range(2):
+      if complist[i][j]:
+        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
+
+  expandop = clbuild("expandop", """__kernel void expandop(__global const float *x_g, __global float *res_g"""+args+""") {
+    int gid0 = get_global_id(0);"""+compute_idx_rets+"""
+    res_g[gid0] = x_g["""+idx_exprs[0]+"""];\n}""")
+  expandop([prod_list[0] if len(dimlist) > 0 else 1], None, x.cl, ret.cl, *dimlist, *(prod_list[1:]))
 
 def movement_op(op, x, ret, arg=None):
   if op == MovementOps.RESHAPE: reshape(x, ret)
