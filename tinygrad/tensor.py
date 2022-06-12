@@ -344,8 +344,9 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
-  def conv2d(self, weight, bias=None, stride=1, groups=1):
-    ret = self._conv2d(weight, stride=stride, groups=groups)
+  def conv2d(self, weight, bias=None, stride=1, groups=1, padding=None):
+    x = self.pad2d((padding[0], padding[0], padding[1], padding[1])) if padding is not None else self
+    ret = x._conv2d(weight, stride=stride, groups=groups)
     return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
 
   # ***** functional nn ops *****

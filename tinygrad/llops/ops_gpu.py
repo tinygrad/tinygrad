@@ -5,6 +5,8 @@ from tinygrad.helpers import prod, binary_broadcast, get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 cl_ctx, cl_queue = None, None
+def get_cl_ctx(): return cl_ctx
+def get_cl_queue(): return cl_queue
 def require_init_gpu():
   global cl_ctx, cl_queue
   if cl_ctx is None:

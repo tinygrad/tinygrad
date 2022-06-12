@@ -28,6 +28,7 @@ def binary_broadcast(x_shape, y_shape, extra=False):
   return (shape_ret, dimlist, complist) if extra else shape_ret
 
 def get_conv_args(x_shape, w_shape, stride, groups):
+  # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   conv_args = namedtuple('conv_args',
     ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs'])
   cout,cin,H,W = w_shape
