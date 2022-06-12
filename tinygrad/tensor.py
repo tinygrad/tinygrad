@@ -349,10 +349,34 @@ class Tensor:
     ret = x._conv2d(weight, stride=stride, groups=groups)
     return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
 
+  # ***** broadcasted binary ops *****
+
+  @staticmethod
+  def broadcasted(fxn, x, y):
+    tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
+    if not isinstance(x, Tensor): x = Tensor(np.array([x], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+    if not isinstance(y, Tensor): y = Tensor(np.array([y], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+
+    n_dims = max(len(x.shape), len(y.shape))
+    if len(x.shape) != n_dims: x = x.reshape(list(x.shape) + [1]*(n_dims-len(x.shape)))
+    if len(y.shape) != n_dims: y = y.reshape(list(y.shape) + [1]*(n_dims-len(y.shape)))
+
+    shape_ret = tuple([int(x) for x in np.maximum(x.shape, y.shape)])
+    if x.shape != shape_ret: x = x.expand(shape_ret)
+    if y.shape != shape_ret: y = y.expand(shape_ret)
+    return fxn(x, y)
+
+  # TODO: are these the only ones that can take number arguments?
+  def add(self, x): return Tensor.broadcasted(Tensor._add, self, x)
+  def sub(self, x): return Tensor.broadcasted(Tensor._sub, self, x)
+  def mul(self, x): return Tensor.broadcasted(Tensor._mul, self, x)
+  def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
+
   # ***** functional nn ops *****
 
-  def reshape(self, shape):
-    return self._reshape(shape=shape)
+  # TODO: fix the kwargs problem
+  def reshape(self, shape): return self._reshape(shape=shape)
+  def expand(self, shape): return self._expand(shape=shape)
 
   def linear(self, weight, bias):
     shp = [1] * (len(self.shape)-1) + [-1]
@@ -391,13 +415,8 @@ class Function(Ops):
 
   @classmethod
   def apply(cls, *x, **kwargs):
-    tt = [arg for arg in x if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-
-    # create tensors from number arguments
-    x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    assert all([tt.device == t.device for t in x]), "All tensors are not on the same device"
-
-    ctx = cls(tt.device, *x)
+    assert all([isinstance(arg, Tensor) for arg in x])
+    ctx = cls(x[0].device, *x)
     with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
       ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
                    device=ctx.device, requires_grad=ctx.requires_grad)
@@ -419,6 +438,7 @@ for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), i
   if name[0] != "_" and name != "Function" and not name.endswith("Ops"): register(name.lower(), cls)
 
 # register the operators
+# TODO: add div
 def register_op(name, fxn):
   setattr(Tensor, f"__{name}__", fxn)
   setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self,x)))

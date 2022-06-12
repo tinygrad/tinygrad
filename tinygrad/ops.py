@@ -1,9 +1,9 @@
 # TODO: move Device to here and proxy buffer call
 from enum import Enum
 UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
-BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
+BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND"])
 ProcessingOps = Enum("ProcessingOps", ["CONV", "CONVT", "CONVDW"])
 
 import os
@@ -45,7 +45,6 @@ def log_op(op, ret, inp):
     G.nodes[nm(ret)]['fillcolor'] = top_colors[top]
     G.nodes[nm(ret)]['style'] = 'filled'
 
-from tinygrad.helpers import binary_broadcast
 class Ops:
   def unary_op(ctx, op:UnaryOps, x):
     ret = ctx.buffer(x.shape)
@@ -60,13 +59,14 @@ class Ops:
     return ret
 
   def binary_op(ctx, op:ReduceOps, x, y):
-    ret = ctx.buffer(binary_broadcast(x.shape, y.shape))
+    assert x.shape == y.shape
+    ret = ctx.buffer(x.shape)
     ctx.op.binary_op(op, x, y, ret)
-    log_op(op, ret, [x] if op == BinaryOps.A else [x, y])
+    log_op(op, ret, [x, y])
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg=None):
-    if op == MovementOps.RESHAPE: new_shape = arg
+    if op in [MovementOps.RESHAPE, MovementOps.EXPAND]: new_shape = arg
     if op == MovementOps.PERMUTE: new_shape = [x.shape[i] for i in arg]
     if op == MovementOps.SLICE: new_shape = [y-x for x,y in arg]
     ret = ctx.buffer(new_shape)
