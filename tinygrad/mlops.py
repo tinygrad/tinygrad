@@ -151,7 +151,33 @@ class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     C = get_conv_args(x.shape, w.shape, stride, groups)
     ctx.save_for_backward(x,w,(C.ys,C.xs), C.groups)
-    return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.groups*C.rcout, C.oy, C.ox), C)
+
+    # opencl speed hacks
+    # TODO: find a better way to id opencl
+    if ctx.device == 2:
+      # packed
+      assert (C.groups*C.cin) % 4 == 0
+      x = ctx.movement_op(MovementOps.PERMUTE, x, (0,2,3,1))
+      x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
+
+      assert C.cout % 4 == 0
+      if C.cin == 1:
+        # depthwise
+        w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.H*C.W))
+        w = ctx.movement_op(MovementOps.PERMUTE, w, (0,2,1))
+      else:
+        w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.cin//4,4,C.H,C.W))
+        w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
+        w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
+
+      out_shape = (C.bs*C.oy, C.ox*C.groups*C.rcout//4, 4)
+      ret = ctx.processing_op(ProcessingOps.CONV, x, w, out_shape, C)
+
+      ret = ctx.movement_op(MovementOps.RESHAPE, ret, (C.bs, C.oy, C.ox, C.groups*C.rcout))
+      ret = ctx.movement_op(MovementOps.PERMUTE, ret, (0,3,1,2))
+      return ret
+    else:
+      return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.groups*C.rcout, C.oy, C.ox), C)
 
   def backward(ctx, grad_output):
     x, w, stride, groups = ctx.saved_tensors

@@ -45,8 +45,8 @@ def buffer_np(x):
   return cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
 
 @functools.lru_cache
-def clbuild(name, prg):
-  clprg = cl.Program(cl_ctx, prg).build().__getattr__(name)
+def clbuild(name, prg, options=tuple()):
+  clprg = cl.Program(cl_ctx, prg).build(options=options).__getattr__(name)
   def run(*args): clprg(cl_queue, *args)
   return run
 
