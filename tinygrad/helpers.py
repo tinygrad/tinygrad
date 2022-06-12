@@ -39,3 +39,27 @@ def get_conv_args(x_shape, w_shape, stride, groups):
   assert cout % groups == 0
   rcout = cout//groups
   return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs, cout)
+
+# Buffers should extend this
+class ShapeTracker:
+  def __init__(self, shape):
+    self.shape = shape
+    self.strides = [1]
+    for d in self.shape[::-1][:-1]:
+      self.strides = [d*self.strides[0]] + self.strides
+
+  @property
+  def shape(self):
+    return tuple(self.shape)
+
+  def reshape(self, new_shape):
+    pass
+  
+  def permute(self, axis):
+    pass
+  
+  def slice(self, arg):
+    pass
+
+
+
