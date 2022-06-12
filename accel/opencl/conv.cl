@@ -19,13 +19,21 @@
     outputValues[i] = (float4)(0, 0, 0, 0);
   }
 
+
   short packedOutputChannel = get_global_id(0);
   int2 weightLocation;
   weightLocation.x = 0;
   weightLocation.y = packedOutputChannel;
 
+#ifdef DEPTHWISE
+  short startPackedInputChannel = packedOutputChannel;
+#else
+  // this was an input?
+  short startPackedInputChannel = 0;
+#endif
+
   short startOutputColumn = mul24((short)get_global_id(1), NUM_OUTPUTS);
-  short startX = mul24(mad24(startOutputColumn, strideX, -paddingX), totalNumPackedInputChannels);
+  short startX = mad24(mad24(startOutputColumn, strideX, -paddingX), totalNumPackedInputChannels, startPackedInputChannel);
   short strideWithChannels = mul24(strideX, totalNumPackedInputChannels);
 
   short outputRow = get_global_id(2);

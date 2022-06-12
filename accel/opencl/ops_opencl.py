@@ -82,7 +82,6 @@ def conv(x,w,ret,C):
   w.toImage(wi)
   options = ("-DDEPTHWISE",) if C.groups > 1 else tuple()
   conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), options)
-  assert C.cin%4 == 0
   assert C.cout%4 == 0
   kernel_args = [C.cout//4, (C.ox+3)//4, C.oy]
   conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.W, C.H, 0, 0, C.xs, C.ys]

@@ -156,13 +156,15 @@ class Conv2D(Function):
     # opencl speed hacks
     # TODO: find a better way to id opencl
     if ctx.device == 2:
+      """
       global cnt
-      if cnt > 0:
+      if cnt > 5:
         from tinygrad.llops.ops_gpu import processing_op as pop
         ret = ctx.buffer((C.bs, C.groups*C.rcout, C.oy, C.ox))
         pop(ProcessingOps.CONV, x, w, ret, C)
         return ret
       cnt += 1
+      """
 
       print(x.shape, w.shape)
 
