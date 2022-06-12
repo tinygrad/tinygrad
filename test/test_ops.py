@@ -42,6 +42,8 @@ class TestOps(unittest.TestCase):
 
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
+  def test_broadcasted_add(self):
+    helper_test_op([(45,65), (45,1)], lambda x,y: x+y, lambda x,y: x+y)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
   def test_mul(self):
