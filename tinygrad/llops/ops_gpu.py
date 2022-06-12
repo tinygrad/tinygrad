@@ -78,21 +78,19 @@ def get_binop_prg(code, complist):
       if complist[i][j]:
         idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
 
-  dtype = ["float", "float", "float"]
-  prg = """__kernel void binop(__global const """+dtype[0]+""" *x_g, __global const """+dtype[1]+""" *y_g, __global """+dtype[2]+""" *res_g"""+args+""") {
+  prg = """__kernel void binop(__global const float *x_g, __global const float *y_g, __global float *res_g"""+args+""") {
     int gid0 = get_global_id(0);"""+compute_idx_rets+"""
-    """+dtype[0]+""" a = x_g["""+idx_exprs[0]+"""];
-    """+dtype[1]+""" b = y_g["""+idx_exprs[1]+"""];
+    float a = x_g["""+idx_exprs[0]+"""];
+    float b = y_g["""+idx_exprs[1]+"""];
     res_g[gid0] = """+code+""";\n}"""
-  return cl.Program(cl_ctx, prg).build(), dtype[2] == "float4"
+  return cl.Program(cl_ctx, prg).build()
 
 def expand(x, ret):
   shape_ret, dimlist, complist = binary_broadcast(x.shape, ret.shape, True)
   assert tuple(shape_ret) == tuple(ret.shape)
   prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-  prg, is_float4 = get_binop_prg("a", tuple(complist))
-  kernel_size = ((roundup(prod_list[0])//4) if is_float4 else prod_list[0]) if len(dimlist) > 0 else 1
-  prg.binop(cl_queue, [kernel_size], None, x.cl, None, ret.cl, *dimlist, *(prod_list[1:]))
+  prg = get_binop_prg("a", tuple(complist))
+  prg.binop(cl_queue, [prod_list[0] if len(dimlist) > 0 else 1], None, x.cl, None, ret.cl, *dimlist, *(prod_list[1:]))
 
 def binary_op(op, x, y, ret):
   if op == BinaryOps.ADD: code = "a+b"
