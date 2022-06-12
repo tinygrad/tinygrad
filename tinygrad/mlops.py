@@ -54,10 +54,17 @@ class Max(Function):
 
   def backward(ctx, grad_output):
     input, ret = ctx.saved_tensors
-    ret2 = ctx.binary_op(BinaryOps.CMPEQ, input, ret)
-    div = ctx.reduce_op(ReduceOps.SUM, ret2, grad_output.shape)
-    ret2 = ctx.binary_op(BinaryOps.DIV, div, ret2)
-    return ctx.binary_op(BinaryOps.MUL, ret2, grad_output)
+
+    # 1s in locations where the max was chosen (can be two locations)
+    max_is_1s = ctx.binary_op(BinaryOps.CMPEQ, input, ctx.movement_op(MovementOps.EXPAND, ret, input.shape))
+
+    # sum of locations, averaged
+    div = ctx.reduce_op(ReduceOps.SUM, max_is_1s, grad_output.shape)
+    div = ctx.movement_op(MovementOps.EXPAND, div, input.shape)
+    max_is_amount = ctx.binary_op(BinaryOps.DIV, div, max_is_1s)
+
+    grad_output_expanded = ctx.movement_op(MovementOps.EXPAND, grad_output, input.shape)
+    return ctx.binary_op(BinaryOps.MUL, max_is_amount, grad_output_expanded)
 
 # ************* binary ops *************
 

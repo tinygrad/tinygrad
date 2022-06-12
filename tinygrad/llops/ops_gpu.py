@@ -86,21 +86,32 @@ def get_binop_prg(code, complist):
     res_g[gid0] = """+code+""";\n}"""
   return cl.Program(cl_ctx, prg).build(), dtype[2] == "float4"
 
+def expand(x, ret):
+  shape_ret, dimlist, complist = binary_broadcast(x.shape, ret.shape, True)
+  assert tuple(shape_ret) == tuple(ret.shape)
+  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
+  prg, is_float4 = get_binop_prg("a", tuple(complist))
+  kernel_size = ((roundup(prod_list[0])//4) if is_float4 else prod_list[0]) if len(dimlist) > 0 else 1
+  prg.binop(cl_queue, [kernel_size], None, x.cl, None, ret.cl, *dimlist, *(prod_list[1:]))
+
 def binary_op(op, x, y, ret):
   if op == BinaryOps.ADD: code = "a+b"
   elif op == BinaryOps.SUB: code = "a-b"
   elif op == BinaryOps.MUL: code = "a*b"
   elif op == BinaryOps.DIV: code = "b/a"
   elif op == BinaryOps.POW: code = "pow(a,b)"
-  elif op == BinaryOps.CMPEQ: code = "1.0f*(a==b)"
+  elif op == BinaryOps.CMPEQ: code = "(float4)(1.0f*(a.x==b.x), 1.0f*(a.y==b.y), 1.0f*(a.z==b.z), 1.0f*(a.w==b.w))"
   else: raise Exception(f"{op} isn't supported")
-
-  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape, True)
-  assert tuple(shape_ret) == tuple(ret.shape)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-  prg, is_float4 = get_binop_prg(code, tuple(complist))
-  kernel_size = ((roundup(prod_list[0])//4) if is_float4 else prod_list[0]) if len(dimlist) > 0 else 1
-  prg.binop(cl_queue, [kernel_size], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
+  assert x.shape == ret.shape and y.shape == ret.shape
+  binop = clbuild("binop", """
+  __kernel void binop(__global const float4 *a_g, __global const float4 *b_g, __global float4 *res_g) {
+    int gid = get_global_id(0);
+    float4 a = a_g[gid];
+    float4 b = b_g[gid];
+    res_g[gid] = """+code+""";
+  }""")
+  binop([roundup(prod(ret.shape))//4], None, x.cl, y.cl, ret.cl)
+  return ret
 
 def reduce_op(op, inp, ret):
   if op == ReduceOps.SUM:
@@ -193,6 +204,7 @@ def movement_op(op, x, ret, arg=None):
   if op == MovementOps.RESHAPE: reshape(x, ret)
   elif op == MovementOps.PERMUTE: perm_axis(x, arg, ret)
   elif op == MovementOps.SLICE: inner_slice(x, arg, ret)
+  elif op == MovementOps.EXPAND: expand(x, ret)
 
 def conv(x,w,ret,C):
   # input  = (bs, groups, cin, iy, ix)
