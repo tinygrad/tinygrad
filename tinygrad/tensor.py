@@ -419,13 +419,8 @@ class Function(Ops):
 
   @classmethod
   def apply(cls, *x, **kwargs):
-    tt = [arg for arg in x if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-
-    # create tensors from number arguments
-    x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    assert all([tt.device == t.device for t in x]), "All tensors are not on the same device"
-
-    ctx = cls(tt.device, *x)
+    assert all([isinstance(arg, Tensor) for arg in x])
+    ctx = cls(x[0].device, *x)
     with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
       ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
                    device=ctx.device, requires_grad=ctx.requires_grad)
@@ -447,6 +442,7 @@ for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), i
   if name[0] != "_" and name != "Function" and not name.endswith("Ops"): register(name.lower(), cls)
 
 # register the operators
+# TODO: add div
 def register_op(name, fxn):
   setattr(Tensor, f"__{name}__", fxn)
   setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self,x)))

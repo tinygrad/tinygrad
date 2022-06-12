@@ -63,29 +63,21 @@ class Max(Function):
 
 # ************* binary ops *************
 
-def unbroadcast(ctx, out, in_sh):
-  return ctx.reduce_op(ReduceOps.SUM, out, in_sh)
-
 class Add(Function):
   def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
     return ctx.binary_op(BinaryOps.ADD, x, y)
 
   def backward(ctx, grad_output):
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(ctx, grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
-           unbroadcast(ctx, grad_output, shape_y) if ctx.needs_input_grad[1] else None
+    return grad_output if ctx.needs_input_grad[0] else None, \
+           grad_output if ctx.needs_input_grad[1] else None
 
 class Sub(Function):
   def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
     return ctx.binary_op(BinaryOps.SUB, x, y)
 
   def backward(ctx, grad_output):
-    shape_x, shape_y = ctx.saved_tensors
-    neg_grad_output = ctx.unary_op(UnaryOps.NEG, grad_output)
-    return unbroadcast(ctx, grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
-           unbroadcast(ctx, neg_grad_output, shape_y) if ctx.needs_input_grad[1] else None
+    return grad_output if ctx.needs_input_grad[0] else None, \
+           ctx.unary_op(UnaryOps.NEG, grad_output) if ctx.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(ctx, x, y):
@@ -94,8 +86,8 @@ class Mul(Function):
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, y, grad_output), x.shape) if ctx.needs_input_grad[0] else None
-    grad_y = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, x, grad_output), y.shape) if ctx.needs_input_grad[1] else None
+    grad_x = ctx.binary_op(BinaryOps.MUL, y, grad_output) if ctx.needs_input_grad[0] else None
+    grad_y = ctx.binary_op(BinaryOps.MUL, x, grad_output) if ctx.needs_input_grad[1] else None
     return grad_x, grad_y
 
 class Pow(Function):
@@ -106,11 +98,14 @@ class Pow(Function):
 
   def backward(ctx, grad_output):
     x,y,powxy = ctx.saved_tensors
-    tmp = ctx.binary_op(BinaryOps.DIV, x, powxy)      # pow(x,y)/x
-    tmp = ctx.binary_op(BinaryOps.MUL, y, tmp)        # y * pow(x,y)/x
-    grad_x = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, grad_output, tmp), x.shape) if ctx.needs_input_grad[0] else None
-    tmp = ctx.binary_op(BinaryOps.MUL, ctx.unary_op(UnaryOps.LOG, x), powxy)  # log(x) * pow(x,y)
-    grad_y = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, grad_output, tmp), y.shape) if ctx.needs_input_grad[1] else None
+    grad_x, grad_y = None, None
+    if ctx.needs_input_grad[0]:
+      tmp = ctx.binary_op(BinaryOps.DIV, x, powxy)      # pow(x,y)/x
+      tmp = ctx.binary_op(BinaryOps.MUL, y, tmp)        # y * pow(x,y)/x
+      grad_x = ctx.binary_op(BinaryOps.MUL, grad_output, tmp)
+    if ctx.needs_input_grad[1]:
+      tmp = ctx.binary_op(BinaryOps.MUL, ctx.unary_op(UnaryOps.LOG, x), powxy)  # log(x) * pow(x,y)
+      grad_y = ctx.binary_op(BinaryOps.MUL, grad_output, tmp)
     return grad_x, grad_y
 
 # ************* movement ops *************
