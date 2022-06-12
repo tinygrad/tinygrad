@@ -371,10 +371,10 @@ class Tensor:
     return fxn(x, y)
 
   # TODO: are these the only ones that can take number arguments?
-  def add(self, x): return self.broadcasted(Tensor._add, self, x)
-  def sub(self, x): return self.broadcasted(Tensor._sub, self, x)
-  def mul(self, x): return self.broadcasted(Tensor._mul, self, x)
-  def pow(self, x): return self.broadcasted(Tensor._pow, self, x)
+  def add(self, x): return Tensor.broadcasted(Tensor._add, self, x)
+  def sub(self, x): return Tensor.broadcasted(Tensor._sub, self, x)
+  def mul(self, x): return Tensor.broadcasted(Tensor._mul, self, x)
+  def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
 
   # ***** functional nn ops *****
 
