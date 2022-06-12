@@ -3,6 +3,7 @@ from tinygrad.helpers import get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 class CPUBuffer(np.ndarray):
+  def __new__(cls, shape): return np.zeros(shape, dtype=np.float32).view(CPUBuffer)
   def relu(x): return np.maximum(x, 0)
   def exp(x): return np.exp(x)
   def log(x): return np.log(x)

@@ -182,10 +182,10 @@ class Tensor:
   def _move_data(data, device):
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
-    if isinstance(data, np.ndarray):
-      data = data.view(Device.buffers[Device.CPU])
     if isinstance(data, Device.buffers[device]):
       return data
+    if isinstance(data, np.ndarray):
+      data = data.view(Device.buffers[Device.CPU])
 
     if Tensor._get_data_dtype(data) != np.float32 and not Tensor.did_float_warning:
       # warning? float64 is actually needed for numerical jacobian
