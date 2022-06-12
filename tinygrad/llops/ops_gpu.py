@@ -195,8 +195,7 @@ def movement_op(op, x, ret, arg=None):
   elif op == MovementOps.PERMUTE: perm_axis(x, arg, ret)
   elif op == MovementOps.SLICE: inner_slice(x, arg, ret)
 
-def conv(x,w,ret,stride,groups):
-  C = get_conv_args(x.shape, w.shape, stride, groups)
+def conv(x,w,ret,C):
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
@@ -229,8 +228,7 @@ def conv(x,w,ret,stride,groups):
 # tensw = (groups*rcout, cin, H, W)
 # ggg = (bs, groups*rout, oy, ox)
 
-def convdw(x,grad_output,dw,stride,groups):
-  C = get_conv_args(x.shape, dw.shape, stride, groups)
+def convdw(x,grad_output,dw,C):
   convdw_prg = clbuild("convdw", """
   __kernel void convdw(__global const float *tensx, __global const float *ggg, __global float *dw,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
@@ -252,8 +250,7 @@ def convdw(x,grad_output,dw,stride,groups):
   }""")
   convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C])
 
-def convdx(grad_output,w,dx,stride,groups):
-  C = get_conv_args(dx.shape, w.shape, stride, groups)
+def convdx(grad_output,w,dx,C):
   convdx_prg = clbuild("convdx", """
   __kernel void convdx(__global const float *tensw, __global const float *ggg, __global float *dx,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
@@ -280,7 +277,7 @@ def convdx(grad_output,w,dx,stride,groups):
   """)
   convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C])
 
-def processing_op(op,a,b,ret,stride,groups):
-  if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
-  elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
-  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
+def processing_op(op,a,b,ret,C):
+  if op == ProcessingOps.CONV: conv(a,b,ret,C)
+  elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)
+  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,C)

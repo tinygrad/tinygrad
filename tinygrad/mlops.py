@@ -151,10 +151,11 @@ class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1):
     C = get_conv_args(x.shape, w.shape, stride, groups)
     ctx.save_for_backward(x,w,(C.ys,C.xs), C.groups)
-    return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.groups*C.rcout, C.oy, C.ox), (C.ys,C.xs), C.groups)
+    return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.groups*C.rcout, C.oy, C.ox), C)
 
   def backward(ctx, grad_output):
     x, w, stride, groups = ctx.saved_tensors
-    dx = ctx.processing_op(ProcessingOps.CONVT, grad_output, w, x.shape, stride, groups) if ctx.needs_input_grad[0] else None
-    dw = ctx.processing_op(ProcessingOps.CONVDW, x, grad_output, w.shape, stride, groups) if ctx.needs_input_grad[1] else None
+    C = get_conv_args(x.shape, w.shape, stride, groups)
+    dx = ctx.processing_op(ProcessingOps.CONVT, grad_output, w, x.shape, C) if ctx.needs_input_grad[0] else None
+    dw = ctx.processing_op(ProcessingOps.CONVDW, x, grad_output, w.shape, C) if ctx.needs_input_grad[1] else None
     return dx, dw

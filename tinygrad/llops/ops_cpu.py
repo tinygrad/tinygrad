@@ -65,8 +65,7 @@ def get_tx(x, C):
     writeable=False,
   )
 
-def conv(x,w,ret,stride,groups):
-  C = get_conv_args(x.shape, w.shape, stride, groups)
+def conv(x,w,ret,C):
   tx = get_tx(x, C)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
   tmp = np.zeros((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
@@ -75,8 +74,7 @@ def conv(x,w,ret,stride,groups):
     tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
   ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
-def convdw(x,grad_output,dw,stride,groups):
-  C = get_conv_args(x.shape, dw.shape, stride, groups)
+def convdw(x,grad_output,dw,C):
   tx = get_tx(x, C)
   ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
   gdw = dw.reshape((C.groups, C.rcout, C.cin, C.H, C.W))
@@ -85,8 +83,7 @@ def convdw(x,grad_output,dw,stride,groups):
     #'ikYX,ijYXyx -> kjyx'
     gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
 
-def convdx(grad_output,w,dx,stride,groups):
-  C = get_conv_args(dx.shape, w.shape, stride, groups)
+def convdx(grad_output,w,dx,C):
   ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
   gdx = dx.reshape((C.bs, C.groups, C.cin, C.iy, C.ix))
@@ -99,7 +96,7 @@ def convdx(grad_output,w,dx,stride,groups):
       tg = np.dot(ggg[:,g,:,Y,X].reshape(C.bs, -1), tw[g].reshape(C.rcout, -1))
       gdx[:, g, :, iY:iY+C.H, iX:iX+C.W] += tg.reshape((C.bs, C.cin, C.H, C.W))
 
-def processing_op(op,a,b,ret,stride,groups):
-  if op == ProcessingOps.CONV: conv(a,b,ret,stride,groups)
-  elif op == ProcessingOps.CONVT: convdx(a,b,ret,stride,groups)
-  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,stride,groups)
+def processing_op(op,a,b,ret,C):
+  if op == ProcessingOps.CONV: conv(a,b,ret,C)
+  elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)
+  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,C)
