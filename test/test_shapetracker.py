@@ -3,33 +3,67 @@ import unittest
 import numpy as np
 from tinygrad.shapetracker import ShapeTracker
 
+def flatten(obj):
+  x = []
+  if len(obj.shape) == 3:
+    for i in range(obj.shape[0]):
+      for j in range(obj.shape[1]):
+        for k in range(obj.shape[2]):
+          x.append(obj[i, j, k])
+  else:
+    for i in range(obj.shape[0]):
+      for j in range(obj.shape[1]):
+        x.append(obj[i, j])
+  return x
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.buf = np.arange(10*20).reshape(10, 20)
-    self.st = ShapeTracker(10,20)
+    self.buf = np.arange(2*4).reshape(2, 4)
+    self.st = ShapeTracker(2,4)
 
   def tearDown(self):
-    assert self.st.shape == self.buf.shape
-    assert self.st[4, 5] == self.buf[4, 5]
-    assert self.st[8, 3] == self.buf[8, 3]
+    x,y = flatten(self.buf), flatten(self.st)
+    print(x,y)
+    assert self.buf.shape == self.st.shape
+    assert x == y
 
   def test_noop(self):
     pass
 
   def test_reshape(self):
-    self.buf = self.buf.reshape(20, 10)
-    self.st.reshape(20,10)
+    assert self.buf.shape == self.st.shape
+    new_shape = self.buf.shape[::-1]
+    self.buf = self.buf.reshape(*new_shape)
+    self.st.reshape(*new_shape)
 
   def test_permute(self):
     self.buf = self.buf.transpose(1,0)
     self.st.permute(1,0)
 
+  def test_expand(self):
+    assert self.buf.shape == self.st.shape
+    new_shape = [self.buf.shape[0], 1, self.buf.shape[1]]
+    self.buf = self.buf.reshape(*new_shape)
+    self.st.reshape(*new_shape)
+
+    new_shape[1] = 2
+    self.buf = np.broadcast_to(self.buf, new_shape)
+    self.st.expand(*new_shape)
+
   def test_reshape_then_permute(self):
     self.test_reshape()
     self.test_permute()
 
+  def test_reshape_then_expand(self):
+    self.test_reshape()
+    self.test_expand()
+
   def test_permute_then_reshape(self):
     self.test_permute()
+    self.test_reshape()
+
+  def test_expand_then_reshape(self):
+    self.test_expand()
     self.test_reshape()
 
 if __name__ == '__main__':
