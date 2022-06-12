@@ -5,15 +5,19 @@ from tinygrad.shapetracker import ShapeTracker
 
 def flatten(obj):
   x = []
+  # lazy
   if len(obj.shape) == 3:
     for i in range(obj.shape[0]):
       for j in range(obj.shape[1]):
         for k in range(obj.shape[2]):
           x.append(obj[i, j, k])
-  else:
+  elif len(obj.shape) == 2:
     for i in range(obj.shape[0]):
       for j in range(obj.shape[1]):
         x.append(obj[i, j])
+  else:
+    for i in range(obj.shape[0]):
+      x.append(obj[i])
   return x
 
 class TestShapeTracker(unittest.TestCase):
@@ -22,13 +26,19 @@ class TestShapeTracker(unittest.TestCase):
     self.st = ShapeTracker(2,4)
 
   def tearDown(self):
-    x,y = flatten(self.buf), flatten(self.st)
+    x = flatten(self.buf)
+    y = flatten(self.st)
     print(x,y)
     assert self.buf.shape == self.st.shape
     assert x == y
 
   def test_noop(self):
     pass
+
+  def test_simple_split(self):
+    self.test_permute()
+    self.buf = self.buf.reshape(8)
+    self.st.reshape(8)
 
   def test_reshape(self):
     assert self.buf.shape == self.st.shape

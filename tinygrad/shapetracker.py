@@ -23,6 +23,7 @@ class ShapeTracker:
 
     self._shape = tuple(new_shape)
     # restride (this is wrong if permuted)
+    # the way to fix this is to create "virtual" dimensions
     self.strides = [1]
     for d in self.shape[::-1][:-1]:
       self.strides = [d*self.strides[0]] + self.strides
@@ -48,6 +49,7 @@ class ShapeTracker:
 
   # this returns the index
   def __getitem__(self, val):
+    if isinstance(val, int): val = [val]
     ret = 0
     for i,v in enumerate(val):
       assert isinstance(v, int)
