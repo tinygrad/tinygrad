@@ -97,6 +97,7 @@ def convdx(grad_output,w,dx,C):
       gdx[:, g, :, iY:iY+C.H, iX:iX+C.W] += tg.reshape((C.bs, C.cin, C.H, C.W))
 
 def processing_op(op,a,b,ret,C):
+  assert C.py == 0 and C.px == 0
   if op == ProcessingOps.CONV: conv(a,b,ret,C)
   elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)
   elif op == ProcessingOps.CONVDW: convdw(a,b,ret,C)

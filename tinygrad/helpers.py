@@ -27,18 +27,19 @@ def binary_broadcast(x_shape, y_shape, extra=False):
 
   return (shape_ret, dimlist, complist) if extra else shape_ret
 
-def get_conv_args(x_shape, w_shape, stride, groups):
+def get_conv_args(x_shape, w_shape, stride=0, groups=1, padding=0):
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   conv_args = namedtuple('conv_args',
-    ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout'])
+    ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout', 'py', 'px'])
   cout,cin,H,W = w_shape
   ys,xs = (stride, stride) if isinstance(stride, int) else stride
+  py,px = (padding, padding) if isinstance(padding, int) else padding
   bs,cin_,iy,ix = x_shape
-  oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
+  oy,ox = (iy+py*2-(H-ys))//ys, (ix+px*2-(W-xs))//xs
   if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0
   rcout = cout//groups
-  return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs, cout)
+  return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs, cout, py, px)
 
 # Buffers should extend this
 class ShapeTracker:

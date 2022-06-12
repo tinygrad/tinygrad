@@ -278,6 +278,7 @@ def convdx(grad_output,w,dx,C):
   convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C[0:12]])
 
 def processing_op(op,a,b,ret,C):
+  assert C.py == 0 and C.px == 0
   if op == ProcessingOps.CONV: conv(a,b,ret,C)
   elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)
   elif op == ProcessingOps.CONVDW: convdw(a,b,ret,C)

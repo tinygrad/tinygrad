@@ -39,14 +39,14 @@ def convdw(x,grad_output,dw,C):
 def processing_op(op,x,w,ret,C):
   stride, groups = (C.ys, C.xs), C.groups
   if op == ProcessingOps.CONV:
-    ret[:] = torch.conv2d(x, w, stride=stride, groups=groups)
+    ret[:] = torch.conv2d(x, w, stride=stride, groups=groups, padding=(C.py, C.px))
   elif op == ProcessingOps.CONVT:
     if stride == 1 or stride == (1,1):
       # strided needs weird padding: https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
       w = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W).flip(3, 4).transpose(2, 1).reshape(C.groups*C.cin, C.rcout, C.H, C.W)
-      ret[:] = torch.conv2d(x, w, padding=(C.H-1,C.W-1), groups=groups)
+      ret[:] = torch.conv2d(x, w, padding=(C.H-1+C.py,C.W-1+C.px), groups=groups)
     else:
       output_padding = [ret.shape[d+2] - ((x.shape[d+2] - 1) * stride[d] + 1 + (w.shape[d+2] - 1)) for d in range(2)]
-      ret[:] = torch.conv_transpose2d(x, w, stride=stride, groups=groups, output_padding=output_padding)
+      ret[:] = torch.conv_transpose2d(x, w, stride=stride, groups=groups, padding=(C.py, C.px), output_padding=output_padding)
   elif op == ProcessingOps.CONVDW:
     convdw(x,w,ret,C)
