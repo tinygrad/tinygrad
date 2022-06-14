@@ -59,6 +59,15 @@ class StackedViewShapeTracker:
     print(self.shape, new_shape, strides)
     self.views.append(View(new_shape, strides))
 
+  def flip(self, *axis):
+    assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
+    strides = strides_for_shape(self.shape)
+    offset = 0
+    for a in axis:
+      offset += (self.shape[a]-1) * strides[a]
+      strides[a] *= -1
+    self.views.append(View(self.shape, strides, offset))
+
 class DumbShapeTracker:
   def __init__(self, *shape):
     self.t = np.arange(prod(shape), dtype=np.uint8).reshape(shape)
@@ -99,6 +108,7 @@ class TestShapeTracker(unittest.TestCase):
     #self.st = ShapeTracker(2,4)
     self.st = StackedViewShapeTracker(2,4)
     self.dt = DumbShapeTracker(2,4)
+    self.apply = lambda fxn: [fxn(x) for x in [self.st, self.dt]]
 
   def tearDown(self):
     x = [self.st[i] for i in range(prod(self.st.shape))]
@@ -112,20 +122,18 @@ class TestShapeTracker(unittest.TestCase):
 
   def test_simple_split(self):
     self.test_permute()
-    fxn = lambda x: x.reshape(8)
-    [fxn(x) for x in [self.st, self.dt]]
+    self.apply(lambda x: x.reshape(8))
 
   def test_reshape(self):
     assert self.st.shape == self.dt.shape
     new_shape = self.st.shape[::-1]
-    fxn = lambda x: x.reshape(*new_shape)
-    [fxn(x) for x in [self.st, self.dt]]
+    self.apply(lambda x: x.reshape(*new_shape))
 
   def test_permute(self):
-    fxn = lambda x: x.permute(1,0)
-    [fxn(x) for x in [self.st, self.dt]]
+    self.apply(lambda x: x.permute(1,0))
 
   # should this work?
+  # NOTE: you can write this as a reshape and expand
   """
   def test_simple_expand(self):
     new_shape = [self.st.shape[0]*2, self.st.shape[1]]
@@ -136,15 +144,22 @@ class TestShapeTracker(unittest.TestCase):
   def test_reshape_with_1(self):
     assert self.st.shape == self.dt.shape
     new_shape = [self.st.shape[0], 1, self.st.shape[1]]
-    fxn = lambda x: x.reshape(*new_shape)
-    [fxn(x) for x in [self.st, self.dt]]
+    self.apply(lambda x: x.reshape(*new_shape))
 
   def test_expand(self):
     self.test_reshape_with_1()
     new_shape = list(self.st.shape)
     new_shape[1] = 2
-    fxn = lambda x: x.expand(*new_shape)
-    [fxn(x) for x in [self.st, self.dt]]
+    self.apply(lambda x: x.expand(*new_shape))
+
+  def test_flip_0(self):
+    self.apply(lambda x: x.flip(0))
+
+  def test_flip_1(self):
+    self.apply(lambda x: x.flip(1))
+
+  def test_flip_01(self):
+    self.apply(lambda x: x.flip(0,1))
 
   def test_reshape_then_permute(self):
     self.test_reshape()
