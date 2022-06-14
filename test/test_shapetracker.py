@@ -42,7 +42,7 @@ class TestShapeTracker(unittest.TestCase):
   def tearDown(self):
     x = [self.st[i] for i in range(prod(self.st.shape))]
     y = [self.dt[i] for i in range(prod(self.dt.shape))]
-    print(x,y, self.st.shape, self.dt.shape)
+    print(x,y, self.st.shape, self.dt.shape, self.st.expr())
     assert self.st.shape == self.dt.shape
     assert x == y
 
@@ -59,7 +59,9 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.reshape(*new_shape))
 
   def test_permute(self):
-    self.apply(lambda x: x.permute(1,0))
+    assert self.st.shape == self.dt.shape
+    if len(self.st.shape) == 2: self.apply(lambda x: x.permute(1,0))
+    elif len(self.st.shape) == 3: self.apply(lambda x: x.permute(2,0,1))
 
   def test_reshape_with_1(self):
     assert self.st.shape == self.dt.shape
@@ -108,6 +110,13 @@ class TestShapeTracker(unittest.TestCase):
   def test_expand_then_reshape(self):
     self.test_expand()
     self.test_reshape()
+
+  def test_combo(self):
+    self.test_permute()
+    self.test_reshape()
+    self.test_slice_1()
+    self.test_expand()
+    self.test_permute()
 
 if __name__ == '__main__':
   unittest.main()

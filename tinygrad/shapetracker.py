@@ -1,9 +1,8 @@
-# ShapeTracker allows many operations to a buffer that don't
-# require a copy to be made. When initted, you assume the underlying
-# buffer is contiguous in the shape. Then movement operations modify the
-# buffer. ReduceOps and ProcessingOps "realize" the buffer.
+# ShapeTracker allows many operations to a buffer that don't require a copy to be made.
+# When initted, you assume the underlying buffer is contiguous in the shape.
 
 from tinygrad.helpers import prod
+from functools import cached_property
 
 def strides_for_shape(shape):
   strides = [1]
@@ -13,16 +12,34 @@ def strides_for_shape(shape):
 
 class View:
   def __init__(self, shape, strides, offset=0):
-    self.shape = shape
-    self.strides = strides
-    self.offset = offset
+    assert len(shape) == len(strides)
+    self.shape, self.strides, self.offset = shape, [], offset
+
+    self.realshape = [shape[0]]
+    self.strides = [strides[0]]
+    for i in range(1, len(shape)):
+      if strides[i] != 0 and self.strides[-1]//strides[i] == shape[i]:
+        self.realshape[-1] *= shape[i]
+        self.strides[-1] = strides[i]
+      else:
+        self.realshape.append(shape[i])
+        self.strides.append(strides[i])
+
+  @cached_property
+  def expr(self):
+    ret = [f"{self.offset}"] if self.offset != 0 else []
+    acc = 1
+    for i,(d,s) in enumerate(zip(self.realshape[::-1], self.strides[::-1])):
+      if d != 1 and s != 0:
+        lr = f"(idx//{acc})" if acc != 1 else "idx"
+        lr = f"({lr}%{d})" if i != len(self.realshape)-1 else lr  # don't mod the top shape dimension
+        lr = f"({lr}*{s})" if s != 1 else lr
+        ret.append(lr)
+      acc *= d
+    return '+'.join(ret) if len(ret) > 0 else "0"
   
-  def __getitem__(self, val):
-    ret = self.offset
-    for d,s in zip(self.shape[::-1], self.strides[::-1]):
-      ret += (val%d) * s
-      val //= d
-    return ret
+  def __getitem__(self, idx):
+    return eval(self.expr())
 
 class ShapeTracker:
   def __init__(self, *shape):
@@ -30,9 +47,12 @@ class ShapeTracker:
     self.views.append(View(shape, strides_for_shape(shape)))
 
   def __getitem__(self, val):
-    for v in self.views[::-1]:
-      val = v[val]
-    return val
+    locals = {"idx": val}
+    exec(self.expr(), None, locals)
+    return locals["idx"]
+
+  def expr(self):
+    return ';'.join([f"idx={v.expr}" for v in self.views[::-1] if v.expr != 'idx'])
 
   @property
   def shape(self):
@@ -69,8 +89,7 @@ class ShapeTracker:
       strides[a] *= -1
     self.views.append(View(self.shape, strides, offset))
 
-  def slice(self, arg):
-    # NOTE: this slice can only shrink
+  def slice(self, arg):  # NOTE: this slice can only shrink
     assert len(arg) == len(self.shape)
     assert all([x>=0 and y<=self.shape[i] for i,(x,y) in enumerate(arg)])
 
