@@ -24,7 +24,7 @@ class DumbShapeTracker:
   def flip(self, *axis):
     self.t = np.flip(self.t, axis)
 
-  def slice(self, arg):
+  def slice(self, *arg):
     self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
 
   def __getitem__(self, val):
@@ -84,16 +84,16 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.flip(0,1))
 
   def test_slice_0(self):
-    self.apply(lambda x: x.slice(((1, x.shape[0]), (0, x.shape[1]))))
+    self.apply(lambda x: x.slice((1, x.shape[0]), (0, x.shape[1])))
 
   def test_slice_1(self):
-    self.apply(lambda x: x.slice(((0, x.shape[0]), (1, x.shape[1]))))
+    self.apply(lambda x: x.slice((0, x.shape[0]), (1, x.shape[1])))
 
   def test_slice_1c1(self):
-    self.apply(lambda x: x.slice(((0, 1), (0, 1))))
+    self.apply(lambda x: x.slice((0, 1), (0, 1)))
 
   def test_slice_1c2(self):
-    self.apply(lambda x: x.slice(((1, 2), (1, 2))))
+    self.apply(lambda x: x.slice((1, 2), (1, 2)))
 
   def test_reshape_then_permute(self):
     self.test_reshape()

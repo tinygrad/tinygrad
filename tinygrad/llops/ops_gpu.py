@@ -161,14 +161,10 @@ def contiguous(x, ret, st):
   }""")([prod(ret.shape)], None, x.cl, ret.cl)
 
 def movement_op(op, x, ret, arg=None):
-  st = ShapeTracker(*x.shape)
-  if op == MovementOps.RESHAPE: st.reshape(*arg)
-  elif op == MovementOps.PERMUTE: st.permute(*arg)
-  elif op == MovementOps.SLICE:
-    inner_slice(x, arg, ret)   # TODO: this can't use ShapeTracker since it can expand
+  if op == MovementOps.SLICE:
+    inner_slice(x, arg, ret)   # TODO: this can't use ShapeTracker since it can't expand
     return
-  elif op == MovementOps.EXPAND: st.expand(*arg)
-  contiguous(x, ret, st)
+  contiguous(x, ret, ShapeTracker(*x.shape).movement_op(op, arg))
 
 def conv(x,w,ret,C):
   # input  = (bs, groups, cin, iy, ix)

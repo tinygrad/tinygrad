@@ -6,6 +6,8 @@ ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
 ProcessingOps = Enum("ProcessingOps", ["CONV", "CONVT", "CONVDW"])
 
+from tinygrad.shapetracker import ShapeTracker
+
 import os
 DEBUG = int(os.getenv("PRINT_LLOPS", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
@@ -66,10 +68,7 @@ class Ops:
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg=None):
-    if op in [MovementOps.RESHAPE, MovementOps.EXPAND]: new_shape = arg
-    if op == MovementOps.PERMUTE: new_shape = [x.shape[i] for i in arg]
-    if op == MovementOps.SLICE: new_shape = [y-x for x,y in arg]
-    ret = ctx.buffer(new_shape)
+    ret = ctx.buffer(ShapeTracker(*x.shape).movement_op(op, arg).shape)
     ctx.op.movement_op(op, x, ret, arg)
     log_op(op, ret, [x])
     return ret

@@ -1,6 +1,4 @@
-# ShapeTracker allows many operations to a buffer that don't require a copy to be made.
-# When initted, you assume the underlying buffer is contiguous in the shape.
-
+# ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from tinygrad.helpers import prod
 from functools import cached_property
 
@@ -35,15 +33,18 @@ def strides_for_shape(shape):
     strides = [d*strides[0]] + strides
   return strides
 
+# TODO: support "contiguous" property and "simple_strided" property and make them work
+# TODO: support simplification across views
 class ShapeTracker:
-  def __init__(self, *shape):
+  def __init__(self, *shape, strides=None):
     if len(shape) == 0: shape = (1,)
-    self.views = [View(shape, strides_for_shape(shape))]
+    self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
 
   @property
   def shape(self): return tuple(self.views[-1].shape)
 
   def expr(self): return ';'.join([f"idx={v.expr}" for v in self.views[::-1] if v.expr != 'idx'])
+  def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
 
   def __getitem__(self, val):
     locals = {"idx": val}
@@ -61,7 +62,7 @@ class ShapeTracker:
     strides = strides_for_shape(self.shape)
     self.views.append(View([self.shape[a] for a in axis], [strides[a] for a in axis]))
 
-  def slice(self, arg):  # NOTE: this slice can only shrink
+  def slice(self, *arg):  # NOTE: this slice can only shrink
     assert len(arg) == len(self.shape)
     assert all([x>=0 and y<=self.shape[i] for i,(x,y) in enumerate(arg)])
     strides = strides_for_shape(self.shape)
