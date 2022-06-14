@@ -28,13 +28,36 @@ class StackedViewShapeTracker:
     self.views = []
     self.views.append(View(shape, strides_for_shape(shape)))
 
+  def __getitem__(self, val):
+    for v in self.views[::-1]:
+      val = v[val]
+    return val
+
   @property
   def shape(self):
-    return self.views[-1].shape
+    return tuple(self.views[-1].shape)
 
   def reshape(self, *new_shape):
     self.views.append(View(new_shape, strides_for_shape(new_shape)))
 
+  def permute(self, *axis):
+    assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
+    assert len(set(axis)) == len(axis)
+    shape = [self.shape[a] for a in axis]
+    strides = strides_for_shape(self.shape)
+    strides = [strides[a] for a in axis]
+    self.views.append(View(shape, strides))
+
+  def expand(self, *new_shape):
+    assert all([isinstance(x, int) for x in new_shape])
+    strides = strides_for_shape(self.shape)
+    for i,(x,y) in enumerate(zip(self.shape, new_shape)):
+      if x != y:
+        assert x == 1
+        #assert y%x == 0
+        strides[i] = 0
+    print(self.shape, new_shape, strides)
+    self.views.append(View(new_shape, strides))
 
 class DumbShapeTracker:
   def __init__(self, *shape):
@@ -71,18 +94,16 @@ class DumbShapeTracker:
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
 
-
-
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = ShapeTracker(2,4)
+    #self.st = ShapeTracker(2,4)
+    self.st = StackedViewShapeTracker(2,4)
     self.dt = DumbShapeTracker(2,4)
-
 
   def tearDown(self):
     x = [self.st[i] for i in range(prod(self.st.shape))]
     y = [self.dt[i] for i in range(prod(self.dt.shape))]
-    print(x,y)
+    print(x,y, self.st.shape, self.dt.shape)
     assert self.st.shape == self.dt.shape
     assert x == y
 
@@ -104,12 +125,23 @@ class TestShapeTracker(unittest.TestCase):
     fxn = lambda x: x.permute(1,0)
     [fxn(x) for x in [self.st, self.dt]]
 
-  def test_expand(self):
+  # should this work?
+  """
+  def test_simple_expand(self):
+    new_shape = [self.st.shape[0]*2, self.st.shape[1]]
+    fxn = lambda x: x.expand(*new_shape)
+    [fxn(x) for x in [self.st, self.dt]]
+  """
+
+  def test_reshape_with_1(self):
     assert self.st.shape == self.dt.shape
     new_shape = [self.st.shape[0], 1, self.st.shape[1]]
     fxn = lambda x: x.reshape(*new_shape)
     [fxn(x) for x in [self.st, self.dt]]
 
+  def test_expand(self):
+    self.test_reshape_with_1()
+    new_shape = list(self.st.shape)
     new_shape[1] = 2
     fxn = lambda x: x.expand(*new_shape)
     [fxn(x) for x in [self.st, self.dt]]
