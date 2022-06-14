@@ -39,6 +39,8 @@ class ShapeTracker:
     pass
 
   def flip(self, *axis):
+    assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
+
     # list of axis to flip
     pass
 
@@ -53,10 +55,8 @@ class ShapeTracker:
 
   # this returns the index
   def __getitem__(self, val):
-    if isinstance(val, int): val = [val]
     ret = 0
-    for i,v in enumerate(val):
-      assert isinstance(v, int)
-      assert v>=0 and v < self.shape[i]
-      ret += self.strides[i]*v
+    for d,s in zip(self.shape[::-1], self.strides[::-1]):
+      ret += (val%d) * s
+      val //= d
     return ret
