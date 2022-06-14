@@ -63,9 +63,9 @@ class ShapeTracker:
   def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
 
   def __getitem__(self, val):
-    locals = {"idx": val}
+    locals = {"idx": val, "valid": 1}
     exec(self.expr(), None, locals)
-    return locals["idx"]
+    return locals["idx"] if locals["valid"] else -1
 
   def reshape(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])

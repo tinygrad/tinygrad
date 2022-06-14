@@ -32,13 +32,7 @@ def log_op(op, ret, inp):
       return f"<<< {x.global_num} >>>"
 
     top,sop = str(op).split(".")
-    top_colors = {
-      "UnaryOps": "#c0c0c0",
-      "ReduceOps": "#8080ff",
-      "BinaryOps": "#c0c0c0",
-      "MovementOps": "#80ff80",
-      "ProcessingOps": "#ff8080"
-    }
+    top_colors = {"UnaryOps": "#c0c0c0", "ReduceOps": "#8080ff", "BinaryOps": "#c0c0c0", "MovementOps": "#80ff80", "ProcessingOps": "#ff8080"}
 
     for x in inp:
       G.add_edge(nm(x), nm(ret), label=sop)

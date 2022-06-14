@@ -87,12 +87,8 @@ def binary_op(op, x, y, ret):
   return ret
 
 def reduce_op(op, inp, ret):
-  if op == ReduceOps.SUM:
-    code = "out += a"
-    start = "0.0"
-  elif op == ReduceOps.MAX:
-    code = "out = max(a,out)"
-    start = "-INFINITY"
+  if op == ReduceOps.SUM: code, start = "out += a", "0.0"
+  elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
   else: raise Exception(f"{op} isn't supported")
   # TODO: this is insanely slow
   # NOTE: ret.shape can be (1,), it's mostly by luck that this works

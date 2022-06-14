@@ -16,5 +16,4 @@ def get_conv_args(x_shape, w_shape, stride, groups):
   oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
   if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0
-  rcout = cout//groups
-  return conv_args(H, W, groups, rcout, cin, oy, ox, iy, ix, ys, xs, bs, cout)
+  return conv_args(H, W, groups, cout//groups, cin, oy, ox, iy, ix, ys, xs, bs, cout)
