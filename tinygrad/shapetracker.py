@@ -38,6 +38,10 @@ class ShapeTracker:
   def slice(self, arg):
     pass
 
+  def flip(self, *axis):
+    # list of axis to flip
+    pass
+
   def expand(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
     for i,(x,y) in enumerate(zip(self.shape, new_shape)):

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
 
 def flatten(obj):
@@ -20,10 +21,38 @@ def flatten(obj):
       x.append(obj[i])
   return x
 
+class DumbShapeTracker:
+  def __init__(self, *shape):
+    self.t = np.arange(prod(shape)).reshape(shape)
+
+  @property
+  def shape(self):
+    return self.t.shape
+
+  def reshape(self, *new_shape):
+    self.t = self.t.reshape(new_shape)
+
+  def permute(self, *axis):
+    self.t = np.transpose(self.t, axis)
+
+  def expand(self, *new_shape):
+    self.t = np.broadcast_to(self.t, new_shape)
+
+  def flip(self, *axis):
+    self.t = np.flip(self.t, axis)
+
+  def slice(self, arg):
+    # TODO: negative means pad with 0s, not negative indexing like in numpy
+    # Use -1 to represent index of 0
+    pass
+
+  def __getitem__(self, val):
+    return self.t[val]
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.buf = np.arange(2*4).reshape(2, 4)
-    self.st = ShapeTracker(2,4)
+    self.st = DumbShapeTracker(2,4)
 
   def tearDown(self):
     x = flatten(self.buf)
