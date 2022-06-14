@@ -2,6 +2,10 @@
 from tinygrad.helpers import prod
 from functools import cached_property
 
+def divmodidx(acc, d, mod=True):
+  lr = f"(idx//{acc})" if acc != 1 else "idx"
+  return f"({lr}%{d})" if mod else lr  # don't mod the top shape dimension
+
 class View:
   def __init__(self, shape, strides, offset=0):
     assert len(shape) == len(strides)
@@ -20,12 +24,24 @@ class View:
     acc = 1
     for i,(d,s) in enumerate(self.shape_strides[::-1]):
       if d != 1 and s != 0:
-        lr = f"(idx//{acc})" if acc != 1 else "idx"
-        lr = f"({lr}%{d})" if i != len(self.shape_strides)-1 else lr  # don't mod the top shape dimension
+        lr = divmodidx(acc, d, i != len(self.shape_strides)-1)
         lr = f"({lr}*{s})" if s != 1 else lr
         ret.append(lr)
       acc *= d
-    return '+'.join(ret) if len(ret) > 0 else "0"
+    return 'idx=' + ('+'.join(ret) if len(ret) > 0 else "0")
+
+class ZeroView:
+  def __init__(self, old_shape, arg):
+    expr = ['valid']
+    self.shape = []
+    acc = 1
+    for s,(x,y) in list(zip(old_shape, arg))[::-1]:
+      self.shape = [y-x] + self.shape
+      base = divmodidx(acc, self.shape[0], len(self.shape) != len(old_shape)) + f"+{x}"
+      if x < 0: expr.append(f"(({base}) >= 0)")
+      if y > s: expr.append(f"(({base}) < {s})")
+      acc *= self.shape[0]
+    self.expr = 'valid=' + ' && '.join(expr)
 
 def strides_for_shape(shape):
   strides = [1]
@@ -43,7 +59,7 @@ class ShapeTracker:
   @property
   def shape(self): return tuple(self.views[-1].shape)
 
-  def expr(self): return ';'.join([f"idx={v.expr}" for v in self.views[::-1] if v.expr != 'idx'])
+  def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
   def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
 
   def __getitem__(self, val):
@@ -68,7 +84,7 @@ class ShapeTracker:
     #assert all([x>=0 and y<=self.shape[i] for i,(x,y) in enumerate(arg)])
     strides = strides_for_shape(self.shape)
     offset = sum([strides[i]*x for i,(x,_) in enumerate(arg)])
-    self.views.append(View([y-x for x,y in arg], strides, offset))
+    self.views += [View([y-x for x,y in arg], strides, offset), ZeroView(self.shape, arg)]
 
   def expand(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
