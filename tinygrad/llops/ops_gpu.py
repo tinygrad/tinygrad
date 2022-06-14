@@ -3,6 +3,7 @@ import numpy as np
 import pyopencl as cl
 from tinygrad.helpers import prod
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.shapetracker import ShapeTracker
 
 cl_ctx, cl_queue = None, None
 def get_cl_ctx(): return cl_ctx
@@ -86,12 +87,8 @@ def binary_op(op, x, y, ret):
   return ret
 
 def reduce_op(op, inp, ret):
-  if op == ReduceOps.SUM:
-    code = "out += a"
-    start = "0.0"
-  elif op == ReduceOps.MAX:
-    code = "out = max(a,out)"
-    start = "-INFINITY"
+  if op == ReduceOps.SUM: code, start = "out += a", "0.0"
+  elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
   else: raise Exception(f"{op} isn't supported")
   # TODO: this is insanely slow
   # NOTE: ret.shape can be (1,), it's mostly by luck that this works
@@ -126,85 +123,14 @@ def reduce_op(op, inp, ret):
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)))
 
-def reshape(x, ret):
-  cl.enqueue_copy(cl_queue, ret.cl, x.cl)
-
-def perm_axis(inp, order, ret):
-  perm = clbuild("perm", """
-  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
-                       __global const int *shape, __global const int *order) {
-    int gid = get_global_id(0);
-    int gi = gid;
-    int idx = 0;
-    for(int i = n_axis-1; i>-1; i--) {
-      int stride = 1;
-      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
-      idx += (gi % shape[order[i]])*stride;
-      gi /= shape[order[i]];
-    }
-    res_g[gid] = a_g[idx];
-  }""")
-  perm([prod(inp.shape)], None, inp.cl, ret.cl, i32(len(inp.shape)),
-    buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(order, dtype=np.int32)))
-
-# TODO: merge this with perm axis
-def inner_slice(x, arg, ret):
-  shift = [y[0] for y in arg]
-  gslice = clbuild("gslice", """
-  __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
-                       __global const int *shape_x, __global const int *shape_ret,
-                       __global const int *shift) {
-    int gid = get_global_id(0);
-    int iptr = 0;
-    int zero = 1;
-    for (int dim = 0; dim < n_dims; dim++) {
-      prod /= shape_ret[dim];
-      int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
-      zero &= (sidx >= 0 && sidx < shape_x[dim]);
-      iptr = (iptr * shape_x[dim]) + sidx;
-    }
-    output[gid] = zero ? input[iptr] : 0.0;
-  }""")
-  gslice([prod(ret.shape)], None,
-    x.cl, ret.cl, i32(prod(ret.shape)), i32(len(ret.shape)),
-    buffer_np(np.array(x.shape, dtype=np.int32)),
-    buffer_np(np.array(ret.shape, dtype=np.int32)),
-    buffer_np(np.array(shift, dtype=np.int32)))
-
-def expand(x, ret):
-  assert len(x.shape) == len(ret.shape)
-
-  dimlist, complist = [], [] # note: len(dimlist) may be less than n_dims
-  def push(dim, comp):
-    if len(complist) > 0 and complist[-1] == comp:
-      dimlist[-1] *= dim
-    elif comp != (False, False):
-      dimlist.append(dim); complist.append(comp)
-  for i,j in zip(x.shape, ret.shape): # group together any adjacent dimensions that we can to simplify broadcasting
-    push(np.int32(max(i,j)), (i > 1, j > 1))
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-
-  ndims = len(complist)
-  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
-  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
-
-  idx_exprs = ["0", "0"] # [idx_x, idx_y]
-  for i in range(ndims):
-    for j in range(2):
-      if complist[i][j]:
-        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
-
-  expandop = clbuild("expandop", """__kernel void expandop(__global const float *x_g, __global float *res_g"""+args+""") {
-    int gid0 = get_global_id(0);"""+compute_idx_rets+"""
-    res_g[gid0] = x_g["""+idx_exprs[0]+"""];\n}""")
-  expandop([prod_list[0] if len(dimlist) > 0 else 1], None, x.cl, ret.cl, *dimlist, *(prod_list[1:]))
+def contiguous(x, ret, st):
+  clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
+    int gid = get_global_id(0); int valid = 1; int idx = gid; """+st.expr().replace('//', '/')+""";
+    ret[gid] = valid ? x[idx] : 0.0;  // should never be out-of-bounds accesses
+  }""")([prod(ret.shape)], None, x.cl, ret.cl)
 
 def movement_op(op, x, ret, arg=None):
-  if op == MovementOps.RESHAPE: reshape(x, ret)
-  elif op == MovementOps.PERMUTE: perm_axis(x, arg, ret)
-  elif op == MovementOps.SLICE: inner_slice(x, arg, ret)
-  elif op == MovementOps.EXPAND: expand(x, ret)
+  contiguous(x, ret, ShapeTracker(*x.shape).movement_op(op, arg))
 
 def conv(x,w,ret,C):
   # input  = (bs, groups, cin, iy, ix)

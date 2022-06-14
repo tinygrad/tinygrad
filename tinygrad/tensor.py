@@ -301,23 +301,23 @@ class Tensor:
   def leakyrelu(self, neg_slope=0.01):
     return self.relu() - (-neg_slope*self).relu()
 
+  def _softmax(self):
+    m = self - self.max(axis=len(self.shape)-1, keepdim=True)
+    e = m.exp()
+    return m, e, e.sum(axis=len(self.shape)-1, keepdim=True)
+
   def softmax(self):
-    m = self.max(axis=len(self.shape)-1, keepdim=True)
-    e = (self - m).exp()
-    ss = e.sum(axis=len(self.shape)-1, keepdim=True)
+    _, e, ss = self._softmax()
     return e.div(ss)
 
   def logsoftmax(self):
-    m = self.max(axis=len(self.shape)-1, keepdim=True)
-    ss = m + (self-m).exp().sum(axis=len(self.shape)-1, keepdim=True).log()
-    return self - ss
+    m, _, ss = self._softmax()
+    return m - ss.log()
 
   def dropout(self, p=0.5):
-    if Tensor.training:
-      _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-      return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
-    else:
-      return self
+    if not Tensor.training: return self
+    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
   def softplus(self, limit=20, beta=1):
     # safe softplus - 1/beta*log(1 + exp(beta*x)) (PyTorch)
