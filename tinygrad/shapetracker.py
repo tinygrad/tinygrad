@@ -43,6 +43,7 @@ class View:
 
 class ShapeTracker:
   def __init__(self, *shape):
+    if len(shape) == 0: shape = (1,)
     self.views = [View(shape, strides_for_shape(shape))]
 
   def __getitem__(self, val):
