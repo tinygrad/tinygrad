@@ -62,9 +62,10 @@ class ShapeTracker:
     strides = strides_for_shape(self.shape)
     self.views.append(View([self.shape[a] for a in axis], [strides[a] for a in axis]))
 
-  def slice(self, *arg):  # NOTE: this slice can only shrink
+  def slice(self, *arg):  # NOTE: this slice cannot pad the edges
     assert len(arg) == len(self.shape)
-    assert all([x>=0 and y<=self.shape[i] for i,(x,y) in enumerate(arg)])
+    # if you pass in an expansion, it will be correct for the shrink, but return junk in the expanded region
+    #assert all([x>=0 and y<=self.shape[i] for i,(x,y) in enumerate(arg)])
     strides = strides_for_shape(self.shape)
     offset = sum([strides[i]*x for i,(x,_) in enumerate(arg)])
     self.views.append(View([y-x for x,y in arg], strides, offset))

@@ -127,44 +127,36 @@ def reduce_op(op, inp, ret):
     buffer_np(np.array(inp.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)))
 
-def reshape(x, ret):
-  cl.enqueue_copy(cl_queue, ret.cl, x.cl)
-
-# TODO: merge this with perm axis
-def inner_slice(x, arg, ret):
-  shift = [y[0] for y in arg]
-  gslice = clbuild("gslice", """
-  __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
+def slice_pad_zeros(x, ret, arg):
+  gslice = clbuild("pslice", """
+  __kernel void pslice(__global float *output, int prod, int n_dims,
                        __global const int *shape_x, __global const int *shape_ret,
                        __global const int *shift) {
     int gid = get_global_id(0);
-    int iptr = 0;
     int zero = 1;
     for (int dim = 0; dim < n_dims; dim++) {
       prod /= shape_ret[dim];
       int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
       zero &= (sidx >= 0 && sidx < shape_x[dim]);
-      iptr = (iptr * shape_x[dim]) + sidx;
     }
-    output[gid] = zero ? input[iptr] : 0.0;
+    output[gid] = zero ? output[gid] : 0.0;
   }""")
   gslice([prod(ret.shape)], None,
-    x.cl, ret.cl, i32(prod(ret.shape)), i32(len(ret.shape)),
+    ret.cl, i32(prod(ret.shape)), i32(len(ret.shape)),
     buffer_np(np.array(x.shape, dtype=np.int32)),
     buffer_np(np.array(ret.shape, dtype=np.int32)),
-    buffer_np(np.array(shift, dtype=np.int32)))
+    buffer_np(np.array([y[0] for y in arg], dtype=np.int32)))
 
 def contiguous(x, ret, st):
-  clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
+  clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret, const int x_max) {
     int gid = get_global_id(0); int idx = gid; """+st.expr().replace('//', '/')+""";
-    ret[gid] = x[idx];
-  }""")([prod(ret.shape)], None, x.cl, ret.cl)
+    ret[gid] = x[clamp(idx, 0, x_max)];  // no out-of-bounds accesses
+  }""")([prod(ret.shape)], None, x.cl, ret.cl, i32(prod(x.shape)))
 
 def movement_op(op, x, ret, arg=None):
-  if op == MovementOps.SLICE:
-    inner_slice(x, arg, ret)   # TODO: this can't use ShapeTracker since it can't expand
-    return
   contiguous(x, ret, ShapeTracker(*x.shape).movement_op(op, arg))
+  if op == MovementOps.SLICE and any([a[0]<0 or a[1]>x.shape[i] for i,a in enumerate(arg)]):
+    slice_pad_zeros(x, ret, arg)   # this can't use ShapeTracker since it can't expand
 
 def conv(x,w,ret,C):
   # input  = (bs, groups, cin, iy, ix)
