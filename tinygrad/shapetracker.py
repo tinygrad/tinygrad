@@ -13,7 +13,7 @@ class View:
 
     self.shape_strides = [(shape[0], strides[0])]
     for i in range(1, len(shape)):
-      if strides[i] != 0 and self.shape_strides[-1][1]//strides[i] == shape[i]:
+      if (strides[i] != 0 and self.shape_strides[-1][1]//strides[i] == shape[i]) or (strides[i] == 0 and self.shape_strides[-1][1] == 0):
         self.shape_strides[-1] = (self.shape_strides[-1][0] * shape[i], strides[i])
       else:
         self.shape_strides.append((shape[i], strides[i]))
