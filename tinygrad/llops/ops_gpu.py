@@ -132,7 +132,7 @@ def conv(x,w,ret,C):
   # output = (bs, groups, rcout, oy, ox)
   conv_prg = clbuild("conv", """
   __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
-    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
+    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy) {
 
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
@@ -145,15 +145,15 @@ def conv(x,w,ret,C):
 
     float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
-      for (int y = IY; y < IY+H; y++) { for (int x = IX; x < IX+W; x++) {
-        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
-          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
+      for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
+        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (y*dy+IY)*ix + (x*dx+IX)] * \
+          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
       } }
     }
     output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
   }""")
 
-  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in C[0:12]])
+  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in list(C[0:12])+[C.dx, C.dy]])
 
 # tensx = (bs, groups*cin, iy, ix)
 # tensw = (groups*rcout, cin, H, W)
