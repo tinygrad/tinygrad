@@ -25,17 +25,6 @@ from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, movement_op
 
 from tinygrad.ops import ProcessingOps
 
-def convdw(x,grad_output,dw,C):
-  # NOTE: torch.nn.grad.conv2d_weight is wrong for groups in pytorch, wonder who it affects 
-  # https://github.com/pytorch/pytorch/issues/51430
-  grad_output = grad_output.reshape(C.bs * C.groups, C.rcout, C.oy, C.ox).repeat(1, C.cin, 1, 1)
-  grad_output = grad_output.reshape(C.bs * C.groups * C.cin * C.rcout, 1, C.oy, C.ox)
-  x = x.reshape(1, C.bs * C.groups * C.cin, C.iy, C.ix)
-  # NOTE: this conv2d always has batch size 1.
-  grad_weight = torch.conv2d(x, grad_output, stride=(C.dy, C.dx), dilation=(C.ys, C.xs), groups=C.bs*C.groups*C.cin)
-  grad_weight = grad_weight.reshape(C.bs, C.groups, C.cin, C.rcout, *grad_weight.shape[2:]).transpose(3, 2).sum(dim=0)
-  dw[:] = grad_weight.reshape(C.groups*C.rcout, C.cin, *grad_weight.shape[3:])[:, :, :dw.shape[2], :dw.shape[3]]
-
 def processing_op(op,x,w,ret,C):
   stride, groups, dilation = (C.ys, C.xs), C.groups, (C.dy, C.dx)
   if op == ProcessingOps.CONV:
@@ -48,5 +37,3 @@ def processing_op(op,x,w,ret,C):
     else:
       output_padding = [ret.shape[d+2] - ((x.shape[d+2] - 1) * stride[d] + 1 + dilation[d] * (w.shape[d+2] - 1)) for d in range(2)]
       ret[:] = torch.conv_transpose2d(x, w, stride=stride, groups=groups, output_padding=output_padding, dilation=dilation)
-  elif op == ProcessingOps.CONVDW:
-    convdw(x,w,ret,C)

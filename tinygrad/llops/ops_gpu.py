@@ -159,28 +159,6 @@ def conv(x,w,ret,C):
 # tensw = (groups*rcout, cin, H, W)
 # ggg = (bs, groups*rout, oy, ox)
 
-def convdw(x,grad_output,dw,C):
-  convdw_prg = clbuild("convdw", """
-  __kernel void convdw(__global const float *tensx, __global const float *ggg, __global float *dw,
-    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
-
-    int g = get_global_id(0)/(rcout*cin) ; // range 0-groups
-    int c = (get_global_id(0)/(cin)) %rcout; // range 0-rcout
-    int ci = get_global_id(0) % cin;        // range 0-cin
-    int y = get_global_id(1);  // range 0-H
-    int x = get_global_id(2);  // range 0-W
-
-    float acc = 0.0;
-    for (int Y = 0; Y < oy; Y++) { for (int X = 0; X < ox; X++) {
-      for (int B = 0; B < bs; B++) {
-        acc += ggg[B*groups*rcout*oy*ox + +g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
-          tensx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x];
-        }
-    } }
-    dw[get_global_id(0)*H*W + y*W + x] = acc;
-  }""")
-  convdw_prg([C.groups*C.rcout*C.cin, C.H, C.W], None, x.cl, grad_output.cl, dw.cl, *[i32(x) for x in C[0:12]])
-
 def convdx(grad_output,w,dx,C):
   convdx_prg = clbuild("convdx", """
   __kernel void convdx(__global const float *tensw, __global const float *ggg, __global float *dx,

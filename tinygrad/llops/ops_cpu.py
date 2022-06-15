@@ -77,15 +77,6 @@ def conv(x,w,ret,C):
     tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
   ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
-def convdw(x,grad_output,dw,C):
-  tx = get_tx(x, C)
-  ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
-  gdw = dw.reshape((C.groups, C.rcout, C.cin, C.H, C.W))
-  gdw[:] = 0
-  for g in range(C.groups):
-    #'ikYX,ijYXyx -> kjyx'
-    gdw[g] += np.tensordot(ggg[:,g], tx[:,g], ((0,2,3),(0,2,3)))
-
 def convdx(grad_output,w,dx,C):
   ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
@@ -102,4 +93,3 @@ def convdx(grad_output,w,dx,C):
 def processing_op(op,a,b,ret,C):
   if op == ProcessingOps.CONV: conv(a,b,ret,C)
   elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)
-  elif op == ProcessingOps.CONVDW: convdw(a,b,ret,C)
