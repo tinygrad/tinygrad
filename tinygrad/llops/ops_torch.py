@@ -32,21 +32,21 @@ def convdw(x,grad_output,dw,C):
   grad_output = grad_output.reshape(C.bs * C.groups * C.cin * C.rcout, 1, C.oy, C.ox)
   x = x.reshape(1, C.bs * C.groups * C.cin, C.iy, C.ix)
   # NOTE: this conv2d always has batch size 1.
-  grad_weight = torch.conv2d(x, grad_output, dilation=(C.ys, C.xs), groups=C.bs*C.groups*C.cin)
+  grad_weight = torch.conv2d(x, grad_output, stride=(C.dy, C.dx), dilation=(C.ys, C.xs), groups=C.bs*C.groups*C.cin)
   grad_weight = grad_weight.reshape(C.bs, C.groups, C.cin, C.rcout, *grad_weight.shape[2:]).transpose(3, 2).sum(dim=0)
   dw[:] = grad_weight.reshape(C.groups*C.rcout, C.cin, *grad_weight.shape[3:])[:, :, :dw.shape[2], :dw.shape[3]]
 
 def processing_op(op,x,w,ret,C):
-  stride, groups = (C.ys, C.xs), C.groups
+  stride, groups, dilation = (C.ys, C.xs), C.groups, (C.dy, C.dx)
   if op == ProcessingOps.CONV:
-    ret[:] = torch.conv2d(x, w, stride=stride, groups=groups)
+    ret[:] = torch.conv2d(x, w, stride=stride, groups=groups, dilation=dilation)
   elif op == ProcessingOps.CONVT:
-    if stride == 1 or stride == (1,1):
+    if stride == (1,1) and dilation == (1,1):
       # strided needs weird "undilation": https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
       w = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W).flip(3, 4).transpose(2, 1).reshape(C.groups*C.cin, C.rcout, C.H, C.W)
       ret[:] = torch.conv2d(x, w, padding=(C.H-1,C.W-1), groups=groups)
     else:
-      output_padding = [ret.shape[d+2] - ((x.shape[d+2] - 1) * stride[d] + 1 + (w.shape[d+2] - 1)) for d in range(2)]
-      ret[:] = torch.conv_transpose2d(x, w, stride=stride, groups=groups, output_padding=output_padding)
+      output_padding = [ret.shape[d+2] - ((x.shape[d+2] - 1) * stride[d] + 1 + dilation[d] * (w.shape[d+2] - 1)) for d in range(2)]
+      ret[:] = torch.conv_transpose2d(x, w, stride=stride, groups=groups, output_padding=output_padding, dilation=dilation)
   elif op == ProcessingOps.CONVDW:
     convdw(x,w,ret,C)

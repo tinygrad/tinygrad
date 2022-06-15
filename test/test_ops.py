@@ -268,6 +268,20 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
         lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
+  @unittest.skipUnless(Device.DEFAULT == Device.TORCH, "Not Implemented")
+  def test_dilated_conv2d(self):
+    bs = 4
+    cin = 3
+    H,W = 3,3
+    with self.subTest(dilation := 2):
+      helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+        lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
+        lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4)
+    with self.subTest(dilation := (2,1)):
+      helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+        lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
+        lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4)
+
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
