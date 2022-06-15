@@ -32,7 +32,7 @@ def processing_op(op,x,w,ret,C):
   if op == ProcessingOps.CONV:
     ret[:] = torch.conv2d(x, w, stride=stride, groups=groups, dilation=dilation, padding=padding)
   elif op == ProcessingOps.CONVT:
-    if stride == (1,1) and dilation == (1,1):
+    if stride == (1,1):
       # strided needs weird "unstride": https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
       # it's 0 insertion between the inputs
       w = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W).flip(3, 4).transpose(2, 1).reshape(C.groups*C.cin, C.rcout, C.H, C.W)
