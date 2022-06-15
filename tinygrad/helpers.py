@@ -6,14 +6,16 @@ def prod(x): return int(np.prod(x))
 def reduce_shape(shape, axis):
   return [1 if i in axis else shape[i] for i in range(len(shape))]
 
-def get_conv_args(x_shape, w_shape, stride, groups):
+def get_conv_args(x_shape, w_shape, stride=0, groups=1, padding=0):
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   conv_args = namedtuple('conv_args',
-    ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout'])
+    ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout', 'py', 'px'])
   cout,cin,H,W = w_shape
   ys,xs = (stride, stride) if isinstance(stride, int) else stride
+  py,px = (padding, padding) if isinstance(padding, int) else padding
   bs,cin_,iy,ix = x_shape
-  oy,ox = (iy-(H-ys))//ys, (ix-(W-xs))//xs
+  # TODO: should be easy to support asymmetric padding by changing output size
+  oy,ox = (iy+py*2-(H-ys))//ys, (ix+px*2-(W-xs))//xs
   if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0
-  return conv_args(H, W, groups, cout//groups, cin, oy, ox, iy, ix, ys, xs, bs, cout)
+  return conv_args(H, W, groups, cout//groups, cin, oy, ox, iy, ix, ys, xs, bs, cout, py, px)
