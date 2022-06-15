@@ -259,14 +259,11 @@ class TestOps(unittest.TestCase):
     bs = 4
     cin = 3
     H,W = 3,3
-    with self.subTest(padding := 2):
-      helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-        lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-        lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
-    with self.subTest(padding := (2,1)):
-      helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-        lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-        lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+    for p in [2, (2,1)]:
+      with self.subTest(padding := p):
+        helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+          lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+          lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4, forward_only=True)
 
   def test_dilated_conv2d_forward(self):
     bs = 4

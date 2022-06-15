@@ -90,6 +90,7 @@ class ShapeTracker:
     strides = [s if x == y else 0 for s,(x,y) in zip(strides_for_shape(self.shape), zip(self.shape, new_shape))]
     self.views.append(View(new_shape, strides))
 
+  # TODO: this is a special case of slice with strides, remove it
   def flip(self, *axis):
     assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
     strides = [-s if i in axis else s for i,s in enumerate(strides_for_shape(self.shape))]

@@ -69,6 +69,7 @@ def get_tx(x, C):
   )
 
 def conv(x,w,ret,C):
+  if C.px > 0 or C.py > 0: x = np.pad(x, [(0,0), (0,0), (C.py, C.py), (C.px, C.px)])
   tx = get_tx(x, C)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
   tmp = np.zeros((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
