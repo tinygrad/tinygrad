@@ -7,7 +7,7 @@ class TorchBuffer(torch.Tensor):
     if isinstance(shape, torch.Tensor):
       return super().__new__(cls, shape)
     else:
-      return TorchBuffer(torch.zeros(shape))
+      return TorchBuffer(torch.zeros(shape)).to(device)
   custompad = lambda x,padding: torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
   @staticmethod
   def fromCPU(data):

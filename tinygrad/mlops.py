@@ -125,6 +125,15 @@ class Expand(Function):
     in_shape, = ctx.saved_tensors
     return ctx.reduce_op(ReduceOps.SUM, grad_output, in_shape)
 
+class Flip(Function):
+  def forward(ctx, x, axis):
+    ctx.save_for_backward(axis)
+    return ctx.movement_op(MovementOps.FLIP, x, axis)
+
+  def backward(ctx, grad_output):
+    axis, = ctx.saved_tensors
+    return ctx.movement_op(MovementOps.FLIP, grad_output, axis)
+
 class Reshape(Function):
   def forward(ctx, x, shape):
     ctx.save_for_backward(x.shape)

@@ -8,6 +8,7 @@ class CPUBuffer(np.ndarray):
   def exp(x): return np.exp(x)
   def log(x): return np.log(x)
   def sign(x): return np.sign(x)
+  def flip(x, axis): return np.flip(x, axis)
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
   def permute(x, order): return x.transpose(order)
   def custompad(x, padding): return np.pad(x, padding)
@@ -50,6 +51,7 @@ def reduce_op(op, inp, ret):
 def movement_op(op, x, ret, arg=None):
   if op == MovementOps.RESHAPE: ret[:] = x.reshape(arg)
   elif op == MovementOps.PERMUTE: ret[:] = x.permute(arg)
+  elif op == MovementOps.FLIP: ret[:] = x.flip(arg)
   elif op == MovementOps.SLICE:
     padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
     x = x.custompad(padding)
