@@ -42,9 +42,6 @@ class GPUBuffer:
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
-def buffer_np(x):
-  return cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-
 @functools.lru_cache
 def clbuild(name, prg):
   clprg = cl.Program(cl_ctx, prg).build().__getattr__(name)
@@ -126,7 +123,8 @@ def contiguous(x, ret, st):
 def movement_op(op, x, ret, arg=None):
   contiguous(x, ret, ShapeTracker(*x.shape).movement_op(op, arg))
 
-def conv(x,w,ret,C):
+def processing_op(op,x,w,ret,C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
@@ -157,6 +155,3 @@ def conv(x,w,ret,C):
   }""")
 
   conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
-
-def processing_op(op,a,b,ret,C):
-  if op == ProcessingOps.CONV: conv(a,b,ret,C)

@@ -60,23 +60,18 @@ def movement_op(op, x, ret, arg=None):
   elif op == MovementOps.EXPAND: ret[:] = x.expand(arg)
   else: raise Exception(f"{op} isn't supported")
 
-def get_tx(x, C):
+def processing_op(op,x,w,ret,C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  if C.px > 0 or C.py > 0: x = np.pad(x, [(0,0), (0,0), (C.py, C.py), (C.px, C.px)])
   gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
-  return np.lib.stride_tricks.as_strided(gx,
+  tx = np.lib.stride_tricks.as_strided(gx,
     shape=(C.bs, C.groups, C.cin, C.oy, C.ox, C.H, C.W),
     strides=(*gx.strides[0:3], gx.strides[3]*C.ys, gx.strides[4]*C.xs, gx.strides[3]*C.dy, gx.strides[4]*C.dx),
     writeable=False,
   )
-
-def conv(x,w,ret,C):
-  if C.px > 0 or C.py > 0: x = np.pad(x, [(0,0), (0,0), (C.py, C.py), (C.px, C.px)])
-  tx = get_tx(x, C)
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
   tmp = np.zeros((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
   for g in range(C.groups):
     #ijYXyx,kjyx -> iYXk ->ikYX
     tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
   ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
-
-def processing_op(op,a,b,ret,C):
-  if op == ProcessingOps.CONV: conv(a,b,ret,C)
