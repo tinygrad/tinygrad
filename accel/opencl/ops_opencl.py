@@ -95,10 +95,18 @@ def conv(x,w,ret,C):
   print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *[np.int16(x) for x in conv_args])
 
+
+def processing_op(ctx,op,x,w,out_shape,C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  ret = ctx.buffer((C.bs*C.oy, C.ox*C.cout//4, 4))
+  conv(x, w, ret, C)
+  return ret
+
+
 # input format is    N, H x W, C//4 x 4
 # dweight format is  oc//4 x ch, cw x 4(oc)
 # weight format is   oc//4 x ch, ic//4, cw, 4(oc) x 4(ic)
-def processing_op(ctx,op,x,w,out_shape,C):
+def preprocessing_op(ctx,op,x,w,out_shape,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs, C.groups, C.cin, C.iy, C.ix))
   w = ctx.movement_op(MovementOps.RESHAPE, w, (C.groups, C.rcout, C.cin, C.H, C.W))
@@ -126,7 +134,6 @@ def processing_op(ctx,op,x,w,out_shape,C):
     C = C._replace(cin = C.cin + to_add)
 
   # hack for non multiples of 4 on C.rcout
-  added_output_channels = 0
   if C.rcout % 4 != 0 and not (C.rcout == 1 and C.groups%4 == 0):
     added_output_channels = 4 - (C.rcout % 4)
     ws = [(0, s) for s in w.shape]
@@ -149,17 +156,20 @@ def processing_op(ctx,op,x,w,out_shape,C):
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.cin//4,4,C.H,C.W))
     w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
+  return x,w,C
 
-  ret = ctx.buffer((C.bs*C.oy, C.ox*C.cout//4, 4))
-  conv(x, w, ret, C)
+def postprocessing_op(ctx, op, ret, out_shape, C):
+  added_output_channels = C.rcout - out_shape[1]//C.groups
 
+  # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:
     ret = ctx.movement_op(MovementOps.RESHAPE, ret, (C.bs, C.oy, C.ox, C.groups, C.rcout))
     xs = [(0, s) for s in ret.shape]
     xs[4] = (0, ret.shape[4]-added_output_channels)
     ret = ctx.movement_op(MovementOps.SLICE, ret, xs)
+    C = C._replace(rcout = C.rcout - added_output_channels, cout = C.groups * (C.rcout - added_output_channels))
 
-  ret = ctx.movement_op(MovementOps.RESHAPE, ret, (C.bs, C.oy, C.ox, C.groups*(C.rcout-added_output_channels)))
+  ret = ctx.movement_op(MovementOps.RESHAPE, ret, (C.bs, C.oy, C.ox, C.cout))
   ret = ctx.movement_op(MovementOps.PERMUTE, ret, (0,3,1,2))
   return ret
 
