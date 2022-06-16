@@ -168,7 +168,6 @@ class Slice(Function):
 
 cnt = 0
 class Conv2D(Function):
-<<<<<<< HEAD
   def forward(ctx, x, w, stride=1, groups=1, padding=0):
     C = get_conv_args(x.shape, w.shape, stride, groups, padding)
     ctx.save_for_backward(x,w,(C.ys,C.xs), C.groups)
@@ -239,12 +238,6 @@ class Conv2D(Function):
       return ret
     else:
       return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.groups*C.rcout, C.oy, C.ox), C)
-=======
-  def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
-    C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
-    ctx.save_for_backward(x,w,C)
-    return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.cout, C.oy, C.ox), C)
->>>>>>> origin/master
 
   def backward(ctx, grad_output):
     x, w, C = ctx.saved_tensors
