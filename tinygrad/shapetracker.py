@@ -75,7 +75,7 @@ class ShapeTracker:
 
   def permute(self, *axis):
     assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
-    assert len(set(axis)) == len(axis)
+    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape)
     strides = strides_for_shape(self.shape)
     self.views.append(View([self.shape[a] for a in axis], [strides[a] for a in axis]))
 
