@@ -174,7 +174,20 @@ class Conv2D(Function):
 
   def backward(ctx, grad_output):
     x, w, C = ctx.saved_tensors
-    dx = ctx.processing_op(ProcessingOps.CONVT, grad_output, w, x.shape, C) if ctx.needs_input_grad[0] else None
+    #dx = ctx.processing_op(ProcessingOps.CONVT, grad_output, w, x.shape, C) if ctx.needs_input_grad[0] else None
+    xt = grad_output
+    if C.xs > 1 or C.ys > 1:   # unstride
+      xt = ctx.movement_op(MovementOps.RESHAPE, xt, (grad_output.shape[0], grad_output.shape[1], grad_output.shape[2], 1, grad_output.shape[3], 1))
+      xt = ctx.movement_op(MovementOps.SLICE, xt, ((0,xt.shape[0]), (0,xt.shape[1]), (0,xt.shape[2]), (0,C.ys), (0,xt.shape[4]), (0,C.xs)))
+      xt = ctx.movement_op(MovementOps.RESHAPE, xt, (xt.shape[0], xt.shape[1], xt.shape[2]*C.ys, xt.shape[4]*C.xs))
+    wt = ctx.movement_op(MovementOps.RESHAPE, w, (C.groups, C.rcout, C.cin, C.H, C.W))
+    wt = ctx.movement_op(MovementOps.FLIP, wt, (3, 4))
+    wt = ctx.movement_op(MovementOps.PERMUTE, wt, (0, 2, 1, 3, 4))
+    wt = ctx.movement_op(MovementOps.RESHAPE, wt, (C.groups*C.cin, C.rcout, C.H, C.W))
+    Cdx = get_conv_args(xt.shape, wt.shape, dilation=(C.dy, C.dx), padding=((C.H-1)*C.dy-C.py,(C.W-1)*C.dx-C.px), groups=C.groups)
+    # TODO: this shape can be wrong. support asymmetric padding to remove the slice
+    dx = ctx.processing_op(ProcessingOps.CONV, xt, wt, (Cdx.bs, Cdx.cout, Cdx.oy, Cdx.ox), Cdx)
+    dx = ctx.movement_op(MovementOps.SLICE, dx, [(0,s) for s in x.shape])
 
     # compute derivative of weights using ProcessingOps.CONV
     # TODO: there has to be a way to do this without the expand/reduce for at least matmul

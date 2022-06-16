@@ -158,37 +158,5 @@ def conv(x,w,ret,C):
 
   conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
 
-# tensx = (bs, groups*cin, iy, ix)
-# tensw = (groups*rcout, cin, H, W)
-# ggg = (bs, groups*rout, oy, ox)
-
-def convdx(grad_output,w,dx,C):
-  convdx_prg = clbuild("convdx", """
-  __kernel void convdx(__global const float *tensw, __global const float *ggg, __global float *dx,
-    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
-
-    int B = get_global_id(0);
-    int g = get_global_id(1);
-    int ci = get_global_id(2);
-
-    for (int Y = 0; Y < iy; Y++) { for (int X = 0; X < ix; X++) {
-      dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + Y*ix + X] = 0.0;
-    } }
-
-    for (int Y = 0; Y < oy; Y++) { for (int X = 0; X < ox; X++) {
-      for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
-        float acc = 0.0;
-        for (int c = 0; c < rcout; c++) {
-          acc += ggg[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] * \
-            tensw[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-        }
-        dx[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + (Y*ys+y)*ix + X*xs+x] += acc;
-      } }
-    } }
-  }
-  """)
-  convdx_prg([C.bs, C.groups, C.cin], None, w.cl, grad_output.cl, dx.cl, *[i32(x) for x in C[0:12]])
-
 def processing_op(op,a,b,ret,C):
   if op == ProcessingOps.CONV: conv(a,b,ret,C)
-  elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)

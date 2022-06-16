@@ -78,19 +78,5 @@ def conv(x,w,ret,C):
     tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
   ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
-def convdx(grad_output,w,dx,C):
-  ggg = grad_output.reshape(C.bs, C.groups, C.rcout, C.oy, C.ox)
-  tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
-  gdx = dx.reshape((C.bs, C.groups, C.cin, C.iy, C.ix))
-  gdx[:] = 0
-  for k in range(C.oy*C.ox):
-    Y, X = k//C.ox, k%C.ox
-    iY,iX = Y*C.ys, X*C.xs
-    #gdx[:,:,: , iY:iY+H, iX:iX+W] += np.einsum('igk,gkjyx->igjyx', ggg[:,:,:,Y,X], tw)
-    for g in range(C.groups):
-      tg = np.dot(ggg[:,g,:,Y,X].reshape(C.bs, -1), tw[g].reshape(C.rcout, -1))
-      gdx[:, g, :, iY:iY+C.H, iX:iX+C.W] += tg.reshape((C.bs, C.cin, C.H, C.W))
-
 def processing_op(op,a,b,ret,C):
   if op == ProcessingOps.CONV: conv(a,b,ret,C)
-  elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)

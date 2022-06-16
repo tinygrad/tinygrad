@@ -138,7 +138,7 @@ unary_op  (RELU, EXP, LOG, NEG, SIGN)                # A -> A
 reduce_op (SUM, MAX)                                 # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)           # A + B -> C (all the same size)
 movement_op (RESHAPE, PERMUTE, SLICE, EXPAND, FLIP)  # A -> B (different size)
-processing_op (CONV, CONVT)                          # A + B -> C
+processing_op (CONV)                                 # A + B -> C
 ```
 
 When tinygrad moves to lazy evaluation, optimizations will happen here.
