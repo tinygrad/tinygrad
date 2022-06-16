@@ -44,37 +44,39 @@ def log_op(op, ret, inp):
 class Ops:
   def unary_op(ctx, op:UnaryOps, x):
     ret = ctx.op.unary_op(ctx, op, x)
+    log_op(op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
-    log_op(op, ret, [x])
     return ret
 
   def reduce_op(ctx, op:ReduceOps, x, new_shape):
     ret = ctx.op.reduce_op(ctx, op, x, new_shape)
+    log_op(op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == tuple(new_shape)
-    log_op(op, ret, [x])
     return ret
 
   def binary_op(ctx, op:BinaryOps, x, y):
     assert x.shape == y.shape
     ret = ctx.op.binary_op(ctx, op, x, y)
+    log_op(op, ret, [x, y])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
-    log_op(op, ret, [x, y])
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg=None):
     ret = ctx.op.movement_op(ctx, op, x, arg)
+    log_op(op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == ShapeTracker(*x.shape).movement_op(op, arg).shape
-    log_op(op, ret, [x])
     return ret
 
   def processing_op(ctx, op:ProcessingOps, x, y, out_shape, C):
     # TODO: can we do better than out_shape?
+    if getattr(ctx.op, "preprocessing_op", None) is not None: x,y,C = ctx.op.preprocessing_op(ctx, op, x, y, out_shape, C)
     ret = ctx.op.processing_op(ctx, op, x, y, out_shape, C)
+    log_op(op, ret, [x, y])
+    if getattr(ctx.op, "postprocessing_op", None) is not None: ret = ctx.op.postprocessing_op(ctx, op, ret, out_shape, C)
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == out_shape
-    log_op(op, ret, [x, y])
     return ret
