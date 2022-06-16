@@ -8,6 +8,7 @@
     short totalNumPackedInputChannels,
     short totalNumPackedOutputChannels,
     short numOutputColumns,
+    short numOutputRows, short numInputRows,
     short filterSizeX, short filterSizeY,
     short paddingX, short paddingY,
     short strideX, short strideY,
@@ -19,7 +20,6 @@
   for (short i = 0; i < NUM_OUTPUTS; ++i) {
     outputValues[i] = (float4)(0, 0, 0, 0);
   }
-
 
   short packedOutputChannel = get_global_id(0);
   int2 weightLocation;
@@ -39,7 +39,15 @@
 
   short outputRow = get_global_id(2);
   int2 inputLocation;
-  inputLocation.y = mad24(outputRow, strideY, -paddingY); 
+
+#ifdef BATCH
+  // TODO: this doesn't work with y padding
+  inputLocation.y = mad24(outputRow % numOutputRows, strideY, -paddingY);
+  short batchOffset = (outputRow / numOutputRows) * numInputRows;
+  inputLocation.y += batchOffset;
+#else
+  inputLocation.y = mad24(outputRow, strideY, -paddingY);
+#endif
 
   for (short rfRow = 0; rfRow < filterSizeY; ++rfRow) {
     // numPackedInputChannelsForGroup is 1 in depthwise

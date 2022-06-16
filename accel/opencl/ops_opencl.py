@@ -61,7 +61,7 @@ class OpenCLBuffer:
       fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
       self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=flip(self.shape))
       if self._buf is not None:
-        print(f"converting {self.shape} to image")
+        print(f"converting {self.shape} to image with shape {self._image.shape}")
         clbuild("to_image", """
           __kernel void to_image(
               __global const float4 *in,
@@ -83,11 +83,15 @@ def load(x):
 
 def conv(x,w,ret,C):
   print(x.shape, w.shape, ret.shape)
-  options = ("-DDEPTHWISE",) if C.groups > 1 else tuple()
-  conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), options)
+  options = []
+  if C.groups > 1: options.append("-DDEPTHWISE")
+  if C.bs > 1:
+    options.append("-DBATCH")
+    assert C.py == 0, "batched conv doesn't work with y-padding"
+  conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), tuple(options))
   assert C.cout%4 == 0
-  kernel_args = [C.cout//4, (C.ox+3)//4, C.oy]
-  conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
+  kernel_args = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
+  conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
   print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *[np.int16(x) for x in conv_args])
 
@@ -98,6 +102,12 @@ def processing_op(ctx,op,x,w,out_shape,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
 
   print(x.shape, w.shape)
+
+  if C.bs > 1 and C.py > 0:
+    # explictly add y-padding for batched inputs
+    # N C H W
+    x = ctx.movement_op(MovementOps.SLICE, x, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py), (0, x.shape[3])))
+    C = C._replace(iy=C.iy + C.py*2, py=0)
 
   # hack for multiples of 4
   if C.groups == 1 and C.cin % 4 != 0:
@@ -136,6 +146,7 @@ def processing_op(ctx,op,x,w,out_shape,C):
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.cin//4,4,C.H,C.W))
     w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
+
 
   ret = ctx.buffer((C.bs*C.oy, C.ox*C.cout//4, 4))
   conv(x, w, ret, C)
