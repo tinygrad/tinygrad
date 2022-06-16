@@ -1,6 +1,7 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from tinygrad.helpers import prod
-from functools import cached_property
+from functools import cached_property, reduce
+from itertools import chain
 
 def divmodidx(acc, d, mod=True):
   lr = f"(idx//{acc})" if acc != 1 else "idx"
@@ -90,7 +91,7 @@ class ShapeTracker:
     strides = [s if x == y else 0 for s,(x,y) in zip(strides_for_shape(self.shape), zip(self.shape, new_shape))]
     self.views.append(View(new_shape, strides))
 
-  # TODO: combine with slice
+  # TODO: combine with slice? this doesn't require a ZeroView, though slice shouldn't always either
   def stride(self, *mul):
     assert all([isinstance(x, int) for x in mul])
     old_strides = strides_for_shape(self.shape)
@@ -100,8 +101,12 @@ class ShapeTracker:
     self.views.append(View(new_shape, strides, offset))
 
   # TODO: is there a better name for this?
+  # TODO: this shouldn't be in shapetracker, this should be in mlops
   def unstride(self, *mul):
-    pass
+    start_shape = self.shape
+    self.reshape(*reduce(lambda x,y: x+[y,1], start_shape, []))
+    self.slice([(0,x) for x in chain(*zip(start_shape, mul))])
+    self.reshape([s*m for s,m in zip(start_shape, mul)])
 
   # TODO: this is a special case of slice with strides, remove it
   def flip(self, *axis):
