@@ -7,7 +7,7 @@ def divmodidx(acc, d, mod=True):
   return f"({lr}%{d})" if mod else lr  # don't mod the top shape dimension
 
 class View:
-  def __init__(self, shape, strides, offset=0):
+  def __init__(self, shape, strides, offset:int=0):
     assert len(shape) == len(strides)
     self.shape, self.offset = shape, offset
 
@@ -90,9 +90,19 @@ class ShapeTracker:
     strides = [s if x == y else 0 for s,(x,y) in zip(strides_for_shape(self.shape), zip(self.shape, new_shape))]
     self.views.append(View(new_shape, strides))
 
+  # TODO: combine with slice
+  def stride(self, *mul):
+    assert all([isinstance(x, int) for x in mul])
+    old_strides = strides_for_shape(self.shape)
+    strides = [z*m for z,m in zip(old_strides, mul)]
+    new_shape = [(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)]
+    offset = sum([(s-1)*z for s,z,m in zip(self.shape,old_strides,mul) if m < 0])
+    self.views.append(View(new_shape, strides, offset))
+
+  # TODO: is there a better name for this?
+  def unstride(self, *mul):
+    pass
+
   # TODO: this is a special case of slice with strides, remove it
   def flip(self, *axis):
-    assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
-    strides = [-s if i in axis else s for i,s in enumerate(strides_for_shape(self.shape))]
-    offset = sum([(self.shape[a] - 1) * -strides[a] for a in axis])
-    self.views.append(View(self.shape, strides, offset))
+    self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])

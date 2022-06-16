@@ -27,6 +27,9 @@ class DumbShapeTracker:
   def slice(self, *arg):
     self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
 
+  def stride(self, *arg):
+    self.t = self.t[tuple([slice(None, None, x) for x in arg])]
+
   def __getitem__(self, val):
     return self.t.flatten()[val]
 
@@ -94,6 +97,13 @@ class TestShapeTracker(unittest.TestCase):
 
   def test_slice_1c2(self):
     self.apply(lambda x: x.slice((1, 2), (1, 2)))
+
+  def test_stride(self): self.apply(lambda x: x.stride(2,1))
+  def test_stride_int(self): self.apply(lambda x: x.stride(1,2))
+  def test_stride_2(self): self.apply(lambda x: x.stride(2,2))
+  def test_stride_n(self): self.apply(lambda x: x.stride(-2,1))
+  def test_stride_int_n(self): self.apply(lambda x: x.stride(-1,2))
+  def test_stride_2_n(self): self.apply(lambda x: x.stride(-2,-2))
 
   def test_reshape_then_permute(self):
     self.test_reshape()
