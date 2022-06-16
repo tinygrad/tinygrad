@@ -171,73 +171,7 @@ class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
     C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
     ctx.save_for_backward(x,w,C)
-
-    # opencl speed hacks
-    # TODO: find a better way to id opencl
-    if ctx.device == 2:
-      """
-      global cnt
-      if cnt > 5:
-        from tinygrad.llops.ops_gpu import processing_op as pop
-        ret = ctx.buffer((C.bs, C.groups*C.rcout, C.oy, C.ox))
-        pop(ProcessingOps.CONV, x, w, ret, C)
-        return ret
-      cnt += 1
-      """
-
-      print(x.shape, w.shape)
-
-      # hack for multiples of 4
-      if C.groups == 1 and C.cin % 4 != 0:
-        to_add = 4 - (C.cin % 4)
-        ws = [(0, s) for s in w.shape]
-        ws[1] = (0, w.shape[1]+to_add)
-        w = ctx.movement_op(MovementOps.SLICE, w, ws)
-
-        xs = [(0, s) for s in x.shape]
-        xs[1] = (0, x.shape[1]+to_add)
-        x = ctx.movement_op(MovementOps.SLICE, x, xs)
-
-        C = C._replace(cin = C.cin + to_add)
-
-      # hack for multiples of 4
-      added_output_shape = None
-      if C.groups == 1 and C.cout % 4 != 0:
-        to_add = 4 - (C.cout % 4)
-        added_output_shape = to_add
-        ws = [(0, s) for s in w.shape]
-        ws[0] = (0, w.shape[0]+to_add)
-        w = ctx.movement_op(MovementOps.SLICE, w, ws)
-        C = C._replace(cout = C.cout + to_add, rcout = C.rcout + to_add)
-
-      # packed
-      assert (C.groups*C.cin) % 4 == 0
-      x = ctx.movement_op(MovementOps.PERMUTE, x, (0,2,3,1))
-      x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
-
-      assert C.cout % 4 == 0
-      if C.cin == 1:
-        # depthwise
-        w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.H*C.W))
-        w = ctx.movement_op(MovementOps.PERMUTE, w, (0,2,1))
-      else:
-        w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.cin//4,4,C.H,C.W))
-        w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
-        w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
-
-      out_shape = (C.bs*C.oy, C.ox*C.cout//4, 4)
-      ret = ctx.processing_op(ProcessingOps.CONV, x, w, out_shape, C)
-      ret = ctx.movement_op(MovementOps.RESHAPE, ret, (C.bs, C.oy, C.ox, C.cout))
-
-      if added_output_shape is not None:
-        xs = [(0, s) for s in ret.shape]
-        xs[3] = (0, ret.shape[3]-added_output_shape)
-        ret = ctx.movement_op(MovementOps.SLICE, ret, xs)
-
-      ret = ctx.movement_op(MovementOps.PERMUTE, ret, (0,3,1,2))
-      return ret
-    else:
-      return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.groups*C.rcout, C.oy, C.ox), C)
+    return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.cout, C.oy, C.ox), C)
 
   def backward(ctx, grad_output):
     x, w, C = ctx.saved_tensors

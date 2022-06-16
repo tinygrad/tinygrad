@@ -3,7 +3,7 @@
 
 import pathlib
 import numpy as np
-from tinygrad.ops import ProcessingOps
+from tinygrad.ops import MovementOps, ProcessingOps
 from tinygrad.llops.ops_gpu import require_init_gpu, clbuild, sync, get_cl_queue, get_cl_ctx
 from tinygrad.llops.ops_gpu import unary_op, binary_op, reduce_op, movement_op
 from tinygrad.helpers import prod
@@ -80,12 +80,7 @@ def load(x):
     ret = f.read()
   return ret
 
-# input format is    N, H x W, C//4 x 4
-# dweight format is  oc//4 x ch, cw x 4(oc)
-# weight format is   oc//4 x ch, ic//4, cw, 4(oc) x 4(ic)
-def processing_op(op,x,w,ret,C):
-  assert op == ProcessingOps.CONV, f"{op} isn't supported"
-
+def conv(x,w,ret,C):
   print(x.shape, w.shape, ret.shape)
   options = ("-DDEPTHWISE",) if C.groups > 1 else tuple()
   conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), options)
@@ -94,6 +89,65 @@ def processing_op(op,x,w,ret,C):
   conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
   print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *[np.int16(x) for x in conv_args])
+
+# input format is    N, H x W, C//4 x 4
+# dweight format is  oc//4 x ch, cw x 4(oc)
+# weight format is   oc//4 x ch, ic//4, cw, 4(oc) x 4(ic)
+def processing_op(ctx,op,x,w,out_shape,C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+
+  print(x.shape, w.shape)
+
+  # hack for multiples of 4
+  if C.groups == 1 and C.cin % 4 != 0:
+    to_add = 4 - (C.cin % 4)
+    ws = [(0, s) for s in w.shape]
+    ws[1] = (0, w.shape[1]+to_add)
+    w = ctx.movement_op(MovementOps.SLICE, w, ws)
+
+    xs = [(0, s) for s in x.shape]
+    xs[1] = (0, x.shape[1]+to_add)
+    x = ctx.movement_op(MovementOps.SLICE, x, xs)
+
+    C = C._replace(cin = C.cin + to_add)
+
+  # hack for multiples of 4
+  added_output_shape = None
+  if C.groups == 1 and C.cout % 4 != 0:
+    to_add = 4 - (C.cout % 4)
+    added_output_shape = to_add
+    ws = [(0, s) for s in w.shape]
+    ws[0] = (0, w.shape[0]+to_add)
+    w = ctx.movement_op(MovementOps.SLICE, w, ws)
+    C = C._replace(cout = C.cout + to_add, rcout = C.rcout + to_add)
+
+  # packed
+  assert (C.groups*C.cin) % 4 == 0
+  x = ctx.movement_op(MovementOps.PERMUTE, x, (0,2,3,1))
+  x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
+
+  assert C.cout % 4 == 0
+  if C.cin == 1:
+    # depthwise
+    w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.H*C.W))
+    w = ctx.movement_op(MovementOps.PERMUTE, w, (0,2,1))
+  else:
+    w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.cin//4,4,C.H,C.W))
+    w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
+    w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
+
+  ret = ctx.buffer((C.bs*C.oy, C.ox*C.cout//4, 4))
+  conv(x, w, ret, C)
+
+  ret = ctx.movement_op(MovementOps.RESHAPE, ret, (C.bs, C.oy, C.ox, C.cout))
+
+  if added_output_shape is not None:
+    xs = [(0, s) for s in ret.shape]
+    xs[3] = (0, ret.shape[3]-added_output_shape)
+    ret = ctx.movement_op(MovementOps.SLICE, ret, xs)
+
+  ret = ctx.movement_op(MovementOps.PERMUTE, ret, (0,3,1,2))
+  return ret
 
 def test_image():
   hostbuf = np.random.randn(5,8,4).astype(np.float32)
