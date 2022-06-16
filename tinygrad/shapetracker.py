@@ -100,14 +100,6 @@ class ShapeTracker:
     offset = sum([(s-1)*z for s,z,m in zip(self.shape,old_strides,mul) if m < 0])
     self.views.append(View(new_shape, strides, offset))
 
-  # TODO: is there a better name for this?
-  # TODO: this shouldn't be in shapetracker, this should be in mlops
-  def unstride(self, *mul):
-    start_shape = self.shape
-    self.reshape(*reduce(lambda x,y: x+[y,1], start_shape, []))
-    self.slice([(0,x) for x in chain(*zip(start_shape, mul))])
-    self.reshape([s*m for s,m in zip(start_shape, mul)])
-
   # TODO: this is a special case of slice with strides, remove it
   def flip(self, *axis):
     self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
