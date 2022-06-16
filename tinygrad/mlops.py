@@ -177,6 +177,8 @@ class Conv2D(Function):
     dx = ctx.processing_op(ProcessingOps.CONVT, grad_output, w, x.shape, C) if ctx.needs_input_grad[0] else None
 
     # compute derivative of weights using ProcessingOps.CONV
+    # TODO: there has to be a way to do this without the expand/reduce for at least matmul
+    # since it's ctx.op.matmul(input, grad_output, ctx.buffer(weight.shape), transpose_a=True)
     xdw = ctx.movement_op(MovementOps.RESHAPE, x, (1, C.bs * C.groups * C.cin, C.iy, C.ix))
     grad_output_dw = ctx.movement_op(MovementOps.RESHAPE, grad_output, (C.bs * C.groups, 1, C.rcout, C.oy, C.ox))
     # this expand is slow
