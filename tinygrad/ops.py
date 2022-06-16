@@ -73,11 +73,10 @@ class Ops:
 
   def processing_op(ctx, op:ProcessingOps, x, y, out_shape, C):
     # TODO: can we do better than out_shape?
-    x,y,C = ctx.op.preprocessing_op(ctx, op, x, y, out_shape, C)
+    if getattr(ctx.op, "preprocessing_op", None) is not None: x,y,C = ctx.op.preprocessing_op(ctx, op, x, y, out_shape, C)
     ret = ctx.op.processing_op(ctx, op, x, y, out_shape, C)
     log_op(op, ret, [x, y])
-    ret = ctx.op.postprocessing_op(ctx, op, ret, out_shape, C)
+    if getattr(ctx.op, "postprocessing_op", None) is not None: ret = ctx.op.postprocessing_op(ctx, op, ret, out_shape, C)
     assert isinstance(ret, ctx.buffer)
-    print(ret.shape, out_shape)
     assert ret.shape == out_shape
     return ret
