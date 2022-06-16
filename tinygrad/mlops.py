@@ -166,7 +166,6 @@ class Slice(Function):
 
 # ************* processing ops *************
 
-cnt = 0
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
     C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
