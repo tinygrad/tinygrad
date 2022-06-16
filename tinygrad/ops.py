@@ -1,10 +1,12 @@
 # TODO: move Device to here and proxy buffer call
 from enum import Enum
 UnaryOps = Enum("UnaryOps", ["RELU", "EXP", "LOG", "NEG", "SIGN"])
-BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "A", "CMPEQ"])
+BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE"])
-ProcessingOps = Enum("ProcessingOps", ["CONV", "CONVT", "CONVDW"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
+ProcessingOps = Enum("ProcessingOps", ["CONV"])
+
+from tinygrad.shapetracker import ShapeTracker
 
 import os
 DEBUG = int(os.getenv("PRINT_LLOPS", "0"))
@@ -30,13 +32,7 @@ def log_op(op, ret, inp):
       return f"<<< {x.global_num} >>>"
 
     top,sop = str(op).split(".")
-    top_colors = {
-      "UnaryOps": "#c0c0c0",
-      "ReduceOps": "#8080ff",
-      "BinaryOps": "#c0c0c0",
-      "MovementOps": "#80ff80",
-      "ProcessingOps": "#ff8080"
-    }
+    top_colors = {"UnaryOps": "#c0c0c0", "ReduceOps": "#8080ff", "BinaryOps": "#c0c0c0", "MovementOps": "#80ff80", "ProcessingOps": "#ff8080"}
 
     for x in inp:
       G.add_edge(nm(x), nm(ret), label=sop)
@@ -45,7 +41,6 @@ def log_op(op, ret, inp):
     G.nodes[nm(ret)]['fillcolor'] = top_colors[top]
     G.nodes[nm(ret)]['style'] = 'filled'
 
-from tinygrad.helpers import binary_broadcast
 class Ops:
   def unary_op(ctx, op:UnaryOps, x):
     ret = ctx.buffer(x.shape)
@@ -53,23 +48,21 @@ class Ops:
     log_op(op, ret, [x])
     return ret
 
-  def reduce_op(ctx, op:BinaryOps, x, new_shape):
+  def reduce_op(ctx, op:ReduceOps, x, new_shape):
     ret = ctx.buffer(new_shape)
     ctx.op.reduce_op(op, x, ret)
     log_op(op, ret, [x])
     return ret
 
-  def binary_op(ctx, op:ReduceOps, x, y):
-    ret = ctx.buffer(binary_broadcast(x.shape, y.shape))
+  def binary_op(ctx, op:BinaryOps, x, y):
+    assert x.shape == y.shape
+    ret = ctx.buffer(x.shape)
     ctx.op.binary_op(op, x, y, ret)
-    log_op(op, ret, [x] if op == BinaryOps.A else [x, y])
+    log_op(op, ret, [x, y])
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg=None):
-    if op == MovementOps.RESHAPE: new_shape = arg
-    if op == MovementOps.PERMUTE: new_shape = [x.shape[i] for i in arg]
-    if op == MovementOps.SLICE: new_shape = [y-x for x,y in arg]
-    ret = ctx.buffer(tuple(new_shape))
+    ret = ctx.buffer(ShapeTracker(*x.shape).movement_op(op, arg).shape)
     ctx.op.movement_op(op, x, ret, arg)
     log_op(op, ret, [x])
     return ret

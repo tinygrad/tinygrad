@@ -301,23 +301,23 @@ class Tensor:
   def leakyrelu(self, neg_slope=0.01):
     return self.relu() - (-neg_slope*self).relu()
 
+  def _softmax(self):
+    m = self - self.max(axis=len(self.shape)-1, keepdim=True)
+    e = m.exp()
+    return m, e, e.sum(axis=len(self.shape)-1, keepdim=True)
+
   def softmax(self):
-    m = self.max(axis=len(self.shape)-1, keepdim=True)
-    e = (self - m).exp()
-    ss = e.sum(axis=len(self.shape)-1, keepdim=True)
+    _, e, ss = self._softmax()
     return e.div(ss)
 
   def logsoftmax(self):
-    m = self.max(axis=len(self.shape)-1, keepdim=True)
-    ss = m + (self-m).exp().sum(axis=len(self.shape)-1, keepdim=True).log()
-    return self - ss
+    m, _, ss = self._softmax()
+    return m - ss.log()
 
   def dropout(self, p=0.5):
-    if Tensor.training:
-      _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-      return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
-    else:
-      return self
+    if not Tensor.training: return self
+    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
   def softplus(self, limit=20, beta=1):
     # safe softplus - 1/beta*log(1 + exp(beta*x)) (PyTorch)
@@ -344,15 +344,38 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)):
     return self._pool2d(*kernel_size).max(axis=(3,5))
 
-  def conv2d(self, weight, bias=None, stride=1, groups=1, padding=0):
-    #x = self.pad2d((padding[0], padding[0], padding[1], padding[1])) if padding is not None else self
-    ret = self._conv2d(weight, stride=stride, groups=groups, padding=padding)
+  def conv2d(self, weight, bias=None, **kwargs):
+    ret = self._conv2d(weight, **kwargs)
     return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
+
+  # ***** broadcasted binary ops *****
+
+  @staticmethod
+  def broadcasted(fxn, x, y):
+    tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
+    if not isinstance(x, Tensor): x = Tensor(np.array([x], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+    if not isinstance(y, Tensor): y = Tensor(np.array([y], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+
+    n_dims = max(len(x.shape), len(y.shape))
+    if len(x.shape) != n_dims: x = x.reshape(list(x.shape) + [1]*(n_dims-len(x.shape)))
+    if len(y.shape) != n_dims: y = y.reshape(list(y.shape) + [1]*(n_dims-len(y.shape)))
+
+    shape_ret = tuple([int(x) for x in np.maximum(x.shape, y.shape)])
+    if x.shape != shape_ret: x = x.expand(shape_ret)
+    if y.shape != shape_ret: y = y.expand(shape_ret)
+    return fxn(x, y)
+
+  # TODO: are these the only ones that can take number arguments?
+  def add(self, x): return Tensor.broadcasted(Tensor._add, self, x)
+  def sub(self, x): return Tensor.broadcasted(Tensor._sub, self, x)
+  def mul(self, x): return Tensor.broadcasted(Tensor._mul, self, x)
+  def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
 
   # ***** functional nn ops *****
 
-  def reshape(self, shape):
-    return self._reshape(shape=shape)
+  # TODO: fix the kwargs problem
+  def reshape(self, shape): return self._reshape(shape=shape)
+  def expand(self, shape): return self._expand(shape=shape)
 
   def linear(self, weight, bias):
     shp = [1] * (len(self.shape)-1) + [-1]
@@ -391,13 +414,8 @@ class Function(Ops):
 
   @classmethod
   def apply(cls, *x, **kwargs):
-    tt = [arg for arg in x if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-
-    # create tensors from number arguments
-    x = [Tensor(np.array([arg], dtype=tt.dtype), device=tt.device, requires_grad=False) if not isinstance(arg, Tensor) else arg for arg in x]
-    assert all([tt.device == t.device for t in x]), "All tensors are not on the same device"
-
-    ctx = cls(tt.device, *x)
+    assert all([isinstance(arg, Tensor) for arg in x])
+    ctx = cls(x[0].device, *x)
     with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
       ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
                    device=ctx.device, requires_grad=ctx.requires_grad)
@@ -406,19 +424,22 @@ class Function(Ops):
       ret._ctx = ctx    # used by autograd engine
     return ret
 
-def register(name, fxn):
-  def dispatch(*x, **kwargs): return fxn.apply(*x, **kwargs)   # TODO: there's probably a very pythonic thing to replace this with
-  setattr(Tensor, "_"+name if (getattr(Tensor, name, None) is not None) else name, dispatch)
-  if name in ['add', 'sub', 'mul', 'pow', 'matmul']:
-    setattr(Tensor, f"__{name}__", dispatch)
-    setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(dispatch(self,x)))
-    setattr(Tensor, f"__r{name}__", lambda self,x: dispatch(x,self))
-
 # register functions to move between devices
 for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
 
-# this registers all the mlops "math" operations
+# register all the mlops "math" operations
+def register(name, fxn):
+  def dispatch(*x, **kwargs): return fxn.apply(*x, **kwargs)   # TODO: there's probably a very pythonic thing to replace this with
+  setattr(Tensor, "_"+name if (getattr(Tensor, name, None) is not None) else name, dispatch)
 for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
   if name[0] != "_" and name != "Function" and not name.endswith("Ops"): register(name.lower(), cls)
+
+# register the operators
+# TODO: add div
+def register_op(name, fxn):
+  setattr(Tensor, f"__{name}__", fxn)
+  setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self,x)))
+  setattr(Tensor, f"__r{name}__", lambda self,x: fxn(x,self))
+for name in ['add', 'sub', 'mul', 'pow', 'matmul']: register_op(name, getattr(Tensor, name))
