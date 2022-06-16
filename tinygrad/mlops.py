@@ -44,9 +44,7 @@ class Sum(Function):
 
   def backward(ctx, grad_output):
     shape_input, = ctx.saved_tensors
-    # NOTE: the b Buffer isn't used, since this is just for broadcast
-    ret = ctx.buffer(shape_input)
-    return ctx.binary_op(BinaryOps.A, grad_output, ret)
+    return ctx.movement_op(MovementOps.EXPAND, grad_output, shape_input)
 
 class Max(Function):
   def forward(ctx, input, axis=None):
@@ -56,36 +54,35 @@ class Max(Function):
 
   def backward(ctx, grad_output):
     input, ret = ctx.saved_tensors
-    ret2 = ctx.binary_op(BinaryOps.CMPEQ, input, ret)
-    div = ctx.reduce_op(ReduceOps.SUM, ret2, grad_output.shape)
-    ret2 = ctx.binary_op(BinaryOps.DIV, div, ret2)
-    return ctx.binary_op(BinaryOps.MUL, ret2, grad_output)
+
+    # 1s in locations where the max was chosen (can be two locations)
+    max_is_1s = ctx.binary_op(BinaryOps.CMPEQ, input, ctx.movement_op(MovementOps.EXPAND, ret, input.shape))
+
+    # sum of locations, averaged
+    div = ctx.reduce_op(ReduceOps.SUM, max_is_1s, grad_output.shape)
+    div = ctx.movement_op(MovementOps.EXPAND, div, input.shape)
+    max_is_amount = ctx.binary_op(BinaryOps.DIV, div, max_is_1s)
+
+    grad_output_expanded = ctx.movement_op(MovementOps.EXPAND, grad_output, input.shape)
+    return ctx.binary_op(BinaryOps.MUL, max_is_amount, grad_output_expanded)
 
 # ************* binary ops *************
 
-def unbroadcast(ctx, out, in_sh):
-  return ctx.reduce_op(ReduceOps.SUM, out, in_sh)
-
 class Add(Function):
   def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
     return ctx.binary_op(BinaryOps.ADD, x, y)
 
   def backward(ctx, grad_output):
-    shape_x, shape_y = ctx.saved_tensors
-    return unbroadcast(ctx, grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
-           unbroadcast(ctx, grad_output, shape_y) if ctx.needs_input_grad[1] else None
+    return grad_output if ctx.needs_input_grad[0] else None, \
+           grad_output if ctx.needs_input_grad[1] else None
 
 class Sub(Function):
   def forward(ctx, x, y):
-    ctx.save_for_backward(x.shape, y.shape)
     return ctx.binary_op(BinaryOps.SUB, x, y)
 
   def backward(ctx, grad_output):
-    shape_x, shape_y = ctx.saved_tensors
-    neg_grad_output = ctx.unary_op(UnaryOps.NEG, grad_output)
-    return unbroadcast(ctx, grad_output, shape_x) if ctx.needs_input_grad[0] else None, \
-           unbroadcast(ctx, neg_grad_output, shape_y) if ctx.needs_input_grad[1] else None
+    return grad_output if ctx.needs_input_grad[0] else None, \
+           ctx.unary_op(UnaryOps.NEG, grad_output) if ctx.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(ctx, x, y):
@@ -94,8 +91,8 @@ class Mul(Function):
 
   def backward(ctx, grad_output):
     x,y = ctx.saved_tensors
-    grad_x = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, y, grad_output), x.shape) if ctx.needs_input_grad[0] else None
-    grad_y = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, x, grad_output), y.shape) if ctx.needs_input_grad[1] else None
+    grad_x = ctx.binary_op(BinaryOps.MUL, y, grad_output) if ctx.needs_input_grad[0] else None
+    grad_y = ctx.binary_op(BinaryOps.MUL, x, grad_output) if ctx.needs_input_grad[1] else None
     return grad_x, grad_y
 
 class Pow(Function):
@@ -106,14 +103,36 @@ class Pow(Function):
 
   def backward(ctx, grad_output):
     x,y,powxy = ctx.saved_tensors
-    tmp = ctx.binary_op(BinaryOps.DIV, x, powxy)      # pow(x,y)/x
-    tmp = ctx.binary_op(BinaryOps.MUL, y, tmp)        # y * pow(x,y)/x
-    grad_x = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, grad_output, tmp), x.shape) if ctx.needs_input_grad[0] else None
-    tmp = ctx.binary_op(BinaryOps.MUL, ctx.unary_op(UnaryOps.LOG, x), powxy)  # log(x) * pow(x,y)
-    grad_y = unbroadcast(ctx, ctx.binary_op(BinaryOps.MUL, grad_output, tmp), y.shape) if ctx.needs_input_grad[1] else None
+    grad_x, grad_y = None, None
+    if ctx.needs_input_grad[0]:
+      tmp = ctx.binary_op(BinaryOps.DIV, x, powxy)      # pow(x,y)/x
+      tmp = ctx.binary_op(BinaryOps.MUL, y, tmp)        # y * pow(x,y)/x
+      grad_x = ctx.binary_op(BinaryOps.MUL, grad_output, tmp)
+    if ctx.needs_input_grad[1]:
+      tmp = ctx.binary_op(BinaryOps.MUL, ctx.unary_op(UnaryOps.LOG, x), powxy)  # log(x) * pow(x,y)
+      grad_y = ctx.binary_op(BinaryOps.MUL, grad_output, tmp)
     return grad_x, grad_y
 
 # ************* movement ops *************
+
+# NOTE: this is sum in reverse
+class Expand(Function):
+  def forward(ctx, x, shape):
+    ctx.save_for_backward(x.shape)
+    return ctx.movement_op(MovementOps.EXPAND, x, shape)
+
+  def backward(ctx, grad_output):
+    in_shape, = ctx.saved_tensors
+    return ctx.reduce_op(ReduceOps.SUM, grad_output, in_shape)
+
+class Flip(Function):
+  def forward(ctx, x, axis):
+    ctx.save_for_backward(axis)
+    return ctx.movement_op(MovementOps.FLIP, x, axis)
+
+  def backward(ctx, grad_output):
+    axis, = ctx.saved_tensors
+    return ctx.movement_op(MovementOps.FLIP, grad_output, axis)
 
 class Reshape(Function):
   def forward(ctx, x, shape):
@@ -149,6 +168,7 @@ class Slice(Function):
 
 cnt = 0
 class Conv2D(Function):
+<<<<<<< HEAD
   def forward(ctx, x, w, stride=1, groups=1, padding=0):
     C = get_conv_args(x.shape, w.shape, stride, groups, padding)
     ctx.save_for_backward(x,w,(C.ys,C.xs), C.groups)
@@ -219,10 +239,39 @@ class Conv2D(Function):
       return ret
     else:
       return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.groups*C.rcout, C.oy, C.ox), C)
+=======
+  def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
+    C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
+    ctx.save_for_backward(x,w,C)
+    return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.cout, C.oy, C.ox), C)
+>>>>>>> origin/master
 
   def backward(ctx, grad_output):
-    x, w, stride, groups = ctx.saved_tensors
-    C = get_conv_args(x.shape, w.shape, stride, groups)
-    dx = ctx.processing_op(ProcessingOps.CONVT, grad_output, w, x.shape, C) if ctx.needs_input_grad[0] else None
-    dw = ctx.processing_op(ProcessingOps.CONVDW, x, grad_output, w.shape, C) if ctx.needs_input_grad[1] else None
+    x, w, C = ctx.saved_tensors
+    #dx = ctx.processing_op(ProcessingOps.CONVT, grad_output, w, x.shape, C) if ctx.needs_input_grad[0] else None
+    xt = grad_output
+    if C.xs > 1 or C.ys > 1:   # unstride
+      xt = ctx.movement_op(MovementOps.RESHAPE, xt, (grad_output.shape[0], grad_output.shape[1], grad_output.shape[2], 1, grad_output.shape[3], 1))
+      xt = ctx.movement_op(MovementOps.SLICE, xt, ((0,xt.shape[0]), (0,xt.shape[1]), (0,xt.shape[2]), (0,C.ys), (0,xt.shape[4]), (0,C.xs)))
+      xt = ctx.movement_op(MovementOps.RESHAPE, xt, (xt.shape[0], xt.shape[1], xt.shape[2]*C.ys, xt.shape[4]*C.xs))
+    wt = ctx.movement_op(MovementOps.RESHAPE, w, (C.groups, C.rcout, C.cin, C.H, C.W))
+    wt = ctx.movement_op(MovementOps.FLIP, wt, (3, 4))
+    wt = ctx.movement_op(MovementOps.PERMUTE, wt, (0, 2, 1, 3, 4))
+    wt = ctx.movement_op(MovementOps.RESHAPE, wt, (C.groups*C.cin, C.rcout, C.H, C.W))
+    Cdx = get_conv_args(xt.shape, wt.shape, dilation=(C.dy, C.dx), padding=((C.H-1)*C.dy-C.py,(C.W-1)*C.dx-C.px), groups=C.groups)
+    # TODO: this shape can be wrong. support asymmetric padding to remove the slice
+    dx = ctx.processing_op(ProcessingOps.CONV, xt, wt, (Cdx.bs, Cdx.cout, Cdx.oy, Cdx.ox), Cdx)
+    dx = ctx.movement_op(MovementOps.SLICE, dx, [(0,s) for s in x.shape])
+
+    # compute derivative of weights using ProcessingOps.CONV
+    xdw = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs, C.groups, C.cin, C.iy, C.ix))
+    xdw = ctx.movement_op(MovementOps.PERMUTE, xdw, (2,1,0,3,4))
+    xdw = ctx.movement_op(MovementOps.RESHAPE, xdw, (C.cin, C.groups*C.bs, C.iy, C.ix))
+    grad_output_dw = ctx.movement_op(MovementOps.PERMUTE, grad_output, (1,0,2,3))
+    grad_output_dw = ctx.movement_op(MovementOps.RESHAPE, grad_output_dw, (C.cout, C.bs, C.oy, C.ox))
+    Cdw = get_conv_args(xdw.shape, grad_output_dw.shape, padding=(C.py, C.px), stride=(C.dy, C.dx), dilation=(C.ys, C.xs), groups=C.groups)
+    grad_weight = ctx.processing_op(ProcessingOps.CONV, xdw, grad_output_dw, (C.cin, C.cout, Cdw.oy, Cdw.ox), Cdw)
+    grad_weight = ctx.movement_op(MovementOps.PERMUTE, grad_weight, (1,0,2,3))
+    # TODO: remove this slice using asymmetric padding
+    dw = ctx.movement_op(MovementOps.SLICE, grad_weight, ((0, grad_weight.shape[0]), (0, grad_weight.shape[1]), (0, w.shape[2]), (0, w.shape[3])))
     return dx, dw

@@ -42,6 +42,8 @@ class TestOps(unittest.TestCase):
 
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
+  def test_broadcasted_add(self):
+    helper_test_op([(45,65), (45,1)], lambda x,y: x+y, lambda x,y: x+y)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
   def test_mul(self):
@@ -159,12 +161,22 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)))
 
+  def test_flip(self):
+    helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (0,)), lambda x: x.flip(axis=(0,)))
+    helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (0,1)), lambda x: x.flip(axis=(0,1)))
+    helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (0,1,3)), lambda x: x.flip(axis=(0,1,3)))
+    helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (3,)), lambda x: x.flip(axis=(3,)))
+
   def test_flatten(self):
     for axis in range(3):
       helper_test_op([(4,3,6,6)], lambda x: torch.flatten(x, start_dim=axis), lambda x: x.flatten(axis))
 
   def test_detach(self):
     helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), forward_only=True)
+
+  def test_expand(self):
+    arg = (4,3,2,6)
+    helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
 
   def test_simple_conv2d(self):
     helper_test_op([(1,1,9,9), (1,1,3,3)],
@@ -190,7 +202,8 @@ class TestOps(unittest.TestCase):
     W = 2
     helper_test_op([(bs,cin,64,64), (6,cin//groups,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+      # needed to relax tolerance on NVIDIA
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-3, grad_rtol=1e-5)
 
   def test_simple_grouped_conv2d(self):
     bs = 1
@@ -241,6 +254,37 @@ class TestOps(unittest.TestCase):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride).relu(),
         lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), atol=1e-4)
+
+  def test_padded_conv2d(self):
+    bs = 4
+    cin = 3
+    H,W = 3,3
+    for p in [2, (2,1)]:
+      with self.subTest(padding := p):
+        helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+          lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+          lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4, forward_only=True)
+
+  def test_dilated_conv2d_forward(self):
+    bs = 4
+    cin = 3
+    H,W = 3,3
+    for d in [2, (2,1)]:
+      with self.subTest(dilation := d):
+        helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+          lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
+          lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4, forward_only=True)
+
+  @unittest.skipUnless(Device.DEFAULT == Device.TORCH, "Not Implemented")
+  def test_dilated_conv2d(self):
+    bs = 4
+    cin = 3
+    H,W = 3,3
+    for d in [2, (2,1)]:
+      with self.subTest(dilation := d):
+        helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+          lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
+          lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4)
 
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:

@@ -1,8 +1,9 @@
 import functools
 import numpy as np
 import pyopencl as cl
-from tinygrad.helpers import prod, binary_broadcast, get_conv_args
+from tinygrad.helpers import prod
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
 cl_ctx, cl_queue = None, None
 def get_cl_ctx(): return cl_ctx
@@ -41,9 +42,6 @@ class GPUBuffer:
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
-def buffer_np(x):
-  return cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=x)
-
 @functools.lru_cache
 def clbuild(name, prg, options=tuple()):
   clprg = cl.Program(cl_ctx, prg).build(options=options).__getattr__(name)
@@ -66,142 +64,74 @@ def unary_op(op, x, ret):
   unop([roundup(prod(ret.shape))//4], None, x.cl, ret.cl)
   return ret
 
-@functools.lru_cache
-def get_binop_prg(code, complist):
-  ndims = len(complist)
-  args = "".join([f", int d{i}" for i in range(ndims)] + [f", int p{i}" for i in range(ndims-1)])
-  compute_idx_rets = "".join([f"\n    int idx_ret{i} = (gid0 / {f'p{i}' if i < ndims-1 else '1'}) % d{i};" for i in range(ndims)])
-
-  idx_exprs = ["0", "0"] # [idx_x, idx_y]
-  for i in range(ndims):
-    for j in range(2):
-      if complist[i][j]:
-        idx_exprs[j] = "idx_ret%d + d%d*(%s)" % (i, i, idx_exprs[j])
-
-  dtype = ["float", "float", "float"]
-  prg = """__kernel void binop(__global const """+dtype[0]+""" *x_g, __global const """+dtype[1]+""" *y_g, __global """+dtype[2]+""" *res_g"""+args+""") {
-    int gid0 = get_global_id(0);"""+compute_idx_rets+"""
-    """+dtype[0]+""" a = x_g["""+idx_exprs[0]+"""];
-    """+dtype[1]+""" b = y_g["""+idx_exprs[1]+"""];
-    res_g[gid0] = """+code+""";\n}"""
-  return cl.Program(cl_ctx, prg).build(), dtype[2] == "float4"
-
 def binary_op(op, x, y, ret):
   if op == BinaryOps.ADD: code = "a+b"
   elif op == BinaryOps.SUB: code = "a-b"
   elif op == BinaryOps.MUL: code = "a*b"
   elif op == BinaryOps.DIV: code = "b/a"
   elif op == BinaryOps.POW: code = "pow(a,b)"
-  elif op == BinaryOps.A: code = "a"
-  elif op == BinaryOps.CMPEQ: code = "1.0f*(a==b)"
+  elif op == BinaryOps.CMPEQ: code = "(float4)(1.0f*(a.x==b.x), 1.0f*(a.y==b.y), 1.0f*(a.z==b.z), 1.0f*(a.w==b.w))"
   else: raise Exception(f"{op} isn't supported")
-
-  shape_ret, dimlist, complist = binary_broadcast(x.shape, y.shape, True)
-  assert tuple(shape_ret) == tuple(ret.shape)
-  prod_list = np.array(dimlist, dtype=i32)[-1::-1].cumprod(dtype=i32)[-1::-1] # take cumprod from back to front
-  prg, is_float4 = get_binop_prg(code, tuple(complist))
-  kernel_size = ((roundup(prod_list[0])//4) if is_float4 else prod_list[0]) if len(dimlist) > 0 else 1
-  prg.binop(cl_queue, [kernel_size], None, x.cl, y.cl, ret.cl, *dimlist, *(prod_list[1:]))
+  assert x.shape == ret.shape and y.shape == ret.shape
+  binop = clbuild("binop", """
+  __kernel void binop(__global const float4 *a_g, __global const float4 *b_g, __global float4 *res_g) {
+    int gid = get_global_id(0);
+    float4 a = a_g[gid];
+    float4 b = b_g[gid];
+    res_g[gid] = """+code+""";
+  }""")
+  binop([roundup(prod(ret.shape))//4], None, x.cl, y.cl, ret.cl)
+  return ret
 
 def reduce_op(op, inp, ret):
-  if op == ReduceOps.SUM:
-    code = "out += a"
-    start = "0.0"
-  elif op == ReduceOps.MAX:
-    code = "out = max(a,out)"
-    start = "-INFINITY"
+  if op == ReduceOps.SUM: code, start = "out += a", "0.0"
+  elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
   else: raise Exception(f"{op} isn't supported")
-  # TODO: this is insanely slow
-  # NOTE: ret.shape can be (1,), it's mostly by luck that this works
-  reduce = clbuild("reduce", """
-  __kernel void reduce(__global const float *a_g, int sz, __global float *res_g, int prod, int n_dims,
-                       __global const int *shape_x, __global const int *shape_ret) {
-    int gid = get_global_id(0);
 
-    float out = """+start+""";
-    for (int x = 0; x < sz; x++) {
-      int idx = 0;  // compute index into a_g
-      int tprod = prod;
-      int tsz = sz;
-      for (int dim = 0; dim < n_dims; dim++) {
-        idx *= shape_x[dim];
-        if (shape_x[dim] == shape_ret[dim]) {   // dim from gid, don't reduce
-          tprod /= shape_x[dim];
-          idx += (gid / tprod) % shape_x[dim];
-        } else {  // dim from x
-          tsz /= shape_x[dim];
-          idx += (x / tsz) % shape_x[dim];
-        }
-      }
-      float a = a_g[idx];
-      """+code+""";
-    }
+  # reverse operation of expand, this validates inputs
+  st = ShapeTracker(*ret.shape).movement_op(MovementOps.EXPAND, inp.shape)
+  # this takes a ret index to an inp index, indexing 0 on the reduced strides
+  view = View(ret.shape, strides_for_shape(inp.shape))
+
+  # generate loops with combined adjacent reduce axis
+  acc = 1
+  loop_start, loop_end = [], []
+  for shp,stride in st.views[-1].shape_strides[::-1]:
+    if stride == 0:
+      loop_start.append(f"for (int axis_{len(loop_start)} = 0; axis_{len(loop_start)} < {shp}; axis_{len(loop_start)}++) {{")
+      loop_end.append(f"idx += {acc}; }} idx -= {shp*acc};")
+    acc *= shp
+
+  # TODO: support multistage reduces
+  prg = """
+  __kernel void reduce(__global const float *a_g, __global float *res_g) {
+    int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
+    float out = """+start+""";\n"""+ \
+      '\n'.join(loop_start[::-1])+"""
+        float a = a_g[idx];
+        """+code+""";\n"""+ \
+      '\n'.join(loop_end)+"""
     res_g[gid] = out;
-  }""")
-  reduce([prod(ret.shape)], None, inp.cl,
-    i32(prod(inp.shape)//prod(ret.shape)), ret.cl,
-    i32(prod(ret.shape)), i32(len(ret.shape)),
-    buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(ret.shape, dtype=np.int32)))
+  }"""
+  clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
 
-def reshape(x, ret):
-  cl.enqueue_copy(cl_queue, ret.cl, x.cl)
-
-def perm_axis(inp, order, ret):
-  perm = clbuild("perm", """
-  __kernel void perm(__global const float *a_g, __global float *res_g, int n_axis,
-                       __global const int *shape, __global const int *order) {
-    int gid = get_global_id(0);
-    int gi = gid;
-    int idx = 0;
-    for(int i = n_axis-1; i>-1; i--) {
-      int stride = 1;
-      for(int j=order[i]+1; j<n_axis; j++) stride *= shape[j];
-      idx += (gi % shape[order[i]])*stride;
-      gi /= shape[order[i]];
-    }
-    res_g[gid] = a_g[idx];
-  }""")
-  perm([prod(inp.shape)], None, inp.cl, ret.cl, i32(len(inp.shape)),
-    buffer_np(np.array(inp.shape, dtype=np.int32)),
-    buffer_np(np.array(order, dtype=np.int32)))
-
-# TODO: merge this with perm axis
-def inner_slice(x, arg, ret):
-  shift = [y[0] for y in arg]
-  gslice = clbuild("gslice", """
-  __kernel void gslice(__global const float *input, __global float *output, int prod, int n_dims,
-                       __global const int *shape_x, __global const int *shape_ret,
-                       __global const int *shift) {
-    int gid = get_global_id(0);
-    int iptr = 0;
-    int zero = 1;
-    for (int dim = 0; dim < n_dims; dim++) {
-      prod /= shape_ret[dim];
-      int sidx = (gid / prod) % shape_ret[dim] + shift[dim];
-      zero &= (sidx >= 0 && sidx < shape_x[dim]);
-      iptr = (iptr * shape_x[dim]) + sidx;
-    }
-    output[gid] = zero ? input[iptr] : 0.0;
-  }""")
-  gslice([prod(ret.shape)], None,
-    x.cl, ret.cl, i32(prod(ret.shape)), i32(len(ret.shape)),
-    buffer_np(np.array(x.shape, dtype=np.int32)),
-    buffer_np(np.array(ret.shape, dtype=np.int32)),
-    buffer_np(np.array(shift, dtype=np.int32)))
+def contiguous(x, ret, st):
+  clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
+    int gid = get_global_id(0); int valid = 1; int idx = gid; """+st.expr().replace('//', '/')+""";
+    ret[gid] = valid ? x[idx] : 0.0;  // should never be out-of-bounds accesses
+  }""")([prod(ret.shape)], None, x.cl, ret.cl)
 
 def movement_op(op, x, ret, arg=None):
-  if op == MovementOps.RESHAPE: reshape(x, ret)
-  elif op == MovementOps.PERMUTE: perm_axis(x, arg, ret)
-  elif op == MovementOps.SLICE: inner_slice(x, arg, ret)
+  contiguous(x, ret, ShapeTracker(*x.shape).movement_op(op, arg))
 
-def conv(x,w,ret,C):
+def processing_op(op,x,w,ret,C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
   conv_prg = clbuild("conv", """
   __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
-    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs) {
+    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py) {
 
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
@@ -214,14 +144,18 @@ def conv(x,w,ret,C):
 
     float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
-      for (int y = IY; y < IY+H; y++) { for (int x = IX; x < IX+W; x++) {
-        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + y*ix + x] * \
-          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + (y-IY)*W + (x-IX)];
+      for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
+        int idx_y = y*dy + IY - py;
+        int idx_x = x*dx + IX - px;
+        int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
+        acc += valid ? input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
+          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] : 0.0;
       } }
     }
     output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
   }""")
 
+<<<<<<< HEAD
   conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in C[0:12]])
 
 # tensx = (bs, groups*cin, iy, ix)
@@ -282,3 +216,6 @@ def processing_op(op,a,b,ret,C):
   if op == ProcessingOps.CONV: conv(a,b,ret,C)
   elif op == ProcessingOps.CONVT: convdx(a,b,ret,C)
   elif op == ProcessingOps.CONVDW: convdw(a,b,ret,C)
+=======
+  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
+>>>>>>> origin/master
