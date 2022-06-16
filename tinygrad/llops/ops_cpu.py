@@ -12,55 +12,55 @@ class CPUBuffer(np.ndarray):
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
   def permute(x, order): return x.transpose(order)
   def custompad(x, padding): return np.pad(x, padding)
-  def expand(x, new_shape): return np.broadcast_to(x, new_shape)
+  def expand(x, new_shape): return np.broadcast_to(x, new_shape).view(CPUBuffer)
 
   @staticmethod
   def fromCPU(x): return x
   def toCPU(x): return x
 
-def unary_op(op, x, ret):
-  if op == UnaryOps.RELU: ret[:] = x.relu()
-  elif op == UnaryOps.EXP: ret[:] = x.exp()
-  elif op == UnaryOps.LOG: ret[:] = x.log()
-  elif op == UnaryOps.NEG: ret[:] = -x
-  elif op == UnaryOps.SIGN: ret[:] = x.sign()
+def unary_op(ctx, op, x):
+  if op == UnaryOps.RELU: return x.relu()
+  elif op == UnaryOps.EXP: return x.exp()
+  elif op == UnaryOps.LOG: return x.log()
+  elif op == UnaryOps.NEG: return -x
+  elif op == UnaryOps.SIGN: return x.sign()
   else: raise Exception(f"{op} isn't supported")
 
-def binary_op(op, x, y, ret):
-  if op == BinaryOps.ADD: ret[:] = x+y
-  elif op == BinaryOps.SUB: ret[:] = x-y
-  elif op == BinaryOps.MUL: ret[:] = x*y
-  elif op == BinaryOps.DIV: ret[:] = y/x
-  elif op == BinaryOps.POW: ret[:] = x**y
-  elif op == BinaryOps.CMPEQ: ret[:] = 1.0*(x==y)
+def binary_op(ctx, op, x, y):
+  if op == BinaryOps.ADD: return x+y
+  elif op == BinaryOps.SUB: return x-y
+  elif op == BinaryOps.MUL: return x*y
+  elif op == BinaryOps.DIV: return y/x
+  elif op == BinaryOps.POW: return x**y
+  elif op == BinaryOps.CMPEQ: return 1.0*(x==y)
   else: raise Exception(f"{op} isn't supported")
 
-def reduce_op(op, inp, ret):
-  if inp.shape == ret.shape:   # this is just a copy, regardless of the reduce op
-    ret[:] = inp
+def reduce_op(ctx, op, inp, new_shape):
+  if inp.shape == new_shape:   # this is just a copy, regardless of the reduce op
+    return inp[:]
   else:
-    if ret.shape == (1,):      # full reduce
+    if new_shape == (1,):      # full reduce
       axis = tuple(range(len(inp.shape)))
     else:
-      assert len(inp.shape) == len(ret.shape)
-      axis = tuple([i for i,(a,b) in enumerate(zip(inp.shape, ret.shape)) if a != b])
-    if op == ReduceOps.SUM: ret[:] = inp.sum(axis, keepdims=True)
-    elif op == ReduceOps.MAX: ret[:] = inp.amax(axis, keepdims=True)
+      assert len(inp.shape) == len(new_shape)
+      axis = tuple([i for i,(a,b) in enumerate(zip(inp.shape, new_shape)) if a != b])
+    if op == ReduceOps.SUM: return inp.sum(axis, keepdims=True)
+    elif op == ReduceOps.MAX: return inp.amax(axis, keepdims=True)
     else: raise Exception(f"{op} isn't supported")
 
-def movement_op(op, x, ret, arg=None):
-  if op == MovementOps.RESHAPE: ret[:] = x.reshape(arg)
-  elif op == MovementOps.PERMUTE: ret[:] = x.permute(arg)
-  elif op == MovementOps.FLIP: ret[:] = x.flip(arg)
+def movement_op(ctx, op, x, arg=None):
+  if op == MovementOps.RESHAPE: return x.reshape(arg)
+  elif op == MovementOps.PERMUTE: return x.permute(arg)
+  elif op == MovementOps.FLIP: return x.flip(arg)
   elif op == MovementOps.SLICE:
     padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
     x = x.custompad(padding)
     slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
-    ret[:] = x[tuple([slice(x[0], x[1], None) for x in slicee])]
-  elif op == MovementOps.EXPAND: ret[:] = x.expand(arg)
+    return x[tuple([slice(x[0], x[1], None) for x in slicee])].view(CPUBuffer)
+  elif op == MovementOps.EXPAND: return x.expand(arg)
   else: raise Exception(f"{op} isn't supported")
 
-def processing_op(op,x,w,ret,C):
+def processing_op(ctx, op,x,w,out_shape,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   if C.px > 0 or C.py > 0: x = np.pad(x, [(0,0), (0,0), (C.py, C.py), (C.px, C.px)])
   gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
@@ -74,4 +74,4 @@ def processing_op(op,x,w,ret,C):
   for g in range(C.groups):
     #ijYXyx,kjyx -> iYXk ->ikYX
     tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
-  ret[:] = np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
+  return np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)
