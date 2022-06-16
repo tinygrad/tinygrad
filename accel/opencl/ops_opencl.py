@@ -91,7 +91,7 @@ def conv(x,w,ret,C):
   conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), tuple(options))
   assert C.cout%4 == 0
   kernel_args = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
-  conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
+  conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
   print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *[np.int16(x) for x in conv_args])
 

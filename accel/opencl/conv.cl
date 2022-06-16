@@ -6,6 +6,7 @@
     write_only image2d_t output,
     short numPackedInputChannelsForGroup,
     short totalNumPackedInputChannels,
+    short numPackedOutputChannelsForGroup,
     short totalNumPackedOutputChannels,
     short numOutputColumns,
     short numOutputRows, short numInputRows,
@@ -26,13 +27,8 @@
   weightLocation.x = 0;
   weightLocation.y = packedOutputChannel;
 
-#ifdef DEPTHWISE
-  short startPackedInputChannel = packedOutputChannel;
-#else
-  // this was an input?
-  short startPackedInputChannel = 0;
-#endif
-
+  short groupNum = (packedOutputChannel / numPackedOutputChannelsForGroup);
+  short startPackedInputChannel = mul24(groupNum, numPackedInputChannelsForGroup);
   short startOutputColumn = mul24((short)get_global_id(1), NUM_OUTPUTS);
   short startX = mad24(mad24(startOutputColumn, strideX, -paddingX), totalNumPackedInputChannels, startPackedInputChannel);
   short strideWithChannels = mul24(strideX, totalNumPackedInputChannels);
