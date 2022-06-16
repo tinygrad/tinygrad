@@ -87,7 +87,11 @@ class OpenCLBuffer:
 def movement_op(ctx, op, x, arg=None):
   xc = x.clone()
   xc.shapetracker.movement_op(op, arg)
-  return contiguous(ctx, xc, xc.shapetracker)
+  if not xc.shapetracker.contiguous:
+    return contiguous(ctx, xc, xc.shapetracker)
+  else:
+    xc.cl   # this can't be image
+    return xc
 
 def load(x):
   with open(x) as f:
