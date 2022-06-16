@@ -5,7 +5,8 @@ import pathlib
 import numpy as np
 from tinygrad.ops import MovementOps, ProcessingOps
 from tinygrad.llops.ops_gpu import require_init_gpu, clbuild, sync, get_cl_queue, get_cl_ctx
-from tinygrad.llops.ops_gpu import unary_op, binary_op, reduce_op, contiguous
+from tinygrad.llops.ops_gpu import contiguous
+from tinygrad.llops.ops_gpu import unary_op as unary_op_gpu, binary_op as binary_op_gpu, reduce_op as reduce_op_gpu
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
 import pyopencl as cl
@@ -37,8 +38,12 @@ class OpenCLBuffer:
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    sync()
-    cl.enqueue_copy(get_cl_queue(), data, self.cl, is_blocking=True)
+    if self.shapetracker.contiguous == False:
+      tmp = OpenCLBuffer(self.shapetracker.shape)
+      contiguous(None, self, self.shapetracker, tmp)
+    else:
+      tmp = self
+    cl.enqueue_copy(get_cl_queue(), data, tmp.cl, is_blocking=True)
     return data
 
   @property
@@ -46,6 +51,7 @@ class OpenCLBuffer:
     if self._buf is None:
       self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
       if self._image is not None:
+        assert prod(self.shape) == prod(self._image.shape)*4
         print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         clbuild("from_image", """
           __kernel void from_image(
@@ -69,6 +75,7 @@ class OpenCLBuffer:
       fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
       self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=flip(self.shape))
       if self._buf is not None:
+        assert prod(self.shape) == prod(self._image.shape)*4
         print(f"converting {self.shape} to image with shape {self._image.shape}")
         clbuild("to_image", """
           __kernel void to_image(
@@ -84,14 +91,26 @@ class OpenCLBuffer:
       self._buf = None
     return self._image
 
+def unary_op(ctx, op, x):
+  # TODO: this doesn't actually have to be contiguous
+  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
+  return unary_op_gpu(ctx, op, x)
+
+def binary_op(ctx, op, x, y):
+  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
+  y = contiguous(ctx, y, y.shapetracker) if not y.shapetracker.contiguous else y
+  return binary_op_gpu(ctx, op, x, y)
+
+def reduce_op(ctx, op, x, new_shape):
+  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
+  return reduce_op_gpu(ctx, op, x, new_shape)
+
 def movement_op(ctx, op, x, arg=None):
   xc = x.clone()
+  # convert from image if the buffer can change shape
+  if op in [MovementOps.EXPAND, MovementOps.SLICE]: xc.cl
   xc.shapetracker.movement_op(op, arg)
-  if not xc.shapetracker.contiguous:
-    return contiguous(ctx, xc, xc.shapetracker)
-  else:
-    xc.cl   # this can't be image
-    return xc
+  return xc
 
 def load(x):
   with open(x) as f:
@@ -99,6 +118,7 @@ def load(x):
   return ret
 
 def conv(x,w,ret,C):
+  print(x.shapetracker.expr(), w.shapetracker.expr())
   print(x.shape, w.shape, ret.shape)
   options = []
   if C.cin == 1: options.append("-DDEPTHWISE")
@@ -172,6 +192,9 @@ def preprocessing_op(ctx,op,x,w,out_shape,C):
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4,4,C.cin//4,4,C.H,C.W))
     w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
+
+  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
+  w = contiguous(ctx, w, w.shapetracker) if not w.shapetracker.contiguous else w
   return x,w,C
 
 def postprocessing_op(ctx, op, ret, out_shape, C):

@@ -119,8 +119,8 @@ def reduce_op(ctx, op, inp, new_shape):
   clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
   return ret
 
-def contiguous(ctx, x, st):
-  ret = ctx.buffer(st.shape)
+def contiguous(ctx, x, st, ret=None):
+  if ret is None: ret = ctx.buffer(st.shape)
   clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
     int gid = get_global_id(0); int valid = 1; int idx = gid; """+st.expr().replace('//', '/')+""";
     ret[gid] = valid ? x[idx] : 0.0;  // should never be out-of-bounds accesses

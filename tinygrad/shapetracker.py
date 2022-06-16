@@ -107,5 +107,6 @@ class ShapeTracker:
     self.views.append(View(new_shape, strides, offset))
 
   # TODO: this is a special case of slice with strides, remove it
+  # though it's nice that it can't change size
   def flip(self, *axis):
     self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
