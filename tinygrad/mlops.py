@@ -170,7 +170,7 @@ cnt = 0
 class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1, padding=0):
     C = get_conv_args(x.shape, w.shape, stride, groups, padding)
-    ctx.save_for_backward(x,w,(C.ys,C.xs), C.groups)
+    ctx.save_for_backward(x,w,C)
 
     # opencl speed hacks
     # TODO: find a better way to id opencl
