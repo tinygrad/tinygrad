@@ -10,7 +10,8 @@
     short numOutputColumns,
     short filterSizeX, short filterSizeY,
     short paddingX, short paddingY,
-    short strideX, short strideY) {
+    short strideX, short strideY,
+    short dilationX, short dilationY) {
 
   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
 
@@ -46,7 +47,8 @@
       short startXForChannel = startX + packedInputChannel;
       for (short rfColumn = 0; rfColumn < filterSizeX; ++rfColumn) {
 
-        inputLocation.x = mad24(rfColumn, totalNumPackedInputChannels, startXForChannel);
+        short dilatedStepX = mul24(totalNumPackedInputChannels, dilationX);
+        inputLocation.x = mad24(rfColumn, dilatedStepX, startXForChannel);
         float4 inputValues[NUM_OUTPUTS];
         for (short i = 0; i < NUM_OUTPUTS; ++i) {
           inputValues[i] = read_imagef(input, smp, inputLocation);
@@ -77,7 +79,7 @@
 #endif
       }
     }
-    ++inputLocation.y;
+    inputLocation.y += dilationY;
   }
 
   // insert unary and binary ops here

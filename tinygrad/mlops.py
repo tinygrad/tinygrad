@@ -168,8 +168,8 @@ class Slice(Function):
 
 cnt = 0
 class Conv2D(Function):
-  def forward(ctx, x, w, stride=1, groups=1, padding=0):
-    C = get_conv_args(x.shape, w.shape, stride, groups, padding)
+  def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
+    C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
     ctx.save_for_backward(x,w,C)
 
     # opencl speed hacks

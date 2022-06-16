@@ -13,7 +13,7 @@ def flip(x): return (x[1], x[0])
 class OpenCLBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
-    self.shape = shape
+    self.shape = tuple(shape)
     self._buf = None
     self._image = None
     self.dtype = np.float32
@@ -83,19 +83,17 @@ def load(x):
 # input format is    N, H x W, C//4 x 4
 # dweight format is  oc//4 x ch, cw x 4(oc)
 # weight format is   oc//4 x ch, ic//4, cw, 4(oc) x 4(ic)
-def conv(x,w,ret,C):
+def processing_op(op,x,w,ret,C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+
   print(x.shape, w.shape, ret.shape)
   options = ("-DDEPTHWISE",) if C.groups > 1 else tuple()
   conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), options)
   assert C.cout%4 == 0
   kernel_args = [C.cout//4, (C.ox+3)//4, C.oy]
-  conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.W, C.H, C.px, C.py, C.xs, C.ys]
+  conv_args = [max(1, C.cin//4), C.groups*C.cin//4, C.cout//4, C.ox, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
   print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *[np.int16(x) for x in conv_args])
-
-def processing_op(op,a,b,ret,C):
-  if op == ProcessingOps.CONV: conv(a,b,ret,C)
-  else: raise Exception(f"{op} not implemented")
 
 def test_image():
   hostbuf = np.random.randn(5,8,4).astype(np.float32)

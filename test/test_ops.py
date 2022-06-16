@@ -183,6 +183,11 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  def test_simple_conv2d_4(self):
+    helper_test_op([(1,4,9,9), (4,4,3,3)],
+      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
+      lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+
   def test_conv2d(self):
     for bs in [1,8]:
       for cin in [1,3]:
