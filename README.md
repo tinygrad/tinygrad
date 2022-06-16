@@ -191,7 +191,7 @@ tinygrad will always be below 1000 lines. If it isn't, we will revert commits un
 
 ```bash
 GRAPH=1 python3 test/test_mnist.py TestMNIST.test_sgd_onestep
-dot -Tsvg /tmp/net.dot -o /tmp/net.svg && open /tmp/net.svg
+# requires dot, outputs /tmp/net.svg
 ```
 
 ### Running tests

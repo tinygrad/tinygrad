@@ -18,6 +18,7 @@ if GRAPH:
   def save_graph_exit():
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
+    os.system('dot -Tsvg /tmp/net.dot -o /tmp/net.svg')
   atexit.register(save_graph_exit)
 
 global_num_max = 0
