@@ -28,7 +28,7 @@ from tinygrad.ops import ProcessingOps
 def processing_op(op,x,w,ret,C):
   stride, groups, dilation, padding = (C.ys, C.xs), C.groups, (C.dy, C.dx), (C.py, C.px)
   # stride is the same as doing the full conv and slicing with stride at the end
-  # dilation is the same as conving with a weight matrix with 0s added
+  # dilation is the same as conving with a larger weight matrix with 0s added
   if op == ProcessingOps.CONV:
     ret[:] = torch.conv2d(x, w, stride=stride, groups=groups, dilation=dilation, padding=padding)
   elif op == ProcessingOps.CONVT:

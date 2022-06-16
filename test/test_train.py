@@ -32,6 +32,7 @@ class TestTrain(unittest.TestCase):
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
 
+  @unittest.skip("OOM in GPU test")
   def test_vit(self):
     model = ViT()
     X = np.zeros((BS,3,224,224), dtype=np.float32)
