@@ -34,5 +34,16 @@ class TestConv(unittest.TestCase):
     x = x.numpy()
     print(x.shape)
 
+  def test_elu(self):
+    x = Tensor.ones(1,12,128,256)
+
+    w = Tensor.ones(32,12,3,3)
+    x = x.conv2d(w, stride=(2,2), padding=(1,1))
+
+    x = x.elu()
+
+    w = Tensor.ones(32,1,3,3)
+    x = x.conv2d(w, padding=(1,1), groups=32)
+
 if __name__ == '__main__':
   unittest.main()

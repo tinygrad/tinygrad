@@ -4,7 +4,7 @@
 import pathlib
 import numpy as np
 from tinygrad.ops import MovementOps, ProcessingOps
-from tinygrad.llops.ops_gpu import require_init_gpu, clbuild, sync, get_cl_queue, get_cl_ctx
+from tinygrad.llops.ops_gpu import require_init_gpu, clbuild, get_cl_queue, get_cl_ctx
 from tinygrad.llops.ops_gpu import contiguous
 from tinygrad.llops.ops_gpu import unary_op as unary_op_gpu, binary_op as binary_op_gpu, reduce_op as reduce_op_gpu
 from tinygrad.helpers import prod
@@ -110,7 +110,8 @@ def movement_op(ctx, op, x, arg=None):
   # convert from image if the buffer can change shape
   if op in [MovementOps.EXPAND, MovementOps.SLICE]: xc.cl
   xc.shapetracker.movement_op(op, arg)
-  return xc
+  if not xc.shapetracker.contiguous: return contiguous(ctx, xc, xc.shapetracker)
+  else: return xc
 
 def load(x):
   with open(x) as f:

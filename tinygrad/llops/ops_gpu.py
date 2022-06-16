@@ -17,9 +17,7 @@ def require_init_gpu():
     cl_ctx = cl.Context(devices=devices)
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
-i32 = np.int32
 def roundup(x, n=4): return (x+(n-1))//n * n
-def sync(): cl_queue.finish()
 
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
@@ -38,7 +36,6 @@ class GPUBuffer:
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    sync()
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
@@ -162,5 +159,5 @@ def processing_op(ctx,op,x,w,out_shape,C):
     output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
   }""")
 
-  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[i32(x) for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
+  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[np.int32(x) for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
   return ret
