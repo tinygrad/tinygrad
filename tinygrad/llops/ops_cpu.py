@@ -11,7 +11,7 @@ class CPUBuffer(np.ndarray):
   def flip(x, axis): return np.flip(x, axis)
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
   def permute(x, order): return x.transpose(order)
-  def custompad(x, padding): return np.pad(x, padding)
+  def custompad(x, padding): return np.pad(x, padding).view(CPUBuffer)
   def expand(x, new_shape): return np.broadcast_to(x, new_shape).view(CPUBuffer)
 
   @staticmethod
@@ -56,7 +56,7 @@ def movement_op(ctx, op, x, arg=None):
     padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
     x = x.custompad(padding)
     slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
-    return x[tuple([slice(x[0], x[1], None) for x in slicee])].view(CPUBuffer)
+    return x[tuple([slice(x[0], x[1], None) for x in slicee])]
   elif op == MovementOps.EXPAND: return x.expand(arg)
   else: raise Exception(f"{op} isn't supported")
 
