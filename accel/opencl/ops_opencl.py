@@ -9,6 +9,7 @@ from tinygrad.llops.ops_gpu import unary_op, binary_op, reduce_op, movement_op
 from tinygrad.helpers import prod
 import pyopencl as cl
 
+def roundup(x, n=4): return (x+(n-1))//n * n
 def flip(x): return (x[1], x[0])
 class OpenCLBuffer:
   def __init__(self, shape, hostbuf=None):
@@ -19,7 +20,7 @@ class OpenCLBuffer:
     self.dtype = np.float32
     if hostbuf is not None:
       # TODO: lazy?
-      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*prod(shape)) 
+      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))
       cl.enqueue_copy(get_cl_queue(), self._buf, hostbuf.astype(np.float32).ravel())
 
   @staticmethod
@@ -35,9 +36,9 @@ class OpenCLBuffer:
   @property
   def cl(self):
     if self._buf is None:
-      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*prod(self.shape))
+      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
       if self._image is not None:
-        print(f"converting {self.shape} back to buffer")
+        print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         clbuild("from_image", """
           __kernel void from_image(
               read_only image2d_t in,
