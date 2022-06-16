@@ -84,7 +84,7 @@ def load(x):
 def conv(x,w,ret,C):
   print(x.shape, w.shape, ret.shape)
   options = []
-  if C.groups > 1: options.append("-DDEPTHWISE")
+  if C.cin == 1: options.append("-DDEPTHWISE")
   if C.bs > 1:
     options.append("-DBATCH")
     assert C.py == 0, "batched conv doesn't work with y-padding"
@@ -110,17 +110,18 @@ def processing_op(ctx,op,x,w,out_shape,C):
     C = C._replace(iy=C.iy + C.py*2, py=0)
 
   # hack for multiples of 4
-  if C.groups == 1 and C.cin % 4 != 0:
+  if C.cin % 4 != 0 and not (C.cin == 1 and C.groups%4 == 0):
     to_add = 4 - (C.cin % 4)
     ws = [(0, s) for s in w.shape]
     ws[1] = (0, w.shape[1]+to_add)
     w = ctx.movement_op(MovementOps.SLICE, w, ws)
 
+    x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs, C.groups, C.cin, C.iy, C.ix))
     xs = [(0, s) for s in x.shape]
-    xs[1] = (0, x.shape[1]+to_add)
+    xs[2] = (0, x.shape[2]+to_add)
     x = ctx.movement_op(MovementOps.SLICE, x, xs)
-
     C = C._replace(cin = C.cin + to_add)
+    x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs, C.groups*C.cin, C.iy, C.ix))
 
   # hack for multiples of 4
   added_output_shape = None
