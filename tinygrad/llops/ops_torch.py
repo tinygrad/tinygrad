@@ -25,6 +25,6 @@ from tinygrad.llops.ops_cpu import unary_op, binary_op, reduce_op, movement_op
 
 from tinygrad.ops import ProcessingOps
 
-def processing_op(op,x,w,ret,C):
+def processing_op(ctx,op,x,w,out_shape,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  ret[:] = torch.conv2d(x, w, stride=(C.ys, C.xs), groups=C.groups, dilation=(C.dy, C.dx), padding=(C.py, C.px))
+  return torch.conv2d(x, w, stride=(C.ys, C.xs), groups=C.groups, dilation=(C.dy, C.dx), padding=(C.py, C.px))
