@@ -102,6 +102,7 @@ def reduce_op(op, inp, ret):
       loop_end.append(f"idx += {acc}; }} idx -= {shp*acc};")
     acc *= shp
 
+  # TODO: support multistage reduces
   prg = """
   __kernel void reduce(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
