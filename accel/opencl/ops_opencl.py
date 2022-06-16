@@ -5,23 +5,31 @@ import pathlib
 import numpy as np
 from tinygrad.ops import MovementOps, ProcessingOps
 from tinygrad.llops.ops_gpu import require_init_gpu, clbuild, sync, get_cl_queue, get_cl_ctx
-from tinygrad.llops.ops_gpu import unary_op, binary_op, reduce_op, movement_op
+from tinygrad.llops.ops_gpu import unary_op, binary_op, reduce_op, contiguous
 from tinygrad.helpers import prod
+from tinygrad.shapetracker import ShapeTracker
 import pyopencl as cl
+from copy import deepcopy
 
 def roundup(x, n=4): return (x+(n-1))//n * n
 def flip(x): return (x[1], x[0])
 class OpenCLBuffer:
-  def __init__(self, shape, hostbuf=None):
+  def __init__(self, shape, hostbuf=None, _buf=None, _image=None):
     require_init_gpu()
-    self.shape = tuple(shape)
-    self._buf = None
-    self._image = None
+    self.shapetracker = deepcopy(shape) if isinstance(shape, ShapeTracker) else ShapeTracker(*shape)
+    self._buf = _buf
+    self._image = _image
     self.dtype = np.float32
     if hostbuf is not None:
       # TODO: lazy?
       self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))
       cl.enqueue_copy(get_cl_queue(), self._buf, hostbuf.astype(np.float32).ravel())
+
+  def clone(self):
+    return OpenCLBuffer(self.shapetracker, _buf=self._buf, _image=self._image)
+
+  @property
+  def shape(self): return self.shapetracker.shape
 
   @staticmethod
   def fromCPU(x):
@@ -76,6 +84,11 @@ class OpenCLBuffer:
       self._buf = None
     return self._image
 
+def movement_op(ctx, op, x, arg=None):
+  xc = x.clone()
+  xc.shapetracker.movement_op(op, arg)
+  return contiguous(ctx, xc, xc.shapetracker)
+
 def load(x):
   with open(x) as f:
     ret = f.read()
@@ -101,7 +114,6 @@ def processing_op(ctx,op,x,w,out_shape,C):
   ret = ctx.buffer((C.bs*C.oy, C.ox*C.cout//4, 4))
   conv(x, w, ret, C)
   return ret
-
 
 # input format is    N, H x W, C//4 x 4
 # dweight format is  oc//4 x ch, cw x 4(oc)

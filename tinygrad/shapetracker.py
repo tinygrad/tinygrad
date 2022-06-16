@@ -54,8 +54,10 @@ def strides_for_shape(shape):
 # TODO: support simplification across views
 class ShapeTracker:
   def __init__(self, *shape, strides=None):
+    assert all([isinstance(x, int) for x in shape])
     if len(shape) == 0: shape = (1,)
     self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
+    self.contiguous = True
 
   @property
   def shape(self): return tuple(self.views[-1].shape)
@@ -74,18 +76,21 @@ class ShapeTracker:
     self.views.append(View(new_shape, strides_for_shape(new_shape)))
 
   def permute(self, *axis):
+    self.contiguous = False
     assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape)
     strides = strides_for_shape(self.shape)
     self.views.append(View([self.shape[a] for a in axis], [strides[a] for a in axis]))
 
   def slice(self, *arg):
+    self.contiguous = False
     assert len(arg) == len(self.shape)
     strides = strides_for_shape(self.shape)
     offset = sum([strides[i]*x for i,(x,_) in enumerate(arg)])
     self.views += [View([y-x for x,y in arg], strides, offset), ZeroView(self.shape, arg)]
 
   def expand(self, *new_shape):
+    self.contiguous = False
     assert all([isinstance(x, int) for x in new_shape])
     assert all([x == y or x == 1 for x,y in zip(self.shape, new_shape)])
     strides = [s if x == y else 0 for s,(x,y) in zip(strides_for_shape(self.shape), zip(self.shape, new_shape))]
@@ -93,6 +98,7 @@ class ShapeTracker:
 
   # TODO: combine with slice? this doesn't require a ZeroView, though slice shouldn't always either
   def stride(self, *mul):
+    self.contiguous = False
     assert all([isinstance(x, int) for x in mul])
     old_strides = strides_for_shape(self.shape)
     strides = [z*m for z,m in zip(old_strides, mul)]
