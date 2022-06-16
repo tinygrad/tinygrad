@@ -93,7 +93,7 @@ def reduce_op(op, inp, ret):
   # this takes a ret index to an inp index, indexing 0 on the reduced strides
   view = View(ret.shape, strides_for_shape(inp.shape))
 
-  # combined adjacent reduce axis
+  # generate loops with combined adjacent reduce axis
   acc = 1
   loop_start, loop_end = [], []
   for shp,stride in st.views[-1].shape_strides[::-1]:

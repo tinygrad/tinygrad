@@ -48,13 +48,13 @@ class Ops:
     log_op(op, ret, [x])
     return ret
 
-  def reduce_op(ctx, op:BinaryOps, x, new_shape):
+  def reduce_op(ctx, op:ReduceOps, x, new_shape):
     ret = ctx.buffer(new_shape)
     ctx.op.reduce_op(op, x, ret)
     log_op(op, ret, [x])
     return ret
 
-  def binary_op(ctx, op:ReduceOps, x, y):
+  def binary_op(ctx, op:BinaryOps, x, y):
     assert x.shape == y.shape
     ret = ctx.buffer(x.shape)
     ctx.op.binary_op(op, x, y, ret)
