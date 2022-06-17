@@ -170,6 +170,7 @@ from accel.opencl.preprocessing import preprocessing_op, postprocessing_op
 
 class Conv2D(Function):
   def _conv(ctx, x, w, C):
+    # TODO: the device would have to request this
     x,w,Cmod = preprocessing_op(ctx, x, w, C)
     ret = ctx.processing_op(ProcessingOps.CONV, x, w, Cmod)
     return postprocessing_op(ctx, ret, Cmod, C)

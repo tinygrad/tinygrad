@@ -44,6 +44,7 @@ class TestConv(unittest.TestCase):
 
     w = Tensor.ones(32,1,3,3)
     x = x.conv2d(w, padding=(1,1), groups=32)
+    out = x.numpy()
 
   def test_bias(self):
     from tinygrad.nn import Conv2d
