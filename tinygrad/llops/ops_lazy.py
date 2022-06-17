@@ -1,7 +1,8 @@
 from matplotlib.pyplot import isinteractive
 from tinygrad.shapetracker import ShapeTracker
 import numpy as np
-from copy import deepcopy
+import sys
+sys.setrecursionlimit(10000)
 
 # TODO: these aren't really ops
 from tinygrad.ops import BinaryOps, MovementOps, UnaryOps, log_op
@@ -24,11 +25,14 @@ class LazyBuffer:
     self.did_realize = False
 
   def realize(self):
-    if self.did_realize or self.op is None: return
+    if self.did_realize or self.op is None: return self
+    #if isinstance(self.op, MovementOps):
+      # TODO: shapetracker
+      #return self.src[0].realize()
     self.did_realize = True
-    for s in self.src:
-      s.realize()
-    log_op(self.op, self, self.src)
+    srcs = [s.realize() for s in self.src]
+    log_op(self.op, self, srcs)
+    return self
 
   @staticmethod
   def fromCPU(x):
@@ -44,5 +48,4 @@ class Ops:
   def binary_op(ctx, op, x, y): return LazyBuffer(x.shape, op, [x,y])
   def reduce_op(ctx, op, x, new_shape): return LazyBuffer(new_shape).op(op, [x], new_shape)
   def movement_op(ctx, op, x, arg): return LazyBuffer(ShapeTracker(*x.shape).movement_op(op, arg).shape, op, [x], arg)
-  #def processing_op(ctx, op, x, w, C): return LazyBuffer((C.bs, C.cout, C.oy, C.ox), op, [x,w], C)
-  def processing_op(ctx, op, x, w, C): return LazyBuffer((C.bs*C.oy, C.ox*C.cout//4, 4), op, [x,w], C)
+  def processing_op(ctx, op, x, w, C): return LazyBuffer(C.out_shape, op, [x,w], C)

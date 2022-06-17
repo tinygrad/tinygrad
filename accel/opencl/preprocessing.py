@@ -52,6 +52,7 @@ def preprocessing_op(ctx,x,w,C):
     w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
 
+  C = C._replace(out_shape = (C.bs*C.oy, C.ox*C.cout//4, 4))
   #x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
   #w = contiguous(ctx, w, w.shapetracker) if not w.shapetracker.contiguous else w
   return x,w,C
