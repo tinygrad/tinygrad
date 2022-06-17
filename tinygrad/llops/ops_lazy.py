@@ -9,15 +9,19 @@ from tinygrad.ops import BinaryOps, MovementOps, UnaryOps, log_op
 
 class LazyBuffer:
   def __init__(self, shape, op=None, src=[], arg=None, hostbuf=None):
-    self.shape, self.hostbuf = shape, hostbuf
+    self.shapetracker, self.hostbuf = ShapeTracker(*shape), hostbuf
     self.dtype = np.float32
     self.op, self.src, self.arg = op, src, arg
     self.did_realize = False
+
+  @property
+  def shape(self): return self.shapetracker.shape
 
   def realize(self):
     if self.did_realize or self.op is None: return self
     self.did_realize = True
     srcs = [s.realize() for s in self.src]
+    # TODO: do real op here
     log_op(self.op, self, srcs)
     return self
 
@@ -40,14 +44,14 @@ class LazyBuffer:
     return LazyBuffer(new_shape, op, [self], new_shape)
 
   def movement_op(self, op, arg):
-    new_shape = ShapeTracker(*self.shape).movement_op(op, arg).shape
-
     # if we got a movement op, push it above any UnaryOp/BinaryOp
     if isinstance(self.op, BinaryOps) or isinstance(self.op, UnaryOps):
       src = [x.movement_op(op, arg) for x in self.src]
-      return LazyBuffer(new_shape, self.op, src)
+      return LazyBuffer(src[0].shape, self.op, src)
     
-    return LazyBuffer(new_shape, op, [self], arg)
+    st = ShapeTracker(*self.shape).movement_op(op, arg)
+    if len(st.views) == 1: return self   # return self for trivial movement ops
+    return LazyBuffer(st.shape, op, [self], arg)
 
   def processing_op(self, op, x, w, C):
     return LazyBuffer(C.out_shape, op, [x,w], C)
