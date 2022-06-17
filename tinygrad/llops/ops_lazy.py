@@ -11,24 +11,11 @@ class LazyBuffer:
   def __init__(self, shape, op=None, src=[], arg=None, hostbuf=None):
     self.shape, self.hostbuf = shape, hostbuf
     self.dtype = np.float32
-
-    # if we got a movement op, push it above any UnaryOp/BinaryOp
-    # this is done on construction
-    if isinstance(op, MovementOps):
-      if isinstance(src[0].op, BinaryOps) or isinstance(src[0].op, UnaryOps):
-        mop = op
-        op = src[0].op
-        src = [LazyBuffer(self.shape, mop, [x], arg) for x in src[0].src]
-        arg = None
-
     self.op, self.src, self.arg = op, src, arg
     self.did_realize = False
 
   def realize(self):
     if self.did_realize or self.op is None: return self
-    #if isinstance(self.op, MovementOps):
-      # TODO: shapetracker
-      #return self.src[0].realize()
     self.did_realize = True
     srcs = [s.realize() for s in self.src]
     log_op(self.op, self, srcs)
@@ -43,9 +30,32 @@ class LazyBuffer:
     # this realizes the tensor 
     return np.zeros(self.shape, self.dtype)
 
+  def unary_op(self, op):
+    return LazyBuffer(self.shape, op, [self])
+  
+  def binary_op(self, op, y):
+    return LazyBuffer(self.shape, op, [self, y])
+
+  def reduce_op(self, op, new_shape):
+    return LazyBuffer(new_shape, op, [self], new_shape)
+
+  def movement_op(self, op, arg):
+    new_shape = ShapeTracker(*self.shape).movement_op(op, arg).shape
+
+    # if we got a movement op, push it above any UnaryOp/BinaryOp
+    if isinstance(self.op, BinaryOps) or isinstance(self.op, UnaryOps):
+      src = [x.movement_op(op, arg) for x in self.src]
+      return LazyBuffer(new_shape, self.op, src)
+    
+    return LazyBuffer(new_shape, op, [self], arg)
+
+  def processing_op(self, op, x, w, C):
+    return LazyBuffer(C.out_shape, op, [x,w], C)
+
+# universal dispatcher?
 class Ops:
-  def unary_op(ctx, op, x): return LazyBuffer(x.shape, op, [x])
-  def binary_op(ctx, op, x, y): return LazyBuffer(x.shape, op, [x,y])
-  def reduce_op(ctx, op, x, new_shape): return LazyBuffer(new_shape).op(op, [x], new_shape)
-  def movement_op(ctx, op, x, arg): return LazyBuffer(ShapeTracker(*x.shape).movement_op(op, arg).shape, op, [x], arg)
-  def processing_op(ctx, op, x, w, C): return LazyBuffer(C.out_shape, op, [x,w], C)
+  def unary_op(ctx, op, x): return x.unary_op(op)
+  def binary_op(ctx, op, x, y): return x.binary_op(op, y)
+  def reduce_op(ctx, op, x, new_shape): return x.reduce_op(op, new_shape)
+  def movement_op(ctx, op, x, arg): return x.movement_op(op, arg)
+  def processing_op(ctx, op, x, w, C): return x.processing_op(op, x, w, C)

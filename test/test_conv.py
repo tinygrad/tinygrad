@@ -54,6 +54,7 @@ class TestConv(unittest.TestCase):
     x = x.relu()
     w = Tensor.uniform(32, 1, 3, 3)
     x = x.conv2d(w, groups=32)
+    out = x.numpy()
 
 if __name__ == '__main__':
   unittest.main()
