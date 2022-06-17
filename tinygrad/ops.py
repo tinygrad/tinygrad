@@ -32,13 +32,13 @@ def log_op(op, ret, inp):
         global_num_max += 1
       return f"<<< {x.global_num} >>>"
 
-    top,sop = str(op).split(".")
+    top,_ = str(op[0]).split(".")
     top_colors = {"UnaryOps": "#c0c0c0", "ReduceOps": "#8080ff", "BinaryOps": "#c0c0c0", "MovementOps": "#80ff80", "ProcessingOps": "#ff8080"}
 
     for x in inp:
-      G.add_edge(nm(x), nm(ret), label=sop)
-      G.nodes[nm(x)]['label'] = str(x.shape)
-    G.nodes[nm(ret)]['label'] = str(ret.shape)
+      G.add_edge(nm(x), nm(ret), label='.'.join([str(x).split(".")[1][0:1] for x in op]))
+      if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
+    G.nodes[nm(ret)]['label'] = str(ret.shape) + "\n" + str(len(set(inp)))
     G.nodes[nm(ret)]['fillcolor'] = top_colors[top]
     G.nodes[nm(ret)]['style'] = 'filled'
 

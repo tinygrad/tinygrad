@@ -55,6 +55,12 @@ class TestConv(unittest.TestCase):
     w = Tensor.uniform(32, 1, 3, 3)
     x = x.conv2d(w, groups=32)
     out = x.numpy()
+  
+  def test_multiadd(sef):
+    w = Tensor.ones(32)
+    x = Tensor.ones(32).relu()
+    (w+x).numpy()
+
 
 if __name__ == '__main__':
   unittest.main()
