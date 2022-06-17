@@ -391,7 +391,8 @@ class Tensor:
     return y.div((y*y).mean(axis=-1, keepdim=True).add(eps).sqrt())
 
 # An instantiation of the Function is the Context
-from tinygrad.ops import Ops
+#from tinygrad.ops import Ops
+from tinygrad.lazy import Ops
 class Function(Ops):
   def __new__(cls, *args, **kwargs):
     cls.forward = staticmethod(cls.forward)
@@ -405,7 +406,7 @@ class Function(Ops):
     self.requires_grad = any(self.needs_input_grad)
     self.saved_tensors = []
 
-  buffer = property(lambda self: Device.buffers[self.device])
+  #buffer = property(lambda self: Device.buffers[self.device])
   op = property(lambda self: Device.llops[self.device])
 
   def save_for_backward(self, *x):

@@ -147,8 +147,7 @@ def preprocessing_op(ctx,op,x,w,out_shape,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs, C.groups, C.cin, C.iy, C.ix))
   w = ctx.movement_op(MovementOps.RESHAPE, w, (C.groups, C.rcout, C.cin, C.H, C.W))
-
-  print(x.shape, w.shape)
+  #print(x.shape, w.shape)
 
   if C.bs > 1 and C.py > 0:
     # explictly add y-padding for batched inputs
@@ -180,7 +179,7 @@ def preprocessing_op(ctx,op,x,w,out_shape,C):
 
   # packed
   assert (C.groups*C.cin) % 4 == 0
-  print(x.shape)
+  #print(x.shape)
   x = ctx.movement_op(MovementOps.PERMUTE, x, (0,3,4,1,2))
   x = ctx.movement_op(MovementOps.RESHAPE, x, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
 
@@ -194,8 +193,8 @@ def preprocessing_op(ctx,op,x,w,out_shape,C):
     w = ctx.movement_op(MovementOps.PERMUTE, w, (0,4,2,5,1,3))
     w = ctx.movement_op(MovementOps.RESHAPE, w, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
 
-  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
-  w = contiguous(ctx, w, w.shapetracker) if not w.shapetracker.contiguous else w
+  #x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
+  #w = contiguous(ctx, w, w.shapetracker) if not w.shapetracker.contiguous else w
   return x,w,C
 
 def postprocessing_op(ctx, op, ret, out_shape, C):

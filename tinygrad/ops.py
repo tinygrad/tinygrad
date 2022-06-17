@@ -65,7 +65,7 @@ class Ops:
     assert ret.shape == x.shape
     return ret
 
-  def movement_op(ctx, op:MovementOps, x, arg=None):
+  def movement_op(ctx, op:MovementOps, x, arg):
     ret = ctx.op.movement_op(ctx, op, x, arg)
     log_op(op, ret, [x])
     assert isinstance(ret, ctx.buffer)
