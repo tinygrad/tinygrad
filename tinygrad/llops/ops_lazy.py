@@ -10,13 +10,10 @@ from tinygrad.ops import BinaryOps, MovementOps, UnaryOps, log_op
 
 class LazyBuffer:
   def __init__(self, shape, op=None, src=[], arg=None, hostbuf=None):
-    self.shapetracker, self.hostbuf = ShapeTracker(*shape), hostbuf
+    self.shape, self.hostbuf = tuple(shape), hostbuf
     self.dtype = np.float32
     self.op, self.src, self.arg = op, src, arg
     self.did_realize = False
-
-  @property
-  def shape(self): return self.shapetracker.shape
 
   def realize(self):
     if self.did_realize or self.op is None: return self
