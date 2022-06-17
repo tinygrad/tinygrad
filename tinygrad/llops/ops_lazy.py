@@ -1,5 +1,6 @@
 from matplotlib.pyplot import isinteractive
 from tinygrad.shapetracker import ShapeTracker
+import functools
 import numpy as np
 import sys
 sys.setrecursionlimit(10000)
@@ -43,6 +44,7 @@ class LazyBuffer:
   def reduce_op(self, op, new_shape):
     return LazyBuffer(new_shape, op, [self], new_shape)
 
+  @functools.lru_cache()
   def movement_op(self, op, arg):
     # if we got a movement op, push it above any UnaryOp/BinaryOp
     if isinstance(self.op, BinaryOps) or isinstance(self.op, UnaryOps):
