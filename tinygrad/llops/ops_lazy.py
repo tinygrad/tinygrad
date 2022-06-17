@@ -60,5 +60,5 @@ class Ops:
   def unary_op(ctx, op, x): return x.unary_op(op)
   def binary_op(ctx, op, x, y): return x.binary_op(op, y)
   def reduce_op(ctx, op, x, new_shape): return x.reduce_op(op, new_shape)
-  def movement_op(ctx, op, x, arg): return x.movement_op(op, arg)
+  def movement_op(ctx, op, x, arg): return x.movement_op(op, tuple(arg))
   def processing_op(ctx, op, x, w, C): return x.processing_op(op, x, w, C)
