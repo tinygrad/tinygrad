@@ -72,12 +72,11 @@ class Ops:
     assert ret.shape == ShapeTracker(*x.shape).movement_op(op, arg).shape
     return ret
 
-  def processing_op(ctx, op:ProcessingOps, x, y, out_shape, C):
-    # TODO: can we do better than out_shape?
-    if getattr(ctx.op, "preprocessing_op", None) is not None: x,y,C = ctx.op.preprocessing_op(ctx, op, x, y, out_shape, C)
-    ret = ctx.op.processing_op(ctx, op, x, y, out_shape, C)
+  def processing_op(ctx, op:ProcessingOps, x, y, C):
+    if getattr(ctx.op, "preprocessing_op", None) is not None: x,y,C = ctx.op.preprocessing_op(ctx, op, x, y, C)
+    ret = ctx.op.processing_op(ctx, op, x, y, C)
     log_op(op, ret, [x, y])
-    if getattr(ctx.op, "postprocessing_op", None) is not None: ret = ctx.op.postprocessing_op(ctx, op, ret, out_shape, C)
+    if getattr(ctx.op, "postprocessing_op", None) is not None: ret = ctx.op.postprocessing_op(ctx, op, ret, C)
     assert isinstance(ret, ctx.buffer)
-    assert ret.shape == out_shape
+    assert ret.shape == (C.bs, C.cout, C.oy, C.ox)
     return ret

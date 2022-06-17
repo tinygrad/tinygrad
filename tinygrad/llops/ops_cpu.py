@@ -60,7 +60,7 @@ def movement_op(ctx, op, x, arg=None):
   elif op == MovementOps.EXPAND: return x.expand(arg)
   else: raise Exception(f"{op} isn't supported")
 
-def processing_op(ctx, op,x,w,out_shape,C):
+def processing_op(ctx,op,x,w,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   if C.px > 0 or C.py > 0: x = np.pad(x, [(0,0), (0,0), (C.py, C.py), (C.px, C.px)])
   gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])

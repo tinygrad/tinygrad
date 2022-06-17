@@ -127,8 +127,8 @@ def contiguous(ctx, x, st, ret=None):
 def movement_op(ctx, op, x, arg=None):
   return contiguous(ctx, x, ShapeTracker(*x.shape).movement_op(op, arg))
 
-def processing_op(ctx,op,x,w,out_shape,C):
-  ret = ctx.buffer(out_shape)
+def processing_op(ctx,op,x,w,C):
+  ret = ctx.buffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)

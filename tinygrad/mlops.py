@@ -170,7 +170,7 @@ class Conv2D(Function):
   def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
     C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
     ctx.save_for_backward(x,w,C)
-    return ctx.processing_op(ProcessingOps.CONV, x, w, (C.bs, C.cout, C.oy, C.ox), C)
+    return ctx.processing_op(ProcessingOps.CONV, x, w, C)
 
   def backward(ctx, grad_output):
     x, w, C = ctx.saved_tensors
@@ -188,7 +188,7 @@ class Conv2D(Function):
       wt = ctx.movement_op(MovementOps.RESHAPE, wt, (C.groups*C.cin, C.rcout, C.H, C.W))
       Cdx = get_conv_args(xt.shape, wt.shape, dilation=(C.dy, C.dx), padding=((C.H-1)*C.dy-C.py,(C.W-1)*C.dx-C.px), groups=C.groups)
       # TODO: this shape can be wrong. support asymmetric padding to remove the slice
-      dx = ctx.processing_op(ProcessingOps.CONV, xt, wt, (Cdx.bs, Cdx.cout, Cdx.oy, Cdx.ox), Cdx)
+      dx = ctx.processing_op(ProcessingOps.CONV, xt, wt, Cdx)
       dx = ctx.movement_op(MovementOps.SLICE, dx, [(0,s) for s in x.shape])
 
     if ctx.needs_input_grad[1]:
@@ -199,7 +199,7 @@ class Conv2D(Function):
       grad_output_dw = ctx.movement_op(MovementOps.PERMUTE, grad_output, (1,0,2,3))
       grad_output_dw = ctx.movement_op(MovementOps.RESHAPE, grad_output_dw, (C.cout, C.bs, C.oy, C.ox))
       Cdw = get_conv_args(xdw.shape, grad_output_dw.shape, padding=(C.py, C.px), stride=(C.dy, C.dx), dilation=(C.ys, C.xs), groups=C.groups)
-      grad_weight = ctx.processing_op(ProcessingOps.CONV, xdw, grad_output_dw, (C.cin, C.cout, Cdw.oy, Cdw.ox), Cdw)
+      grad_weight = ctx.processing_op(ProcessingOps.CONV, xdw, grad_output_dw, Cdw)
       grad_weight = ctx.movement_op(MovementOps.PERMUTE, grad_weight, (1,0,2,3))
       # TODO: remove this slice using asymmetric padding
       dw = ctx.movement_op(MovementOps.SLICE, grad_weight, ((0, grad_weight.shape[0]), (0, grad_weight.shape[1]), (0, w.shape[2]), (0, w.shape[3])))
