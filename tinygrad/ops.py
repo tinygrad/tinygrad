@@ -37,6 +37,7 @@ def log_op(op, ret, inp):
 
     for x in inp:
       G.add_edge(nm(x), nm(ret), label='.'.join([str(x).split(".")[1][0:1] for x in op]))
+      #G.add_edge(nm(x), nm(ret), label='.'.join([str(x).split(".")[1] for x in op]))
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     G.nodes[nm(ret)]['label'] = str(ret.shape) + "\n" + str(len(set(inp)))
     G.nodes[nm(ret)]['fillcolor'] = top_colors[top]
