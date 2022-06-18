@@ -64,11 +64,7 @@ class ShapeTracker:
 
   def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
   def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
-
-  def needs_valid(self):
-    for v in self.views:
-      if isinstance(v, ZeroView): return True
-    return False
+  def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
 
   def __getitem__(self, val):
     locals = {"idx": val, "valid": 1}
@@ -102,9 +98,9 @@ class ShapeTracker:
     self.contiguous = False
     strides = strides_for_shape(self.shape)
     offset = sum([strides[i]*x for i,(x,_) in enumerate(arg)])
-    zv = ZeroView(self.shape, arg)
-    self.views += [View([y-x for x,y in arg], strides, offset)]
-    if zv.expr != "valid=valid": self.views += [zv]
+    zeroview = ZeroView(self.shape, arg)
+    self.views.append(View([y-x for x,y in arg], strides, offset))
+    if zeroview.expr != "valid=valid": self.views.append(zeroview)
 
   def expand(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
