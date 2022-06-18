@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import io
 import unittest
 import numpy as np
@@ -7,6 +8,8 @@ from extra.utils import fetch
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.nn import batch_normalize
+
+MAX_CONVS = int(os.getenv("MAX_CONVS", -1))
 
 def run_onnx(onnx_model, inputs={}, debug=False):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
@@ -54,6 +57,7 @@ def run_onnx(onnx_model, inputs={}, debug=False):
     else:
       raise Exception(f"no data for {inp.name} with shape {shape}")
 
+  conv_count = 0
   for num,n in enumerate(onnx_model.graph.node):
     if debug: print(f"{num}: op {n.op_type}")
     inp = [tensors[x] for x in n.input]
@@ -84,6 +88,10 @@ def run_onnx(onnx_model, inputs={}, debug=False):
       else:
         x = x.pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]))
         ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1))
+      conv_count += 1
+      if conv_count == MAX_CONVS:
+        ret.numpy()
+        break
     elif n.op_type in ["Add", "Sub", "Mul"]:
       # TODO: add this to tinygrad? i don't think it's in torch
       if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):

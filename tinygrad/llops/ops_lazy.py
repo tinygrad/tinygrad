@@ -16,11 +16,11 @@ SHUFFLE_MOVEMENT_OPS = True
 # sequential movement ops can be flattened into 0 or 1 movement ops 
 MERGE_MOVEMENT_OPS = True
 
-# "sequential" elementwise ops can be merged into 1 big elementwise op
-MERGE_ELEMENTWISE_OPS = True
-
 # after the conv is done, it can run elementwise ops on its output
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
+
+# "sequential" elementwise ops can be merged into 1 big elementwise op
+MERGE_ELEMENTWISE_OPS = True
 
 class LazyBuffer:
   def __init__(self, shape, op=[None], src=[], arg=[], hostbuf=None):
@@ -82,7 +82,7 @@ class LazyBuffer:
 
     return LazyBuffer(self.shape, ops, src)
 
-  #@functools.lru_cache()
+  @functools.lru_cache()
   def movement_op(self, ops, args):
     st = ShapeTracker(*self.shape)
     for o,a in zip(ops, args):
