@@ -102,16 +102,30 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
   elif op == UnaryOps.LOG: code = 'log(A)'
   elif op == UnaryOps.NEG: code = '-A'
   elif op == UnaryOps.SIGN: code = 'sign(A)'
-  code = code.replace("A", "("+ast(x.src[0], lazy_srcs)+")")
-  if len(x.src) > 1:
-    code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
+  elif op == ProcessingOps.CONV: code = 'acc'
+  if "A" in code: code = code.replace("A", "("+ast(x.src[0], lazy_srcs)+")")
+  if "B" in code: code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
   return code
+
+def find_conv(x:LazyOp):
+  if isinstance(x, LazyBuffer):
+    return None
+  if isinstance(x.op, ProcessingOps):
+    return x
+  for s in x.src:
+    tst = find_conv(s)
+    if tst is not None:
+      return tst
+  return None
 
 compile_cache = {}
 def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str, list[str], list[int]]:
   if ret not in compile_cache:
     lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
-    opencl_type = ["__global float *res_g"]
+    opencl_type = []
+    if ret.optype == ProcessingOps:
+      opencl_type.append("float acc")
+    opencl_type.append('int gid')
     opencl_src = []
     opencl_interior_src = []
     idxs = []
@@ -120,7 +134,7 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
         opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
       else:
         opencl_src.append("""inline float get_"""+str(argn)+"""(__global const float *x, int idx) {
-          int valid = 1;
+          """+("int valid = 1;" if st.needs_valid() else "")+"""
           """+st.expr().replace('//', '/')+""";
           """+("return valid ? x[idx] : 0.0;" if st.needs_valid() else "return x[idx];")+"""
         }""")
@@ -129,10 +143,9 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
         idxs.append(argn)
 
     prg_src = '\n'.join(opencl_src)+"""
-    inline void _binop("""+', '.join(opencl_type)+""") {
-      int gid = get_global_id(0);
+    inline float _binop("""+', '.join(opencl_type)+""") {
       """+'\n'.join(opencl_interior_src)+"""
-      res_g[gid] = """+ast(ret.op, lazy_srcs)+""";
+      return """+ast(ret.op, lazy_srcs)+""";
     }"""
     compile_cache[ret] = (prg_src, opencl_type, idxs)
   return compile_cache[ret]
@@ -141,17 +154,32 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
   lazy_srcs = list(set(get_lazybuffers(ret.op)))
   prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
   prg_src += """
-    __kernel void binop("""+', '.join(opencl_type)+""") {
-      _binop("""+', '.join([x.split("*")[1] for x in opencl_type])+""");
+    __kernel void binop(__global float *res_g, """+', '.join(opencl_type[1:])+""") {
+      int gid = get_global_id(0);
+      res_g[gid] = _binop("""+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+""");
     }"""
   lazy_srcs_ret = [buf_st(lazy_srcs[i]) for i in idxs]
   real_bufs = [x.realize() for x in lazy_srcs_ret]
 
-  #print(prg_src)
   gret = gops.GPUBuffer(ret.shape)
   binop = gops.clbuild("binop", prg_src)
   binop([prod(ret.shape)], None, gret.cl, *[x.cl for x in real_bufs])
   return gret, lazy_srcs_ret
+
+def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
+  conv = find_conv(ret.op)
+  conv_x, conv_w = conv.src[0], conv.src[1]
+  lazy_srcs = list(set(get_lazybuffers(ret.op)))
+  lazy_srcs = [x for x in lazy_srcs if x not in [conv_x, conv_w]]
+  prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
+  lazy_srcs_ret = [buf_st(lazy_srcs[i]) for i in idxs]
+  real_bufs = [x.realize() for x in lazy_srcs_ret]
+
+  middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
+
+  gret = gops.processing_op(conv.op, conv_x.realize(), conv_w.realize(), conv.arg,
+    prg_src, middle_code, real_bufs, opencl_type[2:])
+  return gret, lazy_srcs_ret+[conv_x, conv_w]
 
 realized_buffers = []
 class LazyBuffer:
@@ -189,9 +217,10 @@ class LazyBuffer:
       assert False
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
-      x,w = self.op.src
-      lazy_srcs = [x,w]
-      ret = gops.processing_op(self.op.op, x.realize(), w.realize(), self.op.arg)
+      #x,w = self.op.src
+      #lazy_srcs = [x,w]
+      #ret = gops.processing_op(self.op.op, x.realize(), w.realize(), self.op.arg)
+      ret, lazy_srcs = realize_processing_op(self)
     elif self.optype == BinaryOps:
       ret, lazy_srcs = realize_binary_op(self)
     elif self.optype == MovementOps:
@@ -242,16 +271,6 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
       return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
     elif cnt == 2:
       # have to confirm they are the same conv
-      def find_conv(x:LazyOp):
-        if isinstance(x, LazyBuffer):
-          return None
-        if isinstance(x.op, ProcessingOps):
-          return x
-        for s in x.src:
-          tst = find_conv(s)
-          if tst is not None:
-            return tst
-        return None
       c1 = find_conv(srcs[0].op)
       c2 = find_conv(srcs[1].op)
       #print(c1.op, c2.op)

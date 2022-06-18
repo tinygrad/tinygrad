@@ -53,6 +53,7 @@ class CLProgram:
 @functools.lru_cache(maxsize=None)
 def clbuild(name, prg, options=tuple(), argdtypes=None):
   #print("cache miss")
+  #print(prg)
   return CLProgram(name, prg, options, argdtypes)
 
 def unary_op(op, x):
@@ -137,16 +138,18 @@ def contiguous(x, st, ret=None):
 def movement_op(op, x, arg=None):
   return contiguous(x, ShapeTracker(*x.shape).movement_op(op, arg))
 
-def processing_op(op,x,w,C):
+def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_type=[]):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
 
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
-  conv_prg = clbuild("conv", """
+  conv_prg = clbuild("conv", prefix_code+"""
   __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
-    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py) {
+    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py
+    """+(', ' if len(opencl_type) > 0 else '') + ', '.join(opencl_type)+"""
+    ) {
 
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
@@ -171,10 +174,13 @@ def processing_op(op,x,w,C):
     }
 
     // insert binary and unary ops here
+    """+middle_code+"""
 
     output[gid] = acc;
   }""", argdtypes=tuple([None, None, None] + [np.int32]*16))
   local_group = None
   if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
-  conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,*[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
+  conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,
+    *[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]],
+    *[x.cl for x in real_bufs])
   return ret
