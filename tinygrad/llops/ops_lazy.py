@@ -80,20 +80,59 @@ def to_st(x: LazyBuffer) -> Tuple[LazyBuffer, ShapeTracker]:
     xst = ShapeTracker(*x.shape)
   return x, xst
 
-def realize_binary_op(ret: LazyBuffer) -> gops.GPUBuffer:
+def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
   lazy_srcs = list(set(get_lazybuffers(ret.op)))
-  lazy_srcs_st = [to_st(x) for x in lazy_srcs]
-  srcs = [(x[0].realize(), x[1]) for x in lazy_srcs_st]
+  lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
 
+  opencl_type = ["__global float *res_g"]
+  opencl_src = []
+  opencl_interior_src = []
+  real_bufs = []
+  for argn,(b,st) in enumerate(lazy_srcs_st):
+    if False and b.optype == None and b.shape == (1,):
+      opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
+    else:
+      opencl_src.append("""float get_"""+str(argn)+"""(__global const float *x, int idx) {
+        int valid = 1;
+        """+st.expr().replace('//', '/')+""";
+        return valid ? x[idx] : 0.0;
+      }""")
+      opencl_interior_src.append(f"float arg_{argn} = get_{argn}(buf_{argn}, gid);")
+      opencl_type.append(f"__global const float *buf_{argn}")
+      real_bufs.append(b.realize())
 
+  def ast(x: Union[LazyBuffer, LazyOp]) -> str:
+    if isinstance(x, LazyBuffer):
+      return f"arg_{lazy_srcs.index(x)}"
+    # it's an op
+    op = x.op
+    if op == BinaryOps.ADD: code = "A+B"
+    elif op == BinaryOps.SUB: code = "A-B"
+    elif op == BinaryOps.MUL: code = "A*B"
+    elif op == BinaryOps.DIV: code = "B/A"
+    elif op == BinaryOps.POW: code = "pow(A,B)"
+    elif op == BinaryOps.CMPEQ: code = "1.0f*(A==B)"
+    elif op == UnaryOps.RELU: code = 'max(A, (float)0.)'
+    elif op == UnaryOps.EXP: code = 'exp(A)'
+    elif op == UnaryOps.LOG: code = 'log(A)'
+    elif op == UnaryOps.NEG: code = '-A'
+    elif op == UnaryOps.SIGN: code = 'sign(A)'
+    code = code.replace("A", "("+ast(x.src[0])+")")
+    if len(x.src) > 1:
+      code = code.replace("B", "("+ast(x.src[1])+")")
+    return code
+
+  prg_src = '\n'.join(opencl_src)+"""
+  __kernel void binop("""+', '.join(opencl_type)+""") {
+    int gid = get_global_id(0);
+    """+'\n'.join(opencl_interior_src)+"""
+    res_g[gid] = """+ast(ret.op)+""";
+  }"""
+  #print(prg_src)
   gret = gops.GPUBuffer(ret.shape)
-  binop = gops.clbuild("binop", """
-  __kernel void binop(__global float *res_g) {
-  }""")
-
-  binop([prod(ret.shape)], None, gret.cl)
-  return gret, lazy_srcs
-
+  binop = gops.clbuild("binop", prg_src)
+  binop([prod(ret.shape)], None, gret.cl, *[x.cl for x in real_bufs])
+  return gret, [x[0] for x in lazy_srcs_st]
 
 realized_buffers = []
 class LazyBuffer:
@@ -124,12 +163,7 @@ class LazyBuffer:
     if self.optype is not None: realized_buffers.append(self)
     if self.realized is not None:
       return self.realized
-    # TODO: put this back
-    #lazy_srcs = get_lazybuffers(self.op)
     lazy_srcs = []
-    #srcs = [s.realize() for s in lazy_srcs]
-
-
     ret = None
     if self.optype == None:
       # created from hostbuf
@@ -137,14 +171,15 @@ class LazyBuffer:
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
       x,w = self.op.src
-      lazy_srcs += [x,w]
+      lazy_srcs = [x,w]
       ret = gops.processing_op(self.op.op, x.realize(), w.realize(), self.op.arg)
     elif self.optype == BinaryOps:
+      """
       if isinstance(self.op.op, UnaryOps):
         #x = self.op.src[0].realize()
         #ret = gops.unary_op(self.op.op, x)
         x, xst = to_st(self.op.src[0])
-        lazy_srcs += [x]
+        lazy_srcs = [x]
         ret = gops.unary_op_shapetracked(self.op.op, x.realize(), xst)
       else:
         #a = self.op.src[0].realize()
@@ -152,16 +187,17 @@ class LazyBuffer:
         #ret = gops.binary_op(self.op.op, a, b)
         x, xst = to_st(self.op.src[0])
         y, yst = to_st(self.op.src[1])
-        lazy_srcs += [x,y]
+        lazy_srcs = [x,y]
         ret = gops.binary_op_shapetracked(self.op.op, x.realize(), xst, y.realize(), yst)
-      #ret, lazy_srcs = realize_binary_op(self)
+      """
+      ret, lazy_srcs = realize_binary_op(self)
     elif self.optype == MovementOps:
       root, st = movementop_st(self.op)
       lazy_srcs += [root]
       ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
-    #if self.op.op is not None: log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
+    if self.op.op is not None: log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
     return self.realized
 
   @staticmethod
@@ -169,11 +205,13 @@ class LazyBuffer:
     return LazyBuffer(x.shape, None, LazyOp(None, [], x))
 
   def toCPU(self):
+    global realized_buffers
     # for the kernel builds to not count in timing
     junk = self.realize().toCPU()
     print("derealizing %d" % len(realized_buffers))
     for b in realized_buffers:
       b.realized = None
+    realized_buffers = []
 
     """
     import cProfile
@@ -187,7 +225,7 @@ class LazyBuffer:
     ret = ret.toCPU()
     et = time.monotonic()
 
-    print(f"realized in {(et-st)*1000:.2f} ms, waited {(et-mt)*1000:.2f} ms for kernels")
+    print(f"realized in {(et-st)*1000:.2f} ms, waited {(et-mt)*1000:.2f} ms for kernels ({(mt-st)*1000:.2f} ms in python)")
     return ret
 
 @functools.lru_cache()
