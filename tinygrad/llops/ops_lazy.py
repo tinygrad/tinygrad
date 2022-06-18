@@ -227,7 +227,8 @@ class LazyBuffer:
     elif self.optype == MovementOps:
       root, st = movementop_st(self.op)
       lazy_srcs += [root]
-      ret = gops.contiguous(root.realize(), st)
+      if st.contiguous: ret = root.realize()
+      else: ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
     if self.op.op is not None and self.SHOULD_LOG:
