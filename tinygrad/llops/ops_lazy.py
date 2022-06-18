@@ -109,7 +109,11 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
     code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
   return code
 
+#@functools.lru_cache(maxsize=None)
+compile_cache = {}
 def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str, list[int]]:
+  if ret in compile_cache:
+    return compile_cache[ret]
   lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
   opencl_type = ["__global float *res_g"]
   opencl_src = []
@@ -134,7 +138,7 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
     """+'\n'.join(opencl_interior_src)+"""
     res_g[gid] = """+ast(ret.op, lazy_srcs)+""";
   }"""
-
+  compile_cache[ret] = (prg_src, idxs)
   return prg_src, idxs
 
 def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
