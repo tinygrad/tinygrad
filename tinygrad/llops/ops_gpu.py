@@ -63,6 +63,37 @@ def unary_op(op, x):
   unop([roundup(prod(ret.shape))//4], None, x.cl, ret.cl)
   return ret
 
+def binary_op_shapetracked(op, x, xst, y, yst):
+  #print(xst.expr(), yst.expr())
+  ret = GPUBuffer(xst.shape)
+  if op == BinaryOps.ADD: code = "a+b"
+  elif op == BinaryOps.SUB: code = "a-b"
+  elif op == BinaryOps.MUL: code = "a*b"
+  elif op == BinaryOps.DIV: code = "b/a"
+  elif op == BinaryOps.POW: code = "pow(a,b)"
+  elif op == BinaryOps.CMPEQ: code = "1.0f*(a==b)"
+  else: raise Exception(f"{op} isn't supported")
+  assert xst.shape == ret.shape and yst.shape == ret.shape
+  binop = clbuild("binop", """
+  float get_shapetracked_a(__global const float *x, int idx) {
+    int valid = 1;
+    """+xst.expr().replace('//', '/')+""";
+    return valid ? x[idx] : 0.0;
+  }
+  float get_shapetracked_b(__global const float *x, int idx) {
+    int valid = 1;
+    """+yst.expr().replace('//', '/')+""";
+    return valid ? x[idx] : 0.0;
+  }
+  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g) {
+    int gid = get_global_id(0);
+    float a = get_shapetracked_a(a_g, gid);
+    float b = get_shapetracked_b(b_g, gid);
+    res_g[gid] = """+code+""";
+  }""")
+  binop([prod(ret.shape)], None, x.cl, y.cl, ret.cl)
+  return ret
+
 def binary_op(op, x, y):
   ret = GPUBuffer(x.shape)
   if op == BinaryOps.ADD: code = "a+b"
