@@ -116,7 +116,7 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
       opencl_src.append("""float get_"""+str(argn)+"""(__global const float *x, int idx) {
         int valid = 1;
         """+st.expr().replace('//', '/')+""";
-        return valid ? x[idx] : 0.0;
+        """+("return valid ? x[idx] : 0.0;" if st.needs_valid() else "return x[idx];")+"""
       }""")
       opencl_interior_src.append(f"float arg_{argn} = get_{argn}(buf_{argn}, gid);")
       opencl_type.append(f"__global const float *buf_{argn}")

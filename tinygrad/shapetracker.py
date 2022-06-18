@@ -102,7 +102,9 @@ class ShapeTracker:
     self.contiguous = False
     strides = strides_for_shape(self.shape)
     offset = sum([strides[i]*x for i,(x,_) in enumerate(arg)])
-    self.views += [View([y-x for x,y in arg], strides, offset), ZeroView(self.shape, arg)]
+    zv = ZeroView(self.shape, arg)
+    self.views += [View([y-x for x,y in arg], strides, offset)]
+    if zv.expr != "valid=valid": self.views += [zv]
 
   def expand(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
