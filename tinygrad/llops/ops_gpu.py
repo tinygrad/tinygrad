@@ -157,6 +157,8 @@ def processing_op(op,x,w,C):
     int IY = Y*ys;
     int IX = X*xs;
 
+    int gid = get_global_id(0)*oy*ox + Y*ox + X;
+
     float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
       for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
@@ -167,7 +169,12 @@ def processing_op(op,x,w,C):
           weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] : 0.0;
       } }
     }
-    output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
+
+    // insert binary and unary ops here
+
+    output[gid] = acc;
   }""", argdtypes=tuple([None, None, None] + [np.int32]*16))
-  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl,*[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
+  local_group = None
+  if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
+  conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,*[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
   return ret

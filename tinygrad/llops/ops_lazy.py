@@ -144,8 +144,8 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
 def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
   lazy_srcs = list(set(get_lazybuffers(ret.op)))
   prg_src, idxs = compile_binary_op(ret, lazy_srcs)
-  lazy_srcs_ret = [lazy_srcs[i] for i in idxs]
-  real_bufs = [buf_st(lazy_srcs[i]).realize() for i in idxs]
+  lazy_srcs_ret = [buf_st(lazy_srcs[i]) for i in idxs]
+  real_bufs = [x.realize() for x in lazy_srcs_ret]
 
   #print(prg_src)
   gret = gops.GPUBuffer(ret.shape)
