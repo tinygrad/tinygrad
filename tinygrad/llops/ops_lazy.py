@@ -28,7 +28,7 @@ SHUFFLE_MOVEMENT_OPS = True
 REMOVE_MOVEMENT_NOPS = False
 
 # "sequential" elementwise ops can be merged into 1 big elementwise op
-MERGE_ELEMENTWISE_OPS = False
+MERGE_ELEMENTWISE_OPS = True
 
 # after the conv is done, it can run elementwise ops on its output
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = False
@@ -80,6 +80,27 @@ def to_st(x: LazyBuffer) -> Tuple[LazyBuffer, ShapeTracker]:
     xst = ShapeTracker(*x.shape)
   return x, xst
 
+def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
+  if isinstance(x, LazyBuffer):
+    return f"arg_{lazy_srcs.index(x)}"
+  # it's an op
+  op = x.op
+  if op == BinaryOps.ADD: code = "A+B"
+  elif op == BinaryOps.SUB: code = "A-B"
+  elif op == BinaryOps.MUL: code = "A*B"
+  elif op == BinaryOps.DIV: code = "B/A"
+  elif op == BinaryOps.POW: code = "pow(A,B)"
+  elif op == BinaryOps.CMPEQ: code = "1.0f*(A==B)"
+  elif op == UnaryOps.RELU: code = 'max(A, (float)0.)'
+  elif op == UnaryOps.EXP: code = 'exp(A)'
+  elif op == UnaryOps.LOG: code = 'log(A)'
+  elif op == UnaryOps.NEG: code = '-A'
+  elif op == UnaryOps.SIGN: code = 'sign(A)'
+  code = code.replace("A", "("+ast(x.src[0], lazy_srcs)+")")
+  if len(x.src) > 1:
+    code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
+  return code
+
 def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
   lazy_srcs = list(set(get_lazybuffers(ret.op)))
   lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
@@ -101,32 +122,11 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
       opencl_type.append(f"__global const float *buf_{argn}")
       real_bufs.append(b.realize())
 
-  def ast(x: Union[LazyBuffer, LazyOp]) -> str:
-    if isinstance(x, LazyBuffer):
-      return f"arg_{lazy_srcs.index(x)}"
-    # it's an op
-    op = x.op
-    if op == BinaryOps.ADD: code = "A+B"
-    elif op == BinaryOps.SUB: code = "A-B"
-    elif op == BinaryOps.MUL: code = "A*B"
-    elif op == BinaryOps.DIV: code = "B/A"
-    elif op == BinaryOps.POW: code = "pow(A,B)"
-    elif op == BinaryOps.CMPEQ: code = "1.0f*(A==B)"
-    elif op == UnaryOps.RELU: code = 'max(A, (float)0.)'
-    elif op == UnaryOps.EXP: code = 'exp(A)'
-    elif op == UnaryOps.LOG: code = 'log(A)'
-    elif op == UnaryOps.NEG: code = '-A'
-    elif op == UnaryOps.SIGN: code = 'sign(A)'
-    code = code.replace("A", "("+ast(x.src[0])+")")
-    if len(x.src) > 1:
-      code = code.replace("B", "("+ast(x.src[1])+")")
-    return code
-
   prg_src = '\n'.join(opencl_src)+"""
   __kernel void binop("""+', '.join(opencl_type)+""") {
     int gid = get_global_id(0);
     """+'\n'.join(opencl_interior_src)+"""
-    res_g[gid] = """+ast(ret.op)+""";
+    res_g[gid] = """+ast(ret.op, lazy_srcs)+""";
   }"""
   #print(prg_src)
   gret = gops.GPUBuffer(ret.shape)
