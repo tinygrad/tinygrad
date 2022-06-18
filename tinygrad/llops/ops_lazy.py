@@ -61,6 +61,7 @@ def get_lazyops(op:LazyOp):
 
 import tinygrad.llops.ops_gpu as gops
 
+realized_buffers = []
 class LazyBuffer:
   def __init__(self, shape:tuple, optype:OpTypes, op:LazyOp):
     assert isinstance(op, LazyOp)
@@ -77,7 +78,7 @@ class LazyBuffer:
     if self.optype == None:
       # nonlazy create from hostbuf
       self.realized = gops.GPUBuffer(self.shape, self.op.arg)
-  
+
   @property
   def opname(self):
     return self.optype.__name__ if self.optype is not None else 'load'
@@ -86,6 +87,7 @@ class LazyBuffer:
     return f"<LB {self.opname}: {self.op.op}>"
 
   def realize(self:LazyBuffer) -> gops.GPUBuffer:
+    if self.optype is not None: realized_buffers.append(self)
     if self.realized is not None:
       return self.realized
     # TODO: put this back
@@ -146,11 +148,18 @@ class LazyBuffer:
     return LazyBuffer(x.shape, None, LazyOp(None, [], x))
 
   def toCPU(self):
+    # for the kernel builds to not count in timing
+    junk = self.realize().toCPU()
+    print("derealizing %d" % len(realized_buffers))
+    for b in realized_buffers:
+      b.realized = None
+
     st = time.monotonic()
     ret = self.realize()
     mt = time.monotonic()
     ret = ret.toCPU()
     et = time.monotonic()
+
     print(f"realized in {(et-st)*1000:.2f} ms, waited {(et-mt)*1000:.2f} ms for kernels")
     return ret
 
