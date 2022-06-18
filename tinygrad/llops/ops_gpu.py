@@ -45,8 +45,8 @@ def clbuild(name, prg, options=tuple()):
   def run(*args): clprg(cl_queue, *args)
   return run
 
-def unary_op(ctx, op, x):
-  ret = ctx.buffer(x.shape)
+def unary_op(op, x):
+  ret = GPUBuffer(x.shape)
   if op == UnaryOps.RELU: code = 'max(a, (float)0.)'
   elif op == UnaryOps.EXP: code = 'exp(a)'
   elif op == UnaryOps.LOG: code = 'log(a)'
@@ -62,8 +62,8 @@ def unary_op(ctx, op, x):
   unop([roundup(prod(ret.shape))//4], None, x.cl, ret.cl)
   return ret
 
-def binary_op(ctx, op, x, y):
-  ret = ctx.buffer(x.shape)
+def binary_op(op, x, y):
+  ret = GPUBuffer(x.shape)
   if op == BinaryOps.ADD: code = "a+b"
   elif op == BinaryOps.SUB: code = "a-b"
   elif op == BinaryOps.MUL: code = "a*b"
@@ -82,8 +82,8 @@ def binary_op(ctx, op, x, y):
   binop([roundup(prod(ret.shape))//4], None, x.cl, y.cl, ret.cl)
   return ret
 
-def reduce_op(ctx, op, inp, new_shape):
-  ret = ctx.buffer(new_shape)
+def reduce_op(op, inp, new_shape):
+  ret = GPUBuffer(new_shape)
   if op == ReduceOps.SUM: code, start = "out += a", "0.0"
   elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
   else: raise Exception(f"{op} isn't supported")
@@ -116,19 +116,19 @@ def reduce_op(ctx, op, inp, new_shape):
   clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
   return ret
 
-def contiguous(ctx, x, st, ret=None):
-  if ret is None: ret = ctx.buffer(st.shape)
+def contiguous(x, st, ret=None):
+  if ret is None: ret = GPUBuffer(st.shape)
   clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
     int gid = get_global_id(0); int valid = 1; int idx = gid; """+st.expr().replace('//', '/')+""";
     ret[gid] = valid ? x[idx] : 0.0;  // should never be out-of-bounds accesses
   }""")([prod(ret.shape)], None, x.cl, ret.cl)
   return ret
 
-def movement_op(ctx, op, x, arg=None):
-  return contiguous(ctx, x, ShapeTracker(*x.shape).movement_op(op, arg))
+def movement_op(op, x, arg=None):
+  return contiguous(x, ShapeTracker(*x.shape).movement_op(op, arg))
 
-def processing_op(ctx,op,x,w,C):
-  ret = ctx.buffer((C.bs, C.cout, C.oy, C.ox))
+def processing_op(op,x,w,C):
+  ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)

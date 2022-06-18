@@ -1,3 +1,4 @@
+from __future__ import annotations
 from tinygrad.shapetracker import ShapeTracker
 from collections import namedtuple
 import functools
@@ -14,26 +15,25 @@ OpTypes = Union[ElementWiseOps, ReduceOps, MovementOps, ProcessingOps]
 
 def tp(a,b,c=[]): return tuple(list(a) + list(b) + list(c))
 
-# movement ops can be moved above elementwise ops 
-SHUFFLE_MOVEMENT_OPS = True
+# sequential movement ops can be flattened into 1 movement op
+MERGE_MOVEMENT_OPS = False
 
-# sequential movement ops can be flattened into 0 or 1 movement ops 
-MERGE_MOVEMENT_OPS = True
+# movement ops can be moved above elementwise ops 
+SHUFFLE_MOVEMENT_OPS = False
 
 # if you stick the right movement ops, they might disappear!
-# TODO: this is wrong
-# TODO: this isn't combining with merge elementwise into conv output
-REMOVE_MOVEMENT_NOPS = True
+# TODO: this is wrong, improve ShapeTracker
+REMOVE_MOVEMENT_NOPS = False
 
 # "sequential" elementwise ops can be merged into 1 big elementwise op
-MERGE_ELEMENTWISE_OPS = True
+MERGE_ELEMENTWISE_OPS = False
 
 # after the conv is done, it can run elementwise ops on its output
-MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
+MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = False
 
 class LazyOp(NamedTuple):
   op: Op
-  src: List # LazyOp or LazyBuffer
+  src: List[Union[LazyOp, LazyBuffer]]
   arg: Any = None
 
 def get_lazybuffers(op:LazyOp):
@@ -44,8 +44,7 @@ def get_lazybuffers(op:LazyOp):
       ret += get_lazybuffers(x)
     elif isinstance(x, LazyBuffer):
       ret.append(x)
-    else:
-      raise Exception("wtf")
+    else: raise Exception("wtf")
   return ret
 
 def get_lazyops(op:LazyOp):
@@ -59,6 +58,8 @@ def get_lazyops(op:LazyOp):
       raise Exception("wtf")
   return ret
 
+import tinygrad.llops.ops_gpu as gops
+
 class LazyBuffer:
   def __init__(self, shape:tuple, optype:OpTypes, op:LazyOp):
     assert isinstance(op, LazyOp)
@@ -70,27 +71,49 @@ class LazyBuffer:
     self.optype = optype
     self.dtype = np.float32
     self.op = op
-    self.did_realize = False
+    self.realized = None
   
-  def __repr__(self):
-    return f"<LB {self.optype.__name__ if self.optype is not None else 'load'}: {self.op.op}>"
+  @property
+  def opname(self):
+    return self.optype.__name__ if self.optype is not None else 'load'
 
-  def realize(self):
-    if self.did_realize or self.optype is None: return self
-    self.did_realize = True
-    srcs = [s.realize() for s in get_lazybuffers(self.op)]
-    # TODO: do real op here
-    log_op(self.optype.__name__, get_lazyops(self.op), self, srcs)
-    return self
+  def __repr__(self):
+    return f"<LB {self.opname}: {self.op.op}>"
+
+  def realize(self:LazyBuffer) -> gops.GPUBuffer:
+    if self.realized is not None:
+      return self.realized
+    # TODO: put this back
+    #srcs = [s.realize() for s in get_lazybuffers(self.op)]
+    lazy_srcs = self.op.src
+    srcs = [s.realize() for s in lazy_srcs]
+
+    ret = None
+    if self.optype == None:
+      # created from hostbuf
+      ret = gops.GPUBuffer(self.shape, self.op.arg)
+    elif self.optype == ProcessingOps:
+      ret = gops.processing_op(self.op.op, srcs[0], srcs[1], self.op.arg)
+    elif self.optype == MovementOps:
+      ret = gops.movement_op(self.op.op, srcs[0], self.op.arg)
+    elif self.optype == BinaryOps:
+      if isinstance(self.op.op, UnaryOps):
+        ret = gops.unary_op(self.op.op, srcs[0])
+      else:
+        ret = gops.binary_op(self.op.op, srcs[0], srcs[1])
+    elif self.optype == MovementOps:
+      ret = gops.movement_op(self.op.op, srcs[0], self.op.arg)
+    self.realized = ret
+
+    if self.op.op is not None: log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
+    return self.realized
 
   @staticmethod
   def fromCPU(x):
     return LazyBuffer(x.shape, None, LazyOp(None, [], x))
 
   def toCPU(self):
-    self.realize()
-    # this realizes the tensor 
-    return np.zeros(self.shape, self.dtype)
+    return self.realize().toCPU()
 
 @functools.lru_cache()
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
@@ -141,8 +164,8 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
         elif depends(srcs[1].op, srcs[0]):
           srcs = [srcs[0], srcs[1].op]
         else:
-          #print("disconnected?")
-          # both are okay
+          # all three are okay
+          #return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
           srcs = [srcs[0].op, srcs[1]]
           #srcs = [srcs[0], srcs[1].op]
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
