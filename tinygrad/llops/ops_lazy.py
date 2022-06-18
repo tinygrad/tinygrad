@@ -117,6 +117,9 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
       else:
         # mismatch convs, don't merge
+        # TODO: pick the right one
+        #srcs = [srcs[0].op, srcs[1]]
+        #return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
         pass
 
   if MERGE_ELEMENTWISE_OPS:
@@ -131,13 +134,13 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
   if len(st.views) == 1: return x    # this is a no-op
 
   if SHUFFLE_MOVEMENT_OPS:
-    if x.optype == ElementWiseOps:
+    if x.optype == BinaryOps:
       def replace_w_movement_op(y:Union[LazyOp, LazyBuffer]):
         if isinstance(y, LazyBuffer):
           return movement_op(op, y, arg)
         elif isinstance(y, LazyOp):
           return LazyOp(y.op, [replace_w_movement_op(z) for z in y.src], y.arg)
-      return LazyBuffer(st.shape, ElementWiseOps, replace_w_movement_op(x.op))
+      return LazyBuffer(st.shape, BinaryOps, replace_w_movement_op(x.op))
 
   if REMOVE_MOVEMENT_NOPS:
     if x.optype == MovementOps:
