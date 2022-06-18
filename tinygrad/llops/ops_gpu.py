@@ -50,8 +50,9 @@ class CLProgram:
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args): self.clprg(cl_queue, *args)
 
-@functools.lru_cache
+@functools.lru_cache(maxsize=None)
 def clbuild(name, prg, options=tuple(), argdtypes=None):
+  #print("cache miss")
   return CLProgram(name, prg, options, argdtypes)
 
 def unary_op(op, x):

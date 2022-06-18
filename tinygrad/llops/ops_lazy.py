@@ -80,6 +80,14 @@ def to_st(x: LazyBuffer) -> Tuple[LazyBuffer, ShapeTracker]:
     xst = ShapeTracker(*x.shape)
   return x, xst
 
+# TODO: refactor with the above two
+def buf_st(x: LazyBuffer) -> LazyBuffer:
+  if x.optype == MovementOps:
+    x = x.op
+    while isinstance(x, LazyOp):
+      x = x.src[0]
+  return x
+
 def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
   if isinstance(x, LazyBuffer):
     return f"arg_{lazy_srcs.index(x)}"
@@ -131,10 +139,9 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
 
 def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
   lazy_srcs = list(set(get_lazybuffers(ret.op)))
-  lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
   prg_src, idxs = compile_binary_op(ret, lazy_srcs)
   lazy_srcs_ret = [lazy_srcs[i] for i in idxs]
-  real_bufs = [lazy_srcs_st[i][0].realize() for i in idxs]
+  real_bufs = [buf_st(lazy_srcs[i]).realize() for i in idxs]
 
   #print(prg_src)
   gret = gops.GPUBuffer(ret.shape)
@@ -220,7 +227,7 @@ class LazyBuffer:
     print(f"realized in {(et-st)*1000:.2f} ms, waited {(et-mt)*1000:.2f} ms for kernels ({(mt-st)*1000:.2f} ms in python)")
     return ret
 
-@functools.lru_cache()
+@functools.lru_cache(maxsize=None)
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
   if MERGE_ELEMENTWISE_INTO_CONV_OUTPUT:
@@ -280,7 +287,7 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
 
 # caching is safe here, the same op and arg applied to the same buffer is the same
-@functools.lru_cache()
+@functools.lru_cache(maxsize=None)
 def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
   st = ShapeTracker(*x.shape)
   st = st.movement_op(op, arg)
