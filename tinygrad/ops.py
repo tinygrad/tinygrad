@@ -22,7 +22,7 @@ if GRAPH:
   atexit.register(save_graph_exit)
 
 global_num_max = 0
-def log_op(op, ret, inp):
+def log_op(top, op, ret, inp):
   if DEBUG: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
     def nm(x):
@@ -32,7 +32,7 @@ def log_op(op, ret, inp):
         global_num_max += 1
       return f"<<< {x.global_num} >>>"
 
-    top,bop = str(op[0]).split(".")
+    #top,bop = str(op[0]).split(".")
     top_colors = {"UnaryOps": "#c0c0c0", "ReduceOps": "#8080ff", "BinaryOps": "#c0c0c0", "MovementOps": "#80ff80", "ProcessingOps": "#ff8080"}
 
     for x in inp:
