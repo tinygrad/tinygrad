@@ -101,14 +101,12 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
     code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
   return code
 
-def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
-  lazy_srcs = list(set(get_lazybuffers(ret.op)))
+def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str, list[int]]:
   lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
-
   opencl_type = ["__global float *res_g"]
   opencl_src = []
   opencl_interior_src = []
-  real_bufs = []
+  idxs = []
   for argn,(b,st) in enumerate(lazy_srcs_st):
     if b.optype == None and b.shape == (1,) and not st.needs_valid():
       opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
@@ -120,7 +118,7 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
       }""")
       opencl_interior_src.append(f"float arg_{argn} = get_{argn}(buf_{argn}, gid);")
       opencl_type.append(f"__global const float *buf_{argn}")
-      real_bufs.append(b.realize())
+      idxs.append(argn)
 
   prg_src = '\n'.join(opencl_src)+"""
   __kernel void binop("""+', '.join(opencl_type)+""") {
@@ -128,11 +126,21 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
     """+'\n'.join(opencl_interior_src)+"""
     res_g[gid] = """+ast(ret.op, lazy_srcs)+""";
   }"""
+
+  return prg_src, idxs
+
+def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
+  lazy_srcs = list(set(get_lazybuffers(ret.op)))
+  lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
+  prg_src, idxs = compile_binary_op(ret, lazy_srcs)
+  lazy_srcs_ret = [lazy_srcs[i] for i in idxs]
+  real_bufs = [lazy_srcs_st[i][0].realize() for i in idxs]
+
   #print(prg_src)
   gret = gops.GPUBuffer(ret.shape)
   binop = gops.clbuild("binop", prg_src)
   binop([prod(ret.shape)], None, gret.cl, *[x.cl for x in real_bufs])
-  return gret, [x[0] for x in lazy_srcs_st]
+  return gret, lazy_srcs_ret
 
 realized_buffers = []
 class LazyBuffer:
@@ -174,22 +182,6 @@ class LazyBuffer:
       lazy_srcs = [x,w]
       ret = gops.processing_op(self.op.op, x.realize(), w.realize(), self.op.arg)
     elif self.optype == BinaryOps:
-      """
-      if isinstance(self.op.op, UnaryOps):
-        #x = self.op.src[0].realize()
-        #ret = gops.unary_op(self.op.op, x)
-        x, xst = to_st(self.op.src[0])
-        lazy_srcs = [x]
-        ret = gops.unary_op_shapetracked(self.op.op, x.realize(), xst)
-      else:
-        #a = self.op.src[0].realize()
-        #b = self.op.src[1].realize()
-        #ret = gops.binary_op(self.op.op, a, b)
-        x, xst = to_st(self.op.src[0])
-        y, yst = to_st(self.op.src[1])
-        lazy_srcs = [x,y]
-        ret = gops.binary_op_shapetracked(self.op.op, x.realize(), xst, y.realize(), yst)
-      """
       ret, lazy_srcs = realize_binary_op(self)
     elif self.optype == MovementOps:
       root, st = movementop_st(self.op)

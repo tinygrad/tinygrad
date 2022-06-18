@@ -54,25 +54,6 @@ class CLProgram:
 def clbuild(name, prg, options=tuple(), argdtypes=None):
   return CLProgram(name, prg, options, argdtypes)
 
-def unary_op_shapetracked(op, x, xst):
-  ret = GPUBuffer(xst.shape)
-  if op == UnaryOps.RELU: code = 'max(a, (float)0.)'
-  elif op == UnaryOps.EXP: code = 'exp(a)'
-  elif op == UnaryOps.LOG: code = 'log(a)'
-  elif op == UnaryOps.NEG: code = '-a'
-  elif op == UnaryOps.SIGN: code = 'sign(a)'
-  else: raise Exception(f"{op} isn't supported")
-  unop = clbuild("unop", """
-  __kernel void unop(__global const float *a_g, __global float *res_g) {
-    int gid = get_global_id(0);
-    int idx = gid; int valid = 1;
-    """+xst.expr().replace('//', '/')+""";
-    float a = valid ? a_g[idx] : 0.0;
-    res_g[gid] = """+code+""";
-  }""")
-  unop([prod(ret.shape)], None, x.cl, ret.cl)
-  return ret
-
 def unary_op(op, x):
   ret = GPUBuffer(x.shape)
   if op == UnaryOps.RELU: code = 'max(a, (float)0.)'
@@ -88,37 +69,6 @@ def unary_op(op, x):
     res_g[gid] = """+code+""";
   }""")
   unop([roundup(prod(ret.shape))//4], None, x.cl, ret.cl)
-  return ret
-
-def binary_op_shapetracked(op, x, xst, y, yst):
-  #print(xst.expr(), yst.expr())
-  ret = GPUBuffer(xst.shape)
-  if op == BinaryOps.ADD: code = "a+b"
-  elif op == BinaryOps.SUB: code = "a-b"
-  elif op == BinaryOps.MUL: code = "a*b"
-  elif op == BinaryOps.DIV: code = "b/a"
-  elif op == BinaryOps.POW: code = "pow(a,b)"
-  elif op == BinaryOps.CMPEQ: code = "1.0f*(a==b)"
-  else: raise Exception(f"{op} isn't supported")
-  assert xst.shape == ret.shape and yst.shape == ret.shape
-  binop = clbuild("binop", """
-  float get_shapetracked_a(__global const float *x, int idx) {
-    int valid = 1;
-    """+xst.expr().replace('//', '/')+""";
-    return valid ? x[idx] : 0.0;
-  }
-  float get_shapetracked_b(__global const float *x, int idx) {
-    int valid = 1;
-    """+yst.expr().replace('//', '/')+""";
-    return valid ? x[idx] : 0.0;
-  }
-  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g) {
-    int gid = get_global_id(0);
-    float a = get_shapetracked_a(a_g, gid);
-    float b = get_shapetracked_b(b_g, gid);
-    res_g[gid] = """+code+""";
-  }""")
-  binop([prod(ret.shape)], None, x.cl, y.cl, ret.cl)
   return ret
 
 def binary_op(op, x, y):
