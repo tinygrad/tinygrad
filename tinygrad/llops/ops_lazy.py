@@ -105,6 +105,13 @@ class LazyBuffer:
         st = st.movement_op(o, a)
       return root, st
 
+    def to_st(x: LazyBuffer) -> Tuple[LazyBuffer, ShapeTracker]:
+      if x.optype == MovementOps:
+        x, xst = movementop_st(x.op)
+      else:
+        xst = ShapeTracker(*x.shape)
+      return x, xst
+
     ret = None
     if self.optype == None:
       # created from hostbuf
@@ -116,24 +123,20 @@ class LazyBuffer:
       ret = gops.processing_op(self.op.op, x, w, self.op.arg)
     elif self.optype == BinaryOps:
       if isinstance(self.op.op, UnaryOps):
+        """
         x = self.op.src[0].realize()
         ret = gops.unary_op(self.op.op, x)
+        """
+        x, xst = to_st(self.op.src[0])
+        ret = gops.unary_op_shapetracked(self.op.op, x.realize(), xst)
       else:
         """
         a = self.op.src[0].realize()
         b = self.op.src[1].realize()
         ret = gops.binary_op(self.op.op, a, b)
         """
-        if self.op.src[0].optype == MovementOps:
-          x, xst = movementop_st(self.op.src[0].op)
-        else:
-          x = self.op.src[0]
-          xst = ShapeTracker(*x.shape)
-        if self.op.src[1].optype == MovementOps:
-          y, yst = movementop_st(self.op.src[1].op)
-        else:
-          y = self.op.src[1]
-          yst = ShapeTracker(*y.shape)
+        x, xst = to_st(self.op.src[0])
+        y, yst = to_st(self.op.src[1])
         ret = gops.binary_op_shapetracked(self.op.op, x.realize(), xst, y.realize(), yst)
     elif self.optype == MovementOps:
       root,st = movementop_st(self.op)

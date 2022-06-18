@@ -46,6 +46,25 @@ def clbuild(name, prg, options=tuple()):
   def run(*args): clprg(cl_queue, *args)
   return run
 
+def unary_op_shapetracked(op, x, xst):
+  ret = GPUBuffer(xst.shape)
+  if op == UnaryOps.RELU: code = 'max(a, (float)0.)'
+  elif op == UnaryOps.EXP: code = 'exp(a)'
+  elif op == UnaryOps.LOG: code = 'log(a)'
+  elif op == UnaryOps.NEG: code = '-a'
+  elif op == UnaryOps.SIGN: code = 'sign(a)'
+  else: raise Exception(f"{op} isn't supported")
+  unop = clbuild("unop", """
+  __kernel void unop(__global const float *a_g, __global float *res_g) {
+    int gid = get_global_id(0);
+    int idx = gid; int valid = 1;
+    """+xst.expr().replace('//', '/')+""";
+    float a = valid ? a_g[idx] : 0.0;
+    res_g[gid] = """+code+""";
+  }""")
+  unop([prod(ret.shape)], None, x.cl, ret.cl)
+  return ret
+
 def unary_op(op, x):
   ret = GPUBuffer(x.shape)
   if op == UnaryOps.RELU: code = 'max(a, (float)0.)'
