@@ -73,7 +73,7 @@ class LazyBuffer:
     self.did_realize = False
   
   def __repr__(self):
-    return f"<LB {self.optype.__name__}: {self.op.op}>"
+    return f"<LB {self.optype.__name__ if self.optype is not None else 'load'}: {self.op.op}>"
 
   def realize(self):
     if self.did_realize or self.optype is None: return self
@@ -120,11 +120,32 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
         srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
       else:
-        # mismatch convs, don't merge
-        # TODO: pick the right one
-        #srcs = [srcs[0].op, srcs[1]]
-        #return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
-        pass
+        #@functools.lru_cache
+        memo = {}
+        def depends(op:LazyOp, needle:LazyBuffer) -> bool:
+          nonlocal memo
+          if id(op) in memo: return memo[id(op)]
+          bufs = get_lazybuffers(op)
+          if needle in bufs:
+            memo[id(op)] = True
+            return True
+          ret = False
+          for b in bufs:
+            if depends(b.op, needle):
+              ret = True
+              break
+          memo[id(op)] = ret
+          return ret
+        if depends(srcs[0].op, srcs[1]):
+          srcs = [srcs[0].op, srcs[1]]
+        elif depends(srcs[1].op, srcs[0]):
+          srcs = [srcs[0], srcs[1].op]
+        else:
+          #print("disconnected?")
+          # both are okay
+          srcs = [srcs[0].op, srcs[1]]
+          #srcs = [srcs[0], srcs[1].op]
+        return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
 
   if MERGE_ELEMENTWISE_OPS:
     srcs = [x.op if x.optype == BinaryOps else x for x in srcs]
