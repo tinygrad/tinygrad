@@ -206,6 +206,7 @@ class LazyBuffer:
   def __repr__(self):
     return f"<LB {self.opname}: {self.op.op}>"
 
+  SHOULD_LOG = True
   def realize(self:LazyBuffer) -> gops.GPUBuffer:
     if self.optype is not None: realized_buffers.append(self)
     if self.realized is not None:
@@ -229,7 +230,8 @@ class LazyBuffer:
       ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
-    if self.op.op is not None: log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
+    if self.op.op is not None and self.SHOULD_LOG:
+      log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
     return self.realized
 
   @staticmethod
@@ -251,6 +253,7 @@ class LazyBuffer:
     cProfile.runctx("self.realize()", globals(), locals(), sort=SortKey.TIME)
     """
 
+    LazyBuffer.SHOULD_LOG = False
     st = time.monotonic()
     ret = self.realize()
     mt = time.monotonic()
