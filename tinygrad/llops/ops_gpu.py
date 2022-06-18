@@ -40,11 +40,16 @@ class GPUBuffer:
     cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
     return data
 
+class CLProgram:
+  def __init__(self, name, prg, options, argdtypes):
+    self.built = cl.Program(cl_ctx, prg).build(options=options)
+    self.clprg = self.built.__getattr__(name)
+    if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
+  def __call__(self, *args): self.clprg(cl_queue, *args)
+
 @functools.lru_cache
-def clbuild(name, prg, options=tuple()):
-  clprg = cl.Program(cl_ctx, prg).build(options=options).__getattr__(name)
-  def run(*args): clprg(cl_queue, *args)
-  return run
+def clbuild(name, prg, options=tuple(), argdtypes=None):
+  return CLProgram(name, prg, options, argdtypes)
 
 def unary_op_shapetracked(op, x, xst):
   ret = GPUBuffer(xst.shape)
@@ -181,6 +186,7 @@ def movement_op(op, x, arg=None):
 def processing_op(op,x,w,C):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
+
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
@@ -208,7 +214,6 @@ def processing_op(op,x,w,C):
       } }
     }
     output[B*groups*rcout*oy*ox + g*rcout*oy*ox + c*oy*ox + Y*ox + X] = acc;
-  }""")
-
-  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl, *[np.int32(x) for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
+  }""", argdtypes=tuple([None, None, None] + [np.int32]*16))
+  conv_prg([C.bs*C.groups*C.rcout, C.oy, C.ox], None, x.cl, w.cl, ret.cl,*[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
   return ret

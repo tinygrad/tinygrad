@@ -3,6 +3,7 @@ from tinygrad.shapetracker import ShapeTracker
 from collections import namedtuple
 import functools
 import numpy as np
+from tinygrad.helpers import prod
 import sys
 import time
 sys.setrecursionlimit(10000)
@@ -61,6 +62,39 @@ def get_lazyops(op:LazyOp):
 
 import tinygrad.llops.ops_gpu as gops
 
+def movementop_st(root: LazyOp) -> Tuple[LazyBuffer, ShapeTracker]:
+  op_arg = []
+  while isinstance(root, LazyOp):
+    op_arg.append((root.op, root.arg))
+    root = root.src[0]
+  assert isinstance(root, LazyBuffer)
+  st = ShapeTracker(*root.shape)
+  for o,a in op_arg[::-1]:
+    st = st.movement_op(o, a)
+  return root, st
+
+def to_st(x: LazyBuffer) -> Tuple[LazyBuffer, ShapeTracker]:
+  if x.optype == MovementOps:
+    x, xst = movementop_st(x.op)
+  else:
+    xst = ShapeTracker(*x.shape)
+  return x, xst
+
+def realize_binary_op(ret: LazyBuffer) -> gops.GPUBuffer:
+  lazy_srcs = list(set(get_lazybuffers(ret.op)))
+  lazy_srcs_st = [to_st(x) for x in lazy_srcs]
+  srcs = [(x[0].realize(), x[1]) for x in lazy_srcs_st]
+
+
+  gret = gops.GPUBuffer(ret.shape)
+  binop = gops.clbuild("binop", """
+  __kernel void binop(__global float *res_g) {
+  }""")
+
+  binop([prod(ret.shape)], None, gret.cl)
+  return gret, lazy_srcs
+
+
 realized_buffers = []
 class LazyBuffer:
   def __init__(self, shape:tuple, optype:OpTypes, op:LazyOp):
@@ -95,23 +129,6 @@ class LazyBuffer:
     lazy_srcs = []
     #srcs = [s.realize() for s in lazy_srcs]
 
-    def movementop_st(root: LazyOp) -> Tuple[LazyBuffer, ShapeTracker]:
-      op_arg = []
-      while isinstance(root, LazyOp):
-        op_arg.append((root.op, root.arg))
-        root = root.src[0]
-      assert isinstance(root, LazyBuffer)
-      st = ShapeTracker(*root.shape)
-      for o,a in op_arg[::-1]:
-        st = st.movement_op(o, a)
-      return root, st
-
-    def to_st(x: LazyBuffer) -> Tuple[LazyBuffer, ShapeTracker]:
-      if x.optype == MovementOps:
-        x, xst = movementop_st(x.op)
-      else:
-        xst = ShapeTracker(*x.shape)
-      return x, xst
 
     ret = None
     if self.optype == None:
@@ -124,25 +141,22 @@ class LazyBuffer:
       ret = gops.processing_op(self.op.op, x.realize(), w.realize(), self.op.arg)
     elif self.optype == BinaryOps:
       if isinstance(self.op.op, UnaryOps):
-        """
-        x = self.op.src[0].realize()
-        ret = gops.unary_op(self.op.op, x)
-        """
+        #x = self.op.src[0].realize()
+        #ret = gops.unary_op(self.op.op, x)
         x, xst = to_st(self.op.src[0])
         lazy_srcs += [x]
         ret = gops.unary_op_shapetracked(self.op.op, x.realize(), xst)
       else:
-        """
-        a = self.op.src[0].realize()
-        b = self.op.src[1].realize()
-        ret = gops.binary_op(self.op.op, a, b)
-        """
+        #a = self.op.src[0].realize()
+        #b = self.op.src[1].realize()
+        #ret = gops.binary_op(self.op.op, a, b)
         x, xst = to_st(self.op.src[0])
         y, yst = to_st(self.op.src[1])
         lazy_srcs += [x,y]
         ret = gops.binary_op_shapetracked(self.op.op, x.realize(), xst, y.realize(), yst)
+      #ret, lazy_srcs = realize_binary_op(self)
     elif self.optype == MovementOps:
-      root,st = movementop_st(self.op)
+      root, st = movementop_st(self.op)
       lazy_srcs += [root]
       ret = gops.contiguous(root.realize(), st)
     self.realized = ret
@@ -160,6 +174,9 @@ class LazyBuffer:
     print("derealizing %d" % len(realized_buffers))
     for b in realized_buffers:
       b.realized = None
+
+    #import cProfile
+    #cProfile.runctx("self.realize()", globals(), locals())
 
     st = time.monotonic()
     ret = self.realize()
