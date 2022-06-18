@@ -29,7 +29,7 @@ REMOVE_MOVEMENT_NOPS = False
 MERGE_ELEMENTWISE_OPS = True
 
 # after the conv is done, it can run elementwise ops on its output
-MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = False
+MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
 
 class LazyOp(NamedTuple):
   op: Op

@@ -177,7 +177,7 @@ def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_ty
     """+middle_code+"""
 
     output[gid] = acc;
-  }""", argdtypes=tuple([None, None, None] + [np.int32]*16))
+  }""", argdtypes=tuple([None, None, None] + [np.int32]*16 + [None]*len(opencl_type)))
   local_group = None
   if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
   conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,
