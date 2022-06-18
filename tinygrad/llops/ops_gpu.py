@@ -164,6 +164,11 @@ def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_ty
 
     float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
+
+#ifdef ONEBYONE
+      acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + IY*ix + IX] * \
+        weight[g*rcout*cin + c*cin + ci];
+#else
       for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
         int idx_y = y*dy + IY - py;
         int idx_x = x*dx + IX - px;
@@ -171,13 +176,16 @@ def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_ty
         acc += valid ? input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
           weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] : 0.0;
       } }
+#endif
     }
 
     // insert binary and unary ops here
     """+middle_code+"""
 
     output[gid] = acc;
-  }""", argdtypes=tuple([None, None, None] + [np.int32]*16 + [None]*len(opencl_type)))
+  }""",
+  options=tuple(["-DONEBYONE"]) if C.H == 1 and C.W == 1 and C.px == 0 and C.py == 0 else tuple(),
+  argdtypes=tuple([None, None, None] + [np.int32]*16 + [None]*len(opencl_type)))
   local_group = None
   if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
   conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,
