@@ -1,8 +1,7 @@
-import numpy as np
 from collections import namedtuple
+import math
 
-def prod(x): return int(np.prod(x))
-
+def prod(x): return math.prod(x)
 def reduce_shape(shape, axis):
   return [1 if i in axis else shape[i] for i in range(len(shape))]
 

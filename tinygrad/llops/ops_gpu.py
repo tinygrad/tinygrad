@@ -22,11 +22,14 @@ def roundup(x, n=4): return (x+(n-1))//n * n
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
-    self.shape, self.dtype = tuple(shape), np.float32
-    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))  # padding
-    if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
+    self.shape = tuple(shape)
+    self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
+    if hostbuf is not None:
       # TODO: this doesn't have to block
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
+
+  @property
+  def dtype(self): return np.float32
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"

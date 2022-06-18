@@ -161,7 +161,7 @@ class LazyBuffer:
       ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
-    if self.op.op is not None: log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
+    #if self.op.op is not None: log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
     return self.realized
 
   @staticmethod
@@ -175,8 +175,11 @@ class LazyBuffer:
     for b in realized_buffers:
       b.realized = None
 
-    #import cProfile
-    #cProfile.runctx("self.realize()", globals(), locals())
+    """
+    import cProfile
+    from pstats import SortKey
+    cProfile.runctx("self.realize()", globals(), locals(), sort=SortKey.TIME)
+    """
 
     st = time.monotonic()
     ret = self.realize()
