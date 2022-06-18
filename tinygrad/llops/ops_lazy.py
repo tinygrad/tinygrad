@@ -15,8 +15,6 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps]
 ElementWiseOps = Union[UnaryOps, BinaryOps]
 OpTypes = Union[ElementWiseOps, ReduceOps, MovementOps, ProcessingOps]
 
-def tp(a,b,c=[]): return tuple(list(a) + list(b) + list(c))
-
 # sequential movement ops can be flattened into 1 movement op
 MERGE_MOVEMENT_OPS = True
 
@@ -109,41 +107,43 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
     code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
   return code
 
-#@functools.lru_cache(maxsize=None)
 compile_cache = {}
-def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str, list[int]]:
-  if ret in compile_cache:
-    return compile_cache[ret]
-  lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
-  opencl_type = ["__global float *res_g"]
-  opencl_src = []
-  opencl_interior_src = []
-  idxs = []
-  for argn,(b,st) in enumerate(lazy_srcs_st):
-    if b.optype == None and b.shape == (1,) and not st.needs_valid():
-      opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
-    else:
-      opencl_src.append("""float get_"""+str(argn)+"""(__global const float *x, int idx) {
-        int valid = 1;
-        """+st.expr().replace('//', '/')+""";
-        """+("return valid ? x[idx] : 0.0;" if st.needs_valid() else "return x[idx];")+"""
-      }""")
-      opencl_interior_src.append(f"float arg_{argn} = get_{argn}(buf_{argn}, gid);")
-      opencl_type.append(f"__global const float *buf_{argn}")
-      idxs.append(argn)
+def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str, list[str], list[int]]:
+  if ret not in compile_cache:
+    lazy_srcs_st : List[Tuple[LazyBuffer, ShapeTracker]] = [to_st(x) for x in lazy_srcs]
+    opencl_type = ["__global float *res_g"]
+    opencl_src = []
+    opencl_interior_src = []
+    idxs = []
+    for argn,(b,st) in enumerate(lazy_srcs_st):
+      if b.optype == None and b.shape == (1,) and not st.needs_valid():
+        opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
+      else:
+        opencl_src.append("""inline float get_"""+str(argn)+"""(__global const float *x, int idx) {
+          int valid = 1;
+          """+st.expr().replace('//', '/')+""";
+          """+("return valid ? x[idx] : 0.0;" if st.needs_valid() else "return x[idx];")+"""
+        }""")
+        opencl_interior_src.append(f"float arg_{argn} = get_{argn}(buf_{argn}, gid);")
+        opencl_type.append(f"__global const float *buf_{argn}")
+        idxs.append(argn)
 
-  prg_src = '\n'.join(opencl_src)+"""
-  __kernel void binop("""+', '.join(opencl_type)+""") {
-    int gid = get_global_id(0);
-    """+'\n'.join(opencl_interior_src)+"""
-    res_g[gid] = """+ast(ret.op, lazy_srcs)+""";
-  }"""
-  compile_cache[ret] = (prg_src, idxs)
-  return prg_src, idxs
+    prg_src = '\n'.join(opencl_src)+"""
+    inline void _binop("""+', '.join(opencl_type)+""") {
+      int gid = get_global_id(0);
+      """+'\n'.join(opencl_interior_src)+"""
+      res_g[gid] = """+ast(ret.op, lazy_srcs)+""";
+    }"""
+    compile_cache[ret] = (prg_src, opencl_type, idxs)
+  return compile_cache[ret]
 
 def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
   lazy_srcs = list(set(get_lazybuffers(ret.op)))
-  prg_src, idxs = compile_binary_op(ret, lazy_srcs)
+  prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
+  prg_src += """
+    __kernel void binop("""+', '.join(opencl_type)+""") {
+      _binop("""+', '.join([x.split("*")[1] for x in opencl_type])+""");
+    }"""
   lazy_srcs_ret = [buf_st(lazy_srcs[i]) for i in idxs]
   real_bufs = [x.realize() for x in lazy_srcs_ret]
 
