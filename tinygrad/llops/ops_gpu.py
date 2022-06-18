@@ -146,7 +146,7 @@ def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_ty
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
   conv_prg = clbuild("conv", prefix_code+"""
-  __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
+  __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py
     """+(', ' if len(opencl_type) > 0 else '') + ', '.join(opencl_type)+"""
     ) {

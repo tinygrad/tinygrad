@@ -133,13 +133,13 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
       if b.optype == None and b.shape == (1,) and not st.needs_valid():
         opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
       else:
-        opencl_src.append("""inline float get_"""+str(argn)+"""(__global const float *x, int idx) {
+        opencl_src.append("""inline float get_"""+str(argn)+"""(__global const float* restrict x, int idx) {
           """+("int valid = 1;" if st.needs_valid() else "")+"""
           """+st.expr().replace('//', '/')+""";
           """+("return valid ? x[idx] : 0.0;" if st.needs_valid() else "return x[idx];")+"""
         }""")
         opencl_interior_src.append(f"float arg_{argn} = get_{argn}(buf_{argn}, gid);")
-        opencl_type.append(f"__global const float *buf_{argn}")
+        opencl_type.append(f"__global const float* restrict buf_{argn}")
         idxs.append(argn)
 
     prg_src = '\n'.join(opencl_src)+"""
@@ -154,7 +154,7 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
   lazy_srcs = list(set(get_lazybuffers(ret.op)))
   prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
   prg_src += """
-    __kernel void binop(__global float *res_g, """+', '.join(opencl_type[1:])+""") {
+    __kernel void binop(__global float* restrict res_g, """+', '.join(opencl_type[1:])+""") {
       int gid = get_global_id(0);
       res_g[gid] = _binop("""+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+""");
     }"""
