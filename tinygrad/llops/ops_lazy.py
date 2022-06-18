@@ -1,6 +1,7 @@
 from __future__ import annotations
 from tinygrad.shapetracker import ShapeTracker
 from collections import namedtuple
+import os
 import functools
 import numpy as np
 from tinygrad.helpers import prod
@@ -36,6 +37,10 @@ class LazyOp(NamedTuple):
   src: List[Union[LazyOp, LazyBuffer]]
   arg: Any = None
 
+@functools.lru_cache(maxsize=None)
+def get_lazybuffers_for_buffer(x:LazyBuffer):
+  return get_lazybuffers(x.op)
+
 def get_lazybuffers(op:LazyOp):
   #print(op)
   ret = []
@@ -60,6 +65,10 @@ def get_lazyops(op:LazyOp):
 
 import tinygrad.llops.ops_gpu as gops
 
+@functools.lru_cache(maxsize=None)
+def movementop_buf(x: LazyBuffer):
+  return movementop_st(x.op)
+
 def movementop_st(root: LazyOp) -> Tuple[LazyBuffer, ShapeTracker]:
   op_arg = []
   while isinstance(root, LazyOp):
@@ -73,12 +82,13 @@ def movementop_st(root: LazyOp) -> Tuple[LazyBuffer, ShapeTracker]:
 
 def to_st(x: LazyBuffer) -> Tuple[LazyBuffer, ShapeTracker]:
   if x.optype == MovementOps:
-    x, xst = movementop_st(x.op)
+    x, xst = movementop_buf(x)
   else:
     xst = ShapeTracker(*x.shape)
   return x, xst
 
 # TODO: refactor with the above two
+@functools.lru_cache(maxsize=None)
 def buf_st(x: LazyBuffer) -> LazyBuffer:
   if x.optype == MovementOps:
     x = x.op
@@ -106,6 +116,10 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
   if "A" in code: code = code.replace("A", "("+ast(x.src[0], lazy_srcs)+")")
   if "B" in code: code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
   return code
+
+@functools.lru_cache(maxsize=None)
+def find_conv_buf(x: LazyBuffer):
+  return find_conv(x.op)
 
 def find_conv(x:LazyOp):
   if isinstance(x, LazyBuffer):
@@ -151,7 +165,7 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
   return compile_cache[ret]
 
 def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
-  lazy_srcs = list(set(get_lazybuffers(ret.op)))
+  lazy_srcs = list(set(get_lazybuffers_for_buffer(ret)))
   prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
   prg_src += """
     __kernel void binop(__global float* restrict res_g, """+', '.join(opencl_type[1:])+""") {
@@ -167,9 +181,9 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
   return gret, lazy_srcs_ret
 
 def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
-  conv = find_conv(ret.op)
+  conv = find_conv_buf(ret)
   conv_x, conv_w = conv.src[0], conv.src[1]
-  lazy_srcs = list(set(get_lazybuffers(ret.op)))
+  lazy_srcs = list(set(get_lazybuffers_for_buffer(ret)))
   lazy_srcs = [x for x in lazy_srcs if x not in [conv_x, conv_w]]
   prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
   lazy_srcs_ret = [buf_st(lazy_srcs[i]) for i in idxs]
@@ -218,14 +232,11 @@ class LazyBuffer:
       assert False
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
-      #x,w = self.op.src
-      #lazy_srcs = [x,w]
-      #ret = gops.processing_op(self.op.op, x.realize(), w.realize(), self.op.arg)
       ret, lazy_srcs = realize_processing_op(self)
     elif self.optype == BinaryOps:
       ret, lazy_srcs = realize_binary_op(self)
     elif self.optype == MovementOps:
-      root, st = movementop_st(self.op)
+      root, st = movementop_buf(self)
       lazy_srcs += [root]
       if st.contiguous: ret = root.realize()
       else: ret = gops.contiguous(root.realize(), st)
@@ -248,13 +259,19 @@ class LazyBuffer:
       b.realized = None
     realized_buffers = []
 
-    """
-    import cProfile
-    from pstats import SortKey
-    cProfile.runctx("self.realize()", globals(), locals(), sort=SortKey.TIME)
-    """
-
     LazyBuffer.SHOULD_LOG = False
+    if int(os.getenv("PROFILE", 0)) == 1:
+      import cProfile
+      import pstats, io
+      from pstats import SortKey
+      import io
+      pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
+      pr.enable()
+      self.realize()
+      pr.disable()
+      ps = pstats.Stats(pr).sort_stats(SortKey.TIME)
+      ps.print_stats()
+
     st = time.monotonic()
     ret = self.realize()
     mt = time.monotonic()
@@ -275,8 +292,8 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
       return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
     elif cnt == 2:
       # have to confirm they are the same conv
-      c1 = find_conv(srcs[0].op)
-      c2 = find_conv(srcs[1].op)
+      c1 = find_conv_buf(srcs[0])
+      c2 = find_conv_buf(srcs[1])
       #print(c1.op, c2.op)
       if c1.arg == c2.arg and tuple(c1.src) == tuple(c2.src):
         srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
