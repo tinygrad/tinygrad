@@ -65,6 +65,11 @@ class ShapeTracker:
   def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
   def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
 
+  def needs_valid(self):
+    for v in self.views:
+      if isinstance(v, ZeroView): return True
+    return False
+
   def __getitem__(self, val):
     locals = {"idx": val, "valid": 1}
     exec(self.expr(), None, locals)

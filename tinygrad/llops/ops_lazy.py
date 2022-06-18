@@ -110,7 +110,7 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
   opencl_interior_src = []
   real_bufs = []
   for argn,(b,st) in enumerate(lazy_srcs_st):
-    if False and b.optype == None and b.shape == (1,):
+    if b.optype == None and b.shape == (1,) and not st.needs_valid():
       opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
     else:
       opencl_src.append("""float get_"""+str(argn)+"""(__global const float *x, int idx) {
