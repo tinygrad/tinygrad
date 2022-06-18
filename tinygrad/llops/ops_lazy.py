@@ -20,7 +20,7 @@ def tp(a,b,c=[]): return tuple(list(a) + list(b) + list(c))
 MERGE_MOVEMENT_OPS = True
 
 # movement ops can be moved above elementwise ops 
-SHUFFLE_MOVEMENT_OPS = False
+SHUFFLE_MOVEMENT_OPS = True
 
 # if you stick the right movement ops, they might disappear!
 # TODO: this is wrong, improve ShapeTracker
@@ -91,7 +91,8 @@ class LazyBuffer:
     if self.realized is not None:
       return self.realized
     # TODO: put this back
-    lazy_srcs = get_lazybuffers(self.op)
+    #lazy_srcs = get_lazybuffers(self.op)
+    lazy_srcs = []
     #srcs = [s.realize() for s in lazy_srcs]
 
     def movementop_st(root: LazyOp) -> Tuple[LazyBuffer, ShapeTracker]:
@@ -118,9 +119,9 @@ class LazyBuffer:
       assert False
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
-      x = self.op.src[0].realize()
-      w = self.op.src[1].realize()
-      ret = gops.processing_op(self.op.op, x, w, self.op.arg)
+      x,w = self.op.src
+      lazy_srcs += [x,w]
+      ret = gops.processing_op(self.op.op, x.realize(), w.realize(), self.op.arg)
     elif self.optype == BinaryOps:
       if isinstance(self.op.op, UnaryOps):
         """
@@ -128,6 +129,7 @@ class LazyBuffer:
         ret = gops.unary_op(self.op.op, x)
         """
         x, xst = to_st(self.op.src[0])
+        lazy_srcs += [x]
         ret = gops.unary_op_shapetracked(self.op.op, x.realize(), xst)
       else:
         """
@@ -137,9 +139,11 @@ class LazyBuffer:
         """
         x, xst = to_st(self.op.src[0])
         y, yst = to_st(self.op.src[1])
+        lazy_srcs += [x,y]
         ret = gops.binary_op_shapetracked(self.op.op, x.realize(), xst, y.realize(), yst)
     elif self.optype == MovementOps:
       root,st = movementop_st(self.op)
+      lazy_srcs += [root]
       ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
