@@ -17,7 +17,7 @@ OpTypes = Union[ElementWiseOps, ReduceOps, MovementOps, ProcessingOps]
 def tp(a,b,c=[]): return tuple(list(a) + list(b) + list(c))
 
 # sequential movement ops can be flattened into 1 movement op
-MERGE_MOVEMENT_OPS = False
+MERGE_MOVEMENT_OPS = True
 
 # movement ops can be moved above elementwise ops 
 SHUFFLE_MOVEMENT_OPS = False
@@ -89,8 +89,7 @@ class LazyBuffer:
     if self.realized is not None:
       return self.realized
     # TODO: put this back
-    #srcs = [s.realize() for s in get_lazybuffers(self.op)]
-    lazy_srcs = self.op.src
+    lazy_srcs = get_lazybuffers(self.op)
     srcs = [s.realize() for s in lazy_srcs]
 
     ret = None
@@ -100,15 +99,22 @@ class LazyBuffer:
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
       ret = gops.processing_op(self.op.op, srcs[0], srcs[1], self.op.arg)
-    elif self.optype == MovementOps:
-      ret = gops.movement_op(self.op.op, srcs[0], self.op.arg)
     elif self.optype == BinaryOps:
       if isinstance(self.op.op, UnaryOps):
         ret = gops.unary_op(self.op.op, srcs[0])
       else:
         ret = gops.binary_op(self.op.op, srcs[0], srcs[1])
     elif self.optype == MovementOps:
-      ret = gops.movement_op(self.op.op, srcs[0], self.op.arg)
+      root = self.op
+      op_arg = []
+      while isinstance(root, LazyOp):
+        op_arg.append((root.op, root.arg))
+        root = root.src[0]
+      assert isinstance(root, LazyBuffer)
+      st = ShapeTracker(*root.shape)
+      for o,a in op_arg[::-1]:
+        st = st.movement_op(o, a)
+      ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
     if self.op.op is not None: log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
