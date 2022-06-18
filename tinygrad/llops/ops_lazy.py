@@ -22,7 +22,8 @@ MERGE_MOVEMENT_OPS = True
 
 # if you stick the right movement ops, they might disappear!
 # TODO: this is wrong
-REMOVE_MOVEMENT_NOPS = False
+# TODO: this isn't combining with merge elementwise into conv output
+REMOVE_MOVEMENT_NOPS = True
 
 # "sequential" elementwise ops can be merged into 1 big elementwise op
 MERGE_ELEMENTWISE_OPS = True
@@ -70,6 +71,9 @@ class LazyBuffer:
     self.dtype = np.float32
     self.op = op
     self.did_realize = False
+  
+  def __repr__(self):
+    return f"<LB {self.optype.__name__}: {self.op.op}>"
 
   def realize(self):
     if self.did_realize or self.optype is None: return self
@@ -135,12 +139,12 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
 
   if SHUFFLE_MOVEMENT_OPS:
     if x.optype == BinaryOps:
-      def replace_w_movement_op(y:Union[LazyOp, LazyBuffer]):
+      def replace_w_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer):
           return movement_op(op, y, arg)
         elif isinstance(y, LazyOp):
-          return LazyOp(y.op, [replace_w_movement_op(z) for z in y.src], y.arg)
-      return LazyBuffer(st.shape, BinaryOps, replace_w_movement_op(x.op))
+          return elementwise_op(y.op, tuple([replace_w_movement_op(z) for z in y.src]))
+      return replace_w_movement_op(x.op)
 
   if REMOVE_MOVEMENT_NOPS:
     if x.optype == MovementOps:

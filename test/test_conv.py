@@ -56,11 +56,21 @@ class TestConv(unittest.TestCase):
     x = x.conv2d(w, groups=32)
     out = x.numpy()
   
-  def test_multiadd(sef):
+  def test_multiadd(self):
     w = Tensor.ones(32)
     x = Tensor.ones(32).relu()
     (w+x).numpy()
 
+  def test_reorder(self):
+    x = Tensor.ones(1,12,128,256)
+    w = Tensor.ones(12,12,3,3)
+    x = x.conv2d(w, padding=(1,1))
+    print(x.shape)
+    x = x.reshape((1, 12, 256, 128))
+    x += 1
+    x += 1
+    x = x.reshape((1, 12, 128, 256))
+    x.numpy()
 
 if __name__ == '__main__':
   unittest.main()

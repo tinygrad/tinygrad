@@ -11,11 +11,15 @@ from tinygrad.shapetracker import ShapeTracker
 import os
 DEBUG = int(os.getenv("PRINT_LLOPS", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
+from collections import defaultdict
+cnts = defaultdict(int)
 if GRAPH:
   import atexit
   import networkx as nx
   G = nx.DiGraph()
   def save_graph_exit():
+    for k,v in cnts.items():
+      print(k, v)
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
     os.system('dot -Tsvg /tmp/net.dot -o /tmp/net.svg')
@@ -23,6 +27,7 @@ if GRAPH:
 
 global_num_max = 0
 def log_op(top, op, ret, inp):
+  cnts[top] += 1
   if DEBUG: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
     def nm(x):
