@@ -138,10 +138,8 @@ def contiguous(x, st, ret=None):
 def movement_op(op, x, arg=None):
   return contiguous(x, ShapeTracker(*x.shape).movement_op(op, arg))
 
-def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_type=[]):
-  ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
-  assert op == ProcessingOps.CONV, f"{op} isn't supported"
-
+@functools.lru_cache(maxsize=None)
+def processing_op_compile(prefix_code, middle_code, C, opencl_type):
   # input  = (bs, groups, cin, iy, ix)
   # weight = (groups, rcout, cin, H, W)
   # output = (bs, groups, rcout, oy, ox)
@@ -186,6 +184,13 @@ def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_ty
   }""",
   options=tuple(["-DONEBYONE"]) if C.H == 1 and C.W == 1 and C.px == 0 and C.py == 0 else tuple(),
   argdtypes=tuple([None, None, None] + [np.int32]*16 + [None]*len(opencl_type)))
+  return conv_prg
+
+
+def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_type=[]):
+  ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  conv_prg = processing_op_compile(prefix_code, middle_code, C, tuple(opencl_type))
   local_group = None
   if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
   conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,
