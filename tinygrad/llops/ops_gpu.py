@@ -25,6 +25,7 @@ class GPUBuffer:
     self.shape, self.dtype = tuple(shape), np.float32
     self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))  # padding
     if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
+      # TODO: this doesn't have to block
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
 
   def __repr__(self):

@@ -4,6 +4,7 @@ from collections import namedtuple
 import functools
 import numpy as np
 import sys
+import time
 sys.setrecursionlimit(10000)
 
 # TODO: these aren't really ops
@@ -72,6 +73,10 @@ class LazyBuffer:
     self.dtype = np.float32
     self.op = op
     self.realized = None
+
+    if self.optype == None:
+      # nonlazy create from hostbuf
+      self.realized = gops.GPUBuffer(self.shape, self.op.arg)
   
   @property
   def opname(self):
@@ -91,6 +96,7 @@ class LazyBuffer:
     ret = None
     if self.optype == None:
       # created from hostbuf
+      assert False
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
       ret = gops.processing_op(self.op.op, srcs[0], srcs[1], self.op.arg)
@@ -113,7 +119,13 @@ class LazyBuffer:
     return LazyBuffer(x.shape, None, LazyOp(None, [], x))
 
   def toCPU(self):
-    return self.realize().toCPU()
+    st = time.monotonic()
+    ret = self.realize()
+    mt = time.monotonic()
+    ret = ret.toCPU()
+    et = time.monotonic()
+    print(f"realized in {(et-st)*1000:.2f} ms, waited {(et-mt)*1000:.2f} ms for kernels")
+    return ret
 
 @functools.lru_cache()
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
