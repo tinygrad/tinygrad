@@ -5,6 +5,7 @@ BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
+LoadOps = Enum("LoadOps", ["LOAD"])
 
 from tinygrad.shapetracker import ShapeTracker
 
@@ -27,6 +28,7 @@ if GRAPH:
 
 global_num_max = 0
 def log_op(top, op, ret, inp):
+  if top == "LoadOps": return
   cnts[top] += 1
   if DEBUG: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
