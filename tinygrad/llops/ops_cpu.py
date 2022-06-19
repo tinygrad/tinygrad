@@ -70,8 +70,8 @@ def processing_op(op,x,w,C):
     writeable=False,
   )
   tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
-  tmp = np.zeros((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
+  tmp = np.empty((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
   for g in range(C.groups):
     #ijYXyx,kjyx -> iYXk ->ikYX
-    tmp[:,g] += np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
+    tmp[:,g] = np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
   return np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)
