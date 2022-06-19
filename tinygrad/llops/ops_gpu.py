@@ -131,12 +131,12 @@ def movement_op(op, x, arg=None):
   if st.contiguous: return GPUBuffer(st.shape, x)
   else: return contiguous(x, st)
 
-@functools.lru_cache(maxsize=None)
-def processing_op_compile(prefix_code, middle_code, C, opencl_type):
-  conv_prg = clbuild("conv", prefix_code+"""
+def processing_op(op,x,w,C):
+  ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  conv_prg = clbuild("conv", """
   __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py
-    """+(', ' if len(opencl_type) > 0 else '') + ', '.join(opencl_type)+"""
     ) {
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
@@ -165,21 +165,10 @@ def processing_op_compile(prefix_code, middle_code, C, opencl_type):
       } }
 #endif
     }
-
-    // insert binary and unary ops here
-    """+middle_code+"""
-
     output[gid] = acc;
   }""",
   options=tuple(["-DONEBYONE"]) if C.H == 1 and C.W == 1 and C.px == 0 and C.py == 0 else tuple(),
-  argdtypes=tuple([None, None, None] + [np.int32]*16 + [None]*len(opencl_type)))
-  return conv_prg
-
-def processing_op(op,x,w,C,real_bufs=[],opencl_type=[],prefix_code="",middle_code=""):
-  ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
-  assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  conv_prg = processing_op_compile(prefix_code, middle_code, C, tuple(opencl_type))
+  argdtypes=tuple([None, None, None] + [np.int32]*16))
   conv_prg([C.bs*C.cout, C.oy, C.ox], None, x.cl, w.cl, ret.cl,
-    *[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]],
-    *[x.cl for x in real_bufs])
+    *[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
   return ret
