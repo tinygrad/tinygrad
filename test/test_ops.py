@@ -180,8 +180,8 @@ class TestOps(unittest.TestCase):
 
   def test_biased_conv2d(self):
     helper_test_op([(1,16,9,9), (16,16,3,3), (16,)],
-      lambda x,w,b: torch.nn.functional.conv2d(x,w,b).relu(),
-      lambda x,w,b: Tensor.conv2d(x,w,b).relu(), atol=1e-4, grad_rtol=1e-5)
+      lambda x,w,b: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w,b).relu(),w,b),
+      lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4, grad_rtol=1e-5, forward_only=True)
 
   def test_simple_conv2d(self):
     helper_test_op([(1,1,9,9), (1,1,3,3)],

@@ -142,7 +142,7 @@ def conv(x,w,ret,C, replacements={}, real_bufs=[]):
     options=tuple(options),
     argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(real_bufs))
   )
-  print(conv_args, kernel_args)
+  #print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *conv_args, *[x.cl for x in real_bufs])
 
 

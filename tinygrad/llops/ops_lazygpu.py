@@ -203,6 +203,7 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
     #assert False
 
   gops.conv(conv_x.realize(), conv_w.realize(), gret, C, replacements, real_bufs)
+  print(real_bufs)
 
   return gret, lazy_srcs_ret+[conv_x, conv_w]
 
@@ -220,6 +221,7 @@ class LazyGPUBuffer(LazyBuffer):
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
       ret, lazy_srcs = realize_processing_op(self)
+      print("REALIZE PROCESSING OP", self.optype, self.op.op, ret, lazy_srcs)
     elif self.optype == BinaryOps:
       ret, lazy_srcs = realize_binary_op(self)
     elif self.optype == ReduceOps:
@@ -235,7 +237,7 @@ class LazyGPUBuffer(LazyBuffer):
     self.realized = ret
 
     if self.SHOULD_LOG:
-      log_op(self.optype, self.op.op, self, lazy_srcs)
+      log_op(self.optype, get_lazyops(self.op), self, lazy_srcs)
     return self.realized
 
   @staticmethod
@@ -243,7 +245,7 @@ class LazyGPUBuffer(LazyBuffer):
     return LazyGPUBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
 
   def toCPU(self):
-    #return self.realize().toCPU()
+    return self.realize().toCPU()
 
     global realized_buffers
     # for the kernel builds to not count in timing
@@ -254,8 +256,8 @@ class LazyGPUBuffer(LazyBuffer):
         b.realized = None
     realized_buffers = []
 
-    LazyGPUBuffer.SHOULD_LOG = False
     if int(os.getenv("PROFILE", 0)) == 1:
+      LazyGPUBuffer.SHOULD_LOG = False
       import cProfile
       import pstats, io
       from pstats import SortKey

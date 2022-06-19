@@ -38,11 +38,15 @@ def log_op(optype, op, ret, inp, dashed=False):
         global_num_max += 1
       return f"<<< {x.global_num} >>>"
 
-    _,sop = str(op).split(".")
     top_colors = {LoadOps: "#ffffff", UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
 
     for x in inp:
-      G.add_edge(nm(x), nm(ret), label=sop, color='#808080' if dashed else '', style='dashed' if dashed else '')
+      if isinstance(op, list):
+        sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
+        G.add_edge(nm(x), nm(ret), label=sop, color='#808080' if dashed else '', style='dashed' if dashed else '')
+      else:
+        _,sop = str(op).split(".")
+        G.add_edge(nm(x), nm(ret), label=sop, color='#808080' if dashed else '', style='dashed' if dashed else '')
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
     G.nodes[nm(ret)]['label'] = str(ret.shape)
