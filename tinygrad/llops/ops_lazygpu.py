@@ -123,7 +123,7 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
   middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
 
   gret = gops.processing_op(conv.op, conv_x.realize(), conv_w.realize(), conv.arg,
-    prg_src, middle_code, real_bufs, opencl_type[2:])
+    real_bufs, opencl_type[2:], prg_src, middle_code)
   return gret, lazy_srcs_ret+[conv_x, conv_w]
 
 realized_buffers = []
@@ -163,7 +163,7 @@ class LazyGPUBuffer(LazyBuffer):
     return LazyGPUBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
 
   def toCPU(self):
-    return self.realize().toCPU()
+    #return self.realize().toCPU()
 
     global realized_buffers
     # for the kernel builds to not count in timing

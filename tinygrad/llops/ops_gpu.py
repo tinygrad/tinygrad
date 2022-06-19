@@ -132,9 +132,6 @@ def movement_op(op, x, arg=None):
 
 @functools.lru_cache(maxsize=None)
 def processing_op_compile(prefix_code, middle_code, C, opencl_type):
-  # input  = (bs, groups, cin, iy, ix)
-  # weight = (groups, rcout, cin, H, W)
-  # output = (bs, groups, rcout, oy, ox)
   conv_prg = clbuild("conv", prefix_code+"""
   __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py
@@ -167,6 +164,7 @@ def processing_op_compile(prefix_code, middle_code, C, opencl_type):
       } }
 #endif
     }
+
     // insert binary and unary ops here
     """+middle_code+"""
 
@@ -176,14 +174,11 @@ def processing_op_compile(prefix_code, middle_code, C, opencl_type):
   argdtypes=tuple([None, None, None] + [np.int32]*16 + [None]*len(opencl_type)))
   return conv_prg
 
-
-def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_type=[]):
+def processing_op(op,x,w,C,real_bufs=[],opencl_type=[],prefix_code="",middle_code=""):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   conv_prg = processing_op_compile(prefix_code, middle_code, C, tuple(opencl_type))
-  local_group = None
-  #if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
-  conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,
+  conv_prg([C.bs*C.cout, C.oy, C.ox], None, x.cl, w.cl, ret.cl,
     *[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]],
     *[x.cl for x in real_bufs])
   return ret
