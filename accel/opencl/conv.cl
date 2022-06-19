@@ -1,5 +1,7 @@
   #define NUM_OUTPUTS 4
 
+  //PREFIX
+
   __kernel void conv(
     read_only image2d_t input,
     read_only image2d_t weights,
@@ -13,7 +15,9 @@
     short filterSizeX, short filterSizeY,
     short paddingX, short paddingY,
     short strideX, short strideY,
-    short dilationX, short dilationY) {
+    short dilationX, short dilationY
+    //ARGS
+    ) {
 
   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
 
@@ -86,7 +90,7 @@
     inputLocation.y += dilationY;
   }
 
-  // insert unary and binary ops here
+  //BINOP
 
   // output to memory
   int2 outputLocation;

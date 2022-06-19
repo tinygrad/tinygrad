@@ -100,7 +100,7 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
   lazy_srcs = list(set(get_lazybuffers_for_buffer(ret)))
   prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
   prg_src += """
-    __kernel void binop(__global float* restrict res_g, """+', '.join(opencl_type[1:])+""") {
+    __kernel void binop(__global float* restrict res_g"""+(',' if len(opencl_type) >= 2 else '')+', '.join(opencl_type[1:])+""") {
       int gid = get_global_id(0);
       res_g[gid] = _binop("""+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+""");
     }"""
@@ -177,14 +177,32 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
       log_op(buf.optype, buf.op.op, buf, [inp], dashed=True)
   real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
 
-  middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
+  #middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
+  middle_code = "int gid = (outputRow * get_image_width(output) + mad24(startOutputColumn, totalNumPackedOutputChannels, packedOutputChannel))*4;\n"
+  vv = "xyzw"
+  for i in range(16):
+    acc = f"outputValues[{i//4}].{vv[i%4]}"
+    args = [x.split(" ")[-1].replace("*", "") for x in opencl_type[2:]]
+    args = [acc, f"gid+{i}"]+args
+    middle_code += f"{acc} = _binop("+', '.join(args)+");\n"
 
   C = conv.arg
   gret = gops.GPUBuffer(C.out_shape)
 
   #conv_prg = processing_op_compile_hot(prg_src, middle_code, C, tuple(opencl_type)[2:])
   #conv_prg([C.bs*C.cout, C.oy, C.ox], None, conv_x.realize().cl, conv_w.realize().cl, gret.cl, *[x.cl for x in real_bufs])
-  gops.conv(conv_x.realize(), conv_w.realize(), gret, C)
+  replacements = {}
+  if len(real_bufs) != 0:
+    print(prg_src)
+    print(real_bufs)
+    print(middle_code)
+    print(tuple(opencl_type)[2:])
+    replacements["//PREFIX"] = prg_src
+    replacements["//ARGS"] = ","+','.join(tuple(opencl_type)[2:])
+    replacements["//BINOP"] = middle_code
+    #assert False
+
+  gops.conv(conv_x.realize(), conv_w.realize(), gret, C, replacements, real_bufs)
 
   return gret, lazy_srcs_ret+[conv_x, conv_w]
 

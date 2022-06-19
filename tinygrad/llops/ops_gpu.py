@@ -87,7 +87,7 @@ def binary_op(op, x, y):
   return ret
 
 def reduce_op(op, inp, new_shape):
-  Buffer = x.__class__
+  Buffer = inp.__class__
   ret = Buffer(new_shape)
   if op == ReduceOps.SUM: code, start = "out += a", "0.0"
   elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"

@@ -105,7 +105,7 @@ class ShapeTracker:
           yp -= 1
         else:
           break
-      print(xp, yp, self.shape, self.strides, new_shape, new_strides[::-1])
+      #print(xp, yp, self.shape, self.strides, new_shape, new_strides[::-1])
       if xp == -1 and yp == -1:
         #print("1s resize")
         self.views[-1] = View(new_shape, new_strides[::-1], self.offset)

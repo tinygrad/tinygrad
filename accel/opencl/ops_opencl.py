@@ -1,6 +1,7 @@
 # this is focused on speed
 # it may not run everything
 
+from dataclasses import replace
 import pathlib
 import numpy as np
 from tinygrad.ops import MovementOps, ProcessingOps
@@ -119,7 +120,7 @@ def load(x):
     ret = f.read()
   return ret
 
-def conv(x,w,ret,C):
+def conv(x,w,ret,C, replacements={}, real_bufs=[]):
   print(x.shapetracker.expr(), w.shapetracker.expr())
   print(x.shape, w.shape, ret.shape)
   options = []
@@ -130,12 +131,19 @@ def conv(x,w,ret,C):
   assert C.cout%4 == 0
   kernel_args = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
   conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
-  conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'),
+  conv_src = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
+  for k,v in replacements.items():
+    conv_src = conv_src.replace(k, v)
+  if len(replacements) > 0:
+    print(conv_src)
+    #exit(0)
+
+  conv_prg = clbuild("conv", conv_src,
     options=tuple(options),
-    argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args))
+    argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(real_bufs))
   )
   print(conv_args, kernel_args)
-  conv_prg(kernel_args, None, x.image, w.image, ret.image, *conv_args)
+  conv_prg(kernel_args, None, x.image, w.image, ret.image, *conv_args, *[x.cl for x in real_bufs])
 
 
 def processing_op(op,x,w,C):
