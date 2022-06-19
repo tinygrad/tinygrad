@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import time
 import io
 import unittest
 import numpy as np
@@ -152,7 +153,11 @@ class TestOnnxModel(unittest.TestCase):
       "initial_state": np.zeros((1, 512))
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
+    st = time.monotonic()
     tinygrad_out = run_onnx(onnx_model, inputs)['outputs'].numpy()
+    et = time.monotonic() - st
+    print(f"ran openpilot model in {et*1000.0:.2f} ms")
+
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
