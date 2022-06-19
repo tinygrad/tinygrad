@@ -42,7 +42,8 @@ class Device:
     DEFAULT = i if os.environ.get(name, 0) == "1" else DEFAULT
     try:
       llops[i] = importlib.import_module('tinygrad.llops.'+op)
-      buffers[i] = [cls for name, cls in inspect.getmembers(llops[i], inspect.isclass) if name.endswith("Buffer")][0]
+      def find_buffer(llo, name): return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
+      buffers[i] = find_buffer(llops[i], name)
     except ImportError as e:
       print(op, "not available", e)
   DEFAULT = CPU if DEFAULT is None else DEFAULT
