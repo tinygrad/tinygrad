@@ -83,5 +83,5 @@ class Ops:
     ret = ctx.op.processing_op(op, x, y, C)
     if 'LAZY' not in ctx.device: log_op(ProcessingOps, op, ret, [x, y])
     assert isinstance(ret, ctx.buffer)
-    assert ret.shape == (C.bs, C.cout, C.oy, C.ox)
+    assert ret.shape == C.out_shape
     return ret

@@ -61,7 +61,8 @@ code_for_op = {
 }
 
 def unary_op(op, x):
-  ret = GPUBuffer(x.shape)
+  Buffer = x.__class__
+  ret = Buffer(x.shape)
   unop = clbuild("unop", """
   __kernel void unop(__global const float4 *a_g, __global float4 *res_g) {
     int gid = get_global_id(0);
@@ -72,7 +73,8 @@ def unary_op(op, x):
   return ret
 
 def binary_op(op, x, y):
-  ret = GPUBuffer(x.shape)
+  Buffer = x.__class__
+  ret = Buffer(x.shape)
   assert x.shape == ret.shape and y.shape == ret.shape
   binop = clbuild("binop", """
   __kernel void binop(__global const float4 *a_g, __global const float4 *b_g, __global float4 *res_g) {
@@ -85,7 +87,8 @@ def binary_op(op, x, y):
   return ret
 
 def reduce_op(op, inp, new_shape):
-  ret = GPUBuffer(new_shape)
+  Buffer = x.__class__
+  ret = Buffer(new_shape)
   if op == ReduceOps.SUM: code, start = "out += a", "0.0"
   elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
   else: raise Exception(f"{op} isn't supported")
@@ -119,7 +122,8 @@ def reduce_op(op, inp, new_shape):
   return ret
 
 def contiguous(x, st, ret=None):
-  if ret is None: ret = GPUBuffer(st.shape)
+  Buffer = x.__class__
+  if ret is None: ret = Buffer(st.shape)
   clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
     int gid = get_global_id(0); int valid = 1; int idx = gid; """+st.expr().replace('//', '/')+""";
     ret[gid] = valid ? x[idx] : 0.0;  // should never be out-of-bounds accesses
@@ -127,12 +131,14 @@ def contiguous(x, st, ret=None):
   return ret
 
 def movement_op(op, x, arg=None):
+  Buffer = x.__class__
   st = ShapeTracker(*x.shape).movement_op(op, arg)
-  if st.contiguous: return GPUBuffer(st.shape, x)
+  if st.contiguous: return Buffer(st.shape, x)
   else: return contiguous(x, st)
 
 def processing_op(op,x,w,C):
-  ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
+  Buffer = x.__class__
+  ret = Buffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   conv_prg = clbuild("conv", """
   __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,

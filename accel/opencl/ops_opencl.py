@@ -91,26 +91,26 @@ class OpenCLBuffer:
       self._buf = None
     return self._image
 
-def unary_op(ctx, op, x):
+def unary_op(op, x):
   # TODO: this doesn't actually have to be contiguous
-  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
-  return unary_op_gpu(ctx, op, x)
+  x = contiguous(x, x.shapetracker) if not x.shapetracker.contiguous else x
+  return unary_op_gpu(op, x)
 
-def binary_op(ctx, op, x, y):
-  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
-  y = contiguous(ctx, y, y.shapetracker) if not y.shapetracker.contiguous else y
-  return binary_op_gpu(ctx, op, x, y)
+def binary_op(op, x, y):
+  x = contiguous(x, x.shapetracker) if not x.shapetracker.contiguous else x
+  y = contiguous(y, y.shapetracker) if not y.shapetracker.contiguous else y
+  return binary_op_gpu(op, x, y)
 
-def reduce_op(ctx, op, x, new_shape):
-  x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
-  return reduce_op_gpu(ctx, op, x, new_shape)
+def reduce_op(op, x, new_shape):
+  x = contiguous(x, x.shapetracker) if not x.shapetracker.contiguous else x
+  return reduce_op_gpu(op, x, new_shape)
 
-def movement_op(ctx, op, x, arg=None):
+def movement_op(op, x, arg=None):
   xc = x.clone()
   # convert from image if the buffer can change shape
   if op in [MovementOps.EXPAND, MovementOps.SLICE]: xc.cl
   xc.shapetracker.movement_op(op, arg)
-  if not xc.shapetracker.contiguous: return contiguous(ctx, xc, xc.shapetracker)
+  if not xc.shapetracker.contiguous: return contiguous(xc, xc.shapetracker)
   else: return xc
 
 def load(x):
@@ -134,9 +134,9 @@ def conv(x,w,ret,C):
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *[np.int16(x) for x in conv_args])
 
 
-def processing_op(ctx,op,x,w,out_shape,C):
+def processing_op(op,x,w,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  ret = ctx.buffer((C.bs*C.oy, C.ox*C.cout//4, 4))
+  ret = OpenCLBuffer(C.out_shape)
   conv(x, w, ret, C)
   return ret
 
