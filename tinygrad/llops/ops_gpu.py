@@ -136,8 +136,7 @@ def processing_op(op,x,w,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   conv_prg = clbuild("conv", """
   __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
-    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py
-    ) {
+    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py) {
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
     int c = get_global_id(0) % rcout;
