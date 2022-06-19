@@ -132,7 +132,7 @@ def conv(x,w,ret,C):
   conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
   conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'),
     options=tuple(options),
-    argdtypes=tuple([None, None, None] + [np.uint32]*len(conv_args))
+    argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args))
   )
   print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *conv_args)
