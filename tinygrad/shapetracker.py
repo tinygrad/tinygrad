@@ -95,8 +95,8 @@ class ShapeTracker:
     if len(self.shape) < len(new_shape):
       xp, yp = len(self.shape)-1, len(new_shape)-1
       new_strides = []
-      while xp >= 0 and yp >= 0:
-        if self.shape[xp] == new_shape[yp]:
+      while yp >= 0:
+        if xp >= 0 and self.shape[xp] == new_shape[yp]:
           new_strides.append(self.strides[xp])
           xp -= 1
           yp -= 1
@@ -105,7 +105,7 @@ class ShapeTracker:
           yp -= 1
         else:
           break
-      #print(xp, yp, self.shape, self.strides, new_shape, new_strides[::-1])
+      print(xp, yp, self.shape, self.strides, new_shape, new_strides[::-1])
       if xp == -1 and yp == -1:
         #print("1s resize")
         self.views[-1] = View(new_shape, new_strides[::-1], self.offset)
