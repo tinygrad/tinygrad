@@ -2,10 +2,12 @@ import os, time
 from tinygrad.llops.ops_lazy import LazyBuffer, LazyOp, find_conv_buf, get_lazybuffers_for_buffer
 import functools
 import tinygrad.llops.ops_gpu as gops
-from tinygrad.ops import ProcessingOps, ReduceOps, BinaryOps, MovementOps, LoadOps, log_op
+from tinygrad.ops import ProcessingOps, ReduceOps, BinaryOps, MovementOps, LoadOps
 from tinygrad.shapetracker import ShapeTracker
 from tinygrad.helpers import prod
 from typing import Tuple, List, Union
+
+from tinygrad.llops.ops_lazy import processing_op, binary_op, unary_op, reduce_op, movement_op
 
 def get_lazyops(op:LazyOp):
   ret = [op.op]
@@ -151,9 +153,9 @@ class LazyGPUBuffer(LazyBuffer):
       ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
-    if self.op.op is not None and self.SHOULD_LOG:
-      opname = self.optype.__name__ if self.optype is not None else 'load'
-      log_op(opname, get_lazyops(self.op), self, lazy_srcs)
+    #if self.op.op is not None and self.SHOULD_LOG:
+    #  opname = self.optype.__name__ if self.optype is not None else 'load'
+    #  log_op(opname, get_lazyops(self.op), self, lazy_srcs)
     return self.realized
 
   @staticmethod

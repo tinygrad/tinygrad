@@ -392,8 +392,7 @@ class Tensor:
     return y.div((y*y).mean(axis=-1, keepdim=True).add(eps).sqrt())
 
 # An instantiation of the Function is the Context
-#from tinygrad.ops import Ops
-from tinygrad.llops.ops_lazy import Ops
+from tinygrad.ops import Ops
 class Function(Ops):
   def __new__(cls, *args, **kwargs):
     cls.forward = staticmethod(cls.forward)

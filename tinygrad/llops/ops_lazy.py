@@ -154,15 +154,8 @@ def processing_op(op, x, w, C):
   Buffer = x.__class__
   return Buffer(C.out_shape, ProcessingOps, LazyOp(op, [x, w], C))
 
-# universal dispatcher?
-class Ops:
-  def unary_op(ctx, op, x):
-    return elementwise_op(op, (x,))
-  def binary_op(ctx, op, x, y):
-    return elementwise_op(op, (x,y))
-  def movement_op(ctx, op, x, arg):
-    return movement_op(op, x, tuple(arg))
-  def reduce_op(ctx, op, x, new_shape):
-    return reduce_op(op, x, tuple(new_shape))
-  def processing_op(ctx, op, x, w, C):
-    return processing_op(op, x, w, C)
+def unary_op(op, x):
+  return elementwise_op(op, (x,))
+
+def binary_op(op, x, y):
+  return elementwise_op(op, (x,y))
