@@ -59,7 +59,7 @@ class ShapeTracker:
   @property
   def contiguous(self):
     if len(self.views) > 1: return False
-    return self.strides == strides_for_shape(self.shape)
+    return self.strides == strides_for_shape(self.shape) and self.offset == 0
 
   @property
   def shape(self): return self.views[-1].shape

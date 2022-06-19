@@ -48,6 +48,10 @@ class TestSingleShapeTracker(unittest.TestCase):
     self.st.permute(1,0)
     assert not self.st.contiguous
 
+  def test_slice(self):
+    self.st.slice((1,2), (0,4))
+    assert not self.st.contiguous
+
   def test_double_permute(self):
     self.st.permute(1,0)
     self.st.permute(1,0)
