@@ -163,6 +163,6 @@ class Ops:
   def movement_op(ctx, op, x, arg):
     return movement_op(op, x, tuple(arg))
   def reduce_op(ctx, op, x, new_shape):
-    return reduce_op(op, x, new_shape)
+    return reduce_op(op, x, tuple(new_shape))
   def processing_op(ctx, op, x, w, C):
     return processing_op(op, x, w, C)

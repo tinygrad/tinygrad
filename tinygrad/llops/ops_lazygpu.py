@@ -2,7 +2,7 @@ import os, time
 from tinygrad.llops.ops_lazy import LazyBuffer, LazyOp, find_conv_buf, get_lazybuffers_for_buffer
 import functools
 import tinygrad.llops.ops_gpu as gops
-from tinygrad.ops import ProcessingOps, UnaryOps, BinaryOps, MovementOps, LoadOps, log_op
+from tinygrad.ops import ProcessingOps, ReduceOps, BinaryOps, MovementOps, LoadOps, log_op
 from tinygrad.shapetracker import ShapeTracker
 from tinygrad.helpers import prod
 from typing import Tuple, List, Union
@@ -139,11 +139,16 @@ class LazyGPUBuffer(LazyBuffer):
       ret, lazy_srcs = realize_processing_op(self)
     elif self.optype == BinaryOps:
       ret, lazy_srcs = realize_binary_op(self)
+    elif self.optype == ReduceOps:
+      lazy_srcs = [self.op.src[0]]
+      ret = gops.reduce_op(self.op.op, self.op.src[0].realize(), self.op.arg)
     elif self.optype == MovementOps:
       root, st = movementop_buf(self)
       lazy_srcs += [root]
-      if st.contiguous: ret = root.realize()
-      else: ret = gops.contiguous(root.realize(), st)
+      # NOTE: contiguous can have the wrong shape
+      #if st.contiguous: ret = root.realize()
+      #else: ret = gops.contiguous(root.realize(), st)
+      ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
     if self.op.op is not None and self.SHOULD_LOG:
@@ -156,6 +161,8 @@ class LazyGPUBuffer(LazyBuffer):
     return LazyGPUBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
 
   def toCPU(self):
+    return self.realize().toCPU()
+
     global realized_buffers
     # for the kernel builds to not count in timing
     junk = self.realize().toCPU()

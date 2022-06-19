@@ -182,7 +182,7 @@ def processing_op(op,x,w,C,prefix_code="",middle_code="",real_bufs=[], opencl_ty
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   conv_prg = processing_op_compile(prefix_code, middle_code, C, tuple(opencl_type))
   local_group = None
-  if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
+  #if C.oy >= 16 and C.ox >= 16: local_group = [1,16,16]
   conv_prg([C.bs*C.cout, C.oy, C.ox], local_group, x.cl, w.cl, ret.cl,
     *[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]],
     *[x.cl for x in real_bufs])
