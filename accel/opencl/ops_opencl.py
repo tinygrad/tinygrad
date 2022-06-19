@@ -15,41 +15,38 @@ from copy import deepcopy
 
 from collections import defaultdict
 class CachingAllocator:
-  bc = defaultdict(list)
-  ic = defaultdict(list)
+  def __init__(self):
+    self.bc = defaultdict(list)
+    self.ic = defaultdict(list)
 
-  @staticmethod
-  def alloc(l):
-    if len(CachingAllocator.bc[l]) > 0:
-      ret = CachingAllocator.bc[l][0]
-      CachingAllocator.bc[l] = CachingAllocator.bc[l][1:]
+  def alloc(self, l):
+    if len(self.bc[l]) > 0:
+      ret = self.bc[l][0]
+      self.bc[l] = self.bc[l][1:]
       return ret
-
     return cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, l) #4*roundup(prod(self.shape)))
 
-  @staticmethod
-  def image(s):
-    if len(CachingAllocator.ic[s]) > 0:
-      ret = CachingAllocator.ic[s][0]
-      CachingAllocator.ic[s] = CachingAllocator.ic[s][1:]
+  def image(self, s):
+    if len(self.ic[s]) > 0:
+      ret = self.ic[s][0]
+      self.ic[s] = self.ic[s][1:]
       return ret
 
     fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
     return cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(s))
 
-  @staticmethod
-  def free_buf(x):
-    CachingAllocator.bc[x.size].append(x)
+  def free_buf(self, x):
+    self.bc[x.size].append(x)
 
-  @staticmethod
-  def free_image(x):
-    CachingAllocator.ic[x.shape].append(x)
+  def free_image(self, x):
+    self.ic[x.shape].append(x)
 
+GCA = CachingAllocator()
 def roundup(x, n=4): return (x+(n-1))//n * n
 def flip(x): return (x[1], x[0])
 class OpenCLBuffer:
   def __init__(self, shape, hostbuf=None, _buf=None, _image=None):
-    self.allocator = CachingAllocator
+    self.allocator = GCA
     require_init_gpu()
     self.shapetracker = deepcopy(shape) if isinstance(shape, ShapeTracker) else ShapeTracker(*shape)
     self._buf = _buf
