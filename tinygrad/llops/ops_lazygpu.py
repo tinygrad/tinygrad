@@ -104,9 +104,13 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
       int gid = get_global_id(0);
       res_g[gid] = _binop("""+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+""");
     }"""
-  lazy_srcs_ret = [buf_st(lazy_srcs[i]) for i in idxs]
-  real_bufs = [x.realize() for x in lazy_srcs_ret]
+  lazy_srcs_ret = [lazy_srcs[i] for i in idxs]
+  for buf in lazy_srcs_ret:
+    inp = buf_st(buf)
+    if inp != buf:
+      log_op(buf.optype, buf.op.op, buf, [inp], dashed=True)
 
+  real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
   gret = gops.GPUBuffer(ret.shape)
   binop = gops.clbuild("binop", prg_src)
   binop([prod(ret.shape)], None, gret.cl, *[x.cl for x in real_bufs])
@@ -166,8 +170,12 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
   lazy_srcs = list(set(get_lazybuffers_for_buffer(ret)))
   lazy_srcs = [x for x in lazy_srcs if x not in [conv_x, conv_w]]
   prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
-  lazy_srcs_ret = [buf_st(lazy_srcs[i]) for i in idxs]
-  real_bufs = [x.realize() for x in lazy_srcs_ret]
+  lazy_srcs_ret = [lazy_srcs[i] for i in idxs]
+  for buf in lazy_srcs_ret:
+    inp = buf_st(buf)
+    if inp != buf:
+      log_op(buf.optype, buf.op.op, buf, [inp], dashed=True)
+  real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
 
   middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
 

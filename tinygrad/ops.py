@@ -27,7 +27,7 @@ if GRAPH:
   atexit.register(save_graph_exit)
 
 global_num_max = 0
-def log_op(optype, op, ret, inp):
+def log_op(optype, op, ret, inp, dashed=False):
   cnts[optype] += 1
   if DEBUG: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
@@ -42,7 +42,7 @@ def log_op(optype, op, ret, inp):
     top_colors = {LoadOps: "#ffffff", UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
 
     for x in inp:
-      G.add_edge(nm(x), nm(ret), label=sop)
+      G.add_edge(nm(x), nm(ret), label=sop, color='#808080' if dashed else '', style='dashed' if dashed else '')
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
     G.nodes[nm(ret)]['label'] = str(ret.shape)
