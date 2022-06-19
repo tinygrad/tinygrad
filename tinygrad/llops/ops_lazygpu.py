@@ -53,19 +53,8 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
   if isinstance(x, LazyBuffer):
     return f"arg_{lazy_srcs.index(x)}"
   # it's an op
-  op = x.op
-  if op == BinaryOps.ADD: code = "A+B"
-  elif op == BinaryOps.SUB: code = "A-B"
-  elif op == BinaryOps.MUL: code = "A*B"
-  elif op == BinaryOps.DIV: code = "B/A"
-  elif op == BinaryOps.POW: code = "pow(A,B)"
-  elif op == BinaryOps.CMPEQ: code = "1.0f*(A==B)"
-  elif op == UnaryOps.RELU: code = 'max(A, (float)0.)'
-  elif op == UnaryOps.EXP: code = 'exp(A)'
-  elif op == UnaryOps.LOG: code = 'log(A)'
-  elif op == UnaryOps.NEG: code = '-A'
-  elif op == UnaryOps.SIGN: code = 'sign(A)'
-  elif op == ProcessingOps.CONV: code = 'acc'
+  if x.op == ProcessingOps.CONV: code = 'acc'
+  else: code = gops.code_for_op[x.op]
   if "A" in code: code = code.replace("A", "("+ast(x.src[0], lazy_srcs)+")")
   if "B" in code: code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
   return code
