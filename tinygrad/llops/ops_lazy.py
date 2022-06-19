@@ -73,6 +73,7 @@ class LazyBuffer:
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   Buffer = srcs[0].__class__
   out_shape = srcs[0].shape
+
   if MERGE_ELEMENTWISE_INTO_CONV_OUTPUT:
     cnt = sum([x.optype == ProcessingOps for x in srcs])
     if cnt == 1:
@@ -80,10 +81,8 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
       return Buffer(out_shape, ProcessingOps, LazyOp(op, srcs))
     elif cnt == 2:
       # have to confirm they are the same conv
-      c1 = find_conv_buf(srcs[0])
-      c2 = find_conv_buf(srcs[1])
-      #print(c1.op, c2.op)
-      if c1.arg == c2.arg and tuple(c1.src) == tuple(c2.src):
+      c1, c2 = [find_conv_buf(x) for x in srcs]
+      if c1.op == c1.op and c1.arg == c2.arg and tuple(c1.src) == tuple(c2.src):
         srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
         return Buffer(out_shape, ProcessingOps, LazyOp(op, srcs))
       else:

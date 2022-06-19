@@ -168,7 +168,7 @@ class LazyGPUBuffer(LazyBuffer):
 
   @staticmethod
   def fromCPU(x):
-    return LazyGPUBuffer(x.shape, LoadOps, LazyOp(LoadOps.LOAD, [], x))
+    return LazyGPUBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
 
   def toCPU(self):
     global realized_buffers
