@@ -164,6 +164,8 @@ def processing_op_compile_hot(prefix_code, middle_code, C, opencl_type):
   options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple())
   return conv_prg
 
+
+#@functools.lru_cache(maxsize=None)
 def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
   conv = find_conv_buf(ret)
   conv_x, conv_w = conv.src[0], conv.src[1]
@@ -177,37 +179,9 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
       log_op(buf.optype, get_lazyops(buf.op), buf, [inp], dashed=True)
   real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
 
-  #middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
-  #middle_code = "int gid = (outputRow * get_image_width(output) + outputLocation.x)*4;\n"
-  #middle_code = "int gid = 0;\n"
-  #middle_code += 'printf("%d %d %d %d\\n", gid, outputRow, get_image_width(output), mad24(startOutputColumn, totalNumPackedOutputChannels, packedOutputChannel));'
-
-  middle_code = ""
-  vv = "xyzw"
-  for i in range(4):
-    acc = f"outputValues[i].{vv[i%4]}"
-    args = [x.split(" ")[-1].replace("*", "") for x in opencl_type[2:]]
-    args = [acc, f"(outputRow * get_image_width(output) + outputLocation.x)*4+{i}"]+args
-    middle_code += f"{acc} = _binop("+', '.join(args)+");\n"
-
   C = conv.arg
   gret = gops.GPUBuffer(C.out_shape)
-
-  #conv_prg = processing_op_compile_hot(prg_src, middle_code, C, tuple(opencl_type)[2:])
-  #conv_prg([C.bs*C.cout, C.oy, C.ox], None, conv_x.realize().cl, conv_w.realize().cl, gret.cl, *[x.cl for x in real_bufs])
-  replacements = {}
-  if len(real_bufs) != 0:
-    print(prg_src)
-    print(real_bufs)
-    print(middle_code)
-    print(tuple(opencl_type)[2:])
-    replacements["//PREFIX"] = prg_src
-    replacements["//ARGS"] = ","+','.join(tuple(opencl_type)[2:])
-    replacements["//BINOP"] = middle_code
-    #assert False
-
-  gops.conv(conv_x.realize(), conv_w.realize(), gret, C, replacements, real_bufs)
-  print(real_bufs)
+  gops.conv(conv_x.realize(), conv_w.realize(), gret, C, prg_src, tuple(opencl_type)[2:], real_bufs)
 
   return gret, lazy_srcs_ret+[conv_x, conv_w]
 
@@ -225,7 +199,6 @@ class LazyGPUBuffer(LazyBuffer):
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
       ret, lazy_srcs = realize_processing_op(self)
-      print("REALIZE PROCESSING OP", self.optype, self.op.op, ret, lazy_srcs)
     elif self.optype == BinaryOps:
       ret, lazy_srcs = realize_binary_op(self)
     elif self.optype == ReduceOps:
