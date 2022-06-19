@@ -49,6 +49,7 @@ def roundup(x, n=4): return (x+(n-1))//n * n
 def flip(x): return (x[1], x[0])
 class OpenCLBuffer:
   def __init__(self, shape, hostbuf=None, _buf=None, _image=None):
+    self.allocator = CachingAllocator
     require_init_gpu()
     self.shapetracker = deepcopy(shape) if isinstance(shape, ShapeTracker) else ShapeTracker(*shape)
     self._buf = _buf
@@ -56,12 +57,12 @@ class OpenCLBuffer:
     self.dtype = np.float32
     if hostbuf is not None:
       # TODO: lazy?
-      self._buf = CachingAllocator.alloc(4*roundup(prod(self.shape))) #cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))
+      self._buf = self.allocator.alloc(4*roundup(prod(self.shape))) #cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))
       cl.enqueue_copy(get_cl_queue(), self._buf, hostbuf.astype(np.float32).ravel())
 
   def __del__(self):
-    if self._buf is not None: CachingAllocator.free_buf(self._buf)
-    if self._image is not None: CachingAllocator.free_image(self._image)
+    if self._buf is not None: self.allocator.free_buf(self._buf)
+    if self._image is not None: self.allocator.free_image(self._image)
 
   def clone(self):
     return OpenCLBuffer(self.shapetracker, _buf=self._buf, _image=self._image)
@@ -86,7 +87,7 @@ class OpenCLBuffer:
   @property
   def cl(self):
     if self._buf is None:
-      self._buf = CachingAllocator.alloc(4*roundup(prod(self.shape)))
+      self._buf = self.allocator.alloc(4*roundup(prod(self.shape)))
       if self._image is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
@@ -109,7 +110,7 @@ class OpenCLBuffer:
   def image(self):
     if self._image is None:
       assert self.shape[2] == 4 and len(self.shape) == 3
-      self._image = CachingAllocator.image(flip(self.shape))
+      self._image = self.allocator.image(flip(self.shape))
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
         #print(f"converting {self.shape} to image with shape {self._image.shape}")
