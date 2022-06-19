@@ -45,6 +45,18 @@ def find_conv(x:LazyOp):
       return tst
   return None
 
+@functools.lru_cache(maxsize=None)
+def depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
+  bufs = get_lazybuffers(me.op)
+  if needle in bufs:
+    return True
+  ret = False
+  for b in bufs:
+    if depends(b, needle):
+      ret = True
+      break
+  return ret
+
 class LazyBuffer:
   def __init__(self, shape:tuple, optype:Op, op:LazyOp):
     assert isinstance(op, LazyOp)
@@ -75,29 +87,13 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
         srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
         return Buffer(out_shape, ProcessingOps, LazyOp(op, srcs))
       else:
-        #@functools.lru_cache
-        memo = {}
-        def depends(op:LazyOp, needle:LazyBuffer) -> bool:
-          nonlocal memo
-          if id(op) in memo: return memo[id(op)]
-          bufs = get_lazybuffers(op)
-          if needle in bufs:
-            memo[id(op)] = True
-            return True
-          ret = False
-          for b in bufs:
-            if depends(b.op, needle):
-              ret = True
-              break
-          memo[id(op)] = ret
-          return ret
-        if depends(srcs[0].op, srcs[1]):
+        if depends(srcs[0], srcs[1]):
           srcs = [srcs[0].op, srcs[1]]
-        elif depends(srcs[1].op, srcs[0]):
+        elif depends(srcs[1], srcs[0]):
           srcs = [srcs[0], srcs[1].op]
         else:
           # all three are okay
-          #return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
+          #return Buffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
           srcs = [srcs[0].op, srcs[1]]
           #srcs = [srcs[0], srcs[1].op]
         return Buffer(out_shape, ProcessingOps, LazyOp(op, srcs))
