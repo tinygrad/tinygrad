@@ -13,6 +13,38 @@ from tinygrad.shapetracker import ShapeTracker
 import pyopencl as cl
 from copy import deepcopy
 
+from collections import defaultdict
+class CachingAllocator:
+  bc = defaultdict(list)
+  ic = defaultdict(list)
+
+  @staticmethod
+  def alloc(l):
+    if len(CachingAllocator.bc[l]) > 0:
+      ret = CachingAllocator.bc[l][0]
+      CachingAllocator.bc[l] = CachingAllocator.bc[l][1:]
+      return ret
+
+    return cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, l) #4*roundup(prod(self.shape)))
+
+  @staticmethod
+  def image(s):
+    if len(CachingAllocator.ic[s]) > 0:
+      ret = CachingAllocator.ic[s][0]
+      CachingAllocator.ic[s] = CachingAllocator.ic[s][1:]
+      return ret
+
+    fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
+    return cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(s))
+
+  @staticmethod
+  def free_buf(x):
+    CachingAllocator.bc[x.size].append(x)
+
+  @staticmethod
+  def free_image(x):
+    CachingAllocator.ic[x.shape].append(x)
+
 def roundup(x, n=4): return (x+(n-1))//n * n
 def flip(x): return (x[1], x[0])
 class OpenCLBuffer:
@@ -24,8 +56,12 @@ class OpenCLBuffer:
     self.dtype = np.float32
     if hostbuf is not None:
       # TODO: lazy?
-      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))
+      self._buf = CachingAllocator.alloc(4*roundup(prod(self.shape))) #cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(shape)))
       cl.enqueue_copy(get_cl_queue(), self._buf, hostbuf.astype(np.float32).ravel())
+
+  def __del__(self):
+    if self._buf is not None: CachingAllocator.free_buf(self._buf)
+    if self._image is not None: CachingAllocator.free_image(self._image)
 
   def clone(self):
     return OpenCLBuffer(self.shapetracker, _buf=self._buf, _image=self._image)
@@ -50,10 +86,10 @@ class OpenCLBuffer:
   @property
   def cl(self):
     if self._buf is None:
-      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
+      self._buf = CachingAllocator.alloc(4*roundup(prod(self.shape)))
       if self._image is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
-        print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
+        #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         clbuild("from_image", """
           __kernel void from_image(
               read_only image2d_t in,
@@ -73,11 +109,10 @@ class OpenCLBuffer:
   def image(self):
     if self._image is None:
       assert self.shape[2] == 4 and len(self.shape) == 3
-      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
-      self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=flip(self.shape))
+      self._image = CachingAllocator.image(flip(self.shape))
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
-        print(f"converting {self.shape} to image with shape {self._image.shape}")
+        #print(f"converting {self.shape} to image with shape {self._image.shape}")
         clbuild("to_image", """
           __kernel void to_image(
               __global const float4 *in,

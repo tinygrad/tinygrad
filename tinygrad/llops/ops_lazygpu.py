@@ -10,6 +10,8 @@ from typing import Tuple, List, Union
 
 from tinygrad.llops.ops_lazy import processing_op, binary_op, unary_op, reduce_op, movement_op
 
+SHOULD_LOG = True
+
 def get_lazyops(op:LazyOp):
   ret = [op.op]
   for x in op.src:
@@ -105,10 +107,11 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
       res_g[gid] = _binop("""+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+""");
     }"""
   lazy_srcs_ret = [lazy_srcs[i] for i in idxs]
-  for buf in lazy_srcs_ret:
-    inp = buf_st(buf)
-    if inp != buf:
-      log_op(buf.optype, get_lazyops(buf.op), buf, [inp], dashed=True)
+  if SHOULD_LOG:
+    for buf in lazy_srcs_ret:
+      inp = buf_st(buf)
+      if inp != buf:
+        log_op(buf.optype, get_lazyops(buf.op), buf, [inp], dashed=True)
 
   real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
   gret = gops.GPUBuffer(ret.shape)
@@ -173,10 +176,11 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
   lazy_srcs = [x for x in lazy_srcs if x not in [conv_x, conv_w]]
   prg_src, opencl_type, idxs = compile_binary_op(ret, lazy_srcs)
   lazy_srcs_ret = [lazy_srcs[i] for i in idxs]
-  for buf in lazy_srcs_ret:
-    inp = buf_st(buf)
-    if inp != buf:
-      log_op(buf.optype, get_lazyops(buf.op), buf, [inp], dashed=True)
+  if SHOULD_LOG:
+    for buf in lazy_srcs_ret:
+      inp = buf_st(buf)
+      if inp != buf:
+        log_op(buf.optype, get_lazyops(buf.op), buf, [inp], dashed=True)
   real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
 
   C = conv.arg
@@ -188,7 +192,6 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
 
 realized_buffers = []
 class LazyGPUBuffer(LazyBuffer):
-  SHOULD_LOG = True
   def realize(self:LazyBuffer) -> gops.GPUBuffer:
     if self.realized is not None: return self.realized
     realized_buffers.append(self)
@@ -213,7 +216,7 @@ class LazyGPUBuffer(LazyBuffer):
       ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
-    if self.SHOULD_LOG:
+    if SHOULD_LOG:
       log_op(self.optype, get_lazyops(self.op), self, lazy_srcs)
     return self.realized
 
@@ -222,6 +225,7 @@ class LazyGPUBuffer(LazyBuffer):
     return LazyGPUBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
 
   def toCPU(self):
+    global SHOULD_LOG
     #return self.realize().toCPU()
 
     global realized_buffers
@@ -232,7 +236,7 @@ class LazyGPUBuffer(LazyBuffer):
       if b.optype != LoadOps:
         b.realized = None
     realized_buffers = []
-    LazyGPUBuffer.SHOULD_LOG = False
+    SHOULD_LOG = False
 
     if int(os.getenv("PROFILE", 0)) == 1:
       import cProfile

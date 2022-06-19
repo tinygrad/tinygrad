@@ -42,7 +42,8 @@ def log_op(optype, op, ret, inp, dashed=False):
 
     for x in inp:
       if isinstance(op, list):
-        sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
+        #sop = '.'.join([str(y).split(".")[1][0:1] for y in op][::-1])
+        sop = str(len(op))
         G.add_edge(nm(x), nm(ret), label=sop, color='#808080' if dashed else '', style='dashed' if dashed else '')
       else:
         _,sop = str(op).split(".")
