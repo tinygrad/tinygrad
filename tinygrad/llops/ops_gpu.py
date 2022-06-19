@@ -160,8 +160,8 @@ def processing_op(op,x,w,C):
         int idx_y = y*dy + IY - py;
         int idx_x = x*dx + IX - px;
         int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
-        acc += valid ? input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
-          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] : 0.0;
+        acc += valid * input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
+          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
       } }
 #endif
     }

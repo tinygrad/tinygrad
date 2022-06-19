@@ -139,15 +139,9 @@ def processing_op_compile_hot(prefix_code, middle_code, C, opencl_type):
       for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
         int idx_y = y*dy + IY - py;
         int idx_x = x*dx + IX - px;
-
-#ifdef ALLVALID
-        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
-          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-#else
         int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
-        acc += valid ? input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
-          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] : 0.0;
-#endif
+        acc += valid * input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
+          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
       } }
     }
 
@@ -155,8 +149,7 @@ def processing_op_compile_hot(prefix_code, middle_code, C, opencl_type):
     """+middle_code+"""
 
     output[gid] = acc;
-  }""",
-  options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple())
+  }""")
   return conv_prg
 
 def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
