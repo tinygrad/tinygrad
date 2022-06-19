@@ -19,6 +19,8 @@ class View:
       else:
         self.shape_strides.append((shape[i], strides[i]))
 
+  def __repr__(self): return f"View<{self.shape}, {self.strides}, {self.offset}>"
+
   @cached_property
   def expr(self):
     ret = [f"{self.offset}"] if self.offset != 0 else []
@@ -58,8 +60,13 @@ class ShapeTracker:
 
   @property
   def contiguous(self):
-    if len(self.views) > 1: return False
-    return self.strides == strides_for_shape(self.shape) and self.offset == 0
+    #print(self.views)
+    if len(self.views) > 1 or self.offset != 0: return False
+    for s, st1, st2 in zip(self.shape, self.strides, strides_for_shape(self.shape)):
+      # ignore strides in 1 dimensional shapes
+      if s != 1 and st1 != st2: return False
+    return True
+    #return self.strides == strides_for_shape(self.shape)
 
   @property
   def shape(self): return self.views[-1].shape
@@ -83,7 +90,28 @@ class ShapeTracker:
     assert all([isinstance(x, int) for x in new_shape])
     assert prod(self.shape) == prod(new_shape)
     if self.shape == new_shape: return
+    # special case: adding 1s
+    # ugh there's so much subtlely here i'm not handling
+    if len(self.shape) < len(new_shape):
+      xp, yp = len(self.shape)-1, len(new_shape)-1
+      new_strides = []
+      while xp >= 0 and yp >= 0:
+        if self.shape[xp] == new_shape[yp]:
+          new_strides.append(self.strides[xp])
+          xp -= 1
+          yp -= 1
+        elif new_shape[yp] == 1:
+          new_strides.append(self.strides[xp])
+          yp -= 1
+        else:
+          break
+      #print(xp, yp, self.shape, self.strides, new_shape, new_strides[::-1])
+      if xp == -1 and yp == -1:
+        #print("1s resize")
+        self.views[-1] = View(new_shape, new_strides[::-1], self.offset)
+        return
     view = View(new_shape, strides_for_shape(new_shape))
+    #print(view.shape, view.strides, self.shape, self.strides)
     if self.contiguous: self.views[-1] = view
     else: self.views.append(view)
 
