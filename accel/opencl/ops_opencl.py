@@ -5,7 +5,7 @@ import pathlib
 import numpy as np
 from tinygrad.ops import MovementOps, ProcessingOps
 from tinygrad.llops.ops_gpu import require_init_gpu, clbuild, get_cl_queue, get_cl_ctx
-from tinygrad.llops.ops_gpu import contiguous
+from tinygrad.llops.ops_gpu import contiguous, code_for_op
 from tinygrad.llops.ops_gpu import unary_op as unary_op_gpu, binary_op as binary_op_gpu, reduce_op as reduce_op_gpu
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
@@ -90,6 +90,7 @@ class OpenCLBuffer:
         """)(self._image.shape, None, self._buf, self._image)
       self._buf = None
     return self._image
+GPUBuffer = OpenCLBuffer
 
 def unary_op(op, x):
   # TODO: this doesn't actually have to be contiguous
@@ -126,12 +127,15 @@ def conv(x,w,ret,C):
   if C.bs > 1:
     options.append("-DBATCH")
     assert C.py == 0, "batched conv doesn't work with y-padding"
-  conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'), tuple(options))
   assert C.cout%4 == 0
   kernel_args = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
   conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
+  conv_prg = clbuild("conv", load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl'),
+    options=tuple(options),
+    argdtypes=tuple([None, None, None] + [np.uint32]*len(conv_args))
+  )
   print(conv_args, kernel_args)
-  conv_prg(kernel_args, None, x.image, w.image, ret.image, *[np.int16(x) for x in conv_args])
+  conv_prg(kernel_args, None, x.image, w.image, ret.image, *conv_args)
 
 
 def processing_op(op,x,w,C):

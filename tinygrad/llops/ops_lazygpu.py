@@ -1,7 +1,8 @@
 import os, time
 from tinygrad.llops.ops_lazy import LazyBuffer, LazyOp, find_conv_buf, get_lazybuffers_for_buffer
 import functools
-import tinygrad.llops.ops_gpu as gops
+#import tinygrad.llops.ops_gpu as gops
+import tinygrad.llops.ops_opencl as gops
 from tinygrad.ops import ProcessingOps, ReduceOps, BinaryOps, MovementOps, LoadOps, log_op
 from tinygrad.shapetracker import ShapeTracker
 from tinygrad.helpers import prod
@@ -171,9 +172,12 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
   middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
 
   C = conv.arg
-  gret = gops.GPUBuffer((C.bs, C.cout, C.oy, C.ox))
-  conv_prg = processing_op_compile_hot(prg_src, middle_code, C, tuple(opencl_type)[2:])
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, conv_x.realize().cl, conv_w.realize().cl, gret.cl, *[x.cl for x in real_bufs])
+  gret = gops.GPUBuffer(C.out_shape)
+
+  #conv_prg = processing_op_compile_hot(prg_src, middle_code, C, tuple(opencl_type)[2:])
+  #conv_prg([C.bs*C.cout, C.oy, C.ox], None, conv_x.realize().cl, conv_w.realize().cl, gret.cl, *[x.cl for x in real_bufs])
+  gops.conv(conv_x.realize().cl, conv_w.realize().cl, gret.cl, C)
+
   return gret, lazy_srcs_ret+[conv_x, conv_w]
 
 
@@ -244,3 +248,4 @@ class LazyGPUBuffer(LazyBuffer):
 
     print(f"realized in {(et-st)*1000:.2f} ms, waited {(et-mt)*1000:.2f} ms for kernels ({(mt-st)*1000:.2f} ms in python)")
     return ret
+LazyOpenCLBuffer = LazyGPUBuffer
