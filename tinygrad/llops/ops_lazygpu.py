@@ -108,7 +108,7 @@ def realize_binary_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]
   for buf in lazy_srcs_ret:
     inp = buf_st(buf)
     if inp != buf:
-      log_op(buf.optype, buf.op.op, buf, [inp], dashed=True)
+      log_op(buf.optype, get_lazyops(buf.op), buf, [inp], dashed=True)
 
   real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
   gret = gops.GPUBuffer(ret.shape)
@@ -174,16 +174,20 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
   for buf in lazy_srcs_ret:
     inp = buf_st(buf)
     if inp != buf:
-      log_op(buf.optype, buf.op.op, buf, [inp], dashed=True)
+      log_op(buf.optype, get_lazyops(buf.op), buf, [inp], dashed=True)
   real_bufs = [buf_st(x).realize() for x in lazy_srcs_ret]
 
   #middle_code = "acc = _binop("+', '.join([x.split(" ")[-1].replace("*", "") for x in opencl_type])+");"
-  middle_code = "int gid = (outputRow * get_image_width(output) + mad24(startOutputColumn, totalNumPackedOutputChannels, packedOutputChannel))*4;\n"
+  #middle_code = "int gid = (outputRow * get_image_width(output) + outputLocation.x)*4;\n"
+  #middle_code = "int gid = 0;\n"
+  #middle_code += 'printf("%d %d %d %d\\n", gid, outputRow, get_image_width(output), mad24(startOutputColumn, totalNumPackedOutputChannels, packedOutputChannel));'
+
+  middle_code = ""
   vv = "xyzw"
-  for i in range(16):
-    acc = f"outputValues[{i//4}].{vv[i%4]}"
+  for i in range(4):
+    acc = f"outputValues[i].{vv[i%4]}"
     args = [x.split(" ")[-1].replace("*", "") for x in opencl_type[2:]]
-    args = [acc, f"gid+{i}"]+args
+    args = [acc, f"(outputRow * get_image_width(output) + outputLocation.x)*4+{i}"]+args
     middle_code += f"{acc} = _binop("+', '.join(args)+");\n"
 
   C = conv.arg
@@ -245,7 +249,7 @@ class LazyGPUBuffer(LazyBuffer):
     return LazyGPUBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
 
   def toCPU(self):
-    return self.realize().toCPU()
+    #return self.realize().toCPU()
 
     global realized_buffers
     # for the kernel builds to not count in timing

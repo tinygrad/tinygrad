@@ -19,6 +19,15 @@ class TestConv(unittest.TestCase):
     ret = x.conv2d(w, stride=(1,2), padding=(0,0)).numpy()
     print(ret)
 
+  def test_simple_biased(self):
+    C = 8
+    x = Tensor.zeros(1,C,5,5)
+    w = Tensor.eye(C).reshape((C,C,1,1))
+    b = Tensor(np.arange(C))
+    ret = Tensor.conv2d(x,w,b).relu().conv2d(w,b)
+
+    print(ret.numpy())
+
   def test_first_three(self):
     x = Tensor.ones(1,12,128,256)
 

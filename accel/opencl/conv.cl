@@ -90,7 +90,6 @@
     inputLocation.y += dilationY;
   }
 
-  //BINOP
 
   // output to memory
   int2 outputLocation;
@@ -98,6 +97,7 @@
   outputLocation.y = outputRow;
   for (short i = 0; i < NUM_OUTPUTS; ++i) {
     outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
+    //BINOP
     if (outputColumn < numOutputColumns) {
       write_imagef(output, outputLocation, outputValues[i]);
     }

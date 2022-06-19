@@ -121,7 +121,7 @@ def load(x):
   return ret
 
 def conv(x,w,ret,C, replacements={}, real_bufs=[]):
-  print(x.shapetracker.expr(), w.shapetracker.expr())
+  #print(x.shapetracker.expr(), w.shapetracker.expr())
   print(x.shape, w.shape, ret.shape)
   options = []
   if C.cin == 1: options.append("-DDEPTHWISE")
@@ -134,15 +134,15 @@ def conv(x,w,ret,C, replacements={}, real_bufs=[]):
   conv_src = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
   for k,v in replacements.items():
     conv_src = conv_src.replace(k, v)
-  if len(replacements) > 0:
-    print(conv_src)
+  #if len(replacements) > 0:
+    #print(conv_src)
     #exit(0)
 
   conv_prg = clbuild("conv", conv_src,
     options=tuple(options),
     argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(real_bufs))
   )
-  #print(conv_args, kernel_args)
+  print(conv_args, kernel_args)
   conv_prg(kernel_args, None, x.image, w.image, ret.image, *conv_args, *[x.cl for x in real_bufs])
 
 

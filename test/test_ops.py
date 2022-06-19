@@ -179,7 +179,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
 
   def test_biased_conv2d(self):
-    helper_test_op([(1,16,9,9), (16,16,3,3), (16,)],
+    C = 8
+    helper_test_op([(1,C,5,5), (C,C,1,1), (C,)],
       lambda x,w,b: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w,b).relu(),w,b),
       lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4, grad_rtol=1e-5, forward_only=True)
 
