@@ -136,18 +136,19 @@ def processing_op_compile_hot(prefix_code, middle_code, C, opencl_type):
 
     float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
-#ifdef ONEBYONE
-      acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + IY*ix + IX] * \
-        weight[g*rcout*cin + c*cin + ci];
-#else
       for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
         int idx_y = y*dy + IY - py;
         int idx_x = x*dx + IX - px;
+
+#ifdef ALLVALID
+        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
+          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+#else
         int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
         acc += valid ? input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
           weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] : 0.0;
-      } }
 #endif
+      } }
     }
 
     // insert binary and unary ops here
@@ -155,7 +156,7 @@ def processing_op_compile_hot(prefix_code, middle_code, C, opencl_type):
 
     output[gid] = acc;
   }""",
-  options=tuple(["-DONEBYONE"]) if C.H == 1 and C.W == 1 and C.px == 0 and C.py == 0 else tuple())
+  options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple())
   return conv_prg
 
 def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuffer]]:
