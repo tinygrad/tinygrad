@@ -148,7 +148,6 @@ def processing_op_compile(prefix_code, middle_code, C, opencl_type):
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py
     """+(', ' if len(opencl_type) > 0 else '') + ', '.join(opencl_type)+"""
     ) {
-
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
     int c = get_global_id(0) % rcout;
@@ -176,7 +175,6 @@ def processing_op_compile(prefix_code, middle_code, C, opencl_type):
       } }
 #endif
     }
-
     // insert binary and unary ops here
     """+middle_code+"""
 
