@@ -1,15 +1,11 @@
 import os, time
-from tinygrad.llops.ops_lazy import LazyBuffer, LazyOp, find_conv_buf, get_lazybuffers
+from tinygrad.llops.ops_lazy import LazyBuffer, LazyOp, find_conv_buf, get_lazybuffers_for_buffer
 import functools
 import tinygrad.llops.ops_gpu as gops
 from tinygrad.ops import ProcessingOps, UnaryOps, BinaryOps, MovementOps, LoadOps, log_op
 from tinygrad.shapetracker import ShapeTracker
 from tinygrad.helpers import prod
 from typing import Tuple, List, Union
-
-@functools.lru_cache(maxsize=None)
-def get_lazybuffers_for_buffer(x:LazyBuffer):
-  return get_lazybuffers(x.op)
 
 def get_lazyops(op:LazyOp):
   ret = [op.op]

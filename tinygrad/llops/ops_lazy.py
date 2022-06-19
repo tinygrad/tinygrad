@@ -20,6 +20,10 @@ class LazyOp(NamedTuple):
   src: List[Union[LazyOp, LazyBuffer]]
   arg: Any = None
 
+@functools.lru_cache(maxsize=None)
+def get_lazybuffers_for_buffer(x:LazyBuffer):
+  return get_lazybuffers(x.op)
+
 def get_lazybuffers(op:LazyOp):
   ret = []
   for x in op.src:
@@ -47,7 +51,7 @@ def find_conv(x:LazyOp):
 
 @functools.lru_cache(maxsize=None)
 def depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
-  bufs = get_lazybuffers(me.op)
+  bufs = get_lazybuffers_for_buffer(me)
   if needle in bufs:
     return True
   ret = False
@@ -107,6 +111,7 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 @functools.lru_cache(maxsize=None)
 def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
   Buffer = x.__class__
+
   st = ShapeTracker(*x.shape)
   # TODO: Refactor shapetracker to return a new shapetracker
   st = st.movement_op(op, arg)
