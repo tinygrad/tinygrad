@@ -176,7 +176,7 @@ def realize_processing_op(ret: LazyBuffer) -> Tuple[gops.GPUBuffer, List[LazyBuf
 
   #conv_prg = processing_op_compile_hot(prg_src, middle_code, C, tuple(opencl_type)[2:])
   #conv_prg([C.bs*C.cout, C.oy, C.ox], None, conv_x.realize().cl, conv_w.realize().cl, gret.cl, *[x.cl for x in real_bufs])
-  gops.conv(conv_x.realize().cl, conv_w.realize().cl, gret.cl, C)
+  gops.conv(conv_x.realize(), conv_w.realize(), gret, C)
 
   return gret, lazy_srcs_ret+[conv_x, conv_w]
 
