@@ -115,7 +115,7 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
   st = ShapeTracker(*x.shape)
   # TODO: Refactor shapetracker to return a new shapetracker
   st = st.movement_op(op, arg)
-  if len(st.views) == 1: return x    # this is a no-op
+  #if len(st.views) == 1: return x    # this is a no-op
 
   if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps:
     # if this MovementOp is a no op, remove it

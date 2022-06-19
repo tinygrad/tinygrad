@@ -36,10 +36,37 @@ class DumbShapeTracker:
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
 
+class TestSingleShapeTracker(unittest.TestCase):
+  def setUp(self):
+    self.st = ShapeTracker(7,4)
+  
+  def test_reshape(self):
+    self.st.reshape(7,1,4)
+    assert self.st.contiguous
+
+  def test_permute(self):
+    self.st.permute(1,0)
+    assert not self.st.contiguous
+
+  def test_double_permute(self):
+    self.st.permute(1,0)
+    self.st.permute(1,0)
+    assert self.st.contiguous
+
+  def test_reshape_permute(self):
+    self.st.reshape(7,1,4)
+    self.st.permute(0,1,2)
+    assert self.st.contiguous
+
+  def test_reshape_permute_no(self):
+    self.st.reshape(4,7)
+    self.st.permute(1,0)
+    assert not self.st.contiguous
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = ShapeTracker(2,4)
-    self.dt = DumbShapeTracker(2,4)
+    self.st = ShapeTracker(7,4)
+    self.dt = DumbShapeTracker(7,4)
     self.apply = lambda fxn: [fxn(x) for x in [self.st, self.dt]]
 
   def tearDown(self):
@@ -54,7 +81,7 @@ class TestShapeTracker(unittest.TestCase):
 
   def test_simple_split(self):
     self.test_permute()
-    self.apply(lambda x: x.reshape(8))
+    self.apply(lambda x: x.reshape(prod(self.st.shape)))
 
   def test_reshape(self):
     assert self.st.shape == self.dt.shape
@@ -97,6 +124,22 @@ class TestShapeTracker(unittest.TestCase):
 
   def test_slice_1c2(self):
     self.apply(lambda x: x.slice((1, 2), (1, 2)))
+  
+  def test_double_permute(self):
+    self.apply(lambda x: x.permute(1, 0))
+    self.apply(lambda x: x.permute(1, 0))
+
+  def test_slice_permute(self):
+    self.apply(lambda x: x.slice((0, 2), (2, 4)))
+    self.apply(lambda x: x.permute(1, 0))
+
+  def test_slice_expand(self):
+    self.apply(lambda x: x.slice((0, 2), (3, 4)))
+    self.apply(lambda x: x.expand(2, 10))
+
+  def test_double_stride(self):
+    self.apply(lambda x: x.stride(1, 2))
+    self.apply(lambda x: x.stride(2, 1))
 
   def test_stride(self): self.apply(lambda x: x.stride(2,1))
   def test_stride_int(self): self.apply(lambda x: x.stride(1,2))
