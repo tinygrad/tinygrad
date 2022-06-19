@@ -19,6 +19,8 @@ class View:
       else:
         self.shape_strides.append((shape[i], strides[i]))
 
+  def __repr__(self): return f"View<{self.shape}, {self.strides}, {self.offset}>"
+
   @cached_property
   def expr(self):
     ret = [f"{self.offset}"] if self.offset != 0 else []
@@ -52,9 +54,12 @@ def strides_for_shape(shape):
 
 class ShapeTracker:
   def __init__(self, *shape, strides=None):
-    assert all([isinstance(x, int) for x in shape])
-    if len(shape) == 0: shape = (1,)
-    self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
+    if isinstance(shape[0], ShapeTracker):
+      self.views = shape[0].views[:]
+    else:
+      assert all([isinstance(x, int) for x in shape])
+      if len(shape) == 0: shape = (1,)
+      self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
 
   @property
   def contiguous(self):

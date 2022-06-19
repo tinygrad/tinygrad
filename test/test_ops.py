@@ -178,6 +178,12 @@ class TestOps(unittest.TestCase):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
 
+  def test_biased_conv2d(self):
+    C = 8
+    helper_test_op([(1,C,5,5), (C,C,1,1), (C,)],
+      lambda x,w,b: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w,b).relu(),w,b),
+      lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+
   def test_simple_conv2d(self):
     helper_test_op([(1,1,9,9), (1,1,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
@@ -280,7 +286,6 @@ class TestOps(unittest.TestCase):
           lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
           lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4, forward_only=True)
 
-  @unittest.skipUnless(Device.DEFAULT == Device.TORCH, "Not Implemented")
   def test_dilated_conv2d(self):
     bs = 4
     cin = 3
