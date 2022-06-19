@@ -18,7 +18,7 @@ class CPUBuffer(np.ndarray):
   def fromCPU(x): return x
   def toCPU(x): return x
 
-def unary_op(ctx, op, x):
+def unary_op(op, x):
   if op == UnaryOps.RELU: return x.relu()
   elif op == UnaryOps.EXP: return x.exp()
   elif op == UnaryOps.LOG: return x.log()
@@ -26,7 +26,7 @@ def unary_op(ctx, op, x):
   elif op == UnaryOps.SIGN: return x.sign()
   else: raise Exception(f"{op} isn't supported")
 
-def binary_op(ctx, op, x, y):
+def binary_op(op, x, y):
   if op == BinaryOps.ADD: return x+y
   elif op == BinaryOps.SUB: return x-y
   elif op == BinaryOps.MUL: return x*y
@@ -35,7 +35,7 @@ def binary_op(ctx, op, x, y):
   elif op == BinaryOps.CMPEQ: return 1.0*(x==y)
   else: raise Exception(f"{op} isn't supported")
 
-def reduce_op(ctx, op, inp, new_shape):
+def reduce_op(op, inp, new_shape):
   if inp.shape == new_shape:   # this is just a copy, regardless of the reduce op
     return inp[:]
   else:
@@ -48,7 +48,7 @@ def reduce_op(ctx, op, inp, new_shape):
     elif op == ReduceOps.MAX: return inp.amax(axis, keepdims=True)
     else: raise Exception(f"{op} isn't supported")
 
-def movement_op(ctx, op, x, arg=None):
+def movement_op(op, x, arg=None):
   if op == MovementOps.RESHAPE: return x.reshape(arg)
   elif op == MovementOps.PERMUTE: return x.permute(arg)
   elif op == MovementOps.FLIP: return x.flip(arg)
@@ -60,7 +60,7 @@ def movement_op(ctx, op, x, arg=None):
   elif op == MovementOps.EXPAND: return x.expand(arg)
   else: raise Exception(f"{op} isn't supported")
 
-def processing_op(ctx,op,x,w,C):
+def processing_op(op,x,w,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   if C.px > 0 or C.py > 0: x = np.pad(x, [(0,0), (0,0), (C.py, C.py), (C.px, C.px)])
   gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])

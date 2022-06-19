@@ -44,14 +44,14 @@ def log_op(op, ret, inp):
 
 class Ops:
   def unary_op(ctx, op:UnaryOps, x):
-    ret = ctx.op.unary_op(ctx, op, x)
+    ret = ctx.op.unary_op(op, x)
     log_op(op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
 
   def reduce_op(ctx, op:ReduceOps, x, new_shape):
-    ret = ctx.op.reduce_op(ctx, op, x, new_shape)
+    ret = ctx.op.reduce_op(op, x, new_shape)
     log_op(op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == tuple(new_shape)
@@ -59,24 +59,22 @@ class Ops:
 
   def binary_op(ctx, op:BinaryOps, x, y):
     assert x.shape == y.shape
-    ret = ctx.op.binary_op(ctx, op, x, y)
+    ret = ctx.op.binary_op(op, x, y)
     log_op(op, ret, [x, y])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg=None):
-    ret = ctx.op.movement_op(ctx, op, x, arg)
+    ret = ctx.op.movement_op(op, x, arg)
     log_op(op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == ShapeTracker(*x.shape).movement_op(op, arg).shape
     return ret
 
   def processing_op(ctx, op:ProcessingOps, x, y, C):
-    if getattr(ctx.op, "preprocessing_op", None) is not None: x,y,C = ctx.op.preprocessing_op(ctx, op, x, y, C)
-    ret = ctx.op.processing_op(ctx, op, x, y, C)
+    ret = ctx.op.processing_op(op, x, y, C)
     log_op(op, ret, [x, y])
-    if getattr(ctx.op, "postprocessing_op", None) is not None: ret = ctx.op.postprocessing_op(ctx, op, ret, C)
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == (C.bs, C.cout, C.oy, C.ox)
     return ret
