@@ -259,9 +259,9 @@ class LazyGPUBuffer(LazyBuffer):
       if b.optype != LoadOps:
         b.realized = None
     realized_buffers = []
+    LazyGPUBuffer.SHOULD_LOG = False
 
     if int(os.getenv("PROFILE", 0)) == 1:
-      LazyGPUBuffer.SHOULD_LOG = False
       import cProfile
       import pstats, io
       from pstats import SortKey
