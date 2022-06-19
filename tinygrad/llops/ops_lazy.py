@@ -202,34 +202,20 @@ class LazyBuffer:
     assert isinstance(op.src, list)
     assert isinstance(shape, tuple)
 
-    #print(shape, optype, op)
     self.shape = shape
     self.optype = optype
     self.dtype = np.float32
     self.op = op
     self.realized = None
 
-    if self.optype == None:
-      # nonlazy create from hostbuf
-      self.realized = gops.GPUBuffer(self.shape, self.op.arg)
-
-  @property
-  def opname(self):
-    return self.optype.__name__ if self.optype is not None else 'load'
-
-  def __repr__(self):
-    return f"<LB {self.opname}: {self.op.op}>"
-
   SHOULD_LOG = True
   def realize(self:LazyBuffer) -> gops.GPUBuffer:
-    if self.optype is not None: realized_buffers.append(self)
-    if self.realized is not None:
-      return self.realized
+    if self.realized is not None: return self.realized
+    realized_buffers.append(self)
+
     lazy_srcs = []
     ret = None
-    if self.optype == None:
-      # created from hostbuf
-      assert False
+    if self.optype is None:
       ret = gops.GPUBuffer(self.shape, self.op.arg)
     elif self.optype == ProcessingOps:
       ret, lazy_srcs = realize_processing_op(self)
@@ -243,7 +229,8 @@ class LazyBuffer:
     self.realized = ret
 
     if self.op.op is not None and self.SHOULD_LOG:
-      log_op(self.opname, get_lazyops(self.op), self, lazy_srcs)
+      opname = self.optype.__name__ if self.optype is not None else 'load'
+      log_op(opname, get_lazyops(self.op), self, lazy_srcs)
     return self.realized
 
   @staticmethod
@@ -256,7 +243,8 @@ class LazyBuffer:
     junk = self.realize().toCPU()
     print("derealizing %d" % len(realized_buffers))
     for b in realized_buffers:
-      b.realized = None
+      if b.optype is not None:
+        b.realized = None
     realized_buffers = []
 
     LazyBuffer.SHOULD_LOG = False
@@ -285,7 +273,6 @@ class LazyBuffer:
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
   if MERGE_ELEMENTWISE_INTO_CONV_OUTPUT:
-    # TODO: this is wrong
     cnt = sum([x.optype == ProcessingOps for x in srcs])
     if cnt == 1:
       srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
@@ -327,45 +314,46 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
 
   if MERGE_ELEMENTWISE_OPS:
+    # remove the buffers from any BinaryOps that feed into this
     srcs = [x.op if x.optype == BinaryOps else x for x in srcs]
+
   return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
 
 # caching is safe here, the same op and arg applied to the same buffer is the same
 @functools.lru_cache(maxsize=None)
 def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
   st = ShapeTracker(*x.shape)
+  # TODO: Refactor shapetracker to return a new shapetracker
   st = st.movement_op(op, arg)
   if len(st.views) == 1: return x    # this is a no-op
 
-  if SHUFFLE_MOVEMENT_OPS:
-    if x.optype == BinaryOps:
-      def replace_w_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
-        if isinstance(y, LazyBuffer):
-          return movement_op(op, y, arg)
-        elif isinstance(y, LazyOp):
-          return elementwise_op(y.op, tuple([replace_w_movement_op(z) for z in y.src]))
-      return replace_w_movement_op(x.op)
+  if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps:
+    # if this MovementOp is a no op, remove it
+    # TODO: Use shapetracker in lazybuffer to make this simple
+    root = x.op
+    op_arg = [(op, arg)]
+    while isinstance(root, LazyOp):
+      op_arg.append((root.op, root.arg))
+      root = root.src[0]
+    assert isinstance(root, LazyBuffer)
+    rst = ShapeTracker(*root.shape)
+    for o,a in op_arg[::-1]:
+      rst = rst.movement_op(o, a)
+    # TODO: this check is wrong, we used the shapetracker for a reason
+    if rst.shape == root.shape:
+      return root
 
-  if REMOVE_MOVEMENT_NOPS:
-    if x.optype == MovementOps:
-      root = x.op
-      op_arg = [(op, arg)]
-      while isinstance(root, LazyOp):
-        op_arg.append((root.op, root.arg))
-        root = root.src[0]
-      assert isinstance(root, LazyBuffer)
-      rst = ShapeTracker(*root.shape)
-      for o,a in op_arg[::-1]:
-        rst = rst.movement_op(o, a)
-      # TODO: this check is wrong, we used the shapetracker for a reason
-      if rst.shape == root.shape:
-        return root
+  if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
+    # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
+    def replace_w_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
+      if isinstance(y, LazyBuffer): return movement_op(op, y, arg)
+      elif isinstance(y, LazyOp): return elementwise_op(y.op, tuple([replace_w_movement_op(z) for z in y.src]))
+    return replace_w_movement_op(x.op)
 
-  if MERGE_MOVEMENT_OPS:
-    if isinstance(x.op.op, MovementOps):
-      x = x.op
+  if MERGE_MOVEMENT_OPS and x.optype == MovementOps:
+    # if a MovementOp is applied to a MovementOp, merge them and use one buffer
+    x = x.op
 
-  # otherwise just create the movement op
   return LazyBuffer(st.shape, MovementOps, LazyOp(op, [x], arg))
 
 def reduce_op(op, x, new_shape): return LazyBuffer(new_shape, ReduceOps, LazyOp(op, [x], new_shape))
