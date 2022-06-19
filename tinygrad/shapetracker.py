@@ -81,7 +81,7 @@ class ShapeTracker:
     assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape)
     if tuple(range(len(axis))) == axis: return
-    self.contiguous = False
+    self.contiguous = False   # TODO: some permutes don't break this. ex: (100, 1) -> (1, 100)
     strides = strides_for_shape(self.shape)
     self.views.append(View([self.shape[a] for a in axis], [strides[a] for a in axis]))
 

@@ -23,10 +23,9 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.shape = tuple(shape)
-    self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
-    if hostbuf is not None:
-      # TODO: this doesn't have to block
-      cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
+    if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
+      cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel(), is_blocking=False)
 
   @property
   def dtype(self): return np.float32
@@ -128,7 +127,9 @@ def contiguous(x, st, ret=None):
   return ret
 
 def movement_op(op, x, arg=None):
-  return contiguous(x, ShapeTracker(*x.shape).movement_op(op, arg))
+  st = ShapeTracker(*x.shape).movement_op(op, arg)
+  if st.contiguous: return GPUBuffer(st.shape, x)
+  else: return contiguous(x, st)
 
 @functools.lru_cache(maxsize=None)
 def processing_op_compile(prefix_code, middle_code, C, opencl_type):
