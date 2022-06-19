@@ -10,7 +10,7 @@ def divmodidx(acc, d, mod=True):
 class View:
   def __init__(self, shape, strides, offset:int=0):
     assert len(shape) == len(strides)
-    self.shape, self.offset = shape, offset
+    self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
 
     self.shape_strides = [(shape[0], strides[0])]
     for i in range(1, len(shape)):
@@ -48,19 +48,27 @@ def strides_for_shape(shape):
   strides = [1]
   for d in shape[::-1][:-1]:
     strides = [d*strides[0]] + strides
-  return strides
+  return tuple(strides)
 
-# TODO: support "contiguous" property and "simple_strided" property and make them work
-# TODO: support simplification across views
 class ShapeTracker:
   def __init__(self, *shape, strides=None):
     assert all([isinstance(x, int) for x in shape])
     if len(shape) == 0: shape = (1,)
     self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
-    self.contiguous = True
 
   @property
-  def shape(self): return tuple(self.views[-1].shape)
+  def contiguous(self):
+    if len(self.views) > 1: return False
+    return self.strides == strides_for_shape(self.shape) and self.offset == 0
+
+  @property
+  def shape(self): return self.views[-1].shape
+
+  @property
+  def strides(self): return self.views[-1].strides
+
+  @property
+  def offset(self): return self.views[-1].offset
 
   def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
   def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
@@ -75,15 +83,14 @@ class ShapeTracker:
     assert all([isinstance(x, int) for x in new_shape])
     assert prod(self.shape) == prod(new_shape)
     if self.shape == new_shape: return
-    self.views.append(View(new_shape, strides_for_shape(new_shape)))
+    view = View(new_shape, strides_for_shape(new_shape))
+    if self.contiguous: self.views[-1] = view
+    else: self.views.append(view)
 
   def permute(self, *axis):
     assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape)
-    if tuple(range(len(axis))) == axis: return
-    self.contiguous = False
-    strides = strides_for_shape(self.shape)
-    self.views.append(View([self.shape[a] for a in axis], [strides[a] for a in axis]))
+    self.views[-1] = View([self.shape[a] for a in axis], [self.strides[a] for a in axis], self.offset)
 
   # TODO: this is a special case of slice with strides, remove it
   # though it's nice that it can't change size
@@ -94,30 +101,24 @@ class ShapeTracker:
 
   def slice(self, *arg):
     assert len(arg) == len(self.shape)
-    if all([(x,y) == (0,s) for s,(x,y) in zip(self.shape, arg)]): return
-    self.contiguous = False
-    strides = strides_for_shape(self.shape)
-    offset = sum([strides[i]*x for i,(x,_) in enumerate(arg)])
+    offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
     zeroview = ZeroView(self.shape, arg)
-    self.views.append(View([y-x for x,y in arg], strides, offset))
-    if zeroview.expr != "valid=valid": self.views.append(zeroview)
+    self.views[-1] = View([y-x for x,y in arg], self.strides, self.offset+offset)
+    if zeroview.expr != "valid=valid":
+      # if we add a ZeroView, we add another (stock) view also for modding
+      self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
 
   def expand(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
     assert all([x == y or x == 1 for x,y in zip(self.shape, new_shape)])
-    if self.shape == new_shape: return
-    self.contiguous = False
-    strides = [s if x == y else 0 for s,(x,y) in zip(strides_for_shape(self.shape), zip(self.shape, new_shape))]
-    self.views.append(View(new_shape, strides))
+    strides = [s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape))]
+    self.views[-1] = View(new_shape, strides, self.offset)
 
   # TODO: combine with slice? this doesn't require a ZeroView, though slice shouldn't always either
   def stride(self, *mul):
     assert all([isinstance(x, int) for x in mul])
-    if all([x==1 for x in mul]): return
-    self.contiguous = False
-    old_strides = strides_for_shape(self.shape)
-    strides = [z*m for z,m in zip(old_strides, mul)]
+    strides = [z*m for z,m in zip(self.strides, mul)]
     new_shape = [(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)]
-    offset = sum([(s-1)*z for s,z,m in zip(self.shape,old_strides,mul) if m < 0])
-    self.views.append(View(new_shape, strides, offset))
+    offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
+    self.views[-1] = View(new_shape, strides, self.offset + offset)
 

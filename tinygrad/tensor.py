@@ -38,12 +38,12 @@ class Device:
   buffers, llops = {}, {}
   for i,op in imports.items():
     name = op[len("ops_"):].upper()
-    vars()[name] = i
-    DEFAULT = i if os.environ.get(name, 0) == "1" else DEFAULT
+    vars()[name] = name 
+    DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
     try:
-      llops[i] = importlib.import_module('tinygrad.llops.'+op)
+      llops[name] = importlib.import_module('tinygrad.llops.'+op)
       def find_buffer(llo, name): return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
-      buffers[i] = find_buffer(llops[i], name)
+      buffers[name] = find_buffer(llops[name], name)
     except ImportError as e:
       print(op, "not available", e)
   DEFAULT = CPU if DEFAULT is None else DEFAULT

@@ -23,10 +23,9 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.shape = tuple(shape)
-    self.cl = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
-    if hostbuf is not None:
-      # TODO: this doesn't have to block
-      cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel())
+    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
+    if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
+      cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel(), is_blocking=False)
 
   @property
   def dtype(self): return np.float32
@@ -128,15 +127,16 @@ def contiguous(x, st, ret=None):
   return ret
 
 def movement_op(op, x, arg=None):
-  return contiguous(x, ShapeTracker(*x.shape).movement_op(op, arg))
+  st = ShapeTracker(*x.shape).movement_op(op, arg)
+  if st.contiguous: return GPUBuffer(st.shape, x)
+  else: return contiguous(x, st)
 
 def processing_op(op,x,w,C):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   conv_prg = clbuild("conv", """
-  __kernel void conv(__global const float *input, __global const float *weight, __global float *output,
+  __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
     int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py) {
-
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
     int c = get_global_id(0) % rcout;
