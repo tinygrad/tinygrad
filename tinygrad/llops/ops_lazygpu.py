@@ -148,9 +148,8 @@ class LazyGPUBuffer(LazyBuffer):
       root, st = movementop_buf(self)
       lazy_srcs += [root]
       # NOTE: contiguous can have the wrong shape
-      #if st.contiguous: ret = root.realize()
-      #else: ret = gops.contiguous(root.realize(), st)
-      ret = gops.contiguous(root.realize(), st)
+      if st.contiguous: ret = gops.GPUBuffer(st.shape, root.realize())
+      else: ret = gops.contiguous(root.realize(), st)
     self.realized = ret
 
     if self.SHOULD_LOG:

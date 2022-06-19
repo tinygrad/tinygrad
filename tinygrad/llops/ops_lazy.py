@@ -11,7 +11,7 @@ Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
 MERGE_MOVEMENT_OPS = True
 SHUFFLE_MOVEMENT_OPS = True
-REMOVE_MOVEMENT_NOPS = False
+REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
 
@@ -115,11 +115,10 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
   st = ShapeTracker(*x.shape)
   # TODO: Refactor shapetracker to return a new shapetracker
   st = st.movement_op(op, arg)
-  #if len(st.views) == 1: return x    # this is a no-op
+  if st.shape == x.shape and st.contiguous: return x    # this is a no-op
 
   if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps:
     # if this MovementOp is a no op, remove it
-    # TODO: Use shapetracker in lazybuffer to make this simple
     root = x.op
     op_arg = [(op, arg)]
     while isinstance(root, LazyOp):
@@ -129,8 +128,7 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
     rst = ShapeTracker(*root.shape)
     for o,a in op_arg[::-1]:
       rst = rst.movement_op(o, a)
-    # TODO: this check is wrong, we used the shapetracker for a reason
-    if rst.shape == root.shape:
+    if rst.shape == root.shape and rst.contiguous:
       return root
 
   if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
