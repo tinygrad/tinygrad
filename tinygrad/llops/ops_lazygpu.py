@@ -74,7 +74,7 @@ def compile_binary_op(ret: LazyBuffer, lazy_srcs: List[LazyBuffer]) -> Tuple[str
     opencl_interior_src = []
     idxs = []
     for argn,(b,st) in enumerate(lazy_srcs_st):
-      if b.optype == None and b.shape == (1,) and not st.needs_valid():
+      if b.optype == LoadOps and b.shape == (1,) and not st.needs_valid():
         opencl_interior_src.append(f"float arg_{argn} = {b.op.arg[0]};")
       else:
         opencl_src.append("""inline float get_"""+str(argn)+"""(__global const float* restrict x, int idx) {
