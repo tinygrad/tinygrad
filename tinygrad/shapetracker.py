@@ -54,11 +54,11 @@ def strides_for_shape(shape):
 
 class ShapeTracker:
   def __init__(self, *shape, strides=None):
+    if len(shape) == 0: shape = (1,)
     if isinstance(shape[0], ShapeTracker):
       self.views = shape[0].views[:]
     else:
       assert all([isinstance(x, int) for x in shape])
-      if len(shape) == 0: shape = (1,)
       self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
 
   @property
