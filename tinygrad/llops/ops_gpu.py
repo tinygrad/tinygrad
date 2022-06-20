@@ -19,10 +19,10 @@ def require_init_gpu():
 
 def roundup(x, n=4): return (x+(n-1))//n * n
 
-class GPUBuffer(ShapeTracker):
+class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
-    super().__init__(*shape)
     require_init_gpu()
+    self.shape = tuple(shape)
     self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
     if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel(), is_blocking=False)

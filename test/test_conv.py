@@ -23,7 +23,7 @@ class TestConv(unittest.TestCase):
     C = 8
     x = Tensor.zeros(1,C,5,5)
     w = Tensor.eye(C).reshape((C,C,1,1))
-    b = Tensor(np.arange(C))
+    b = Tensor(np.arange(C).astype(np.float32))
     ret = Tensor.conv2d(x,w,b).relu().conv2d(w,b)
 
     print(ret.numpy())
