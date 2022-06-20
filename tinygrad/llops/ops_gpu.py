@@ -6,6 +6,7 @@ from tinygrad.helpers import prod
 from tinygrad.llops.ops_cpu import unary_op
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
+from collections import defaultdict
 
 cl_ctx, cl_queue = None, None
 def get_cl_ctx(): return cl_ctx
@@ -21,12 +22,19 @@ def require_init_gpu():
 
 def roundup(x, n=4): return (x+(n-1))//n * n
 
+buffer_cache = defaultdict(list)
 class CLBuffer:
   def __init__(self, size):
-    self.buf = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, size)
+    if len(buffer_cache[size]):
+      self.buf = buffer_cache[size].pop()
+    else:
+      #print("cache miss", size)
+      self.buf = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, size)
+
+  # comment this out if you don't want caching
   def __del__(self):
+    buffer_cache[self.buf.size].append(self.buf)
     #print("free", self.buf.size)
-    pass
 
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):

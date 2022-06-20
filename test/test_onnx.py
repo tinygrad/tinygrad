@@ -162,7 +162,7 @@ class TestOnnxModel(unittest.TestCase):
       st = time.monotonic()
       tinygrad_out = run_onnx(inputs)['outputs']
       mt = time.monotonic()
-      if getattr(tinygrad_out.data, 'realize'): tinygrad_out.data.realize()
+      if getattr(tinygrad_out.data, 'realize', None): tinygrad_out.data.realize()
       mt2 = time.monotonic()
       tinygrad_out = tinygrad_out.numpy()
       et = time.monotonic()
