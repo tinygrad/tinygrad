@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple
 from tinygrad.shapetracker import ShapeTracker
 
-from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps
+from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
 MERGE_ELEMENTWISE_OPS = False
@@ -22,7 +22,10 @@ class LazyBuffer:
   def shape(self): return self.st.shape
 
   def realize(self:LazyBuffer):
-    if self.realized is None: self.realized = _realize(self)
+    if self.realized is None:
+      self.realized = _realize(self)
+      # in lazy mode, we don't log until we realize
+      log_op(self.optype, self.op.op, self.realized, self.op.src)
     return self.realized
 
   @staticmethod
@@ -40,8 +43,7 @@ def _realize(self:LazyBuffer) -> gops.GPUBuffer:
   elif self.optype == ReduceOps:
     return gops.reduce_op(self.op.op, self.op.src[0].realize(), self.op.arg)
   elif self.optype == MovementOps:
-    def get_root(x): return x if isinstance(x, LazyBuffer) else get_root(x.op.src[0])
-    return gops.GPUBuffer(self.st, get_root(self.op.src[0]).realize())
+    return gops.GPUBuffer(self.st, self.op.src[0].realize())
   elif self.optype == BinaryOps:
     return gops.elementwise_op(list(zip(["A", "B"], [x.realize() for x in self.op.src])), gops.code_for_op[self.op.op])
   elif self.optype == ProcessingOps:
