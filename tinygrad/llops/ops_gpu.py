@@ -22,10 +22,13 @@ def roundup(x, n=4): return (x+(n-1))//n * n
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
-    self.shape = tuple(shape)
+    self.st = ShapeTracker(shape)
     self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
     if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel(), is_blocking=False)
+
+  @property
+  def shape(self): return self.st.shape
 
   @property
   def dtype(self): return np.float32
@@ -91,7 +94,7 @@ def reduce_op(op, inp, new_shape):
   else: raise Exception(f"{op} isn't supported")
 
   # reverse operation of expand, this validates inputs
-  st = ShapeTracker(*ret.shape).movement_op(MovementOps.EXPAND, inp.shape)
+  st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, inp.shape)
   # this takes a ret index to an inp index, indexing 0 on the reduced strides
   view = View(ret.shape, strides_for_shape(inp.shape))
 
@@ -118,18 +121,19 @@ def reduce_op(op, inp, new_shape):
   clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
   return ret
 
-def contiguous(x, st, ret=None):
-  if ret is None: ret = GPUBuffer(st.shape)
+def contiguous(x, ret=None):
+  if ret is None: ret = GPUBuffer(x.st.shape)
   clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
-    int gid = get_global_id(0); int valid = 1; int idx = gid; """+st.expr().replace('//', '/')+""";
+    int gid = get_global_id(0); int valid = 1; int idx = gid; """+x.st.expr().replace('//', '/')+""";
     ret[gid] = valid ? x[idx] : 0.0;  // should never be out-of-bounds accesses
   }""")([prod(ret.shape)], None, x.cl, ret.cl)
   return ret
 
 def movement_op(op, x, arg=None):
-  st = ShapeTracker(*x.shape).movement_op(op, arg)
-  if st.contiguous: return GPUBuffer(st.shape, x)
-  else: return contiguous(x, st)
+  ret = GPUBuffer(x.st, x)
+  ret.st.movement_op(op, arg)
+  if ret.st.contiguous: return ret
+  else: return contiguous(ret)
 
 def processing_op(op,x,w,C):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))

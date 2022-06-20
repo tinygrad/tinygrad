@@ -9,8 +9,8 @@ def divmodidx(acc, d, mod=True):
 
 class View:
   def __init__(self, shape, strides, offset:int=0):
-    assert len(shape) == len(strides)
     self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
+    assert len(shape) == len(strides)
 
     self.shape_strides = [(shape[0], strides[0])]
     for i in range(1, len(shape)):
@@ -53,13 +53,13 @@ def strides_for_shape(shape):
   return tuple(strides)
 
 class ShapeTracker:
-  def __init__(self, *shape, strides=None):
-    if len(shape) == 0: shape = (1,)
-    if isinstance(shape[0], ShapeTracker):
-      self.views = shape[0].views[:]
+  def __init__(self, shape, strides=None):
+    if isinstance(shape, ShapeTracker):
+      self.views = shape.views[:]
     else:
+      if len(shape) == 0: shape = (1,)
       assert all([isinstance(x, int) for x in shape])
-      self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
+      self.views = [View(tuple(shape), strides_for_shape(shape) if strides == None else strides)]
 
   @property
   def contiguous(self):
