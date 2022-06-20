@@ -22,6 +22,22 @@ def get_root(x:LazyOp) -> LazyBuffer: return x if isinstance(x, LazyBuffer) else
 def get_lazyops(op:LazyOp) -> List[Op]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 
+# TODO: this is very slow
+def depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
+  @functools.lru_cache(maxsize=None)
+  def _depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
+    if me.realized is not None: return False
+    bufs = get_lazybuffers(me.op)
+    if needle in bufs:
+      return True
+    ret = False
+    for b in bufs:
+      if _depends(b, needle):
+        ret = True
+        break
+    return ret
+  return _depends(me, needle)
+
 def find_conv(x:Union[LazyOp,LazyBuffer]):
   if isinstance(x, LazyBuffer):
     return None
@@ -140,7 +156,6 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
         srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
       else:
-        """
         if depends(srcs[0], srcs[1]):
           srcs = [srcs[0].op, srcs[1]]
         elif depends(srcs[1], srcs[0]):
@@ -151,8 +166,6 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
           srcs = [srcs[0].op, srcs[1]]
           #srcs = [srcs[0], srcs[1].op]
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
-        """
-        pass
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any BinaryOps that feed into this
