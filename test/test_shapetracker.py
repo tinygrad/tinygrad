@@ -59,7 +59,7 @@ class TestComplexShapeTracker(unittest.TestCase):
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = ShapeTracker((7,4))
-  
+
   def test_reshape(self):
     self.st.reshape(7,1,4)
     assert self.st.contiguous
@@ -80,6 +80,11 @@ class TestSingleShapeTracker(unittest.TestCase):
   def test_reshape_permute(self):
     self.st.reshape(7,1,4)
     self.st.permute(0,1,2)
+    assert self.st.contiguous
+
+  def test_reshape_permute_yes(self):
+    self.st.reshape(7,1,4)
+    self.st.permute(0,2,1)
     assert self.st.contiguous
 
   def test_reshape_permute_no(self):
