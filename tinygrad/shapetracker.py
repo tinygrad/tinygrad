@@ -57,6 +57,7 @@ class ShapeTracker:
     if isinstance(shape, ShapeTracker):
       self.views = shape.views[:]
     else:
+      if len(shape) == 0: shape = (1,)
       assert all([isinstance(x, int) for x in shape])
       self.views = [View(tuple(shape), strides_for_shape(shape) if strides == None else strides)]
 
