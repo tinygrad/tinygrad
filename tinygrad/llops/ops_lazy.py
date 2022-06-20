@@ -42,6 +42,7 @@ class LazyBuffer:
   @staticmethod
   def fromCPU(x):
     ret = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x))
+    #ret.realize()
     return ret
 
   def toCPU(self):

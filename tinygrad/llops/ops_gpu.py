@@ -54,6 +54,7 @@ class GPUBuffer:
   @staticmethod
   def fromCPU(x):
     ret = GPUBuffer(x.shape)
+    # TODO: this is blocking even though we told it not to
     cl.enqueue_copy(cl_queue, ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
     return ret
 
