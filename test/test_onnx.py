@@ -184,7 +184,7 @@ class TestOnnxModel(unittest.TestCase):
     stats.dump_stats("/tmp/net.prof")
     os.system("flameprof /tmp/net.prof > /tmp/prof.svg")
     ps = stats.sort_stats(pstats.SortKey.TIME)
-    ps.print_stats(20)
+    ps.print_stats(30)
 
   def test_openpilot_model(self):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")

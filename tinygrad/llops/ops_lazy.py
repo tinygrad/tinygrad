@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
-import functools, operator, time
+import functools, operator
 
 from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op, DEBUG, GRAPH
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
@@ -22,12 +22,14 @@ def get_lazyops(op:LazyOp) -> List[Op]: return functools.reduce(operator.add, [g
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 
 class LazyBuffer:
-  def __init__(self, shape:tuple, optype:Op, op:LazyOp):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
     self.st = ShapeTracker(shape)
     self.optype, self.op = optype, op
     self.realized = None
 
-  @functools.cached_property
+  # TODO: we can't cache this since it can change if we modify the ShapeTracker, which we do in movement op
+  #@functools.cached_property
+  @property
   def shape(self): return self.st.shape
   def __repr__(self): return f"<LB {self.shape} {self.optype}>"
 

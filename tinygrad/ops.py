@@ -10,7 +10,7 @@ LoadOps = Enum("LoadOps", ["FROMCPU"])
 from tinygrad.shapetracker import ShapeTracker
 
 import os
-DEBUG = int(os.getenv("PRINT_LLOPS", "0"))
+DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 from collections import defaultdict
 cnts = defaultdict(int)

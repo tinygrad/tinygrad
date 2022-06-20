@@ -65,7 +65,7 @@ def view_from_shape(shape:Tuple):
   return View(tuple(shape), strides_for_shape(shape))
 
 class ShapeTracker:
-  def __init__(self, shape:Union[ShapeTracker, Tuple]):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int]]):
     if isinstance(shape, ShapeTracker): self.views = shape.views[:]
     else: self.views = [view_from_shape(shape)]
 

@@ -3,31 +3,7 @@ import os, atexit, time, inspect, functools, importlib
 from collections import defaultdict
 import numpy as np
 from tinygrad.helpers import prod
-
-# **** profiler ****
-
-DEBUG = os.getenv("DEBUG", None) is not None
-if DEBUG:
-  debug_counts, debug_times = defaultdict(int), defaultdict(float)
-  def print_debug_exit():
-    for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
-      print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
-  atexit.register(print_debug_exit)
-
-global_num_max = 0
-class ProfileOp:
-  def __init__(self, ctx, name, x, backward=False):
-    if DEBUG: self.ctx, self.name, self.x, self.output, self.backward = ctx, f"back_{name}" if backward else name, x, None, backward
-  def __enter__(self):
-    if DEBUG: self.st = time.time()
-    return self
-  def __exit__(self, *junk):
-    if DEBUG:
-      self.output[0].data.toCPU()
-      et = (time.time()-self.st)*1000.
-      debug_counts[self.name] += 1
-      debug_times[self.name] += et
-      print(f"{self.name:>20} : {et:>7.2f} ms {str([y.shape for y in self.x]):>40} -> {str([y.shape for y in self.output])}")
+from typing import List
 
 # **** enumerate supported devices ****
 
@@ -136,11 +112,9 @@ class Tensor:
       if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
-      with ProfileOp(t0._ctx, t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
-        grads = t0._ctx.backward(t0._ctx, t0.grad.data)
-        grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
-          for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
-        po.output = [x for x in grads if x is not None]   # backward can return None if no required gradient, don't profile it
+      grads = t0._ctx.backward(t0._ctx, t0.grad.data)
+      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+        for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, \
@@ -419,14 +393,11 @@ class Function(Ops):
       self.saved_tensors.extend(x)
 
   @classmethod
-  def apply(cls, *x, **kwargs):
-    assert all(isinstance(arg, Tensor) for arg in x)
+  def apply(cls, *x : List[Tensor], **kwargs):
     ctx = cls(x[0].device, *x)
-    with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
-      ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
-                   device=ctx.device, requires_grad=ctx.requires_grad)
-      po.output = [ret]
-    if ret.requires_grad:
+    ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
+                 device=ctx.device, requires_grad=ctx.requires_grad)
+    if ctx.requires_grad:
       ret._ctx = ctx    # used by autograd engine
     return ret
 

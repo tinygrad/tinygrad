@@ -141,7 +141,7 @@ def movement_op(op, x, arg):
   return ret
 
 def processing_op(op,x,w,C):
-  ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
+  ret = GPUBuffer(C.out_shape)
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
   params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
