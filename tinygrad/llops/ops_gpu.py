@@ -145,19 +145,17 @@ def movement_op(op, x, arg):
   ret.st.movement_op(op, arg)
   return ret
 
-# TODO: merge with elementwise_op
-def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc"):
+def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
   ret = GPUBuffer(C.out_shape)
-  assert op == ProcessingOps.CONV, f"{op} isn't supported"
   ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
-  ints += ''.join(f"int {x} = {getattr(C, x)};" for x in ["groups", "rcout", "oy", "ox", "iy", "ix"])
-  params = []
-  #params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
-  conv_params = ["__global float* restrict output", "__global const float* restrict input", "__global const float* restrict weight"] + \
-                [x[0] for x in params] + \
-                [f"__global const float *{name}_g" for name, _ in bufs]
+  params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
+  conv_params = ["__global float* restrict output"] + \
+                [f"__global const float *{name}_g" for name, _ in bufs] + \
+                [x[0] for x in params]
   conv_prg = clbuild("conv", elementwise_op_compile(bufs, code)+"""
   __kernel void conv("""+','.join(conv_params)+""") {
+    float acc = 0.0;
+
     """+ints+"""
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
@@ -170,24 +168,30 @@ def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc")
 
     int gid = get_global_id(0)*oy*ox + Y*ox + X;
 
-    float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
       for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
         int idx_y = y*dy + IY - py;
         int idx_x = x*dx + IX - px;
 #ifdef ALLVALID
-        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
-          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+        acc += input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
+          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
 #else
         int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
-        acc += valid * input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
-          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+        acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
+          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
 #endif
       } }
     }
     output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in bufs])+""");
   }""",
   options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple(),
-  argdtypes=tuple([None, None, None] + [np.int32]*len(params) + [None]*len(bufs)))
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, ret.cl, contiguous(x).cl, contiguous(w).cl, *[x[1] for x in params], *[buf.cl for _, buf in bufs])
+  argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
+  conv_prg([C.bs*C.cout, C.oy, C.ox], None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
   return ret
+
+
+# TODO: merge with elementwise_op
+def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc"):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  return _processing_op({"input": contiguous(x), "weight": contiguous(w)}, "acc", C)
+

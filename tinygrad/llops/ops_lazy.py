@@ -121,7 +121,8 @@ def _realize_binary_op(self:LazyBuffer, has_conv:bool=False) -> Tuple[gops.GPUBu
   if has_conv:
     #print(real_srcs, code)
     conv_x_real, conv_w_real = conv_x.realize(), conv_w.realize()
-    return gops.processing_op(conv.op, conv_x_real, conv_w_real, conv.arg, real_srcs, code), [conv_x_real, conv_w_real] + [x[1] for x in real_srcs]
+    real_srcs = [("input", gops.contiguous(conv_x_real)), ("weight", gops.contiguous(conv_w_real))] + real_srcs
+    return gops._processing_op(real_srcs, code, conv.arg), [x[1] for x in real_srcs]
   else:
     return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
 
