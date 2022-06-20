@@ -32,7 +32,7 @@ class LazyBuffer:
     self.optype, self.op = optype, op
     self.realized = None
 
-  @property
+  @functools.cached_property
   def shape(self): return self.st.shape
   def __repr__(self): return f"<LB {self.shape} {self.optype}>"
 

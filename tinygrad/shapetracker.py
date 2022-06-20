@@ -1,5 +1,6 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
+import functools
 from typing import Tuple, Union
 from tinygrad.helpers import prod
 from functools import cached_property
@@ -47,6 +48,7 @@ class ZeroView:
       acc *= self.shape[0]
     self.expr = 'valid=' + ' && '.join(expr)
 
+@functools.lru_cache(maxsize=None)
 def strides_for_shape(shape):
   strides = [1]
   for d in shape[::-1][:-1]:
@@ -55,12 +57,15 @@ def strides_for_shape(shape):
 
 class ShapeTracker:
   def __init__(self, shape:Union[ShapeTracker, Tuple]):
-    if isinstance(shape, ShapeTracker):
-      self.views = shape.views[:]
-    else:
-      if len(shape) == 0: shape = (1,)
-      assert all([isinstance(x, int) for x in shape])
-      self.views = [View(tuple(shape), strides_for_shape(shape))]
+    if isinstance(shape, ShapeTracker): self.views = shape.views[:]
+    else: self.views = [ShapeTracker.view_from_shape(shape)]
+
+  @staticmethod
+  @functools.lru_cache(maxsize=None)
+  def view_from_shape(shape:Tuple):
+    if len(shape) == 0: shape = (1,)
+    assert all([isinstance(x, int) for x in shape])
+    return View(tuple(shape), strides_for_shape(shape))
 
   @property
   def contiguous(self):
