@@ -53,13 +53,12 @@ def strides_for_shape(shape):
   return tuple(strides)
 
 class ShapeTracker:
-  def __init__(self, *shape, strides=None):
-    if len(shape) == 0: shape = (1,)
-    if isinstance(shape[0], ShapeTracker):
-      self.views = shape[0].views[:]
+  def __init__(self, shape, strides=None):
+    if isinstance(shape, ShapeTracker):
+      self.views = shape.views[:]
     else:
       assert all([isinstance(x, int) for x in shape])
-      self.views = [View(shape, strides_for_shape(shape) if strides == None else strides)]
+      self.views = [View(tuple(shape), strides_for_shape(shape) if strides == None else strides)]
 
   @property
   def contiguous(self):

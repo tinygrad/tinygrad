@@ -5,7 +5,7 @@ from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
 
 class DumbShapeTracker:
-  def __init__(self, *shape):
+  def __init__(self, shape):
     self.t = np.arange(prod(shape), dtype=np.uint8).reshape(shape)
 
   @property
@@ -39,7 +39,7 @@ class DumbShapeTracker:
 @unittest.skip("reshape is more complex")
 class TestComplexShapeTracker(unittest.TestCase):
   def test_work(self):
-    self.st = ShapeTracker(64, 1024, 4)
+    self.st = ShapeTracker((64, 1024, 4))
     self.st.reshape(1, 64, 128, 32)
     self.st.permute(0, 3, 1, 2)
     self.st.reshape(1, 32, 1, 64, 128)
@@ -47,7 +47,7 @@ class TestComplexShapeTracker(unittest.TestCase):
     assert self.st.contiguous
 
   def test_work2(self):
-    self.st = ShapeTracker(64, 1024, 4)
+    self.st = ShapeTracker((64, 1024, 4))
     self.st.reshape(1, 64, 128, 32)
     self.st.permute(0, 3, 1, 2)
     self.st.reshape(1, 1, 32, 64, 128)
@@ -58,7 +58,7 @@ class TestComplexShapeTracker(unittest.TestCase):
 
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = ShapeTracker(7,4)
+    self.st = ShapeTracker((7,4))
   
   def test_reshape(self):
     self.st.reshape(7,1,4)
@@ -89,8 +89,8 @@ class TestSingleShapeTracker(unittest.TestCase):
 
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = ShapeTracker(7,4)
-    self.dt = DumbShapeTracker(7,4)
+    self.st = ShapeTracker((7,4))
+    self.dt = DumbShapeTracker((7,4))
     self.apply = lambda fxn: [fxn(x) for x in [self.st, self.dt]]
 
   def tearDown(self):

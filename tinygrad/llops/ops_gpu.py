@@ -91,7 +91,7 @@ def reduce_op(op, inp, new_shape):
   else: raise Exception(f"{op} isn't supported")
 
   # reverse operation of expand, this validates inputs
-  st = ShapeTracker(*ret.shape).movement_op(MovementOps.EXPAND, inp.shape)
+  st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, inp.shape)
   # this takes a ret index to an inp index, indexing 0 on the reduced strides
   view = View(ret.shape, strides_for_shape(inp.shape))
 
@@ -127,7 +127,7 @@ def contiguous(x, st, ret=None):
   return ret
 
 def movement_op(op, x, arg=None):
-  st = ShapeTracker(*x.shape).movement_op(op, arg)
+  st = ShapeTracker(x.shape).movement_op(op, arg)
   if st.contiguous: return GPUBuffer(st.shape, x)
   else: return contiguous(x, st)
 
