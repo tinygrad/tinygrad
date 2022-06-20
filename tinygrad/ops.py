@@ -79,7 +79,8 @@ class Ops:
     ret = ctx.op.movement_op(op, x, tuple(arg))
     if 'LAZY' not in ctx.device: log_op(MovementOps, op, ret, [x])
     assert isinstance(ret, ctx.buffer)
-    assert ret.shape == ShapeTracker(x.shape).movement_op(op, arg).shape
+    # this check is slow
+    #assert ret.shape == ShapeTracker(x.shape).movement_op(op, arg).shape
     return ret
 
   def processing_op(ctx, op:ProcessingOps, x, y, C):

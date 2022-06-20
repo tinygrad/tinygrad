@@ -162,7 +162,7 @@ class TestOnnxModel(unittest.TestCase):
     }
     inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in inputs.items()}
     for _,v in inputs.items(): v.realize()
-    for _ in range(5):
+    for _ in range(7):
       st = time.monotonic()
       tinygrad_out = run_onnx(inputs)['outputs']
       mt = time.monotonic()

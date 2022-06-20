@@ -4,7 +4,7 @@ from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
 import functools, operator, time
 
-from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op
+from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op, DEBUG, GRAPH
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
 MERGE_MOVEMENT_OPS = True
@@ -34,8 +34,10 @@ class LazyBuffer:
   def realize(self:LazyBuffer):
     if self.realized is None:
       self.realized, real_srcs = _realize(self)
-      # in lazy mode, we don't log until we realize
-      log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
+      # TODO: get if logging in a better way
+      if DEBUG or GRAPH:
+        # in lazy mode, we don't log until we realize
+        log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
       del self.op
     return self.realized
 
@@ -70,13 +72,11 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     real_src = get_root(self.op).realize()
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype == BinaryOps:
-    lazy_srcs = get_lazybuffers(self.op)
-    real_srcs = []
+    seen = {}
+    lazy_srcs : List[LazyBuffer] = [seen.setdefault(x, x) for x in get_lazybuffers(self.op) if x not in seen]
+    real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
     real_dict : Dict[LazyBuffer, str] = {}
-    seen = set()
     for s in lazy_srcs:
-      if s in seen: continue
-      seen.add(s)
       if s.optype == MovementOps and s.realized is None:
         root = get_root(s.op)
         if root.realized is None and root.optype == LoadOps and root.shape == (1,):

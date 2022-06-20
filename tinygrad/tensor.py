@@ -17,7 +17,7 @@ if DEBUG:
 global_num_max = 0
 class ProfileOp:
   def __init__(self, ctx, name, x, backward=False):
-    self.ctx, self.name, self.x, self.output, self.backward = ctx, f"back_{name}" if backward else name, x, None, backward
+    if DEBUG: self.ctx, self.name, self.x, self.output, self.backward = ctx, f"back_{name}" if backward else name, x, None, backward
   def __enter__(self):
     if DEBUG: self.st = time.time()
     return self
@@ -151,10 +151,11 @@ class Tensor:
 
   @staticmethod
   def _move_data(data, device):
-    if isinstance(data, list):
-      data = np.array(data, dtype=np.float32)
     if isinstance(data, Device.buffers[device]):
       return data
+    if isinstance(data, list):
+      # TODO: don't use np.array here, support Tensor creation direct to device
+      data = np.array(data, dtype=np.float32)
     if isinstance(data, np.ndarray):
       data = data.view(Device.buffers[Device.CPU])
 
@@ -358,8 +359,8 @@ class Tensor:
   @staticmethod
   def broadcasted(fxn, x, y):
     tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    if not isinstance(x, Tensor): x = Tensor(np.array([x], dtype=tt.dtype), device=tt.device, requires_grad=False) 
-    if not isinstance(y, Tensor): y = Tensor(np.array([y], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+    if not isinstance(x, Tensor): x = Tensor([x], device=tt.device, requires_grad=False) 
+    if not isinstance(y, Tensor): y = Tensor([y], device=tt.device, requires_grad=False) 
 
     n_dims = max(len(x.shape), len(y.shape))
     if len(x.shape) != n_dims: x = x.reshape(list(x.shape) + [1]*(n_dims-len(x.shape)))
@@ -419,7 +420,7 @@ class Function(Ops):
 
   @classmethod
   def apply(cls, *x, **kwargs):
-    assert all([isinstance(arg, Tensor) for arg in x])
+    assert all(isinstance(arg, Tensor) for arg in x)
     ctx = cls(x[0].device, *x)
     with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
       ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
