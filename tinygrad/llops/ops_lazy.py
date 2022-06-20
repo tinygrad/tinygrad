@@ -14,10 +14,13 @@ MERGE_ELEMENTWISE_OPS = True
 
 class LazyOp(NamedTuple):
   op: Op
-  src: List[Union[LazyOp, LazyBuffer]]
+  src: Tuple[Union[LazyOp, LazyBuffer]]
   arg: Any = None
 
 def get_root(x:LazyOp) -> LazyBuffer: return x if isinstance(x, LazyBuffer) else get_root(x.src[0])
+
+@functools.lru_cache(maxsize=None)
+def get_lazyops(op:LazyOp) -> List[Op]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
 
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]:
   ret = []
@@ -41,15 +44,13 @@ class LazyBuffer:
   def realize(self:LazyBuffer):
     if self.realized is None:
       self.realized, real_srcs = _realize(self)
-      def get_lazyops(op:LazyOp) -> List[Op]:
-        return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
       # in lazy mode, we don't log until we realize
       log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
     return self.realized
 
   @staticmethod
   def fromCPU(x):
-    ret = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
+    ret = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x))
     return ret
 
   def toCPU(self):
@@ -103,9 +104,9 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any BinaryOps that feed into this
-    srcs = [x.op if x.optype == BinaryOps else x for x in srcs]
+    srcs = tuple([x.op if x.optype == BinaryOps else x for x in srcs])
 
-  return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
+  return LazyBuffer(out_shape, BinaryOps, LazyOp(op, srcs))
 
 def unary_op(op, x): return elementwise_op(op, (x,))
 def binary_op(op, x, y): return elementwise_op(op, (x,y))
@@ -120,7 +121,7 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg):
     return replace_w_movement_op(x.op)
 
   # if a MovementOp is applied to a MovementOp, merge them and use one buffer
-  ret = LazyBuffer(x.st, MovementOps, LazyOp(op, [x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps else x], arg))
+  ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps else x,), arg))
   ret.st.movement_op(op, arg)
 
   if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps:
@@ -131,7 +132,7 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg):
   return ret
 
 def reduce_op(op, x, new_shape):
-  return LazyBuffer(new_shape, ReduceOps, LazyOp(op, [x], new_shape))
+  return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x), new_shape))
 
 def processing_op(op, x, w, C):
-  return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, [x, w], C))
+  return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))

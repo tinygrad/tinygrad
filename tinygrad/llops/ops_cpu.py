@@ -18,6 +18,9 @@ class CPUBuffer(np.ndarray):
   def fromCPU(x): return x
   def toCPU(x): return x
 
+  # TODO: this is wrong
+  def __hash__(x): return id(x)
+
 def unary_op(op, x):
   if op == UnaryOps.RELU: return x.relu()
   elif op == UnaryOps.EXP: return x.exp()
