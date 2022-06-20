@@ -23,9 +23,10 @@ class LazyBuffer:
 
   def realize(self:LazyBuffer):
     if self.realized is None:
-      self.realized = _realize(self)
+      srcs = [x.realize() for x in self.op.src]
+      self.realized = _realize(self, srcs)
       # in lazy mode, we don't log until we realize
-      log_op(self.optype, self.op.op, self.realized, self.op.src)
+      log_op(self.optype, self.op.op, self.realized, srcs)
     return self.realized
 
   @staticmethod
@@ -37,17 +38,17 @@ class LazyBuffer:
 
 # this function determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
-def _realize(self:LazyBuffer) -> gops.GPUBuffer:
+def _realize(self:LazyBuffer, srcs:List[gops.GPUBuffer]) -> gops.GPUBuffer:
   if self.optype == LoadOps:
     return gops.GPUBuffer(self.shape, self.op.arg)
   elif self.optype == ReduceOps:
-    return gops.reduce_op(self.op.op, self.op.src[0].realize(), self.op.arg)
+    return gops.reduce_op(self.op.op, srcs[0], self.op.arg)
   elif self.optype == MovementOps:
-    return gops.GPUBuffer(self.st, self.op.src[0].realize())
+    return gops.GPUBuffer(self.st, srcs[0])
   elif self.optype == BinaryOps:
-    return gops.elementwise_op(list(zip(["A", "B"], [x.realize() for x in self.op.src])), gops.code_for_op[self.op.op])
+    return gops.elementwise_op(list(zip(["A", "B"], srcs)), gops.code_for_op[self.op.op])
   elif self.optype == ProcessingOps:
-    return gops.processing_op(self.op.op, self.op.src[0].realize(), self.op.src[1].realize(), self.op.arg)
+    return gops.processing_op(self.op.op, srcs[0], srcs[1], self.op.arg)
 
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
