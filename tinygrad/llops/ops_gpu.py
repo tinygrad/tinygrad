@@ -81,7 +81,6 @@ def clbuild(name, prg, options=tuple(), argdtypes=None):
 code_for_op = {
   UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
   BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(B/A)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-  ProcessingOps.CONV: "(acc)"
 }
 
 def contiguous_view(x:GPUBuffer, name:str):
@@ -151,8 +150,10 @@ def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc")
   ret = GPUBuffer(C.out_shape)
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
-  params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
-  conv_params = ["__global const float* restrict input", "__global const float* restrict weight", "__global float* restrict output"] + \
+  ints += ''.join(f"int {x} = {getattr(C, x)};" for x in ["groups", "rcout", "oy", "ox", "iy", "ix"])
+  params = []
+  #params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
+  conv_params = ["__global float* restrict output", "__global const float* restrict input", "__global const float* restrict weight"] + \
                 [x[0] for x in params] + \
                 [f"__global const float *{name}_g" for name, _ in bufs]
   conv_prg = clbuild("conv", elementwise_op_compile(bufs, code)+"""
@@ -188,5 +189,5 @@ def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc")
   }""",
   options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple(),
   argdtypes=tuple([None, None, None] + [np.int32]*len(params) + [None]*len(bufs)))
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl, *[x[1] for x in params], *[buf.cl for _, buf in bufs])
+  conv_prg([C.bs*C.cout, C.oy, C.ox], None, ret.cl, contiguous(x).cl, contiguous(w).cl, *[x[1] for x in params], *[buf.cl for _, buf in bufs])
   return ret

@@ -86,7 +86,8 @@ def ast_op(op: Op, srcs_code: List[str]) -> str:
 def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
   if isinstance(x, LazyBuffer): return lazy_srcs[x]
   # if it's not a LazyBuffer, it's an op
-  return ast_op(x.op, [ast(src, lazy_srcs) for src in x.src] if x.op != ProcessingOps.CONV else [])
+  if x.op == ProcessingOps.CONV: return "acc"
+  return ast_op(x.op, [ast(src, lazy_srcs) for src in x.src])
 
 # these functions determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
