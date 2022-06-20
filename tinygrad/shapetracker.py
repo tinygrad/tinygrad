@@ -55,17 +55,16 @@ def strides_for_shape(shape):
     strides = [d*strides[0]] + strides
   return tuple(strides)
 
+@functools.lru_cache(maxsize=None)
+def view_from_shape(shape:Tuple):
+  if len(shape) == 0: shape = (1,)
+  assert all([isinstance(x, int) for x in shape])
+  return View(tuple(shape), strides_for_shape(shape))
+
 class ShapeTracker:
   def __init__(self, shape:Union[ShapeTracker, Tuple]):
     if isinstance(shape, ShapeTracker): self.views = shape.views[:]
-    else: self.views = [ShapeTracker.view_from_shape(shape)]
-
-  @staticmethod
-  @functools.lru_cache(maxsize=None)
-  def view_from_shape(shape:Tuple):
-    if len(shape) == 0: shape = (1,)
-    assert all([isinstance(x, int) for x in shape])
-    return View(tuple(shape), strides_for_shape(shape))
+    else: self.views = [view_from_shape(shape)]
 
   @property
   def contiguous(self):

@@ -41,6 +41,7 @@ class LazyBuffer:
       self.realized, real_srcs = _realize(self)
       # in lazy mode, we don't log until we realize
       log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
+      del self.op
     return self.realized
 
   @staticmethod
@@ -80,7 +81,7 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     for s in lazy_srcs:
       if s in seen: continue
       seen.add(s)
-      if s.optype == MovementOps:
+      if s.optype == MovementOps and s.realized is None:
         root = get_root(s.op)
         if root.optype == LoadOps and root.shape == (1,) and not s.st.needs_valid():
           real_dict[s] = str(root.op.arg[0])

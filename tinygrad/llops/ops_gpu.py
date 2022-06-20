@@ -21,13 +21,23 @@ def require_init_gpu():
 
 def roundup(x, n=4): return (x+(n-1))//n * n
 
+class CLBuffer:
+  def __init__(self, size):
+    self.buf = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, size)
+  def __del__(self):
+    #print("free", self.buf.size)
+    pass
+
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.st = ShapeTracker(shape)
-    self.cl = hostbuf.cl if isinstance(hostbuf, GPUBuffer) else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
+    self.buf = hostbuf.buf if isinstance(hostbuf, GPUBuffer) else CLBuffer(4*roundup(prod(self.shape)))  # padding
     if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
       cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel(), is_blocking=False)
+
+  @property
+  def cl(self): return self.buf.buf
 
   @property
   def shape(self): return self.st.shape
