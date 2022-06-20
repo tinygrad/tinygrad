@@ -16,9 +16,9 @@ def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
     if inp.data_type == 1:
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.float32).reshape(inp.dims).copy())
+      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.float32).reshape(inp.dims).copy(), requires_grad=False)
     elif inp.data_type == 7:
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.int64).reshape(inp.dims).astype(np.float32).copy())
+      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.int64).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
@@ -38,9 +38,9 @@ def get_run_onnx(onnx_model):
     if len(inp.raw_data) > 0:
       tensors[inp.name] = buffer_parse(inp)
     elif len(inp.float_data) > 0:
-      tensors[inp.name] = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims))
+      tensors[inp.name] = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
     elif len(inp.int64_data) > 0:
-      tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.float32).reshape(inp.dims))
+      tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
     else:
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
@@ -57,7 +57,7 @@ def get_run_onnx(onnx_model):
       if inp.name in inputs:
         input_shape = inputs[inp.name].shape
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        input_tensors[inp.name] = Tensor(inputs[inp.name])
+        input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
