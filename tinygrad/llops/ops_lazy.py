@@ -5,6 +5,7 @@ from tinygrad.shapetracker import ShapeTracker
 from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
+SHUFFLE_MOVEMENT_OPS = True
 MERGE_ELEMENTWISE_OPS = False
 
 class LazyOp(NamedTuple):
@@ -66,6 +67,13 @@ def binary_op(op, x, y):
   return elementwise_op(op, (x,y))
 
 def movement_op(op, x, arg):
+  if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
+    # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
+    def replace_w_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
+      if isinstance(y, LazyBuffer): return movement_op(op, y, arg)
+      elif isinstance(y, LazyOp): return elementwise_op(y.op, tuple([replace_w_movement_op(z) for z in y.src]))
+    return replace_w_movement_op(x.op)
+
   ret = LazyBuffer(x.st, MovementOps, LazyOp(op, [x], arg))
   ret.st.movement_op(op, arg)
   return ret
