@@ -27,6 +27,10 @@ class View:
   def __repr__(self): return f"View<{self.shape}, {self.strides}, {self.offset}>"
 
   @functools.cached_property
+  def contiguous(self):
+    return self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
+
+  @functools.cached_property
   def expr(self):
     ret = [f"{self.offset}"] if self.offset != 0 else []
     acc = 1
@@ -71,8 +75,7 @@ class ShapeTracker:
 
   @property
   def contiguous(self):
-    if len(self.views) > 1 or self.offset != 0: return False
-    return all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
+    return len(self.views) == 1 and self.views[-1].contiguous
 
   @property
   def shape(self): return self.views[-1].shape

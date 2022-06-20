@@ -49,7 +49,7 @@ class LazyBuffer:
   def toCPU(self):
     return self.realize().toCPU()
 
-def ast_op(op: Op, srcs_code: List[str]):
+def ast_op(op: Op, srcs_code: List[str]) -> str:
   code = gops.code_for_op[op]
   if len(srcs_code) >= 1: code = code.replace("A", srcs_code[0])
   if len(srcs_code) >= 2: code = code.replace("B", srcs_code[1])
@@ -81,7 +81,6 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
             real_dict[s] = f"(({inline_valid}) * {str(root.op.arg[0])}f)"
     if s not in real_dict:  # nicer way to write this?
       real_dict[s] = f"arg_{len(real_srcs)}"
-      #print("realize", s.shape)
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
   return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
