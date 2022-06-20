@@ -1,6 +1,7 @@
 import functools
 import numpy as np
 import pyopencl as cl
+from typing import List, Tuple
 from tinygrad.helpers import prod
 from tinygrad.llops.ops_cpu import unary_op
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
@@ -67,33 +68,20 @@ code_for_op = {
 def contiguous_view(x:GPUBuffer, name:str):
   return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-def contiguous(x:GPUBuffer):
-  if x.st.contiguous: return x
-  else: return unary_op(UnaryOps.NOOP, x)
-
-def unary_op(op, x):
-  ret = GPUBuffer(x.shape)
-  unop = clbuild("unop", contiguous_view(x, 'A')+"""
-  __kernel void unop(__global const float *a_g, __global float *res_g) {
-    int gid = get_global_id(0);
-    float A = get_A(a_g, gid);
-    res_g[gid] = """+code_for_op[op]+""";
-  }""")
-  unop([prod(ret.shape)], None, x.cl, ret.cl)
+def elementwise_op(bufs: List[Tuple[str, GPUBuffer]], code):
+  assert all(buf.shape == bufs[0][1].shape for _, buf in bufs)
+  ret = GPUBuffer(bufs[0][1].shape)
+  ewop = clbuild("ewop", '\n'.join([contiguous_view(buf, name) for name, buf in bufs])+
+    "__kernel void ewop(__global float *res_g, "+','.join([f"__global const float *{name}_g" for name, _ in bufs])+") {"+
+    "int gid = get_global_id(0);"+
+    '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+
+    f"res_g[gid] = {code}; }}")
+  ewop([prod(ret.shape)], None, ret.cl, *[buf.cl for _, buf in bufs])
   return ret
 
-def binary_op(op, x, y):
-  ret = GPUBuffer(x.shape)
-  assert x.shape == ret.shape and y.shape == ret.shape
-  binop = clbuild("binop", contiguous_view(x, 'A')+contiguous_view(y, 'B')+"""
-  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g) {
-    int gid = get_global_id(0);
-    float A = get_A(a_g, gid);
-    float B = get_B(b_g, gid);
-    res_g[gid] = """+code_for_op[op]+""";
-  }""")
-  binop([prod(ret.shape)], None, x.cl, y.cl, ret.cl)
-  return ret
+def unary_op(op, x): return elementwise_op([("A", x)], code_for_op[op])
+def binary_op(op, x, y): return elementwise_op([("A", x), ("B", y)], code_for_op[op])
+def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
 def reduce_op(op, inp, new_shape):
   ret = GPUBuffer(new_shape)
@@ -121,7 +109,7 @@ def reduce_op(op, inp, new_shape):
     int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
     float out = """+start+""";\n"""+ \
       '\n'.join(loop_start[::-1])+"""
-        float a = get_A(a_g, idx);;
+        float a = get_A(a_g, idx);
         """+code+""";\n"""+ \
       '\n'.join(loop_end)+"""
     res_g[gid] = out;
@@ -129,7 +117,7 @@ def reduce_op(op, inp, new_shape):
   clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
   return ret
 
-def movement_op(op, x, arg=None):
+def movement_op(op, x, arg):
   ret = GPUBuffer(x.st, x)
   ret.st.movement_op(op, arg)
   return ret
