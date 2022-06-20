@@ -9,8 +9,8 @@ def divmodidx(acc, d, mod=True):
 
 class View:
   def __init__(self, shape, strides, offset:int=0):
-    assert len(shape) == len(strides)
     self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
+    assert len(shape) == len(strides)
 
     self.shape_strides = [(shape[0], strides[0])]
     for i in range(1, len(shape)):
