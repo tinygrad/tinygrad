@@ -87,14 +87,19 @@ code_for_op = {
 def contiguous_view(x:GPUBuffer, name:str):
   return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-def elementwise_op(bufs: List[Tuple[str, GPUBuffer]], code):
+def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
+  return '\n'.join([contiguous_view(buf, name) for name, buf in bufs])+ \
+    "inline float _ewop(int gid, float acc, "+','.join([f"__global const float *{name}_g" for name, _ in bufs])+") {"+ \
+    '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+ \
+    f"return {code}; }}"
+
+def elementwise_op(bufs: List[Tuple[str, GPUBuffer]], code:str) -> GPUBuffer:
   assert all(buf.shape == bufs[0][1].shape for _, buf in bufs)
   ret = GPUBuffer(bufs[0][1].shape)
-  ewop = clbuild("ewop", '\n'.join([contiguous_view(buf, name) for name, buf in bufs])+
+  ewop = clbuild("ewop", elementwise_op_compile(bufs, code)+
     "__kernel void ewop(__global float *res_g, "+','.join([f"__global const float *{name}_g" for name, _ in bufs])+") {"+
     "int gid = get_global_id(0);"+
-    '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+
-    f"res_g[gid] = {code}; }}")
+    "res_g[gid] = _ewop(gid,0.0f,"+','.join([f"{name}_g" for name, _ in bufs])+"); }")
   ewop([prod(ret.shape)], None, ret.cl, *[buf.cl for _, buf in bufs])
   return ret
 
