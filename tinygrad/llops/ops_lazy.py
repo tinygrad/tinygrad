@@ -24,13 +24,10 @@ def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(oper
 class LazyBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
     self.st = ShapeTracker(shape)
+    self.shape = self.st.shape
     self.optype, self.op = optype, op
     self.realized = None
 
-  # TODO: we can't cache this since it can change if we modify the ShapeTracker, which we do in movement op
-  #@functools.cached_property
-  @property
-  def shape(self): return self.st.shape
   def __repr__(self): return f"<LB {self.shape} {self.optype}>"
 
   def realize(self:LazyBuffer):
@@ -52,17 +49,43 @@ class LazyBuffer:
   def toCPU(self):
     return self.realize().toCPU()
 
-def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
-   if isinstance(x, LazyBuffer): return lazy_srcs[x]
-   # it's an op
-   if x.op == ProcessingOps.CONV: code = 'acc'
-   else: code = gops.code_for_op[x.op]
-   if "A" in code: code = code.replace("A", "("+ast(x.src[0], lazy_srcs)+")")
-   if "B" in code: code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
-   return code
+def ast_op(op: Op, srcs_code: List[str]):
+  code = gops.code_for_op[op]
+  if len(srcs_code) >= 1: code = code.replace("A", srcs_code[0])
+  if len(srcs_code) >= 2: code = code.replace("B", srcs_code[1])
+  return code
 
-# this function determines the backing buffer
+def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
+  if isinstance(x, LazyBuffer): return lazy_srcs[x]
+  # if it's not a LazyBuffer, it's an op
+  return ast_op(x.op, [ast(src, lazy_srcs) for src in x.src])
+
+# these functions determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
+
+def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
+  seen = {}
+  lazy_srcs : List[LazyBuffer] = [seen.setdefault(x, x) for x in get_lazybuffers(self.op) if x not in seen]
+  real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
+  real_dict : Dict[LazyBuffer, str] = {}
+  for s in lazy_srcs:
+    if s.optype == MovementOps and s.realized is None:
+      root = get_root(s.op)
+      if root.realized is None and root.optype == LoadOps and root.shape == (1,):
+        if not s.st.needs_valid():
+          real_dict[s] = str(root.op.arg[0]) + "f"
+        else:
+          # TODO: this is a terrible hack, and it's very unclear if it's always right
+          inline_valid = s.st.expr().replace("valid=valid && ", "").replace(";idx=0", "").replace("//", "/").replace("idx", "gid")
+          if ';' not in inline_valid:
+            real_dict[s] = f"(({inline_valid}) * {str(root.op.arg[0])}f)"
+    if s not in real_dict:  # nicer way to write this?
+      real_dict[s] = f"arg_{len(real_srcs)}"
+      #print("realize", s.shape)
+      real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
+  code = ast(self.op, real_dict)
+  return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
+
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps:
     #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
@@ -74,27 +97,7 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     real_src = get_root(self.op).realize()
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype == BinaryOps:
-    seen = {}
-    lazy_srcs : List[LazyBuffer] = [seen.setdefault(x, x) for x in get_lazybuffers(self.op) if x not in seen]
-    real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
-    real_dict : Dict[LazyBuffer, str] = {}
-    for s in lazy_srcs:
-      if s.optype == MovementOps and s.realized is None:
-        root = get_root(s.op)
-        if root.realized is None and root.optype == LoadOps and root.shape == (1,):
-          if not s.st.needs_valid():
-            real_dict[s] = str(root.op.arg[0]) + "f"
-          else:
-            # TODO: this is a terrible hack, and it's very unclear if it's always right
-            inline_valid = s.st.expr().replace("valid=valid && ", "").replace(";idx=0", "").replace("//", "/").replace("idx", "gid")
-            if ';' not in inline_valid:
-              real_dict[s] = f"(({inline_valid}) * {str(root.op.arg[0])}f)"
-      if s not in real_dict:  # nicer way to write this?
-        real_dict[s] = f"arg_{len(real_srcs)}"
-        #print("realize", s.shape)
-        real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
-    code = ast(self.op, real_dict)
-    return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
+    return _realize_binary_op(self)
   elif self.optype == ProcessingOps:
     real_srcs = [x.realize() for x in self.op.src]
     return gops.processing_op(self.op.op, real_srcs[0], real_srcs[1], self.op.arg), real_srcs
@@ -122,7 +125,7 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg):
 
   # if a MovementOp is applied to a MovementOp, merge them and use one buffer
   ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps else x,), arg))
-  ret.st.movement_op(op, arg)
+  ret.shape = ret.st.movement_op(op, arg).shape   # update the shape after we modify the ShapeTracker
 
   if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps:
     root = get_root(x.op)

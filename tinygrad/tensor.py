@@ -393,7 +393,7 @@ class Function(Ops):
       self.saved_tensors.extend(x)
 
   @classmethod
-  def apply(cls, *x : List[Tensor], **kwargs):
+  def apply(cls, *x:List[Tensor], **kwargs):
     ctx = cls(x[0].device, *x)
     ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
                  device=ctx.device, requires_grad=ctx.requires_grad)
