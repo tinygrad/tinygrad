@@ -365,7 +365,7 @@ class Tensor:
     if len(x.shape) != n_dims: x = x.reshape(list(x.shape) + [1]*(n_dims-len(x.shape)))
     if len(y.shape) != n_dims: y = y.reshape(list(y.shape) + [1]*(n_dims-len(y.shape)))
 
-    shape_ret = tuple([int(x) for x in np.maximum(x.shape, y.shape)])
+    shape_ret = tuple([max(sx, sy) for sx,sy in zip(x.shape, y.shape)])
     if x.shape != shape_ret: x = x.expand(shape_ret)
     if y.shape != shape_ret: y = y.expand(shape_ret)
     return fxn(x, y)
