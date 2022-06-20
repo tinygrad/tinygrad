@@ -104,10 +104,13 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     real_src = get_root(self.op).realize()
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype == BinaryOps:
-    lazy_srcs = list(set(get_lazybuffers(self.op)))
+    lazy_srcs = get_lazybuffers(self.op)
     real_srcs = []
     real_dict : Dict[LazyBuffer, str] = {}
+    seen = set()
     for s in lazy_srcs:
+      if s in seen: continue
+      seen.add(s)
       if s.optype == MovementOps:
         root = get_root(s.op)
         if root.optype == LoadOps and root.shape == (1,) and not s.st.needs_valid():
