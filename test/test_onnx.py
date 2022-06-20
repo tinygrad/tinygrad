@@ -162,9 +162,11 @@ class TestOnnxModel(unittest.TestCase):
       st = time.monotonic()
       tinygrad_out = run_onnx(inputs)['outputs']
       mt = time.monotonic()
+      if getattr(tinygrad_out.data, 'realize'): tinygrad_out.data.realize()
+      mt2 = time.monotonic()
       tinygrad_out = tinygrad_out.numpy()
       et = time.monotonic()
-      print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(et-mt)*1000.0:.2f} ms for realize")
+      print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
     import cProfile
     import pstats
@@ -173,7 +175,10 @@ class TestOnnxModel(unittest.TestCase):
     tinygrad_out = run_onnx(inputs)['outputs']
     tinygrad_out = tinygrad_out.numpy()
     pr.disable()
-    ps = pstats.Stats(pr).sort_stats(pstats.SortKey.TIME)
+    stats = pstats.Stats(pr)
+    stats.dump_stats("/tmp/net.prof")
+    os.system("flameprof /tmp/net.prof > /tmp/prof.svg")
+    ps = stats.sort_stats(pstats.SortKey.TIME)
     ps.print_stats(20)
 
   def test_openpilot_model(self):
