@@ -65,6 +65,10 @@ class Tensor:
   def __repr__(self):
     return f"<Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}>"
 
+  def realize(self):
+    if getattr(self.data, 'realize', None) is not None:
+      self.data.realize()
+
   def assign(self, x):
     if not isinstance(x, Tensor):
       x = Tensor(x)

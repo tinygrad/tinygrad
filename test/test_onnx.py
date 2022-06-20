@@ -57,7 +57,10 @@ def get_run_onnx(onnx_model):
       if inp.name in inputs:
         input_shape = inputs[inp.name].shape
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
+        if isinstance(inputs[inp.name], Tensor):
+          input_tensors[inp.name] = inputs[inp.name]
+        else:
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
@@ -150,19 +153,20 @@ class TestOnnxModel(unittest.TestCase):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
+    inputs = {
+      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "desire": np.zeros((1, 8)),
+      "traffic_convention": np.array([[1., 0.]]),
+      "initial_state": np.zeros((1, 512))
+    }
+    inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in inputs.items()}
+    for _,v in inputs.items(): v.realize()
     for _ in range(5):
-      inputs = {
-        "input_imgs": np.random.randn(*(1, 12, 128, 256)),
-        "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-        "desire": np.zeros((1, 8)),
-        "traffic_convention": np.array([[1., 0.]]),
-        "initial_state": np.zeros((1, 512))
-      }
-      inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
       st = time.monotonic()
       tinygrad_out = run_onnx(inputs)['outputs']
       mt = time.monotonic()
-      if getattr(tinygrad_out.data, 'realize', None): tinygrad_out.data.realize()
+      tinygrad_out.realize()
       mt2 = time.monotonic()
       tinygrad_out = tinygrad_out.numpy()
       et = time.monotonic()

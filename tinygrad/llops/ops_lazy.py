@@ -79,7 +79,7 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
       seen.add(s)
       if s.optype == MovementOps and s.realized is None:
         root = get_root(s.op)
-        if root.optype == LoadOps and root.shape == (1,) and not s.st.needs_valid() and root.realized is None:
+        if root.realized is None and root.optype == LoadOps and root.shape == (1,) and not s.st.needs_valid():
           real_dict[s] = str(root.op.arg[0]) + "f"
       if s not in real_dict:  # nicer way to write this?
         real_dict[s] = f"arg_{len(real_srcs)}"
