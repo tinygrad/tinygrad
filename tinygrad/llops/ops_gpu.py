@@ -116,17 +116,17 @@ def reduce_op(op, inp, new_shape):
     acc *= shp
 
   # TODO: support multistage reduces
-  prg = """
+  prg = contiguous_view(inp, 'A')+"""
   __kernel void reduce(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
     float out = """+start+""";\n"""+ \
       '\n'.join(loop_start[::-1])+"""
-        float a = a_g[idx];
+        float a = get_A(a_g, idx);;
         """+code+""";\n"""+ \
       '\n'.join(loop_end)+"""
     res_g[gid] = out;
   }"""
-  clbuild("reduce", prg)([prod(ret.shape)], None, contiguous(inp).cl, ret.cl)
+  clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
   return ret
 
 def movement_op(op, x, arg=None):
