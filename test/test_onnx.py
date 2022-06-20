@@ -160,9 +160,11 @@ class TestOnnxModel(unittest.TestCase):
       }
       inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
       st = time.monotonic()
-      tinygrad_out = run_onnx(inputs)['outputs'].numpy()
-      et = time.monotonic() - st
-      print(f"ran openpilot model in {et*1000.0:.2f} ms")
+      tinygrad_out = run_onnx(inputs)['outputs']
+      mt = time.monotonic()
+      tinygrad_out = tinygrad_out.numpy()
+      et = time.monotonic()
+      print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(et-mt)*1000.0:.2f} ms for realize")
 
   def test_openpilot_model(self):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
@@ -177,9 +179,12 @@ class TestOnnxModel(unittest.TestCase):
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
     st = time.monotonic()
-    tinygrad_out = run_onnx(inputs)['outputs'].numpy()
-    et = time.monotonic() - st
-    print(f"ran openpilot model in {et*1000.0:.2f} ms")
+    tinygrad_out = run_onnx(inputs)['outputs']
+    #tinygrad_out.data.realize()
+    mt = time.monotonic()
+    tinygrad_out = tinygrad_out.numpy()
+    et = time.monotonic()
+    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(et-mt)*1000.0:.2f} ms for realize")
 
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     print(tinygrad_out, torch_out)

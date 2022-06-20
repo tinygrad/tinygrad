@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
-import functools, operator
+import functools, operator, time
 
 from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
@@ -28,6 +28,9 @@ def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]:
       ret.append(x)
   return ret
 
+SHOULD_LOG = True
+realized_buffers = []
+
 class LazyBuffer:
   def __init__(self, shape:tuple, optype:Op, op:LazyOp):
     self.st = ShapeTracker(shape)
@@ -41,10 +44,11 @@ class LazyBuffer:
   def realize(self:LazyBuffer):
     if self.realized is None:
       self.realized, real_srcs = _realize(self)
+      realized_buffers.append(self)
       def get_lazyops(op:LazyOp) -> List[Op]:
         return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
       # in lazy mode, we don't log until we realize
-      log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
+      if SHOULD_LOG: log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
     return self.realized
 
   @staticmethod
@@ -54,6 +58,29 @@ class LazyBuffer:
 
   def toCPU(self):
     return self.realize().toCPU()
+
+    """
+    global SHOULD_LOG
+    global realized_buffers
+    # for the kernel builds to not count in timing
+    junk = self.realize().toCPU()
+    print("derealizing %d" % len(realized_buffers))
+    for b in realized_buffers:
+      if b.optype != LoadOps:
+        b.realized = None
+    realized_buffers = []
+    SHOULD_LOG = False
+
+    st = time.monotonic()
+    ret = self.realize()
+    mt = time.monotonic()
+    ret = ret.toCPU()
+    et = time.monotonic()
+
+    print(f"realized in {(et-st)*1000:.2f} ms, waited {(et-mt)*1000:.2f} ms for kernels ({(mt-st)*1000:.2f} ms in python)")
+    return ret
+    """
+
 
 def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
    if isinstance(x, LazyBuffer): return lazy_srcs[x]
@@ -68,7 +95,7 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
 import tinygrad.llops.ops_gpu as gops
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps:
-    print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
+    #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
     return gops.GPUBuffer(self.shape, self.op.arg), []
   elif self.optype == ReduceOps:
     real_src = self.op.srcs[0].realize()

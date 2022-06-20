@@ -46,15 +46,17 @@ class GPUBuffer:
 
 class CLProgram:
   def __init__(self, name, prg, options, argdtypes):
+    self.name = name
     self.built = cl.Program(cl_ctx, prg).build(options=options)
     self.clprg = self.built.__getattr__(name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
-  def __call__(self, *args): self.clprg(cl_queue, *args)
+  def __call__(self, *args):
+    #print(f"running {self.name} with {args[0]} count {len(args)-2}")
+    self.clprg(cl_queue, *args)
 
 @functools.lru_cache(maxsize=None)
 def clbuild(name, prg, options=tuple(), argdtypes=None):
-  #print("cache miss")
-  #print(prg)
+  #print("cache miss", prg[0:100])
   return CLProgram(name, prg, options, argdtypes)
 
 code_for_op = {
