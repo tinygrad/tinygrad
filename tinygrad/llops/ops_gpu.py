@@ -137,9 +137,12 @@ def movement_op(op, x, arg=None):
 def processing_op(op,x,w,C):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
+  params = [C.groups, C.rcout, C.oy, C.ox, C.iy, C.ix]
   conv_prg = clbuild("conv", """
   __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
-    int H, int W, int groups, int rcout, int cin, int oy, int ox, int iy, int ix, int ys, int xs, int bs, int dx, int dy, int px, int py) {
+    int groups, int rcout, int oy, int ox, int iy, int ix) {
+    """+ints+"""
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
     int c = get_global_id(0) % rcout;
@@ -153,24 +156,22 @@ def processing_op(op,x,w,C):
 
     float acc = 0.0;
     for (int ci = 0; ci < cin; ci++) {
-
-#ifdef ONEBYONE
-      acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + IY*ix + IX] * \
-        weight[g*rcout*cin + c*cin + ci];
-#else
       for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
         int idx_y = y*dy + IY - py;
         int idx_x = x*dx + IX - px;
+#ifdef ALLVALID
+        acc += input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
+          weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+#else
         int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
         acc += valid ? input[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
           weight[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x] : 0.0;
-      } }
 #endif
+      } }
     }
     output[gid] = acc;
   }""",
-  options=tuple(["-DONEBYONE"]) if C.H == 1 and C.W == 1 and C.px == 0 and C.py == 0 else tuple(),
-  argdtypes=tuple([None, None, None] + [np.int32]*16))
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl,
-    *[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
+  options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple(),
+  argdtypes=tuple([None, None, None] + [np.int32]*len(params)))
+  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl, *params)
   return ret
