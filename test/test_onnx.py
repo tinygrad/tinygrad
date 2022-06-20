@@ -177,6 +177,7 @@ class TestOnnxModel(unittest.TestCase):
     pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
     pr.enable()
     tinygrad_out = run_onnx(inputs)['outputs']
+    tinygrad_out.realize()
     tinygrad_out = tinygrad_out.numpy()
     pr.disable()
     stats = pstats.Stats(pr)

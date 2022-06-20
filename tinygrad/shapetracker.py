@@ -1,29 +1,32 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 import functools
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 from tinygrad.helpers import prod
-from functools import cached_property
 
 def divmodidx(acc, d, mod=True):
   lr = f"(idx//{acc})" if acc != 1 else "idx"
   return f"({lr}%{d})" if mod else lr  # don't mod the top shape dimension
 
+@functools.lru_cache(maxsize=None)
+def to_shape_strides(shape:Tuple[int], strides:Tuple[int]) -> List[Tuple[int, int]]:
+  assert len(shape) == len(strides)
+  ret = [(shape[0], strides[0])]
+  for i in range(1, len(shape)):
+    if (strides[i] != 0 and ret[-1][1]//strides[i] == shape[i]) or (strides[i] == 0 and ret[-1][1] == 0):
+      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+    else:
+      ret.append((shape[i], strides[i]))
+  return ret
+
 class View:
   def __init__(self, shape, strides, offset:int=0):
     self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
-    assert len(shape) == len(strides)
-
-    self.shape_strides = [(shape[0], strides[0])]
-    for i in range(1, len(shape)):
-      if (strides[i] != 0 and self.shape_strides[-1][1]//strides[i] == shape[i]) or (strides[i] == 0 and self.shape_strides[-1][1] == 0):
-        self.shape_strides[-1] = (self.shape_strides[-1][0] * shape[i], strides[i])
-      else:
-        self.shape_strides.append((shape[i], strides[i]))
+    self.shape_strides = to_shape_strides(self.shape, self.strides)
 
   def __repr__(self): return f"View<{self.shape}, {self.strides}, {self.offset}>"
 
-  @cached_property
+  @functools.cached_property
   def expr(self):
     ret = [f"{self.offset}"] if self.offset != 0 else []
     acc = 1
