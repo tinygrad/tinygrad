@@ -89,7 +89,7 @@ def contiguous_view(x:GPUBuffer, name:str):
 
 def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
   return '\n'.join([contiguous_view(buf, name) for name, buf in bufs])+ \
-    "inline float _ewop(int gid, float acc, "+','.join([f"__global const float *{name}_g" for name, _ in bufs])+") {"+ \
+    "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in bufs])+") {"+ \
     '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+ \
     f"return {code}; }}"
 
@@ -146,14 +146,16 @@ def movement_op(op, x, arg):
   ret.st.movement_op(op, arg)
   return ret
 
-def processing_op(op,x,w,C):
+def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc"):
   ret = GPUBuffer(C.out_shape)
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
   params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
-  conv_prg = clbuild("conv", """
-  __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
-    """+','.join([x[0] for x in params])+""") {
+  conv_params = ["__global const float* restrict input", "__global const float* restrict weight", "__global float* restrict output"] + \
+                [x[0] for x in params] + \
+                [f"__global const float *{name}_g" for name, _ in bufs]
+  conv_prg = clbuild("conv", elementwise_op_compile(bufs, code)+"""
+  __kernel void conv("""+','.join(conv_params)+""") {
     """+ints+"""
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
@@ -181,9 +183,9 @@ def processing_op(op,x,w,C):
 #endif
       } }
     }
-    output[gid] = acc;
+    output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in bufs])+""");
   }""",
   options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple(),
-  argdtypes=tuple([None, None, None] + [np.int32]*len(params)))
+  argdtypes=tuple([None, None, None] + [np.int32]*len(params) + [None]*len(bufs)))
   conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl, *[x[1] for x in params])
   return ret
