@@ -32,9 +32,6 @@ class GPUBuffer:
   @property
   def shape(self): return self.st.shape
 
-  @property
-  def dtype(self): return np.float32
-
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
 

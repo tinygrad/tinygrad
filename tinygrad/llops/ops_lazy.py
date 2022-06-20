@@ -10,7 +10,7 @@ Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 MERGE_MOVEMENT_OPS = True
 SHUFFLE_MOVEMENT_OPS = True
 REMOVE_MOVEMENT_NOPS = True
-MERGE_ELEMENTWISE_OPS = False
+MERGE_ELEMENTWISE_OPS = True
 
 class LazyOp(NamedTuple):
   op: Op
@@ -18,6 +18,15 @@ class LazyOp(NamedTuple):
   arg: Any = None
 
 def get_root(x:LazyOp) -> LazyBuffer: return x if isinstance(x, LazyBuffer) else get_root(x.src[0])
+
+def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]:
+  ret = []
+  for x in op.src:
+    if isinstance(x, LazyOp):
+      ret += get_lazybuffers(x)
+    elif isinstance(x, LazyBuffer):
+      ret.append(x)
+  return ret
 
 class LazyBuffer:
   def __init__(self, shape:tuple, optype:Op, op:LazyOp):
@@ -50,6 +59,15 @@ class LazyBuffer:
   def toCPU(self):
     return self.realize().toCPU()
 
+def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
+   if isinstance(x, LazyBuffer): return f"arg_{lazy_srcs.index(x)}"
+   # it's an op
+   if x.op == ProcessingOps.CONV: code = 'acc'
+   else: code = gops.code_for_op[x.op]
+   if "A" in code: code = code.replace("A", "("+ast(x.src[0], lazy_srcs)+")")
+   if "B" in code: code = code.replace("B", "("+ast(x.src[1], lazy_srcs)+")")
+   return code
+
 # this function determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
@@ -63,11 +81,12 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     real_src = get_root(self.op).realize()
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype == BinaryOps:
-    srcs = [x.realize() for x in self.op.src]
-    return gops.elementwise_op(list(zip(["A", "B"], srcs)), gops.code_for_op[self.op.op]), srcs
+    lazy_srcs = list(set(get_lazybuffers(self.op)))
+    real_srcs = [(f"arg_{i}", x.realize()) for i,x in enumerate(lazy_srcs)]
+    return gops.elementwise_op(real_srcs, ast(self.op, lazy_srcs)), [x[1] for x in real_srcs]
   elif self.optype == ProcessingOps:
-    srcs = [x.realize() for x in self.op.src]
-    return gops.processing_op(self.op.op, srcs[0], srcs[1], self.op.arg), srcs
+    real_srcs = [x.realize() for x in self.op.src]
+    return gops.processing_op(self.op.op, real_srcs[0], real_srcs[1], self.op.arg), real_srcs
 
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
@@ -78,11 +97,8 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
   return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
 
-def unary_op(op, x):
-  return elementwise_op(op, (x,))
-
-def binary_op(op, x, y):
-  return elementwise_op(op, (x,y))
+def unary_op(op, x): return elementwise_op(op, (x,))
+def binary_op(op, x, y): return elementwise_op(op, (x,y))
 
 @functools.lru_cache(maxsize=None)
 def movement_op(op:MovementOps, x:LazyBuffer, arg):
