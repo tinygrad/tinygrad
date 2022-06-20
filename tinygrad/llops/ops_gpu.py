@@ -188,5 +188,5 @@ def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc")
   }""",
   options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple(),
   argdtypes=tuple([None, None, None] + [np.int32]*len(params) + [None]*len(bufs)))
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl, *[x[1] for x in params])
+  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl, *[x[1] for x in params], *[buf.cl for _, buf in bufs])
   return ret

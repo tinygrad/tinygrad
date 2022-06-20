@@ -11,7 +11,7 @@ MERGE_MOVEMENT_OPS = True
 SHUFFLE_MOVEMENT_OPS = True
 REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
-MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = False
+MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
 
 class LazyOp(NamedTuple):
   op: Op
@@ -102,7 +102,9 @@ def _realize_binary_op(self:LazyBuffer, has_conv:bool=False) -> Tuple[gops.GPUBu
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
   if has_conv:
-    return gops.processing_op(conv.op, conv_x.realize(), conv_w.realize(), conv.arg, real_srcs, code), [conv_x, conv_w] + [x[1] for x in real_srcs]
+    #print(real_srcs, code)
+    conv_x_real, conv_w_real = conv_x.realize(), conv_w.realize()
+    return gops.processing_op(conv.op, conv_x_real, conv_w_real, conv.arg, real_srcs, code), [conv_x_real, conv_w_real] + [x[1] for x in real_srcs]
   else:
     return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
 
@@ -119,9 +121,9 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   elif self.optype == BinaryOps:
     return _realize_binary_op(self)
   elif self.optype == ProcessingOps:
-    #return _realize_binary_op(self, has_conv=True)
-    real_srcs = [x.realize() for x in self.op.src]
-    return gops.processing_op(self.op.op, real_srcs[0], real_srcs[1], self.op.arg), real_srcs
+    return _realize_binary_op(self, has_conv=True)
+    #real_srcs = [x.realize() for x in self.op.src]
+    #return gops.processing_op(self.op.op, real_srcs[0], real_srcs[1], self.op.arg), real_srcs
 
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
