@@ -98,10 +98,15 @@ def _realize_binary_op(self:LazyBuffer, has_conv:bool=False) -> Tuple[gops.GPUBu
     conv = find_conv(self.op)
     conv_x, conv_w = conv.src[0], conv.src[1]
     seen = {conv_x:conv_x, conv_w:conv_w}
+    conv_x_real, conv_w_real = conv_x.realize(), conv_w.realize()
+    # TODO: this contiguous shouldn't be here, it should be inserted at build time if needed
+    real_srcs = [("input", gops.contiguous(conv_x_real)), ("weight", gops.contiguous(conv_w_real))]
+    arg = conv.arg
   else:
     seen = {}
+    real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
+    arg = None
   lazy_srcs : List[LazyBuffer] = [seen.setdefault(x,x) for x in get_lazybuffers(self.op) if x not in seen]
-  real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
   real_dict : Dict[LazyBuffer, str] = {}
   for s in lazy_srcs:
     if s.optype == MovementOps and s.realized is None:
@@ -118,13 +123,7 @@ def _realize_binary_op(self:LazyBuffer, has_conv:bool=False) -> Tuple[gops.GPUBu
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
-  if has_conv:
-    #print(real_srcs, code)
-    conv_x_real, conv_w_real = conv_x.realize(), conv_w.realize()
-    real_srcs = [("input", gops.contiguous(conv_x_real)), ("weight", gops.contiguous(conv_w_real))] + real_srcs
-    return gops._processing_op(real_srcs, code, conv.arg), [x[1] for x in real_srcs]
-  else:
-    return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
+  return gops._processing_op(real_srcs, code, arg), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps:

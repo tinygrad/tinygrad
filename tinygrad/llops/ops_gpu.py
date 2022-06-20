@@ -92,18 +92,8 @@ def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
     '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+ \
     f"return {code}; }}"
 
-def elementwise_op(bufs: List[Tuple[str, GPUBuffer]], code:str) -> GPUBuffer:
-  assert all(buf.shape == bufs[0][1].shape for _, buf in bufs)
-  ret = GPUBuffer(bufs[0][1].shape)
-  ewop = clbuild("ewop", elementwise_op_compile(bufs, code)+
-    "__kernel void ewop(__global float *res_g, "+','.join([f"__global const float *{name}_g" for name, _ in bufs])+") {"+
-    "int gid = get_global_id(0);"+
-    "res_g[gid] = _ewop(gid,0.0f,"+','.join([f"{name}_g" for name, _ in bufs])+"); }")
-  ewop([prod(ret.shape)], None, ret.cl, *[buf.cl for _, buf in bufs])
-  return ret
-
-def unary_op(op, x): return elementwise_op([("A", x)], code_for_op[op])
-def binary_op(op, x, y): return elementwise_op([("A", x), ("B", y)], code_for_op[op])
+def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
+def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
 def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
 def reduce_op(op, inp, new_shape):
@@ -146,17 +136,32 @@ def movement_op(op, x, arg):
   return ret
 
 def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
-  ret = GPUBuffer(C.out_shape)
-  ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
-  params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
+  if C is not None:
+    ret = GPUBuffer(C.out_shape)
+    ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
+    params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
+    options = tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple()
+    global_size = [C.bs*C.cout, C.oy, C.ox]
+    ewbufs = bufs[2:]
+  else:
+    ret = GPUBuffer(bufs[0][1].shape)
+    ints = ''
+    params = []
+    options = tuple(["-DNOCONV"])
+    global_size = [prod(ret.shape)]
+    ewbufs = bufs
+
   conv_params = ["__global float* restrict output"] + \
                 [f"__global const float *{name}_g" for name, _ in bufs] + \
                 [x[0] for x in params]
-  conv_prg = clbuild("conv", elementwise_op_compile(bufs, code)+"""
+  conv_prg = clbuild("conv", elementwise_op_compile(ewbufs, code)+"""
   __kernel void conv("""+','.join(conv_params)+""") {
     float acc = 0.0;
-
     """+ints+"""
+
+#ifdef NOCONV
+    int gid = get_global_id(0);
+#else
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
     int c = get_global_id(0) % rcout;
@@ -182,16 +187,17 @@ def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None)
 #endif
       } }
     }
-    output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in bufs])+""");
-  }""",
-  options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple(),
+#endif
+
+    output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
+  }""", options=options,
   argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
+  conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
   return ret
 
 
 # TODO: merge with elementwise_op
 def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc"):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  return _processing_op({"input": contiguous(x), "weight": contiguous(w)}, "acc", C)
+  return _processing_op([("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
 
