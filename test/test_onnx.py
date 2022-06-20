@@ -146,6 +146,31 @@ def run_onnx_torch(onnx_model, inputs):
   return torch_out
 
 class TestOnnxModel(unittest.TestCase):
+  def test_profile_openpilot_model(self):
+    dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
+    onnx_model = onnx.load(io.BytesIO(dat))
+    run_onnx = get_run_onnx(onnx_model)
+    inputs = {
+      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "desire": np.zeros((1, 8)),
+      "traffic_convention": np.array([[1., 0.]]),
+      "initial_state": np.zeros((1, 512))
+    }
+    inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
+    tinygrad_out = run_onnx(inputs)['outputs']
+    tinygrad_out = tinygrad_out.numpy()
+
+    import cProfile
+    import pstats
+    pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
+    pr.enable()
+    tinygrad_out = run_onnx(inputs)['outputs']
+    tinygrad_out = tinygrad_out.numpy()
+    pr.disable()
+    ps = pstats.Stats(pr).sort_stats(pstats.SortKey.TIME)
+    ps.print_stats()
+
   def test_benchmark_openpilot_model(self):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
     onnx_model = onnx.load(io.BytesIO(dat))
