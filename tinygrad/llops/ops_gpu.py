@@ -2,6 +2,7 @@ import functools
 import numpy as np
 import pyopencl as cl
 from tinygrad.helpers import prod
+from tinygrad.llops.ops_cpu import unary_op
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
@@ -42,7 +43,7 @@ class GPUBuffer:
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    cl.enqueue_copy(cl_queue, data, self.cl, is_blocking=True)
+    cl.enqueue_copy(cl_queue, data, contiguous(self).cl, is_blocking=True)
     return data
 
 class CLProgram:
@@ -59,32 +60,39 @@ def clbuild(name, prg, options=tuple(), argdtypes=None):
   return CLProgram(name, prg, options, argdtypes)
 
 code_for_op = {
-  UnaryOps.RELU: 'max(A, (float)0.)', UnaryOps.EXP: 'exp(A)', UnaryOps.LOG: 'log(A)', UnaryOps.NEG: '-A', UnaryOps.SIGN: 'sign(A)',
+  UnaryOps.NOOP: "A", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "-A", UnaryOps.SIGN: "sign(A)",
   BinaryOps.ADD: "A+B", BinaryOps.SUB: "A-B", BinaryOps.MUL: "A*B", BinaryOps.DIV: "B/A", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)"
 }
 
+def contiguous_view(x:GPUBuffer, name:str):
+  return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
+
+def contiguous(x:GPUBuffer):
+  if x.st.contiguous: return x
+  else: return unary_op(UnaryOps.NOOP, x)
+
 def unary_op(op, x):
   ret = GPUBuffer(x.shape)
-  unop = clbuild("unop", """
-  __kernel void unop(__global const float4 *a_g, __global float4 *res_g) {
+  unop = clbuild("unop", contiguous_view(x, 'A')+"""
+  __kernel void unop(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0);
-    float4 A = a_g[gid];
-    res_g[gid] = convert_float4("""+code_for_op[op]+""");
+    float A = get_A(a_g, gid);
+    res_g[gid] = """+code_for_op[op]+""";
   }""")
-  unop([roundup(prod(ret.shape))//4], None, x.cl, ret.cl)
+  unop([prod(ret.shape)], None, x.cl, ret.cl)
   return ret
 
 def binary_op(op, x, y):
   ret = GPUBuffer(x.shape)
   assert x.shape == ret.shape and y.shape == ret.shape
-  binop = clbuild("binop", """
-  __kernel void binop(__global const float4 *a_g, __global const float4 *b_g, __global float4 *res_g) {
+  binop = clbuild("binop", contiguous_view(x, 'A')+contiguous_view(y, 'B')+"""
+  __kernel void binop(__global const float *a_g, __global const float *b_g, __global float *res_g) {
     int gid = get_global_id(0);
-    float4 A = a_g[gid];
-    float4 B = b_g[gid];
-    res_g[gid] = convert_float4("""+code_for_op[op]+""");
+    float A = get_A(a_g, gid);
+    float B = get_B(b_g, gid);
+    res_g[gid] = """+code_for_op[op]+""";
   }""")
-  binop([roundup(prod(ret.shape))//4], None, x.cl, y.cl, ret.cl)
+  binop([prod(ret.shape)], None, x.cl, y.cl, ret.cl)
   return ret
 
 def reduce_op(op, inp, new_shape):
@@ -118,22 +126,13 @@ def reduce_op(op, inp, new_shape):
       '\n'.join(loop_end)+"""
     res_g[gid] = out;
   }"""
-  clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
-  return ret
-
-def contiguous(x, ret=None):
-  if ret is None: ret = GPUBuffer(x.st.shape)
-  clbuild("contiguous", """__kernel void contiguous(__global const float *x, __global float *ret) {
-    int gid = get_global_id(0); int valid = 1; int idx = gid; """+x.st.expr().replace('//', '/')+""";
-    ret[gid] = valid ? x[idx] : 0.0;  // should never be out-of-bounds accesses
-  }""")([prod(ret.shape)], None, x.cl, ret.cl)
+  clbuild("reduce", prg)([prod(ret.shape)], None, contiguous(inp).cl, ret.cl)
   return ret
 
 def movement_op(op, x, arg=None):
   ret = GPUBuffer(x.st, x)
   ret.st.movement_op(op, arg)
-  if ret.st.contiguous: return ret
-  else: return contiguous(ret)
+  return ret
 
 def processing_op(op,x,w,C):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
@@ -172,6 +171,6 @@ def processing_op(op,x,w,C):
   }""",
   options=tuple(["-DONEBYONE"]) if C.H == 1 and C.W == 1 and C.px == 0 and C.py == 0 else tuple(),
   argdtypes=tuple([None, None, None] + [np.int32]*16))
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, x.cl, w.cl, ret.cl,
+  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl,
     *[x for x in list(C[0:12])+[C.dx, C.dy, C.px, C.py]])
   return ret
