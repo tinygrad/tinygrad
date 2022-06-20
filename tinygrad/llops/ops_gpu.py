@@ -40,9 +40,7 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.st = ShapeTracker(shape)
-    self.buf = hostbuf.buf if isinstance(hostbuf, GPUBuffer) else CLBuffer(4*roundup(prod(self.shape)))  # padding
-    if hostbuf is not None and not isinstance(hostbuf, GPUBuffer):
-      cl.enqueue_copy(cl_queue, self.cl, hostbuf.astype(np.float32).ravel(), is_blocking=False)
+    self.buf = hostbuf.buf if hostbuf is not None else CLBuffer(4*roundup(prod(self.shape)))  # padding
 
   @property
   def cl(self): return self.buf.buf
@@ -55,7 +53,9 @@ class GPUBuffer:
 
   @staticmethod
   def fromCPU(x):
-    return GPUBuffer(x.shape, x.view(np.ndarray))
+    ret = GPUBuffer(x.shape)
+    cl.enqueue_copy(cl_queue, ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
+    return ret
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)

@@ -61,7 +61,7 @@ import tinygrad.llops.ops_gpu as gops
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps:
     #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
-    return gops.GPUBuffer(self.shape, self.op.arg), []
+    return gops.GPUBuffer.fromCPU(self.op.arg), []
   elif self.optype == ReduceOps:
     real_src = self.op.src[0].realize()
     return gops.reduce_op(self.op.op, real_src, self.op.arg), [real_src]
