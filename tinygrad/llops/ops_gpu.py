@@ -146,6 +146,7 @@ def movement_op(op, x, arg):
   ret.st.movement_op(op, arg)
   return ret
 
+# TODO: merge with elementwise_op
 def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc"):
   ret = GPUBuffer(C.out_shape)
   assert op == ProcessingOps.CONV, f"{op} isn't supported"

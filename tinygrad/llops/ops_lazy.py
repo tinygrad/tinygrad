@@ -11,6 +11,7 @@ MERGE_MOVEMENT_OPS = True
 SHUFFLE_MOVEMENT_OPS = True
 REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
+MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = False
 
 class LazyOp(NamedTuple):
   op: Op
@@ -20,6 +21,17 @@ class LazyOp(NamedTuple):
 def get_root(x:LazyOp) -> LazyBuffer: return x if isinstance(x, LazyBuffer) else get_root(x.src[0])
 def get_lazyops(op:LazyOp) -> List[Op]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
+
+def find_conv(x:Union[LazyOp,LazyBuffer]):
+  if isinstance(x, LazyBuffer):
+    return None
+  if isinstance(x.op, ProcessingOps):
+    return x
+  for s in x.src:
+    tst = find_conv(s)
+    if tst is not None:
+      return tst
+  return None
 
 class LazyBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
@@ -58,14 +70,20 @@ def ast_op(op: Op, srcs_code: List[str]) -> str:
 def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
   if isinstance(x, LazyBuffer): return lazy_srcs[x]
   # if it's not a LazyBuffer, it's an op
-  return ast_op(x.op, [ast(src, lazy_srcs) for src in x.src])
+  return ast_op(x.op, [ast(src, lazy_srcs) for src in x.src] if x.op != ProcessingOps.CONV else [])
 
 # these functions determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
 
-def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
-  seen = {}
-  lazy_srcs : List[LazyBuffer] = [seen.setdefault(x, x) for x in get_lazybuffers(self.op) if x not in seen]
+def _realize_binary_op(self:LazyBuffer, has_conv:bool=False) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
+  # optional
+  if has_conv:
+    conv = find_conv(self.op)
+    conv_x, conv_w = conv.src[0], conv.src[1]
+    seen = {conv_x:conv_x, conv_w:conv_w}
+  else:
+    seen = {}
+  lazy_srcs : List[LazyBuffer] = [seen.setdefault(x,x) for x in get_lazybuffers(self.op) if x not in seen]
   real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
   real_dict : Dict[LazyBuffer, str] = {}
   for s in lazy_srcs:
@@ -83,7 +101,10 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
-  return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
+  if has_conv:
+    return gops.processing_op(conv.op, conv_x.realize(), conv_w.realize(), conv.arg, real_srcs, code), [conv_x, conv_w] + [x[1] for x in real_srcs]
+  else:
+    return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps:
@@ -98,11 +119,38 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   elif self.optype == BinaryOps:
     return _realize_binary_op(self)
   elif self.optype == ProcessingOps:
+    #return _realize_binary_op(self, has_conv=True)
     real_srcs = [x.realize() for x in self.op.src]
     return gops.processing_op(self.op.op, real_srcs[0], real_srcs[1], self.op.arg), real_srcs
 
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
+
+  if MERGE_ELEMENTWISE_INTO_CONV_OUTPUT:
+    cnt = sum([x.optype == ProcessingOps for x in srcs])
+    if cnt == 1:
+      srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
+      return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
+    elif cnt == 2:
+      # have to confirm they are the same conv
+      c1, c2 = [find_conv(x.op) for x in srcs]
+      if c1.op == c1.op and c1.arg == c2.arg and tuple(c1.src) == tuple(c2.src):
+        srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
+        return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
+      else:
+        """
+        if depends(srcs[0], srcs[1]):
+          srcs = [srcs[0].op, srcs[1]]
+        elif depends(srcs[1], srcs[0]):
+          srcs = [srcs[0], srcs[1].op]
+        else:
+          # all three are okay
+          #return Buffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
+          srcs = [srcs[0].op, srcs[1]]
+          #srcs = [srcs[0], srcs[1].op]
+        return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
+        """
+        pass
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any BinaryOps that feed into this
