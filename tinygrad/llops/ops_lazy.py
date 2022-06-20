@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Union, NamedTuple, List, Any, Tuple
+from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
-import functools
+import functools, operator
 
 from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
@@ -36,16 +36,13 @@ class LazyBuffer:
 
   @property
   def shape(self): return self.st.shape
+  def __repr__(self): return f"<LB {self.shape} {self.optype}>"
 
   def realize(self:LazyBuffer):
     if self.realized is None:
       self.realized, real_srcs = _realize(self)
       def get_lazyops(op:LazyOp) -> List[Op]:
-        ret = [op.op]
-        # TODO: reduce?
-        for x in [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)]:
-          ret += x
-        return ret
+        return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
       # in lazy mode, we don't log until we realize
       log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
     return self.realized
@@ -53,14 +50,13 @@ class LazyBuffer:
   @staticmethod
   def fromCPU(x):
     ret = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, [], x))
-    ret.realize()   # early realize on these
     return ret
 
   def toCPU(self):
     return self.realize().toCPU()
 
-def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
-   if isinstance(x, LazyBuffer): return f"arg_{lazy_srcs.index(x)}"
+def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
+   if isinstance(x, LazyBuffer): return lazy_srcs[x]
    # it's an op
    if x.op == ProcessingOps.CONV: code = 'acc'
    else: code = gops.code_for_op[x.op]
@@ -72,7 +68,7 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: List[LazyBuffer]) -> str:
 import tinygrad.llops.ops_gpu as gops
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps:
-    #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
+    print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
     return gops.GPUBuffer(self.shape, self.op.arg), []
   elif self.optype == ReduceOps:
     real_src = self.op.srcs[0].realize()
@@ -82,8 +78,19 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype == BinaryOps:
     lazy_srcs = list(set(get_lazybuffers(self.op)))
-    real_srcs = [(f"arg_{i}", x.realize()) for i,x in enumerate(lazy_srcs)]
-    return gops.elementwise_op(real_srcs, ast(self.op, lazy_srcs)), [x[1] for x in real_srcs]
+    real_srcs = []
+    real_dict : Dict[LazyBuffer, str] = {}
+    for s in lazy_srcs:
+      if s.optype == MovementOps:
+        root = get_root(s.op)
+        if root.optype == LoadOps and root.shape == (1,) and not s.st.needs_valid():
+          real_dict[s] = str(root.op.arg[0])
+      if s not in real_dict:  # nicer way to write this?
+        real_dict[s] = f"arg_{len(real_srcs)}"
+        #print("realize", s.shape)
+        real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
+    code = ast(self.op, real_dict)
+    return gops.elementwise_op(real_srcs, code), [x[1] for x in real_srcs]
   elif self.optype == ProcessingOps:
     real_srcs = [x.realize() for x in self.op.src]
     return gops.processing_op(self.op.op, real_srcs[0], real_srcs[1], self.op.arg), real_srcs
