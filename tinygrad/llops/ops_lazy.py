@@ -17,19 +17,14 @@ class LazyOp(NamedTuple):
   src: Tuple[Union[LazyOp, LazyBuffer]]
   arg: Any = None
 
+@functools.lru_cache(maxsize=None)
 def get_root(x:LazyOp) -> LazyBuffer: return x if isinstance(x, LazyBuffer) else get_root(x.src[0])
 
 @functools.lru_cache(maxsize=None)
 def get_lazyops(op:LazyOp) -> List[Op]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
 
-def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]:
-  ret = []
-  for x in op.src:
-    if isinstance(x, LazyOp):
-      ret += get_lazybuffers(x)
-    elif isinstance(x, LazyBuffer):
-      ret.append(x)
-  return ret
+@functools.lru_cache(maxsize=None)
+def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 
 class LazyBuffer:
   def __init__(self, shape:tuple, optype:Op, op:LazyOp):
