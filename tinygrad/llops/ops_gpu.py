@@ -138,10 +138,10 @@ def processing_op(op,x,w,C):
   ret = GPUBuffer((C.bs, C.cout, C.oy, C.ox))
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
-  params = [C.groups, C.rcout, C.oy, C.ox, C.iy, C.ix]
+  params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
   conv_prg = clbuild("conv", """
   __kernel void conv(__global const float* restrict input, __global const float* restrict weight, __global float* restrict output,
-    int groups, int rcout, int oy, int ox, int iy, int ix) {
+    """+','.join([x[0] for x in params])+""") {
     """+ints+"""
     int B = get_global_id(0)/(groups*rcout);  // range 0-bs
     int g = (get_global_id(0)/rcout)%groups;
@@ -173,5 +173,5 @@ def processing_op(op,x,w,C):
   }""",
   options=tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple(),
   argdtypes=tuple([None, None, None] + [np.int32]*len(params)))
-  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl, *params)
+  conv_prg([C.bs*C.cout, C.oy, C.ox], None, contiguous(x).cl, contiguous(w).cl, ret.cl, *[x[1] for x in params])
   return ret
