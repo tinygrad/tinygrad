@@ -46,9 +46,11 @@ def log_op(optype, op, ret, inp, dashed=False):
       G.add_edge(nm(x), nm(ret), label=sop, color='#808080' if dashed else '', style='dashed' if dashed else '')
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
+    st = getattr(ret, "st", None)
+    non_contiguous = st is not None and not st.contiguous
     G.nodes[nm(ret)]['label'] = str(ret.shape)
-    G.nodes[nm(ret)]['fillcolor'] = top_colors[optype]
-    G.nodes[nm(ret)]['style'] = 'filled'
+    G.nodes[nm(ret)]['fillcolor'] = top_colors[optype] + ('80' if non_contiguous else '')
+    G.nodes[nm(ret)]['style'] = 'filled, dashed' if non_contiguous else 'filled'
 
 class Ops:
   def unary_op(ctx, op:UnaryOps, x):
