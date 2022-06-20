@@ -78,7 +78,7 @@ class Tensor:
 
   @staticmethod
   def _get_data_dtype(data):
-    return data.getdtype() if getattr(data, 'getdtype', None) else data.dtype
+    return data.getdtype() if getattr(data, 'getdtype', None) else (data.dtype if getattr(data, 'dtype', None) else np.float32)
 
   @property
   def dtype(self):
