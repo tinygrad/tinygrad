@@ -152,7 +152,8 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
 
 # these functions determines the backing buffer
-import tinygrad.llops.ops_gpu as gops
+#import tinygrad.llops.ops_gpu as gops
+import tinygrad.llops.ops_opencl as gops
 
 def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   # optional
@@ -183,7 +184,10 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
-  return gops.GPUBuffer(self.shape)._processing_op(real_srcs, code, arg), [x[1] for x in real_srcs]
+  if self.optype == ProcessingOps:
+    return gops.GPUBuffer(self.shape)._processing_op_cl(real_srcs, code, arg), [x[1] for x in real_srcs]
+  else:
+    return gops.GPUBuffer(self.shape)._processing_op(real_srcs, code, arg), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
@@ -191,12 +195,13 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     return gops.GPUBuffer.fromCPU(self.op.arg), []
   elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize()
-    return real_src.contiguous(), [real_src]
+    return real_src.contiguous_op(), [real_src]
   elif self.optype == ReduceOps:
     real_src = self.op.src[0].realize()
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src]
   elif self.optype == MovementOps:
     real_src = get_root(self.op).realize()
+    real_src.cl
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype in [BinaryOps, ProcessingOps]:
     return _realize_binary_op(self)

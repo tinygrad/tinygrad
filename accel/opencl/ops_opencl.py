@@ -1,9 +1,9 @@
 from __future__ import annotations
 import pyopencl as cl
-from tinygrad.llops.ops_gpu import GPUBuffer, get_cl_ctx, get_cl_queue, CLProgram
+from tinygrad.llops.ops_gpu import GPUBuffer, get_cl_ctx, get_cl_queue, CLProgram, code_for_op
 from tinygrad.ops import ProcessingOps
 from tinygrad.helpers import prod, ConvArgs
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import numpy as np
 
 import pathlib
@@ -13,7 +13,7 @@ def load(x):
    return ret
 CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
 
-def get_replacements(prg_src, opencl_type):
+def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   middle_code = []
   vv = "xyzw"
   for i in range(4):
@@ -129,3 +129,5 @@ class OpenCLBuffer(GPUBuffer):
     conv_prg([C.cout//4, (C.ox+3)//4, C.bs*C.oy], None, x.image, w.image, ret.image, *conv_args, *[buf.cl for _, buf in ewbufs])
 
     return ret
+
+GPUBuffer = OpenCLBuffer
