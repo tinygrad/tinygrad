@@ -49,8 +49,8 @@ void Thneed::load(const char *filename) {
       desc.image_type = (mobj["arg_type"] == "image2d_t") ? CL_MEM_OBJECT_IMAGE2D : CL_MEM_OBJECT_IMAGE1D_BUFFER;
       desc.image_width = mobj["width"].int_value();
       desc.image_height = mobj["height"].int_value();
-      desc.image_row_pitch = mobj["row_pitch"].int_value();
-      desc.buffer = clbuf;
+      /*desc.image_row_pitch = mobj["row_pitch"].int_value();
+      desc.buffer = clbuf;*/
 
       cl_image_format format;
       format.image_channel_order = CL_RGBA;
@@ -58,6 +58,7 @@ void Thneed::load(const char *filename) {
 
       clbuf = clCreateImage(context, CL_MEM_READ_WRITE, &format, &desc, NULL, NULL);
       assert(clbuf != NULL);
+      //printf("create image %p %d %dx%d\n", clbuf, desc.image_type , desc.image_width, desc.image_height);
     }
 
     real_mem[*(cl_mem*)(mobj["id"].string_value().data())] = clbuf;
@@ -67,6 +68,7 @@ void Thneed::load(const char *filename) {
   for (const auto &[name, source] : jdat["programs"].object_items()) {
     if (debug >= 1) printf("building %s with size %zu\n", name.c_str(), source["src"].string_value().size());
     string src = source["src"].string_value();
+    //printf("%s\n", src.c_str());
     string options = source["options"].string_value();
     g_programs[name] = cl_program_from_source(context, device_id, src, options.c_str());
   }
@@ -92,6 +94,7 @@ void Thneed::load(const char *filename) {
       kk->local_work_size[i] = lws[i].int_value();
     }
     kk->num_args = obj["num_args"].int_value();
+    //printf("get args %s %d\n", kk->name.c_str(), kk->num_args);
     for (int i = 0; i < kk->num_args; i++) {
       string arg = obj["args"].array_items()[i].string_value();
       int arg_size = obj["args_size"].array_items()[i].int_value();

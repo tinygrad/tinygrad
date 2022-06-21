@@ -178,6 +178,12 @@ cl_int CLQueuedKernel::exec() {
       } else {
         ret = thneed_clSetKernelArg(kernel, j, args_size[j], NULL);
       }
+      if (ret != CL_SUCCESS) {
+        printf("CL error num_args:%d setting arg %d(%d) arg %s = %s : %d %s\n", num_args, j, args[j].size(),
+          arg_types[j].c_str(), arg_names[j].c_str(), ret, cl_get_error_string(ret));
+        hexdump((uint8_t *)args[j].data(), args[j].size());
+        debug_print(true);
+      }
       assert(ret == CL_SUCCESS);
     }
   }
