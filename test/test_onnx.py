@@ -129,6 +129,11 @@ def get_run_onnx(onnx_model):
         #chan = ret.shape[1]
         #w = Tensor.eye(chan).reshape((chan, chan, 1, 1))
         #ret = ret.conv2d(w, stride=opt['strides'])
+      elif n.op_type == "Slice":
+        arg = [(0,x) for x in inp[0].shape]
+        assert len(opt['axes']) == 1
+        arg[opt['axes'][0]] = (opt['starts'][0], opt['ends'][0])
+        ret = inp[0].slice(arg = arg)
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
@@ -148,9 +153,12 @@ def run_onnx_torch(onnx_model, inputs):
     torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
   return torch_out
 
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
+#OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/1f2f9ea9c9dc37bdea9c6e32e4cb8f88ea0a34bf/selfdrive/modeld/models/supercombo.onnx"
+
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
-    dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
+    dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
     inputs = {
@@ -159,6 +167,7 @@ class TestOnnxModel(unittest.TestCase):
       "desire": np.zeros((1, 8)),
       "traffic_convention": np.array([[1., 0.]]),
       "initial_state": np.zeros((1, 512))
+      #"initial_state": np.zeros((1, 768))
     }
     inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in inputs.items()}
     for _,v in inputs.items(): v.realize()
@@ -187,7 +196,7 @@ class TestOnnxModel(unittest.TestCase):
     ps.print_stats(30)
 
   def test_openpilot_model(self):
-    dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
+    dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
     inputs = {
@@ -196,6 +205,7 @@ class TestOnnxModel(unittest.TestCase):
       "desire": np.zeros((1, 8)),
       "traffic_convention": np.array([[1., 0.]]),
       "initial_state": np.zeros((1, 512))
+      #"initial_state": np.zeros((1, 768))
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
 

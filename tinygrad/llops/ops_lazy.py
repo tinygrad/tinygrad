@@ -81,56 +81,6 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
   if x.op == ProcessingOps.CONV: return "acc"
   return ast_op(x.op, [ast(src, lazy_srcs) for src in x.src])
 
-# these functions determines the backing buffer
-import tinygrad.llops.ops_gpu as gops
-
-def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
-  # optional
-  if self.optype == ProcessingOps:
-    conv = find_conv(self.op)
-    conv_x, conv_w = conv.src[0], conv.src[1]
-    seen = {conv_x:conv_x, conv_w:conv_w}
-    real_srcs = [("input", conv_x.realize()), ("weight", conv_w.realize())]
-    arg = conv.arg
-  else:
-    seen = {}
-    real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
-    arg = None
-  lazy_srcs : List[LazyBuffer] = [seen.setdefault(x,x) for x in get_lazybuffers(self.op) if x not in seen]
-  real_dict : Dict[LazyBuffer, str] = {}
-  for s in lazy_srcs:
-    if s.optype == MovementOps and s.realized is None:
-      root = get_root(s.op)
-      if root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
-        if not s.st.needs_valid():
-          real_dict[s] = f"({root.op.arg[0]}f)"
-        else:
-          # TODO: this is a terrible hack, and it's very unclear if it's always right
-          inline_valid = s.st.expr().replace("valid=valid && ", "").replace(";idx=0", "").replace("//", "/").replace("idx", "gid")
-          if ';' not in inline_valid:
-            real_dict[s] = f"(({inline_valid}) * {str(root.op.arg[0])}f)"
-    if s not in real_dict:  # nicer way to write this?
-      real_dict[s] = f"arg_{len(real_srcs)}"
-      real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
-  code = ast(self.op, real_dict)
-  return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
-
-def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
-  if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
-    #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
-    return gops.GPUBuffer.fromCPU(self.op.arg), []
-  elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
-    real_src = self.op.src[0].realize()
-    return gops.contiguous(real_src), [real_src]
-  elif self.optype == ReduceOps:
-    real_src = self.op.src[0].realize()
-    return gops.reduce_op(self.op.op, real_src, self.op.arg), [real_src]
-  elif self.optype == MovementOps:
-    real_src = get_root(self.op).realize()
-    return gops.GPUBuffer(self.st, real_src), [real_src]
-  elif self.optype in [BinaryOps, ProcessingOps]:
-    return _realize_binary_op(self)
-
 # this is needed to reduce convs from 186 -> 174
 @functools.lru_cache(maxsize=None)
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
@@ -196,3 +146,54 @@ def processing_op(op, x, w, C):
   if not x.st.contiguous: x = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
   if not w.st.contiguous: w = LazyBuffer(w.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (w,)))
   return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
+
+
+# these functions determines the backing buffer
+import tinygrad.llops.ops_gpu as gops
+
+def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
+  # optional
+  if self.optype == ProcessingOps:
+    conv = find_conv(self.op)
+    conv_x, conv_w = conv.src[0], conv.src[1]
+    seen = {conv_x:conv_x, conv_w:conv_w}
+    real_srcs = [("input", conv_x.realize()), ("weight", conv_w.realize())]
+    arg = conv.arg
+  else:
+    seen = {}
+    real_srcs : List[Tuple[str, gops.GPUBuffer]] = []
+    arg = None
+  lazy_srcs : List[LazyBuffer] = [seen.setdefault(x,x) for x in get_lazybuffers(self.op) if x not in seen]
+  real_dict : Dict[LazyBuffer, str] = {}
+  for s in lazy_srcs:
+    if s.optype == MovementOps and s.realized is None:
+      root = get_root(s.op)
+      if root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
+        if not s.st.needs_valid():
+          real_dict[s] = f"({root.op.arg[0]}f)"
+        else:
+          # TODO: this is a terrible hack, and it's very unclear if it's always right
+          inline_valid = s.st.expr().replace("valid=valid && ", "").replace(";idx=0", "").replace("//", "/").replace("idx", "gid")
+          if ';' not in inline_valid:
+            real_dict[s] = f"(({inline_valid}) * {str(root.op.arg[0])}f)"
+    if s not in real_dict:  # nicer way to write this?
+      real_dict[s] = f"arg_{len(real_srcs)}"
+      real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
+  code = ast(self.op, real_dict)
+  return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
+
+def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
+  if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
+    #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
+    return gops.GPUBuffer.fromCPU(self.op.arg), []
+  elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
+    real_src = self.op.src[0].realize()
+    return gops.contiguous(real_src), [real_src]
+  elif self.optype == ReduceOps:
+    real_src = self.op.src[0].realize()
+    return gops.reduce_op(self.op.op, real_src, self.op.arg), [real_src]
+  elif self.optype == MovementOps:
+    real_src = get_root(self.op).realize()
+    return gops.GPUBuffer(self.st, real_src), [real_src]
+  elif self.optype in [BinaryOps, ProcessingOps]:
+    return _realize_binary_op(self)
