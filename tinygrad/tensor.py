@@ -3,31 +3,7 @@ import os, atexit, time, inspect, functools, importlib
 from collections import defaultdict
 import numpy as np
 from tinygrad.helpers import prod
-
-# **** profiler ****
-
-DEBUG = os.getenv("DEBUG", None) is not None
-if DEBUG:
-  debug_counts, debug_times = defaultdict(int), defaultdict(float)
-  def print_debug_exit():
-    for name, _ in sorted(debug_times.items(), key=lambda x: -x[1]):
-      print(f"{name:>20} : {debug_counts[name]:>6} {debug_times[name]:>10.2f} ms")
-  atexit.register(print_debug_exit)
-
-global_num_max = 0
-class ProfileOp:
-  def __init__(self, ctx, name, x, backward=False):
-    self.ctx, self.name, self.x, self.output, self.backward = ctx, f"back_{name}" if backward else name, x, None, backward
-  def __enter__(self):
-    if DEBUG: self.st = time.time()
-    return self
-  def __exit__(self, *junk):
-    if DEBUG:
-      self.output[0].data.toCPU()
-      et = (time.time()-self.st)*1000.
-      debug_counts[self.name] += 1
-      debug_times[self.name] += et
-      print(f"{self.name:>20} : {et:>7.2f} ms {str([y.shape for y in self.x]):>40} -> {str([y.shape for y in self.output])}")
+from typing import List
 
 # **** enumerate supported devices ****
 
@@ -65,6 +41,10 @@ class Tensor:
   def __repr__(self):
     return f"<Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}>"
 
+  def realize(self):
+    if getattr(self.data, 'realize', None) is not None:
+      self.data.realize()
+
   def assign(self, x):
     if not isinstance(x, Tensor):
       x = Tensor(x)
@@ -78,7 +58,7 @@ class Tensor:
 
   @staticmethod
   def _get_data_dtype(data):
-    return data.getdtype() if getattr(data, 'getdtype', None) else data.dtype
+    return data.getdtype() if getattr(data, 'getdtype', None) else (data.dtype if getattr(data, 'dtype', None) else np.float32)
 
   @property
   def dtype(self):
@@ -132,11 +112,9 @@ class Tensor:
       if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
-      with ProfileOp(t0._ctx, t0._ctx.__class__.__name__, [t0.grad], backward=True) as po:
-        grads = t0._ctx.backward(t0._ctx, t0.grad.data)
-        grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
-          for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
-        po.output = [x for x in grads if x is not None]   # backward can return None if no required gradient, don't profile it
+      grads = t0._ctx.backward(t0._ctx, t0.grad.data)
+      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+        for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, \
@@ -147,10 +125,11 @@ class Tensor:
 
   @staticmethod
   def _move_data(data, device):
-    if isinstance(data, list):
-      data = np.array(data, dtype=np.float32)
     if isinstance(data, Device.buffers[device]):
       return data
+    if isinstance(data, list):
+      # TODO: don't use np.array here, support Tensor creation direct to device
+      data = np.array(data, dtype=np.float32)
     if isinstance(data, np.ndarray):
       data = data.view(Device.buffers[Device.CPU])
 
@@ -354,14 +333,14 @@ class Tensor:
   @staticmethod
   def broadcasted(fxn, x, y):
     tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    if not isinstance(x, Tensor): x = Tensor(np.array([x], dtype=tt.dtype), device=tt.device, requires_grad=False) 
-    if not isinstance(y, Tensor): y = Tensor(np.array([y], dtype=tt.dtype), device=tt.device, requires_grad=False) 
+    if not isinstance(x, Tensor): x = Tensor([x], device=tt.device, requires_grad=False) 
+    if not isinstance(y, Tensor): y = Tensor([y], device=tt.device, requires_grad=False) 
 
     n_dims = max(len(x.shape), len(y.shape))
     if len(x.shape) != n_dims: x = x.reshape(list(x.shape) + [1]*(n_dims-len(x.shape)))
     if len(y.shape) != n_dims: y = y.reshape(list(y.shape) + [1]*(n_dims-len(y.shape)))
 
-    shape_ret = tuple([int(x) for x in np.maximum(x.shape, y.shape)])
+    shape_ret = tuple([max(sx, sy) for sx,sy in zip(x.shape, y.shape)])
     if x.shape != shape_ret: x = x.expand(shape_ret)
     if y.shape != shape_ret: y = y.expand(shape_ret)
     return fxn(x, y)
@@ -414,14 +393,11 @@ class Function(Ops):
       self.saved_tensors.extend(x)
 
   @classmethod
-  def apply(cls, *x, **kwargs):
-    assert all([isinstance(arg, Tensor) for arg in x])
+  def apply(cls, *x:List[Tensor], **kwargs):
     ctx = cls(x[0].device, *x)
-    with ProfileOp(ctx, ctx.__class__.__name__, x) as po:
-      ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
-                   device=ctx.device, requires_grad=ctx.requires_grad)
-      po.output = [ret]
-    if ret.requires_grad:
+    ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
+                 device=ctx.device, requires_grad=ctx.requires_grad)
+    if ctx.requires_grad:
       ret._ctx = ctx    # used by autograd engine
     return ret
 

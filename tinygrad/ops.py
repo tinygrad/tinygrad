@@ -10,7 +10,7 @@ LoadOps = Enum("LoadOps", ["FROMCPU"])
 from tinygrad.shapetracker import ShapeTracker
 
 import os
-DEBUG = int(os.getenv("PRINT_LLOPS", "0"))
+DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 from collections import defaultdict
 cnts = defaultdict(int)
@@ -27,7 +27,7 @@ if GRAPH:
   atexit.register(save_graph_exit)
 
 global_num_max = 0
-def log_op(optype, op, ret, inp, dashed=False):
+def log_op(optype, op, ret, inp):
   cnts[optype] += 1
   if DEBUG: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
@@ -42,8 +42,9 @@ def log_op(optype, op, ret, inp, dashed=False):
 
     for x in inp:
       if not isinstance(op, list): op = [op]
-      sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
-      G.add_edge(nm(x), nm(ret), label=sop, color='#808080' if dashed else '', style='dashed' if dashed else '')
+      #sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
+      sop = str(len(op))
+      G.add_edge(nm(x), nm(ret), label=sop)
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
     st = getattr(ret, "st", None)
@@ -79,7 +80,8 @@ class Ops:
     ret = ctx.op.movement_op(op, x, tuple(arg))
     if 'LAZY' not in ctx.device: log_op(MovementOps, op, ret, [x])
     assert isinstance(ret, ctx.buffer)
-    assert ret.shape == ShapeTracker(x.shape).movement_op(op, arg).shape
+    # this check is slow
+    #assert ret.shape == ShapeTracker(x.shape).movement_op(op, arg).shape
     return ret
 
   def processing_op(ctx, op:ProcessingOps, x, y, C):

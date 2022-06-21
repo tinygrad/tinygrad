@@ -5,10 +5,9 @@ def prod(x): return math.prod(x)
 def reduce_shape(shape, axis):
   return [1 if i in axis else shape[i] for i in range(len(shape))]
 
+conv_args = namedtuple('conv_args', ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout', 'py', 'px', 'dy', 'dx', 'out_shape'])
 def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1):
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
-  conv_args = namedtuple('conv_args',
-    ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout', 'py', 'px', 'dy','dx', 'out_shape'])
   cout,cin,H,W = w_shape
   ys,xs = (stride, stride) if isinstance(stride, int) else stride
   py,px = (padding, padding) if isinstance(padding, int) else padding
