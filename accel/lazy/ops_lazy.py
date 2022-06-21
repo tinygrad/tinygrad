@@ -180,7 +180,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
-  return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
+  return gops.GPUBuffer(self.shape)._processing_op(real_srcs, code, arg), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
