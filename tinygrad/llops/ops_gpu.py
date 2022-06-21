@@ -19,14 +19,12 @@ def require_init_gpu():
     cl_ctx = cl.Context(devices=devices)
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
-def roundup(x, n=4): return (x+(n-1))//n * n
-
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
-    self.cl = hostbuf.cl if hostbuf is not None else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
+    self.cl = hostbuf.cl if hostbuf is not None else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*prod(self.shape))
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
@@ -57,34 +55,33 @@ class CLProgram:
 def contiguous_view(name:str, x:GPUBuffer) -> str:
   return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
-  return '\n'.join([contiguous_view(name, buf) for name, buf in bufs])+ \
-    "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in bufs])+") {"+ \
-    '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+ \
-    f"return {code}; }}"
-
 def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
+  ret = GPUBuffer(C.out_shape if C is not None else bufs[0][1].shape)
+  options = []
+
   if C is not None:
-    ret = GPUBuffer(C.out_shape)
     ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py"] + (["cin"] if C.cin == 1 else []))
     params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"] + (["cin"] if C.cin > 1 else [])]
-    options = []
     if C.px == 0 and C.py == 0: options.append("-DALLVALID")
     if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
     global_size = [C.bs*C.cout, C.oy, C.ox]
-    ewbufs = bufs[2:]
+    assert bufs[0][0] == "input" and bufs[1][0] == "weight"
+    ewbufs = bufs[2:]   # input and weight are consumed by the convs
   else:
-    ret = GPUBuffer(bufs[0][1].shape)
-    ints = ''
-    params = []
-    options = ["-DNOCONV"]
+    ints, params = '', []
+    options.append("-DNOCONV")
     global_size = [prod(ret.shape), 1, 1]
     ewbufs = bufs
+
+  elementwise_prefix = '\n'.join([contiguous_view(name, buf) for name, buf in ewbufs])+ \
+    "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {"+ \
+    '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in ewbufs])+ \
+    f"return {code}; }}"
 
   conv_params = ["__global float* restrict output"] + \
                 [f"__global const float *{name}_g" for name, _ in bufs] + \
                 [x[0] for x in params]
-  conv_prg = CLProgram("conv", elementwise_op_compile(ewbufs, code)+"""
+  conv_prg = CLProgram("conv", elementwise_prefix+"""
   __kernel void conv("""+','.join(conv_params)+""") {
     float acc = 0.0;
     int gid = get_global_id(0);
@@ -124,19 +121,12 @@ def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None)
 #endif
 
     output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
-  }""", options=tuple(options),
-  argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
+  }""", options=tuple(options), argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
   conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
   return ret
 
-def movement_op(op, x, arg):
-  ret = GPUBuffer(x.st, x)
-  ret.shape = ret.st.movement_op(op, arg).shape
-  return ret
 
-def processing_op(op,x,w,C):
-  assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  return _processing_op([("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
+# gpu ops
 
 code_for_op = {
   UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
@@ -146,6 +136,15 @@ code_for_op = {
 def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
 def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
 def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
+
+def movement_op(op, x, arg):
+  ret = GPUBuffer(x.st, x)
+  ret.shape = ret.st.movement_op(op, arg).shape
+  return ret
+
+def processing_op(op, x, w, C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  return _processing_op([("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
 
 def reduce_op(op, x, new_shape):
   ret = GPUBuffer(new_shape)
@@ -168,7 +167,7 @@ def reduce_op(op, x, new_shape):
     acc *= shp
 
   # TODO: support multistage reduces
-  prg = contiguous_view('A', x)+"""
+  CLProgram("reduce", contiguous_view('A', x)+"""
   __kernel void reduce(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
     float out = """+start+""";\n"""+ \
@@ -177,6 +176,5 @@ def reduce_op(op, x, new_shape):
         """+code+""";\n"""+ \
       '\n'.join(loop_end)+"""
     res_g[gid] = out;
-  }"""
-  CLProgram("reduce", prg)([prod(ret.shape)], None, x.cl, ret.cl)
+  }""")([prod(ret.shape)], None, x.cl, ret.cl)
   return ret
