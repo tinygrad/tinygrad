@@ -20,8 +20,9 @@ def require_init_gpu():
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
 import atexit, struct, json
-jdat = {"programs": {}}
+jdat = {"programs": {}, "kernels": [], "objects": []}
 weights = []
+saved_objs = set()
 def save_thneed():
   print("saving thneed")
   with open("/tmp/output.thneed", "wb") as f:
@@ -44,14 +45,60 @@ class CLProgram:
     self.built = cl.Program(cl_ctx, self.prg).build(options=options)
     self.clprg = self.built.__getattr__(self.name)
     self.options = options
+    self.argdtypes = argdtypes
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    global gcnt, jdat, weights
+    global gcnt, jdat, weights, saved_objs
     if get_graph():
       print(f"{gcnt:4d} running {self.name} with {args[0]} count {len(args)-2}")
       gcnt += 1
       # thneed hook
       if self.name not in jdat['programs']: jdat['programs'][self.name] = {"src": self.prg, "options": ' '.join(self.options)}
+      targs, args_size = [], []
+      argdtypes = self.argdtypes if self.argdtypes is not None else [None]*(len(args)-2)
+      for a,d in zip(args[2:], argdtypes):
+        if d == np.int16:
+          targs.append(struct.pack("H", a).decode("latin_1"))
+          args_size.append(2)
+        elif d is None:
+          ptr = struct.pack("Q", id(a)).decode("latin_1")
+          if ptr not in saved_objs:
+            if isinstance(a, cl.Buffer):
+              jdat['objects'].append({
+                "id": ptr,
+                "needs_load": False,
+                "size": a.size,
+              })
+            elif isinstance(a, cl.Image):
+              #print(a.size, a.shape, a.row_pitch)
+              jdat['objects'].append({
+                "id": ptr,
+                "needs_load": False,
+                "arg_type": "image2d_t",
+                "width": a.shape[0],
+                "height": a.shape[1],
+                "row_pitch": a.row_pitch,
+                "size": a.size,
+                "unbacked": True
+              })
+            else:
+              raise Exception("unknown object")
+            #print(jdat['objects'][-1])
+            saved_objs.add(ptr)
+          targs.append(ptr)
+          args_size.append(8)
+        else:
+          raise Exception("idk this type")
+      # TODO: get the args
+      jdat['kernels'].append({
+        "name": self.name,
+        "work_dim": len(args[0]),
+        "global_work_size": args[0],
+        "local_work_size": [1 for x in args[0]],
+        "num_args": len(args)-2,
+        "args": targs,
+        "args_size": args_size 
+      })
 
     self.clprg(cl_queue, *args)
 

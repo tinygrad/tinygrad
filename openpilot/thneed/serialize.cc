@@ -27,20 +27,22 @@ void Thneed::load(const char *filename) {
     int sz = mobj["size"].int_value();
     cl_mem clbuf = NULL;
 
-    if (mobj["buffer_id"].string_value().size() > 0) {
-      // image buffer must already be allocated
-      clbuf = real_mem[*(cl_mem*)(mobj["buffer_id"].string_value().data())];
-      assert(mobj["needs_load"].bool_value() == false);
-    } else {
-      if (mobj["needs_load"].bool_value()) {
-        //printf("loading %p %d @ 0x%X\n", clbuf, sz, ptr);
-        clbuf = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_READ_WRITE, sz, &buf[ptr], NULL);
-        ptr += sz;
+    if (!mobj["unbacked"].bool_value()) {
+      if (mobj["buffer_id"].string_value().size() > 0) {
+        // image buffer must already be allocated
+        clbuf = real_mem[*(cl_mem*)(mobj["buffer_id"].string_value().data())];
+        assert(mobj["needs_load"].bool_value() == false);
       } else {
-        clbuf = clCreateBuffer(context, CL_MEM_READ_WRITE, sz, NULL, NULL);
+        if (mobj["needs_load"].bool_value()) {
+          //printf("loading %p %d @ 0x%X\n", clbuf, sz, ptr);
+          clbuf = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_READ_WRITE, sz, &buf[ptr], NULL);
+          ptr += sz;
+        } else {
+          clbuf = clCreateBuffer(context, CL_MEM_READ_WRITE, sz, NULL, NULL);
+        }
       }
+      assert(clbuf != NULL);
     }
-    assert(clbuf != NULL);
 
     if (mobj["arg_type"] == "image2d_t" || mobj["arg_type"] == "image1d_t") {
       cl_image_desc desc = {0};
