@@ -4,7 +4,7 @@ import numpy as np
 import pyopencl as cl
 from typing import List, Tuple, Optional
 from tinygrad.helpers import prod, ConvArgs
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, get_graph
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
 cl_ctx, cl_queue = None, None
@@ -19,6 +19,7 @@ def require_init_gpu():
     cl_ctx = cl.Context(devices=devices)
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
+gcnt = 0
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
@@ -27,7 +28,10 @@ class CLProgram:
     self.clprg = self.built.__getattr__(name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    print(f"running {self.name} with {args[0]} count {len(args)-2}")
+    global gcnt
+    if get_graph():
+      print(f"{gcnt:4d} running {self.name} with {args[0]} count {len(args)-2}")
+      gcnt += 1
     self.clprg(cl_queue, *args)
 
 code_for_op = {

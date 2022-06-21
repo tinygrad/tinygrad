@@ -26,7 +26,7 @@ def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   """
   acc = f"outputValues[i]"
   args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
-  args = [f"(outputRow * get_image_width(output) + outputLocation.x)*4", acc]+args
+  args = ["outputLocation", "(outputLocation.y * get_image_width(output) + outputLocation.x)*4", acc]+args
   middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
 
   replacements = {}
@@ -111,20 +111,20 @@ class OpenCLBuffer(GPUBuffer):
     assert bufs[0][0] == "input" and bufs[1][0] == "weight"
     x,w = bufs[0][1], bufs[1][1]
     ewbufs = bufs[2:]
-    ewimages = [False and buf.is_image() and buf.shape == ret.shape and buf.st.contiguous for _,buf in ewbufs]
+    ewimages = [buf.is_image() and buf.shape == ret.shape and buf.st.contiguous for _,buf in ewbufs]
     ewtypes = [f"read_only image2d_t {name}_g" if is_img else f"__global const float *{name}_g" for is_img, (name, buf) in zip(ewimages, ewbufs)]
 
     getters = []
     for is_img, (name, buf) in zip(ewimages, ewbufs):
       if is_img:
-        pass
+        getters.append(f"inline float4 get4_{name}(read_only image2d_t x, int2 loc, int gid) {{ const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST; return read_imagef(x, smp, loc); }}")
       else:
         getters.append(buf.contiguous_view(name))
-        getters.append(f"inline float4 get4_{name}(__global const float *x, int gid) {{ return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
+        getters.append(f"inline float4 get4_{name}(__global const float *x, int2 loc, int gid) {{ return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
 
     elementwise_prefix = '\n'.join(getters)+ \
-      "\n\ninline float4 _ewop("+','.join(["int gid", "float4 acc"]+ewtypes)+") {\n"+ \
-      ''.join([f"float4 {name} = get4_{name}({name}_g, gid);\n" for name, _ in ewbufs])+ \
+      "\n\ninline float4 _ewop("+','.join(["int2 loc", "int gid", "float4 acc"]+ewtypes)+") {\n"+ \
+      ''.join([f"float4 {name} = get4_{name}({name}_g, loc, gid);\n" for name, _ in ewbufs])+ \
       f"return {code}; }}"
 
     replacements = get_replacements(elementwise_prefix, ewtypes)
@@ -139,15 +139,15 @@ class OpenCLBuffer(GPUBuffer):
     conv_src = CONV_SRC
     for k,v in replacements.items():
       conv_src = conv_src.replace(k, v)
-    if any(ewimages):
-      print(conv_src)
-      exit(0)
+    #if any(ewimages):
+    #  print(conv_src)
+    #  exit(0)
     conv_prg = CLProgram("image_conv", conv_src,
       options=tuple(options),
       argdtypes=tuple([None, None, None] + [np.int16]*15 + [None]*len(ewbufs))
     )
     conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
-    conv_prg([C.cout//4, (C.ox+3)//4, C.bs*C.oy], None, x.image, w.image, ret.image, *conv_args, *[buf.cl for _, buf in ewbufs])
+    conv_prg([C.cout//4, (C.ox+3)//4, C.bs*C.oy], None, x.image, w.image, ret.image, *conv_args, *[buf.image if is_img else buf.cl for is_img, (_, buf) in zip(ewimages, ewbufs)])
 
     return ret
 
