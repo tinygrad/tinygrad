@@ -2,6 +2,9 @@ from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.shapetracker import ShapeTracker
 import functools, operator
+from tinygrad.helpers import prod
+import sys
+sys.setrecursionlimit(10000)
 
 from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, log_op, DEBUG, GRAPH
 from enum import Enum
@@ -70,6 +73,36 @@ class LazyBuffer:
   def toCPU(self):
     return self.realize().toCPU()
 
+  def unary_op(x, op): return elementwise_op(op, (x,))
+  def binary_op(x, op, y:LazyBuffer): return elementwise_op(op, (x,y))
+  def contiguous_op(x): return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
+
+  @functools.lru_cache(maxsize=None)
+  def movement_op(x, op:MovementOps, arg) -> LazyBuffer:
+    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
+      # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
+      def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
+        if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
+        return elementwise_op(y.op, tuple(replace_with_movement_op(z) for z in y.src))
+      return replace_with_movement_op(x.op)
+
+    # if a MovementOp is applied to a MovementOp, merge them and use one buffer
+    ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
+    ret.shape = ret.st.movement_op(op, arg).shape   # update the shape after we modify the ShapeTracker
+
+    if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps and x.realized is None and ret.st.contiguous:
+      root = get_root(x.op)
+      if ret.st.shape == root.shape:
+        return root
+
+    return ret
+
+  def reduce_op(x, op, new_shape:Tuple[int]):
+    return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x,), new_shape))
+
+  def processing_op(x, op, w:LazyBuffer, C):
+    return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x.contiguous_op(), w.contiguous_op()), C))
+
 def ast_op(op: Op, srcs_code: List[str]) -> str:
   code = gops.code_for_op[op]
   if len(srcs_code) >= 1: code = code.replace("A", srcs_code[0])
@@ -117,37 +150,6 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
   return LazyBuffer(out_shape, BinaryOps, LazyOp(op, srcs))
 
-def unary_op(op, x): return elementwise_op(op, (x,))
-def binary_op(op, x, y): return elementwise_op(op, (x,y))
-
-@functools.lru_cache(maxsize=None)
-def movement_op(op:MovementOps, x:LazyBuffer, arg):
-  if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
-    # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
-    def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
-      if isinstance(y, LazyBuffer): return movement_op(op, y, arg)
-      return elementwise_op(y.op, tuple(replace_with_movement_op(z) for z in y.src))
-    return replace_with_movement_op(x.op)
-
-  # if a MovementOp is applied to a MovementOp, merge them and use one buffer
-  ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
-  ret.shape = ret.st.movement_op(op, arg).shape   # update the shape after we modify the ShapeTracker
-
-  if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps and x.realized is None and ret.st.contiguous:
-    root = get_root(x.op)
-    if ret.st.shape == root.shape:
-      return root
-
-  return ret
-
-def reduce_op(op, x, new_shape):
-  return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x,), new_shape))
-
-def processing_op(op, x, w, C):
-  if not x.st.contiguous: x = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
-  if not w.st.contiguous: w = LazyBuffer(w.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (w,)))
-  return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
-
 
 # these functions determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
@@ -181,7 +183,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
-  return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
+  return gops.GPUBuffer(self.shape)._processing_op(real_srcs, code, arg), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
@@ -189,10 +191,10 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     return gops.GPUBuffer.fromCPU(self.op.arg), []
   elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize()
-    return gops.contiguous(real_src), [real_src]
+    return real_src.contiguous(), [real_src]
   elif self.optype == ReduceOps:
     real_src = self.op.src[0].realize()
-    return gops.reduce_op(self.op.op, real_src, self.op.arg), [real_src]
+    return real_src.reduce_op(self.op.op, self.op.arg), [real_src]
   elif self.optype == MovementOps:
     real_src = get_root(self.op).realize()
     return gops.GPUBuffer(self.st, real_src), [real_src]
