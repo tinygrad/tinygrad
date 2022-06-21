@@ -23,21 +23,23 @@ def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def find_conv(op:LazyOp) -> LazyOp: return [x for x in get_lazyops(op) if isinstance(x.op, ProcessingOps)][0]
 
-# TODO: this is very slow
-def depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
-  @functools.lru_cache(maxsize=None)
-  def _depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
-    if me.realized is not None: return False
-    bufs = get_lazybuffers(me.op)
-    if needle in bufs:
-      return True
-    ret = False
-    for b in bufs:
-      if _depends(b, needle):
-        ret = True
-        break
-    return ret
-  return _depends(me, needle)
+# TODO: i'm sure this is a real algorithm
+def cmp(buf1:LazyBuffer, buf2:LazyBuffer):
+  explore1, explore2 = [buf1], [buf2]
+  expanded1, expanded2 = set(), set()
+  while len(explore1) and len(explore2):
+    if buf2 in explore1: return -1
+    if buf1 in explore2: return 1
+    x1 = explore1.pop(0)
+    x2 = explore2.pop(0)
+    if x1 in expanded2 or x2 in expanded1: return 0
+    if x1 not in expanded1 and x1.realized is None:
+      explore1 += get_lazybuffers(x1.op)
+      expanded1.add(x1)
+    if x2 not in expanded2 and x2.realized is None:
+      explore2 += get_lazybuffers(x2.op)
+      expanded2.add(x2)
+  return 0
 
 class LazyBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
@@ -147,9 +149,10 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
         srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
       else:
-        if depends(srcs[0], srcs[1]):
+        order = cmp(srcs[0], srcs[1])
+        if order == -1:
           srcs = [srcs[0].op, srcs[1]]
-        elif depends(srcs[1], srcs[0]):
+        elif order == 1:
           srcs = [srcs[0], srcs[1].op]
         else:
           # all three are okay
