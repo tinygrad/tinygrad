@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.shapetracker import ShapeTracker
+from tinygrad.helpers import prod
 import functools, operator
 import sys
 sys.setrecursionlimit(10000)
@@ -179,6 +180,8 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
           inline_valid = s.st.expr().replace("valid=valid && ", "").replace(";idx=0", "").replace("//", "/").replace("idx", "gid")
           if ';' not in inline_valid:
             real_dict[s] = f"(({inline_valid}) * {str(root.op.arg[0])}f)"
+          else:
+            print("can't optimize", root.op.arg, s.st.expr())
     if s not in real_dict:  # nicer way to write this?
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))

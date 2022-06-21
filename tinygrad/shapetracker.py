@@ -36,7 +36,7 @@ class View:
     acc = 1
     for i,(d,s) in enumerate(self.shape_strides[::-1]):
       if d != 1 and s != 0:
-        lr = divmodidx(acc, d, i != len(self.shape_strides)-1)
+        lr = divmodidx(acc, d, i != len(self.shape_strides)-1 and d != prod(self.shape))
         lr = f"({lr}*{s})" if s != 1 else lr
         ret.append(lr)
       acc *= d
@@ -99,6 +99,28 @@ class ShapeTracker:
     assert all([isinstance(x, int) for x in new_shape])
     assert prod(self.shape) == prod(new_shape)
     if self.shape == new_shape: return
+
+    # special case: adding 1s
+    # ugh there's so much subtlely here i'm not handling
+    if len(self.shape) < len(new_shape):
+      xp, yp = len(self.shape)-1, len(new_shape)-1
+      new_strides = []
+      while yp >= 0:
+        if xp >= 0 and self.shape[xp] == new_shape[yp]:
+          new_strides.append(self.strides[xp])
+          xp -= 1
+          yp -= 1
+        elif new_shape[yp] == 1:
+          new_strides.append(self.strides[xp])
+          yp -= 1
+        else:
+          break
+      #print(xp, yp, self.shape, self.strides, new_shape, new_strides[::-1])
+      if xp == -1 and yp == -1:
+        #print("1s resize")
+        self.views[-1] = View(new_shape, new_strides[::-1], self.offset)
+        return
+
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous: self.views[-1] = view
     else: self.views.append(view)
