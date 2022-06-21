@@ -19,13 +19,16 @@ def require_init_gpu():
     cl_ctx = cl.Context(devices=devices)
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
+gkernel = 0
 gcnt = 0
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
-    self.name = name
-    self.built = cl.Program(cl_ctx, prg).build(options=options)
-    self.clprg = self.built.__getattr__(name)
+    global gkernel
+    self.name = f"{name}_{gkernel}"
+    gkernel += 1
+    self.built = cl.Program(cl_ctx, prg.replace(name+"(", self.name+"(")).build(options=options)
+    self.clprg = self.built.__getattr__(self.name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
     global gcnt
