@@ -73,7 +73,7 @@ jobs:
 
   testgpu:
     name: GPU Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
     - name: Checkout Code
@@ -85,7 +85,9 @@ jobs:
         sudo apt-get update
     - name: Install OpenCL
       #run: sudo apt-get install -y pocl-opencl-icd
-      run: sudo apt-get install -y intel-oneapi-runtime-opencl clinfo
+      run: |
+        sudo apt-get install -y intel-oneapi-runtime-opencl clinfo
+        clinfo
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
