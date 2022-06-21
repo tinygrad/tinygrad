@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import time
 import io
 os.environ['LAZY'] = '1'
 
@@ -34,10 +35,16 @@ if __name__ == "__main__":
   run_onnx = get_run_onnx(onnx_model)
   inputs, _ = get_random_input_tensors()
 
-  # initial run to load weights
-  junk = run_onnx(inputs)['outputs'].numpy()
-
-  print("\n***** real compile here *****\n")
+  # initial run(s) to load weights
+  for _ in range(5):
+    st = time.monotonic()
+    tinygrad_out = run_onnx(inputs)['outputs']
+    mt = time.monotonic()
+    tinygrad_out.realize()
+    mt2 = time.monotonic()
+    tinygrad_out = tinygrad_out.numpy()
+    et = time.monotonic()
+    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
   set_graph(True)
   inputs, np_inputs = get_random_input_tensors()
@@ -48,8 +55,3 @@ if __name__ == "__main__":
   torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
   print(tinygrad_out, torch_out)
   np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
-
-
-
-
-
