@@ -124,7 +124,7 @@ def unary_op(op, x): return elementwise_op(op, (x,))
 def binary_op(op, x, y): return elementwise_op(op, (x,y))
 
 @functools.lru_cache(maxsize=None)
-def movement_op(op:MovementOps, x:LazyBuffer, arg):
+def movement_op(op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
   if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
     def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
@@ -146,15 +146,21 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg):
 def reduce_op(op, x, new_shape):
   return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x,), new_shape))
 
+@functools.lru_cache(maxsize=None)
+def contiguous_op(x:LazyBuffer) -> LazyBuffer:
+  return LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
+
 def processing_op(op, x, w, C):
-  if not x.st.contiguous: x = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
-  if not w.st.contiguous: w = LazyBuffer(w.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (w,)))
+  if not x.st.contiguous: x = contiguous_op(x)
+  if not w.st.contiguous: w = contiguous_op(w)
+  w.realize().image
   return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
 
 # these functions determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
 
+@functools.lru_cache(maxsize=None)
 def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   # optional
   if self.optype == ProcessingOps:
@@ -191,6 +197,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   else:
     return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
 
+@functools.lru_cache(maxsize=None)
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
     #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")

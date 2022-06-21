@@ -117,11 +117,13 @@ def _processing_op(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[], 
     global_size = [C.bs*C.cout, C.oy, C.ox]
     assert bufs[0][0] == "input" and bufs[1][0] == "weight"
     ewbufs = bufs[2:]   # input and weight are consumed by the convs
+    kernel_name = "conv"
   else:
     ints, params = '', []
     options.append("-DNOCONV")
     global_size = [prod(ret.shape), 1, 1]
     ewbufs = bufs
+    kernel_name = "elementwise"
 
   elementwise_prefix = '\n'.join([contiguous_view(name, buf) for name, buf in ewbufs])+ \
     "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {"+ \
@@ -131,8 +133,7 @@ def _processing_op(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[], 
   conv_params = ["__global float* restrict output"] + \
                 [f"__global const float *{name}_g" for name, _ in bufs] + \
                 [x[0] for x in params]
-  conv_prg = CLProgram("conv", elementwise_prefix+"""
-  __kernel void conv("""+','.join(conv_params)+""") {
+  conv_prg = CLProgram(kernel_name, elementwise_prefix+f"__kernel void {kernel_name}("+','.join(conv_params)+""") {
     float acc = 0.0;
     int gid = get_global_id(0);
     """+ints+"""
@@ -240,7 +241,7 @@ def _processing_op_cl(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[
   for k,v in replacements.items():
     conv_src = conv_src.replace(k, v)
   #print(conv_src)
-  conv_prg = CLProgram("conv", conv_src,
+  conv_prg = CLProgram("image_conv", conv_src,
     options=tuple(options),
     argdtypes=tuple([None, None, None] + [np.int16]*15 + [None]*len(ewbufs))
   )

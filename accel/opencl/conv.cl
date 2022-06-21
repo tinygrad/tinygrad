@@ -2,7 +2,7 @@
 
 //PREFIX
 
-__kernel void conv(
+__kernel void image_conv(
   read_only image2d_t input,
   read_only image2d_t weights,
   write_only image2d_t output,
