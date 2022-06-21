@@ -16,9 +16,9 @@ def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
     if inp.data_type == 1:
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.float32).reshape(inp.dims).copy())
+      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.float32).reshape(inp.dims).copy(), requires_grad=False)
     elif inp.data_type == 7:
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.int64).reshape(inp.dims).astype(np.float32).copy())
+      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.int64).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
@@ -38,9 +38,9 @@ def get_run_onnx(onnx_model):
     if len(inp.raw_data) > 0:
       tensors[inp.name] = buffer_parse(inp)
     elif len(inp.float_data) > 0:
-      tensors[inp.name] = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims))
+      tensors[inp.name] = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
     elif len(inp.int64_data) > 0:
-      tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.float32).reshape(inp.dims))
+      tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
     else:
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
@@ -57,7 +57,10 @@ def get_run_onnx(onnx_model):
       if inp.name in inputs:
         input_shape = inputs[inp.name].shape
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
-        input_tensors[inp.name] = Tensor(inputs[inp.name])
+        if isinstance(inputs[inp.name], Tensor):
+          input_tensors[inp.name] = inputs[inp.name]
+        else:
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
@@ -150,19 +153,38 @@ class TestOnnxModel(unittest.TestCase):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
-    for _ in range(5):
-      inputs = {
-        "input_imgs": np.random.randn(*(1, 12, 128, 256)),
-        "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-        "desire": np.zeros((1, 8)),
-        "traffic_convention": np.array([[1., 0.]]),
-        "initial_state": np.zeros((1, 512))
-      }
-      inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
+    inputs = {
+      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "desire": np.zeros((1, 8)),
+      "traffic_convention": np.array([[1., 0.]]),
+      "initial_state": np.zeros((1, 512))
+    }
+    inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in inputs.items()}
+    for _,v in inputs.items(): v.realize()
+    for _ in range(7):
       st = time.monotonic()
-      tinygrad_out = run_onnx(inputs)['outputs'].numpy()
-      et = time.monotonic() - st
-      print(f"ran openpilot model in {et*1000.0:.2f} ms")
+      tinygrad_out = run_onnx(inputs)['outputs']
+      mt = time.monotonic()
+      tinygrad_out.realize()
+      mt2 = time.monotonic()
+      tinygrad_out = tinygrad_out.numpy()
+      et = time.monotonic()
+      print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+
+    import cProfile
+    import pstats
+    pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
+    tinygrad_out = run_onnx(inputs)['outputs']
+    pr.enable()
+    tinygrad_out.realize()
+    tinygrad_out = tinygrad_out.numpy()
+    pr.disable()
+    stats = pstats.Stats(pr)
+    stats.dump_stats("/tmp/net.prof")
+    os.system("flameprof /tmp/net.prof > /tmp/prof.svg")
+    ps = stats.sort_stats(pstats.SortKey.TIME)
+    ps.print_stats(30)
 
   def test_openpilot_model(self):
     dat = fetch("https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx")
@@ -177,9 +199,12 @@ class TestOnnxModel(unittest.TestCase):
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
     st = time.monotonic()
-    tinygrad_out = run_onnx(inputs)['outputs'].numpy()
-    et = time.monotonic() - st
-    print(f"ran openpilot model in {et*1000.0:.2f} ms")
+    tinygrad_out = run_onnx(inputs)['outputs']
+    #tinygrad_out.data.realize()
+    mt = time.monotonic()
+    tinygrad_out = tinygrad_out.numpy()
+    et = time.monotonic()
+    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(et-mt)*1000.0:.2f} ms for realize")
 
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     print(tinygrad_out, torch_out)

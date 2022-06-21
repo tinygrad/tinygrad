@@ -1,5 +1,4 @@
 import numpy as np
-from tinygrad.helpers import get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 class CPUBuffer(np.ndarray):
@@ -19,7 +18,8 @@ class CPUBuffer(np.ndarray):
   def toCPU(x): return x
 
 def unary_op(op, x):
-  if op == UnaryOps.RELU: return x.relu()
+  if op == UnaryOps.NOOP: return x[:]
+  elif op == UnaryOps.RELU: return x.relu()
   elif op == UnaryOps.EXP: return x.exp()
   elif op == UnaryOps.LOG: return x.log()
   elif op == UnaryOps.NEG: return -x
