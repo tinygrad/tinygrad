@@ -8,7 +8,7 @@ from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadO
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
 MERGE_MOVEMENT_OPS = True
-SHUFFLE_MOVEMENT_OPS = False   # this breaks maxpool
+SHUFFLE_MOVEMENT_OPS = True   # this breaks maxpool
 REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
@@ -101,7 +101,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   for s in lazy_srcs:
     if s.optype == MovementOps and s.realized is None:
       root = get_root(s.op)
-      if root.realized is None and root.optype == LoadOps and root.shape == (1,):
+      if root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
         if not s.st.needs_valid():
           real_dict[s] = f"({root.op.arg[0]}f)"
         else:
@@ -131,6 +131,8 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   elif self.optype in [BinaryOps, ProcessingOps]:
     return _realize_binary_op(self)
 
+# this is needed to reduce convs from 186 -> 174
+@functools.lru_cache(maxsize=None)
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
 
