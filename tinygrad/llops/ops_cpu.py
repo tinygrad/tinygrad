@@ -54,9 +54,8 @@ def movement_op(op, x, arg=None):
   elif op == MovementOps.FLIP: return x.flip(arg)
   elif op == MovementOps.SLICE:
     padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
-    x = x.custompad(padding)
     slicee = [(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)]
-    return x[tuple([slice(x[0], x[1], None) for x in slicee])]
+    return x.custompad(padding)[tuple([slice(x[0], x[1], None) for x in slicee])]
   elif op == MovementOps.EXPAND: return x.expand(arg)
   else: raise Exception(f"{op} isn't supported")
 

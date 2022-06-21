@@ -1,10 +1,11 @@
 from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
-from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
 import functools, operator
 
-from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadOps, log_op, DEBUG, GRAPH
+from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, log_op, DEBUG, GRAPH
+from enum import Enum
+LoadOps = Enum("LoadOps", ["FROMCPU", "CONTIGUOUS"])
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
 MERGE_MOVEMENT_OPS = True

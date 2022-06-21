@@ -1,13 +1,9 @@
-# TODO: move Device to here and proxy buffer call
 from enum import Enum
 UnaryOps = Enum("UnaryOps", ["NOOP", "RELU", "EXP", "LOG", "NEG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
-LoadOps = Enum("LoadOps", ["FROMCPU", "CONTIGUOUS"])
-
-from tinygrad.shapetracker import ShapeTracker
 
 import os
 DEBUG = int(os.getenv("DEBUG", "0"))
@@ -38,7 +34,7 @@ def log_op(optype, op, ret, inp):
         global_num_max += 1
       return f"<<< {x.global_num} >>>"
 
-    top_colors = {LoadOps: "#ffffff", UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
+    top_colors = {UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
 
     for x in inp:
       if not isinstance(op, list): op = [op]
@@ -50,7 +46,7 @@ def log_op(optype, op, ret, inp):
     st = getattr(ret, "st", None)
     non_contiguous = st is not None and not st.contiguous
     G.nodes[nm(ret)]['label'] = str(ret.shape)
-    G.nodes[nm(ret)]['fillcolor'] = top_colors[optype] + ('80' if non_contiguous else '')
+    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if non_contiguous else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if non_contiguous else 'filled'
 
 class Ops:
