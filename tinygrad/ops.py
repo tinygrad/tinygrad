@@ -5,7 +5,7 @@ BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
-LoadOps = Enum("LoadOps", ["FROMCPU"])
+LoadOps = Enum("LoadOps", ["FROMCPU", "CONTIGUOUS"])
 
 from tinygrad.shapetracker import ShapeTracker
 

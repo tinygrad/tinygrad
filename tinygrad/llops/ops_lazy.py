@@ -90,9 +90,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
     conv = find_conv(self.op)
     conv_x, conv_w = conv.src[0], conv.src[1]
     seen = {conv_x:conv_x, conv_w:conv_w}
-    conv_x_real, conv_w_real = conv_x.realize(), conv_w.realize()
-    # TODO: this contiguous shouldn't be here, it should be inserted at build time if needed
-    real_srcs = [("input", gops.contiguous(conv_x_real)), ("weight", gops.contiguous(conv_w_real))]
+    real_srcs = [("input", conv_x.realize()), ("weight", conv_w.realize())]
     arg = conv.arg
   else:
     seen = {}
@@ -118,9 +116,12 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
-  if self.optype == LoadOps:
+  if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
     #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
     return gops.GPUBuffer.fromCPU(self.op.arg), []
+  elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
+    real_src = self.op.src[0].realize()
+    return gops.contiguous(real_src), [real_src]
   elif self.optype == ReduceOps:
     real_src = self.op.src[0].realize()
     return gops.reduce_op(self.op.op, real_src, self.op.arg), [real_src]
@@ -190,4 +191,6 @@ def reduce_op(op, x, new_shape):
   return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x,), new_shape))
 
 def processing_op(op, x, w, C):
+  if not x.st.contiguous: x = LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
+  if not w.st.contiguous: w = LazyBuffer(w.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (w,)))
   return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
