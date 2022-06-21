@@ -22,29 +22,12 @@ def require_init_gpu():
 
 def roundup(x, n=4): return (x+(n-1))//n * n
 
-buffer_cache = defaultdict(list)
-class CLBuffer:
-  def __init__(self, size):
-    if len(buffer_cache[size]):
-      self.buf = buffer_cache[size].pop()
-    else:
-      #print("cache miss", size)
-      self.buf = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, size)
-
-  # comment this out if you don't want caching
-  def __del__(self):
-    buffer_cache[self.buf.size].append(self.buf)
-    #print("free", self.buf.size)
-
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
-    self.buf = hostbuf.buf if hostbuf is not None else CLBuffer(4*roundup(prod(self.shape)))  # padding
-
-  @property
-  def cl(self): return self.buf.buf
+    self.cl = hostbuf.cl if hostbuf is not None else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))  # padding
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
