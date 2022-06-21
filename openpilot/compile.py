@@ -15,6 +15,7 @@ from tinygrad.ops import set_graph
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
 #OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/1f2f9ea9c9dc37bdea9c6e32e4cb8f88ea0a34bf/selfdrive/modeld/models/supercombo.onnx"
 
+np.random.seed(1337)
 def get_random_input_tensors():
   np_inputs = {
     "input_imgs": np.random.randn(*(1, 12, 128, 256)),
