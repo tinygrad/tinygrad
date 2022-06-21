@@ -86,7 +86,7 @@ jobs:
     - name: Install OpenCL
       #run: sudo apt-get install -y pocl-opencl-icd
       run: |
-        sudo apt-get install -y intel-oneapi-runtime-libs intel-oneapi-runtime-opencl clinfo
+        sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl clinfo
         clinfo
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
