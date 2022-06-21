@@ -1,7 +1,8 @@
+from __future__ import annotations
 import functools
 import numpy as np
 import pyopencl as cl
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from tinygrad.helpers import prod
 from tinygrad.llops.ops_cpu import unary_op
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
@@ -20,14 +21,62 @@ def require_init_gpu():
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
 class GPUBuffer:
-  def __init__(self, shape, hostbuf=None):
+  def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None):
     require_init_gpu()
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
-    self.cl = hostbuf.cl if hostbuf is not None else cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*prod(self.shape))
+    if hostbuf is None:
+      self._buf, self._image = None, None
+    else:
+      self._buf, self._image = hostbuf._buf, hostbuf._image
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
+
+  @property
+  def cl(self):
+    if self._buf is None:
+      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*prod(self.shape))
+      if self._image is not None:
+        assert prod(self.shape) == prod(self._image.shape)*4
+        print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
+        CLProgram("from_image", """
+          __kernel void from_image(
+              read_only image2d_t in,
+              __global float4 *out) {
+            const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
+            int2 l;
+            l.y = get_global_id(1);
+            l.x = get_global_id(0);
+            int W = get_image_width(in);
+            out[l.y*W + l.x] = read_imagef(in, smp, l);
+          }
+        """)(self._image.shape, None, self._image, self._buf)
+        self._image = None
+    return self._buf
+
+  @property
+  def image(self):
+    if self._image is None:
+      assert self.shape[2] == 4 and len(self.shape) == 3
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
+      self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(self.shape[1], self.shape[0]))
+      if self._buf is not None:
+        assert prod(self.shape) == prod(self._image.shape)*4
+        print(f"converting {self.shape} to image with shape {self._image.shape}")
+        CLProgram("to_image", """
+          __kernel void to_image(
+              __global const float4 *in,
+              write_only image2d_t out) {
+            int2 l;
+            l.y = get_global_id(1);
+            l.x = get_global_id(0);
+            int W = get_image_width(out);
+            write_imagef(out, l, in[l.y*W + l.x]);
+          }
+        """)(self._image.shape, None, self._buf, self._image)
+      self._buf = None
+    return self._image
 
   @staticmethod
   def fromCPU(x):
