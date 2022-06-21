@@ -26,7 +26,7 @@ def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   """
   acc = f"outputValues[i]"
   args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
-  args = ["outputLocation", "(outputLocation.y * get_image_width(output) + outputLocation.x)*4", acc]+args
+  args = ["smp", "outputLocation", "(outputLocation.y * get_image_width(output) + outputLocation.x)*4", acc]+args
   middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
 
   replacements = {}
@@ -117,14 +117,14 @@ class OpenCLBuffer(GPUBuffer):
     getters = []
     for is_img, (name, buf) in zip(ewimages, ewbufs):
       if is_img:
-        getters.append(f"inline float4 get4_{name}(read_only image2d_t x, int2 loc, int gid) {{ const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST; return read_imagef(x, smp, loc); }}")
+        getters.append(f"inline float4 get4_{name}(read_only image2d_t x, const sampler_t smp, int2 loc, int gid) {{ return read_imagef(x, smp, loc); }}")
       else:
         getters.append(buf.contiguous_view(name))
-        getters.append(f"inline float4 get4_{name}(__global const float *x, int2 loc, int gid) {{ return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
+        getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{ return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
 
     elementwise_prefix = '\n'.join(getters)+ \
-      "\n\ninline float4 _ewop("+','.join(["int2 loc", "int gid", "float4 acc"]+ewtypes)+") {\n"+ \
-      ''.join([f"float4 {name} = get4_{name}({name}_g, loc, gid);\n" for name, _ in ewbufs])+ \
+      "\n\ninline float4 _ewop("+','.join(["const sampler_t smp", "int2 loc", "int gid", "float4 acc"]+ewtypes)+") {\n"+ \
+      ''.join([f"float4 {name} = get4_{name}({name}_g, smp, loc, gid);\n" for name, _ in ewbufs])+ \
       f"return {code}; }}"
 
     replacements = get_replacements(elementwise_prefix, ewtypes)
