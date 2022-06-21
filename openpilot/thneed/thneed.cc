@@ -32,8 +32,8 @@ void hexdump(uint8_t *d, int len) {
 
 Thneed::Thneed(bool do_clinit) {
   if (do_clinit) clinit();
-  assert(g_fd != -1);
 #ifdef INTERCEPTOR
+  assert(g_fd != -1);
   fd = g_fd;
   ram = make_unique<GPUMalloc>(0x80000, fd);
 #endif

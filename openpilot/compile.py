@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import pathlib, sys
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+
 import os
 import time
 import io
