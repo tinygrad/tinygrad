@@ -51,14 +51,14 @@ def log_op(optype, op, ret, inp):
 
 class Ops:
   def unary_op(ctx, op:UnaryOps, x):
-    ret = ctx.op.unary_op(op, x)
+    ret = x.unary_op(op)
     if 'LAZY' not in ctx.device: log_op(UnaryOps, op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
 
   def reduce_op(ctx, op:ReduceOps, x, new_shape):
-    ret = ctx.op.reduce_op(op, x, tuple(new_shape))
+    ret = x.reduce_op(op, tuple(new_shape))
     if 'LAZY' not in ctx.device: log_op(ReduceOps, op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == tuple(new_shape)
@@ -66,14 +66,14 @@ class Ops:
 
   def binary_op(ctx, op:BinaryOps, x, y):
     assert x.shape == y.shape
-    ret = ctx.op.binary_op(op, x, y)
+    ret = x.binary_op(op, y)
     if 'LAZY' not in ctx.device: log_op(BinaryOps, op, ret, [x, y])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
 
   def movement_op(ctx, op:MovementOps, x, arg):
-    ret = ctx.op.movement_op(op, x, tuple(arg))
+    ret = x.movement_op(op, tuple(arg))
     if 'LAZY' not in ctx.device: log_op(MovementOps, op, ret, [x])
     assert isinstance(ret, ctx.buffer)
     # this check is slow
@@ -81,7 +81,7 @@ class Ops:
     return ret
 
   def processing_op(ctx, op:ProcessingOps, x, y, C):
-    ret = ctx.op.processing_op(op, x, y, C)
+    ret = x.processing_op(op, y, C)
     if 'LAZY' not in ctx.device: log_op(ProcessingOps, op, ret, [x, y])
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == C.out_shape

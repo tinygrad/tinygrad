@@ -5,7 +5,7 @@ def prod(x): return math.prod(x)
 def reduce_shape(shape, axis):
   return [1 if i in axis else shape[i] for i in range(len(shape))]
 
-conv_args = namedtuple('conv_args', ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout', 'py', 'px', 'dy', 'dx', 'out_shape'])
+ConvArgs = namedtuple('ConvArgs', ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'ys', 'xs', 'bs', 'cout', 'py', 'px', 'dy', 'dx', 'out_shape'])
 def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1):
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   cout,cin,H,W = w_shape
@@ -19,4 +19,4 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1):
   ox = (ix + 2*px - dx * (W-1) - 1)//xs + 1
   if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0
-  return conv_args(H, W, groups, cout//groups, cin, oy, ox, iy, ix, ys, xs, bs, cout, py, px, dy, dx, (bs, cout, oy, ox))
+  return ConvArgs(H, W, groups, cout//groups, cin, oy, ox, iy, ix, ys, xs, bs, cout, py, px, dy, dx, (bs, cout, oy, ox))

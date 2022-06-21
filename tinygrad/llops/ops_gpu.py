@@ -1,9 +1,10 @@
+from __future__ import annotations
+from ast import UnaryOp
 import functools
 import numpy as np
 import pyopencl as cl
 from typing import List, Tuple
-from tinygrad.helpers import prod
-from tinygrad.llops.ops_cpu import unary_op
+from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
@@ -18,6 +19,22 @@ def require_init_gpu():
       devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
     cl_ctx = cl.Context(devices=devices)
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
+
+@functools.lru_cache(maxsize=None)
+class CLProgram:
+  def __init__(self, name, prg, options=tuple(), argdtypes=None):
+    self.name = name
+    self.built = cl.Program(cl_ctx, prg).build(options=options)
+    self.clprg = self.built.__getattr__(name)
+    if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
+  def __call__(self, *args):
+    #print(f"running {self.name} with {args[0]} count {len(args)-2}")
+    self.clprg(cl_queue, *args)
+
+code_for_op = {
+  UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
+  BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(B/A)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
+}
 
 class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
@@ -38,24 +55,59 @@ class GPUBuffer:
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    cl.enqueue_copy(cl_queue, data, contiguous(self).cl, is_blocking=True)
+    cl.enqueue_copy(cl_queue, data, self.contiguous().cl, is_blocking=True)
     return data
 
-@functools.lru_cache(maxsize=None)
-class CLProgram:
-  def __init__(self, name, prg, options=tuple(), argdtypes=None):
-    self.name = name
-    self.built = cl.Program(cl_ctx, prg).build(options=options)
-    self.clprg = self.built.__getattr__(name)
-    if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
-  def __call__(self, *args):
-    #print(f"running {self.name} with {args[0]} count {len(args)-2}")
-    self.clprg(cl_queue, *args)
+  def contiguous_view(x, name:str) -> str:
+    return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-def contiguous_view(name:str, x:GPUBuffer) -> str:
-  return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
+  def unary_op(x, op:UnaryOps):return _processing_op(x.shape, [("A", x)], code_for_op[op])
+  def binary_op(x, op:BinaryOps, y:GPUBuffer): return _processing_op(x.shape, [("A", x), ("B", y)], code_for_op[op])
+  def contiguous(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
-def _processing_op(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
+  def movement_op(x, op:MovementOps, arg) -> GPUBuffer:
+    ret = GPUBuffer(x.st, x)
+    ret.shape = ret.st.movement_op(op, arg).shape
+    return ret
+
+  def processing_op(x, op:ProcessingOps, w:GPUBuffer, C:ConvArgs):
+    assert op == ProcessingOps.CONV, f"{op} isn't supported"
+    return _processing_op(C.out_shape, [("input", x.contiguous()), ("weight", w.contiguous())], "acc", C)
+
+  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int]):
+    ret = GPUBuffer(new_shape)
+    if op == ReduceOps.SUM: code, start = "out += a", "0.0"
+    elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
+    else: raise Exception(f"{op} isn't supported")
+
+    # reverse operation of expand, this validates inputs
+    st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, x.shape)
+    # this takes a ret index to an inp index, indexing 0 on the reduced strides
+    view = View(ret.shape, strides_for_shape(x.shape))
+
+    # generate loops with combined adjacent reduce axis
+    acc = 1
+    loop_start, loop_end = [], []
+    for shp,stride in st.views[-1].shape_strides[::-1]:
+      if stride == 0:
+        loop_start.append(f"for (int axis_{len(loop_start)} = 0; axis_{len(loop_start)} < {shp}; axis_{len(loop_start)}++) {{")
+        loop_end.append(f"idx += {acc}; }} idx -= {shp*acc};")
+      acc *= shp
+
+    # TODO: support multistage reduces
+    CLProgram("reduce", x.contiguous_view('A')+"""
+    __kernel void reduce(__global const float *a_g, __global float *res_g) {
+      int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
+      float out = """+start+""";\n"""+ \
+        '\n'.join(loop_start[::-1])+"""
+          float a = get_A(a_g, idx);
+          """+code+""";\n"""+ \
+        '\n'.join(loop_end)+"""
+      res_g[gid] = out;
+    }""")([prod(ret.shape)], None, x.cl, ret.cl)
+    return ret
+
+def _processing_op(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None) -> GPUBuffer:
   ret = GPUBuffer(out_shape)
   options = []
 
@@ -73,7 +125,7 @@ def _processing_op(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[], 
     global_size = [prod(ret.shape), 1, 1]
     ewbufs = bufs
 
-  elementwise_prefix = '\n'.join([contiguous_view(name, buf) for name, buf in ewbufs])+ \
+  elementwise_prefix = '\n'.join([buf.contiguous_view(name) for name, buf in ewbufs])+ \
     "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {"+ \
     '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in ewbufs])+ \
     f"return {code}; }}"
@@ -126,55 +178,6 @@ def _processing_op(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[], 
   return ret
 
 
-# gpu ops
 
-code_for_op = {
-  UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
-  BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(B/A)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-}
 
-def unary_op(op, x): return _processing_op(x.shape, [("A", x)], code_for_op[op])
-def binary_op(op, x, y): return _processing_op(x.shape, [("A", x), ("B", y)], code_for_op[op])
-def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
-def movement_op(op, x, arg):
-  ret = GPUBuffer(x.st, x)
-  ret.shape = ret.st.movement_op(op, arg).shape
-  return ret
-
-def processing_op(op, x, w, C):
-  assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  return _processing_op(C.out_shape, [("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
-
-def reduce_op(op, x, new_shape):
-  ret = GPUBuffer(new_shape)
-  if op == ReduceOps.SUM: code, start = "out += a", "0.0"
-  elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
-  else: raise Exception(f"{op} isn't supported")
-
-  # reverse operation of expand, this validates inputs
-  st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, x.shape)
-  # this takes a ret index to an inp index, indexing 0 on the reduced strides
-  view = View(ret.shape, strides_for_shape(x.shape))
-
-  # generate loops with combined adjacent reduce axis
-  acc = 1
-  loop_start, loop_end = [], []
-  for shp,stride in st.views[-1].shape_strides[::-1]:
-    if stride == 0:
-      loop_start.append(f"for (int axis_{len(loop_start)} = 0; axis_{len(loop_start)} < {shp}; axis_{len(loop_start)}++) {{")
-      loop_end.append(f"idx += {acc}; }} idx -= {shp*acc};")
-    acc *= shp
-
-  # TODO: support multistage reduces
-  CLProgram("reduce", contiguous_view('A', x)+"""
-  __kernel void reduce(__global const float *a_g, __global float *res_g) {
-    int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
-    float out = """+start+""";\n"""+ \
-      '\n'.join(loop_start[::-1])+"""
-        float a = get_A(a_g, idx);
-        """+code+""";\n"""+ \
-      '\n'.join(loop_end)+"""
-    res_g[gid] = out;
-  }""")([prod(ret.shape)], None, x.cl, ret.cl)
-  return ret
