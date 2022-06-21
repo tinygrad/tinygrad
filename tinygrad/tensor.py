@@ -372,11 +372,6 @@ class Tensor:
 # An instantiation of the Function is the Context
 from tinygrad.ops import Ops
 class Function(Ops):
-  def __new__(cls, *args, **kwargs):
-    cls.forward = staticmethod(cls.forward)
-    cls.backward = staticmethod(cls.backward)
-    return super().__new__(cls)
-
   def __init__(self, device, *tensors):
     self.device = device
     self.parents = tensors
