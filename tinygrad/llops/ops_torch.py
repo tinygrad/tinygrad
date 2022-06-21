@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class TorchBuffer(torch.Tensor):
@@ -13,6 +14,8 @@ class TorchBuffer(torch.Tensor):
     return TorchBuffer(torch.from_numpy(data).requires_grad_(False)).to(device)
   def toCPU(x):
     return x.cpu().numpy()
+  def getdtype(self):
+    return np.float32
 
 # ************* unary+binary+reduce+movement ops *************
 
