@@ -40,13 +40,11 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf=None):
     require_init_gpu()
     self.st = ShapeTracker(shape)
+    self.shape = self.st.shape
     self.buf = hostbuf.buf if hostbuf is not None else CLBuffer(4*roundup(prod(self.shape)))  # padding
 
   @property
   def cl(self): return self.buf.buf
-
-  @property
-  def shape(self): return self.st.shape
 
   def __repr__(self):
     return f"<GPUBuffer with shape {self.shape!r}>"
@@ -83,7 +81,7 @@ code_for_op = {
   BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(B/A)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
 }
 
-def contiguous_view(x:GPUBuffer, name:str):
+def contiguous_view(x:GPUBuffer, name:str) -> str:
   return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
 def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
@@ -91,10 +89,6 @@ def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
     "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in bufs])+") {"+ \
     '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+ \
     f"return {code}; }}"
-
-def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
-def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
-def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
 def reduce_op(op, inp, new_shape):
   ret = GPUBuffer(new_shape)
@@ -130,25 +124,22 @@ def reduce_op(op, inp, new_shape):
   clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
   return ret
 
-def movement_op(op, x, arg):
-  ret = GPUBuffer(x.st, x)
-  ret.st.movement_op(op, arg)
-  return ret
-
 def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
   if C is not None:
     ret = GPUBuffer(C.out_shape)
-    ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "cin", "ys", "xs", "dx", "dy", "px", "py"])
-    params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"]]
-    options = tuple(["-DALLVALID"]) if C.px == 0 and C.py == 0 else tuple()
+    ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py"] + (["cin"] if C.cin == 1 else []))
+    params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"] + (["cin"] if C.cin > 1 else [])]
+    options = []
+    if C.px == 0 and C.py == 0: options.append("-DALLVALID")
+    if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
     global_size = [C.bs*C.cout, C.oy, C.ox]
     ewbufs = bufs[2:]
   else:
     ret = GPUBuffer(bufs[0][1].shape)
     ints = ''
     params = []
-    options = tuple(["-DNOCONV"])
-    global_size = [prod(ret.shape)]
+    options = ["-DNOCONV"]
+    global_size = [prod(ret.shape), 1, 1]
     ewbufs = bufs
 
   conv_params = ["__global float* restrict output"] + \
@@ -166,8 +157,14 @@ def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None)
     int g = (get_global_id(0)/rcout)%groups;
     int c = get_global_id(0) % rcout;
 
+#ifdef ONEBYONE
+    int Y = 0;
+    int X = 0;
+#else
     int Y = get_global_id(1);  // range 0-oy
     int X = get_global_id(2);  // range 0-ox
+#endif
+
     int IY = Y*ys;
     int IX = X*xs;
 
@@ -190,14 +187,21 @@ def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None)
 #endif
 
     output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
-  }""", options=options,
+  }""", options=tuple(options),
   argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
   conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
   return ret
 
+def movement_op(op, x, arg):
+  ret = GPUBuffer(x.st, x)
+  ret.shape = ret.st.movement_op(op, arg).shape
+  return ret
 
-# TODO: merge with elementwise_op
-def processing_op(op,x,w,C,bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc"):
+def processing_op(op,x,w,C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
   return _processing_op([("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
+
+def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
+def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
+def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
