@@ -19,8 +19,9 @@ class LazyOp(NamedTuple):
   arg: Any = None
 
 def get_root(x:LazyOp) -> LazyBuffer: return x if isinstance(x, LazyBuffer) else get_root(x.src[0])
-def get_lazyops(op:LazyOp) -> List[Op]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op.op])
+def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
+def find_conv(op:LazyOp) -> LazyOp: return [x for x in get_lazyops(op) if isinstance(x.op, ProcessingOps)][0]
 
 # TODO: this is very slow
 def depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
@@ -38,17 +39,6 @@ def depends(me:LazyBuffer, needle:LazyBuffer) -> bool:
     return ret
   return _depends(me, needle)
 
-def find_conv(x:Union[LazyOp,LazyBuffer]):
-  if isinstance(x, LazyBuffer):
-    return None
-  if isinstance(x.op, ProcessingOps):
-    return x
-  for s in x.src:
-    tst = find_conv(s)
-    if tst is not None:
-      return tst
-  return None
-
 class LazyBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
     self.st = ShapeTracker(shape)
@@ -64,7 +54,7 @@ class LazyBuffer:
       # TODO: get if logging in a better way
       if DEBUG or GRAPH:
         # in lazy mode, we don't log until we realize
-        log_op(self.optype, get_lazyops(self.op), self.realized, real_srcs)
+        log_op(self.optype, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
       del self.op
     return self.realized
 
