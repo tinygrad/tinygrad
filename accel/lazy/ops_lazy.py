@@ -194,7 +194,8 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
 @functools.lru_cache(maxsize=None)
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
-    #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
+    if get_graph():
+      print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
     return gops.GPUBuffer.fromCPU(self.op.arg), []
   elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize()

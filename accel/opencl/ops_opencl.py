@@ -77,7 +77,8 @@ class OpenCLBuffer(GPUBuffer):
   def image(self):
     if self._image is None:
       assert self.shape[2] == 4 and len(self.shape) == 3
-      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
+      #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
       self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
