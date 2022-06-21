@@ -20,6 +20,7 @@ def require_init_gpu():
     cl_ctx = cl.Context(devices=devices)
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
+def roundup(x, n=4): return (x+(n-1))//n * n
 class GPUBuffer:
   def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None):
     require_init_gpu()
@@ -36,7 +37,7 @@ class GPUBuffer:
   @property
   def cl(self):
     if self._buf is None:
-      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*prod(self.shape))
+      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
       if self._image is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
         print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
@@ -187,13 +188,39 @@ def binary_op(op, x, y): return _processing_op(x.shape, [("A", x), ("B", y)], co
 def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
 def movement_op(op, x, arg):
+  x.cl
   ret = GPUBuffer(x.st, x)
   ret.shape = ret.st.movement_op(op, arg).shape
   return ret
 
+import pathlib
+def load(x):
+   with open(x) as f:
+     ret = f.read()
+   return ret
+CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
+
 def processing_op(op, x, w, C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  return _processing_op(C.out_shape, [("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
+  #return _processing_op(C.out_shape, [("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
+
+  x, w = contiguous(x), contiguous(w)
+  ret = GPUBuffer(C.out_shape)
+  options = []
+  if C.cin == 1: options.append("-DDEPTHWISE")
+  if C.bs > 1:
+    options.append("-DBATCH")
+    assert C.py == 0, "batched conv doesn't work with y-padding"
+  assert C.cout%4 == 0
+  conv_src = CONV_SRC
+  conv_prg = CLProgram("conv", conv_src,
+    options=tuple(options),
+    argdtypes=tuple([None, None, None] + [np.int16]*15)
+  )
+  conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
+  conv_prg([C.cout//4, (C.ox+3)//4, C.bs*C.oy], None, x.image, w.image, ret.image, *conv_args)
+
+  return ret
 
 def reduce_op(op, x, new_shape):
   ret = GPUBuffer(new_shape)
