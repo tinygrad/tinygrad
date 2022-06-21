@@ -2,6 +2,8 @@ from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.shapetracker import ShapeTracker
 import functools, operator
+import sys
+sys.setrecursionlimit(10000)
 
 from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, log_op, DEBUG, GRAPH
 from enum import Enum
@@ -181,7 +183,10 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
-  return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
+  if self.optype == ProcessingOps:
+    return gops._processing_op_cl(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
+  else:
+    return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
@@ -195,6 +200,7 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     return gops.reduce_op(self.op.op, real_src, self.op.arg), [real_src]
   elif self.optype == MovementOps:
     real_src = get_root(self.op).realize()
+    real_src.cl
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype in [BinaryOps, ProcessingOps]:
     return _realize_binary_op(self)

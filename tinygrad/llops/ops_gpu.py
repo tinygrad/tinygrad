@@ -206,7 +206,7 @@ def get_replacements(prg_src, opencl_type):
   for i in range(4):
     acc = f"outputValues[i].{vv[i%4]}"
     args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
-    args = [acc, f"(outputRow * get_image_width(output) + outputLocation.x)*4+{i}"]+args
+    args = [f"(outputRow * get_image_width(output) + outputLocation.x)*4+{i}", acc]+args
     middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
 
   replacements = {}
@@ -239,9 +239,10 @@ def _processing_op_cl(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[
   conv_src = CONV_SRC
   for k,v in replacements.items():
     conv_src = conv_src.replace(k, v)
+  #print(conv_src)
   conv_prg = CLProgram("conv", conv_src,
     options=tuple(options),
-    argdtypes=tuple([None, None, None] + [np.int16]*15)
+    argdtypes=tuple([None, None, None] + [np.int16]*15 + [None]*len(ewbufs))
   )
   conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
   conv_prg([C.cout//4, (C.ox+3)//4, C.bs*C.oy], None, x.image, w.image, ret.image, *conv_args, *[buf.cl for _, buf in ewbufs])
