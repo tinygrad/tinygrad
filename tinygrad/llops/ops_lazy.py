@@ -84,9 +84,9 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
 # these functions determines the backing buffer
 import tinygrad.llops.ops_gpu as gops
 
-def _realize_binary_op(self:LazyBuffer, has_conv:bool=False) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
+def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   # optional
-  if has_conv:
+  if self.optype == ProcessingOps:
     conv = find_conv(self.op)
     conv_x, conv_w = conv.src[0], conv.src[1]
     seen = {conv_x:conv_x, conv_w:conv_w}
@@ -127,12 +127,8 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   elif self.optype == MovementOps:
     real_src = get_root(self.op).realize()
     return gops.GPUBuffer(self.st, real_src), [real_src]
-  elif self.optype == BinaryOps:
+  elif self.optype in [BinaryOps, ProcessingOps]:
     return _realize_binary_op(self)
-  elif self.optype == ProcessingOps:
-    return _realize_binary_op(self, has_conv=True)
-    #real_srcs = [x.realize() for x in self.op.src]
-    #return gops.processing_op(self.op.op, real_srcs[0], real_srcs[1], self.op.arg), real_srcs
 
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape

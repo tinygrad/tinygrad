@@ -198,13 +198,15 @@ class TestOnnxModel(unittest.TestCase):
       "initial_state": np.zeros((1, 512))
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
+
     st = time.monotonic()
     tinygrad_out = run_onnx(inputs)['outputs']
-    #tinygrad_out.data.realize()
     mt = time.monotonic()
+    tinygrad_out.realize()
+    mt2 = time.monotonic()
     tinygrad_out = tinygrad_out.numpy()
     et = time.monotonic()
-    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(et-mt)*1000.0:.2f} ms for realize")
+    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     print(tinygrad_out, torch_out)

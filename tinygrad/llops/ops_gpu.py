@@ -60,8 +60,8 @@ def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None)
   options = []
 
   if C is not None:
-    ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py"] + (["cin"] if C.cin == 1 else []))
-    params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"] + (["cin"] if C.cin > 1 else [])]
+    ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
+    params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
     if C.px == 0 and C.py == 0: options.append("-DALLVALID")
     if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
     global_size = [C.bs*C.cout, C.oy, C.ox]
