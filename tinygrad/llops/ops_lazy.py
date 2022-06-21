@@ -159,7 +159,7 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any BinaryOps that feed into this
-    srcs = tuple([x.op if x.optype == BinaryOps else x for x in srcs])
+    srcs = tuple(x.op if x.optype == BinaryOps else x for x in srcs)
 
   return LazyBuffer(out_shape, BinaryOps, LazyOp(op, srcs))
 
@@ -170,18 +170,18 @@ def binary_op(op, x, y): return elementwise_op(op, (x,y))
 def movement_op(op:MovementOps, x:LazyBuffer, arg):
   if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
-    def replace_w_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
+    def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
       if isinstance(y, LazyBuffer): return movement_op(op, y, arg)
-      elif isinstance(y, LazyOp): return elementwise_op(y.op, tuple([replace_w_movement_op(z) for z in y.src]))
-    return replace_w_movement_op(x.op)
+      return elementwise_op(y.op, tuple(replace_with_movement_op(z) for z in y.src))
+    return replace_with_movement_op(x.op)
 
   # if a MovementOp is applied to a MovementOp, merge them and use one buffer
   ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps else x,), arg))
   ret.shape = ret.st.movement_op(op, arg).shape   # update the shape after we modify the ShapeTracker
 
-  if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps:
+  if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps and ret.st.contiguous:
     root = get_root(x.op)
-    if ret.st.contiguous and ret.st.shape == root.shape:
+    if ret.st.shape == root.shape:
       return root
 
   return ret

@@ -88,9 +88,9 @@ def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None)
     """+ints+"""
 
 #ifndef NOCONV
-    int B = get_global_id(0)/(groups*rcout);  // range 0-bs
-    int g = (get_global_id(0)/rcout)%groups;
-    int c = get_global_id(0) % rcout;
+    int B = gid/(groups*rcout);  // range 0-bs
+    int g = (gid/rcout)%groups;
+    int c = gid % rcout;
 
 #ifdef ONEBYONE
     int Y = 0;
