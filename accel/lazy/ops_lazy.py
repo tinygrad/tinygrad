@@ -2,6 +2,9 @@ from __future__ import annotations
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.shapetracker import ShapeTracker
 import functools, operator
+from tinygrad.helpers import prod
+import sys
+sys.setrecursionlimit(10000)
 
 from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, log_op, DEBUG, GRAPH
 from enum import Enum

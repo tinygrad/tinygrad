@@ -36,7 +36,7 @@ code_for_op = {
 }
 
 class GPUBuffer:
-  def __init__(self, shape, hostbuf=None):
+  def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None):
     require_init_gpu()
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
@@ -121,11 +121,13 @@ class GPUBuffer:
       global_size = [C.bs*C.cout, C.oy, C.ox]
       assert bufs[0][0] == "input" and bufs[1][0] == "weight"
       ewbufs = bufs[2:]   # input and weight are consumed by the convs
+      kernel_name = "conv"
     else:
       ints, params = '', []
       options.append("-DNOCONV")
       global_size = [prod(ret.shape), 1, 1]
       ewbufs = bufs
+      kernel_name = "elementwise"
 
     elementwise_prefix = '\n'.join([buf.contiguous_view(name) for name, buf in ewbufs])+ \
       "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {"+ \
@@ -135,8 +137,7 @@ class GPUBuffer:
     conv_params = ["__global float* restrict output"] + \
                   [f"__global const float *{name}_g" for name, _ in bufs] + \
                   [x[0] for x in params]
-    conv_prg = CLProgram("conv", elementwise_prefix+"""
-    __kernel void conv("""+','.join(conv_params)+""") {
+    conv_prg = CLProgram(kernel_name, elementwise_prefix+f"__kernel void {kernel_name}("+','.join(conv_params)+""") {
       float acc = 0.0;
       int gid = get_global_id(0);
       """+ints+"""
