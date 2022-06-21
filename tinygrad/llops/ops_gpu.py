@@ -35,6 +35,7 @@ atexit.register(save_thneed)
 
 gkernel = 0
 gcnt = 0
+gobj = 1
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
@@ -48,9 +49,10 @@ class CLProgram:
     self.argdtypes = argdtypes
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    global gcnt, jdat, weights, saved_objs
+    global gcnt, jdat, weights, saved_objs, gobj
     if get_graph():
       print(f"{gcnt:4d} running {self.name} with {args[0]} count {len(args)-2}")
+      #print(args)
       gcnt += 1
       # thneed hook
       if self.name not in jdat['programs']: jdat['programs'][self.name] = {"src": self.prg, "options": ' '.join(self.options)}
@@ -61,7 +63,10 @@ class CLProgram:
           targs.append(struct.pack("H", a).decode("latin_1"))
           args_size.append(2)
         elif d is None:
-          ptr = struct.pack("Q", id(a)).decode("latin_1")
+          if getattr(a, "global_id", None) is None:
+            setattr(a, "global_id", gobj)
+            gobj += 1
+          ptr = struct.pack("Q", a.global_id).decode("latin_1")
           if ptr not in saved_objs:
             if isinstance(a, cl.Buffer):
               jdat['objects'].append({
@@ -99,6 +104,7 @@ class CLProgram:
         "args": targs,
         "args_size": args_size 
       })
+      #print(jdat['kernels'][-1])
 
     self.clprg(cl_queue, *args)
 
