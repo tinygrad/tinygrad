@@ -15,12 +15,19 @@ CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv
 
 def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   middle_code = []
+
+  """
   vv = "xyzw"
   for i in range(4):
     acc = f"outputValues[i].{vv[i%4]}"
     args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
     args = [f"(outputRow * get_image_width(output) + outputLocation.x)*4+{i}", acc]+args
     middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
+  """
+  acc = f"outputValues[i]"
+  args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
+  args = [f"(outputRow * get_image_width(output) + outputLocation.x)*4", acc]+args
+  middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
 
   replacements = {}
   if len(opencl_type) != 0:
@@ -63,6 +70,8 @@ class OpenCLBuffer(GPUBuffer):
         """)(self._image.shape, None, self._image, self._buf)
         self._image = None
     return self._buf
+  
+  def is_image(self): return self._image is not None
 
   @property
   def image(self):
@@ -98,17 +107,27 @@ class OpenCLBuffer(GPUBuffer):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return type(x)(C.out_shape)._processing_op_cl([("input", x), ("weight", w)], "acc", C)
 
-  def _processing_op_cl(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
+  def _processing_op_cl(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None):
     assert bufs[0][0] == "input" and bufs[1][0] == "weight"
     x,w = bufs[0][1], bufs[1][1]
     ewbufs = bufs[2:]
+    ewimages = [False and buf.is_image() and buf.shape == ret.shape and buf.st.contiguous for _,buf in ewbufs]
+    ewtypes = [f"read_only image2d_t {name}_g" if is_img else f"__global const float *{name}_g" for is_img, (name, buf) in zip(ewimages, ewbufs)]
 
-    elementwise_prefix = '\n'.join([buf.contiguous_view(name) for name, buf in ewbufs])+ \
-      "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {"+ \
-      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in ewbufs])+ \
+    getters = []
+    for is_img, (name, buf) in zip(ewimages, ewbufs):
+      if is_img:
+        pass
+      else:
+        getters.append(buf.contiguous_view(name))
+        getters.append(f"inline float4 get4_{name}(__global const float *x, int gid) {{ return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
+
+    elementwise_prefix = '\n'.join(getters)+ \
+      "\n\ninline float4 _ewop("+','.join(["int gid", "float4 acc"]+ewtypes)+") {\n"+ \
+      ''.join([f"float4 {name} = get4_{name}({name}_g, gid);\n" for name, _ in ewbufs])+ \
       f"return {code}; }}"
 
-    replacements = get_replacements(elementwise_prefix, [f"__global const float *{name}_g" for name, _ in ewbufs] )
+    replacements = get_replacements(elementwise_prefix, ewtypes)
 
     x, w = x.contiguous_op(), w.contiguous_op()
     options = []
@@ -120,7 +139,9 @@ class OpenCLBuffer(GPUBuffer):
     conv_src = CONV_SRC
     for k,v in replacements.items():
       conv_src = conv_src.replace(k, v)
-    #print(conv_src)
+    if any(ewimages):
+      print(conv_src)
+      exit(0)
     conv_prg = CLProgram("image_conv", conv_src,
       options=tuple(options),
       argdtypes=tuple([None, None, None] + [np.int16]*15 + [None]*len(ewbufs))
