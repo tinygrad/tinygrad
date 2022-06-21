@@ -76,11 +76,6 @@ def clbuild(name, prg, options=tuple(), argdtypes=None):
   #print("cache miss", prg[0:100])
   return CLProgram(name, prg, options, argdtypes)
 
-code_for_op = {
-  UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
-  BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(B/A)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-}
-
 def contiguous_view(x:GPUBuffer, name:str) -> str:
   return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
@@ -89,6 +84,90 @@ def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
     "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in bufs])+") {"+ \
     '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+ \
     f"return {code}; }}"
+
+def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
+  if C is not None:
+    ret = GPUBuffer(C.out_shape)
+    ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py"] + (["cin"] if C.cin == 1 else []))
+    params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"] + (["cin"] if C.cin > 1 else [])]
+    options = []
+    if C.px == 0 and C.py == 0: options.append("-DALLVALID")
+    if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
+    global_size = [C.bs*C.cout, C.oy, C.ox]
+    ewbufs = bufs[2:]
+  else:
+    ret = GPUBuffer(bufs[0][1].shape)
+    ints = ''
+    params = []
+    options = ["-DNOCONV"]
+    global_size = [prod(ret.shape), 1, 1]
+    ewbufs = bufs
+
+  conv_params = ["__global float* restrict output"] + \
+                [f"__global const float *{name}_g" for name, _ in bufs] + \
+                [x[0] for x in params]
+  conv_prg = clbuild("conv", elementwise_op_compile(ewbufs, code)+"""
+  __kernel void conv("""+','.join(conv_params)+""") {
+    float acc = 0.0;
+    int gid = get_global_id(0);
+    """+ints+"""
+
+#ifndef NOCONV
+    int B = get_global_id(0)/(groups*rcout);  // range 0-bs
+    int g = (get_global_id(0)/rcout)%groups;
+    int c = get_global_id(0) % rcout;
+
+#ifdef ONEBYONE
+    int Y = 0;
+    int X = 0;
+#else
+    int Y = get_global_id(1);  // range 0-oy
+    int X = get_global_id(2);  // range 0-ox
+    gid = gid*oy*ox + Y*ox + X;
+#endif
+
+    int IY = Y*ys;
+    int IX = X*xs;
+
+    for (int ci = 0; ci < cin; ci++) {
+      for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
+        int idx_y = y*dy + IY - py;
+        int idx_x = x*dx + IX - px;
+#ifdef ALLVALID
+        acc += input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
+          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+#else
+        int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
+        acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
+          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+#endif
+      } }
+    }
+#endif
+
+    output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
+  }""", options=tuple(options),
+  argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
+  conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
+  return ret
+
+def movement_op(op, x, arg):
+  ret = GPUBuffer(x.st, x)
+  ret.shape = ret.st.movement_op(op, arg).shape
+  return ret
+
+def processing_op(op,x,w,C):
+  assert op == ProcessingOps.CONV, f"{op} isn't supported"
+  return _processing_op([("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
+
+code_for_op = {
+  UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
+  BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(B/A)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
+}
+
+def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
+def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
+def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
 def reduce_op(op, inp, new_shape):
   ret = GPUBuffer(new_shape)
@@ -123,85 +202,3 @@ def reduce_op(op, inp, new_shape):
   }"""
   clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
   return ret
-
-def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
-  if C is not None:
-    ret = GPUBuffer(C.out_shape)
-    ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py"] + (["cin"] if C.cin == 1 else []))
-    params = [(f"int {x}", getattr(C, x)) for x in ["groups", "rcout", "oy", "ox", "iy", "ix"] + (["cin"] if C.cin > 1 else [])]
-    options = []
-    if C.px == 0 and C.py == 0: options.append("-DALLVALID")
-    if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
-    global_size = [C.bs*C.cout, C.oy, C.ox]
-    ewbufs = bufs[2:]
-  else:
-    ret = GPUBuffer(bufs[0][1].shape)
-    ints = ''
-    params = []
-    options = ["-DNOCONV"]
-    global_size = [prod(ret.shape), 1, 1]
-    ewbufs = bufs
-
-  conv_params = ["__global float* restrict output"] + \
-                [f"__global const float *{name}_g" for name, _ in bufs] + \
-                [x[0] for x in params]
-  conv_prg = clbuild("conv", elementwise_op_compile(ewbufs, code)+"""
-  __kernel void conv("""+','.join(conv_params)+""") {
-    float acc = 0.0;
-    """+ints+"""
-
-#ifdef NOCONV
-    int gid = get_global_id(0);
-#else
-    int B = get_global_id(0)/(groups*rcout);  // range 0-bs
-    int g = (get_global_id(0)/rcout)%groups;
-    int c = get_global_id(0) % rcout;
-
-#ifdef ONEBYONE
-    int Y = 0;
-    int X = 0;
-#else
-    int Y = get_global_id(1);  // range 0-oy
-    int X = get_global_id(2);  // range 0-ox
-#endif
-
-    int IY = Y*ys;
-    int IX = X*xs;
-
-    int gid = get_global_id(0)*oy*ox + Y*ox + X;
-
-    for (int ci = 0; ci < cin; ci++) {
-      for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
-        int idx_y = y*dy + IY - py;
-        int idx_x = x*dx + IX - px;
-#ifdef ALLVALID
-        acc += input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
-          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-#else
-        int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
-        acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
-          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-#endif
-      } }
-    }
-#endif
-
-    output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
-  }""", options=tuple(options),
-  argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
-  conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
-  return ret
-
-def movement_op(op, x, arg):
-  ret = GPUBuffer(x.st, x)
-  ret.shape = ret.st.movement_op(op, arg).shape
-  return ret
-
-def processing_op(op,x,w,C):
-  assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  return _processing_op([("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
-
-def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
-def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
-def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
-
