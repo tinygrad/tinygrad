@@ -40,7 +40,7 @@ class GPUBuffer:
       self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
       if self._image is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
-        print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
+        #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", """
           __kernel void from_image(
               read_only image2d_t in,
@@ -64,7 +64,7 @@ class GPUBuffer:
       self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
-        print(f"converting {self.shape} to image with shape {self._image.shape}")
+        #print(f"converting {self.shape} to image with shape {self._image.shape}")
         CLProgram("to_image", """
           __kernel void to_image(
               __global const float4 *in,
