@@ -6,7 +6,6 @@ from tinygrad.helpers import prod
 from tinygrad.llops.ops_cpu import unary_op
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
-from collections import defaultdict
 
 cl_ctx, cl_queue = None, None
 def get_cl_ctx(): return cl_ctx

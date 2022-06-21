@@ -1,6 +1,5 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-import os, atexit, time, inspect, functools, importlib
-from collections import defaultdict
+import os, inspect, functools, importlib
 import numpy as np
 from tinygrad.helpers import prod
 from typing import List
