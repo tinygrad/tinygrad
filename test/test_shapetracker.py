@@ -36,7 +36,7 @@ class DumbShapeTracker:
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
 
-@unittest.skip("reshape is more complex")
+#@unittest.skip("reshape is more complex")
 class TestComplexShapeTracker(unittest.TestCase):
   def test_work(self):
     self.st = ShapeTracker((64, 1024, 4))
