@@ -8,7 +8,7 @@ from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, LoadO
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
 MERGE_MOVEMENT_OPS = True
-SHUFFLE_MOVEMENT_OPS = True
+SHUFFLE_MOVEMENT_OPS = False   # this breaks maxpool
 REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
@@ -105,7 +105,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
       root = get_root(s.op)
       if root.realized is None and root.optype == LoadOps and root.shape == (1,):
         if not s.st.needs_valid():
-          real_dict[s] = str(root.op.arg[0]) + "f"
+          real_dict[s] = f"({root.op.arg[0]}f)"
         else:
           # TODO: this is a terrible hack, and it's very unclear if it's always right
           inline_valid = s.st.expr().replace("valid=valid && ", "").replace(";idx=0", "").replace("//", "/").replace("idx", "gid")
@@ -115,7 +115,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
   code = ast(self.op, real_dict)
-  return gops._processing_op(real_srcs, code, arg), [x[1] for x in real_srcs]
+  return gops._processing_op(self.shape, real_srcs, code, arg), [x[1] for x in real_srcs]
 
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps:
@@ -134,15 +134,15 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
 
   if MERGE_ELEMENTWISE_INTO_CONV_OUTPUT:
-    cnt = sum([x.optype == ProcessingOps for x in srcs])
+    cnt = sum([x.optype == ProcessingOps and x.realized is None for x in srcs])
     if cnt == 1:
-      srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
+      srcs = [x.op if x.optype == ProcessingOps and x.realized is None else x for x in srcs]
       return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
     elif cnt == 2:
       # have to confirm they are the same conv
       c1, c2 = [find_conv(x.op) for x in srcs]
       if c1.op == c1.op and c1.arg == c2.arg and tuple(c1.src) == tuple(c2.src):
-        srcs = [x.op if x.optype == ProcessingOps else x for x in srcs]
+        srcs = [x.op if x.optype == ProcessingOps and x.realized is None else x for x in srcs]
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
       else:
         order = cmp(srcs[0], srcs[1])
@@ -159,7 +159,7 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any BinaryOps that feed into this
-    srcs = tuple(x.op if x.optype == BinaryOps else x for x in srcs)
+    srcs = tuple(x.op if x.optype == BinaryOps and x.realized is None else x for x in srcs)
 
   return LazyBuffer(out_shape, BinaryOps, LazyOp(op, srcs))
 
@@ -176,10 +176,10 @@ def movement_op(op:MovementOps, x:LazyBuffer, arg):
     return replace_with_movement_op(x.op)
 
   # if a MovementOp is applied to a MovementOp, merge them and use one buffer
-  ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps else x,), arg))
+  ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
   ret.shape = ret.st.movement_op(op, arg).shape   # update the shape after we modify the ShapeTracker
 
-  if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps and ret.st.contiguous:
+  if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps and x.realized is None and ret.st.contiguous:
     root = get_root(x.op)
     if ret.st.shape == root.shape:
       return root

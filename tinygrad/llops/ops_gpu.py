@@ -55,8 +55,8 @@ class CLProgram:
 def contiguous_view(name:str, x:GPUBuffer) -> str:
   return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
-  ret = GPUBuffer(C.out_shape if C is not None else bufs[0][1].shape)
+def _processing_op(out_shape: Tuple[int], bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None):
+  ret = GPUBuffer(out_shape)
   options = []
 
   if C is not None:
@@ -133,8 +133,8 @@ code_for_op = {
   BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(B/A)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
 }
 
-def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
-def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
+def unary_op(op, x): return _processing_op(x.shape, [("A", x)], code_for_op[op])
+def binary_op(op, x, y): return _processing_op(x.shape, [("A", x), ("B", y)], code_for_op[op])
 def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
 def movement_op(op, x, arg):
@@ -144,7 +144,7 @@ def movement_op(op, x, arg):
 
 def processing_op(op, x, w, C):
   assert op == ProcessingOps.CONV, f"{op} isn't supported"
-  return _processing_op([("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
+  return _processing_op(C.out_shape, [("input", contiguous(x)), ("weight", contiguous(w))], "acc", C)
 
 def reduce_op(op, x, new_shape):
   ret = GPUBuffer(new_shape)
