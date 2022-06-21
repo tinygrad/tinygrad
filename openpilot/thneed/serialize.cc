@@ -63,8 +63,10 @@ void Thneed::load(const char *filename) {
 
   map<string, cl_program> g_programs;
   for (const auto &[name, source] : jdat["programs"].object_items()) {
-    if (debug >= 1) printf("building %s with size %zu\n", name.c_str(), source.string_value().size());
-    g_programs[name] = cl_program_from_source(context, device_id, source.string_value());
+    if (debug >= 1) printf("building %s with size %zu\n", name.c_str(), source["src"].string_value().size());
+    string src = source["src"].string_value();
+    string options = source["options"].string_value();
+    g_programs[name] = cl_program_from_source(context, device_id, src, options.c_str());
   }
 
   for (auto &obj : jdat["binaries"].array_items()) {

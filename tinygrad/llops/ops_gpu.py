@@ -19,6 +19,19 @@ def require_init_gpu():
     cl_ctx = cl.Context(devices=devices)
     cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
 
+import atexit, struct, json
+jdat = {"programs": {}}
+weights = []
+def save_thneed():
+  print("saving thneed")
+  with open("/tmp/output.thneed", "wb") as f:
+    j = json.dumps(jdat, ensure_ascii=False).encode('latin_1')
+    f.write(struct.pack("I", len(j)))
+    f.write(j)
+    f.write(b''.join(weights))
+atexit.register(save_thneed)
+
+
 gkernel = 0
 gcnt = 0
 @functools.lru_cache(maxsize=None)
@@ -26,15 +39,20 @@ class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
     global gkernel
     self.name = f"{name}_{gkernel}"
+    self.prg = prg.replace(name+"(", self.name+"(")
     gkernel += 1
-    self.built = cl.Program(cl_ctx, prg.replace(name+"(", self.name+"(")).build(options=options)
+    self.built = cl.Program(cl_ctx, self.prg).build(options=options)
     self.clprg = self.built.__getattr__(self.name)
+    self.options = options
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    global gcnt
+    global gcnt, jdat, weights
     if get_graph():
       print(f"{gcnt:4d} running {self.name} with {args[0]} count {len(args)-2}")
       gcnt += 1
+      # thneed hook
+      if self.name not in jdat['programs']: jdat['programs'][self.name] = {"src": self.prg, "options": ' '.join(self.options)}
+
     self.clprg(cl_queue, *args)
 
 code_for_op = {

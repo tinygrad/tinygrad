@@ -40,7 +40,7 @@ if __name__ == "__main__":
   inputs, _ = get_random_input_tensors()
 
   # initial run(s) to load weights
-  for _ in range(5):
+  for _ in range(2):
     st = time.monotonic()
     tinygrad_out = run_onnx(inputs)['outputs']
     mt = time.monotonic()
@@ -56,6 +56,7 @@ if __name__ == "__main__":
   tinygrad_out.realize()
   tinygrad_out = tinygrad_out.numpy()
 
+  """
   torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
   print(tinygrad_out, torch_out)
 
@@ -64,3 +65,7 @@ if __name__ == "__main__":
 
   # float16, i think it's so bad because the data is random
   np.testing.assert_allclose(torch_out, tinygrad_out, atol=1, rtol=100)
+  """
+
+  # comment this out if you want graph
+  set_graph(False)
