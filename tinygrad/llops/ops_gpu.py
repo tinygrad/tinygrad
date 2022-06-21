@@ -59,7 +59,7 @@ class GPUBuffer:
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    cl.enqueue_copy(cl_queue, data, self.contiguous().cl, is_blocking=True)
+    cl.enqueue_copy(cl_queue, data, self.contiguous_op().cl, is_blocking=True)
     return data
 
   def contiguous_view(x, name:str) -> str:
@@ -67,7 +67,7 @@ class GPUBuffer:
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], code_for_op[op])
-  def contiguous(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
+  def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   def movement_op(x, op:MovementOps, arg) -> GPUBuffer:
     ret = GPUBuffer(x.st, x)
@@ -76,7 +76,7 @@ class GPUBuffer:
 
   def processing_op(x, op:ProcessingOps, w:GPUBuffer, C:ConvArgs):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    return type(x)(C.out_shape)._processing_op([("input", x.contiguous()), ("weight", w.contiguous())], "acc", C)
+    return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int]):
     ret = GPUBuffer(new_shape)

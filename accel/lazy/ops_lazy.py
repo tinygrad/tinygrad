@@ -74,11 +74,11 @@ class LazyBuffer:
     return self.realize().toCPU()
 
   def unary_op(x, op): return elementwise_op(op, (x,))
-  def binary_op(x, op, y): return elementwise_op(op, (x,y))
-  def contiguous(x): return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
+  def binary_op(x, op, y:LazyBuffer): return elementwise_op(op, (x,y))
+  def contiguous_op(x): return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
 
   @functools.lru_cache(maxsize=None)
-  def movement_op(x, op:MovementOps, arg):
+  def movement_op(x, op:MovementOps, arg) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
@@ -97,11 +97,11 @@ class LazyBuffer:
 
     return ret
 
-  def reduce_op(x, op, new_shape):
+  def reduce_op(x, op, new_shape:Tuple[int]):
     return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x,), new_shape))
 
   def processing_op(x, op, w:LazyBuffer, C):
-    return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x.contiguous(), w.contiguous()), C))
+    return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x.contiguous_op(), w.contiguous_op()), C))
 
 def ast_op(op: Op, srcs_code: List[str]) -> str:
   code = gops.code_for_op[op]
