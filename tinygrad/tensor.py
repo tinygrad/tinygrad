@@ -380,7 +380,6 @@ class Function(Ops):
     self.saved_tensors = []
 
   buffer = property(lambda self: Device.buffers[self.device])
-  op = property(lambda self: Device.llops[self.device])
 
   def save_for_backward(self, *x):
     if self.requires_grad:
@@ -389,7 +388,7 @@ class Function(Ops):
   @classmethod
   def apply(cls, *x:List[Tensor], **kwargs):
     ctx = cls(x[0].device, *x)
-    ret = Tensor(cls.forward(ctx, *[t.data for t in x], **kwargs),
+    ret = Tensor(ctx.forward(ctx, *[t.data for t in x], **kwargs),
                  device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad:
       ret._ctx = ctx    # used by autograd engine
