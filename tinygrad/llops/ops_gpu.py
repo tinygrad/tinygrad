@@ -43,8 +43,9 @@ class GPUBuffer:
     cl.enqueue_copy(cl_queue, data, contiguous(self).cl, is_blocking=True)
     return data
 
+@functools.lru_cache(maxsize=None)
 class CLProgram:
-  def __init__(self, name, prg, options, argdtypes):
+  def __init__(self, name, prg, options=tuple(), argdtypes=None):
     self.name = name
     self.built = cl.Program(cl_ctx, prg).build(options=options)
     self.clprg = self.built.__getattr__(name)
@@ -53,16 +54,11 @@ class CLProgram:
     #print(f"running {self.name} with {args[0]} count {len(args)-2}")
     self.clprg(cl_queue, *args)
 
-@functools.lru_cache(maxsize=None)
-def clbuild(name, prg, options=tuple(), argdtypes=None):
-  #print("cache miss", prg[0:100])
-  return CLProgram(name, prg, options, argdtypes)
-
-def contiguous_view(x:GPUBuffer, name:str) -> str:
+def contiguous_view(name:str, x:GPUBuffer) -> str:
   return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
 def elementwise_op_compile(bufs: List[Tuple[str, GPUBuffer]], code:str) -> str:
-  return '\n'.join([contiguous_view(buf, name) for name, buf in bufs])+ \
+  return '\n'.join([contiguous_view(name, buf) for name, buf in bufs])+ \
     "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in bufs])+") {"+ \
     '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in bufs])+ \
     f"return {code}; }}"
@@ -88,7 +84,7 @@ def _processing_op(bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C=None)
   conv_params = ["__global float* restrict output"] + \
                 [f"__global const float *{name}_g" for name, _ in bufs] + \
                 [x[0] for x in params]
-  conv_prg = clbuild("conv", elementwise_op_compile(ewbufs, code)+"""
+  conv_prg = CLProgram("conv", elementwise_op_compile(ewbufs, code)+"""
   __kernel void conv("""+','.join(conv_params)+""") {
     float acc = 0.0;
     int gid = get_global_id(0);
@@ -151,16 +147,16 @@ def unary_op(op, x): return _processing_op([("A", x)], code_for_op[op])
 def binary_op(op, x, y): return _processing_op([("A", x), ("B", y)], code_for_op[op])
 def contiguous(x:GPUBuffer): return x if x.st.contiguous else unary_op(UnaryOps.NOOP, x)
 
-def reduce_op(op, inp, new_shape):
+def reduce_op(op, x, new_shape):
   ret = GPUBuffer(new_shape)
   if op == ReduceOps.SUM: code, start = "out += a", "0.0"
   elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
   else: raise Exception(f"{op} isn't supported")
 
   # reverse operation of expand, this validates inputs
-  st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, inp.shape)
+  st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, x.shape)
   # this takes a ret index to an inp index, indexing 0 on the reduced strides
-  view = View(ret.shape, strides_for_shape(inp.shape))
+  view = View(ret.shape, strides_for_shape(x.shape))
 
   # generate loops with combined adjacent reduce axis
   acc = 1
@@ -172,7 +168,7 @@ def reduce_op(op, inp, new_shape):
     acc *= shp
 
   # TODO: support multistage reduces
-  prg = contiguous_view(inp, 'A')+"""
+  prg = contiguous_view('A', x)+"""
   __kernel void reduce(__global const float *a_g, __global float *res_g) {
     int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
     float out = """+start+""";\n"""+ \
@@ -182,5 +178,5 @@ def reduce_op(op, inp, new_shape):
       '\n'.join(loop_end)+"""
     res_g[gid] = out;
   }"""
-  clbuild("reduce", prg)([prod(ret.shape)], None, inp.cl, ret.cl)
+  CLProgram("reduce", prg)([prod(ret.shape)], None, x.cl, ret.cl)
   return ret
