@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools
 import numpy as np
 import pyopencl as cl
+import time
 from typing import List, Tuple, Optional
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, get_graph
@@ -36,6 +37,7 @@ atexit.register(save_thneed)
 gkernel = 0
 gcnt = 0
 gobj = 1
+tt = 0.0
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
@@ -49,9 +51,8 @@ class CLProgram:
     self.argdtypes = argdtypes
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    global gcnt, jdat, weights, saved_objs, gobj
+    global gcnt, jdat, weights, saved_objs, gobj, tt
     if get_graph():
-      print(f"{gcnt:4d} running {self.name} with {args[0]} {args[1]} count {len(args)-2}")
       #print(args)
       gcnt += 1
       # thneed hook
@@ -106,7 +107,20 @@ class CLProgram:
       })
       #print(jdat['kernels'][-1])
 
-    self.clprg(cl_queue, *args)
+    avg = []
+    for i in range(4):
+      st = time.monotonic()
+      self.clprg(cl_queue, *args)
+      cl_queue.finish()
+      et = time.monotonic()
+      if i != 0:
+        avg.append(et-st)
+    avg = (sum(avg)/len(avg))*1000.0
+
+    if get_graph():
+      tt += avg
+      print(f"{gcnt:4d} running {self.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}", f"in {avg:.3f} ms total {tt:.2f} ms")
+
 
 code_for_op = {
   UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
