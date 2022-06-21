@@ -99,7 +99,7 @@ class CLProgram:
         "name": self.name,
         "work_dim": len(args[0]),
         "global_work_size": args[0],
-        "local_work_size": [1 for x in args[0]],
+        "local_work_size": [1 for x in args[0]] if args[1] is None else args[1],
         "num_args": len(args)-2,
         "args": targs,
         "args_size": args_size 
