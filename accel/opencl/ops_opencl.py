@@ -148,8 +148,18 @@ class OpenCLBuffer(GPUBuffer):
       argdtypes=tuple([None, None, None] + [np.int16]*15 + [None]*len(ewbufs))
     )
     conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
-    conv_prg([C.cout//4, (C.ox+3)//4, C.bs*C.oy], None, x.image, w.image, ret.image, *conv_args, *[buf.image if is_img else buf.cl for is_img, (_, buf) in zip(ewimages, ewbufs)])
-
+    global_work_size = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
+    local_work_size = [1, (C.ox+3)//4, 1]
+    n = 1
+    while global_work_size[0] % n == 0 and n*local_work_size[1]*local_work_size[2] <= 1024:
+      local_work_size[0] = n
+      n *= 2
+    n = 1
+    #while global_work_size[2] % n == 0 and n*local_work_size[0]*local_work_size[1] <= 1024:
+    #  local_work_size[2] = n
+    #  n *= 2
+    #print(global_work_size, local_work_size)
+    conv_prg(global_work_size, local_work_size, x.image, w.image, ret.image, *conv_args, *[buf.image if is_img else buf.cl for is_img, (_, buf) in zip(ewimages, ewbufs)])
     return ret
 
 GPUBuffer = OpenCLBuffer

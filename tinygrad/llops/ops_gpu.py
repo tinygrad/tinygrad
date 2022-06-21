@@ -51,7 +51,7 @@ class CLProgram:
   def __call__(self, *args):
     global gcnt, jdat, weights, saved_objs, gobj
     if get_graph():
-      print(f"{gcnt:4d} running {self.name} with {args[0]} count {len(args)-2}")
+      print(f"{gcnt:4d} running {self.name} with {args[0]} {args[1]} count {len(args)-2}")
       #print(args)
       gcnt += 1
       # thneed hook
