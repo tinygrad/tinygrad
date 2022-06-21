@@ -6,7 +6,7 @@ from tinygrad.helpers import prod
 import sys
 sys.setrecursionlimit(10000)
 
-from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, log_op, DEBUG, GRAPH
+from tinygrad.ops import ReduceOps, BinaryOps, MovementOps, ProcessingOps, log_op, get_debug, get_graph
 from enum import Enum
 LoadOps = Enum("LoadOps", ["FROMCPU", "CONTIGUOUS"])
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
@@ -58,7 +58,7 @@ class LazyBuffer:
     if self.realized is None:
       self.realized, real_srcs = _realize(self)
       # TODO: get if logging in a better way
-      if DEBUG or GRAPH:
+      if get_graph() or get_debug():
         # in lazy mode, we don't log until we realize
         log_op(self.optype, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
       del self.op
@@ -75,6 +75,8 @@ class LazyBuffer:
 
   def unary_op(x, op): return elementwise_op(op, (x,))
   def binary_op(x, op, y:LazyBuffer): return elementwise_op(op, (x,y))
+
+  @functools.lru_cache(maxsize=None)
   def contiguous_op(x): return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
 
   @functools.lru_cache(maxsize=None)
@@ -189,6 +191,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   else:
     return gops.GPUBuffer(self.shape)._processing_op(real_srcs, code, arg), [x[1] for x in real_srcs]
 
+@functools.lru_cache(maxsize=None)
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
     #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")

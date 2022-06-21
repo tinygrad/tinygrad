@@ -8,19 +8,25 @@ ProcessingOps = Enum("ProcessingOps", ["CONV"])
 import os
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
+def get_graph(): return GRAPH
+def get_debug(): return DEBUG
+def set_graph(x): global GRAPH; GRAPH = x
+def set_debug(x): global DEBUG; DEBUG = x
+
 from collections import defaultdict
 cnts = defaultdict(int)
-if GRAPH:
-  import atexit
-  import networkx as nx
-  G = nx.DiGraph()
-  def save_graph_exit():
+
+import atexit
+import networkx as nx
+G = nx.DiGraph()
+def save_graph_exit():
+  if GRAPH:
     for k,v in cnts.items():
       print(k, v)
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
     os.system('dot -Tsvg /tmp/net.dot -o /tmp/net.svg')
-  atexit.register(save_graph_exit)
+atexit.register(save_graph_exit)
 
 global_num_max = 0
 def log_op(optype, op, ret, inp):

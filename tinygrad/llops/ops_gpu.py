@@ -27,7 +27,7 @@ class CLProgram:
     self.clprg = self.built.__getattr__(name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    #print(f"running {self.name} with {args[0]} count {len(args)-2}")
+    print(f"running {self.name} with {args[0]} count {len(args)-2}")
     self.clprg(cl_queue, *args)
 
 code_for_op = {
