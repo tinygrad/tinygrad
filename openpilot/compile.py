@@ -106,7 +106,7 @@ if __name__ == "__main__":
       runtime = e.profile.end - e.profile.start
       total_runtime += runtime
       if DEBUGCL:
-        print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us")
+        print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
         if prg.name == "image_conv":
           print(f"   {args[2].shape} {args[3].shape} -> {args[4].shape}")
     print(f"total runtime: {total_runtime/1e6:.2f} ms")

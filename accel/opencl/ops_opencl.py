@@ -13,6 +13,7 @@ def load(x):
      ret = f.read()
    return ret
 CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
+MATMUL_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/matmul.cl')
 
 class ECL(CL):
   @staticmethod
@@ -165,8 +166,25 @@ class OpenCLBuffer(GPUBuffer):
       options.append("-DBATCH")
       assert C.py == 0, "batched conv doesn't work with y-padding"
     if C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1 and C.cin == 1: options.append("-DDEPTHWISE_UNSTRIDED")
-    if C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1:
+    if C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1:
       options.append("-DMATMUL")
+
+      conv_args = []
+      conv_short_names = ["numPackedInputChannelsForGroup", "totalNumPackedInputChannels", "numPackedOutputChannelsForGroup", "totalNumPackedOutputChannels", "numOutputColumns", "numOutputRows", "numInputRows"]
+      conv_shorts = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy]
+
+      conv_src = MATMUL_SRC
+      replacements["//SHORTS"] = ''.join([f"short {name} = {val};" for name,val in zip(conv_short_names, conv_shorts)])
+      for k,v in replacements.items():
+        conv_src = conv_src.replace(k, v)
+
+      conv_prg = CLProgram("matmul", conv_src,
+        options=tuple(options),
+        argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
+      )
+      global_work_size = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
+      conv_prg(global_work_size, None, x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
+      return ret
 
     assert C.cout%4 == 0
     conv_src = CONV_SRC

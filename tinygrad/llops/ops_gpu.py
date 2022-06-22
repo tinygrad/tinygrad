@@ -30,7 +30,7 @@ class CL:
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
-    self.name = name
+    self.name, self.options = name, options
     self.built = cl.Program(CL().cl_ctx, prg).build(options=options)
     self.clprg = self.built.__getattr__(name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
