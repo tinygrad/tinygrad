@@ -189,14 +189,13 @@ class OpenCLBuffer(GPUBuffer):
       global_work_size = [4, 8, C.cout//4]
 
       # must be even
-      lw = 32
+      lw = 1024 // (global_work_size[0] * global_work_size[1])
       while global_work_size[2] % lw != 0:
         lw -= 1
+      local_work_size = [4, global_work_size[1], lw]
 
-      local_work_size = [4, 8, lw]
       #print(global_work_size, local_work_size)
-      #global_work_size = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
-      conv_prg(global_work_size, local_work_size, cl.LocalMemory(128 * lw), x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
+      conv_prg(global_work_size, local_work_size, cl.LocalMemory(4 * local_work_size[0] * local_work_size[1] * lw), x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
       return ret
 
     assert C.cout%4 == 0
