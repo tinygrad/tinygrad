@@ -1,5 +1,3 @@
-#define NUM_OUTPUTS 4
-
 //PREFIX
 
 __kernel void image_conv(

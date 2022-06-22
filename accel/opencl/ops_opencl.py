@@ -206,6 +206,9 @@ class OpenCLBuffer(GPUBuffer):
     conv_arg_names = ["numPackedInputChannelsForGroup", "totalNumPackedInputChannels", "numPackedOutputChannelsForGroup", "totalNumPackedOutputChannels", "numOutputColumns", "numOutputRows", "numInputRows"]
     conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy]
 
+    NUM_OUTPUTS = 4
+    options.append(f"-DNUM_OUTPUTS={NUM_OUTPUTS}")
+
     # comment out for args
     """
     conv_short_names += conv_arg_names
@@ -222,7 +225,7 @@ class OpenCLBuffer(GPUBuffer):
       options=tuple(options),
       argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
     )
-    global_work_size = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
+    global_work_size = [C.cout//4, (C.ox+NUM_OUTPUTS-1)//NUM_OUTPUTS, C.bs*C.oy]
     conv_prg(global_work_size, None, x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
     return ret
 

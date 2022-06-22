@@ -27,8 +27,9 @@ from test.test_onnx import run_onnx_torch
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 
-OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
+#OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
 #OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/1f2f9ea9c9dc37bdea9c6e32e4cb8f88ea0a34bf/selfdrive/modeld/models/supercombo.onnx"
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/0e0b5c4e24a8da64362c8dbf851dbe0f806916c0/selfdrive/modeld/models/supercombo.onnx"
 
 np.random.seed(1337)
 def get_random_input_tensors():
