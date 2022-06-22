@@ -191,7 +191,7 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     return gops.GPUBuffer.fromCPU(self.op.arg), []
   elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize()
-    return real_src.contiguous(), [real_src]
+    return real_src.contiguous_op(), [real_src]
   elif self.optype == ReduceOps:
     real_src = self.op.src[0].realize()
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src]
