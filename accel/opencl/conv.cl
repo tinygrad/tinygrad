@@ -53,6 +53,35 @@ __kernel void image_conv(
   inputLocation.y = mad24(outputRow, strideY, -paddingY);
 #endif
 
+#ifdef MATMUL
+
+  for (short packedInputChannel = 0; packedInputChannel < numPackedInputChannelsForGroup; ++packedInputChannel) {
+    inputLocation.x = startX + packedInputChannel;
+    
+    float4 inputValues[NUM_OUTPUTS];
+    for (short i = 0; i < NUM_OUTPUTS; ++i) {
+      inputValues[i] = read_imagef(input, smp, inputLocation);
+      inputLocation.x += strideWithChannels;
+    }
+
+    float4 weightValues[4];
+    for (short outChIdx = 0; outChIdx < 4; ++outChIdx) {
+      weightValues[outChIdx] = read_imagef(weights, smp, weightLocation);
+      ++weightLocation.x;
+    }
+
+    for (short i = 0; i < NUM_OUTPUTS; ++i) {
+      float4 curOutputValues = outputValues[i];
+      curOutputValues.x += dot(inputValues[i], weightValues[0]);
+      curOutputValues.y += dot(inputValues[i], weightValues[1]);
+      curOutputValues.z += dot(inputValues[i], weightValues[2]);
+      curOutputValues.w += dot(inputValues[i], weightValues[3]);
+      outputValues[i] = curOutputValues;
+    }
+  }
+
+#else
+
 #ifdef DEPTHWISE_UNSTRIDED
   for (short rfRow = 0; rfRow < filterSizeY; ++rfRow) {
     float4 inputValues[4];
@@ -118,6 +147,8 @@ __kernel void image_conv(
     }
     inputLocation.y += dilationY;
   }
+#endif
+
 #endif
 
   // insert unary and binary ops here

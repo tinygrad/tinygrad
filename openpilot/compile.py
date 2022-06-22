@@ -44,6 +44,7 @@ def get_random_input_tensors():
   for _,v in inputs.items(): v.realize()
   return inputs, np_inputs
 
+# UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 python3 openpilot/compile.py
 if __name__ == "__main__":
   ops.GRAPH = False
 
@@ -89,7 +90,7 @@ if __name__ == "__main__":
   CL.CACHE = None
 
   # real CL ish
-  for j in range(2):
+  for j in range(1):
     events = []
     st = time.monotonic()
     for i, (prg, args) in enumerate(local_cl_cache):
@@ -106,6 +107,8 @@ if __name__ == "__main__":
       total_runtime += runtime
       if DEBUGCL:
         print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us")
+        if prg.name == "image_conv":
+          print(f"   {args[2].shape} {args[3].shape} -> {args[4].shape}")
     print(f"total runtime: {total_runtime/1e6:.2f} ms")
 
   tinygrad_out = tinygrad_out.numpy()

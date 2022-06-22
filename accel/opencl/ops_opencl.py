@@ -113,6 +113,10 @@ class OpenCLBuffer(GPUBuffer):
       # TODO: handle an opencl conv without the conv part
       return super()._processing_op(bufs, code, C)
 
+    # HACK to test no accumulate
+    #bufs = bufs[0:2]
+    #code = "acc"
+
     assert bufs[0][0] == "input" and bufs[1][0] == "weight"
     x,w = bufs[0][1], bufs[1][1]
     ewbufs = bufs[2:]
@@ -161,6 +165,8 @@ class OpenCLBuffer(GPUBuffer):
       options.append("-DBATCH")
       assert C.py == 0, "batched conv doesn't work with y-padding"
     if C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1 and C.cin == 1: options.append("-DDEPTHWISE_UNSTRIDED")
+    if C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1:
+      options.append("-DMATMUL")
 
     assert C.cout%4 == 0
     conv_src = CONV_SRC
