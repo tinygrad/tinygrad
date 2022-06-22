@@ -53,6 +53,7 @@ class CLProgram:
   def __call__(self, *args):
     global gcnt, jdat, weights, saved_objs, gobj, tt
     if get_graph():
+      print(f"{gcnt:4d} running {self.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
       #print(args)
       gcnt += 1
       # thneed hook
@@ -107,6 +108,8 @@ class CLProgram:
       })
       #print(jdat['kernels'][-1])
 
+    self.clprg(cl_queue, *args)
+    """
     avg = []
     for i in range(4):
       st = time.monotonic()
@@ -120,6 +123,7 @@ class CLProgram:
     if get_graph():
       tt += avg
       print(f"{gcnt:4d} running {self.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}", f"in {avg:.3f} ms total {tt:.2f} ms")
+    """
 
 
 code_for_op = {
