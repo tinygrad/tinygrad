@@ -11,13 +11,15 @@ __kernel void image_conv(
   short numPackedOutputChannelsForGroup,
   short totalNumPackedOutputChannels,
   short numOutputColumns,
-  short numOutputRows, short numInputRows,
-  short filterSizeX, short filterSizeY,
+  short numOutputRows, short numInputRows
+  /*short filterSizeX, short filterSizeY,
   short paddingX, short paddingY,
   short strideX, short strideY,
-  short dilationX, short dilationY
+  short dilationX, short dilationY*/
   //ARGS
   ) {
+
+  //SHORTS
 
   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
 
@@ -91,14 +93,19 @@ __kernel void image_conv(
   }
 
   // insert unary and binary ops here
-
-  // output to memory
   int2 outputLocation;
   short outputColumn = startOutputColumn;
   outputLocation.y = outputRow;
   for (short i = 0; i < NUM_OUTPUTS; ++i) {
     outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
     //BINOP
+    ++outputColumn;
+  }
+
+  // output to memory
+  outputColumn = startOutputColumn;
+  for (short i = 0; i < NUM_OUTPUTS; ++i) {
+    outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
     if (outputColumn < numOutputColumns) {
       write_imagef(output, outputLocation, outputValues[i]);
     }
