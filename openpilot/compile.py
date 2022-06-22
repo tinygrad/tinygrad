@@ -78,14 +78,15 @@ if __name__ == "__main__":
   local_cl_cache = []
   for i, (prg, args) in enumerate(CL.CACHE):
     args = list(args)
-    if len(args[0]) == 3:
-      if args[0][1] == 1 and args[0][2] == 1:
-        args[1] = [min(1024, args[0][0]), 1, 1]
+    if args[1] is None:
+      if len(args[0]) == 3:
+        if args[0][1] == 1 and args[0][2] == 1:
+          args[1] = [min(1024, args[0][0]), 1, 1]
+        else:
+          args[1] = [1,args[0][1],min(args[0][2], 4)]
+          args[1][0] = min(32, min(args[0][0], 1024 // (args[1][1] * args[1][2])))
       else:
-        args[1] = [1,args[0][1],min(args[0][2], 4)]
-        args[1][0] = min(32, min(args[0][0], 1024 // (args[1][1] * args[1][2])))
-    else:
-      args[1] = [min(1024, args[0][0]), 1]
+        args[1] = [min(1024, args[0][0]), 1]
     local_cl_cache.append((prg, args))
   CL.CACHE = None
 
@@ -106,7 +107,7 @@ if __name__ == "__main__":
       runtime = e.profile.end - e.profile.start
       if DEBUGCL:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
-        if prg.name == "matmul": print(f"   {args[2].shape} {args[3].shape} -> {args[4].shape}")
+        #if prg.name == "matmul": print(f"   {args[3].shape} {args[4].shape} -> {args[5].shape}")
       total_runtime += runtime
     print(f"total runtime: {total_runtime/1e6:.2f} ms")
 
