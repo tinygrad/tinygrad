@@ -99,8 +99,16 @@ class ShapeTracker:
     assert all([isinstance(x, int) for x in new_shape])
     assert prod(self.shape) == prod(new_shape)
     if self.shape == new_shape: return
+
+    # check if this is adding or removing 1s (only)
+    if tuple([x for x in self.shape if x != 1]) == tuple([x for x in new_shape if x != 1]):
+      old_strides = [y for x,y in zip(self.shape, self.strides) if x != 1]
+      new_strides = [0 if x == 1 else old_strides.pop(0) for x in new_shape]
+      self.views[-1] = View(new_shape, new_strides, self.offset)
+      return
+
     view = View(new_shape, strides_for_shape(new_shape))
-    if self.contiguous: self.views[-1] = view
+    if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
     else: self.views.append(view)
 
   def permute(self, *axis):
