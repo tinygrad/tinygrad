@@ -5,13 +5,15 @@
 __kernel void image_conv(
   read_only image2d_t input,
   read_only image2d_t weights,
-  write_only image2d_t output,
-  short numPackedInputChannelsForGroup,
+  write_only image2d_t output
+#ifndef NOARGS
+  ,short numPackedInputChannelsForGroup,
   short totalNumPackedInputChannels,
   short numPackedOutputChannelsForGroup,
   short totalNumPackedOutputChannels,
   short numOutputColumns,
   short numOutputRows, short numInputRows
+#endif
   /*short filterSizeX, short filterSizeY,
   short paddingX, short paddingY,
   short strideX, short strideY,
