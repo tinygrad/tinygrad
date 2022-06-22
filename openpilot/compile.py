@@ -91,9 +91,9 @@ if __name__ == "__main__":
         args[1][0] = min(32, min(args[0][0], 1024 // (args[1][1] * args[1][2])))
       """
       runtimes = []
-      for l2 in [16,args[0][1]]:
-        for l3 in [4,16,args[0][2]]:
-          for l1 in [max(1, 1024//(l2*l3)), args[0][0], 4, 16]:
+      for l2 in [16,args[0][1],1024]:
+        for l3 in [4,16,args[0][2],1024]:
+          for l1 in [max(1, 1024//(l2*l3)), args[0][0], 4, 16, 1024]:
             if l1 > args[0][0] or l2 > args[0][1] or l3 > args[0][2]: continue
             local_args = (l1, l2, l3)
             if prod(local_args) > 1024: continue

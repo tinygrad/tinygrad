@@ -186,7 +186,7 @@ class OpenCLBuffer(GPUBuffer):
         options=tuple(options),
         argdtypes=tuple([None, None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
       )
-      global_work_size = [4, 8, C.cout//4]
+      global_work_size = [4, 16, C.cout//4]
 
       # must be even
       lw = 1024 // (global_work_size[0] * global_work_size[1])
