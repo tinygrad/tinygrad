@@ -25,17 +25,21 @@ class TestOnnxModel(unittest.TestCase):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
-    inputs = {
-      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
-      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-      "desire": np.zeros((1, 8)),
-      "traffic_convention": np.array([[1., 0.]]),
-      "initial_state": np.zeros((1, 512))
-      #"initial_state": np.zeros((1, 768))
-    }
-    inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in inputs.items()}
-    for _,v in inputs.items(): v.realize()
+    def get_inputs():
+      np_inputs = {
+        "input_imgs": np.random.randn(*(1, 12, 128, 256)),
+        "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+        "desire": np.zeros((1, 8)),
+        "traffic_convention": np.array([[1., 0.]]),
+        "initial_state": np.zeros((1, 512))
+        #"initial_state": np.zeros((1, 768))
+      }
+      inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
+      for _,v in inputs.items(): v.realize()
+      return inputs
+
     for _ in range(7):
+      inputs = get_inputs()
       st = time.monotonic()
       tinygrad_out = run_onnx(inputs)['outputs']
       mt = time.monotonic()
@@ -47,6 +51,7 @@ class TestOnnxModel(unittest.TestCase):
 
     import cProfile
     import pstats
+    inputs = get_inputs()
     pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
     pr.enable()
     tinygrad_out = run_onnx(inputs)['outputs']
