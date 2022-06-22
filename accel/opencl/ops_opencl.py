@@ -115,16 +115,25 @@ class OpenCLBuffer(GPUBuffer):
     assert bufs[0][0] == "input" and bufs[1][0] == "weight"
     x,w = bufs[0][1], bufs[1][1]
     ewbufs = bufs[2:]
-    ewimages = [buf.is_image() and buf.shape == ret.shape and buf.st.contiguous for _,buf in ewbufs]
-    ewtypes = [f"read_only image2d_t {name}_g" if is_img else f"__global const float *{name}_g" for is_img, (name, buf) in zip(ewimages, ewbufs)]
 
+    ewtypes = []
     getters = []
-    for is_img, (name, buf) in zip(ewimages, ewbufs):
-      if is_img:
+    for name, buf in ewbufs:
+      if buf.is_image() and buf.shape == ret.shape and buf.st.contiguous:
+        # use an image here
+        ewtypes.append(f"read_only image2d_t {name}_g")
         getters.append(f"inline float4 get4_{name}(read_only image2d_t x, const sampler_t smp, int2 loc, int gid) {{ return read_imagef(x, smp, loc); }}")
+      elif buf.st.contiguous:
+        # use float4
+        ewtypes.append(f"__global const float4 *{name}_g")
+        getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
+          f"return x[gid/4]; }}")
       else:
+        # fallback to float
+        ewtypes.append(f"__global const float *{name}_g")
         getters.append(buf.contiguous_view(name))
-        getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{ return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
+        getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{"+
+          f"return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
 
     elementwise_prefix = '\n'.join(getters)+ \
       "\n\ninline float4 _ewop("+','.join(["const sampler_t smp", "int2 loc", "int gid", "float4 acc"]+ewtypes)+") {\n"+ \
@@ -150,7 +159,7 @@ class OpenCLBuffer(GPUBuffer):
     )
     conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
     global_work_size = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
-    conv_prg(global_work_size, None, x.image, w.image, ret.image, *conv_args, *[buf.image if is_img else buf.cl for is_img, (_, buf) in zip(ewimages, ewbufs)])
+    conv_prg(global_work_size, None, x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
     return ret
 
 GPUBuffer = OpenCLBuffer

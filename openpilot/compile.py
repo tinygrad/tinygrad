@@ -11,6 +11,8 @@ if int(os.getenv("NOIMAGE", 0)):
 else:
   os.environ['LAZY_OPENCL'] = '1'
 
+DEBUGCL = int(os.getenv("DEBUGCL", 0))
+
 import onnx
 import numpy as np
 
@@ -72,7 +74,8 @@ if __name__ == "__main__":
   # real CL ish
   st = time.monotonic()
   for i, (prg, args) in enumerate(CL.CACHE):
-    print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
+    if DEBUGCL: print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
+    #print(args)
     prg.clprg(CL().cl_queue, *args)
   mt = time.monotonic()
   CL().cl_queue.finish()
