@@ -148,6 +148,8 @@ class OpenCLBuffer(GPUBuffer):
     if C.bs > 1:
       options.append("-DBATCH")
       assert C.py == 0, "batched conv doesn't work with y-padding"
+    if C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1 and C.cin == 1: options.append("-DDEPTHWISE_UNSTRIDED")
+
     assert C.cout%4 == 0
     conv_src = CONV_SRC
     conv_short_names = ["filterSizeX", "filterSizeY", "paddingX", "paddingY", "strideX", "strideY", "dilationX", "dilationY"]
