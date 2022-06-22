@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, code_for_op
 from tinygrad.ops import ProcessingOps
 from tinygrad.helpers import prod, ConvArgs
@@ -16,10 +17,11 @@ CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv
 class ECL(CL):
   @staticmethod
   def image(shape):
-    if CL.DEBUG >= 2: print(f"cl: create image({shape})")
-    fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
-    # HALF_FLOAT breaks tests
-    #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
+    if int(os.getenv("FLOAT16", 0)):
+      # HALF_FLOAT breaks tests
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
+    else:
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
     return cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=shape)
 
 def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:

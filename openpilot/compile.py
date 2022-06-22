@@ -6,10 +6,15 @@ import os
 import time
 import io
 os.environ['LAZY'] = '1'
-os.environ['LAZY_OPENCL'] = '1'
+if int(os.getenv("NOIMAGE", 0)):
+  pass
+else:
+  os.environ['LAZY_OPENCL'] = '1'
 
 import onnx
 import numpy as np
+
+import tinygrad.ops as ops
 
 from tinygrad.llops.ops_gpu import CL
 from extra.utils import fetch
@@ -36,6 +41,8 @@ def get_random_input_tensors():
   return inputs, np_inputs
 
 if __name__ == "__main__":
+  ops.GRAPH = False
+
   dat = fetch(OPENPILOT_MODEL)
   onnx_model = onnx.load(io.BytesIO(dat))
   run_onnx = get_run_onnx(onnx_model)
@@ -57,18 +64,22 @@ if __name__ == "__main__":
   tinygrad_out = run_onnx(inputs)['outputs']
 
   CL.CACHE = []
+  ops.GRAPH = True
   tinygrad_out.realize()
+  ops.GRAPH = False
   print("kernel count:", len(CL.CACHE))
 
   # real CL ish
   st = time.monotonic()
-  for prg, args in CL.CACHE:
-    prg(CL().cl_queue, *args)
+  for i, (prg, args) in enumerate(CL.CACHE):
+    print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
+    prg.clprg(CL().cl_queue, *args)
   mt = time.monotonic()
   CL().cl_queue.finish()
   et = time.monotonic()
   print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {(et-st)*1000.0:.2f} ms")
 
+  CL.CACHE = None
   tinygrad_out = tinygrad_out.numpy()
 
   # float32

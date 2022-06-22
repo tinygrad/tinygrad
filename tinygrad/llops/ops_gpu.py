@@ -9,7 +9,6 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, Processing
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
 class CL:
-  DEBUG = int(os.getenv("DEBUGCL", "0"))
   CACHE = None
   def __init__(self):
     if getattr(CL, "cl_queue", None) is not None: return
@@ -21,25 +20,21 @@ class CL:
 
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
-    if CL.DEBUG: print(f"cl: copy into {type(a)} sz {a.size} block {is_blocking}")
+    if CL.CACHE is not None: assert False, "can't copy while caching"
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
   @staticmethod
-  def malloc(sz):
-    if CL.DEBUG >= 2: print(f"cl: malloc({sz})")
-    return cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, sz)
+  def malloc(sz): return cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, sz)
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
     self.name = name
-    if CL.DEBUG >= 2: print(f"cl: building {self.name:20s} with {options}")
     self.built = cl.Program(CL().cl_ctx, prg).build(options=options)
     self.clprg = self.built.__getattr__(name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    if CL.DEBUG: print(f"cl: running {self.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
-    if CL.CACHE is not None: CL.CACHE.append((self.clprg, args))
+    if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)
 
 # **** end CL wrappers ****
