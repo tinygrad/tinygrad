@@ -128,6 +128,13 @@ class OpenCLBuffer(GPUBuffer):
         ewtypes.append(f"__global const float4 *{name}_g")
         getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
           f"return x[gid/4]; }}")
+      elif False:
+        # use float4 indexed (HACK!)
+        # TODO: work out when this is okay
+        ewtypes.append(f"__global const float4 *{name}_g")
+        getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
+          "int valid = 1; int idx = gid;"+buf.st.expr()+";"+
+          f"return x[idx/4]; }}")
       else:
         # fallback to float
         ewtypes.append(f"__global const float *{name}_g")
