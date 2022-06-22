@@ -24,9 +24,9 @@ if GRAPH:
 
 global_num_max = 0
 def log_op(optype, op, ret, inp):
-  cnts[optype] += 1
   if DEBUG: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
+    cnts[optype] += 1
     def nm(x):
       global global_num_max
       if getattr(x, 'global_num', None) is None:

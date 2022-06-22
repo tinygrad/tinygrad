@@ -107,6 +107,7 @@ class OpenCLBuffer(GPUBuffer):
       self._buf = None
     return self._image
 
+  seen = set()
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None):
     if C is None:
       # TODO: handle an opencl conv without the conv part
@@ -115,6 +116,10 @@ class OpenCLBuffer(GPUBuffer):
     assert bufs[0][0] == "input" and bufs[1][0] == "weight"
     x,w = bufs[0][1], bufs[1][1]
     ewbufs = bufs[2:]
+
+    if tuple(bufs[0:2]) in OpenCLBuffer.seen:
+      print("WARNING: recomputing CONV with", bufs[0], bufs[1])
+    OpenCLBuffer.seen.add(tuple(bufs[0:2]))
 
     ewtypes = []
     getters = []

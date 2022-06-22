@@ -47,6 +47,12 @@ def cmp(buf1:LazyBuffer, buf2:LazyBuffer):
       expanded2.add(x2)
   return 0
 
+@functools.lru_cache(maxsize=None)
+def depends(haystack:LazyBuffer, needle:LazyBuffer):
+  gen = get_lazybuffers(haystack.op)
+  if needle in gen: return True
+  return any(depends(x, needle) for x in gen if x.realized is None)
+
 class LazyBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
     self.st = ShapeTracker(shape)
@@ -138,12 +144,14 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
       else:
         order = cmp(srcs[0], srcs[1])
         if order == -1:
+        #if depends(srcs[0], srcs[1]):
           srcs = [srcs[0].op, srcs[1]]
         elif order == 1:
+        #elif depends(srcs[1], srcs[0]):
           srcs = [srcs[0], srcs[1].op]
         else:
           # all three are okay
-          #return Buffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
+          #return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
           srcs = [srcs[0].op, srcs[1]]
           #srcs = [srcs[0], srcs[1].op]
         return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
