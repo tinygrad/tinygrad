@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.shapetracker import ShapeTracker
 import functools, operator
@@ -150,9 +151,11 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
   return LazyBuffer(out_shape, BinaryOps, LazyOp(op, srcs))
 
-
 # these functions determines the backing buffer
-import tinygrad.llops.ops_gpu as gops
+if int(os.getenv("LAZY_OPENCL", 0)) == 1:
+  import tinygrad.llops.ops_opencl as gops
+else:
+  import tinygrad.llops.ops_gpu as gops
 
 def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   # optional

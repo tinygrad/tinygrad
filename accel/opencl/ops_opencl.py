@@ -52,9 +52,10 @@ class OpenCLBuffer(GPUBuffer):
   @property
   def cl(self):
     if self._buf is None:
-      self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
+      if self.st.contiguous:
+        self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
       if self._image is not None:
-        assert prod(self.shape) == prod(self._image.shape)*4
+        self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self._image.shape)*4))
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", """
           __kernel void from_image(
@@ -77,8 +78,9 @@ class OpenCLBuffer(GPUBuffer):
   def image(self):
     if self._image is None:
       assert self.shape[2] == 4 and len(self.shape) == 3
-      #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
-      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
+      # HALF_FLOAT breaks tests
+      #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
       self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
@@ -97,18 +99,11 @@ class OpenCLBuffer(GPUBuffer):
       self._buf = None
     return self._image
 
-  def movement_op(x, op, arg):
-    x.cl
-    # TODO: call super after x.cl
-    ret = type(x)(x.st, x)
-    ret.shape = ret.st.movement_op(op, arg).shape
-    return ret
+  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None):
+    if C is None:
+      # TODO: handle an opencl conv without the conv part
+      return super()._processing_op(bufs, code, C)
 
-  def processing_op(x, op, w, C:ConvArgs):
-    assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    return type(x)(C.out_shape)._processing_op_cl([("input", x), ("weight", w)], "acc", C)
-
-  def _processing_op_cl(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None):
     assert bufs[0][0] == "input" and bufs[1][0] == "weight"
     x,w = bufs[0][1], bufs[1][1]
     ewbufs = bufs[2:]
@@ -140,29 +135,14 @@ class OpenCLBuffer(GPUBuffer):
     conv_src = CONV_SRC
     for k,v in replacements.items():
       conv_src = conv_src.replace(k, v)
-    #if any(ewimages):
-    #  print(conv_src)
-    #  exit(0)
+    #print(conv_src)
     conv_prg = CLProgram("image_conv", conv_src,
       options=tuple(options),
       argdtypes=tuple([None, None, None] + [np.int16]*15 + [None]*len(ewbufs))
     )
     conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy, C.W, C.H, C.px, C.py, C.xs, C.ys, C.dx, C.dy]
     global_work_size = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
-    local_work_size = [1, (C.ox+3)//4, 1]
-
-    MAX_LOCAL_WORK_SIZE = 256
-
-    n = 1
-    while global_work_size[0] % n == 0 and n*local_work_size[1]*local_work_size[2] <= MAX_LOCAL_WORK_SIZE:
-      local_work_size[0] = n
-      n *= 2
-    n = 1
-    while global_work_size[2] % n == 0 and n*local_work_size[0]*local_work_size[1] <= MAX_LOCAL_WORK_SIZE:
-      local_work_size[2] = n
-      n *= 2
-    #print(global_work_size, local_work_size)
-    conv_prg(global_work_size, local_work_size, x.image, w.image, ret.image, *conv_args, *[buf.image if is_img else buf.cl for is_img, (_, buf) in zip(ewimages, ewbufs)])
+    conv_prg(global_work_size, None, x.image, w.image, ret.image, *conv_args, *[buf.image if is_img else buf.cl for is_img, (_, buf) in zip(ewimages, ewbufs)])
     return ret
 
 GPUBuffer = OpenCLBuffer

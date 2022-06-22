@@ -70,7 +70,7 @@ class GPUBuffer:
   def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   def movement_op(x, op:MovementOps, arg) -> GPUBuffer:
-    ret = GPUBuffer(x.st, x)
+    ret = type(x)(x.st, x)
     ret.shape = ret.st.movement_op(op, arg).shape
     return ret
 
@@ -79,7 +79,7 @@ class GPUBuffer:
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int]):
-    ret = GPUBuffer(new_shape)
+    ret = type(x)(new_shape)
     if op == ReduceOps.SUM: code, start = "out += a", "0.0"
     elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
     else: raise Exception(f"{op} isn't supported")
