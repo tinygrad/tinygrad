@@ -175,6 +175,8 @@ class OpenCLBuffer(GPUBuffer):
 
       conv_src = MATMUL_SRC
       replacements["//SHORTS"] = ''.join([f"short {name} = {val};" for name,val in zip(conv_short_names, conv_shorts)])
+      if "//BINOP" in replacements:
+        replacements["//BINOP"] = replacements["//BINOP"].replace("outputValues[i]", "outputValues")
       for k,v in replacements.items():
         conv_src = conv_src.replace(k, v)
 

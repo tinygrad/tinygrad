@@ -104,11 +104,10 @@ if __name__ == "__main__":
     for i, ((prg, args), e) in enumerate(zip(local_cl_cache, events)):
       # profile types https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clGetEventProfilingInfo.html
       runtime = e.profile.end - e.profile.start
-      total_runtime += runtime
       if DEBUGCL:
-        print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
-        if prg.name == "image_conv":
-          print(f"   {args[2].shape} {args[3].shape} -> {args[4].shape}")
+        print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
+        if prg.name == "matmul": print(f"   {args[2].shape} {args[3].shape} -> {args[4].shape}")
+      total_runtime += runtime
     print(f"total runtime: {total_runtime/1e6:.2f} ms")
 
   tinygrad_out = tinygrad_out.numpy()
