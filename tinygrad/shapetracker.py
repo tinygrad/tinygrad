@@ -36,7 +36,7 @@ class View:
     acc = 1
     for i,(d,s) in enumerate(self.shape_strides[::-1]):
       if d != 1 and s != 0:
-        lr = divmodidx(acc, d, i != len(self.shape_strides)-1)
+        lr = divmodidx(acc, d, i != len(self.shape_strides)-1 and d != prod(self.shape))
         lr = f"({lr}*{s})" if s != 1 else lr
         ret.append(lr)
       acc *= d

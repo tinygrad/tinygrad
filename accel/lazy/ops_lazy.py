@@ -17,6 +17,7 @@ SHUFFLE_MOVEMENT_OPS = True   # this breaks maxpool
 REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
+FOLD_CONSTANTS_INTO_KERNELS = True
 
 class LazyOp(NamedTuple):
   op: Op
@@ -174,7 +175,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   for s in lazy_srcs:
     if s.optype == MovementOps and s.realized is None:
       root = get_root(s.op)
-      if root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
+      if FOLD_CONSTANTS_INTO_KERNELS and root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
         if not s.st.needs_valid():
           real_dict[s] = f"({root.op.arg[0]}f)"
         else:
