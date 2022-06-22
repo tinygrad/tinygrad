@@ -133,8 +133,12 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   if MERGE_ELEMENTWISE_INTO_CONV_OUTPUT:
     cnt = sum([x.optype == ProcessingOps and x.realized is None for x in srcs])
     if cnt == 1:
-      srcs = [x.op if x.optype == ProcessingOps and x.realized is None else x for x in srcs]
-      return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
+      conv = find_conv([x.op for x in srcs if x.optype == ProcessingOps and x.realized is None][0])
+      blacklist = conv.src[1].shape == (256, 2060, 4) and out_shape == (1, 256, 4)
+      # hack to not recompute the conv
+      if not blacklist:
+        tsrcs = [x.op if x.optype == ProcessingOps and x.realized is None else x for x in srcs]
+        return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, tsrcs))
     elif cnt == 2:
       # have to confirm they are the same conv
       c1, c2 = [find_conv(x.op) for x in srcs]

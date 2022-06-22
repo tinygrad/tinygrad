@@ -86,19 +86,27 @@ if __name__ == "__main__":
     else:
       args[1] = [min(1024, args[0][0]), 1]
     local_cl_cache.append((prg, args))
-    if DEBUGCL: print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
   CL.CACHE = None
 
   # real CL ish
-  for i in range(10):
+  for j in range(2):
+    events = []
     st = time.monotonic()
     for i, (prg, args) in enumerate(local_cl_cache):
       #print(args)
-      prg.clprg(CL().cl_queue, *args)
+      events.append(prg.clprg(CL().cl_queue, *args))
     mt = time.monotonic()
     CL().cl_queue.finish()
     et = time.monotonic()
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {(et-st)*1000.0:.2f} ms")
+    total_runtime = 0
+    for i, ((prg, args), e) in enumerate(zip(local_cl_cache, events)):
+      # profile types https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clGetEventProfilingInfo.html
+      runtime = e.profile.end - e.profile.start
+      total_runtime += runtime
+      if DEBUGCL:
+        print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us")
+    print(f"total runtime: {total_runtime/1e6:.2f} ms")
 
   tinygrad_out = tinygrad_out.numpy()
 

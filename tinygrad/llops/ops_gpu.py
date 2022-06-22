@@ -16,7 +16,8 @@ class CL:
     if len(devices) == 0:  # settle for CPU
       devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
     CL.cl_ctx = cl.Context(devices=devices)
-    CL.cl_queue = cl.CommandQueue(self.cl_ctx)  # this is an in-order command queue
+    # this is an in-order command queue
+    CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
