@@ -78,25 +78,32 @@ if __name__ == "__main__":
   for i, (prg, args) in enumerate(CL.CACHE):
     args = list(args)
     if len(args[0]) == 3:
-      args[1] = [1,args[0][1],min(args[0][2], 8)]
-      args[1][0] = min(32, min(args[0][0], 1024 // (args[1][1] * args[1][2])))
+      if args[0][1] == 1 and args[0][2] == 1:
+        args[1] = [min(1024, args[0][0]), 1, 1]
+      else:
+        args[1] = [1,args[0][1],min(args[0][2], 4)]
+        args[1][0] = min(32, min(args[0][0], 1024 // (args[1][1] * args[1][2])))
+    else:
+      args[1] = [min(1024, args[0][0]), 1]
     local_cl_cache.append((prg, args))
     if DEBUGCL: print(f"{i:3d} running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
   CL.CACHE = None
 
   # real CL ish
-  st = time.monotonic()
-  for i, (prg, args) in enumerate(local_cl_cache):
-    #print(args)
-    prg.clprg(CL().cl_queue, *args)
-  mt = time.monotonic()
-  CL().cl_queue.finish()
-  et = time.monotonic()
-  print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {(et-st)*1000.0:.2f} ms")
+  for i in range(10):
+    st = time.monotonic()
+    for i, (prg, args) in enumerate(local_cl_cache):
+      #print(args)
+      prg.clprg(CL().cl_queue, *args)
+    mt = time.monotonic()
+    CL().cl_queue.finish()
+    et = time.monotonic()
+    print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {(et-st)*1000.0:.2f} ms")
 
   tinygrad_out = tinygrad_out.numpy()
 
-  # float32
-  torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
-  print(tinygrad_out, torch_out)
-  np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
+  # float32 only
+  if int(os.getenv("FLOAT16", 0)) == 0:
+    torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
+    print(tinygrad_out, torch_out)
+    np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
