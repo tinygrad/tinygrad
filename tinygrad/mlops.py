@@ -26,7 +26,7 @@ class ReLU(_UnaryOp):
 
 class Log(_UnaryOp):
   fop = UnaryOps.LOG
-  bop = BinaryOps.DIV
+  bop = BinaryOps.DIV   # TODO: flip order of DIV
 
 class Exp(_UnaryOp):
   def forward(ctx, input):
@@ -35,6 +35,8 @@ class Exp(_UnaryOp):
     return ret
 
   bop = BinaryOps.MUL
+
+# TODO: add Neg?
 
 # ************* reduce ops *************
 
@@ -95,6 +97,8 @@ class Mul(Function):
     grad_x = ctx.binary_op(BinaryOps.MUL, y, grad_output) if ctx.needs_input_grad[0] else None
     grad_y = ctx.binary_op(BinaryOps.MUL, x, grad_output) if ctx.needs_input_grad[1] else None
     return grad_x, grad_y
+
+# TODO: add Div?
 
 class Pow(Function):
   def forward(ctx, x, y):
