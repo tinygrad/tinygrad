@@ -1,19 +1,23 @@
-  #define NUM_OUTPUTS 4
+#define NUM_OUTPUTS 4
 
-  __kernel void conv(
-    read_only image2d_t input,
-    read_only image2d_t weights,
-    write_only image2d_t output,
-    short numPackedInputChannelsForGroup,
-    short totalNumPackedInputChannels,
-    short numPackedOutputChannelsForGroup,
-    short totalNumPackedOutputChannels,
-    short numOutputColumns,
-    short numOutputRows, short numInputRows,
-    short filterSizeX, short filterSizeY,
-    short paddingX, short paddingY,
-    short strideX, short strideY,
-    short dilationX, short dilationY) {
+//PREFIX
+
+__kernel void image_conv(
+  read_only image2d_t input,
+  read_only image2d_t weights,
+  write_only image2d_t output,
+  short numPackedInputChannelsForGroup,
+  short totalNumPackedInputChannels,
+  short numPackedOutputChannelsForGroup,
+  short totalNumPackedOutputChannels,
+  short numOutputColumns,
+  short numOutputRows, short numInputRows,
+  short filterSizeX, short filterSizeY,
+  short paddingX, short paddingY,
+  short strideX, short strideY,
+  short dilationX, short dilationY
+  //ARGS
+  ) {
 
   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
 
@@ -94,6 +98,7 @@
   outputLocation.y = outputRow;
   for (short i = 0; i < NUM_OUTPUTS; ++i) {
     outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
+    //BINOP
     if (outputColumn < numOutputColumns) {
       write_imagef(output, outputLocation, outputValues[i]);
     }
