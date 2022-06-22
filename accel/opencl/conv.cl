@@ -53,46 +53,6 @@ __kernel void image_conv(
   inputLocation.y = mad24(outputRow, strideY, -paddingY);
 #endif
 
-#ifdef ONLY_1X1_CONV
-  // 1x1 convolution
-  short endPackedInputChannel = startPackedInputChannel + numPackedInputChannelsForGroup;
-  for (short packedInputChannel = startPackedInputChannel; packedInputChannel < endPackedInputChannel; ++packedInputChannel) {
-    float4 weightValues[4];
-    for (short outChIdx = 0; outChIdx < 4; ++outChIdx) {
-      weightValues[outChIdx] = read_imagef(weights, smp, weightLocation);
-      ++weightLocation.x;
-    }
-
-    inputLocation.x = startX + packedInputChannel;
-    float4 inputValues[NUM_OUTPUTS];
-    for (short i = 0; i < NUM_OUTPUTS; ++i) {
-      inputValues[i] = read_imagef(input, smp, inputLocation);
-      inputLocation.x += strideWithChannels;
-    }
-
-    for (short i = 0; i < NUM_OUTPUTS; ++i) {
-      float4 curOutputValues = outputValues[i];
-      curOutputValues.x += inputValues[i].x * weightValues[0].x;
-      curOutputValues.x += inputValues[i].y * weightValues[0].y;
-      curOutputValues.x += inputValues[i].z * weightValues[0].z;
-      curOutputValues.x += inputValues[i].w * weightValues[0].w;
-      curOutputValues.y += inputValues[i].x * weightValues[1].x;
-      curOutputValues.y += inputValues[i].y * weightValues[1].y;
-      curOutputValues.y += inputValues[i].z * weightValues[1].z;
-      curOutputValues.y += inputValues[i].w * weightValues[1].w;
-      curOutputValues.z += inputValues[i].x * weightValues[2].x;
-      curOutputValues.z += inputValues[i].y * weightValues[2].y;
-      curOutputValues.z += inputValues[i].z * weightValues[2].z;
-      curOutputValues.z += inputValues[i].w * weightValues[2].w;
-      curOutputValues.w += inputValues[i].x * weightValues[3].x;
-      curOutputValues.w += inputValues[i].y * weightValues[3].y;
-      curOutputValues.w += inputValues[i].z * weightValues[3].z;
-      curOutputValues.w += inputValues[i].w * weightValues[3].w;
-      outputValues[i] = curOutputValues;
-    }
-  }
-#else
-
 #ifdef DEPTHWISE_UNSTRIDED
   for (short rfRow = 0; rfRow < filterSizeY; ++rfRow) {
     float4 inputValues[4];
@@ -169,8 +129,6 @@ __kernel void image_conv(
     }
     inputLocation.y += dilationY;
   }
-#endif
-
 #endif
 
   // insert unary and binary ops here

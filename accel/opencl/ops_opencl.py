@@ -197,7 +197,7 @@ class OpenCLBuffer(GPUBuffer):
       #print(global_work_size, local_work_size)
       conv_prg(global_work_size, local_work_size, cl.LocalMemory(4 * local_work_size[0] * local_work_size[1] * lw), x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
       return ret
-    if C.H == 1 and C.W == 1: options.append("-DONLY_1X1_CONV")
+    #if C.H == 1 and C.W == 1: options.append("-DONLY_1X1_CONV")
 
     assert C.cout%4 == 0
     conv_src = CONV_SRC
