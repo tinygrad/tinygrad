@@ -8,9 +8,9 @@ from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
-
 class CL:
   DEBUG = int(os.getenv("DEBUGCL", "0"))
+  CACHE = None
   def __init__(self):
     if getattr(CL, "cl_queue", None) is not None: return
     devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
@@ -39,7 +39,8 @@ class CLProgram:
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
     if CL.DEBUG: print(f"cl: running {self.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
-    self.clprg(CL().cl_queue, *args)
+    if CL.CACHE is not None: CL.CACHE.append((self.clprg, args))
+    else: self.clprg(CL().cl_queue, *args)
 
 # **** end CL wrappers ****
 
