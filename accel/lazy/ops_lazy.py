@@ -77,6 +77,8 @@ class LazyBuffer:
 
   def unary_op(x, op): return elementwise_op(op, (x,))
   def binary_op(x, op, y:LazyBuffer): return elementwise_op(op, (x,y))
+
+  @functools.lru_cache(maxsize=None)
   def contiguous_op(x): return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
 
   @functools.lru_cache(maxsize=None)

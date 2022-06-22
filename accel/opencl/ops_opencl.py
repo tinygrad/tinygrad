@@ -1,10 +1,10 @@
 from __future__ import annotations
-import pyopencl as cl
-from tinygrad.llops.ops_gpu import GPUBuffer, get_cl_ctx, get_cl_queue, CLProgram, code_for_op
+from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, code_for_op
 from tinygrad.ops import ProcessingOps
 from tinygrad.helpers import prod, ConvArgs
 from typing import List, Tuple, Optional, Dict
 import numpy as np
+import pyopencl as cl
 
 import pathlib
 def load(x):
@@ -12,6 +12,15 @@ def load(x):
      ret = f.read()
    return ret
 CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
+
+class ECL(CL):
+  @staticmethod
+  def image(shape):
+    if CL.DEBUG >= 2: print(f"cl: create image({shape})")
+    fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
+    # HALF_FLOAT breaks tests
+    #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
+    return cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=shape)
 
 def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   middle_code = []
@@ -46,16 +55,16 @@ class OpenCLBuffer(GPUBuffer):
   def fromCPU(x):
     ret = OpenCLBuffer(x.shape)
     # TODO: this is blocking even though we told it not to
-    cl.enqueue_copy(get_cl_queue(), ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
+    CL.enqueue_copy(ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
     return ret
 
   @property
   def cl(self):
     if self._buf is None:
       if self.st.contiguous:
-        self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self.shape)))
+        self._buf = CL.malloc(4*roundup(prod(self.shape)))
       if self._image is not None:
-        self._buf = cl.Buffer(get_cl_ctx(), cl.mem_flags.READ_WRITE, 4*roundup(prod(self._image.shape)*4))
+        self._buf = CL.malloc(4*roundup(prod(self._image.shape)*4))
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", """
           __kernel void from_image(
@@ -78,10 +87,7 @@ class OpenCLBuffer(GPUBuffer):
   def image(self):
     if self._image is None:
       assert self.shape[2] == 4 and len(self.shape) == 3
-      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
-      # HALF_FLOAT breaks tests
-      #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
-      self._image = cl.Image(get_cl_ctx(), cl.mem_flags.READ_WRITE, fmt, shape=(self.shape[1], self.shape[0]))
+      self._image = ECL.image(shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
         #print(f"converting {self.shape} to image with shape {self._image.shape}")

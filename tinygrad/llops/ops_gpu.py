@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import functools
 import numpy as np
 import pyopencl as cl
@@ -7,28 +8,40 @@ from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
-cl_ctx, cl_queue = None, None
-def get_cl_ctx(): return cl_ctx
-def get_cl_queue(): return cl_queue
-def require_init_gpu():
-  global cl_ctx, cl_queue
-  if cl_ctx is None:
+
+class CL:
+  DEBUG = int(os.getenv("DEBUGCL", "0"))
+  def __init__(self):
+    if getattr(CL, "cl_queue", None) is not None: return
     devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
     if len(devices) == 0:  # settle for CPU
       devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
-    cl_ctx = cl.Context(devices=devices)
-    cl_queue = cl.CommandQueue(cl_ctx)  # this is an in-order command queue
+    CL.cl_ctx = cl.Context(devices=devices)
+    CL.cl_queue = cl.CommandQueue(self.cl_ctx)  # this is an in-order command queue
+
+  @staticmethod
+  def enqueue_copy(a, b, is_blocking=False):
+    if CL.DEBUG: print(f"cl: copy into {type(a)} sz {a.size} block {is_blocking}")
+    cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
+
+  @staticmethod
+  def malloc(sz):
+    if CL.DEBUG >= 2: print(f"cl: malloc({sz})")
+    return cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, sz)
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
     self.name = name
-    self.built = cl.Program(cl_ctx, prg).build(options=options)
+    if CL.DEBUG >= 2: print(f"cl: building {self.name:20s} with {options}")
+    self.built = cl.Program(CL().cl_ctx, prg).build(options=options)
     self.clprg = self.built.__getattr__(name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    #print(f"running {self.name} with {args[0]} count {len(args)-2}")
-    self.clprg(cl_queue, *args)
+    if CL.DEBUG: print(f"cl: running {self.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d}")
+    self.clprg(CL().cl_queue, *args)
+
+# **** end CL wrappers ****
 
 code_for_op = {
   UnaryOps.NOOP: "(A)", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.NEG: "(-(A))", UnaryOps.SIGN: "sign(A)",
@@ -37,14 +50,13 @@ code_for_op = {
 
 class GPUBuffer:
   def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None):
-    require_init_gpu()
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
   
   @property
   def cl(self):
-    if self._buf is None: self._buf = cl.Buffer(cl_ctx, cl.mem_flags.READ_WRITE, 4*prod(self.shape))
+    if self._buf is None: self._buf = CL.malloc(4*prod(self.shape))
     return self._buf
 
   def __repr__(self):
@@ -54,12 +66,12 @@ class GPUBuffer:
   def fromCPU(x):
     ret = GPUBuffer(x.shape)
     # TODO: this is blocking even though we told it not to
-    cl.enqueue_copy(cl_queue, ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
+    CL.enqueue_copy(ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
     return ret
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    cl.enqueue_copy(cl_queue, data, self.contiguous_op().cl, is_blocking=True)
+    CL.enqueue_copy(data, self.contiguous_op().cl, is_blocking=True)
     return data
 
   def contiguous_view(x, name:str) -> str:
