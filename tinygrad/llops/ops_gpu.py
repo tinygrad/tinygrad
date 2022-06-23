@@ -15,7 +15,7 @@ class CL:
     CL.devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
     if len(CL.devices) == 0:  # settle for CPU
       CL.devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
-    CL.cl_ctx = cl.Context(devices=CL.devices)
+    CL.cl_ctx = cl.Context(devices=CL.devices[0:1])
     # this is an in-order command queue
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
