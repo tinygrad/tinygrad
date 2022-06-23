@@ -171,6 +171,9 @@ if __name__ == "__main__":
       if d == np.int16:
         targs.append(struct.pack("H", a).decode("latin_1"))
         args_size.append(2)
+      elif d == np.int32:
+        targs.append(struct.pack("I", a).decode("latin_1"))
+        args_size.append(4)
       elif isinstance(a, cl.LocalMemory):
         targs.append("")
         args_size.append(a.size)
