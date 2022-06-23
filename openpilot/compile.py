@@ -77,7 +77,8 @@ if __name__ == "__main__":
   print("kernel count:", len(CL.CACHE))
 
   # optimize local workgroups
-  if int(os.getenv("OPTWG", 0)):
+  OPTWG = int(os.getenv("OPTWG", 0))
+  if OPTWG:
     MAX_WORKGROUP = CL.devices[0].max_work_group_size
     local_cl_cache = []
     for i, (prg, args) in enumerate(CL.CACHE):
@@ -101,14 +102,20 @@ if __name__ == "__main__":
               local_args = (l1, l2, l3)
               if prod(local_args) > MAX_WORKGROUP: continue
               args[1] = local_args
-
+              if OPTWG == 2:
+                bad = any(g%l != 0 for g,l in zip(args[0], args[1]))
+                if bad: continue
               e = prg.clprg(CL().cl_queue, *args)
               CL().cl_queue.finish()
               runtime = e.profile.end - e.profile.start
               #print(runtime, args[0], args[1])
               runtimes.append((runtime, local_args))
         #print(sorted(runtimes)[0:5])
-        args[1] = sorted(runtimes)[0][1]
+        if len(runtimes) > 0:
+          args[1] = sorted(runtimes)[0][1]
+        else:
+          args[1] = None
+          print("couldn't optimize", args[0])
 
       local_cl_cache.append((prg, args))
   else:
