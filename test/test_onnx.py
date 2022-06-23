@@ -5,12 +5,12 @@ import io
 import unittest
 import numpy as np
 import onnx
+import test.torch_workaround as torch
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 
 def run_onnx_torch(onnx_model, inputs):
-  import torch
   from onnx2torch import convert
   torch_model = convert(onnx_model)
   with torch.no_grad():
@@ -20,6 +20,7 @@ def run_onnx_torch(onnx_model, inputs):
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
 #OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/1f2f9ea9c9dc37bdea9c6e32e4cb8f88ea0a34bf/selfdrive/modeld/models/supercombo.onnx"
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)

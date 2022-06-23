@@ -4,8 +4,9 @@ import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import *
 from extra.utils import get_parameters
-import torch
+import test.torch_workaround as torch
 
+@unittest.skipUnless(torch is None, "Torch not available")
 @unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
 class TestNN(unittest.TestCase):
 

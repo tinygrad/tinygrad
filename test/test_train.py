@@ -3,6 +3,7 @@ import unittest
 import time
 import tinygrad.optim as optim
 import numpy as np
+import test.torch_workaround as torch
 from tinygrad.tensor import Tensor
 from extra.training import train
 from extra.utils import get_parameters
@@ -25,6 +26,7 @@ def train_one_step(model,X,Y):
   et = time.time()-st
   print("done in %.2f ms" % (et*1000.))
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TestTrain(unittest.TestCase):
   def test_efficientnet(self):
     model = EfficientNet(0)

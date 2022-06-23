@@ -3,7 +3,7 @@ import time
 import cProfile
 import pstats
 import unittest
-import torch
+import test.torch_workaround as torch
 from tinygrad.tensor import Tensor
 
 def start_profile():
@@ -19,6 +19,7 @@ def stop_profile(pr, sort='cumtime'):
   ps.sort_stats(sort)
   ps.print_stats(0.2)
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TestConvSpeed(unittest.TestCase):
 
   def test_mnist(self):

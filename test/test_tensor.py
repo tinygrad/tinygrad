@@ -1,6 +1,6 @@
 import numpy as np
-import torch
 import unittest
+import test.torch_workaround as torch
 from tinygrad.tensor import Tensor, Device
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
@@ -10,6 +10,7 @@ V_init = np.random.randn(3,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TestTinygrad(unittest.TestCase):
   def test_plus_equals(self):
     a = Tensor.randn(10,10)

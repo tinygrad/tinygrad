@@ -1,6 +1,6 @@
 import numpy as np
-import torch
 import unittest
+import test.torch_workaround as torch
 from tinygrad.tensor import Tensor
 from tinygrad.optim import Adam, SGD, RMSprop
 from extra.utils import get_parameters
@@ -26,6 +26,7 @@ def step_pytorch(optim, kwargs={}):
   return net.x.detach().numpy(), net.W.detach().numpy()
 
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TinyNet():
   def __init__(self):
     self.x = Tensor(x_init.copy())
@@ -39,6 +40,7 @@ class TinyNet():
     return out
 
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TorchNet():
   def __init__(self):
     self.x = torch.tensor(x_init.copy(), requires_grad=True)
@@ -52,6 +54,7 @@ class TorchNet():
     return out
 
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TestOptim(unittest.TestCase):
 
   def test_adam(self):

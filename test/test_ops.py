@@ -1,9 +1,9 @@
 import os
-import torch
 import numpy as np
 import unittest
 import timeit
 import functools
+import test.torch_workaround as torch
 from tinygrad.tensor import Tensor, Device
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
@@ -38,6 +38,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
 
   print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp, tinygrad_fp, torch_fbp-torch_fp, tinygrad_fbp-tinygrad_fp))
 
+@unittest.skipUnless(torch is None, "Torch not available")
 class TestOps(unittest.TestCase):
 
   def test_add(self):
