@@ -12,10 +12,10 @@ class CL:
   CACHE = None
   def __init__(self):
     if getattr(CL, "cl_queue", None) is not None: return
-    devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
-    if len(devices) == 0:  # settle for CPU
-      devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
-    CL.cl_ctx = cl.Context(devices=devices)
+    CL.devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.GPU)
+    if len(CL.devices) == 0:  # settle for CPU
+      CL.devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
+    CL.cl_ctx = cl.Context(devices=CL.devices)
     # this is an in-order command queue
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
 

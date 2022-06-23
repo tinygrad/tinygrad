@@ -76,39 +76,43 @@ if __name__ == "__main__":
   ops.GRAPH = False
   print("kernel count:", len(CL.CACHE))
 
-  # fill in local workgroups
-  local_cl_cache = []
-  for i, (prg, args) in enumerate(CL.CACHE):
-    args = list(args)
-    if args[1] is None and len(args[0]) == 2:
-      args[1] = [min(1024, args[0][0]), 1]
+  # optimize local workgroups
+  if int(os.getenv("OPTWG", 0)):
+    MAX_WORKGROUP = CL.devices[0].max_work_group_size
+    local_cl_cache = []
+    for i, (prg, args) in enumerate(CL.CACHE):
+      args = list(args)
+      if args[1] is None and len(args[0]) == 2:
+        args[1] = [min(MAX_WORKGROUP, args[0][0]), 1]
 
-    if args[1] is None and len(args[0]) == 3:
-      """
-      if args[0][1] == 1 and args[0][2] == 1:
-        args[1] = [min(1024, args[0][0]), 1, 1]
-      else:
-        args[1] = [1,min(16,args[0][1]),min(args[0][2], 4)]
-        args[1][0] = min(32, min(args[0][0], 1024 // (args[1][1] * args[1][2])))
-      """
-      runtimes = []
-      for l2 in [16,args[0][1],1024]:
-        for l3 in [4,16,args[0][2],1024]:
-          for l1 in [max(1, 1024//(l2*l3)), args[0][0], 4, 16, 1024]:
-            if l1 > args[0][0] or l2 > args[0][1] or l3 > args[0][2]: continue
-            local_args = (l1, l2, l3)
-            if prod(local_args) > 1024: continue
-            args[1] = local_args
+      if args[1] is None and len(args[0]) == 3:
+        """
+        if args[0][1] == 1 and args[0][2] == 1:
+          args[1] = [min(1024, args[0][0]), 1, 1]
+        else:
+          args[1] = [1,min(16,args[0][1]),min(args[0][2], 4)]
+          args[1][0] = min(32, min(args[0][0], 1024 // (args[1][1] * args[1][2])))
+        """
+        runtimes = []
+        for l2 in [16,args[0][1],MAX_WORKGROUP]:
+          for l3 in [4,16,args[0][2],MAX_WORKGROUP]:
+            for l1 in [max(1, MAX_WORKGROUP//(l2*l3)), args[0][0], 4, 16, MAX_WORKGROUP]:
+              if l1 > args[0][0] or l2 > args[0][1] or l3 > args[0][2]: continue
+              local_args = (l1, l2, l3)
+              if prod(local_args) > MAX_WORKGROUP: continue
+              args[1] = local_args
 
-            e = prg.clprg(CL().cl_queue, *args)
-            CL().cl_queue.finish()
-            runtime = e.profile.end - e.profile.start
-            #print(runtime, args[0], args[1])
-            runtimes.append((runtime, local_args))
-      #print(sorted(runtimes)[0:5])
-      args[1] = sorted(runtimes)[0][1]
+              e = prg.clprg(CL().cl_queue, *args)
+              CL().cl_queue.finish()
+              runtime = e.profile.end - e.profile.start
+              #print(runtime, args[0], args[1])
+              runtimes.append((runtime, local_args))
+        #print(sorted(runtimes)[0:5])
+        args[1] = sorted(runtimes)[0][1]
 
-    local_cl_cache.append((prg, args))
+      local_cl_cache.append((prg, args))
+  else:
+    local_cl_cache = CL.CACHE[:]
   CL.CACHE = None
 
   # real CL ish
