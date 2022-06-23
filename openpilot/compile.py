@@ -139,3 +139,66 @@ if __name__ == "__main__":
     torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
+
+  # save local_cl_cache as thneed
+  import struct, json
+  jdat = {"programs": {}, "kernels": [], "objects": []}
+  weights = []
+  saved_objs = set()
+
+  gobj = 0
+  import pyopencl as cl
+  for self, args in local_cl_cache:
+    if self.name not in jdat['programs']:
+      jdat['programs'][self.name] = {"src": self.prg, "options": ' '.join(self.options)}
+    targs, args_size = [], []
+    argdtypes = self.argdtypes if self.argdtypes is not None else [None]*(len(args)-2)
+    for a,d in zip(args[2:], argdtypes):
+      if d == np.int16:
+        targs.append(struct.pack("H", a).decode("latin_1"))
+        args_size.append(2)
+      elif isinstance(a, cl.LocalMemory):
+        targs.append("")
+        args_size.append(a.size)
+      elif d is None:
+        if getattr(a, "global_id", None) is None:
+          setattr(a, "global_id", gobj)
+          gobj += 1
+        ptr = struct.pack("Q", a.global_id).decode("latin_1")
+        if ptr not in saved_objs:
+          if isinstance(a, cl.Buffer):
+            jdat['objects'].append({
+              "id": ptr, "needs_load": False, "size": a.size,
+            })
+          elif isinstance(a, cl.Image):
+            #print(a.size, a.shape, a.row_pitch)
+            jdat['objects'].append({
+              "id": ptr, "needs_load": False, "size": a.size,
+              "arg_type": "image2d_t", "unbacked": True,
+              "width": a.shape[0], "height": a.shape[1], "row_pitch": a.row_pitch,
+            })
+          else:
+            raise Exception("unknown object", a)
+          #print(jdat['objects'][-1])
+          saved_objs.add(ptr)
+        targs.append(ptr)
+        args_size.append(8)
+      else:
+        raise Exception("idk this type")
+
+    jdat['kernels'].append({
+      "name": self.name,
+      "work_dim": len(args[0]),
+      "global_work_size": args[0],
+      "local_work_size": [1 for x in args[0]] if args[1] is None else args[1],
+      "num_args": len(args)-2,
+      "args": targs,
+      "args_size": args_size 
+    })
+
+  print("saving thneed")
+  with open("/tmp/output.thneed", "wb") as f:
+    j = json.dumps(jdat, ensure_ascii=False).encode('latin_1')
+    f.write(struct.pack("I", len(j)))
+    f.write(j)
+    f.write(b''.join(weights))

@@ -26,8 +26,9 @@ void Thneed::load(const char *filename) {
     auto mobj = obj.object_items();
     int sz = mobj["size"].int_value();
     cl_mem clbuf = NULL;
+    bool unbacked = mobj["unbacked"].bool_value();
 
-    if (!mobj["unbacked"].bool_value()) {
+    if (!unbacked) {
       if (mobj["buffer_id"].string_value().size() > 0) {
         // image buffer must already be allocated
         clbuf = real_mem[*(cl_mem*)(mobj["buffer_id"].string_value().data())];
@@ -49,13 +50,16 @@ void Thneed::load(const char *filename) {
       desc.image_type = (mobj["arg_type"] == "image2d_t") ? CL_MEM_OBJECT_IMAGE2D : CL_MEM_OBJECT_IMAGE1D_BUFFER;
       desc.image_width = mobj["width"].int_value();
       desc.image_height = mobj["height"].int_value();
-      desc.image_row_pitch = mobj["row_pitch"].int_value();
-      desc.buffer = clbuf;
+      if (!unbacked) {
+        desc.image_row_pitch = mobj["row_pitch"].int_value();
+        desc.buffer = clbuf;
+      }
 
       cl_image_format format;
       format.image_channel_order = CL_RGBA;
       format.image_channel_data_type = CL_HALF_FLOAT;
 
+      //printf("image %dx%d %d\n", desc.image_width, desc.image_height, desc.image_row_pitch);
       clbuf = clCreateImage(context, CL_MEM_READ_WRITE, &format, &desc, NULL, NULL);
       assert(clbuf != NULL);
       //printf("create image %p %d %dx%d\n", clbuf, desc.image_type , desc.image_width, desc.image_height);

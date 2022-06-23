@@ -27,10 +27,14 @@ class CL:
   @staticmethod
   def malloc(sz): return cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, sz)
 
+kernel_cnt = 0
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
-    self.name, self.options = name, options
+    global kernel_cnt
+    self.name, self.prg, self.options, self.argdtypes = name, prg, options, argdtypes
+    self.name, self.prg = f"{self.name}_{kernel_cnt}", self.prg.replace(f"{self.name}(", f"{self.name}_{kernel_cnt}(")
+    kernel_cnt += 1
     self.built = cl.Program(CL().cl_ctx, prg).build(options=options)
     self.clprg = self.built.__getattr__(name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
