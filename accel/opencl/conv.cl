@@ -103,6 +103,7 @@ __kernel void image_conv(
         }
 
         for (short i = 0; i < NUM_OUTPUTS; ++i) {
+          // this is marginally faster than using dot
           float4 curOutputValues = outputValues[i];
           curOutputValues.x += inputValues[i].x * weightValues[0].x;
           curOutputValues.x += inputValues[i].y * weightValues[0].y;

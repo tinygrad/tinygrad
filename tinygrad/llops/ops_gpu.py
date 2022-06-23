@@ -17,6 +17,7 @@ class CL:
       CL.devices = cl.get_platforms()[0].get_devices(device_type=cl.device_type.CPU)
     CL.cl_ctx = cl.Context(devices=CL.devices[0:1])
     # this is an in-order command queue
+    # TODO: it's probably marginally faster to disable profiling
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
   @staticmethod
@@ -27,18 +28,17 @@ class CL:
   @staticmethod
   def malloc(sz): return cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, sz)
 
-kernel_cnt = 0
 @functools.lru_cache(maxsize=None)
 class CLProgram:
+  kernel_cnt = 0
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
-    global kernel_cnt
-    self.name, self.prg, self.options, self.argdtypes = f"{name}_{kernel_cnt}", prg, options, argdtypes
-    self.prg = self.prg.replace(f"{name}(", f"{self.name}(")
-    kernel_cnt += 1
+    self.name, self.prg, self.options, self.argdtypes = \
+      f"{name}_{CLProgram.kernel_cnt}", prg.replace(f"{name}(", f"{name}_{CLProgram.kernel_cnt}("), options, argdtypes
+    CLProgram.kernel_cnt += 1
     self.clprogram = cl.Program(CL().cl_ctx, self.prg)
-    self.built = self.clprogram.build(options=options)
+    self.built = self.clprogram.build(options=self.options)
     self.clprg = self.built.__getattr__(self.name)
-    if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
+    if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
   def __call__(self, *args):
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)
