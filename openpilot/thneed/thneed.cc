@@ -93,9 +93,12 @@ void Thneed::clinit() {
   device_id = cl_get_device_id(CL_DEVICE_TYPE_DEFAULT);
   context = CL_CHECK_ERR(clCreateContext(NULL, 1, &device_id, NULL, NULL, &err));
   //cl_command_queue_properties props[3] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
+#ifdef clCreateCommandQueueWithProperties
   cl_command_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
   command_queue = CL_CHECK_ERR(clCreateCommandQueueWithProperties(context, device_id, props, &err));
-  //command_queue = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
+#else
+  command_queue = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
+#endif
   printf("Thneed::clinit done\n");
 }
 
