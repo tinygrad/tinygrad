@@ -85,6 +85,8 @@ if __name__ == "__main__":
       args = list(args)
       if args[1] is None and len(args[0]) == 2:
         args[1] = [min(MAX_WORKGROUP, args[0][0]), 1]
+        if OPTWG == 2 and args[0][0] % args[1][0] != 0:
+          args[1] = None
 
       if args[1] is None and len(args[0]) == 3:
         """
