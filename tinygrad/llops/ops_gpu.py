@@ -32,11 +32,12 @@ kernel_cnt = 0
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
     global kernel_cnt
-    self.name, self.prg, self.options, self.argdtypes = name, prg, options, argdtypes
-    self.name, self.prg = f"{self.name}_{kernel_cnt}", self.prg.replace(f"{self.name}(", f"{self.name}_{kernel_cnt}(")
+    self.name, self.prg, self.options, self.argdtypes = f"{name}_{kernel_cnt}", prg, options, argdtypes
+    self.prg = self.prg.replace(f"{name}(", f"{self.name}(")
     kernel_cnt += 1
-    self.built = cl.Program(CL().cl_ctx, prg).build(options=options)
-    self.clprg = self.built.__getattr__(name)
+    self.clprogram = cl.Program(CL().cl_ctx, self.prg)
+    self.built = self.clprogram.build(options=options)
+    self.clprg = self.built.__getattr__(self.name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
     if CL.CACHE is not None: CL.CACHE.append((self, args))
@@ -150,7 +151,7 @@ class GPUBuffer:
     conv_params = ["__global float* restrict output"] + \
                   [f"__global const float *{name}_g" for name, _ in bufs] + \
                   [x[0] for x in params]
-    conv_prg = CLProgram(kernel_name, elementwise_prefix+f"__kernel void {kernel_name}("+','.join(conv_params)+""") {
+    conv_prg = CLProgram(kernel_name, elementwise_prefix+f"\n__kernel void {kernel_name}("+','.join(conv_params)+""") {
       float acc = 0.0;
       int gid = get_global_id(0);
       """+ints+"""

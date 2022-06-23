@@ -142,15 +142,25 @@ if __name__ == "__main__":
 
   # save local_cl_cache as thneed
   import struct, json
-  jdat = {"programs": {}, "kernels": [], "objects": []}
+  jdat = {"binaries": [], "programs": {}, "kernels": [], "objects": []}
   weights = []
+  binaries = []
   saved_objs = set()
+  saved_binaries = set()
 
   gobj = 0
   import pyopencl as cl
   for self, args in local_cl_cache:
-    if self.name not in jdat['programs']:
-      jdat['programs'][self.name] = {"src": self.prg, "options": ' '.join(self.options)}
+    #if self.name not in jdat['programs']:
+    #  jdat['programs'][self.name] = {"src": self.prg, "options": ' '.join(self.options)}
+
+    if self.name not in saved_binaries:
+      binary = self.clprogram.get_info(cl.program_info.BINARIES)
+      assert len(binary) == 1
+      jdat['binaries'].append({"name":self.name, "length":len(binary[0])})
+      binaries.append(binary[0])
+      saved_binaries.add(self.name)
+
     targs, args_size = [], []
     argdtypes = self.argdtypes if self.argdtypes is not None else [None]*(len(args)-2)
     for a,d in zip(args[2:], argdtypes):
@@ -202,3 +212,4 @@ if __name__ == "__main__":
     f.write(struct.pack("I", len(j)))
     f.write(j)
     f.write(b''.join(weights))
+    f.write(b''.join(binaries))

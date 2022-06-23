@@ -94,8 +94,8 @@ void Thneed::clinit() {
   context = CL_CHECK_ERR(clCreateContext(NULL, 1, &device_id, NULL, NULL, &err));
   //cl_command_queue_properties props[3] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
   cl_command_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
-  //command_queue = CL_CHECK_ERR(clCreateCommandQueueWithProperties(context, device_id, props, &err));*/
-  command_queue = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
+  command_queue = CL_CHECK_ERR(clCreateCommandQueueWithProperties(context, device_id, props, &err));
+  //command_queue = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
   printf("Thneed::clinit done\n");
 }
 
@@ -160,7 +160,9 @@ int CLQueuedKernel::get_arg_num(const char *search_arg_name) {
 
 cl_int CLQueuedKernel::exec() {
   if (kernel == NULL) {
-    kernel = clCreateKernel(program, name.c_str(), NULL);
+    cl_int err;
+    kernel = clCreateKernel(program, name.c_str(), &err);
+    assert(err == CL_SUCCESS);
     arg_names.clear();
     arg_types.clear();
 
@@ -179,7 +181,7 @@ cl_int CLQueuedKernel::exec() {
         ret = thneed_clSetKernelArg(kernel, j, args_size[j], NULL);
       }
       if (ret != CL_SUCCESS) {
-        printf("CL error num_args:%d setting arg %d(%d) arg %s = %s : %d %s\n", num_args, j, args[j].size(),
+        printf("CL error num_args:%d setting arg %d(%ld) arg %s = %s : %d %s\n", num_args, j, args[j].size(),
           arg_types[j].c_str(), arg_names[j].c_str(), ret, cl_get_error_string(ret));
         hexdump((uint8_t *)args[j].data(), args[j].size());
         debug_print(true);

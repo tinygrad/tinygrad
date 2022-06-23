@@ -8,6 +8,7 @@
 using namespace json11;
 
 extern map<cl_program, string> g_program_source;
+void hexdump(uint8_t *d, int len);
 
 void Thneed::load(const char *filename) {
   printf("Thneed::load: loading from %s\n", filename);
@@ -35,11 +36,12 @@ void Thneed::load(const char *filename) {
         assert(mobj["needs_load"].bool_value() == false);
       } else {
         if (mobj["needs_load"].bool_value()) {
-          //printf("loading %p %d @ 0x%X\n", clbuf, sz, ptr);
           clbuf = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_READ_WRITE, sz, &buf[ptr], NULL);
+          if (debug >= 3) printf("loading %p %d @ 0x%X\n", clbuf, sz, ptr);
           ptr += sz;
         } else {
           clbuf = clCreateBuffer(context, CL_MEM_READ_WRITE, sz, NULL, NULL);
+          if (debug >= 3) printf("create new buffer %p %d\n", clbuf, sz);
         }
       }
       assert(clbuf != NULL);
@@ -59,10 +61,9 @@ void Thneed::load(const char *filename) {
       format.image_channel_order = CL_RGBA;
       format.image_channel_data_type = CL_HALF_FLOAT;
 
-      //printf("image %dx%d %d\n", desc.image_width, desc.image_height, desc.image_row_pitch);
       clbuf = clCreateImage(context, CL_MEM_READ_WRITE, &format, &desc, NULL, NULL);
       assert(clbuf != NULL);
-      //printf("create image %p %d %dx%d\n", clbuf, desc.image_type , desc.image_width, desc.image_height);
+      if (debug >= 3) printf("create image %p %d %ldx%ld\n", clbuf, desc.image_type , desc.image_width, desc.image_height);
     }
 
     real_mem[*(cl_mem*)(mobj["id"].string_value().data())] = clbuf;
@@ -86,7 +87,7 @@ void Thneed::load(const char *filename) {
   for (auto &obj : jdat["binaries"].array_items()) {
     string name = obj["name"].string_value();
     size_t length = obj["length"].int_value();
-    if (debug >= 1) printf("binary %s with size %zu\n", name.c_str(), length);
+    if (debug >= 1) printf("binary %s with size %zu at file offset %d\n", name.c_str(), length, ptr);
     g_programs[name] = cl_program_from_binary(context, device_id, (const uint8_t*)&buf[ptr], length);
     ptr += length;
   }
