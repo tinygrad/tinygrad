@@ -8,6 +8,9 @@
 #include <math.h>
 #include <string.h>
 #include <immintrin.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <stdatomic.h>
 
 //#define DEBUG
 
@@ -71,8 +74,30 @@ void matmul(int sy, int ey) {
   }
 }
 
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+atomic_int nready = 0;
+atomic_int ndone = 0;
+
+#define NTHREADS 1
+void *matmul_thread(void *n) {
+  nready++;
+
+  // gotta have main lock once to signal start
+  pthread_mutex_lock(&lock);
+  pthread_mutex_unlock(&lock);
+
+  int k = (int)n;
+  int sy = (N/NTHREADS) * k;
+  int ey = (N/NTHREADS) * (k+1);
+  matmul(sy, ey);
+
+  // we done
+  ndone++;
+  return NULL;
+}
+
 int main() {
-  printf("hello\n");
+  printf("hello with %d threads\n", NTHREADS);
 
 #ifdef DEBUG
   for (int i = 0; i < N*N; i++) A[i] = i;
@@ -100,11 +125,34 @@ int main() {
 
   for (int i = 0; i < 4; i++) {
     memset(C, 0, N*N*sizeof(float));
-    uint64_t start = nanos();
 
-    matmul(0, N/2);
-    matmul(N/2, N);
+#if NTHREADS != 1 
+    nready = 0;
+    ndone = 0;
+    pthread_mutex_lock(&lock);
+    pthread_t threads[NTHREADS];
+    for (int j = 0; j < NTHREADS; j++) {
+      pthread_create(&threads[j], NULL, matmul_thread, (void *)(uint64_t)j);
+    }
+    while (nready != NTHREADS) usleep(1);
+#endif
+
+    uint64_t start = nanos();
+#if NTHREADS == 1 
+    matmul(0, N);
+#else
+    // unlocking mutex starts threads
+    pthread_mutex_unlock(&lock);
+    while (ndone != NTHREADS) usleep(1);
+#endif
     uint64_t end = nanos();
+
+#if NTHREADS != 1 
+    for (int j = 0; j < NTHREADS; j++) {
+      pthread_join(threads[j], NULL);
+    }
+#endif
+
     double gflop = (2.0*N*N*N)*1e-9;
     double s = (end-start)*1e-9;
     printf("%f GFLOP/S -- %.2f ms\n", gflop/s, s*1e3);
