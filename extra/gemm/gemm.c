@@ -52,6 +52,7 @@ void matmul(int sy, int ey) {
   // 4.9 GHz is max boost for 5950X
   // 32 FLOPS/cycle (16 FMAs, aka 2x 8 single wide / 32 byte FMAs)
   // theoretical max is 156.8 GFLOPS, we see 150
+  // multicore theo max = 2508.8 GFLOPS, we see 1501.434299
 
   // Bf = (y/8, k, 8)
   for (int y = sy; y < ey; y+=BLOCK_Y) {
@@ -80,7 +81,7 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 atomic_int nready = 0;
 atomic_int ndone = 0;
 
-#define NTHREADS 16
+#define NTHREADS 8
 void *matmul_thread(void *n) {
   int k = (int)n;
   int sy = (N/NTHREADS) * k;
@@ -164,6 +165,9 @@ int main() {
     double gflop = (2.0*N*N*N)*1e-9;
     double s = (end-start)*1e-9;
     printf("%f GFLOP/S -- %.2f ms\n", gflop/s, s*1e3);
+
+    // hack around throttling
+    //if (i%4 == 0) sleep(1);
   }
 
 #ifdef DEBUG
