@@ -18,6 +18,7 @@ REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
 FOLD_CONSTANTS_INTO_KERNELS = True
+CACHE_LAZYBUFFERS = False    # this leaks tons of memory. TODO: only cache unresolved LazyBuffers
 
 class LazyOp(NamedTuple):
   op: Op
@@ -84,10 +85,10 @@ class LazyBuffer:
   def unary_op(x, op): return elementwise_op(op, (x,))
   def binary_op(x, op, y:LazyBuffer): return elementwise_op(op, (x,y))
 
-  @functools.lru_cache(maxsize=None)
-  def contiguous_op(x): return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
+  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
+  def contiguous_op(x) -> LazyBuffer: return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
 
-  @functools.lru_cache(maxsize=None)
+  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def movement_op(x, op:MovementOps, arg) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
@@ -126,7 +127,7 @@ def ast(x: Union[LazyBuffer, LazyOp], lazy_srcs: Dict[LazyBuffer, str]) -> str:
   return ast_op(x.op, [ast(src, lazy_srcs) for src in x.src])
 
 # this is needed to reduce convs from 186 -> 174
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
 def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
   out_shape = srcs[0].shape
 
