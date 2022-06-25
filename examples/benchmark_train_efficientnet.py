@@ -33,11 +33,12 @@ if __name__ == "__main__":
     loss = out.logsoftmax().mul(y_train).mean()
     optimizer.zero_grad()
     loss.backward()
+    mt = time.monotonic()
+    loss = loss.cpu().data[0]
     et = time.monotonic()
 
-    loss = loss.cpu().data[0]
     info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-    print(f"{(et-st)*1000.0:7.2f} ms, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {info.used/1e9:.2f} GB used")
+    print(f"{(et-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {info.used/1e9:.2f} GB used")
 
 
 
