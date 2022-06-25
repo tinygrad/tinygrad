@@ -39,9 +39,10 @@ if __name__ == "__main__":
     st = time.monotonic()
     out = model.forward(x_train)
     loss = out.logsoftmax().mul(y_train).mean()
-    if BACKWARD: optimizer.zero_grad()
-    loss.backward()
-    if BACKWARD: optimizer.step()
+    if BACKWARD:
+      optimizer.zero_grad()
+      loss.backward()
+      optimizer.step()
     mt = time.monotonic()
     loss.realize()
     for p in parameters:
