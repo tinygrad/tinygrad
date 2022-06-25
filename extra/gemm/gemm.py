@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os
-os.environ['OMP_NUM_THREADS'] = '1'
+#os.environ['OMP_NUM_THREADS'] = '1'
 import time
 import numpy as np
 
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     C = A @ B.T
     et = time.monotonic()
     s = et-st
-    print(f"{flop/s * 1e-9:.2f} GFLOP/S")
+    print(f"{flop/s * 1e-9:.2f} GFLOP/S, {s*1e3:.2f} ms")
   
   with open("/tmp/matmul", "wb") as f:
     f.write(A.data)

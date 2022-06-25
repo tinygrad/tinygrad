@@ -16,7 +16,7 @@
 #else
   //#define N 4096
   // L1 cache is 32 kB
-  #define N 2048
+  #define N 2048 // 2048*2048*4*2 = 32 MB
   // 8*768*4 = 24 kB
 #endif
 
@@ -42,14 +42,14 @@ __m256 *Bfm = (__m256*)Bf;
 #define BLOCK 8
 #define BLOCK_Y 4
 #define BLOCK_X 2
-void matmul() {
+void matmul(int sy, int ey) {
   // 136.77 GFLOPS on single core numpy
   // 4.9 GHz is max boost for 5950X
   // 32 FLOPS/cycle (16 FMAs, aka 2x 8 single wide / 32 byte FMAs)
   // theoretical max is 156.8 GFLOPS, we see 150
 
   // Bf = (y/8, k, 8)
-  for (int y = 0; y < N; y+=BLOCK_Y) {
+  for (int y = sy; y < ey; y+=BLOCK_Y) {
     for (int x = 0; x < N; x+=BLOCK*BLOCK_X) {
 
       __m256 acc[BLOCK_Y][BLOCK_X] = {};
@@ -79,6 +79,10 @@ int main() {
   for (int i = 0; i < N*N; i++) B[i] = i;
 #else
   FILE *f = fopen("/tmp/matmul", "rb");
+  if (f == NULL) {
+    printf("please pregenerate python /tmp/matmul file\n");
+    return -1;
+  }
   fread(A, 1, sizeof(float)*N*N, f);
   fread(B, 1, sizeof(float)*N*N, f);
   fread(val, 1, sizeof(float)*N*N, f);
@@ -97,7 +101,9 @@ int main() {
   for (int i = 0; i < 4; i++) {
     memset(C, 0, N*N*sizeof(float));
     uint64_t start = nanos();
-    matmul();
+
+    matmul(0, N/2);
+    matmul(N/2, N);
     uint64_t end = nanos();
     double gflop = (2.0*N*N*N)*1e-9;
     double s = (end-start)*1e-9;
