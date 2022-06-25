@@ -15,7 +15,8 @@
   #define N 2048
 #endif
 
-#define BLOCK 4
+#define BLOCK_Y 4
+#define BLOCK_X 8
 
 // aligned?
 float A[N*N] __attribute__ ((aligned (32)));
@@ -40,48 +41,51 @@ void matmul() {
   // 4.59 GHz
   // 32 FLOPS/cycle (16 FMAs, aka 2x 8/32B wide FMAs)
 
-  for (int by = 0; by < N; by += BLOCK) {
-    for (int bx = 0; bx < N; bx += BLOCK) {
+  for (int by = 0; by < N; by += BLOCK_Y) {
+    for (int bx = 0; bx < N; bx += BLOCK_X) {
 
 #ifndef FAST
-      // compute
-      float tc[BLOCK][BLOCK] = {};
+      float tc[BLOCK_Y][BLOCK_X] = {};
       for (int k = 0; k < N; k++) {
-        for (int y = 0; y < BLOCK; y++) {
-          for (int x = 0; x < BLOCK; x++) {
+        for (int y = 0; y < BLOCK_Y; y++) {
+          for (int x = 0; x < BLOCK_X; x++) {
             tc[y][x] += A[(by+y)*N + k] * B[(bx+x)*N + k];
           }
         }
       }
 
       // store
-      for (int y = 0; y < BLOCK; y++) {
-        for (int x = 0; x < BLOCK; x++) {
+      for (int y = 0; y < BLOCK_Y; y++) {
+        for (int x = 0; x < BLOCK_X; x++) {
           C[(by+y)*N + bx+x] = tc[y][x];
         }
       }
 #else
-      float tc[BLOCK][BLOCK];
-      for (int y = 0; y < BLOCK; y++) {
-        for (int x = 0; x < BLOCK; x++) {
-          __m256 tmp = {};
-          for (int k = 0; k < N; k += 8) {
+      //float tc[BLOCK_Y][BLOCK_X] = {};
+      __m256 tc[BLOCK_Y][BLOCK_X] = {};   // BLOCK_X is the implied dim
+      for (int k = 0; k < N; k += 8) {
+        for (int y = 0; y < BLOCK_Y; y++) {
+          for (int x = 0; x < BLOCK_X; x++) {
             //printf("%d %d\n", ((by+y)*N + k)/8, ((bx+x)*N + k)/8);
-            tmp = _mm256_fmadd_ps(
+            tc[y][x] = _mm256_fmadd_ps(
               Am[((by+y)*N + k)/8],
               Bm[((bx+x)*N + k)/8],
-              tmp);
+              tc[y][x]);
           }
-          float ftmp = 0.0;
-          for (int i = 0; i < 8; i++) ftmp += tmp[i];
-          tc[y][x] = ftmp;
         }
       }
 
       // store
-      for (int y = 0; y < BLOCK; y++) {
-        for (int x = 0; x < BLOCK; x++) {
-          C[(by+y)*N + bx+x] = tc[y][x];
+      /*for (int y = 0; y < BLOCK_Y; y++) {
+        Cm[((by+y)*N + bx)/8] = tc[y];
+      }*/
+
+      // store
+      for (int y = 0; y < BLOCK_Y; y++) {
+        for (int x = 0; x < BLOCK_X; x++) {
+          float ftmp = 0.0;
+          for (int i =0; i < 8; i++) ftmp += tc[y][x][i];
+          C[(by+y)*N + bx+x] = ftmp;
         }
       }
 #endif
@@ -92,7 +96,13 @@ void matmul() {
 
 int main() {
   printf("hello\n");
-  assert(N%BLOCK == 0);
+  assert(N%BLOCK_Y == 0);
+  assert(N%BLOCK_X == 0);
+
+#ifdef FAST
+  assert(BLOCK_X == 8);
+#endif
+
 
 #ifdef DEBUG
   for (int i = 0; i < N*N; i++) A[i] = i;
