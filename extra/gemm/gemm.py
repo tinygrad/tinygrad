@@ -4,7 +4,7 @@ os.environ['OMP_NUM_THREADS'] = '1'
 import time
 import numpy as np
 
-N = 2048
+N = 768
 if __name__ == "__main__":
   # N^2
   A = np.random.randn(N, N).astype(np.float32)

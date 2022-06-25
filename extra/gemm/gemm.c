@@ -1,9 +1,12 @@
-// clang -ffast-math -march=native -O3 gemm.c && ./a.out
+// clang -DFAST -ffast-math -march=native -O2 gemm.c && ./a.out
+
+// https://en.wikichip.org/wiki/amd/microarchitectures/zen_2
 #include <stdint.h>
 #include <time.h>
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>
+#include <string.h>
 #include <immintrin.h>
 
 //#define DEBUG
@@ -12,11 +15,13 @@
   #define N 8
 #else
   //#define N 4096
-  #define N 2048
+  // L1 cache is 32 kB
+  #define N 768
+  // 8*768*4 = 24 kB
 #endif
 
-#define BLOCK_Y 4
-#define BLOCK_X 2
+#define BLOCK_Y 1
+#define BLOCK_X 1
 
 // aligned?
 float A[N*N] __attribute__ ((aligned (32)));
@@ -34,69 +39,71 @@ uint64_t nanos() {
   return (uint64_t)start.tv_sec*1000000000 + (uint64_t)start.tv_nsec;
 }
 
-//#define FAST
-
+#define BLOCK 8
 void matmul() {
   // 136.77 GFLOPS on single core numpy
   // 4.59 GHz
   // 32 FLOPS/cycle (16 FMAs, aka 2x 8/32B wide FMAs)
 
-  for (int by = 0; by < N; by += BLOCK_Y) {
-    for (int bx = 0; bx < N; bx += BLOCK_X) {
+  for (int y = 0; y < N; y++) {
+    for (int x = 0; x < N; x+=BLOCK) {
 
-#ifndef FAST
-      float tc[BLOCK_Y][BLOCK_X] = {};
+      float acc[BLOCK] = {};
       for (int k = 0; k < N; k++) {
-        for (int y = 0; y < BLOCK_Y; y++) {
-          for (int x = 0; x < BLOCK_X; x++) {
-            tc[y][x] += A[(by+y)*N + k] * B[(bx+x)*N + k];
-          }
+        float ta = A[y*N + k];
+        for (int ix = 0; ix < BLOCK; ix++) {
+          acc[ix] += ta * B[(x+ix)*N + k];
         }
       }
 
-      // store
-      for (int y = 0; y < BLOCK_Y; y++) {
-        for (int x = 0; x < BLOCK_X; x++) {
-          C[(by+y)*N + bx+x] = tc[y][x];
-        }
-      }
-#else
-      // 16 YMM registers
-      __m256 tc[BLOCK_Y][BLOCK_X] = {};
-      for (int k = 0; k < N; k += 8) {
-        for (int y = 0; y < BLOCK_Y; y++) {
-          for (int x = 0; x < BLOCK_X; x++) {
-            //printf("%d %d\n", ((by+y)*N + k)/8, ((bx+x)*N + k)/8);
-            tc[y][x] = _mm256_fmadd_ps(
-              Am[((by+y)*N + k)/8],
-              Bm[((bx+x)*N + k)/8],
-              tc[y][x]);
-          }
-        }
+      // writeback
+      for (int ix = 0; ix < BLOCK; ix++) {
+        C[y*N + x + ix] = acc[ix];
       }
 
-      // store
-      for (int y = 0; y < BLOCK_Y; y++) {
-        for (int x = 0; x < BLOCK_X; x++) {
-          float ftmp = 0.0;
-          for (int i = 0; i < 8; i++) ftmp += tc[y][x][i];
-          C[(by+y)*N + bx+x] = ftmp;
-        }
-      }
-#endif
-
+      /*__m256 acc = {};
+      for (int k = 0; k < N; k++) {
+        float ta = A[y*N + k];*/
     }
   }
+
+  // 768*768*4 = 2.4 MB
+  /*for (int y = 0; y < N; y++) {
+    for (int bx = 0; bx < N; bx += BLOCK_X) {
+      // this should all be in L1 cache
+
+      // 16 YMM registers
+      __m256 tc[1] = {};
+      for (int k = 0; k < N; k += 8) {
+        // this should all be in registers
+
+        //__m256 ty = {2.0, 4.0, 8.0, 16.0, 1.0, 1.0, 1.0, 1.0};
+        //__m256 ty = Am[(y*N + k)/8];
+        __m256 tx = Bm[(bx*N + k)/8];
+
+        for (int ik = 0; ik < 8; ik++) {
+          //printf("%d %d\n", ((by+y)*N + k)/8, ((bx+x)*N + k)/8);
+          //tc[x] = _mm256_fmadd_ps(ty, Bm[(x*N + k)/8], tc[x]);
+          //tc[x] = _mm256_fmadd_ps(ty, Bm[((bx+x)*N + k)/8], tc[x]);
+          __m256 ty = _mm256_broadcast_ss(&A[y*N + k + ik]);
+          tc[0] = _mm256_fmadd_ps(ty, tx, tc[0]);
+          //__builtin_prefetch(&Bm[((bx+x)*N + k)/8 + 1]);
+          //tc[x] = _mm256_fmadd_ps(ty, Bl[(x*N + k)/8], tc[x]);
+          //tc[x] = _mm256_fmadd_ps(ty, Bl[x+k], tc[x]);
+          //tc[x] = _mm256_fmadd_ps(ty, ty, tc[x]);
+        }
+
+      }
+
+      Cm[(y*N + bx)/8] = tc[0];
+     
+    }
+  }*/
 }
 
 int main() {
   printf("hello\n");
-  assert(N%BLOCK_Y == 0);
   assert(N%BLOCK_X == 0);
-
-/*#ifdef FAST
-  assert(BLOCK_X == 8);
-#endif*/
 
 #ifdef DEBUG
   for (int i = 0; i < N*N; i++) A[i] = i;
@@ -109,7 +116,7 @@ int main() {
   fclose(f);
 #endif
 
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 4; i++) {
     uint64_t start = nanos();
     matmul();
     uint64_t end = nanos();
