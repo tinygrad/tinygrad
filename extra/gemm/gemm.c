@@ -16,7 +16,7 @@
 #else
   //#define N 4096
   // L1 cache is 32 kB
-  #define N 768
+  #define N 2048
   // 8*768*4 = 24 kB
 #endif
 
@@ -101,7 +101,7 @@ int main() {
     uint64_t end = nanos();
     double gflop = (2.0*N*N*N)*1e-9;
     double s = (end-start)*1e-9;
-    printf("%f GFLOP/S\n", gflop/s);
+    printf("%f GFLOP/S -- %.2f ms\n", gflop/s, s*1e3);
   }
 
 #ifdef DEBUG
