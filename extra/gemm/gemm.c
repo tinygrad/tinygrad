@@ -5,23 +5,22 @@
 #include <math.h>
 #include <immintrin.h>
 
-#define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
   #define N 8
 #else
   //#define N 4096
-  #define N 1024
+  #define N 2048
 #endif
 
 #define BLOCK 8
 
 // aligned?
-// int x __attribute__ ((aligned (16))) = 0;
-float A[N*N] __attribute__ ((aligned (16)));
-float B[N*N] __attribute__ ((aligned (16)));
-float C[N*N] __attribute__ ((aligned (16)));
-float val[N*N] __attribute__ ((aligned (16)));
+float A[N*N] __attribute__ ((aligned (32)));
+float B[N*N] __attribute__ ((aligned (32)));
+float C[N*N] __attribute__ ((aligned (32)));
+float val[N*N] __attribute__ ((aligned (32)));
 
 __m256 *Am = (__m256*)A;
 __m256 *Bm = (__m256*)B;
@@ -59,7 +58,7 @@ void matmul() {
         }
       }
 #else
-      __m256 tc[BLOCK];
+      float tc[BLOCK][BLOCK];
       for (int y = 0; y < BLOCK; y++) {
         for (int x = 0; x < BLOCK; x++) {
           __m256 tmp = {};
@@ -70,12 +69,17 @@ void matmul() {
               Bm[((bx+x)*N + k)/8],
               tmp);
           }
-          tc[y] = tmp;
+          float ftmp = 0.0;
+          for (int i = 0; i < 8; i++) ftmp += tmp[i];
+          tc[y][x] = ftmp;
         }
       }
 
+      // store
       for (int y = 0; y < BLOCK; y++) {
-        Cm[((by+y)*N + bx)/8] = tc[y];
+        for (int x = 0; x < BLOCK; x++) {
+          C[(by+y)*N + bx+x] = tc[y][x];
+        }
       }
 #endif
 
