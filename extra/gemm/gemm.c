@@ -1,4 +1,4 @@
-// clang -DFAST -ffast-math -march=native -O2 gemm.c && ./a.out
+// clang -O2 -march=native gemm.c
 
 // https://en.wikichip.org/wiki/amd/microarchitectures/zen_2
 #include <stdint.h>
@@ -44,9 +44,9 @@ __m256 *Bfm = (__m256*)Bf;
 #define BLOCK_X 2
 void matmul() {
   // 136.77 GFLOPS on single core numpy
-  // 4549.520 Mhz
-  // 32 FLOPS/cycle (16 FMAs, aka 2x 8/32B wide FMAs)
-  // theoretical max is 145.58464
+  // 4.9 GHz is max boost for 5950X
+  // 32 FLOPS/cycle (16 FMAs, aka 2x 8 single wide / 32 byte FMAs)
+  // theoretical max is 156.8 GFLOPS, we see 150
 
   // Bf = (y/8, k, 8)
   for (int y = 0; y < N; y+=BLOCK_Y) {
@@ -95,6 +95,7 @@ int main() {
   }
 
   for (int i = 0; i < 4; i++) {
+    memset(C, 0, N*N*sizeof(float));
     uint64_t start = nanos();
     matmul();
     uint64_t end = nanos();
