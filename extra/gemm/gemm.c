@@ -39,27 +39,45 @@ uint64_t nanos() {
   return (uint64_t)start.tv_sec*1000000000 + (uint64_t)start.tv_nsec;
 }
 
+float Bf[N*N] __attribute__ ((aligned (32)));
+__m256 *Bfm = (__m256*)Bf;
+
 #define BLOCK 8
 void matmul() {
   // 136.77 GFLOPS on single core numpy
   // 4.59 GHz
   // 32 FLOPS/cycle (16 FMAs, aka 2x 8/32B wide FMAs)
 
-  for (int y = 0; y < N; y++) {
-    for (int x = 0; x < N; x+=BLOCK) {
+  // A = (x, k)
+  // B = (y, k)
 
-      float acc[BLOCK] = {};
+  // Af = (x/8, k, 8)
+  // Bf = (y/8, k, 8)
+
+  for (int y = 0; y < N; y++) {
+    for (int x = 0; x < N; x += BLOCK) {
+
+      __m256 acc = {};
+      for (int k = 0; k < N; k++) {
+        __m256 ta = _mm256_broadcast_ss(&A[y*N + k]);
+        acc = _mm256_fmadd_ps(ta, Bfm[(x*N)/8 + k], acc);
+      }
+      Cm[(y*N + x)/8] = acc;
+
+
+      /*float acc[BLOCK] = {};
       for (int k = 0; k < N; k++) {
         float ta = A[y*N + k];
         for (int ix = 0; ix < BLOCK; ix++) {
-          acc[ix] += ta * B[(x+ix)*N + k];
+          //acc[ix] += ta * B[(x+ix)*N + k];
+          acc[ix] += ta * Bf[x*N + k*8 + ix];
         }
       }
 
       // writeback
       for (int ix = 0; ix < BLOCK; ix++) {
         C[y*N + x + ix] = acc[ix];
-      }
+      }*/
 
       /*__m256 acc = {};
       for (int k = 0; k < N; k++) {
@@ -115,6 +133,15 @@ int main() {
   fread(val, 1, sizeof(float)*N*N, f);
   fclose(f);
 #endif
+
+  // preswizzle
+  for (int y = 0; y < N; y+=8) {
+    for (int x = 0; x < N; x++) {
+      for (int iy = 0; iy < 8; iy++) {
+        Bf[y*N + x*8 + iy] = B[(y+iy)*N + x];
+      }
+    }
+  }
 
   for (int i = 0; i < 4; i++) {
     uint64_t start = nanos();
