@@ -1,3 +1,4 @@
+// clang -ffast-math -march=native -O3 gemm.c && ./a.out
 #include <stdint.h>
 #include <time.h>
 #include <stdio.h>
@@ -14,7 +15,7 @@
   #define N 2048
 #endif
 
-#define BLOCK 8
+#define BLOCK 4
 
 // aligned?
 float A[N*N] __attribute__ ((aligned (32)));
@@ -35,19 +36,21 @@ uint64_t nanos() {
 //#define FAST
 
 void matmul() {
+  // 136.77 GFLOPS on single core numpy
+  // 4.59 GHz
+  // 32 FLOPS/cycle (16 FMAs, aka 2x 8/32B wide FMAs)
+
   for (int by = 0; by < N; by += BLOCK) {
     for (int bx = 0; bx < N; bx += BLOCK) {
 
 #ifndef FAST
       // compute
-      float tc[BLOCK][BLOCK];
-      for (int y = 0; y < BLOCK; y++) {
-        for (int x = 0; x < BLOCK; x++) {
-          float acc = 0;
-          for (int k = 0; k < N; k++) {
-            acc += A[(by+y)*N + k] * B[(bx+x)*N + k];
+      float tc[BLOCK][BLOCK] = {};
+      for (int k = 0; k < N; k++) {
+        for (int y = 0; y < BLOCK; y++) {
+          for (int x = 0; x < BLOCK; x++) {
+            tc[y][x] += A[(by+y)*N + k] * B[(bx+x)*N + k];
           }
-          tc[y][x] = acc;
         }
       }
 
@@ -102,13 +105,14 @@ int main() {
   fclose(f);
 #endif
 
-  //matmul();
-  uint64_t start = nanos();
-  matmul();
-  uint64_t end = nanos();
-  double gflop = (2.0*N*N*N)*1e-9;
-  double s = (end-start)*1e-9;
-  printf("%f GFLOP/S\n", gflop/s);
+  for (int i = 0; i < 2; i++) {
+    uint64_t start = nanos();
+    matmul();
+    uint64_t end = nanos();
+    double gflop = (2.0*N*N*N)*1e-9;
+    double s = (end-start)*1e-9;
+    printf("%f GFLOP/S\n", gflop/s);
+  }
 
 #ifdef DEBUG
   for (int i = 0; i < N*N; i++) {
