@@ -20,9 +20,6 @@
   // 8*768*4 = 24 kB
 #endif
 
-#define BLOCK_Y 1
-#define BLOCK_X 1
-
 // aligned?
 float A[N*N] __attribute__ ((aligned (32)));
 float B[N*N] __attribute__ ((aligned (32)));
@@ -42,6 +39,7 @@ uint64_t nanos() {
 float Bf[N*N] __attribute__ ((aligned (32)));
 __m256 *Bfm = (__m256*)Bf;
 
+#define BLOCK_Y 2
 #define BLOCK 8
 void matmul() {
   // 136.77 GFLOPS on single core numpy
@@ -54,15 +52,20 @@ void matmul() {
   // Af = (x/8, k, 8)
   // Bf = (y/8, k, 8)
 
-  for (int y = 0; y < N; y++) {
-    for (int x = 0; x < N; x += BLOCK) {
+  for (int y = 0; y < N; y+=BLOCK_Y) {
+    for (int x = 0; x < N; x+=BLOCK) {
 
-      __m256 acc = {};
+      __m256 acc[BLOCK_Y] = {};
       for (int k = 0; k < N; k++) {
-        __m256 ta = _mm256_broadcast_ss(&A[y*N + k]);
-        acc = _mm256_fmadd_ps(ta, Bfm[(x*N)/8 + k], acc);
+        for (int iy = 0; iy < BLOCK_Y; iy++) {
+          __m256 ta = _mm256_broadcast_ss(&A[(y+iy)*N + k]);
+          acc[iy] = _mm256_fmadd_ps(ta, Bfm[(x*N + k*8)/8], acc[iy]);
+        }
       }
-      Cm[(y*N + x)/8] = acc;
+
+      for (int iy = 0; iy < BLOCK_Y; iy++) {
+        Cm[((y+iy)*N + x)/8] = acc[iy];
+      }
 
 
       /*float acc[BLOCK] = {};
@@ -121,7 +124,6 @@ void matmul() {
 
 int main() {
   printf("hello\n");
-  assert(N%BLOCK_X == 0);
 
 #ifdef DEBUG
   for (int i = 0; i < N*N; i++) A[i] = i;
