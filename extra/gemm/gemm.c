@@ -39,87 +39,36 @@ uint64_t nanos() {
 float Bf[N*N] __attribute__ ((aligned (32)));
 __m256 *Bfm = (__m256*)Bf;
 
-#define BLOCK_Y 2
 #define BLOCK 8
+#define BLOCK_Y 4
+#define BLOCK_X 2
 void matmul() {
   // 136.77 GFLOPS on single core numpy
-  // 4.59 GHz
+  // 4549.520 Mhz
   // 32 FLOPS/cycle (16 FMAs, aka 2x 8/32B wide FMAs)
+  // theoretical max is 145.58464
 
-  // A = (x, k)
-  // B = (y, k)
-
-  // Af = (x/8, k, 8)
   // Bf = (y/8, k, 8)
-
   for (int y = 0; y < N; y+=BLOCK_Y) {
-    for (int x = 0; x < N; x+=BLOCK) {
+    for (int x = 0; x < N; x+=BLOCK*BLOCK_X) {
 
-      __m256 acc[BLOCK_Y] = {};
+      __m256 acc[BLOCK_Y][BLOCK_X] = {};
       for (int k = 0; k < N; k++) {
         for (int iy = 0; iy < BLOCK_Y; iy++) {
           __m256 ta = _mm256_broadcast_ss(&A[(y+iy)*N + k]);
-          acc[iy] = _mm256_fmadd_ps(ta, Bfm[(x*N + k*8)/8], acc[iy]);
+          for (int ix = 0; ix < BLOCK_X; ix++) {
+            acc[iy][ix] = _mm256_fmadd_ps(ta, Bfm[((x+ix*BLOCK)*N + k*8)/8], acc[iy][ix]);
+          }
         }
       }
 
       for (int iy = 0; iy < BLOCK_Y; iy++) {
-        Cm[((y+iy)*N + x)/8] = acc[iy];
-      }
-
-
-      /*float acc[BLOCK] = {};
-      for (int k = 0; k < N; k++) {
-        float ta = A[y*N + k];
-        for (int ix = 0; ix < BLOCK; ix++) {
-          //acc[ix] += ta * B[(x+ix)*N + k];
-          acc[ix] += ta * Bf[x*N + k*8 + ix];
+        for (int ix = 0; ix < BLOCK_X; ix++) {
+          Cm[((y+iy)*N + x + ix * BLOCK)/8] = acc[iy][ix];
         }
       }
-
-      // writeback
-      for (int ix = 0; ix < BLOCK; ix++) {
-        C[y*N + x + ix] = acc[ix];
-      }*/
-
-      /*__m256 acc = {};
-      for (int k = 0; k < N; k++) {
-        float ta = A[y*N + k];*/
     }
   }
-
-  // 768*768*4 = 2.4 MB
-  /*for (int y = 0; y < N; y++) {
-    for (int bx = 0; bx < N; bx += BLOCK_X) {
-      // this should all be in L1 cache
-
-      // 16 YMM registers
-      __m256 tc[1] = {};
-      for (int k = 0; k < N; k += 8) {
-        // this should all be in registers
-
-        //__m256 ty = {2.0, 4.0, 8.0, 16.0, 1.0, 1.0, 1.0, 1.0};
-        //__m256 ty = Am[(y*N + k)/8];
-        __m256 tx = Bm[(bx*N + k)/8];
-
-        for (int ik = 0; ik < 8; ik++) {
-          //printf("%d %d\n", ((by+y)*N + k)/8, ((bx+x)*N + k)/8);
-          //tc[x] = _mm256_fmadd_ps(ty, Bm[(x*N + k)/8], tc[x]);
-          //tc[x] = _mm256_fmadd_ps(ty, Bm[((bx+x)*N + k)/8], tc[x]);
-          __m256 ty = _mm256_broadcast_ss(&A[y*N + k + ik]);
-          tc[0] = _mm256_fmadd_ps(ty, tx, tc[0]);
-          //__builtin_prefetch(&Bm[((bx+x)*N + k)/8 + 1]);
-          //tc[x] = _mm256_fmadd_ps(ty, Bl[(x*N + k)/8], tc[x]);
-          //tc[x] = _mm256_fmadd_ps(ty, Bl[x+k], tc[x]);
-          //tc[x] = _mm256_fmadd_ps(ty, ty, tc[x]);
-        }
-
-      }
-
-      Cm[(y*N + bx)/8] = tc[0];
-     
-    }
-  }*/
 }
 
 int main() {

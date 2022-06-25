@@ -15,7 +15,7 @@ if __name__ == "__main__":
   flop = 2*N*N*N
   #print(f"{flop / 1e9:.2f} GFLOP")
 
-  for i in range(2):
+  for i in range(4):
     st = time.monotonic()
     C = A @ B.T
     et = time.monotonic()
