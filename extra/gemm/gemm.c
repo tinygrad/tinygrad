@@ -1,8 +1,10 @@
-// clang -O2 -march=native gemm.c
+// clang -O2 -march=native gemm.c -lpthread
+#define _GNU_SOURCE
 
 // https://en.wikichip.org/wiki/amd/microarchitectures/zen_2
 #include <stdint.h>
 #include <time.h>
+#include <sched.h>
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>
@@ -78,17 +80,23 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 atomic_int nready = 0;
 atomic_int ndone = 0;
 
-#define NTHREADS 1
+#define NTHREADS 16
 void *matmul_thread(void *n) {
+  int k = (int)n;
+  int sy = (N/NTHREADS) * k;
+  int ey = (N/NTHREADS) * (k+1);
+
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  CPU_SET(k,&set);
+  pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &set);
+
   nready++;
 
   // gotta have main lock once to signal start
   pthread_mutex_lock(&lock);
   pthread_mutex_unlock(&lock);
 
-  int k = (int)n;
-  int sy = (N/NTHREADS) * k;
-  int ey = (N/NTHREADS) * (k+1);
   matmul(sy, ey);
 
   // we done
@@ -123,7 +131,7 @@ int main() {
     }
   }
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4000; i++) {
     memset(C, 0, N*N*sizeof(float));
 
 #if NTHREADS != 1 
