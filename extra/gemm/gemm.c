@@ -16,7 +16,7 @@
 #endif
 
 #define BLOCK_Y 4
-#define BLOCK_X 8
+#define BLOCK_X 2
 
 // aligned?
 float A[N*N] __attribute__ ((aligned (32)));
@@ -61,8 +61,8 @@ void matmul() {
         }
       }
 #else
-      //float tc[BLOCK_Y][BLOCK_X] = {};
-      __m256 tc[BLOCK_Y][BLOCK_X] = {};   // BLOCK_X is the implied dim
+      // 16 YMM registers
+      __m256 tc[BLOCK_Y][BLOCK_X] = {};
       for (int k = 0; k < N; k += 8) {
         for (int y = 0; y < BLOCK_Y; y++) {
           for (int x = 0; x < BLOCK_X; x++) {
@@ -76,15 +76,10 @@ void matmul() {
       }
 
       // store
-      /*for (int y = 0; y < BLOCK_Y; y++) {
-        Cm[((by+y)*N + bx)/8] = tc[y];
-      }*/
-
-      // store
       for (int y = 0; y < BLOCK_Y; y++) {
         for (int x = 0; x < BLOCK_X; x++) {
           float ftmp = 0.0;
-          for (int i =0; i < 8; i++) ftmp += tc[y][x][i];
+          for (int i = 0; i < 8; i++) ftmp += tc[y][x][i];
           C[(by+y)*N + bx+x] = ftmp;
         }
       }
@@ -99,10 +94,9 @@ int main() {
   assert(N%BLOCK_Y == 0);
   assert(N%BLOCK_X == 0);
 
-#ifdef FAST
+/*#ifdef FAST
   assert(BLOCK_X == 8);
-#endif
-
+#endif*/
 
 #ifdef DEBUG
   for (int i = 0; i < N*N; i++) A[i] = i;
