@@ -37,8 +37,7 @@ class MBConvBlock:
     x = inputs
     if self._expand_conv:
       x = self._bn0(x.conv2d(self._expand_conv)).swish()
-    x = x.pad2d(padding=self.pad)
-    x = x.conv2d(self._depthwise_conv, stride=self.strides, groups=self._depthwise_conv.shape[0])
+    x = x.conv2d(self._depthwise_conv, padding=self.pad, stride=self.strides, groups=self._depthwise_conv.shape[0])
     x = self._bn1(x).swish()
 
     if self.has_se:
@@ -110,8 +109,7 @@ class EfficientNet:
     self._fc_bias = Tensor.zeros(classes)
 
   def forward(self, x):
-    x = x.pad2d(padding=(0,1,0,1))
-    x = self._bn0(x.conv2d(self._conv_stem, stride=2)).swish()
+    x = self._bn0(x.conv2d(self._conv_stem, padding=(0,1,0,1), stride=2)).swish()
     x = x.sequential(self._blocks)
     x = self._bn1(x.conv2d(self._conv_head)).swish()
     x = x.avg_pool2d(kernel_size=x.shape[2:4])
