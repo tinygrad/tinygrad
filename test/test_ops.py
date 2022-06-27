@@ -266,6 +266,27 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride).relu(),
         lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), atol=1e-4)
 
+  def test_negative_padding_conv2d(self):
+    n,k = 10, 3
+    helper_test_op([(1,1,n,n), (1,1,k,k)],
+      lambda x,w: torch.nn.functional.conv2d(x[:, :, 1:-1, 1:-1],w).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=-1).relu(), atol=1e-4)
+    helper_test_op([(1,1,n,n), (1,1,k,k)],
+      lambda x,w: torch.nn.functional.conv2d(x[:, :, 1:, 1:],w).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=(-1,0,-1,0)).relu(), atol=1e-4)
+
+  def test_asymmetric_padding_conv2d(self):
+    for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
+      with self.subTest(padding := p):
+        for n in [3,4]:
+          for k in [2]:
+            helper_test_op([(1,1,n,n), (1,1,k,k)],
+              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
+              lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
+            helper_test_op([(1,1,n,n), (1,1,k,k)],
+              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
+              lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
+
   def test_padded_conv2d(self):
     bs = 4
     cin = 3

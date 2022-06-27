@@ -126,7 +126,7 @@ class GPUBuffer:
     if C is not None:
       ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
-      if C.px == 0 and C.py == 0: options.append("-DALLVALID")
+      if C.px == 0 and C.py == 0 and C.px_ == 0 and C.py_ == 0: options.append("-DALLVALID")
       if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
       global_size = [C.bs*C.cout, C.oy, C.ox]
       assert bufs[0][0] == "input" and bufs[1][0] == "weight"

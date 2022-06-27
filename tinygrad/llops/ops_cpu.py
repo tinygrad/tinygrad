@@ -61,7 +61,8 @@ class CPUBuffer(np.ndarray):
 
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    if C.px > 0 or C.py > 0: x = np.pad(x, [(0,0), (0,0), (C.py, C.py), (C.px, C.px)])
+    if C.px != 0 or C.py != 0 or C.px_ != 0 or C.py_ != 0:
+      x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
     gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
     tx = np.lib.stride_tricks.as_strided(gx,
       shape=(C.bs, C.groups, C.cin, C.oy, C.ox, C.H, C.W),

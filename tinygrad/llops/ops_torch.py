@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from tinygrad.llops.ops_cpu import CPUBuffer
-from tinygrad.ops import ProcessingOps
+from tinygrad.ops import MovementOps, ProcessingOps
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class TorchBuffer(torch.Tensor):
@@ -23,4 +23,6 @@ class TorchBuffer(torch.Tensor):
 
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    return torch.conv2d(x, w, stride=(C.ys, C.xs), groups=C.groups, dilation=(C.dy, C.dx), padding=(C.py, C.px))
+    if C.px != C.px_ or C.py != C.py_: padding, x = 0, x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
+    else: padding = (C.py, C.px)
+    return torch.conv2d(x, w, stride=(C.ys, C.xs), groups=C.groups, dilation=(C.dy, C.dx), padding=padding)
