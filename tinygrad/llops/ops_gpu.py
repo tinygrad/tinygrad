@@ -124,7 +124,7 @@ class GPUBuffer:
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None) -> GPUBuffer:
     options = []
     if C is not None:
-      ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "ys", "xs", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
+      ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
       if C.px == 0 and C.py == 0 and C.px_ == 0 and C.py_ == 0: options.append("-DALLVALID")
       if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
@@ -146,8 +146,8 @@ class GPUBuffer:
       gid = gid*oy*ox + Y*ox + X;
   #endif
 
-      int IY = Y*ys;
-      int IX = X*xs;
+      int IY = Y*sy;
+      int IX = X*sx;
 
       for (int ci = 0; ci < cin; ci++) {
         for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {

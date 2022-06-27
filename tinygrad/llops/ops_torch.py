@@ -24,4 +24,4 @@ class TorchBuffer(torch.Tensor):
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
-    return torch.conv2d(x, w, stride=(C.ys, C.xs), groups=C.groups, dilation=(C.dy, C.dx))
+    return torch.conv2d(x, w, stride=(C.sy, C.sx), groups=C.groups, dilation=(C.dy, C.dx))
