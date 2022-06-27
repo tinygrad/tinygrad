@@ -95,8 +95,8 @@ class Ops:
   def processing_op(ctx, op:ProcessingOps, x, y, C):
     ret = x.processing_op(op, y, C)
     if 'LAZY' not in ctx.device: log_op(ProcessingOps, op, ret, [x, y])
-    Ops.flops += C.bs*C.cout*C.oy*C.ox*C.cin*C.H*C.W*2
-    Ops.mem += C.bs*C.cout*C.oy*C.ox + C.cout*C.cin*C.H*C.W + C.bs*C.cin*C.iy*C.ix
+    Ops.flops += C.bs*C.cout*C.oy*C.ox*C.cin*C.H*C.W * 2
+    Ops.mem += (C.bs*C.cout*C.oy*C.ox + C.cout*C.cin*C.H*C.W + C.bs*C.cin*C.iy*C.ix) * 4
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == C.out_shape
     return ret
