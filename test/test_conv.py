@@ -35,6 +35,13 @@ class TestConv(unittest.TestCase):
     out.relu().numpy(), (out-1).numpy()
     # TODO: make this a real test
 
+  def test_two_overlapping_binops_no_rerun(self):
+    x = Tensor.ones(1,12,128,256)
+    w = Tensor.ones(32,12,3,3)
+    out = x.conv2d(w, stride=(2,2), padding=(1,1))
+    out.relu().numpy(), out.elu().numpy()
+    # TODO: make this a real test
+
   def test_first_three(self):
     x = Tensor.ones(1,12,128,256)
 
