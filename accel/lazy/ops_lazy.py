@@ -26,7 +26,6 @@ class LazyOp(NamedTuple):
   src: Tuple[Union[LazyOp, LazyBuffer]]
   arg: Any = None
 
-def get_root(x:LazyOp) -> LazyBuffer: return x if isinstance(x, LazyBuffer) else get_root(x.src[0])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def find_conv(op:LazyOp) -> LazyOp: return [x for x in get_lazyops(op) if isinstance(x.op, ProcessingOps)][0]
@@ -49,11 +48,12 @@ def cmp(buf1:LazyBuffer, buf2:LazyBuffer):
       expanded2.add(x2)
   return 0
 
-@functools.lru_cache(maxsize=None)
-def depends(haystack:LazyBuffer, needle:LazyBuffer):
-  gen = get_lazybuffers(haystack.op)
-  if needle in gen: return True
-  return any(depends(x, needle) for x in gen if x.realized is None)
+# TODO: confirm cmp is the same thing as this
+#@functools.lru_cache(maxsize=None)
+#def depends(haystack:LazyBuffer, needle:LazyBuffer):
+#  gen = get_lazybuffers(haystack.op)
+#  if needle in gen: return True
+#  return any(depends(x, needle) for x in gen if x.realized is None)
 
 class LazyBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
@@ -103,8 +103,8 @@ class LazyBuffer:
     ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
     ret.shape = ret.st.movement_op(op, arg).shape   # update the shape after we modify the ShapeTracker
 
-    if REMOVE_MOVEMENT_NOPS and x.optype == MovementOps and x.realized is None and ret.st.contiguous:
-      root = get_root(x.op)
+    if REMOVE_MOVEMENT_NOPS and x.realized is None and ret.st.contiguous:
+      root = get_lazybuffers(ret.op)[0]
       if ret.st.shape == root.shape:
         return root
 
@@ -178,6 +178,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
     conv_x, conv_w = conv.src[0], conv.src[1]
     seen = {conv_x:conv_x, conv_w:conv_w}
     real_srcs = [("input", conv_x.realize()), ("weight", conv_w.realize())]
+    assert real_srcs[0][1].st.contiguous and real_srcs[1][1].st.contiguous
     arg = conv.arg
   else:
     seen = {}
@@ -187,7 +188,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   real_dict : Dict[LazyBuffer, str] = {}
   for s in lazy_srcs:
     if s.optype == MovementOps and s.realized is None:
-      root = get_root(s.op)
+      root = get_lazybuffers(s.op)[0]
       if FOLD_CONSTANTS_INTO_KERNELS and root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
         if not s.st.needs_valid():
           real_dict[s] = f"({root.op.arg[0]}f)"
@@ -213,7 +214,7 @@ def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
     real_src = self.op.src[0].realize()
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src]
   elif self.optype == MovementOps:
-    real_src = get_root(self.op).realize()
+    real_src = get_lazybuffers(self.op)[0].realize()
     return gops.GPUBuffer(self.st, real_src), [real_src]
   elif self.optype in [BinaryOps, ProcessingOps]:
     return _realize_binary_op(self)
