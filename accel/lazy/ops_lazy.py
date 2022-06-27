@@ -72,6 +72,7 @@ class LazyBuffer:
         # in lazy mode, we don't log until we realize
         log_op(self.optype, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
       del self.op
+    assert self.realized.shape == self.shape
     return self.realized
 
   @staticmethod
@@ -156,7 +157,7 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
             #return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
             srcs = [srcs[0].op, srcs[1]]
             #srcs = [srcs[0], srcs[1].op]
-      return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
+      return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, tuple(srcs)))
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any BinaryOps that feed into this
