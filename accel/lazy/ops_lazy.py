@@ -91,6 +91,7 @@ class LazyBuffer:
 
   @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
+    # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
     if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:

@@ -182,7 +182,7 @@ class TestOps(unittest.TestCase):
     C = 8
     helper_test_op([(1,C,5,5), (C,C,1,1), (C,)],
       lambda x,w,b: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w,b).relu(),w,b),
-      lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+      lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4, grad_rtol=1e-5)
 
   def test_simple_conv2d(self):
     helper_test_op([(1,1,9,9), (1,1,3,3)],
@@ -192,7 +192,7 @@ class TestOps(unittest.TestCase):
   def test_simple_conv2d_batched(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
-      lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+      lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_conv2d(self):
     for bs in [1,8]:
@@ -270,21 +270,11 @@ class TestOps(unittest.TestCase):
     bs = 4
     cin = 3
     H,W = 3,3
-    for p in [2, (2,1)]:
+    for p in [2, (2,1), (2,2)]:
       with self.subTest(padding := p):
         helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
           lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-          lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4, forward_only=True)
-
-  def test_dilated_conv2d_forward(self):
-    bs = 4
-    cin = 3
-    H,W = 3,3
-    for d in [2, (2,1)]:
-      with self.subTest(dilation := d):
-        helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-          lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
-          lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4, forward_only=True)
+          lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
   def test_dilated_conv2d(self):
     bs = 4

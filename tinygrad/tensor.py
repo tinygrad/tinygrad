@@ -199,6 +199,7 @@ class Tensor:
     return ret
 
   def pad2d(self, padding):
+    # (padding_left, padding_right, padding_top, padding_bottom)
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
   def matmul(x, w):

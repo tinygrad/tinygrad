@@ -85,6 +85,7 @@ def get_run_onnx(onnx_model):
         assert 'dilations' not in opt or opt['dilations'] == (1,1)
         if opt['pads'][0] == opt['pads'][2] and opt['pads'][1] == opt['pads'][3]:
           # symmetric padding
+          # TODO: is this backward?
           ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1), padding=opt['pads'][0:2])
         else:
           x = x.pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]))
