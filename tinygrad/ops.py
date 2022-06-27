@@ -17,7 +17,7 @@ if DEBUG:
   def debug_exit():
     for k,v in cnts.items():
       print(k, v)
-    print(f"GFLOP: {Ops.flops*1e-9:.2f}")
+    print(f"GFLOP: {Ops.flops*1e-9:.2f} MEMBW {Ops.mem*1e-9:.2f} GB")
   atexit.register(debug_exit)
 
 if GRAPH:
@@ -58,6 +58,7 @@ def log_op(optype, op, ret, inp):
 
 class Ops:
   flops = 0
+  mem = 0
 
   def unary_op(ctx, op:UnaryOps, x):
     ret = x.unary_op(op)
@@ -95,6 +96,7 @@ class Ops:
     ret = x.processing_op(op, y, C)
     if 'LAZY' not in ctx.device: log_op(ProcessingOps, op, ret, [x, y])
     Ops.flops += C.bs*C.cout*C.oy*C.ox*C.cin*C.H*C.W*2
+    Ops.mem += C.bs*C.cout*C.oy*C.ox + C.cout*C.cin*C.H*C.W + C.bs*C.cin*C.iy*C.ix
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == C.out_shape
     return ret
