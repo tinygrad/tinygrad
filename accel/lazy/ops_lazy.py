@@ -57,7 +57,7 @@ def cmp(buf1:LazyBuffer, buf2:LazyBuffer):
 
 class LazyBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
-    self.st = ShapeTracker(shape)
+    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(shape)
     self.shape = self.st.shape
     self.optype, self.op = optype, op
     self.realized = None
@@ -100,8 +100,7 @@ class LazyBuffer:
       return replace_with_movement_op(x.op)
 
     # if a MovementOp is applied to a MovementOp, merge them and use one buffer
-    ret = LazyBuffer(x.st, MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
-    ret.shape = ret.st.movement_op(op, arg).shape   # update the shape after we modify the ShapeTracker
+    ret = LazyBuffer(ShapeTracker(x.st).movement_op(op, arg), MovementOps, LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
 
     if REMOVE_MOVEMENT_NOPS and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]
