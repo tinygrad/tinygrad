@@ -92,7 +92,7 @@ class LazyBuffer:
   @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
-    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):
+    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and x.realized is None and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
@@ -137,29 +137,27 @@ def elementwise_op(op, srcs:Tuple[LazyBuffer]) -> LazyBuffer:
 
   if MERGE_ELEMENTWISE_INTO_CONV_OUTPUT:
     cnt = sum([x.optype == ProcessingOps and x.realized is None for x in srcs])
-    if cnt == 1:
-      srcs = [x.op if x.optype == ProcessingOps and x.realized is None else x for x in srcs]
-      return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
-    elif cnt == 2:
-      # have to confirm they are the same conv
-      c1, c2 = [find_conv(x.op) for x in srcs]
-      if c1.op == c1.op and c1.arg == c2.arg and tuple(c1.src) == tuple(c2.src):
+    if cnt > 0:
+      if cnt == 1:
         srcs = [x.op if x.optype == ProcessingOps and x.realized is None else x for x in srcs]
-        return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
-      else:
-        order = cmp(srcs[0], srcs[1])
-        if order == -1:
-        #if depends(srcs[0], srcs[1]):
-          srcs = [srcs[0].op, srcs[1]]
-        elif order == 1:
-        #elif depends(srcs[1], srcs[0]):
-          srcs = [srcs[0], srcs[1].op]
+      elif cnt == 2:
+        c1, c2 = [find_conv(x.op) for x in srcs]  # this returns a list of LazyOps
+        if c1 == c2:   # NOTE: this compare relies on working caching for processing_ops
+          # they are the same conv, merge them
+          srcs = [x.op if x.optype == ProcessingOps and x.realized is None else x for x in srcs]
         else:
-          # all three are okay
-          #return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
-          srcs = [srcs[0].op, srcs[1]]
-          #srcs = [srcs[0], srcs[1].op]
-        return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
+          # they are not the same conv, choose one
+          order = cmp(srcs[0], srcs[1])
+          if order == -1: #if depends(srcs[0], srcs[1]):
+            srcs = [srcs[0].op, srcs[1]]
+          elif order == 1: #elif depends(srcs[1], srcs[0]):
+            srcs = [srcs[0], srcs[1].op]
+          else:
+            # all three are okay
+            #return LazyBuffer(out_shape, BinaryOps, LazyOp(op, list(srcs)))
+            srcs = [srcs[0].op, srcs[1]]
+            #srcs = [srcs[0], srcs[1].op]
+      return LazyBuffer(out_shape, ProcessingOps, LazyOp(op, srcs))
 
   if MERGE_ELEMENTWISE_OPS:
     # remove the buffers from any BinaryOps that feed into this

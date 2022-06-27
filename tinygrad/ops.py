@@ -1,4 +1,5 @@
 from enum import Enum
+from tinygrad.helpers import prod
 UnaryOps = Enum("UnaryOps", ["NOOP", "RELU", "EXP", "LOG", "NEG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
@@ -10,13 +11,19 @@ DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 from collections import defaultdict
 cnts = defaultdict(int)
+
+import atexit
+if DEBUG:
+  def debug_exit():
+    for k,v in cnts.items():
+      print(k, v)
+    print(f"GFLOP: {Ops.flops*1e-9:.2f}")
+  atexit.register(debug_exit)
+
 if GRAPH:
-  import atexit
   import networkx as nx
   G = nx.DiGraph()
   def save_graph_exit():
-    for k,v in cnts.items():
-      print(k, v)
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
     os.system('dot -Tsvg /tmp/net.dot -o /tmp/net.svg')
@@ -24,9 +31,9 @@ if GRAPH:
 
 global_num_max = 0
 def log_op(optype, op, ret, inp):
-  if DEBUG: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
+  cnts[optype] += 1
+  if DEBUG >= 2: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
-    cnts[optype] += 1
     def nm(x):
       global global_num_max
       if getattr(x, 'global_num', None) is None:
@@ -50,9 +57,12 @@ def log_op(optype, op, ret, inp):
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if non_contiguous else 'filled'
 
 class Ops:
+  flops = 0
+
   def unary_op(ctx, op:UnaryOps, x):
     ret = x.unary_op(op)
     if 'LAZY' not in ctx.device: log_op(UnaryOps, op, ret, [x])
+    Ops.flops += prod(x.shape)
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
@@ -68,6 +78,7 @@ class Ops:
     assert x.shape == y.shape
     ret = x.binary_op(op, y)
     if 'LAZY' not in ctx.device: log_op(BinaryOps, op, ret, [x, y])
+    Ops.flops += prod(x.shape)*2
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
@@ -83,6 +94,7 @@ class Ops:
   def processing_op(ctx, op:ProcessingOps, x, y, C):
     ret = x.processing_op(op, y, C)
     if 'LAZY' not in ctx.device: log_op(ProcessingOps, op, ret, [x, y])
+    Ops.flops += C.bs*C.cout*C.oy*C.ox*C.cin*C.H*C.W*2
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == C.out_shape
     return ret
