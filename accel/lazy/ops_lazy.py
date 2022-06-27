@@ -3,7 +3,7 @@ import os
 from typing import Union, NamedTuple, List, Any, Tuple, Dict
 from tinygrad.shapetracker import ShapeTracker
 import functools, operator
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, ConvArgs
 import sys
 sys.setrecursionlimit(10000)
 
@@ -13,7 +13,8 @@ LoadOps = Enum("LoadOps", ["FROMCPU", "CONTIGUOUS"])
 Op = Union[BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
 MERGE_MOVEMENT_OPS = True
-SHUFFLE_MOVEMENT_OPS = True   # this breaks maxpool
+SHUFFLE_MOVEMENT_OPS = True
+SHUFFLE_SLICE_OPS = False  # NOTE: 0/0 is NaN if you slice, so this can change the output
 REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
@@ -86,11 +87,11 @@ class LazyBuffer:
   def binary_op(x, op, y:LazyBuffer): return elementwise_op(op, (x,y))
 
   @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
-  def contiguous_op(x) -> LazyBuffer: return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
+  def contiguous_op(x:LazyBuffer) -> LazyBuffer: return x if x.st.contiguous else LazyBuffer(x.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (x,)))
 
   @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
-  def movement_op(x, op:MovementOps, arg) -> LazyBuffer:
-    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps:
+  def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
+    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
@@ -108,10 +109,10 @@ class LazyBuffer:
 
     return ret
 
-  def reduce_op(x, op, new_shape:Tuple[int]):
+  def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int]):
     return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x,), new_shape))
 
-  def processing_op(x, op, w:LazyBuffer, C):
+  def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs):
     return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x.contiguous_op(), w.contiguous_op()), C))
 
 def ast_op(op: Op, srcs_code: List[str]) -> str:

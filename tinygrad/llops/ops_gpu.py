@@ -7,6 +7,7 @@ from typing import List, Tuple, Optional
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
+from tinygrad.ops import DEBUG
 
 class CL:
   CACHE = None
@@ -29,11 +30,12 @@ class CL:
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name, prg, options=tuple(), argdtypes=None):
-    self.name = name
-    self.built = cl.Program(CL().cl_ctx, prg).build(options=options)
-    self.clprg = self.built.__getattr__(name)
+    self.name, self.prg = name, prg
+    self.built = cl.Program(CL().cl_ctx, self.prg).build(options=options)
+    self.clprg = self.built.__getattr__(self.name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
+    if DEBUG >= 2: print(f"**** {self.name} {args[0]} {args[1]} ****\n{self.prg}")
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)
 
@@ -130,27 +132,7 @@ class GPUBuffer:
       assert bufs[0][0] == "input" and bufs[1][0] == "weight"
       ewbufs = bufs[2:]   # input and weight are consumed by the convs
       kernel_name = "conv"
-    else:
-      ints, params = '', []
-      options.append("-DNOCONV")
-      global_size = [prod(ret.shape), 1, 1]
-      ewbufs = bufs
-      kernel_name = "elementwise"
-
-    elementwise_prefix = '\n'.join([buf.contiguous_view(name) for name, buf in ewbufs])+ \
-      "inline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {"+ \
-      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in ewbufs])+ \
-      f"return {code}; }}"
-
-    conv_params = ["__global float* restrict output"] + \
-                  [f"__global const float *{name}_g" for name, _ in bufs] + \
-                  [x[0] for x in params]
-    conv_prg = CLProgram(kernel_name, elementwise_prefix+f"__kernel void {kernel_name}("+','.join(conv_params)+""") {
-      float acc = 0.0;
-      int gid = get_global_id(0);
-      """+ints+"""
-
-  #ifndef NOCONV
+      conv_src = """
       int B = gid/(groups*rcout);  // range 0-bs
       int g = (gid/rcout)%groups;
       int c = gid % rcout;
@@ -181,9 +163,26 @@ class GPUBuffer:
   #endif
         } }
       }
-  #endif
+      """
+    else:
+      ints, params = '', []
+      global_size = [prod(ret.shape), 1, 1]
+      ewbufs = bufs
+      kernel_name = "elementwise"
+      conv_src = ""
 
-      output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
+    elementwise_prefix = '\n'.join([buf.contiguous_view(name) for name, buf in ewbufs])+ \
+      "\n\ninline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {\n"+ \
+      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in ewbufs])+ \
+      f"\nreturn {code}; }}"
+
+    conv_params = ["__global float* restrict output"] + \
+                  [f"__global const float *{name}_g" for name, _ in bufs] + \
+                  [x[0] for x in params]
+    conv_prg = CLProgram(kernel_name, elementwise_prefix+f"\n\n__kernel void {kernel_name}("+','.join(conv_params)+""") {
+      float acc = 0.0;
+      int gid = get_global_id(0);
+      """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
     }""", options=tuple(options), argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
     conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
     return ret

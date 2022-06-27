@@ -296,6 +296,13 @@ class TestOps(unittest.TestCase):
           lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
           lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4)
 
+  def test_maxpool2d_simple(self):
+    ksz = (2,2)
+    helper_test_op([(1,1,2,3)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
+      # TODO: why is this tolerance so high?
+      lambda x: Tensor.max_pool2d(x, kernel_size=ksz), grad_atol=1e-4)
+
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
