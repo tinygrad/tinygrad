@@ -19,7 +19,7 @@ REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
 MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
 FOLD_CONSTANTS_INTO_KERNELS = True
-CACHE_LAZYBUFFERS = False    # this leaks tons of memory. TODO: only cache unresolved LazyBuffers
+CACHE_LAZYBUFFERS = True    # this leaks tons of memory. TODO: only cache unresolved LazyBuffers
 
 class LazyOp(NamedTuple):
   op: Op
@@ -110,9 +110,11 @@ class LazyBuffer:
 
     return ret
 
+  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int]):
     return LazyBuffer(new_shape, ReduceOps, LazyOp(op, (x,), new_shape))
 
+  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs):
     return LazyBuffer(C.out_shape, ProcessingOps, LazyOp(op, (x.contiguous_op(), w.contiguous_op()), C))
 
@@ -189,6 +191,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   for s in lazy_srcs:
     if s.optype == MovementOps and s.realized is None:
       root = get_lazybuffers(s.op)[0]
+      # NOTE: if this is used, there can be 0 sources for a kernel
       if FOLD_CONSTANTS_INTO_KERNELS and root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
         if not s.st.needs_valid():
           real_dict[s] = f"({root.op.arg[0]}f)"

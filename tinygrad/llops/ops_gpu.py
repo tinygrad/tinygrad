@@ -35,7 +35,8 @@ class CLProgram:
     self.clprg = self.built.__getattr__(self.name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    if DEBUG >= 2: print(f"**** {self.name} {args[0]} {args[1]} ****\n{self.prg}")
+    if DEBUG >= 2: print(f"**** {self.name} {args[0]} {args[1]} ****")
+    if DEBUG >= 3: print(self.prg)
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)
 
