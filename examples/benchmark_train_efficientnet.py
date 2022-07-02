@@ -29,7 +29,7 @@ if __name__ == "__main__":
   print(f"NUM:{NUM} BS:{BS} CNT:{CNT}")
   model = EfficientNet(NUM, classes=1000, has_se=False, track_running_stats=False)
   parameters = get_parameters(model)
-  optimizer = optim.Adam(parameters, lr=0.001)
+  optimizer = optim.SGD(parameters, lr=0.001)
 
   Tensor.training = True
   for i in trange(CNT):

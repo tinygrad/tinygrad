@@ -66,7 +66,7 @@ class EfficientNet:
       (2.0, 3.1), # b7
       (2.2, 3.6), # b8
       (4.3, 5.3), # l2
-    ][number]
+    ][max(number,0)]
 
     def round_filters(filters):
       multiplier = global_params[0]
@@ -92,6 +92,14 @@ class EfficientNet:
       [4, 5, (2,2), 6, 112, 192, 0.25],
       [1, 3, (1,1), 6, 192, 320, 0.25],
     ]
+
+    if self.number == -1:
+      blocks_args = [
+        [1, 3, (2,2), 1, 32, 40, 0.25],
+        [1, 3, (2,2), 1, 40, 80, 0.25],
+        [1, 3, (2,2), 1, 80, 192, 0.25],
+        [1, 3, (2,2), 1, 192, 320, 0.25],
+      ]
 
     self._blocks = []
     for num_repeats, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio in blocks_args:
