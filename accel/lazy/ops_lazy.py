@@ -17,7 +17,7 @@ SHUFFLE_MOVEMENT_OPS = True
 SHUFFLE_SLICE_OPS = False  # NOTE: 0/0 is NaN if you slice, so this can change the output
 REMOVE_MOVEMENT_NOPS = True
 MERGE_ELEMENTWISE_OPS = True
-MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = True
+MERGE_ELEMENTWISE_INTO_CONV_OUTPUT = False  # TODO: this should be done at resolve time
 FOLD_CONSTANTS_INTO_KERNELS = True
 CACHE_LAZYBUFFERS = True    # this leaks tons of memory. TODO: only cache unresolved LazyBuffers
 
