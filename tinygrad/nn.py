@@ -22,6 +22,7 @@ class BatchNorm2D:
       y = (x_detached - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
 
+      # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
         self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var

@@ -22,7 +22,7 @@ def fetch(url):
 def get_parameters(obj):
   parameters = []
   if isinstance(obj, Tensor):
-    parameters.append(obj)
+    if obj.requires_grad: parameters.append(obj)
   elif isinstance(obj, list) or isinstance(obj, tuple):
     for x in obj:
       parameters.extend(get_parameters(x))
