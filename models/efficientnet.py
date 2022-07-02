@@ -100,6 +100,10 @@ class EfficientNet:
         [1, 3, (2,2), 1, 80, 192, 0.25],
         [1, 3, (2,2), 1, 192, 320, 0.25],
       ]
+    elif self.number == -2:
+      blocks_args = [
+        [1, 9, (8,8), 1, 32, 320, 0.25],
+      ]
 
     self._blocks = []
     for num_repeats, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio in blocks_args:

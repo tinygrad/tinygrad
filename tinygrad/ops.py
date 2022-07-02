@@ -26,6 +26,7 @@ if GRAPH:
   def save_graph_exit():
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
+    # -Gnslimit=100 can make it finish, but you won't like results
     os.system('dot -Tsvg /tmp/net.dot -o /tmp/net.svg')
   atexit.register(save_graph_exit)
 

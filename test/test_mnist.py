@@ -50,8 +50,7 @@ class TestMNIST(unittest.TestCase):
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1)
-    for p in model.parameters():
-      p.realize()
+    for p in model.parameters(): p.realize()
 
   def test_sgd_threestep(self):
     np.random.seed(1337)
@@ -64,6 +63,7 @@ class TestMNIST(unittest.TestCase):
     model = TinyBobNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1)
+    for p in model.parameters(): p.realize()
 
   def test_adam_threestep(self):
     np.random.seed(1337)
