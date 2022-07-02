@@ -45,6 +45,19 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st.permute(0,3,2,1,4)
     assert self.st.contiguous
 
+  def test_permute_1s_simple(self):
+    self.st = ShapeTracker((1, 16, 9,9))
+    self.st.permute(1,0,2,3)
+    assert self.st.contiguous
+    self.st = ShapeTracker((2, 16, 9,9))
+    self.st.permute(1,0,2,3)
+    assert not self.st.contiguous
+
+  def test_remove_1s_simple(self):
+    self.st = ShapeTracker((1, 16, 1, 1))
+    self.st.reshape(16,)
+    assert self.st.contiguous
+
   def test_remove_1s(self):
     self.st = ShapeTracker((1, 4, 1, 4, 1))
     self.st.permute(0,3,2,1,4)
