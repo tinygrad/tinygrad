@@ -49,7 +49,7 @@ if __name__ == "__main__":
       p.realize()
     et = time.monotonic()
 
-    loss = loss.cpu().data[0]
+    loss = loss.detach().cpu().data[0]
     print(f"{(et-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {get_memory_used()/1e9:.2f} GB used")
 
 

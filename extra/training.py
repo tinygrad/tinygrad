@@ -35,7 +35,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
     accuracy = (cat == y).mean()
 
     # printing
-    loss = loss.cpu().data
+    loss = loss.detach().cpu().data
     losses.append(loss)
     accuracies.append(accuracy)
     t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))

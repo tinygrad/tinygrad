@@ -187,8 +187,9 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
   lazy_srcs : List[LazyBuffer] = [seen.setdefault(x,x) for x in get_lazybuffers(self.op) if x not in seen]
   real_dict : Dict[LazyBuffer, str] = {}
   for s in lazy_srcs:
-    if s.optype == MovementOps and s.realized is None:
-      root = get_lazybuffers(s.op)[0]
+    if s.optype in [LoadOps, MovementOps] and s.realized is None:
+      if s.optype == MovementOps: root = get_lazybuffers(s.op)[0]
+      else: root = s
       # NOTE: if this is used, there can be 0 sources for a kernel
       if FOLD_CONSTANTS_INTO_KERNELS and root.realized is None and root.optype == LoadOps and root.op.op == LoadOps.FROMCPU and root.shape == (1,):
         if not s.st.needs_valid():
@@ -198,6 +199,8 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
           inline_valid = s.st.expr().replace("valid=valid && ", "").replace(";idx=0", "").replace("//", "/").replace("idx", "gid")
           if ';' not in inline_valid:
             real_dict[s] = f"(({inline_valid}) * {str(root.op.arg[0])}f)"
+          else:
+            print(f"couldn't fold {str(root.op.arg[0])} with expr {s.st.expr()}")
     if s not in real_dict:  # nicer way to write this?
       real_dict[s] = f"arg_{len(real_srcs)}"
       real_srcs.append((f"arg_{len(real_srcs)}", s.realize()))
@@ -207,6 +210,7 @@ def _realize_binary_op(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBu
 def _realize(self:LazyBuffer) -> Tuple[gops.GPUBuffer, List[gops.GPUBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
     #print("load", self, self.shape, self.op.arg if prod(self.shape) == 1 else "<data>")
+    if self.shape == (1,): print("NOTE: resolving unary Tensor", self)
     return gops.GPUBuffer.fromCPU(self.op.arg), []
   elif self.optype == LoadOps and self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize()
