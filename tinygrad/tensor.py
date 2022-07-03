@@ -183,6 +183,7 @@ class Tensor:
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
   def matmul(x, w):
+    # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
     bs, groups = prod(x.shape[0:-2]), prod(w.shape[0:-2])
     cin, cout = w.shape[-2], w.shape[-1]
     out_shape_t = tuple(list(x.shape[0:-2])+[cout,-1])
@@ -321,9 +322,7 @@ class Tensor:
     ret = self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)
     return ret.add(bias.reshape(shape=shp))
 
-  def sequential(self, ll):
-    for l in ll: self = l(self)
-    return self
+  def sequential(self, ll): return functools.reduce(lambda x,f: f(x), ll, self)
 
   def layernorm(x, eps=1e-5):
     y = (x - x.mean(axis=-1, keepdim=True))
