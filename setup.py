@@ -25,7 +25,7 @@ setup(name='tinygrad',
         'gpu': ["pyopencl", "six"],
         'testing': [
             "pytest",
-            "torch",
+            "torch~=1.11.0",
             "tqdm",
             "protobuf~=3.19.0",
             "onnx",
