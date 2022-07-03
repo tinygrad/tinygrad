@@ -94,3 +94,25 @@ jobs:
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
       run: GPU=1 python -m pytest -s -v
+
+  testtypes:
+    name: mypy Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v2
+    - name: Update packages
+      run: sudo apt-get update
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e '.[testing]'
+    - name: Install mypy
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install mypy
+    - name: Run mypy
+      run: python -m mypy tinygrad/
