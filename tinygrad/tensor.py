@@ -264,15 +264,15 @@ class Tensor:
 
   # ***** math functions (unary) *****
 
+  def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)
   def clip(self, min, max): return ((self-min).relu()+min) - (self-max).relu()
-  def abs(self): return self.relu() + (0.0-self).relu()
+  def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
 
   # ***** activation functions (unary) *****
 
-  # TODO: make "-self" work
-  def sigmoid(self): return (1.0 + (0.0-self).exp()) ** -1.0
+  def sigmoid(self): return (1.0 + (-self).exp()) ** -1.0
   def elu(self, alpha=1.0): return self.relu() - (-alpha*(self.exp() - 1)).relu()
   def swish(self): return self * self.sigmoid()
   def relu6(self): return self.relu() - (self-6).relu()
