@@ -26,7 +26,10 @@ class ReLU(_UnaryOp):
 
 class Log(_UnaryOp):
   fop = UnaryOps.LOG
-  bop = BinaryOps.DIV   # TODO: flip order of DIV
+
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return ctx.binary_op(BinaryOps.DIV, grad_output, input)
 
 class Exp(_UnaryOp):
   def forward(ctx, input):
@@ -64,7 +67,7 @@ class Max(Function):
     # sum of locations, averaged
     div = ctx.reduce_op(ReduceOps.SUM, max_is_1s, grad_output.shape)
     div = ctx.movement_op(MovementOps.EXPAND, div, input.shape)
-    max_is_amount = ctx.binary_op(BinaryOps.DIV, div, max_is_1s)
+    max_is_amount = ctx.binary_op(BinaryOps.DIV, max_is_1s, div)
 
     grad_output_expanded = ctx.movement_op(MovementOps.EXPAND, grad_output, input.shape)
     return ctx.binary_op(BinaryOps.MUL, max_is_amount, grad_output_expanded)
@@ -110,7 +113,7 @@ class Pow(Function):
     x,y,powxy = ctx.saved_tensors
     grad_x, grad_y = None, None
     if ctx.needs_input_grad[0]:
-      tmp = ctx.binary_op(BinaryOps.DIV, x, powxy)      # pow(x,y)/x
+      tmp = ctx.binary_op(BinaryOps.DIV, powxy, x)      # pow(x,y)/x
       tmp = ctx.binary_op(BinaryOps.MUL, y, tmp)        # y * pow(x,y)/x
       grad_x = ctx.binary_op(BinaryOps.MUL, grad_output, tmp)
     if ctx.needs_input_grad[1]:

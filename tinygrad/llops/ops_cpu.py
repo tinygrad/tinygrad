@@ -30,7 +30,7 @@ class CPUBuffer(np.ndarray):
     if op == BinaryOps.ADD: return x+y
     elif op == BinaryOps.SUB: return x-y
     elif op == BinaryOps.MUL: return x*y
-    elif op == BinaryOps.DIV: return y/x
+    elif op == BinaryOps.DIV: return x/y
     elif op == BinaryOps.POW: return x**y
     elif op == BinaryOps.CMPEQ: return 1.0*(x==y)
     else: raise Exception(f"{op} isn't supported")
