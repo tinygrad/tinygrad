@@ -12,7 +12,6 @@ class TorchBuffer(torch.Tensor):
       return TorchBuffer(torch.zeros(shape)).to(device)
 
   def custompad(x, padding): return torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
-  def getdtype(self): return np.float32
 
   @staticmethod
   def fromCPU(data):

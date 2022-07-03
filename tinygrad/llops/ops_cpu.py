@@ -14,7 +14,7 @@ class CPUBuffer(np.ndarray):
   def expand(x, new_shape): return np.broadcast_to(x, new_shape).view(CPUBuffer)
 
   @staticmethod
-  def fromCPU(x): return x
+  def fromCPU(x): return x.view(CPUBuffer)
   def toCPU(x): return x
 
   def unary_op(x, op):
