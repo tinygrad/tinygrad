@@ -107,17 +107,15 @@ def _realize(self:LazyBuffer) -> DeviceBuffer:
       return real_src.shapeTrackerView(self.st), [real_src]
     else:
       return functools.reduce(lambda x,o: x.movement_op(o.op, o.arg), get_lazyops(self.op)[::-1], real_src), [real_src]
-  elif self.optype == UnaryOps:
-    real_src_x = self.op.src[0].realize(self.device)
-    return real_src_x.unary_op(self.op.op), [real_src_x]
   elif self.optype == BinaryOps:
-    real_src_x = self.op.src[0].realize(self.device)
-    real_src_y = self.op.src[1].realize(self.device)
-    return real_src_x.binary_op(self.op.op, real_src_y), [real_src_x, real_src_y]
+    real_srcs = [x.realize() for x in self.op.src]
+    if len(real_srcs) == 1: return real_srcs[0].unary_op(self.op.op), real_srcs
+    else: return real_srcs[0].binary_op(self.op.op, real_srcs[1]), real_srcs
   elif self.optype == ProcessingOps:
     real_src_x = self.op.src[0].realize(self.device)
     real_src_w = self.op.src[1].realize(self.device)
     return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w]
+  else: raise NotImplementedError(f"can't handle optype {self.optype}")
 
 # **** lazy operations ****
 
@@ -163,11 +161,8 @@ class LazyBuffer:
   def toCPU(x):
     return x.realize().toCPU()
 
-  def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer:
-    return LazyBuffer(x.device, x.shape, UnaryOps, LazyOp(op, (x,)))
-
-  def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer:
-    return LazyBuffer(x.device, x.shape, BinaryOps, LazyOp(op, (x,y)))
+  def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, (x,))
+  def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, (x,y))
 
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
@@ -187,3 +182,5 @@ class LazyBuffer:
   def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
+def elementwise_op(op:Union[UnaryOps, BinaryOps], srcs:Tuple[LazyBuffer, ...]) -> LazyBuffer:
+  return LazyBuffer(srcs[0].device, srcs[0].shape, BinaryOps, LazyOp(op, srcs))
