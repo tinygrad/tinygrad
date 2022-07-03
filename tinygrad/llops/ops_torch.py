@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 from tinygrad.llops.ops_cpu import CPUBuffer
 from tinygrad.ops import MovementOps, ProcessingOps
 

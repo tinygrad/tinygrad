@@ -1,5 +1,4 @@
-import numpy as np    # TODO: remove this, it's used for np.prod and np.argsort
-from tinygrad.helpers import prod, reduce_shape, get_conv_args
+from tinygrad.helpers import prod, argsort, reduce_shape, get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
@@ -138,7 +137,7 @@ class Permute(Function):
     return x.movement_op(MovementOps.PERMUTE, order)
 
   def backward(ctx, grad_output):
-    norder = np.argsort(ctx.input_order).tolist()
+    norder = argsort(ctx.input_order)
     return grad_output.movement_op(MovementOps.PERMUTE, norder)
 
 # TODO: merge Slice and Flip into Stride with the 3 arguments

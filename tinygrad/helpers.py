@@ -2,6 +2,10 @@ from collections import namedtuple
 import math
 
 def prod(x): return math.prod(x)
+
+# https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
+def argsort(x): return sorted(range(len(x)), key=x.__getitem__)
+
 def reduce_shape(shape, axis):
   return [1 if i in axis else shape[i] for i in range(len(shape))]
 
