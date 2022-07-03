@@ -131,6 +131,7 @@ class GPUBuffer:
       if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
       global_size = [C.bs*C.cout, C.oy, C.ox]
       assert bufs[0][0] == "input" and bufs[1][0] == "weight"
+      assert bufs[0][1].st.contiguous and bufs[1][1].st.contiguous
       ewbufs = bufs[2:]   # input and weight are consumed by the convs
       kernel_name = "conv"
       conv_src = """

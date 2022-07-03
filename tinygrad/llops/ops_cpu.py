@@ -6,8 +6,7 @@ fxn_for_op = {
   UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
   UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(),
   BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
-  BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow,
-  BinaryOps.CMPEQ: lambda x,y: 1.0*(x==y)
+  BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: 1.0*(x==y)
 }
 
 class CPUBuffer(np.ndarray):
