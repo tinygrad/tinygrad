@@ -34,7 +34,7 @@ class Tensor:
     self._ctx = None
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
   @property
   def shape(self): return self.lazydata.shape
