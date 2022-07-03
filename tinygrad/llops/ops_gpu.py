@@ -2,8 +2,8 @@ from __future__ import annotations
 import os
 import functools
 import numpy as np
-import pyopencl as cl
-from typing import List, Tuple, Optional
+import pyopencl as cl  # type: ignore
+from typing import List, Tuple, Optional, Any
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
@@ -11,6 +11,8 @@ from tinygrad.ops import DEBUG
 
 class CL:
   CACHE = None
+  cl_ctx : Optional[cl.Context] = None
+  cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
     if getattr(CL, "cl_queue", None) is not None: return
     devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
@@ -29,7 +31,7 @@ class CL:
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
-  def __init__(self, name, prg, options=tuple(), argdtypes=None):
+  def __init__(self, name:str, prg:str, options=tuple(), argdtypes=None):
     self.name, self.prg = name, prg
     self.built = cl.Program(CL().cl_ctx, self.prg).build(options=options)
     self.clprg = self.built.__getattr__(self.name)
@@ -51,7 +53,7 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None):
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
-    self._buf = hostbuf._buf if hostbuf is not None else None
+    self._buf : cl.Buffer = hostbuf._buf if hostbuf is not None else None
   
   @property
   def cl(self):
@@ -102,7 +104,8 @@ class GPUBuffer:
 
     # generate loops with combined adjacent reduce axis
     acc = 1
-    loop_start, loop_end = [], []
+    loop_start : List[str] = []
+    loop_end : List[str] = []
     for shp,stride in st.views[-1].shape_strides[::-1]:
       if stride == 0:
         loop_start.append(f"for (int axis_{len(loop_start)} = 0; axis_{len(loop_start)} < {shp}; axis_{len(loop_start)}++) {{")
@@ -185,11 +188,6 @@ class GPUBuffer:
       float acc = 0.0;
       int gid = get_global_id(0);
       """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
-    }""", options=tuple(options), argdtypes=tuple([None]*(1+len(bufs)) + [np.int32]*len(params)))
+    }""", options=tuple(options), argdtypes=tuple(None if i < 1+len(bufs) else np.int32 for i in range(1+len(bufs)+len(params))))
     conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
     return ret
-
-
-
-
-

@@ -9,7 +9,7 @@ def divmodidx(acc, d, mod=True):
   return f"({lr}%{d})" if mod else lr  # don't mod the top shape dimension
 
 @functools.lru_cache(maxsize=None)
-def to_shape_strides(shape:Tuple[int], strides:Tuple[int]) -> List[Tuple[int, int]]:
+def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0])]
   for i in range(1, len(shape)):
@@ -55,6 +55,8 @@ class ZeroView:
       acc *= self.shape[0]
     self.expr = 'valid=' + ' && '.join(expr)
 
+ViewTypes = Union[View, ZeroView]
+
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape):
   strides = [1]
@@ -69,9 +71,8 @@ def view_from_shape(shape:Tuple):
   return View(tuple(shape), strides_for_shape(shape))
 
 class ShapeTracker:
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int]]):
-    if isinstance(shape, ShapeTracker): self.views = shape.views[:]
-    else: self.views = [view_from_shape(shape)]
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]]):
+    self.views : List[ViewTypes] = shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)]
 
   @property
   def contiguous(self):

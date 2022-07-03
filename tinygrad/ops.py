@@ -1,6 +1,6 @@
 from __future__ import annotations
 from enum import Enum
-from typing import Tuple, NamedTuple, Union, Any, List
+from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 import functools, operator
 from tinygrad.helpers import ConvArgs
 from tinygrad.shapetracker import ShapeTracker
@@ -11,6 +11,7 @@ MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLI
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
 LoadOps = Enum("LoadOps", ["FROMCPU"])
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
+OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps]]
 
 # lazy can recurse a lot
 import sys
@@ -20,7 +21,7 @@ import os
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 from collections import defaultdict
-cnts = defaultdict(int)
+cnts : Dict[Op, int] = defaultdict(int)
 
 import atexit
 if DEBUG:
@@ -29,7 +30,7 @@ if DEBUG:
   atexit.register(debug_exit)
 
 if GRAPH:
-  import networkx as nx
+  import networkx as nx  # type: ignore
   G = nx.DiGraph()
   def save_graph_exit():
     print("saving", G)
@@ -72,6 +73,8 @@ def log_op(optype, op, ret, inp):
 # **** enumerate supported devices ****
 
 import importlib, inspect
+def find_buffer(llo, name):
+  return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
 class Device:
   _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops")))
   DEFAULT = None
@@ -81,11 +84,10 @@ class Device:
     vars()[name] = name 
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
     try:
-      def find_buffer(llo, name): return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
       buffers[name] = find_buffer(importlib.import_module('tinygrad.llops.'+op), name)
     except ImportError as e:
       print(op, "not available", e)
-  DEFAULT = CPU if DEFAULT is None else DEFAULT
+  DEFAULT = "CPU" if DEFAULT is None else DEFAULT
 
 # TODO: get device buffer types
 DeviceBuffer = Any
@@ -115,7 +117,7 @@ def _realize(self:LazyBuffer) -> DeviceBuffer:
 
 class LazyOp(NamedTuple):
   op: Op
-  src: Tuple[Union[LazyOp, LazyBuffer]]
+  src: Tuple[Union[LazyOp, LazyBuffer], ...]  # type: ignore
   arg: Any = None
   # TODO: add dest to support multiple outputs
 
@@ -125,11 +127,11 @@ def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add
 LAZY = int(os.getenv("LAZY", "0"))
 
 class LazyBuffer:
-  def __init__(self, device, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
+  def __init__(self, device, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
     self.optype, self.op = optype, op
-    self.realized = None
+    self.realized : Optional[DeviceBuffer] = None
     self.device = device
     if not LAZY: self.realize()
 

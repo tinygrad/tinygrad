@@ -1,5 +1,5 @@
 import torch
-from tinygrad.llops.ops_cpu import CPUBuffer
+from tinygrad.llops.ops_cpu import CPUBuffer  # type: ignore
 from tinygrad.ops import MovementOps, ProcessingOps
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

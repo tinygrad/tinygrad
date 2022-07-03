@@ -337,12 +337,15 @@ class Function:
     self.requires_grad = any(self.needs_input_grad)
     self.saved_tensors = []
 
+  def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
+  def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")
+
   def save_for_backward(self, *x):
     # NOTE: it doesn't hurt to save this since the ctx will be freed fast without grad
     self.saved_tensors.extend(x)
 
   @classmethod
-  def apply(cls, *x:List[Tensor], **kwargs):
+  def apply(cls, *x:Tensor, **kwargs):
     ctx = cls(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs),
                  device=ctx.device, requires_grad=ctx.requires_grad)
