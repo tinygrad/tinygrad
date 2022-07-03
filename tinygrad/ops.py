@@ -53,8 +53,14 @@ def log_op(optype, op, ret, inp):
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
     st = getattr(ret, "st", None)
     non_contiguous = st is not None and not st.contiguous
-    G.nodes[nm(ret)]['label'] = str(ret.shape)
-    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if non_contiguous else '')) if optype in top_colors else "#ffffff"
+    if non_contiguous:
+      G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in st.views[-1].shape_strides))
+    else:
+      G.nodes[nm(ret)]['label'] = str(ret.shape)
+    if 'contiguous' in str(op).lower():
+      G.nodes[nm(ret)]['fillcolor'] = '#FFFF80'
+    else:
+      G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if non_contiguous else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if non_contiguous else 'filled'
 
 class Ops:
