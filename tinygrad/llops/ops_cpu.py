@@ -10,7 +10,6 @@ fxn_for_op = {
 }
 
 class CPUBuffer(np.ndarray):
-  def __new__(cls, shape, dtype=np.float32): return np.zeros(shape, dtype=dtype).view(CPUBuffer)
   def relu(x): return np.maximum(x, 0)
   def exp(x): return np.exp(x)
   def log(x): return np.log(x)
