@@ -42,8 +42,5 @@ class Conv2d:
     self.bias = Tensor.uniform(out_channels) if bias else None
 
   def __call__(self, x):
-    if self.padding[0] > 0 or self.padding[2] > 0:
-      x = x.pad2d(padding=self.padding)
-    x = x.conv2d(self.weight, self.bias, stride=self.stride)
-    return x
+    return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride)
 
