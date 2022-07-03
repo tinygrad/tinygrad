@@ -46,7 +46,8 @@ def log_op(optype, op, ret, inp):
 
     for x in inp:
       if not isinstance(op, list): op = [op]
-      if GRAPH == 2: sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
+      if len(op) <= 2: sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
+      elif len(op) <= 4: sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
       else: sop = str(len(op))
       G.add_edge(nm(x), nm(ret), label=sop)
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
