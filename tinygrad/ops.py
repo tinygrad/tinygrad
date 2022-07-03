@@ -5,18 +5,29 @@ from copy import copy
 import sys, functools, operator
 from tinygrad.helpers import ConvArgs
 from tinygrad.shapetracker import ShapeTracker
+
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
 LoadOps = Enum("LoadOps", ["FROMCPU"])
+
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps]]
+
+# TODO: get device buffer types
+DeviceBuffer = Any
 
 # -O1
 MERGE_MOVEMENT_OPS = True
 REMOVE_MOVEMENT_NOPS = True
+
+# -O2
+SHUFFLE_MOVEMENT_OPS = True
+
+# -O3
+SHUFFLE_SLICE_OPS = False  # NOTE: 0/0 is NaN if you slice, so this can change the output
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -24,19 +35,16 @@ sys.setrecursionlimit(10000)
 import os
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
+
 from collections import defaultdict
-cnts : Dict[Op, int] = defaultdict(int)
+cnts : Dict[OpType, int] = defaultdict(int)
 
 import atexit
-if DEBUG:
-  def debug_exit():
-    for k,v in cnts.items(): print(k, v)
-  atexit.register(debug_exit)
-
 if GRAPH:
   import networkx as nx  # type: ignore
   G = nx.DiGraph()
   def save_graph_exit():
+    for k,v in cnts.items(): print(k, v)
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
@@ -44,9 +52,9 @@ if GRAPH:
   atexit.register(save_graph_exit)
 
 global_num_max = 0
-def log_op(optype, op, ret, inp):
+def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[DeviceBuffer]):
   cnts[optype] += 1
-  if DEBUG >= 2: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
+  if DEBUG >= 1: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
     def nm(x):
       global global_num_max
@@ -58,7 +66,6 @@ def log_op(optype, op, ret, inp):
     top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
 
     for x in inp:
-      if not isinstance(op, list): op = [op]
       if len(op) <= 2: sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
       elif len(op) <= 4: sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
       else: sop = str(len(op))
@@ -67,7 +74,7 @@ def log_op(optype, op, ret, inp):
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
     st = getattr(ret, "st", None)
     non_contiguous = st is not None and not st.contiguous
-    if non_contiguous:
+    if non_contiguous and st is not None:   # checked twice to make type checker happy
       G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in st.views[-1].shape_strides))
     else:
       G.nodes[nm(ret)]['label'] = str(ret.shape)
@@ -82,23 +89,18 @@ def find_buffer(llo, name):
 class Device:
   _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops")))
   DEFAULT = None
-  buffers = {}
+  _buffers = {}
   for i,op in enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]):
     name = op[len("ops_"):].upper()
     vars()[name] = name 
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
-    try:
-      buffers[name] = find_buffer(importlib.import_module('tinygrad.llops.'+op), name)
-    except ImportError as e:
-      print(op, "not available", e)
+    try: _buffers[name] = find_buffer(importlib.import_module('tinygrad.llops.'+op), name)
+    except ImportError as e: print(op, "not available", e)
   DEFAULT = "CPU" if DEFAULT is None else DEFAULT
-
-# TODO: get device buffer types
-DeviceBuffer = Any
 
 def _realize(self:LazyBuffer) -> DeviceBuffer:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
-    return Device.buffers[self.device].fromCPU(self.op.arg), []
+    return Device._buffers[self.device].fromCPU(self.op.arg), []
   elif self.optype == ReduceOps:
     real_src = self.op.src[0].realize(self.device)
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src]
@@ -152,7 +154,7 @@ class LazyBuffer:
       del self.op
 
     assert self.realized.shape == self.shape
-    assert isinstance(self.realized, Device.buffers[self.device])
+    assert isinstance(self.realized, Device._buffers[self.device])
     return self.realized
 
   @staticmethod
@@ -169,10 +171,21 @@ class LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
 
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
-    # if a MovementOp is applied to a MovementOp, merge them and use one buffer
     # TODO: look into why that copy is needed
+    arg = copy(arg)
+
+    # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
+    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and x.realized is None and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):
+      # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
+      def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
+        if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
+        assert isinstance(y.op, BinaryOps) or isinstance(y.op, UnaryOps)
+        return elementwise_op(y.op, tuple(replace_with_movement_op(z) for z in y.src))
+      return replace_with_movement_op(x.op)
+
+    # if a MovementOp is applied to a MovementOp, merge them and use one buffer
     ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
-            LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), copy(arg)))
+            LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
 
     if REMOVE_MOVEMENT_NOPS and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]

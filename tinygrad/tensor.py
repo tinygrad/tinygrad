@@ -321,8 +321,7 @@ class Tensor:
 
   def linear(self, weight:Tensor, bias:Tensor):
     shp = [1] * (len(self.shape)-1) + [-1]
-    ret = self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)
-    return ret.add(bias.reshape(shape=shp))
+    return (self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)).add(bias.reshape(shape=shp))
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
 
