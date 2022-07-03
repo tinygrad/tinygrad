@@ -152,6 +152,7 @@ class Tensor:
           new_shape.append(arg[-1][1] - arg[-1][0])
           assert s.step is None or s.step == 1
     new_shape += self.shape[len(arg):]
+    if len(new_shape) == 0: new_shape = (1,)    # tinygrad doesn't support len 0 shapes
     ret = self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
     return ret.reshape(shape=new_shape) if tuple(ret.shape) != tuple(new_shape) else ret
 
