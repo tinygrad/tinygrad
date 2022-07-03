@@ -30,6 +30,7 @@ setup(name='tinygrad',
             "protobuf~=3.19.0",
             "onnx",
             "onnx2torch",
+            "mypy",
         ],
       },
       include_package_data=True)
