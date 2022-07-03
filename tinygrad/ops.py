@@ -26,8 +26,7 @@ cnts = defaultdict(int)
 import atexit
 if DEBUG:
   def debug_exit():
-    for k,v in cnts.items():
-      print(k, v)
+    for k,v in cnts.items(): print(k, v)
   atexit.register(debug_exit)
 
 if GRAPH:

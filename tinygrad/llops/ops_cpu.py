@@ -1,5 +1,14 @@
 import numpy as np
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+import operator
+
+fxn_for_op = {
+  UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
+  UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(),
+  BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
+  BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow,
+  BinaryOps.CMPEQ: lambda x,y: 1.0*(x==y)
+}
 
 class CPUBuffer(np.ndarray):
   def __new__(cls, shape, dtype=np.float32): return np.zeros(shape, dtype=dtype).view(CPUBuffer)
@@ -17,23 +26,8 @@ class CPUBuffer(np.ndarray):
   def fromCPU(x): return x.view(CPUBuffer)
   def toCPU(x): return x
 
-  def unary_op(x, op):
-    if op == UnaryOps.NOOP: return x[:]
-    elif op == UnaryOps.NEG: return -x
-    elif op == UnaryOps.RELU: return x.relu()
-    elif op == UnaryOps.EXP: return x.exp()
-    elif op == UnaryOps.LOG: return x.log()
-    elif op == UnaryOps.SIGN: return x.sign()
-    else: raise Exception(f"{op} isn't supported")
-
-  def binary_op(x, op, y):
-    if op == BinaryOps.ADD: return x+y
-    elif op == BinaryOps.SUB: return x-y
-    elif op == BinaryOps.MUL: return x*y
-    elif op == BinaryOps.DIV: return x/y
-    elif op == BinaryOps.POW: return x**y
-    elif op == BinaryOps.CMPEQ: return 1.0*(x==y)
-    else: raise Exception(f"{op} isn't supported")
+  def unary_op(x, op): return fxn_for_op[op](x)
+  def binary_op(x, op, y): return fxn_for_op[op](x, y)
 
   def reduce_op(x, op, new_shape):
     if x.shape == new_shape:   # this is just a copy, regardless of the reduce op

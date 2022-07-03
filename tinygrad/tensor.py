@@ -6,7 +6,6 @@ from typing import List
 from tinygrad.ops import Device
 
 from tinygrad.ops import LazyBuffer
-#from tinygrad.llops.ops_cpu import CPUBuffer as LazyBuffer
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -49,9 +48,7 @@ class Tensor:
   # ***** data handlers ****
 
   def realize(self):
-    # TODO: once we give up hope of other buffers
-    if getattr(self.data, 'realize', None) is not None:
-      self.lazydata.realize()
+    self.lazydata.realize()
 
   def assign(self, x):
     if not isinstance(x, Tensor):
