@@ -24,7 +24,7 @@ MERGE_MOVEMENT_OPS = True
 REMOVE_MOVEMENT_NOPS = True
 
 # -O2
-SHUFFLE_MOVEMENT_OPS = True
+SHUFFLE_MOVEMENT_OPS = False   # this is making training very slow in the tests
 
 # -O3
 SHUFFLE_SLICE_OPS = False  # NOTE: 0/0 is NaN if you slice, so this can change the output
@@ -95,7 +95,8 @@ class Device:
     vars()[name] = name 
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
     try: _buffers[name] = find_buffer(importlib.import_module('tinygrad.llops.'+op), name)
-    except ImportError as e: print(op, "not available", e)
+    except ImportError as e:
+      print(op, "not available", e)
   DEFAULT = "CPU" if DEFAULT is None else DEFAULT
 
 def _realize(self:LazyBuffer) -> DeviceBuffer:

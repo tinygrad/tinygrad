@@ -10,9 +10,7 @@ class ReLU(Function):
     return input.unary_op(UnaryOps.RELU)
 
   def backward(ctx, grad_output):
-    ret = ctx.saved_tensors[0].unary_op(UnaryOps.SIGN)
-    ret = ret.unary_op(UnaryOps.RELU)
-    return ret.binary_op(BinaryOps.MUL, grad_output)
+    return ctx.saved_tensors[0].unary_op(UnaryOps.SIGN).unary_op(UnaryOps.RELU).binary_op(BinaryOps.MUL, grad_output)
 
 class Log(Function):
   def forward(ctx, input):
@@ -103,8 +101,7 @@ class Pow(Function):
     x,y,powxy = ctx.saved_tensors
     grad_x, grad_y = None, None
     if ctx.needs_input_grad[0]:
-      tmp = powxy.binary_op(BinaryOps.DIV, x)      # pow(x,y)/x
-      tmp = y.binary_op(BinaryOps.MUL, tmp)        # y * pow(x,y)/x
+      tmp = y.binary_op(BinaryOps.MUL, powxy.binary_op(BinaryOps.DIV, x))      # y * (pow(x,y)/x)
       grad_x = grad_output.binary_op(BinaryOps.MUL, tmp)
     if ctx.needs_input_grad[1]:
       tmp = x.unary_op(UnaryOps.LOG).binary_op(BinaryOps.MUL, powxy)  # log(x) * pow(x,y)
@@ -137,8 +134,7 @@ class Permute(Function):
     return x.movement_op(MovementOps.PERMUTE, order)
 
   def backward(ctx, grad_output):
-    norder = argsort(ctx.input_order)
-    return grad_output.movement_op(MovementOps.PERMUTE, norder)
+    return grad_output.movement_op(MovementOps.PERMUTE, argsort(ctx.input_order))
 
 # TODO: merge Slice and Flip into Stride with the 3 arguments
 class Slice(Function):
