@@ -29,17 +29,12 @@ class CPUBuffer(np.ndarray):
   def binary_op(x, op, y): return fxn_for_op[op](x, y)
 
   def reduce_op(x, op, new_shape):
-    if x.shape == new_shape:   # this is just a copy, regardless of the reduce op
-      return x[:]
-    else:
-      if new_shape == (1,):      # full reduce
-        axis = tuple(range(len(x.shape)))
-      else:
-        assert len(x.shape) == len(new_shape)
-        axis = tuple([i for i,(a,b) in enumerate(zip(x.shape, new_shape)) if a != b])
-      if op == ReduceOps.SUM: return x.sum(axis, keepdims=True)
-      elif op == ReduceOps.MAX: return x.amax(axis, keepdims=True)
-      else: raise Exception(f"{op} isn't supported")
+    assert len(x.shape) == len(new_shape)
+    axis = tuple([i for i,(a,b) in enumerate(zip(x.shape, new_shape)) if a != b])
+    if x.shape == new_shape: return x[:]   # this is just a copy, regardless of the reduce op
+    elif op == ReduceOps.SUM: return x.sum(axis, keepdims=True)
+    elif op == ReduceOps.MAX: return x.amax(axis, keepdims=True)
+    else: raise Exception(f"{op} isn't supported")
 
   def movement_op(x, op, arg=None):
     if op == MovementOps.RESHAPE: return x.reshape(arg)
