@@ -52,6 +52,8 @@ jobs:
       run: pip install -e '.[testing]'
     - name: Run Pytest
       run: python -m pytest -s -v
+    - name: Run Pytest (lazy)
+      run: LAZY=1 python -m pytest -s -v
 
   testtorch:
     name: Torch Tests
@@ -70,6 +72,8 @@ jobs:
       run: pip install -e '.[testing]'
     - name: Run Pytest
       run: TORCH=1 python -m pytest -s -v
+    - name: Run Pytest (lazy)
+      run: LAZY=1 TORCH=1 python -m pytest -s -v
 
   testgpu:
     name: GPU Tests
@@ -94,6 +98,8 @@ jobs:
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
       run: GPU=1 python -m pytest -s -v
+    - name: Run Pytest (lazy)
+      run: LAZY=1 GPU=1 python -m pytest -s -v
 
   testmypy:
     name: Mypy Tests
