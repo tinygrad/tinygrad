@@ -5,14 +5,7 @@ from tinygrad.ops import MovementOps, ProcessingOps
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class TorchBuffer(torch.Tensor):
-  def __new__(cls, shape):
-    if isinstance(shape, torch.Tensor):
-      return super().__new__(cls, shape)
-    else:
-      return TorchBuffer(torch.zeros(shape)).to(device)
-
   def custompad(x, padding): return torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
-  def getdtype(self): return np.float32
 
   @staticmethod
   def fromCPU(data):

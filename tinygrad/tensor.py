@@ -1,68 +1,82 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-import os, inspect, functools, importlib
+import inspect, functools, importlib
 import numpy as np
 from tinygrad.helpers import prod
 from typing import List
+from tinygrad.ops import Device
 
-# **** enumerate supported devices ****
-
-class Device:
-  _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops")))
-  imports = dict(enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]))
-  DEFAULT = None
-  buffers, llops = {}, {}
-  for i,op in imports.items():
-    name = op[len("ops_"):].upper()
-    vars()[name] = name 
-    DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
-    try:
-      llops[name] = importlib.import_module('tinygrad.llops.'+op)
-      def find_buffer(llo, name): return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
-      buffers[name] = find_buffer(llops[name], name)
-    except ImportError as e:
-      print(op, "not available", e)
-  DEFAULT = CPU if DEFAULT is None else DEFAULT
+from tinygrad.ops import LazyBuffer
 
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  did_float_warning = False
   training = False
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
-    self.device, self.data = device, self._move_data(data, device)
+    if isinstance(data, list):
+      data = np.array(data, dtype=np.float32)
+    elif isinstance(data, LazyBuffer) and data.device != device:
+      # TODO: this has to realize, it shouldn't have to
+      data = data.realize().toCPU()
 
+    if isinstance(data, np.ndarray):
+      if data.shape == tuple(): data = data.reshape((1,))
+      self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
+    elif isinstance(data, LazyBuffer):
+      self.lazydata = data
+    else:
+      raise Exception(f"can't create Tensor from {data}")
+
+    # tensors have gradients, buffers do not
     self.grad, self.requires_grad = None, requires_grad
 
     # internal variables used for autograd graph construction
     self._ctx = None
 
   def __repr__(self):
-    return f"<Tensor {self.data!r} with grad {(self.grad.data if self.grad else None)!r}>"
+    return f"<Tensor {self.lazydata!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+
+  @property
+  def shape(self): return self.lazydata.shape
+
+  # dtype handling was very broken. it's always float32 now
+  @property
+  def dtype(self): return np.float32
+
+  @property
+  def device(self): return self.lazydata.device
+
+  # ***** data handlers ****
 
   def realize(self):
-    # TODO: once lazy is upstreamed, we can remove this check
-    if getattr(self.data, 'realize', None) is not None:
-      self.data.realize()
+    self.lazydata.realize()
 
   def assign(self, x):
     if not isinstance(x, Tensor):
       x = Tensor(x)
     assert self.shape == x.shape
-    self.data = x.data
+    self.lazydata = x.lazydata
     return x
 
-  @property
-  def shape(self):
-    return self.data.shape
+  def detach(self):
+    return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
-  @staticmethod
-  def _get_data_dtype(data):
-    return data.getdtype() if getattr(data, 'getdtype', None) else (data.dtype if getattr(data, 'dtype', None) else np.float32)
-
+  def numpy(self):
+    return np.array(self.lazydata.toCPU())
+  
+  # TOOD: this keeps the legacy behavior working, remove it after refactor
   @property
-  def dtype(self):
-    return Tensor._get_data_dtype(self.data)
+  def data(self):
+    return self.numpy()
+
+  def to_(self, device):
+    self.device = device
+    if self.grad: self.grad.device = device
+
+  def to(self, device):
+    ret = Tensor(self.lazydata, device)
+    if self.grad: ret.grad = self.grad.to(device)
+    return ret
 
   # ***** creation helper functions *****
 
@@ -114,7 +128,7 @@ class Tensor:
       if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
-      grads = t0._ctx.backward(t0.grad.data)
+      grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
@@ -122,41 +136,6 @@ class Tensor:
           assert g.shape == t.shape, \
             f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
-
-  # ***** tinygrad supports many devices *****
-
-  @staticmethod
-  def _move_data(data, device):
-    if isinstance(data, Device.buffers[device]):
-      return data
-    if isinstance(data, list):
-      # TODO: don't use np.array here, support Tensor creation direct to device
-      data = np.array(data, dtype=np.float32)
-    if isinstance(data, np.ndarray):
-      data = data.view(Device.buffers[Device.CPU])
-
-    if Tensor._get_data_dtype(data) != np.float32 and not Tensor.did_float_warning:
-      # warning? float64 is actually needed for numerical jacobian
-      print(f"warning, {data.shape!r} isn't float32, it's {data.dtype}")
-      Tensor.did_float_warning = True
-
-    data = data.toCPU().view(Device.buffers[Device.CPU])
-    return Device.buffers[device].fromCPU(data)
-
-  def to_(self, device):
-    self.data, self.device = self._move_data(self.data, device), device
-    if self.grad: self.grad.to_(device)
-
-  def to(self, device):
-    ret = Tensor(self.data, device)
-    if self.grad: ret.grad = self.grad.to(device)
-    return ret
-
-  def detach(self):
-    return Tensor(self.data, device=self.device, requires_grad=False)
-
-  def numpy(self):
-    return np.array(self.cpu().data)
 
   # ***** non first class ops (hlops) *****
   
@@ -350,8 +329,7 @@ class Tensor:
     return y.div((y*y).mean(axis=-1, keepdim=True).add(eps).sqrt())
 
 # An instantiation of the Function is the Context
-from tinygrad.ops import Ops
-class Function(Ops):
+class Function:
   def __init__(self, device, *tensors):
     self.device = device
     self.parents = tensors
@@ -359,16 +337,14 @@ class Function(Ops):
     self.requires_grad = any(self.needs_input_grad)
     self.saved_tensors = []
 
-  buffer = property(lambda self: Device.buffers[self.device])
-
   def save_for_backward(self, *x):
-    if self.requires_grad:
-      self.saved_tensors.extend(x)
+    # NOTE: it doesn't hurt to save this since the ctx will be freed fast without grad
+    self.saved_tensors.extend(x)
 
   @classmethod
   def apply(cls, *x:List[Tensor], **kwargs):
     ctx = cls(x[0].device, *x)
-    ret = Tensor(ctx.forward(*[t.data for t in x], **kwargs),
+    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs),
                  device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad: ret._ctx = ctx    # used by autograd engine
     return ret
