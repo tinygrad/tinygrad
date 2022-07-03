@@ -140,9 +140,9 @@ class LazyBuffer:
     if self.realized is None:
       # we haven't realized the Buffer yet
       self.realized, real_srcs = _realize(self)
-      if DEBUG or GRAPH:
-        # in lazy mode, we don't log until we realize
-        log_op(self.optype, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
+      # in lazy mode, we don't log until we realize
+      log_op(self.optype, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
+      # no need to keep the op after realization
       del self.op
 
     assert self.realized.shape == self.shape
@@ -151,8 +151,6 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x, device):
-    # TODO: is there a better place to put this?
-    if x.shape == tuple(): x = x.reshape((1,))
     return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x))
   
   def toCPU(x):

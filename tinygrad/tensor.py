@@ -14,15 +14,16 @@ class Tensor:
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
     if isinstance(data, list):
-      self.lazydata = LazyBuffer.fromCPU(np.array(data, dtype=np.float32), device)
-    elif isinstance(data, np.ndarray):
+      data = np.array(data, dtype=np.float32)
+    elif isinstance(data, LazyBuffer) and data.device != device:
+      # TODO: this has to realize, it shouldn't have to
+      data = data.realize().toCPU()
+
+    if isinstance(data, np.ndarray):
+      if data.shape == tuple(): data = data.reshape((1,))
       self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
     elif isinstance(data, LazyBuffer):
-      if data.device != device:
-        # TODO: this has to realize, it shouldn't have to
-        self.lazydata = LazyBuffer.fromCPU(data.realize().toCPU(), device)
-      else:
-        self.lazydata = data
+      self.lazydata = data
     else:
       raise Exception(f"can't create Tensor from {data}")
 
