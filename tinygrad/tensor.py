@@ -29,10 +29,11 @@ class Tensor:
       raise Exception(f"can't create Tensor from {data}")
 
     # tensors have gradients, buffers do not
-    self.grad, self.requires_grad = None, requires_grad
+    self.grad : Optional[Tensor] = None
+    self.requires_grad = requires_grad
 
     # internal variables used for autograd graph construction
-    self._ctx = None
+    self._ctx : Optional[Function] = None
 
   def __repr__(self):
     return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"

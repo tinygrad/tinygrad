@@ -60,8 +60,8 @@ class GPUBuffer:
     if self._buf is None: self._buf = CL.malloc(4*prod(self.shape))
     return self._buf
 
-  def __repr__(self):
-    return f"<GPUBuffer with shape {self.shape!r}>"
+  def __repr__(self): return f"<GPUBuffer with shape {self.shape!r}>"
+  def shapeTrackerView(self, st:ShapeTracker): return GPUBuffer(st, hostbuf=self)
 
   @staticmethod
   def fromCPU(x):
