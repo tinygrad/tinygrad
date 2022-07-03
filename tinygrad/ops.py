@@ -1,6 +1,7 @@
 from __future__ import annotations
 from enum import Enum
 from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
+from copy import copy
 import sys, functools, operator
 from tinygrad.helpers import ConvArgs
 from tinygrad.shapetracker import ShapeTracker
@@ -156,7 +157,7 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x, device):
-    return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x))
+    return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
   
   def toCPU(x):
     return x.realize().toCPU()
@@ -169,8 +170,9 @@ class LazyBuffer:
 
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # if a MovementOp is applied to a MovementOp, merge them and use one buffer
+    # TODO: look into why that copy is needed
     ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
-            LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
+            LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), copy(arg)))
 
     if REMOVE_MOVEMENT_NOPS and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]

@@ -17,7 +17,7 @@ class CPUBuffer(np.ndarray):
   def flip(x, axis): return np.flip(x, axis)
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
   def permute(x, order): return x.transpose(order)
-  def custompad(x, padding): return np.pad(x, padding).view(CPUBuffer) if any(x > 0 or y > 0 for x,y in padding) else x
+  def custompad(x, padding): return np.pad(x, padding).view(CPUBuffer) if any(x != 0 or y != 0 for x,y in padding) else x
   def expand(x, new_shape): return np.broadcast_to(x, new_shape).view(CPUBuffer)
 
   @staticmethod
@@ -48,7 +48,7 @@ class CPUBuffer(np.ndarray):
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
-    gx = x.reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
+    gx = x.ravel().reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
     tx = np.lib.stride_tricks.as_strided(gx,
       shape=(C.bs, C.groups, C.cin, C.oy, C.ox, C.H, C.W),
       strides=(*gx.strides[0:3], gx.strides[3]*C.sy, gx.strides[4]*C.sx, gx.strides[3]*C.dy, gx.strides[4]*C.dx),
