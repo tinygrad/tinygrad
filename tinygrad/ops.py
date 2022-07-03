@@ -72,17 +72,15 @@ def log_op(optype, op, ret, inp):
 import importlib, inspect
 class Device:
   _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops")))
-  imports = dict(enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]))
   DEFAULT = None
-  buffers, llops = {}, {}
-  for i,op in imports.items():
+  buffers = {}
+  for i,op in enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]):
     name = op[len("ops_"):].upper()
     vars()[name] = name 
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
     try:
-      llops[name] = importlib.import_module('tinygrad.llops.'+op)
       def find_buffer(llo, name): return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
-      buffers[name] = find_buffer(llops[name], name)
+      buffers[name] = find_buffer(importlib.import_module('tinygrad.llops.'+op), name)
     except ImportError as e:
       print(op, "not available", e)
   DEFAULT = CPU if DEFAULT is None else DEFAULT
@@ -149,6 +147,8 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x, device):
+    # TODO: is there a better place to put this?
+    if x.shape == tuple(): x = x.reshape((1,))
     return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x))
 
 class Ops:
