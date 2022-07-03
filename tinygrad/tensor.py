@@ -1,11 +1,12 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
-import os, inspect, functools, importlib
+import inspect, functools, importlib
 import numpy as np
 from tinygrad.helpers import prod
 from typing import List
-from tinygrad.ops import LazyBuffer, Device
+from tinygrad.ops import Device
 
-LAZY = int(os.getenv("LAZY", "0"))
+from tinygrad.ops import LazyBuffer
+#from tinygrad.llops.ops_cpu import CPUBuffer as LazyBuffer
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -48,7 +49,9 @@ class Tensor:
   # ***** data handlers ****
 
   def realize(self):
-    self.lazydata.realize()
+    # TODO: once we give up hope of other buffers
+    if getattr(self.data, 'realize', None) is not None:
+      self.lazydata.realize()
 
   def assign(self, x):
     if not isinstance(x, Tensor):
@@ -61,7 +64,7 @@ class Tensor:
     return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
   def numpy(self):
-    return np.array(self.lazydata.realize().toCPU())
+    return np.array(self.lazydata.toCPU())
   
   # TOOD: this keeps the legacy behavior working, remove it after refactor
   @property
@@ -328,8 +331,7 @@ class Tensor:
     return y.div((y*y).mean(axis=-1, keepdim=True).add(eps).sqrt())
 
 # An instantiation of the Function is the Context
-from tinygrad.ops import Ops
-class Function(Ops):
+class Function:
   def __init__(self, device, *tensors):
     self.device = device
     self.parents = tensors
@@ -337,11 +339,9 @@ class Function(Ops):
     self.requires_grad = any(self.needs_input_grad)
     self.saved_tensors = []
 
-  buffer = property(lambda self: Device.buffers[self.device])
-
   def save_for_backward(self, *x):
-    if self.requires_grad:
-      self.saved_tensors.extend(x)
+    # NOTE: it doesn't hurt to save this since the ctx will be freed fast without grad
+    self.saved_tensors.extend(x)
 
   @classmethod
   def apply(cls, *x:List[Tensor], **kwargs):

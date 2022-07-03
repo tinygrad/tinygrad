@@ -13,6 +13,10 @@ ProcessingOps = Enum("ProcessingOps", ["CONV"])
 LoadOps = Enum("LoadOps", ["FROMCPU"])
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 
+# lazy can recurse a lot
+import sys
+sys.setrecursionlimit(10000)
+
 import os
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
@@ -115,6 +119,7 @@ class LazyOp(NamedTuple):
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer]]
   arg: Any = None
+  # TODO: add dest to support multiple outputs
 
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
@@ -150,20 +155,22 @@ class LazyBuffer:
     # TODO: is there a better place to put this?
     if x.shape == tuple(): x = x.reshape((1,))
     return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x))
+  
+  def toCPU(x):
+    return x.realize().toCPU()
 
-class Ops:
-  def unary_op(ctx, op:UnaryOps, x:LazyBuffer) -> LazyBuffer:
+  def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer:
     return LazyBuffer(x.device, x.shape, UnaryOps, LazyOp(op, (x,)))
 
-  def binary_op(ctx, op:BinaryOps, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+  def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer:
     return LazyBuffer(x.device, x.shape, BinaryOps, LazyOp(op, (x,y)))
 
-  def reduce_op(ctx, op:ReduceOps, x:LazyBuffer, new_shape:Tuple[int]) -> LazyBuffer:
+  def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int]) -> LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
 
-  def movement_op(ctx, op:MovementOps, x:LazyBuffer, arg) -> LazyBuffer:
+  def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     return LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps, LazyOp(op, (x,), arg))
 
-  def processing_op(ctx, op:ProcessingOps, x:LazyBuffer, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
+  def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
