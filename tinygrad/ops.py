@@ -1,6 +1,7 @@
 from enum import Enum
 from tinygrad.helpers import prod
-UnaryOps = Enum("UnaryOps", ["NOOP", "RELU", "EXP", "LOG", "NEG", "SIGN"])
+from tinygrad.shapetracker import ShapeTracker
+UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
@@ -17,7 +18,6 @@ if DEBUG:
   def debug_exit():
     for k,v in cnts.items():
       print(k, v)
-    print(f"GFLOP: {Ops.flops*1e-9:.2f} MEMBW {Ops.mem*1e-9:.2f} GB")
   atexit.register(debug_exit)
 
 if GRAPH:
@@ -65,13 +65,9 @@ def log_op(optype, op, ret, inp):
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if non_contiguous else 'filled'
 
 class Ops:
-  flops = 0
-  mem = 0
-
   def unary_op(ctx, op:UnaryOps, x):
     ret = x.unary_op(op)
     if 'LAZY' not in ctx.device: log_op(UnaryOps, op, ret, [x])
-    Ops.flops += prod(x.shape)
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
@@ -87,7 +83,6 @@ class Ops:
     assert x.shape == y.shape
     ret = x.binary_op(op, y)
     if 'LAZY' not in ctx.device: log_op(BinaryOps, op, ret, [x, y])
-    Ops.flops += prod(x.shape)*2
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == x.shape
     return ret
@@ -96,15 +91,12 @@ class Ops:
     ret = x.movement_op(op, tuple(arg))
     if 'LAZY' not in ctx.device: log_op(MovementOps, op, ret, [x])
     assert isinstance(ret, ctx.buffer)
-    # this check is slow
-    #assert ret.shape == ShapeTracker(x.shape).movement_op(op, arg).shape
+    assert ret.shape == ShapeTracker(x.shape).movement_op(op, arg).shape
     return ret
 
   def processing_op(ctx, op:ProcessingOps, x, y, C):
     ret = x.processing_op(op, y, C)
     if 'LAZY' not in ctx.device: log_op(ProcessingOps, op, ret, [x, y])
-    Ops.flops += C.bs*C.cout*C.oy*C.ox*C.cin*C.H*C.W * 2
-    Ops.mem += (C.bs*C.cout*C.oy*C.ox + C.cout*C.cin*C.H*C.W + C.bs*C.cin*C.iy*C.ix) * 4
     assert isinstance(ret, ctx.buffer)
     assert ret.shape == C.out_shape
     return ret

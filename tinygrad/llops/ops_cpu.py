@@ -19,10 +19,10 @@ class CPUBuffer(np.ndarray):
 
   def unary_op(x, op):
     if op == UnaryOps.NOOP: return x[:]
+    elif op == UnaryOps.NEG: return -x
     elif op == UnaryOps.RELU: return x.relu()
     elif op == UnaryOps.EXP: return x.exp()
     elif op == UnaryOps.LOG: return x.log()
-    elif op == UnaryOps.NEG: return -x
     elif op == UnaryOps.SIGN: return x.sign()
     else: raise Exception(f"{op} isn't supported")
 
