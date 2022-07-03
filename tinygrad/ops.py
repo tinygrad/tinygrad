@@ -1,5 +1,4 @@
 from __future__ import annotations
-from ast import UnaryOp
 from enum import Enum
 from typing import Tuple, NamedTuple, Union, Any, List
 import functools, operator

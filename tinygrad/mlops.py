@@ -1,4 +1,3 @@
-import os
 import numpy as np    # TODO: remove this, it's used for np.prod and np.argsort
 from tinygrad.helpers import prod, reduce_shape, get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps

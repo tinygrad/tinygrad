@@ -1,5 +1,4 @@
 from tinygrad.tensor import Tensor
-import numpy as np
 
 def batch_normalize(x, weight, bias, mean, var, eps):
   x = (x - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
