@@ -36,6 +36,10 @@ class Tensor:
   @property
   def shape(self): return self.lazydata.shape
 
+  # dtype handling was very broken. it's always float32 now
+  @property
+  def dtype(self): return np.float32
+
   @property
   def device(self): return self.lazydata.device
 
