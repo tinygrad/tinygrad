@@ -163,7 +163,7 @@ class LazyBuffer:
   def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer:
     return LazyBuffer(x.device, x.shape, BinaryOps, LazyOp(op, (x,y)))
 
-  def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int]) -> LazyBuffer:
+  def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
 
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:

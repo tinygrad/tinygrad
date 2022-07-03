@@ -1,8 +1,9 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
+from __future__ import annotations
 import inspect, functools, importlib
 import numpy as np
 from tinygrad.helpers import prod
-from typing import List
+from typing import List, Tuple, Callable, Optional
 from tinygrad.ops import Device
 
 from tinygrad.ops import LazyBuffer
@@ -178,17 +179,17 @@ class Tensor:
       ret += y.slice(arg=ts)
     return ret
 
-  def pad2d(self, padding):
+  def pad2d(self, padding:Tuple[int, ...]):
     # (padding_left, padding_right, padding_top, padding_bottom)
     return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
 
-  def matmul(x, w):
+  def matmul(x:Tensor, w:Tensor):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
     bs, groups = prod(x.shape[0:-2]), prod(w.shape[0:-2])
     cin, cout = w.shape[-2], w.shape[-1]
     out_shape_t = tuple(list(x.shape[0:-2])+[cout,-1])
-    if len(x.shape) == 1: order, out_shape_t = (0,), (cout, )
-    else: order = tuple(list(range(len(x.shape)-2))+[len(x.shape)-1, len(x.shape)-2])
+    if len(x.shape) > 1: order = tuple(list(range(len(x.shape)-2))+[len(x.shape)-1, len(x.shape)-2])
+    else: order, out_shape_t = (0,), (cout, )
     worder = tuple(list(range(len(w.shape)-2))+[len(w.shape)-1, len(w.shape)-2])
 
     # NOTE: with NHWC we can remove the transposes
@@ -317,12 +318,12 @@ class Tensor:
   def reshape(self, shape): return self._reshape(shape=shape)
   def expand(self, shape): return self._expand(shape=shape)
 
-  def linear(self, weight, bias):
+  def linear(self, weight:Tensor, bias:Tensor):
     shp = [1] * (len(self.shape)-1) + [-1]
     ret = self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)
     return ret.add(bias.reshape(shape=shp))
 
-  def sequential(self, ll): return functools.reduce(lambda x,f: f(x), ll, self)
+  def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
 
   def layernorm(x, eps=1e-5):
     y = (x - x.mean(axis=-1, keepdim=True))

@@ -65,7 +65,7 @@ def strides_for_shape(shape):
   return tuple(strides)
 
 @functools.lru_cache(maxsize=None)
-def view_from_shape(shape:Tuple):
+def view_from_shape(shape:Tuple[int, ...]):
   if len(shape) == 0: shape = (1,)
   assert all([isinstance(x, int) for x in shape])
   return View(tuple(shape), strides_for_shape(shape))

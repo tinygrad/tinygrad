@@ -14,7 +14,7 @@ class CL:
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
-    if getattr(CL, "cl_queue", None) is not None: return
+    if CL.cl_queue is not None: return
     devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
@@ -91,7 +91,7 @@ class GPUBuffer:
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int]):
+  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]):
     ret = type(x)(new_shape)
     if op == ReduceOps.SUM: code, start = "out += a", "0.0"
     elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
