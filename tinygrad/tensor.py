@@ -5,6 +5,8 @@ from tinygrad.helpers import prod
 from typing import List
 from tinygrad.ops import LazyBuffer, Device
 
+LAZY = int(os.getenv("LAZY", "0"))
+
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:

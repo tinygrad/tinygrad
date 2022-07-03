@@ -121,6 +121,8 @@ class LazyOp(NamedTuple):
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 
+LAZY = int(os.getenv("LAZY", "0"))
+
 class LazyBuffer:
   def __init__(self, device, shape:Union[ShapeTracker, Tuple[int]], optype:Op, op:LazyOp):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
@@ -128,6 +130,7 @@ class LazyBuffer:
     self.optype, self.op = optype, op
     self.realized = None
     self.device = device
+    if not LAZY: self.realize()
 
   # this produces a device buffer
   def realize(self:LazyBuffer, required_device=None) -> DeviceBuffer:
