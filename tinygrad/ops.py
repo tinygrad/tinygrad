@@ -103,21 +103,21 @@ class Device:
   DEFAULT = "CPU" if DEFAULT is None else DEFAULT
 
 # TODO: make a _realize function for each type called by realize
-def _realize(self:LazyBuffer) -> DeviceBuffer:
+def _realize(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer]]:
   if self.optype == LoadOps and self.op.op == LoadOps.FROMCPU:
     return Device._buffers[self.device].fromCPU(self.op.arg), []
   elif self.optype == ReduceOps:
     real_src = self.op.src[0].realize(self.device)
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src]
   elif self.optype == MovementOps:
-    real_src = get_lazybuffers(self.op)[0].realize()
+    real_src = get_lazybuffers(self.op)[0].realize(self.device)
     if getattr(real_src, "shapeTrackerView", None) is not None:
       return real_src.shapeTrackerView(self.st), [real_src]
     else:
       return functools.reduce(lambda x,o: x.movement_op(o.op, o.arg), get_lazyops(self.op)[::-1], real_src), [real_src]
   elif self.optype == BinaryOps:
     real_srcs : Dict[LazyBuffer, DeviceBuffer] = {}
-    [real_srcs.setdefault(x,x.realize()) for x in get_lazybuffers(self.op) if x not in real_srcs]
+    [real_srcs.setdefault(x,x.realize(self.device)) for x in get_lazybuffers(self.op) if x not in real_srcs]
     def ast_eval(x: Union[LazyBuffer, LazyOp]) -> DeviceBuffer:
       if isinstance(x, LazyBuffer): return real_srcs[x]
       if isinstance(x.op, UnaryOps): return ast_eval(x.src[0]).unary_op(x.op)
