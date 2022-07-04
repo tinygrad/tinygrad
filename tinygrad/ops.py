@@ -9,7 +9,7 @@ from tinygrad.shapetracker import ShapeTracker
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
-# these are the llops your accelerator must implement
+# these are the llops your accelerator must implement, along with toCpu
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
@@ -20,9 +20,6 @@ LoadOps = Enum("LoadOps", ["FROMCPU"])
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps]]
 
-# TODO: get device buffer types
-DeviceBuffer = Any
-
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
@@ -31,10 +28,21 @@ MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>
 MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=2, OPT>=2
 SHUFFLE_SLICE_OPS = OPT>=3  # NOTE: 0/0 is NaN if you slice, so this can change the output
 
-from collections import defaultdict
-cnts : Dict[OpType, int] = defaultdict(int)
+# **** enumerate supported devices ****
+
+class Device:
+  _buffers, DEFAULT = get_available_llops()
+  for name in _buffers.keys():
+    vars()[name] = name
+
+# TODO: get device buffer types
+DeviceBuffer = Any
+
+# **** debugging and graphing ****
 
 import atexit
+from collections import defaultdict
+cnts : Dict[OpType, int] = defaultdict(int)
 if GRAPH:
   import networkx as nx  # type: ignore
   G = nx.DiGraph()
@@ -76,12 +84,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if non_contiguous else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if non_contiguous else 'filled'
 
-# **** enumerate supported devices ****
-
-class Device:
-  _buffers, DEFAULT = get_available_llops()
-  for name in _buffers.keys():
-    vars()[name] = name
+# **** realize functions ****
 
 def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer]]:
   assert self.op.op == LoadOps.FROMCPU
