@@ -52,6 +52,7 @@ class Tensor:
 
   def realize(self):
     self.lazydata.realize()
+    return self
 
   def assign(self, x):
     if not isinstance(x, Tensor):
@@ -309,8 +310,7 @@ class Tensor:
   def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
 
   # TODO: should be broadcasted binary op
-  def div(self, y):
-    return self * (y ** -1.0)
+  def div(self, y): return self * (y ** -1.0)
   __truediv__ = div
 
   # ***** functional nn ops *****

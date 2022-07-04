@@ -68,6 +68,8 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
 
     top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
 
+    dashed = optype == LoadOps and getattr(ret, "_backing", None) is not None
+
     for x in inp:
       if len(op) <= 2: sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
       elif len(op) <= 4: sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
@@ -75,14 +77,13 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       G.add_edge(nm(x), nm(ret), label=sop)
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
-    st = getattr(ret, "st", None)
-    non_contiguous = st is not None and not st.contiguous
-    if non_contiguous and st is not None:   # checked twice to make type checker happy
-      G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in st.views[-1].shape_strides))
+    if getattr(ret, "st", None) is not None and not ret.st.contiguous:   # checked twice to make type checker happy
+      G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
+      dashed = True
     else:
       G.nodes[nm(ret)]['label'] = str(ret.shape)
-    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if non_contiguous else '')) if optype in top_colors else "#ffffff"
-    G.nodes[nm(ret)]['style'] = 'filled, dashed' if non_contiguous else 'filled'
+    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
+    G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
 
 # **** realize functions ****
 

@@ -38,7 +38,7 @@ class CLProgram:
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
     CL.kernel_count += 1
-    if DEBUG >= 1: print(f"**CL** {CL.kernel_count:4d} {self.name:20s} {len(args[2:]):3d} {args[0]} {args[1]}")
+    if DEBUG >= 1: print(f"**CL** {CL.kernel_count:4d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):7d}  kernels {args[0]} {args[1]}")
     if DEBUG >= 3: print(self.prg)
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)

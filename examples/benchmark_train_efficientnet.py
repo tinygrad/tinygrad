@@ -33,8 +33,8 @@ if __name__ == "__main__":
 
   Tensor.training = True
   for i in trange(CNT):
-    x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False)
-    y_train = Tensor.randn(BS, 1000, requires_grad=False)
+    x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
+    y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
 
     st = time.monotonic()
     out = model.forward(x_train)
@@ -50,7 +50,9 @@ if __name__ == "__main__":
     et = time.monotonic()
 
     loss = loss.detach().cpu().data[0]
-    print(f"{(et-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {get_memory_used()/1e9:.2f} GB used")
+    cl = time.monotonic()
+
+    print(f"{(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {get_memory_used()/1e9:.2f} GB used")
 
 
 
