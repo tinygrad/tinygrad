@@ -6,6 +6,7 @@ import os
 import time
 import io
 os.environ['LAZY'] = '1'
+
 if int(os.getenv("NOIMAGE", 0)):
   pass
 else:

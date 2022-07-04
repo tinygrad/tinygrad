@@ -2,9 +2,12 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 from copy import copy
-import sys, functools, operator
+import os, sys, functools, operator
 from tinygrad.helpers import ConvArgs
 from tinygrad.shapetracker import ShapeTracker
+
+# lazy can recurse a lot
+sys.setrecursionlimit(10000)
 
 # these are the llops your accelerator must implement
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN"])
@@ -20,24 +23,13 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 # TODO: get device buffer types
 DeviceBuffer = Any
 
-# -O1
-MERGE_MOVEMENT_OPS = True
-REMOVE_MOVEMENT_NOPS = True
-MERGE_UNARY_OPS = True
-
-# -O2
-MERGE_ELEMENTWISE_OPS = False  # this is making training very slow in the tests
-SHUFFLE_MOVEMENT_OPS = False   # this is making training very slow in the tests
-
-# -O3
-SHUFFLE_SLICE_OPS = False  # NOTE: 0/0 is NaN if you slice, so this can change the output
-
-# lazy can recurse a lot
-sys.setrecursionlimit(10000)
-
-import os
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
+OPT = int(os.getenv("OPT", "1"))
+
+MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
+MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=2, OPT>=2
+SHUFFLE_SLICE_OPS = OPT>=3  # NOTE: 0/0 is NaN if you slice, so this can change the output
 
 from collections import defaultdict
 cnts : Dict[OpType, int] = defaultdict(int)

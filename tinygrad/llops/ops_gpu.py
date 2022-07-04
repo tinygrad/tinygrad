@@ -50,25 +50,26 @@ code_for_op = {
 }
 
 class GPUBuffer:
-  def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None):
+  def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
     self._buf : cl.Buffer = hostbuf._buf if hostbuf is not None else None
+    self._base_shape = hostbuf._base_shape if hostbuf is not None else self.shape
+    self._backing = hostbuf._backing if hostbuf is not None else backing
   
   @property
   def cl(self):
-    if self._buf is None: self._buf = CL.malloc(4*prod(self.shape))
+    if self._buf is None: self._buf = CL.malloc(4*prod(self._base_shape))
+    if self._backing is not None:
+      CL.enqueue_copy(self._buf, self._backing, is_blocking=False)
+      self._backing = None
     return self._buf
 
   def __repr__(self): return f"<GPUBuffer with shape {self.shape!r}>"
   def shapeTrackerView(self, st:ShapeTracker): return GPUBuffer(st, hostbuf=self)
 
   @staticmethod
-  def fromCPU(x):
-    ret = GPUBuffer(x.shape)
-    # TODO: this is blocking even though we told it not to
-    CL.enqueue_copy(ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
-    return ret
+  def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
