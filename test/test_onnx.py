@@ -70,6 +70,7 @@ class TestOnnxModel(unittest.TestCase):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
+    print("got run_onnx")
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
       "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),

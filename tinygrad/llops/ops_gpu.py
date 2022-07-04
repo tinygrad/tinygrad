@@ -23,6 +23,7 @@ class CL:
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
     if CL.CACHE is not None: assert False, "can't copy while caching"
+    if DEBUG >= 1: print(f"**CL**      copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**      copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
   @staticmethod
@@ -37,7 +38,7 @@ class CLProgram:
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
     CL.kernel_count += 1
-    if DEBUG >= 1: print(f"**** {CL.kernel_count:3d} {self.name} {args[0]} {args[1]} ****")
+    if DEBUG >= 1: print(f"**CL** {CL.kernel_count:4d} {self.name:20s} {len(args[2:]):3d} {args[0]} {args[1]}")
     if DEBUG >= 3: print(self.prg)
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)
@@ -56,6 +57,8 @@ class GPUBuffer:
     self._buf : cl.Buffer = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+    # early copy in for large buffers
+    if self._backing is not None and self._backing.shape != (1,): self.cl
   
   @property
   def cl(self):

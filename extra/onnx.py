@@ -39,6 +39,7 @@ def get_run_onnx(onnx_model):
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
       raise Exception("no data")
+    tensors[inp.name].realize()
 
   def run_onnx(inputs={}, debug=False):
     input_tensors = {}
