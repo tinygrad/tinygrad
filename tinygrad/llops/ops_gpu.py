@@ -54,8 +54,8 @@ class GPUBuffer:
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
     self._buf : cl.Buffer = hostbuf._buf if hostbuf is not None else None
-    self._base_shape = hostbuf._base_shape if hostbuf is not None else self.shape
-    self._backing = hostbuf._backing if hostbuf is not None else backing
+    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
   
   @property
   def cl(self):
@@ -133,7 +133,6 @@ class GPUBuffer:
     return ret
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None) -> GPUBuffer:
-    options = []
     if C is not None:
       ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
@@ -183,6 +182,6 @@ class GPUBuffer:
       float acc = 0.0;
       int gid = get_global_id(0);
       """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs if name not in views or views[name][1]])+""");
-    }""", options=tuple(options), argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types)+len(params))))
+    }""", argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types)+len(params))))
     conv_prg(global_size, None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]], *[x[1] for x in params])
     return ret
