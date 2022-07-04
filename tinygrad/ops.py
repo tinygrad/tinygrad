@@ -25,8 +25,9 @@ GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
 
 MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
-MERGE_ELEMENTWISE_OPS, SHUFFLE_MOVEMENT_OPS = OPT>=2, OPT>=2
-SHUFFLE_SLICE_OPS = OPT>=3  # NOTE: 0/0 is NaN if you slice, so this can change the output
+MERGE_ELEMENTWISE_OPS = OPT>=2
+SHUFFLE_MOVEMENT_OPS = OPT>=3
+SHUFFLE_SLICE_OPS = OPT>=4  # NOTE: 0/0 is NaN if you slice, so this can change the output
 
 # **** enumerate supported devices ****
 
