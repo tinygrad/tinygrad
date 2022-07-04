@@ -33,7 +33,6 @@ class CPUBuffer(np.ndarray):
     if x.shape == new_shape: return x[:]   # this is just a copy, regardless of the reduce op
     elif op == ReduceOps.SUM: return x.sum(axis, keepdims=True)
     elif op == ReduceOps.MAX: return x.amax(axis, keepdims=True)
-    else: raise Exception(f"{op} isn't supported")
 
   def movement_op(x, op, arg=None):
     if op == MovementOps.RESHAPE: return x.reshape(arg)
@@ -43,7 +42,6 @@ class CPUBuffer(np.ndarray):
       padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
       return x.custompad(padding)[tuple(slice(p[0] + padding[i][0], p[1] + padding[i][0], None) for i,p in enumerate(arg))]
     elif op == MovementOps.EXPAND: return x.expand(arg)
-    else: raise Exception(f"{op} isn't supported")
 
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
