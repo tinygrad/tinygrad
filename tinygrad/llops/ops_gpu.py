@@ -2,14 +2,13 @@ from __future__ import annotations
 import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import List, Tuple, Optional, Any, Union, Dict
+from typing import List, Tuple, Optional
 from tinygrad.helpers import prod, ConvArgs
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
-from tinygrad.ops import DEBUG
 
 class CL:
-  CACHE, kernel_count = None, 0
+  CACHE, kernel_count, mem_used = None, 0, 0
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
@@ -26,8 +25,14 @@ class CL:
     if DEBUG >= 1: print(f"**CL**      copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**      copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
-  @staticmethod
-  def malloc(sz): return cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, sz)
+# TODO: caching allocator
+class CLBuffer(cl.Buffer):
+  def __init__(self, size):
+    CL.mem_used += size
+    super().__init__(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
+
+  def __del__(self):
+    CL.mem_used -= self.size
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
@@ -62,7 +67,7 @@ class GPUBuffer:
   
   @property
   def cl(self):
-    if self._buf is None: self._buf = CL.malloc(4*prod(self._base_shape))
+    if self._buf is None: self._buf = CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
       CL.enqueue_copy(self._buf, self._backing, is_blocking=False)
       self._backing = None
@@ -114,12 +119,9 @@ class GPUBuffer:
 
     # generate loops with combined adjacent reduce axis
     acc = 1
-    loop_start : List[str] = []
-    loop_end : List[str] = []
+    loop : List[Tuple[str, str]] = []
     for shp,stride in st.views[-1].shape_strides[::-1]:
-      if stride == 0:
-        loop_start.append(f"for (int axis_{len(loop_start)} = 0; axis_{len(loop_start)} < {shp}; axis_{len(loop_start)}++) {{")
-        loop_end.append(f"idx += {acc}; }} idx -= {shp*acc};")
+      if stride == 0: loop.append((f"for (int axis_{len(loop)} = 0; axis_{len(loop)} < {shp}; axis_{len(loop)}++) {{", f"idx += {acc}; }} idx -= {shp*acc};"))
       acc *= shp
 
     # TODO: support multistage reduces
@@ -127,10 +129,10 @@ class GPUBuffer:
     __kernel void reduce(__global const float *a_g, __global float *res_g) {
       int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
       float out = """+start+""";\n"""+ \
-        '\n'.join(loop_start[::-1])+"""
+        '\n'.join([ls for ls, _ in loop[::-1]])+"""
           float a = get_A(a_g, idx);
           """+code+""";\n"""+ \
-        '\n'.join(loop_end)+"""
+        '\n'.join([le for _, le in loop])+"""
       res_g[gid] = out;
     }""")([prod(ret.shape)], None, x.cl, ret.cl)
     return ret

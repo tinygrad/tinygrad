@@ -6,19 +6,11 @@ from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
 import tinygrad.optim as optim
 from tinygrad.tensor import Tensor
+from tinygrad.llops.ops_gpu import CL
 
-from test.test_gc import tensors_allocated
-
-try:
-  import pynvml
-  pynvml.nvmlInit()
-  handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-  def get_memory_used():
-    info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-    return info.used
-except Exception:
-  def get_memory_used():
-    return 0
+import gc
+def tensors_allocated():
+  return sum([isinstance(x, Tensor) for x in gc.get_objects()])
 
 NUM = int(os.getenv("NUM", 2))
 BS = int(os.getenv("BS", 8))
@@ -48,11 +40,11 @@ if __name__ == "__main__":
     for p in parameters:
       p.realize()
     et = time.monotonic()
-
+    mem_used = CL.mem_used
     loss = loss.detach().cpu().data[0]
     cl = time.monotonic()
 
-    print(f"{(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {get_memory_used()/1e9:.2f} GB used")
+    print(f"{(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used")
 
 
 
