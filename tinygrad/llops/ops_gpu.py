@@ -149,13 +149,10 @@ class GPUBuffer:
       int X = get_global_id(2);  // range 0-ox
       gid = gid*oy*ox + Y*ox + X;
 
-      int IY = Y*sy;
-      int IX = X*sx;
-
       for (int ci = 0; ci < cin; ci++) {
         for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
-          int idx_y = y*dy + IY - py;
-          int idx_x = x*dx + IX - px;
+          int idx_y = y*dy + Y*sy - py;
+          int idx_x = x*dx + X*sx - px;
           int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
           acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
             weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
