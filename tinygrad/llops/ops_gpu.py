@@ -3,17 +3,18 @@ import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
-CLCACHE = int(os.getenv("CLCACHE", "0"))
+CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:
   def __init__(self, size):
     if len(CL.BUFFER_CACHE[size]) > 0: self.cl = CL.BUFFER_CACHE[size].pop()
     else:
       CL.mem_used += size
+      # TODO: on GPU OOM, clear the cache
       self.cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
 
   def __del__(self):
@@ -21,7 +22,8 @@ class CLBuffer:
     else: CL.mem_used -= self.cl.size
 
 class CL:
-  CACHE, BUFFER_CACHE, kernel_count, mem_used = None, defaultdict(list), 0, 0
+  CACHE, kernel_count, mem_used = None, 0, 0
+  BUFFER_CACHE : Dict[int, List[cl.Buffer]] = defaultdict(list)
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
@@ -30,6 +32,7 @@ class CL:
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
     CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
+    if len(devices) > 1: print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx)  # this is an in-order command queue
 
   @staticmethod
@@ -63,7 +66,7 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
-    self._buf : CLBuffer = hostbuf._buf if hostbuf is not None else None
+    self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     # early copy in for large buffers

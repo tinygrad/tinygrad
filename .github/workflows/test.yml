@@ -51,7 +51,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
-      run: python -m pytest -s -v
+      run: LAZY=0 python -m pytest -s -v
     - name: Run Pytest (lazy)
       run: LAZY=1 python -m pytest -s -v
 
@@ -71,7 +71,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
-      run: TORCH=1 python -m pytest -s -v
+      run: LAZY=0 TORCH=1 python -m pytest -s -v
     - name: Run Pytest (lazy)
       run: LAZY=1 TORCH=1 python -m pytest -s -v
 
@@ -97,7 +97,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest
-      run: GPU=1 python -m pytest -s -v
+      run: LAZY=0 GPU=1 python -m pytest -s -v
     - name: Run Pytest (lazy)
       run: LAZY=1 GPU=1 python -m pytest -s -v
 
