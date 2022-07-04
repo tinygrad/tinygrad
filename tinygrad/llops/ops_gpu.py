@@ -77,7 +77,6 @@ class GPUBuffer:
     return data
 
   def contiguous_view(x, name:str) -> str:
-    print(x._base_shape, x._backing is not None)
     return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
   def contiguous_view_constant_fold(x, name:str) -> Tuple[str, bool]:
@@ -138,8 +137,6 @@ class GPUBuffer:
     if C is not None:
       ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
-      if C.px == 0 and C.py == 0 and C.px_ == 0 and C.py_ == 0: options.append("-DALLVALID")
-      if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
       global_size = [C.bs*C.cout, C.oy, C.ox]
       assert bufs[0][0] == "input" and bufs[1][0] == "weight"
       assert bufs[0][1].st.contiguous and bufs[1][1].st.contiguous
@@ -150,14 +147,9 @@ class GPUBuffer:
       int g = (gid/rcout)%groups;
       int c = gid % rcout;
 
-  #ifdef ONEBYONE
-      int Y = 0;
-      int X = 0;
-  #else
       int Y = get_global_id(1);  // range 0-oy
       int X = get_global_id(2);  // range 0-ox
       gid = gid*oy*ox + Y*ox + X;
-  #endif
 
       int IY = Y*sy;
       int IX = X*sx;
@@ -166,14 +158,9 @@ class GPUBuffer:
         for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
           int idx_y = y*dy + IY - py;
           int idx_x = x*dx + IX - px;
-  #ifdef ALLVALID
-          acc += input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
-            weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-  #else
           int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
           acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
             weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-  #endif
         } }
       }
       """
