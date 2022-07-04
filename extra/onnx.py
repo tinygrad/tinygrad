@@ -56,6 +56,7 @@ def get_run_onnx(onnx_model):
           input_tensors[inp.name] = inputs[inp.name]
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
+        for _,v in input_tensors.items(): v.realize()
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
