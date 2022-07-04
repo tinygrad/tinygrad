@@ -2,13 +2,26 @@ from __future__ import annotations
 import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
+from collections import defaultdict
 from typing import List, Tuple, Optional
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
+CLCACHE = int(os.getenv("CLCACHE", "0"))
+class CLBuffer:
+  def __init__(self, size):
+    if len(CL.BUFFER_CACHE[size]) > 0: self.cl = CL.BUFFER_CACHE[size].pop()
+    else:
+      CL.mem_used += size
+      self.cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
+
+  def __del__(self):
+    if CLCACHE: CL.BUFFER_CACHE[self.cl.size].append(self.cl)
+    else: CL.mem_used -= self.cl.size
+
 class CL:
-  CACHE, kernel_count, mem_used = None, 0, 0
+  CACHE, BUFFER_CACHE, kernel_count, mem_used = None, defaultdict(list), 0, 0
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
@@ -24,15 +37,6 @@ class CL:
     if CL.CACHE is not None: assert False, "can't copy while caching"
     if DEBUG >= 1: print(f"**CL**      copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**      copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
-
-# TODO: caching allocator
-class CLBuffer(cl.Buffer):
-  def __init__(self, size):
-    CL.mem_used += size
-    super().__init__(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
-
-  def __del__(self):
-    CL.mem_used -= self.size
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
@@ -59,7 +63,7 @@ class GPUBuffer:
   def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
-    self._buf : cl.Buffer = hostbuf._buf if hostbuf is not None else None
+    self._buf : CLBuffer = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     # early copy in for large buffers
@@ -69,9 +73,9 @@ class GPUBuffer:
   def cl(self):
     if self._buf is None: self._buf = CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
-      CL.enqueue_copy(self._buf, self._backing, is_blocking=False)
+      CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
       self._backing = None
-    return self._buf
+    return self._buf.cl
 
   def __repr__(self): return f"<GPUBuffer with shape {self.shape!r}>"
   def shapeTrackerView(self, st:ShapeTracker): return GPUBuffer(st, hostbuf=self)
