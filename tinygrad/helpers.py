@@ -7,7 +7,7 @@ def prod(x): return math.prod(x)
 def argsort(x): return sorted(range(len(x)), key=x.__getitem__)
 
 def reduce_shape(shape, axis):
-  return [1 if i in axis else shape[i] for i in range(len(shape))]
+  return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 
 ConvArgs = namedtuple('ConvArgs', ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'sy', 'sx', 'bs', 'cout', 'py', 'py_', 'px', 'px_', 'dy', 'dx', 'out_shape'])
 def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, out_shape=None):

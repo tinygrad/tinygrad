@@ -28,6 +28,7 @@ MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>
 MERGE_ELEMENTWISE_OPS = OPT>=2
 SHUFFLE_MOVEMENT_OPS = OPT>=3
 SHUFFLE_SLICE_OPS = OPT>=4  # NOTE: 0/0 is NaN if you slice, so this can change the output
+CACHE_LAZYBUFFERS = False   # TODO: write this cache such that it only caches unrealized LazyBuffers
 
 # **** enumerate supported devices ****
 
@@ -184,9 +185,11 @@ class LazyBuffer:
   def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, (x,))
   def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, (x,y))
 
+  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
 
+  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
     arg = copy(arg)
@@ -211,9 +214,11 @@ class LazyBuffer:
 
     return ret
 
+  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
   def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
+@functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
 def elementwise_op(op:Union[UnaryOps, BinaryOps], srcs:Tuple[LazyBuffer, ...]) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
 
