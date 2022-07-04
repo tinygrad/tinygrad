@@ -32,13 +32,13 @@ class CL:
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
     CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
-    if len(devices) > 1: print(f"using {CL.cl_ctx.devices}")
-    CL.cl_queue = cl.CommandQueue(self.cl_ctx)  # this is an in-order command queue
+    if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
+    CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
     if CL.CACHE is not None: assert False, "can't copy while caching"
-    if DEBUG >= 1: print(f"**CL**      copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**      copy OUT {a.shape}")
+    if DEBUG >= 1: print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
 @functools.lru_cache(maxsize=None)
@@ -50,10 +50,13 @@ class CLProgram:
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
     CL.kernel_count += 1
-    if DEBUG >= 1: print(f"**CL** {CL.kernel_count:4d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):7d}  kernels {args[0]} {args[1]}")
-    if DEBUG >= 3: print(self.prg)
     if CL.CACHE is not None: CL.CACHE.append((self, args))
-    else: self.clprg(CL().cl_queue, *args)
+    else: e = self.clprg(CL().cl_queue, *args)
+    if DEBUG >= 2: CL.cl_queue.finish()
+    if DEBUG >= 1:
+      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):20s}" + \
+            ("" if DEBUG <= 1 else f"runtime {(e.profile.end - e.profile.start)/1e3:7.2f} us"))
+    if DEBUG >= 4: print(self.prg)
 
 # **** end CL wrappers ****
 
