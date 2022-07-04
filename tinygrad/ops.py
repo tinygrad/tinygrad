@@ -28,7 +28,7 @@ MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>
 MERGE_ELEMENTWISE_OPS = OPT>=2
 SHUFFLE_MOVEMENT_OPS = OPT>=3
 SHUFFLE_SLICE_OPS = OPT>=4  # NOTE: 0/0 is NaN if you slice, so this can change the output
-CACHE_LAZYBUFFERS = False   # TODO: write this cache such that it only caches unrealized LazyBuffers
+CACHE_LAZYBUFFERS = int(os.getenv("LBCACHE", "0"))   # TODO: write this cache such that it only caches unrealized LazyBuffers
 
 # **** enumerate supported devices ****
 
