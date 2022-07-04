@@ -49,7 +49,7 @@ if GRAPH:
 global_num_max = 0
 def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[DeviceBuffer]):
   cnts[optype] += 1
-  if DEBUG >= 1: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
+  if DEBUG >= 2: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
     def nm(x):
       global global_num_max
@@ -78,21 +78,21 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
 
 # **** enumerate supported devices ****
 
-import importlib, inspect
-def find_buffer(llo, name):
-  return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
-class Device:
-  _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops")))
-  DEFAULT = None
-  _buffers = {}
-  for i,op in enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]):
+def get_buffers():
+  import importlib, inspect
+  _buffers, DEFAULT = {}, "CPU"
+  for op in [os.path.splitext(x)[0] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops"))) if x.startswith("ops_")]:
     name = op[len("ops_"):].upper()
-    vars()[name] = name 
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
-    try: _buffers[name] = find_buffer(importlib.import_module('tinygrad.llops.'+op), name)
+    try: _buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module('tinygrad.llops.'+op), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
     except ImportError as e:
       print(op, "not available", e)
-  DEFAULT = "CPU" if DEFAULT is None else DEFAULT
+  return _buffers, DEFAULT
+
+class Device:
+  _buffers, DEFAULT = get_buffers()
+  for name in _buffers.keys():
+    vars()[name] = name
 
 # TODO: make a _realize function for each type called by realize
 def _realize(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer]]:
@@ -106,15 +106,32 @@ def _realize(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer]]:
     if getattr(real_src, "shapeTrackerView", None) is not None:
       return real_src.shapeTrackerView(self.st), [real_src]
     else:
+      # slow path, creates middle buffers
       return functools.reduce(lambda x,o: x.movement_op(o.op, o.arg), get_lazyops(self.op)[::-1], real_src), [real_src]
   elif self.optype == BinaryOps:
     real_srcs : Dict[LazyBuffer, DeviceBuffer] = {}
     [real_srcs.setdefault(x,x.realize(self.device)) for x in get_lazybuffers(self.op) if x not in real_srcs]
-    def ast_eval(x: Union[LazyBuffer, LazyOp]) -> DeviceBuffer:
-      if isinstance(x, LazyBuffer): return real_srcs[x]
-      if isinstance(x.op, UnaryOps): return ast_eval(x.src[0]).unary_op(x.op)
-      if isinstance(x.op, BinaryOps): return ast_eval(x.src[0]).binary_op(x.op, ast_eval(x.src[1]))
-    return ast_eval(self.op), list(real_srcs.values())
+    if getattr(Device._buffers[self.device], "_processing_op", None) is not None:
+      buf_names : Dict[DeviceBuffer, str] = {x:f"arg_{i}" for i, x in enumerate(real_srcs.values())}
+
+      def ast_op(op, srcs_code: List[str]) -> str:
+        code = Device._buffers[self.device].code_for_op[op]
+        if len(srcs_code) >= 1: code = code.replace("A", srcs_code[0])
+        if len(srcs_code) >= 2: code = code.replace("B", srcs_code[1])
+        return code
+
+      def _ast(x: Union[LazyBuffer, LazyOp]) -> str:
+        if isinstance(x, LazyBuffer): return buf_names[real_srcs[x]]
+        return ast_op(x.op, [_ast(src) for src in x.src])
+
+      return Device._buffers[self.device](self.shape)._processing_op([(y,x) for (x,y) in buf_names.items()], _ast(self.op)), list(real_srcs.values())
+    else:
+      # slow path, creates middle buffers
+      def ast_eval(x: Union[LazyBuffer, LazyOp]) -> DeviceBuffer:
+        if isinstance(x, LazyBuffer): return real_srcs[x]
+        if isinstance(x.op, UnaryOps): return ast_eval(x.src[0]).unary_op(x.op)
+        if isinstance(x.op, BinaryOps): return ast_eval(x.src[0]).binary_op(x.op, ast_eval(x.src[1]))
+      return ast_eval(self.op), list(real_srcs.values())
   elif self.optype == ProcessingOps:
     real_src_x = self.op.src[0].realize(self.device)
     real_src_w = self.op.src[1].realize(self.device)

@@ -1,16 +1,15 @@
 from __future__ import annotations
-import os
-import functools
+import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional, Any, Union, Dict
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 from tinygrad.ops import DEBUG
 
 class CL:
-  CACHE = None
+  CACHE, kernel_count = None, 0
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
@@ -24,6 +23,7 @@ class CL:
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
     if CL.CACHE is not None: assert False, "can't copy while caching"
+    if DEBUG >= 1: print(f"**CL**      copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**      copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
   @staticmethod
@@ -37,25 +37,28 @@ class CLProgram:
     self.clprg = self.built.__getattr__(self.name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    if DEBUG >= 2: print(f"**** {self.name} {args[0]} {args[1]} ****")
+    CL.kernel_count += 1
+    if DEBUG >= 1: print(f"**CL** {CL.kernel_count:4d} {self.name:20s} {len(args[2:]):3d} {args[0]} {args[1]}")
     if DEBUG >= 3: print(self.prg)
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)
 
 # **** end CL wrappers ****
 
-code_for_op = {
-  UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)",
-  BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-}
-
 class GPUBuffer:
+  code_for_op = {
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)",
+    BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
+  }
+
   def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
     self._buf : cl.Buffer = hostbuf._buf if hostbuf is not None else None
-    self._base_shape = hostbuf._base_shape if hostbuf is not None else self.shape
-    self._backing = hostbuf._backing if hostbuf is not None else backing
+    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+    # early copy in for large buffers
+    if self._backing is not None and self._backing.shape != (1,): self.cl
   
   @property
   def cl(self):
@@ -79,8 +82,14 @@ class GPUBuffer:
   def contiguous_view(x, name:str) -> str:
     return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-  def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], code_for_op[op])
-  def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], code_for_op[op])
+  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, bool]:
+    if x._base_shape == (1,) and x._backing is not None:
+      return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", False
+    else:
+      return x.contiguous_view(name), True
+
+  def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
+  def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
   def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   def movement_op(x, op:MovementOps, arg) -> GPUBuffer:
@@ -127,12 +136,9 @@ class GPUBuffer:
     return ret
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None) -> GPUBuffer:
-    options = []
     if C is not None:
       ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
-      if C.px == 0 and C.py == 0 and C.px_ == 0 and C.py_ == 0: options.append("-DALLVALID")
-      if C.oy == 1 and C.ox == 1: options.append("-DONEBYONE")
       global_size = [C.bs*C.cout, C.oy, C.ox]
       assert bufs[0][0] == "input" and bufs[1][0] == "weight"
       assert bufs[0][1].st.contiguous and bufs[1][1].st.contiguous
@@ -143,30 +149,17 @@ class GPUBuffer:
       int g = (gid/rcout)%groups;
       int c = gid % rcout;
 
-  #ifdef ONEBYONE
-      int Y = 0;
-      int X = 0;
-  #else
       int Y = get_global_id(1);  // range 0-oy
       int X = get_global_id(2);  // range 0-ox
       gid = gid*oy*ox + Y*ox + X;
-  #endif
-
-      int IY = Y*sy;
-      int IX = X*sx;
 
       for (int ci = 0; ci < cin; ci++) {
         for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
-          int idx_y = y*dy + IY - py;
-          int idx_x = x*dx + IX - px;
-  #ifdef ALLVALID
-          acc += input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + idx_y*ix + idx_x] * \
-            weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-  #else
+          int idx_y = y*dy + Y*sy - py;
+          int idx_x = x*dx + X*sx - px;
           int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
           acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
             weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-  #endif
         } }
       }
       """
@@ -177,18 +170,18 @@ class GPUBuffer:
       kernel_name = "elementwise"
       conv_src = ""
 
-    elementwise_prefix = '\n'.join([buf.contiguous_view(name) for name, buf in ewbufs])+ \
-      "\n\ninline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {\n"+ \
-      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in ewbufs])+ \
+    views = {name:buf.contiguous_view_constant_fold(name) for name, buf in ewbufs}
+    elementwise_prefix = '\n'.join([x[0] for x in views.values()])+ \
+      "\n\ninline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs if views[name][1]])+") {\n"+ \
+      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" if views[name][1] else f"float {name} = get_{name}(gid);" for name, _ in ewbufs])+ \
       f"\nreturn {code}; }}"
 
-    conv_params = ["__global float* restrict output"] + \
-                  [f"__global const float *{name}_g" for name, _ in bufs] + \
-                  [x[0] for x in params]
+    buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
+    conv_params = ["__global float* restrict output"] + buf_types + [x[0] for x in params]
     conv_prg = CLProgram(kernel_name, elementwise_prefix+f"\n\n__kernel void {kernel_name}("+','.join(conv_params)+""") {
       float acc = 0.0;
       int gid = get_global_id(0);
-      """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
-    }""", options=tuple(options), argdtypes=tuple(None if i < 1+len(bufs) else np.int32 for i in range(1+len(bufs)+len(params))))
-    conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
+      """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs if name not in views or views[name][1]])+""");
+    }""", argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types)+len(params))))
+    conv_prg(global_size, None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]], *[x[1] for x in params])
     return ret

@@ -7,10 +7,8 @@ class TorchBuffer(torch.Tensor):
   def custompad(x, padding): return torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
 
   @staticmethod
-  def fromCPU(data):
-    return TorchBuffer(torch.from_numpy(data).requires_grad_(False)).to(device)
-  def toCPU(x):
-    return x.cpu().numpy()
+  def fromCPU(data): return TorchBuffer(torch.from_numpy(data).requires_grad_(False)).to(device)
+  def toCPU(x): return x.cpu().numpy()
 
   unary_op, binary_op, reduce_op, movement_op = CPUBuffer.unary_op, CPUBuffer.binary_op, CPUBuffer.reduce_op, CPUBuffer.movement_op
 

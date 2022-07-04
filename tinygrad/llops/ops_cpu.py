@@ -1,15 +1,15 @@
+import operator
 import numpy as np
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
-import operator
-
-fxn_for_op = {
-  UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
-  UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(),
-  BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
-  BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: 1.0*(x==y)
-}
 
 class CPUBuffer(np.ndarray):
+  fxn_for_op = {
+    UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
+    UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(),
+    BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
+    BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: 1.0*(x==y)
+  }
+
   def relu(x): return np.maximum(x, 0)
   def exp(x): return np.exp(x)
   def log(x): return np.log(x)
@@ -24,8 +24,8 @@ class CPUBuffer(np.ndarray):
   def fromCPU(x): return x.view(CPUBuffer)
   def toCPU(x): return x
 
-  def unary_op(x, op): return fxn_for_op[op](x)
-  def binary_op(x, op, y): return fxn_for_op[op](x, y)
+  def unary_op(x, op): return CPUBuffer.fxn_for_op[op](x)
+  def binary_op(x, op, y): return CPUBuffer.fxn_for_op[op](x, y)
 
   def reduce_op(x, op, new_shape):
     assert len(x.shape) == len(new_shape)
