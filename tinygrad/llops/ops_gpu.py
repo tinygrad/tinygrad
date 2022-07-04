@@ -1,9 +1,8 @@
 from __future__ import annotations
-import os
-import functools
+import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional, Any, Union, Dict
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
@@ -44,12 +43,12 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
-code_for_op = {
-  UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)",
-  BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-}
-
 class GPUBuffer:
+  code_for_op = {
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)",
+    BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
+  }
+
   def __init__(self, shape, hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     self.st = ShapeTracker(shape)
     self.shape = self.st.shape
@@ -85,8 +84,8 @@ class GPUBuffer:
     else:
       return x.contiguous_view(name), True
 
-  def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], code_for_op[op])
-  def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], code_for_op[op])
+  def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
+  def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
   def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   def movement_op(x, op:MovementOps, arg) -> GPUBuffer:
