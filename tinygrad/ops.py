@@ -78,21 +78,21 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
 
 # **** enumerate supported devices ****
 
-import importlib, inspect
-def find_buffer(llo, name):
-  return [cls for cname, cls in inspect.getmembers(llo, inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
-class Device:
-  _ops = sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops")))
-  DEFAULT = None
-  _buffers = {}
-  for i,op in enumerate([os.path.splitext(x)[0] for x in _ops if x.startswith("ops_")]):
+def get_buffers():
+  import importlib, inspect
+  _buffers, DEFAULT = {}, "CPU"
+  for op in [os.path.splitext(x)[0] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops"))) if x.startswith("ops_")]:
     name = op[len("ops_"):].upper()
-    vars()[name] = name 
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
-    try: _buffers[name] = find_buffer(importlib.import_module('tinygrad.llops.'+op), name)
+    try: _buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module('tinygrad.llops.'+op), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
     except ImportError as e:
       print(op, "not available", e)
-  DEFAULT = "CPU" if DEFAULT is None else DEFAULT
+  return _buffers, DEFAULT
+
+class Device:
+  _buffers, DEFAULT = get_buffers()
+  for name in _buffers.keys():
+    vars()[name] = name
 
 # TODO: make a _realize function for each type called by realize
 def _realize(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer]]:
