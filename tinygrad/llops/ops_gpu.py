@@ -9,7 +9,7 @@ from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 from tinygrad.ops import DEBUG
 
 class CL:
-  CACHE = None
+  CACHE, kernel_count = None, 0
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
@@ -36,7 +36,8 @@ class CLProgram:
     self.clprg = self.built.__getattr__(self.name)
     if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
   def __call__(self, *args):
-    if DEBUG >= 2: print(f"**** {self.name} {args[0]} {args[1]} ****")
+    CL.kernel_count += 1
+    if DEBUG >= 1: print(f"**** {CL.kernel_count:3d} {self.name} {args[0]} {args[1]} ****")
     if DEBUG >= 3: print(self.prg)
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: self.clprg(CL().cl_queue, *args)
