@@ -77,7 +77,14 @@ class GPUBuffer:
     return data
 
   def contiguous_view(x, name:str) -> str:
+    print(x._base_shape, x._backing is not None)
     return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
+
+  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, bool]:
+    if x._base_shape == (1,) and x._backing is not None:
+      return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", False
+    else:
+      return x.contiguous_view(name), True
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], code_for_op[op])
@@ -177,18 +184,18 @@ class GPUBuffer:
       kernel_name = "elementwise"
       conv_src = ""
 
-    elementwise_prefix = '\n'.join([buf.contiguous_view(name) for name, buf in ewbufs])+ \
-      "\n\ninline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs])+") {\n"+ \
-      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" for name, _ in ewbufs])+ \
+    views = {name:buf.contiguous_view_constant_fold(name) for name, buf in ewbufs}
+    elementwise_prefix = '\n'.join([x[0] for x in views.values()])+ \
+      "\n\ninline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs if views[name][1]])+") {\n"+ \
+      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" if views[name][1] else f"float {name} = get_{name}(gid);" for name, _ in ewbufs])+ \
       f"\nreturn {code}; }}"
 
-    conv_params = ["__global float* restrict output"] + \
-                  [f"__global const float *{name}_g" for name, _ in bufs] + \
-                  [x[0] for x in params]
+    buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
+    conv_params = ["__global float* restrict output"] + buf_types + [x[0] for x in params]
     conv_prg = CLProgram(kernel_name, elementwise_prefix+f"\n\n__kernel void {kernel_name}("+','.join(conv_params)+""") {
       float acc = 0.0;
       int gid = get_global_id(0);
-      """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs])+""");
-    }""", options=tuple(options), argdtypes=tuple(None if i < 1+len(bufs) else np.int32 for i in range(1+len(bufs)+len(params))))
-    conv_prg(global_size, None, ret.cl, *[buf.cl for _, buf in bufs], *[x[1] for x in params])
+      """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs if name not in views or views[name][1]])+""");
+    }""", options=tuple(options), argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types)+len(params))))
+    conv_prg(global_size, None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]], *[x[1] for x in params])
     return ret
