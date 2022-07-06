@@ -152,9 +152,12 @@ class GPUBuffer:
       ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
       global_size = [C.bs*C.cout, C.oy, C.ox]
-      assert bufs[0][0] == "input" and bufs[1][0] == "weight"
-      assert bufs[0][1].st.contiguous and bufs[1][1].st.contiguous
-      ewbufs = bufs[2:]   # input and weight are consumed by the convs
+
+      # now input and weight can be anywhere in bufs
+      convbufs_contig = tuple(x[1].st.contiguous for x in bufs if x[0] in ["input", "weight"])
+      assert convbufs_contig == (True, True), "input and weight missing or not contiguous"
+      ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
+
       kernel_name = "conv"
       conv_src = """
       int B = gid/(groups*rcout);  // range 0-bs
