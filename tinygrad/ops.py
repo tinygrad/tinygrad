@@ -163,16 +163,17 @@ class LazyOp(NamedTuple):
 
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
-def get_weakop(y:LazyBuffer) -> LazyOp: return LazyOp(y.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in y.src), y.arg)
+def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
 
 LAZY = int(os.getenv("LAZY", "1"))
 
 class LazyBuffer:
-  lazycache = weakref.WeakValueDictionary()
+  lazycache : weakref.WeakValueDictionary[LazyOp, LazyBuffer] = weakref.WeakValueDictionary()
   def __new__(cls, device, shape, optype, op):
     # loadops aren't cached
     if optype == LoadOps: return super().__new__(cls)
     wop = (device, optype, get_weakop(op))   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
+    # NOTE: we need "ret" to prevent the new buffer from being immediately deleted
     if wop not in LazyBuffer.lazycache: LazyBuffer.lazycache[wop] = ret = super().__new__(cls)
     return LazyBuffer.lazycache[wop]
 
@@ -183,7 +184,7 @@ class LazyBuffer:
     self.optype, self.op = optype, op
     self.realized : Optional[DeviceBuffer] = None
     self.device = device
-    self.children = weakref.WeakSet()
+    self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_lazybuffers(op): x.children.add(self)
     if not LAZY: self.realize()
