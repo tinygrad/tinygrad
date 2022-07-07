@@ -134,7 +134,7 @@ class Permute(Function):
     return x.movement_op(MovementOps.PERMUTE, order)
 
   def backward(ctx, grad_output):
-    return grad_output.movement_op(MovementOps.PERMUTE, argsort(ctx.input_order))
+    return grad_output.movement_op(MovementOps.PERMUTE, tuple(argsort(ctx.input_order)))
 
 # TODO: merge Slice and Flip into Stride with the 3 arguments
 class Slice(Function):

@@ -19,6 +19,14 @@ class TestConv(unittest.TestCase):
     ret = x.conv2d(w, stride=(1,2), padding=(0,0)).numpy()
     print(ret)
 
+  def test_lazycache(self):
+    Tensor.no_grad = True
+    x = Tensor.zeros(1, 32)
+    y = Tensor.zeros(32)
+    out = x + y.reshape((1,32,1)).reshape((1,32)) + y.reshape((1,32,1)).reshape((1,32))
+    out.numpy()
+    Tensor.no_grad = False
+
   def test_simple_biased(self):
     C = 8
     x = Tensor.zeros(1,C,5,5)
@@ -33,7 +41,8 @@ class TestConv(unittest.TestCase):
     x = Tensor.ones(1,12,128,256)
     w = Tensor.ones(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
-    out.relu().numpy(), (out-1).numpy()
+    r1, r2 = out.relu(), (out-1)
+    r1.numpy(), r2.numpy()
     Tensor.no_grad = False
     # TODO: make this a real test
 
@@ -42,7 +51,8 @@ class TestConv(unittest.TestCase):
     x = Tensor.ones(1,12,128,256)
     w = Tensor.ones(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
-    out.relu().numpy(), out.elu().numpy()
+    r1, r2 = out.relu(), out.elu()
+    r1.numpy(), r2.numpy()
     # TODO: make this a real test
     Tensor.no_grad = False
 

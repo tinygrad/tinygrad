@@ -2,7 +2,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 from copy import copy
-import os, sys, functools, operator
+import os, sys, functools, operator, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops
 from tinygrad.shapetracker import ShapeTracker
 
@@ -24,11 +24,22 @@ DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
 
+# TODO: why does REMOVE_MOVEMENT_NOPS break things if MERGE_MOVEMENT_OPS isn't used?
 MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS = OPT>=2
 SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_INTO_CONV_OUTPUTS = OPT>=3, OPT>=3
 SHUFFLE_SLICE_OPS = OPT>=4  # NOTE: 0/0 is NaN if you slice, so this can change the output
-CACHE_LAZYBUFFERS = int(os.getenv("LBCACHE", "0"))   # TODO: write this cache such that it only caches unrealized LazyBuffers
+
+# this is doing something, but missing some
+# TODO: see the test for why, double reshape isn't cached
+def lazycache(func):
+  cache = weakref.WeakValueDictionary()
+  def wrapper(*args):
+    weakargs = tuple(weakref.ref(x) if isinstance(x, LazyBuffer) else x for x in args)
+    # NOTE: even though we don't use ref, we need to keep it around or it will be deleted
+    if weakargs not in cache: cache[weakargs] = ret = func(*args)
+    return cache[weakargs]
+  return wrapper
 
 # **** enumerate supported devices ****
 
@@ -115,7 +126,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     # NOTE: if it references the same conv multiple times, they should already be merged
 
     conv_args : Optional[ConvArgs] = None
-    psrcs = [x for x in real_srcs.keys() if x.optype == ProcessingOps and x.realized is None]
+    psrcs = [x for x in real_srcs.keys() if x.optype == ProcessingOps and x.realized is None and len(x.children) <= 1]
     if len(psrcs) == 1 and MERGE_ELEMENTWISE_INTO_CONV_OUTPUTS:
       conv_args = psrcs[0].op.arg
       del real_srcs[psrcs[0]]
@@ -173,7 +184,12 @@ class LazyBuffer:
     self.optype, self.op = optype, op
     self.realized : Optional[DeviceBuffer] = None
     self.device = device
+    self.children = weakref.WeakSet()
+    # NOTE: op should be read only after construction of LazyBuffer
+    for x in get_lazybuffers(op): x.children.add(self)
     if not LAZY: self.realize()
+
+  def __repr__(self): return f"<LB {self.shape} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
   def realize(self:LazyBuffer, required_device=None) -> DeviceBuffer:
@@ -197,14 +213,14 @@ class LazyBuffer:
   def toCPU(x):
     return x.realize().toCPU()
 
-  def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, (x,))
-  def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, (x,y))
+  def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, x)
+  def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, x, y)
 
-  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
+  @lazycache
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
 
-  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
+  @lazycache
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
     arg = copy(arg)
@@ -215,7 +231,7 @@ class LazyBuffer:
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
         assert isinstance(y.op, BinaryOps) or isinstance(y.op, UnaryOps)
-        return elementwise_op(y.op, tuple(replace_with_movement_op(z) for z in y.src))
+        return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
       return replace_with_movement_op(x.op)
 
     # if a MovementOp is applied to a MovementOp, merge them and use one buffer
@@ -229,12 +245,12 @@ class LazyBuffer:
 
     return ret
 
-  @functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
+  @lazycache
   def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
-@functools.lru_cache(maxsize=None if CACHE_LAZYBUFFERS else 0)
-def elementwise_op(op:Union[UnaryOps, BinaryOps], srcs:Tuple[LazyBuffer, ...]) -> LazyBuffer:
+@lazycache
+def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
 
   if (MERGE_UNARY_OPS and len(srcs) == 1) or MERGE_ELEMENTWISE_OPS:
