@@ -254,7 +254,7 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffe
   out_device, out_shape = srcs[0].device, srcs[0].shape
 
   if (MERGE_UNARY_OPS and len(srcs) == 1) or MERGE_ELEMENTWISE_OPS:
-    # remove the buffers from any BinaryOps that feed into this
-    srcs = tuple(x.op if x.optype == BinaryOps and x.realized is None else x for x in srcs)  # type: ignore
+    # remove the buffers from any (childless) BinaryOps that feed into this
+    srcs = tuple(x.op if x.optype == BinaryOps and len(x.children) == 0 and x.realized is None else x for x in srcs)  # type: ignore
 
   return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs))
