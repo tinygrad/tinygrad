@@ -139,8 +139,8 @@ class Permute(Function):
 # TODO: merge Slice and Flip into Stride with the 3 arguments
 class Slice(Function):
   def forward(ctx, x, arg=None):
-    ctx.narg = [(0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg)]
-    return x.movement_op(MovementOps.SLICE, arg)
+    ctx.narg = tuple((0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg))
+    return x.movement_op(MovementOps.SLICE, tuple(arg))
 
   def backward(ctx, grad_output):
     return grad_output.movement_op(MovementOps.SLICE, ctx.narg)

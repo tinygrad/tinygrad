@@ -66,6 +66,7 @@ class TestOnnxModel(unittest.TestCase):
     ps.print_stats(30)
 
   def test_openpilot_model(self):
+    Tensor.no_grad = True
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)

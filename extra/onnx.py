@@ -43,6 +43,7 @@ def get_run_onnx(onnx_model):
 
   def run_onnx(inputs={}, debug=False):
     input_tensors = {}
+    intermediate_tensors = {}
 
     # get inputs
     for inp in onnx_model.graph.input:
@@ -63,7 +64,7 @@ def get_run_onnx(onnx_model):
     conv_count = 0
     for num,n in enumerate(onnx_model.graph.node):
       if debug: print(f"{num}: op {n.op_type}")
-      inp = [tensors[x] if x in tensors else input_tensors[x] for x in n.input]
+      inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else input_tensors[x]) for x in n.input]
       opt = attribute_to_dict(n.attribute)
 
       # free ones
@@ -110,7 +111,7 @@ def get_run_onnx(onnx_model):
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
           arg[opt['axis']] = (i,i+s)
-          tensors[o] = inp[0].slice(arg=arg)
+          intermediate_tensors[o] = inp[0].slice(arg=arg)
           i = i+s
         continue
       elif n.op_type == "AveragePool":
@@ -136,8 +137,8 @@ def get_run_onnx(onnx_model):
         raise Exception(f"op_type {n.op_type} not supported")
       assert len(n.output) == 1
       if debug: print(ret.shape)
-      tensors[n.output[0]] = ret
+      intermediate_tensors[n.output[0]] = ret
       #print(ret.numpy().mean())
 
-    return {outp.name:tensors[outp.name] for outp in onnx_model.graph.output}
+    return {outp.name:intermediate_tensors[outp.name] for outp in onnx_model.graph.output}
   return run_onnx

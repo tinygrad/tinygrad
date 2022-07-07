@@ -11,7 +11,7 @@ from tinygrad.ops import LazyBuffer
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  training = False
+  training, no_grad = False, False
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
     if isinstance(data, list):
@@ -335,7 +335,7 @@ class Function:
     self.device = device
     self.parents = tensors
     self.needs_input_grad = [t.requires_grad for t in tensors]
-    self.requires_grad = any(self.needs_input_grad)
+    self.requires_grad = any(self.needs_input_grad) and not Tensor.no_grad
     self.saved_tensors = []
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")

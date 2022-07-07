@@ -29,35 +29,42 @@ class TestConv(unittest.TestCase):
     print(ret.numpy())
 
   def test_two_binops_no_rerun(self):
+    Tensor.no_grad = True
     x = Tensor.ones(1,12,128,256)
     w = Tensor.ones(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     out.relu().numpy(), (out-1).numpy()
+    Tensor.no_grad = False
     # TODO: make this a real test
 
   def test_two_overlapping_binops_no_rerun(self):
+    Tensor.no_grad = True
     x = Tensor.ones(1,12,128,256)
     w = Tensor.ones(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     out.relu().numpy(), out.elu().numpy()
     # TODO: make this a real test
+    Tensor.no_grad = False
 
   def test_first_three(self):
+    Tensor.no_grad = True
     x = Tensor.ones(1,12,128,256)
 
     w = Tensor.ones(32,12,3,3)
-    x = x.conv2d(w, stride=(2,2), padding=(1,1))
+    x = x.conv2d(w, stride=(2,2), padding=(1,1)).elu()
 
     w = Tensor.ones(32,1,3,3)
-    x = x.conv2d(w, padding=(1,1), groups=32)
+    x = x.conv2d(w, padding=(1,1), groups=32).elu()
 
     w = Tensor.ones(16,32,1,1)
-    x = x.conv2d(w)
+    x = x.conv2d(w).elu()
 
     x = x.numpy()
     print(x.shape)
+    Tensor.no_grad = False
 
   def test_elu(self):
+    Tensor.no_grad = True
     x = Tensor.ones(1,12,128,256)
 
     w = Tensor.ones(32,12,3,3)
@@ -68,16 +75,18 @@ class TestConv(unittest.TestCase):
     w = Tensor.ones(32,1,3,3)
     x = x.conv2d(w, padding=(1,1), groups=32)
     out = x.numpy()
+    Tensor.no_grad = False
 
   def test_bias(self):
+    Tensor.no_grad = True
     from tinygrad.nn import Conv2d
     x = Tensor.ones(1,12,128,256)
     c = Conv2d(12, 32, 3)
-    x = c(x)
-    x = x.relu()
+    x = c(x).relu()
     w = Tensor.uniform(32, 1, 3, 3)
     x = x.conv2d(w, groups=32)
     out = x.numpy()
+    Tensor.no_grad = False
   
   def test_multiadd(self):
     w = Tensor.ones(32)
