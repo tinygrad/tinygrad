@@ -111,9 +111,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
 
     # if there's *one* processing op in here, we can corealize it. we can corealize binary op sibilings as well
-    # TODO: we have to confirm the conv doesn't have other children
-    # NOTE: if it references the same conv multiple times, they should already be merged
-
+    # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
     conv_args : Optional[ConvArgs] = None
     psrcs = [x for x in real_srcs.keys() if x.optype == ProcessingOps and x.realized is None and len(x.children) <= 1]
     if len(psrcs) == 1 and MERGE_ELEMENTWISE_INTO_CONV_OUTPUTS:
