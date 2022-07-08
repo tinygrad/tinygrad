@@ -154,9 +154,9 @@ class GPUBuffer:
       global_size = [C.bs*C.cout, C.oy, C.ox]
 
       # now input and weight can be anywhere in bufs
-      convbufs_contig = tuple(x[1].st.contiguous for x in bufs if x[0] in ["input", "weight"])
-      assert convbufs_contig == (True, True), "input and weight missing or not contiguous"
+      bufs = [(x[0], x[1].contiguous_op()) if x[0] in ["input", "weight"] else x for x in bufs]
       ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
+      assert len(bufs) == len(ewbufs)+2, "input or weight missing"
 
       kernel_name = "conv"
       conv_src = """
