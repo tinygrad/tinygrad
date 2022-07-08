@@ -231,7 +231,7 @@ class LazyBuffer:
 
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
-    arg = copy(arg)
+    arg = tuple(copy(arg))
 
     # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
     if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and x.realized is None and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):

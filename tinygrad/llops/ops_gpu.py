@@ -86,7 +86,7 @@ class GPUBuffer:
     return self._buf.cl
 
   def __repr__(self): return f"<GPUBuffer with shape {self.shape!r}>"
-  def shapeTrackerView(self, st:ShapeTracker): return GPUBuffer(ShapeTracker(st), hostbuf=self)
+  def shapeTrackerView(x, st:ShapeTracker): return type(x)(ShapeTracker(st), hostbuf=x)
 
   @staticmethod
   def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())

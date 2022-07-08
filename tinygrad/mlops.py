@@ -159,7 +159,11 @@ class Conv2D(Function):
   def _conv(ctx, x, w, C):
     # TODO: this does NOT belong here
     # was pre/post processing for opencl
-    return x.processing_op(ProcessingOps.CONV, w, C)
+    if x.device == "OPENCL":
+      from accel.opencl.preprocessing import processed_conv
+      return processed_conv(x, w, C)
+    else:
+      return x.processing_op(ProcessingOps.CONV, w, C)
 
   def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
     ctx.C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)

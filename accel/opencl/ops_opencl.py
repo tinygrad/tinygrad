@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, code_for_op
+from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, CLBuffer
 from tinygrad.ops import ProcessingOps
 from tinygrad.helpers import prod, ConvArgs
 from typing import List, Tuple, Optional, Dict
@@ -59,14 +59,16 @@ class OpenCLBuffer(GPUBuffer):
     # TODO: this is blocking even though we told it not to
     CL.enqueue_copy(ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
     return ret
+  
+  def __repr__(self): return f"<OpenCLBuffer with shape {self.shape!r}>"
 
   @property
   def cl(self):
     if self._buf is None:
       if self.st.contiguous:
-        self._buf = CL.malloc(4*roundup(prod(self.shape)))
+        self._buf = CLBuffer(4*roundup(prod(self.shape)))
       if self._image is not None:
-        self._buf = CL.malloc(4*roundup(prod(self._image.shape)*4))
+        self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", """
           __kernel void from_image(
@@ -79,9 +81,9 @@ class OpenCLBuffer(GPUBuffer):
             int W = get_image_width(in);
             out[l.y*W + l.x] = read_imagef(in, smp, l);
           }
-        """)(self._image.shape, None, self._image, self._buf)
+        """)(self._image.shape, None, self._image, self._buf.cl)
         self._image = None
-    return self._buf
+    return self._buf.cl
   
   def is_image(self): return self._image is not None
 
@@ -113,9 +115,9 @@ class OpenCLBuffer(GPUBuffer):
       # TODO: handle an opencl conv without the conv part
       return super()._processing_op(bufs, code, C)
 
-    assert bufs[0][0] == "input" and bufs[1][0] == "weight"
-    x,w = bufs[0][1], bufs[1][1]
-    ewbufs = bufs[2:]
+    x = [x for x in bufs if x[0] == "input"][0][1]
+    w = [x for x in bufs if x[0] == "weight"][0][1]
+    ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
 
     if tuple(bufs[0:2]) in OpenCLBuffer.seen:
       print("WARNING: recomputing CONV with", bufs[0], bufs[1])
