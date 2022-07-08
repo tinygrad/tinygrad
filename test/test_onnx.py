@@ -81,8 +81,10 @@ class TestOnnxModel(unittest.TestCase):
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
 
     st = time.monotonic()
+    print("****** run onnx ******")
     tinygrad_out = run_onnx(inputs)['outputs']
     mt = time.monotonic()
+    print("****** realize ******")
     tinygrad_out.realize()
     mt2 = time.monotonic()
     tinygrad_out = tinygrad_out.numpy()
