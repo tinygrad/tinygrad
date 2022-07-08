@@ -24,7 +24,6 @@ DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
 
-# TODO: why does REMOVE_MOVEMENT_NOPS break things if MERGE_MOVEMENT_OPS isn't used?
 MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS = OPT>=2
 SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_INTO_CONV_OUTPUTS = OPT>=3, OPT>=3
@@ -236,7 +235,7 @@ class LazyBuffer:
 
     if REMOVE_MOVEMENT_NOPS and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]
-      if ret.st.shape == root.shape:
+      if ret.st.shape == root.shape and root.st.contiguous:
         return root
 
     return ret
