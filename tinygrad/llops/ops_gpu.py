@@ -148,11 +148,9 @@ class GPUBuffer:
       }"""
     elif ret.shape != bufs[0][1].shape:   # this is a reduce
       # reverse operation of expand, this validates inputs
-      st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, bufs[0][1].shape)
-
       # generate loops with combined adjacent reduce axis
       acc = 1
-      for shp,stride in st.views[-1].shape_strides[::-1]:
+      for shp,stride in ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, bufs[0][1].shape).views[-1].shape_strides[::-1]:
         if stride == 0: loop.append((f"for (int axis_{len(loop)} = 0; axis_{len(loop)} < {shp}; axis_{len(loop)}++) {{", f"idx += {acc}; }} idx -= {shp*acc};"))
         acc *= shp
 
