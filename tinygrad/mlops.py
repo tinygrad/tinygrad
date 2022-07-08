@@ -158,7 +158,6 @@ class Flip(Function):
 class Conv2D(Function):
   def _conv(ctx, x, w, C):
     # TODO: this does NOT belong here
-    # was pre/post processing for opencl
     if x.device == "OPENCL":
       from accel.opencl.preprocessing import processed_conv
       return processed_conv(x, w, C)

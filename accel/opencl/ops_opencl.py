@@ -105,7 +105,7 @@ class OpenCLBuffer(GPUBuffer):
             int W = get_image_width(out);
             write_imagef(out, l, in[l.y*W + l.x]);
           }
-        """)(self._image.shape, None, self._buf, self._image)
+        """)(self._image.shape, None, self._buf.cl, self._image)
       self._buf = None
     return self._image
 
