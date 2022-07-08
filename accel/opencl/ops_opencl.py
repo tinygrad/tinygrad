@@ -51,16 +51,12 @@ def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
 
 def roundup(x, n=4): return (x+(n-1))//n * n
 class OpenCLBuffer(GPUBuffer):
-  def __init__(self, shape, hostbuf:Optional[OpenCLBuffer]=None):
-    super().__init__(shape, hostbuf)
+  def __init__(self, shape, hostbuf:Optional[OpenCLBuffer]=None, backing:Optional[np.ndarray]=None):
     self._image = hostbuf._image if hostbuf is not None else None
+    super().__init__(shape, hostbuf, backing)
 
   @staticmethod
-  def fromCPU(x):
-    ret = OpenCLBuffer(x.shape)
-    # TODO: this is blocking even though we told it not to
-    CL.enqueue_copy(ret.cl, x.view(np.ndarray).astype(np.float32).ravel(), is_blocking=False)
-    return ret
+  def fromCPU(x): return OpenCLBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
   
   def __repr__(self): return f"<OpenCLBuffer with shape {self.shape!r}>"
 
@@ -69,8 +65,14 @@ class OpenCLBuffer(GPUBuffer):
     if self._buf is None:
       if self.st.contiguous:
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
+        if self._backing is not None:
+          CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
+          self._backing = None
       if self._image is not None:
         self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
+        if self._backing is not None:
+          CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
+          self._backing = None
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", """
           __kernel void from_image(
@@ -154,7 +156,6 @@ class OpenCLBuffer(GPUBuffer):
           getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{"+
             f"return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
         else:
-          print("folded")
           fakebufs.append(name)
           getters.append(f"inline float4 get4_{name}(int gid) {{"+
             f"return (float4)(get_{name}(gid+0), get_{name}(gid+1), get_{name}(gid+2), get_{name}(gid+3)); }}")

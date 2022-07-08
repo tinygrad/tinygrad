@@ -56,7 +56,7 @@ def preprocessing_op(x,w,C):
   C = C._replace(out_shape = (C.bs*C.oy, C.ox*C.cout//4, 4))
   #x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
   #w = contiguous(ctx, w, w.shapetracker) if not w.shapetracker.contiguous else w
-  return x,w,C
+  return x,w.contiguous_op(),C
 
 def postprocessing_op(ret, C, C_initial):
   added_output_channels = C.rcout - C_initial.rcout
@@ -75,5 +75,7 @@ def postprocessing_op(ret, C, C_initial):
 
 def processed_conv(x, w, C):
   x,w,Cn = preprocessing_op(x,w,C)
+  # precompute the weight
+  w.realize().image
   ret = x.processing_op(ProcessingOps.CONV, w, Cn)
   return postprocessing_op(ret, Cn, C)

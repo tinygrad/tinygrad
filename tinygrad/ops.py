@@ -194,14 +194,12 @@ class LazyBuffer:
     self.shape = self.st.shape
     self.optype, self.op = optype, op
     self.realized : Optional[DeviceBuffer] = None
-    self.device = device
+    self.device, self.dbuffer = device, Device._buffers[device]
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_lazybuffers(op): x.children.add(self)
     if not LAZY: self.realize()
 
-  @property
-  def dbuffer(self) -> DeviceBuffer: return Device._buffers[self.device]
   def __repr__(self): return f"<LB {self.shape} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
@@ -225,6 +223,7 @@ class LazyBuffer:
 
   def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, x)
   def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, x, y)
+  def contiguous_op(x:LazyBuffer) -> LazyBuffer: return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
