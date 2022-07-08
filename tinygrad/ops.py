@@ -203,11 +203,8 @@ class LazyBuffer:
     return self.realized
 
   @staticmethod
-  def fromCPU(x, device):
-    return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
-  
-  def toCPU(x):
-    return x.realize().toCPU()
+  def fromCPU(x, device): return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
+  def toCPU(x): return x.realize().toCPU()
 
   def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, x)
   def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, x, y)

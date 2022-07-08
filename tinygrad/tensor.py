@@ -331,12 +331,12 @@ class Tensor:
 
 # An instantiation of the Function is the Context
 class Function:
-  def __init__(self, device, *tensors):
+  def __init__(self, device, *tensors:Tensor):
     self.device = device
     self.parents = tensors
     self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = any(self.needs_input_grad) and not Tensor.no_grad
-    self.saved_tensors = []
+    self.saved_tensors : List[Tensor] = []
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")
@@ -348,8 +348,7 @@ class Function:
   @classmethod
   def apply(cls, *x:Tensor, **kwargs):
     ctx = cls(x[0].device, *x)
-    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs),
-                 device=ctx.device, requires_grad=ctx.requires_grad)
+    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad: ret._ctx = ctx    # used by autograd engine
     return ret
 

@@ -75,8 +75,7 @@ class ShapeTracker:
     self.views : List[ViewTypes] = shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)]
 
   @property
-  def contiguous(self):
-    return len(self.views) == 1 and self.views[-1].contiguous
+  def contiguous(self): return len(self.views) == 1 and self.views[-1].contiguous
 
   @property
   def shape(self): return self.views[-1].shape
@@ -119,8 +118,7 @@ class ShapeTracker:
 
   # TODO: this is a special case of slice with strides, remove it
   # though it's nice that it can't change size
-  def flip(self, *axis):
-    self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
+  def flip(self, *axis): self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
 
   # *** under this line are not invertible ***
 
