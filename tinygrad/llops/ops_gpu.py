@@ -64,7 +64,9 @@ class GPUBuffer:
   code_for_op = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
+    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
   }
+  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
@@ -113,7 +115,7 @@ class GPUBuffer:
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]):
-    return type(x)(new_shape)._processing_op([("A", x)], {ReduceOps.SUM: "acc + A", ReduceOps.MAX: "max(A, acc)"}[op], None, {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}[op])
+    return type(x)(new_shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op], None, GPUBuffer.start_for_op[op])
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, start="0.0") -> GPUBuffer:
     ints, params, ewbufs, conv_src = '', [], bufs, ''
@@ -136,7 +138,7 @@ class GPUBuffer:
       # TODO: is there a way to unify this with reduce? it looks very similar
       conv_src = """
       int B = gid/(groups*rcout); int g = (gid/rcout)%groups; int c = gid % rcout;
-      int Y = get_global_id(1); int X = get_global_id(2); gid = gid*oy*ox + Y*ox + X; idx = gid;
+      int Y = get_global_id(1); int X = get_global_id(2); gid = gid*oy*ox + Y*ox + X;
       for (int ci = 0; ci < cin; ci++) {
         for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
           int idx_y = y*dy + Y*sy - py;
@@ -159,7 +161,7 @@ class GPUBuffer:
     buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
     conv_prg = CLProgram(kernel_name, f"""{''.join([x[0] for x in views.values()])}
     __kernel void {kernel_name}({','.join(["__global float* restrict output"] + buf_types + [x[0] for x in params])}) {{ {ints}
-      float acc = {start}; int gid = get_global_id(0); int idx = gid; {view.expr.replace('//', '/')}; {conv_src}
+      float acc = {start}; int gid = get_global_id(0); {conv_src} int idx = gid; {view.expr.replace('//', '/')};
       {''.join([ls for ls, _ in loop[::-1]])}
         {''.join([f'float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in ewbufs])}
         acc = {code};

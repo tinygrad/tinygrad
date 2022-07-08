@@ -25,7 +25,7 @@ GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
 
 MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
-MERGE_ELEMENTWISE_OPS, MERGE_ONE_CONV_INTO_ELEMENTWISE = OPT>=2, OPT>=2
+MERGE_ELEMENTWISE_OPS, MERGE_ONE_CONV_INTO_ELEMENTWISE, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=2, OPT>=2, OPT>=2
 SHUFFLE_MOVEMENT_OPS = OPT>=3
 SHUFFLE_SLICE_OPS = OPT>=4  # NOTE: 0/0 is NaN if you slice, so this can change the output
 
@@ -86,6 +86,17 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
 
+
+# **** realize helpers ****
+
+def _ast(x: Union[LazyBuffer, LazyOp], buf_names: Dict[LazyBuffer, str], code_for_op: Dict[Op, str]) -> str:
+  if isinstance(x, LazyBuffer): return buf_names[x]
+  srcs_code = [_ast(src, buf_names, code_for_op) for src in x.src]
+  code = code_for_op[x.op]
+  if len(srcs_code) >= 1: code = code.replace("A", srcs_code[0])
+  if len(srcs_code) >= 2: code = code.replace("B", srcs_code[1])
+  return code
+
 # **** realize functions ****
 
 def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
@@ -93,8 +104,19 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   return Device._buffers[self.device].fromCPU(self.op.arg), [], LoadOps
 
 def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  real_src = self.op.src[0].realize(self.device)
-  return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
+  src = self.op.src[0]
+  if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
+    # TODO: this code is (somewhat) repeated in _realize_binaryops
+    real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_lazybuffers(src.op)}
+    buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
+
+    return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()], \
+      self.dbuffer.code_for_op[self.op.op].replace("A", _ast(src.op, buf_names, self.dbuffer.code_for_op)), \
+        start=self.dbuffer.start_for_op[self.op.op]), \
+      list(real_srcs.values()), ReduceOps
+  else:
+    real_src = src.realize(self.device)
+    return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
 
 def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_src = get_lazybuffers(self.op)[0].realize(self.device)
@@ -106,7 +128,7 @@ def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuff
 
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:None for x in get_lazybuffers(self.op)}
-  if getattr(Device._buffers[self.device], "_processing_op", None) is not None:
+  if getattr(self.dbuffer, "_processing_op", None) is not None:
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
 
     # if there's *one* processing op in here, we can corealize it. we can corealize binary op sibilings as well
@@ -122,17 +144,8 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
 
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
     # fast path, no middle buffers
-    def ast_op(op, srcs_code: List[str]) -> str:
-      code = Device._buffers[self.device].code_for_op[op]
-      if len(srcs_code) >= 1: code = code.replace("A", srcs_code[0])
-      if len(srcs_code) >= 2: code = code.replace("B", srcs_code[1])
-      return code
-
-    def _ast(x: Union[LazyBuffer, LazyOp]) -> str:
-      if isinstance(x, LazyBuffer): return buf_names[x]
-      return ast_op(x.op, [_ast(src) for src in x.src])
-
-    return Device._buffers[self.device](self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()], _ast(self.op), C=conv_args), \
+    return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()], \
+      _ast(self.op, buf_names, self.dbuffer.code_for_op), C=conv_args), \
       list(real_srcs.values()), ProcessingOps if conv_args is not None else BinaryOps
   else:
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
@@ -185,6 +198,8 @@ class LazyBuffer:
     for x in get_lazybuffers(op): x.children.add(self)
     if not LAZY: self.realize()
 
+  @property
+  def dbuffer(self) -> DeviceBuffer: return Device._buffers[self.device]
   def __repr__(self): return f"<LB {self.shape} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
