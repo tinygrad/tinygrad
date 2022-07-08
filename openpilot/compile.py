@@ -5,12 +5,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import os
 import time
 import io
-os.environ['LAZY'] = '1'
 
-if int(os.getenv("NOIMAGE", 0)):
-  pass
-else:
-  os.environ['LAZY_OPENCL'] = '1'
+if not int(os.getenv("NOIMAGE", 0)):
+  os.environ['OPENCL'] = '1'
 
 DEBUGCL = int(os.getenv("DEBUGCL", 0))
 

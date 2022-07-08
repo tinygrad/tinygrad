@@ -1,3 +1,5 @@
+# type: ignore
+
 from __future__ import annotations
 import os
 from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, CLBuffer
@@ -119,10 +121,11 @@ class OpenCLBuffer(GPUBuffer):
     w = [x for x in bufs if x[0] == "weight"][0][1]
     ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
 
-    if tuple(bufs[0:2]) in OpenCLBuffer.seen:
-      print("WARNING: recomputing CONV with", bufs[0], bufs[1])
-    OpenCLBuffer.seen.add(tuple(bufs[0:2]))
+    if (x,w) in OpenCLBuffer.seen:
+      print("WARNING: recomputing CONV with", x, w)
+    OpenCLBuffer.seen.add((x,w))
 
+    fakebufs = []
     ewtypes = []
     getters = []
     for name, buf in ewbufs:
@@ -144,13 +147,24 @@ class OpenCLBuffer(GPUBuffer):
           f"return x[idx/4]; }}")
       else:
         # fallback to float
-        ewtypes.append(f"__global const float *{name}_g")
-        getters.append(buf.contiguous_view(name))
-        getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{"+
-          f"return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
+        view, unfolded = buf.contiguous_view_constant_fold(name)
+        getters.append(view)
+        if unfolded:
+          ewtypes.append(f"__global const float *{name}_g")
+          getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{"+
+            f"return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
+        else:
+          print("folded")
+          fakebufs.append(name)
+          getters.append(f"inline float4 get4_{name}(int gid) {{"+
+            f"return (float4)(get_{name}(gid+0), get_{name}(gid+1), get_{name}(gid+2), get_{name}(gid+3)); }}")
+
+    # remove fakebufs
+    ewbufs = [x for x in ewbufs if x[0] not in fakebufs]
 
     elementwise_prefix = '\n'.join(getters)+ \
       "\n\ninline float4 _ewop("+','.join(["const sampler_t smp", "int2 loc", "int gid", "float4 acc"]+ewtypes)+") {\n"+ \
+      ''.join([f"float4 {name} = get4_{name}(gid);\n" for name in fakebufs])+ \
       ''.join([f"float4 {name} = get4_{name}({name}_g, smp, loc, gid);\n" for name, _ in ewbufs])+ \
       f"return {code}; }}"
 

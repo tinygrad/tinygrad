@@ -159,7 +159,7 @@ class Conv2D(Function):
   def _conv(ctx, x, w, C):
     # TODO: this does NOT belong here
     if x.device == "OPENCL":
-      from accel.opencl.preprocessing import processed_conv
+      from accel.opencl.preprocessing import processed_conv  # type: ignore
       return processed_conv(x, w, C)
     else:
       return x.processing_op(ProcessingOps.CONV, w, C)
