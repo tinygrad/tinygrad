@@ -117,15 +117,14 @@ class GPUBuffer:
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]):
-    ret = type(x)(new_shape)
     if op == ReduceOps.SUM: code, start = "out += a", "0.0"
     elif op == ReduceOps.MAX: code, start = "out = max(a,out)", "-INFINITY"
     else: raise Exception(f"{op} isn't supported")
 
     # reverse operation of expand, this validates inputs
-    st = ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, x.shape)
+    st = ShapeTracker(new_shape).movement_op(MovementOps.EXPAND, x.shape)
     # this takes a ret index to an inp index, indexing 0 on the reduced strides
-    view = View(ret.shape, strides_for_shape(x.shape))
+    view = View(new_shape, strides_for_shape(x.shape))
 
     # generate loops with combined adjacent reduce axis
     acc = 1
@@ -135,16 +134,16 @@ class GPUBuffer:
       acc *= shp
 
     # TODO: support multistage reduces
-    CLProgram("reduce", x.contiguous_view('A')+"""
-    __kernel void reduce(__global const float *a_g, __global float *res_g) {
-      int gid = get_global_id(0); int idx = gid;"""+view.expr.replace('//', '/')+""";
-      float out = """+start+""";\n"""+ \
-        '\n'.join([ls for ls, _ in loop[::-1]])+"""
-          float a = get_A(a_g, idx);
-          """+code+""";\n"""+ \
-        '\n'.join([le for _, le in loop])+"""
+    ret = type(x)(new_shape)
+    CLProgram("reduce", f"""{x.contiguous_view('A')}
+    __kernel void reduce(__global const float *a_g, __global float *res_g) {{
+      int gid = get_global_id(0); int idx = gid; {view.expr.replace('//', '/')};
+      float out = {start};
+        {''.join([ls for ls, _ in loop[::-1]])}
+          float a = get_A(a_g, idx); {code};
+        {''.join([le for _, le in loop])}
       res_g[gid] = out;
-    }""")([prod(ret.shape)], None, x.cl, ret.cl)
+    }}""")([prod(ret.shape)], None, x.cl, ret.cl)
     return ret
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None) -> GPUBuffer:
@@ -158,16 +157,9 @@ class GPUBuffer:
       ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
       assert len(bufs) == len(ewbufs)+2, "input or weight missing"
 
-      kernel_name = "conv"
       conv_src = """
-      int B = gid/(groups*rcout);  // range 0-bs
-      int g = (gid/rcout)%groups;
-      int c = gid % rcout;
-
-      int Y = get_global_id(1);  // range 0-oy
-      int X = get_global_id(2);  // range 0-ox
-      gid = gid*oy*ox + Y*ox + X;
-
+      int B = gid/(groups*rcout); int g = (gid/rcout)%groups; int c = gid % rcout;
+      int Y = get_global_id(1); int X = get_global_id(2); gid = gid*oy*ox + Y*ox + X;
       for (int ci = 0; ci < cin; ci++) {
         for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
           int idx_y = y*dy + Y*sy - py;
@@ -182,21 +174,16 @@ class GPUBuffer:
       ints, params = '', []
       global_size = [prod(ret.shape), 1, 1]
       ewbufs = bufs
-      kernel_name = "elementwise"
       conv_src = ""
 
+    kernel_name = "conv" if C is not None else "elementwise"
     views = {name:buf.contiguous_view_constant_fold(name) for name, buf in ewbufs}
-    elementwise_prefix = '\n'.join([x[0] for x in views.values()])+ \
-      "\n\ninline float _ewop("+','.join(["int gid", "float acc"]+[f"__global const float *{name}_g" for name, _ in ewbufs if views[name][1]])+") {\n"+ \
-      '\n'.join([f"float {name} = get_{name}({name}_g, gid);" if views[name][1] else f"float {name} = get_{name}(gid);" for name, _ in ewbufs])+ \
-      f"\nreturn {code}; }}"
-
     buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
-    conv_params = ["__global float* restrict output"] + buf_types + [x[0] for x in params]
-    conv_prg = CLProgram(kernel_name, elementwise_prefix+f"\n\n__kernel void {kernel_name}("+','.join(conv_params)+""") {
-      float acc = 0.0;
-      int gid = get_global_id(0);
-      """+ints+conv_src+"""output[gid] = _ewop("""+','.join(["gid", "acc"]+[f"{name}_g" for name, _ in ewbufs if name not in views or views[name][1]])+""");
-    }""", argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types)+len(params))))
+    conv_prg = CLProgram(kernel_name, f"""{''.join([x[0] for x in views.values()])}
+    __kernel void {kernel_name}({','.join(["__global float* restrict output"] + buf_types + [x[0] for x in params])}) {{
+      float acc = 0.0; int gid = get_global_id(0); {ints} {conv_src}
+      {''.join([f'float {name} = get_{name}({name}_g, gid);' if views[name][1] else f'float {name} = get_{name}(gid);' for name, _ in ewbufs])}
+      output[gid] = {code};
+    }}""", argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types)+len(params))))
     conv_prg(global_size, None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]], *[x[1] for x in params])
     return ret
