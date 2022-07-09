@@ -168,17 +168,14 @@ class Conv2D(Function):
       #print(x.shape, w.shape, C)
       x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
       x = x.movement_op(MovementOps.STRIDED, (
-        (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]),
-        (C.groups, C.cin*x.shape[2]*x.shape[3]),
-        (C.rcout, 0),
-        (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
+        (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
+        (C.rcout, 0), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
         (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
       w = w.movement_op(MovementOps.RESHAPE, (1, C.groups, C.rcout, 1, 1, C.cin, C.H, C.W)) \
            .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
       #print(x.st.views, w.st.views)
-      xw = x.binary_op(BinaryOps.MUL, w)
-      return xw.reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
-               .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))
+      return x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
+                                          .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))
 
   def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
     ctx.C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
@@ -192,7 +189,7 @@ class Conv2D(Function):
 
     if ctx.needs_input_grad[0]:    # compute derivative of inputs using ProcessingOps.CONV (this is a transposed conv)
       xt = grad_output
-      if C.sx > 1 or C.sy > 1:   # unstride. NOTE: this is really memory intensive for big strides.
+      if C.sx > 1 or C.sy > 1:   # unstride. NOTE: this is really memory intensive for big strides. (but only when we contiguous it)
         xt = xt.movement_op(MovementOps.RESHAPE, (grad_output.shape[0], grad_output.shape[1], grad_output.shape[2], 1, grad_output.shape[3], 1))
         xt = xt.movement_op(MovementOps.SLICE, ((0,xt.shape[0]), (0,xt.shape[1]), (0,xt.shape[2]), (0,C.sy), (0,xt.shape[4]), (0,C.sx)))
         xt = xt.movement_op(MovementOps.RESHAPE, (xt.shape[0], xt.shape[1], xt.shape[2]*C.sy, xt.shape[4]*C.sx))
