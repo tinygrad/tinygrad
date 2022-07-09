@@ -56,5 +56,5 @@ class CPUBuffer(np.ndarray):
     #out = np.einsum("nGChwHW, GkCHW -> nGkhw", tx, tw)
 
     tmp = np.empty((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
-    for g in range(C.groups): tmp[:,g] = np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
+    for g in range(C.groups): tmp[:,g] = np.tensordot(tx[:,g:g+1], tw[g:g+1], ((1,2,5,6),(0,2,3,4)))
     return np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)
