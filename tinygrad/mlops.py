@@ -165,6 +165,7 @@ class Conv2D(Function):
       #return x.processing_op(ProcessingOps.CONV, w, C)
 
       # universal conv
+      #print(x.shape, w.shape, C)
       x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
       x = x.movement_op(MovementOps.STRIDED, (
         (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]),
@@ -174,6 +175,7 @@ class Conv2D(Function):
         (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
       w = w.movement_op(MovementOps.RESHAPE, (1, C.groups, C.rcout, 1, 1, C.cin, C.H, C.W)) \
            .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
+      #print(x.st.views, w.st.views)
       xw = x.binary_op(BinaryOps.MUL, w)
       return xw.reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
                .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))

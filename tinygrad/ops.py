@@ -245,7 +245,7 @@ class LazyBuffer:
     ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
             LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
 
-    if REMOVE_MOVEMENT_NOPS and x.realized is None and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]
       if ret.st.shape == root.shape and root.st.contiguous:
         return root

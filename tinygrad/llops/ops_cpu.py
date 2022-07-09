@@ -42,7 +42,7 @@ class CPUBuffer(np.ndarray):
       padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
       return x.custompad(padding)[tuple(slice(p[0] + padding[i][0], p[1] + padding[i][0], None) for i,p in enumerate(arg))]
     elif op == MovementOps.EXPAND: return x.expand(arg)
-    elif op == MovementOps.STRIDED: return np.lib.stride_tricks.as_strided(x, shape=[x[0] for x in arg], strides=[x[1]*4 for x in arg]).view(CPUBuffer)
+    elif op == MovementOps.STRIDED: return np.lib.stride_tricks.as_strided(x.ravel(), shape=[x[0] for x in arg], strides=[x[1]*4 for x in arg]).view(CPUBuffer)
 
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
