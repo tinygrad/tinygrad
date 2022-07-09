@@ -49,12 +49,6 @@ class CPUBuffer(np.ndarray):
     gx = x.ravel().reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
     tx = np.lib.stride_tricks.as_strided(gx,
       shape=(C.bs, C.groups, C.cin, C.oy, C.ox, C.H, C.W),
-      strides=(*gx.strides[0:3], gx.strides[3]*C.sy, gx.strides[4]*C.sx, gx.strides[3]*C.dy, gx.strides[4]*C.dx),
-      writeable=False,
-    )
+      strides=(*gx.strides[0:3], gx.strides[3]*C.sy, gx.strides[4]*C.sx, gx.strides[3]*C.dy, gx.strides[4]*C.dx))
     tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
-    tmp = np.empty((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
-    for g in range(C.groups):
-      #ijYXyx,kjyx -> iYXk ->ikYX
-      tmp[:,g] = np.tensordot(tx[:,g], tw[g], ((1,4,5),(1,2,3)))
-    return np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)
+    return np.einsum("nGChwHW, GkCHW -> nGkhw", tx, tw).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)

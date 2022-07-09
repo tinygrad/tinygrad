@@ -80,7 +80,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
     if getattr(ret, "st", None) is not None and not ret.st.contiguous:   # checked twice to make type checker happy
-      G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
+      G.nodes[nm(ret)]['label'] = str(ret.shape)+"\n"+str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
       dashed = True
     else:
       G.nodes[nm(ret)]['label'] = str(ret.shape)
