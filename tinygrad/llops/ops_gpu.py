@@ -139,15 +139,13 @@ class GPUBuffer:
       conv_src = """
       int B = gid/(groups*rcout); int g = (gid/rcout)%groups; int c = gid % rcout;
       int Y = get_global_id(1); int X = get_global_id(2); gid = gid*oy*ox + Y*ox + X;
-      for (int ci = 0; ci < cin; ci++) {
-        for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
-          int idx_y = y*dy + Y*sy - py;
-          int idx_x = x*dx + X*sx - px;
-          int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
-          acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
-            weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-        } }
-      }"""
+      for (int ci = 0; ci < cin; ci++) { for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
+        int idx_y = y*dy + Y*sy - py;
+        int idx_x = x*dx + X*sx - px;
+        int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
+        acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
+          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
+      } } }"""
     elif ret.shape != bufs[0][1].shape:   # this is a reduce
       # reverse operation of expand, this validates inputs
       # generate loops with combined adjacent reduce axis

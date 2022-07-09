@@ -48,13 +48,16 @@ class CPUBuffer(np.ndarray):
     x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
     gx = x.ravel().reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
     tx = np.lib.stride_tricks.as_strided(gx,
-      shape=(C.bs, C.groups, C.cin, C.oy, C.ox, C.H, C.W),
-      strides=(*gx.strides[0:3], gx.strides[3]*C.sy, gx.strides[4]*C.sx, gx.strides[3]*C.dy, gx.strides[4]*C.dx))
+      shape=(C.bs, C.groups, C.cin, C.H, C.W, C.oy, C.ox),
+      strides=(*gx.strides[0:3], gx.strides[3]*C.dy, gx.strides[4]*C.dx, gx.strides[3]*C.sy, gx.strides[4]*C.sx))
     tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
 
     # too bad this doesn't mix with stride_tricks, it can be very slow
-    #out = np.einsum("nGChwHW, GkCHW -> nGkhw", tx, tw)
+    #out = np.einsum("nGCHWhw, GkCHW -> nGkhw", tx, tw)
 
-    tmp = np.empty((C.bs,C.groups,C.oy,C.ox,C.rcout),dtype=x.dtype)
-    for g in range(C.groups): tmp[:,g] = np.tensordot(tx[:,g:g+1], tw[g:g+1], ((1,2,5,6),(0,2,3,4)))
-    return np.moveaxis(tmp,4,2).reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)
+    # 3 lines is faster than 1
+    tmp = np.empty((C.groups,C.rcout,C.bs,C.oy,C.ox), dtype=x.dtype)
+    for g in range(C.groups): tmp[g] = np.tensordot(tw[g], tx[:,g], ((1,2,3),(1,2,3)))
+    out = np.einsum("Gknhw -> nGkhw", tmp)
+
+    return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)
