@@ -95,6 +95,11 @@ class ShapeTracker:
     exec(self.expr(), None, locals)
     return locals["idx"] if locals["valid"] else -1
 
+  def strided(self, *arg):
+    view = View([x[0] for x in arg], [x[1] for x in arg])
+    if self.contiguous: self.views[-1] = view
+    else: self.views.append(view)
+
   def reshape(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
     assert prod(self.shape) == prod(new_shape)

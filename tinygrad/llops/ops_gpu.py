@@ -127,7 +127,7 @@ class GPUBuffer:
     if C is not None:  # this is a conv
       ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
-      global_size = [C.bs*C.cout, C.oy, C.ox]
+      global_size = [C.bs*C.cout, C.oy, C.ox]   # [nGk, h, w]
       assert ret.shape == C.out_shape, "output shape is wrong (NOTE: you can't reduce and conv together)"
 
       # now input and weight can be anywhere in bufs

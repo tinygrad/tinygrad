@@ -13,7 +13,7 @@ sys.setrecursionlimit(10000)
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP", "STRIDED"])
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
 LoadOps = Enum("LoadOps", ["FROMCPU"])
 

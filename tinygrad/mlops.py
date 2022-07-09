@@ -162,7 +162,20 @@ class Conv2D(Function):
       from accel.opencl.preprocessing import processed_conv  # type: ignore
       return processed_conv(x, w, C)
     else:
-      return x.processing_op(ProcessingOps.CONV, w, C)
+      #return x.processing_op(ProcessingOps.CONV, w, C)
+
+      # universal conv
+      x = x.movement_op(MovementOps.STRIDED, (
+        (C.bs, C.groups*C.cin*C.iy*C.ix),
+        (C.groups, C.cin*C.iy*C.ix),
+        (C.rcout, 0),
+        (C.oy, C.sy*C.ix), (C.ox, C.sx),
+        (C.cin, C.iy*C.ix), (C.H, C.dy*C.ix), (C.W, C.dx)))
+      w = w.movement_op(MovementOps.RESHAPE, (1, C.groups, C.rcout, 1, 1, C.cin, C.H, C.W)) \
+           .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
+      xw = x.binary_op(BinaryOps.MUL, w)
+      return xw.reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
+               .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))
 
   def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
     ctx.C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
