@@ -25,6 +25,7 @@ if __name__ == "__main__":
   optimizer = optim.SGD(parameters, lr=0.001)
 
   Tensor.training = TRAINING
+  Tensor.no_grad = not BACKWARD
   for i in trange(CNT):
     cpy = time.monotonic()
     x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
