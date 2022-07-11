@@ -120,8 +120,7 @@ class Tensor:
     self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not any(x.requires_grad for x in t0._ctx.parents):
-        continue
+      if not any(x.requires_grad for x in t0._ctx.parents): continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
@@ -136,20 +135,12 @@ class Tensor:
   
   def __getitem__(self, val):
     arg = []
-    new_shape = []
-    if val is not None:
-      for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]):
-        if isinstance(s, int):
-          arg.append((s, s + 1))
-        else:
-          arg.append((s.start if s.start is not None else 0,
-            (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
-          new_shape.append(arg[-1][1] - arg[-1][0])
-          assert s.step is None or s.step == 1
-    new_shape += self.shape[len(arg):]
-    if len(new_shape) == 0: new_shape = (1,)    # tinygrad doesn't support len 0 shapes
-    ret = self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
-    return ret.reshape(shape=new_shape) if tuple(ret.shape) != tuple(new_shape) else ret
+    for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]) if val is not None else []:
+      if isinstance(s, int): s = slice(s, s+1, None)
+      arg.append((s.start if s.start is not None else 0,
+        (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+      assert s.step is None or s.step == 1
+    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
 
   # TODO: there has to be a cleaner way to write this
   def cat(self, *args, dim=0):
@@ -209,12 +200,12 @@ class Tensor:
   def sum(self, axis=None, keepdim=False):
     axis, out_shape = self._canonicalize_reduce_axis(axis)
     ret = self._sum(axis=axis)
-    return ret if keepdim or ret.shape == out_shape else ret.reshape(shape=out_shape)
+    return ret if keepdim else ret.reshape(shape=out_shape)
 
   def max(self, axis=None, keepdim=False):
     axis, out_shape = self._canonicalize_reduce_axis(axis)
     ret = self._max(axis=axis)
-    return ret if keepdim or ret.shape == out_shape else ret.reshape(shape=out_shape)
+    return ret if keepdim else ret.reshape(shape=out_shape)
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
@@ -276,17 +267,10 @@ class Tensor:
   @staticmethod
   def broadcasted(fxn, x, y):
     tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    if not isinstance(x, Tensor): x = Tensor([x], device=tt.device, requires_grad=False) 
-    if not isinstance(y, Tensor): y = Tensor([y], device=tt.device, requires_grad=False) 
-
-    n_dims = max(len(x.shape), len(y.shape))
-    if len(x.shape) != n_dims: x = x.reshape(list(x.shape) + [1]*(n_dims-len(x.shape)))
-    if len(y.shape) != n_dims: y = y.reshape(list(y.shape) + [1]*(n_dims-len(y.shape)))
-
-    shape_ret = tuple([max(sx, sy) for sx,sy in zip(x.shape, y.shape)])
-    if x.shape != shape_ret: x = x.expand(shape_ret)
-    if y.shape != shape_ret: y = y.expand(shape_ret)
-    return fxn(x, y)
+    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [x,y]]
+    x,y = [t.reshape(list(t.shape) + [1]*(max(len(x.shape), len(y.shape))-len(t.shape))) for t in [x,y]]
+    shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
+    return fxn(x.expand(shape_ret), y.expand(shape_ret))
 
   # TODO: are these the only ones that can take number arguments?
   def add(self, x): return Tensor.broadcasted(Tensor._add, self, x)
@@ -301,8 +285,9 @@ class Tensor:
   # ***** functional nn ops *****
 
   # TODO: fix the kwargs problem, then remove these
-  def reshape(self, shape): return self._reshape(shape=shape)
-  def expand(self, shape): return self._expand(shape=shape)
+  # NOTE: perhaps don't, since they create NOOPs if the shape already matches
+  def reshape(self, shape): return self._reshape(shape=shape) if tuple(self.shape) != tuple(shape) else self
+  def expand(self, shape): return self._expand(shape=shape) if tuple(self.shape) != tuple(shape) else self
 
   def linear(self, weight:Tensor, bias:Tensor):
     shp = [1] * (len(self.shape)-1) + [-1]

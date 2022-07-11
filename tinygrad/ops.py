@@ -13,7 +13,7 @@ sys.setrecursionlimit(10000)
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP", "STRIDED"])
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
 LoadOps = Enum("LoadOps", ["FROMCPU"])
 
@@ -23,6 +23,7 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
+NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
@@ -79,7 +80,8 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       G.add_edge(nm(x), nm(ret), label=sop)
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
-    if getattr(ret, "st", None) is not None and not ret.st.contiguous:   # checked twice to make type checker happy
+
+    if getattr(ret, "st", None) is not None and not ret.st.contiguous:
       G.nodes[nm(ret)]['label'] = str(ret.shape)+"\n"+str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
       dashed = True
     else:
@@ -245,7 +247,8 @@ class LazyBuffer:
     ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
             LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
 
-    if REMOVE_MOVEMENT_NOPS and x.realized is None and ret.st.contiguous:
+    # NOTE: if ret is in the cache, it can already be realized
+    if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]
       if ret.st.shape == root.shape and root.st.contiguous:
         return root
@@ -253,7 +256,27 @@ class LazyBuffer:
     return ret
 
   def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
-    return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
+    if NOCONV:
+      # universal conv, just mul and reduce
+      x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
+      # TODO: is there any way to replace strided with other movement ops?
+      x = x.movement_op(MovementOps.STRIDED, (
+        (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
+        (C.rcout, 0), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
+        (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
+      w = w.movement_op(MovementOps.RESHAPE, (1, C.groups, C.rcout, 1, 1, C.cin, C.H, C.W)) \
+           .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
+      #print(x.st.views, w.st.views)
+      return x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
+                                          .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))
+    elif x.device == "OPENCL":
+      # TODO: these can be properties on the device buffer
+      from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
+      x,w,Cn = preprocessing_op(x, w, C)
+      ret = LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
+      return postprocessing_op(ret, Cn, C)
+    else:
+      return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape

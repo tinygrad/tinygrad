@@ -72,10 +72,3 @@ def postprocessing_op(ret, C, C_initial):
   ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout))
   ret = ret.movement_op(MovementOps.PERMUTE, (0,3,1,2))
   return ret
-
-def processed_conv(x, w, C):
-  x,w,Cn = preprocessing_op(x,w,C)
-  # precompute the weight
-  w.realize().image
-  ret = x.processing_op(ProcessingOps.CONV, w, Cn)
-  return postprocessing_op(ret, Cn, C)

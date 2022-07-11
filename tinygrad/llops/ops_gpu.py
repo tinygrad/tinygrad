@@ -127,7 +127,7 @@ class GPUBuffer:
     if C is not None:  # this is a conv
       ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
       params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
-      global_size = [C.bs*C.cout, C.oy, C.ox]
+      global_size = [C.bs*C.cout, C.oy, C.ox]   # [nGk, h, w]
       assert ret.shape == C.out_shape, "output shape is wrong (NOTE: you can't reduce and conv together)"
 
       # now input and weight can be anywhere in bufs
@@ -157,13 +157,13 @@ class GPUBuffer:
     kernel_name = "conv" if C is not None else ("reduce" if len(loop) > 0 else "elementwise")
     views = {name:buf.contiguous_view_constant_fold(name) for name, buf in ewbufs}
     buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
-    conv_prg = CLProgram(kernel_name, f"""{''.join([x[0] for x in views.values()])}
+    conv_prg = CLProgram(kernel_name, f"""{chr(13).join([x[0] for x in views.values()])}
     __kernel void {kernel_name}({','.join(["__global float* restrict output"] + buf_types + [x[0] for x in params])}) {{ {ints}
       float acc = {start}; int gid = get_global_id(0); {conv_src} int idx = gid; {view.expr.replace('//', '/')};
-      {''.join([ls for ls, _ in loop[::-1]])}
-        {''.join([f'float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in ewbufs])}
+      {' '.join([ls for ls, _ in loop[::-1]])}
+{chr(13).join([f'        float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in ewbufs])}
         acc = {code};
-      {''.join([le for _, le in loop])}
+      {' '.join([le for _, le in loop])}
       output[gid] = acc;
     }}""", argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types)+len(params))))
     conv_prg(global_size, None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]], *[x[1] for x in params])
