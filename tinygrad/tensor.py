@@ -120,8 +120,7 @@ class Tensor:
     self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not any(x.requires_grad for x in t0._ctx.parents):
-        continue
+      if not any(x.requires_grad for x in t0._ctx.parents): continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
@@ -141,9 +140,7 @@ class Tensor:
       arg.append((s.start if s.start is not None else 0,
         (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
       assert s.step is None or s.step == 1
-    new_shape = [x[1] - x[0] for x in arg] + list(self.shape[len(arg):])
-    ret = self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
-    return ret.reshape(shape=new_shape)
+    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
 
   # TODO: there has to be a cleaner way to write this
   def cat(self, *args, dim=0):
@@ -289,8 +286,8 @@ class Tensor:
 
   # TODO: fix the kwargs problem, then remove these
   # NOTE: perhaps don't, since they create NOOPs if the shape already matches
-  def reshape(self, shape): return self._reshape(shape=shape) if self.shape != tuple(shape) else self
-  def expand(self, shape): return self._expand(shape=shape) if self.shape != tuple(shape) else self
+  def reshape(self, shape): return self._reshape(shape=shape) if tuple(self.shape) != tuple(shape) else self
+  def expand(self, shape): return self._expand(shape=shape) if tuple(self.shape) != tuple(shape) else self
 
   def linear(self, weight:Tensor, bias:Tensor):
     shp = [1] * (len(self.shape)-1) + [-1]
