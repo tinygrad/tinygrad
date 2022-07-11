@@ -136,18 +136,12 @@ class Tensor:
   
   def __getitem__(self, val):
     arg = []
-    new_shape = []
-    if val is not None:
-      for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]):
-        if isinstance(s, int):
-          arg.append((s, s + 1))
-        else:
-          arg.append((s.start if s.start is not None else 0,
-            (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
-          new_shape.append(arg[-1][1] - arg[-1][0])
-          assert s.step is None or s.step == 1
-    new_shape += self.shape[len(arg):]
-    if len(new_shape) == 0: new_shape = (1,)    # tinygrad doesn't support len 0 shapes
+    for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]) if val is not None else []:
+      if isinstance(s, int): s = slice(s, s+1, None)
+      arg.append((s.start if s.start is not None else 0,
+        (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+      assert s.step is None or s.step == 1
+    new_shape = [x[1] - x[0] for x in arg] + list(self.shape[len(arg):])
     ret = self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
     return ret.reshape(shape=new_shape) if tuple(ret.shape) != tuple(new_shape) else ret
 

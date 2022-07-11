@@ -80,7 +80,8 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       G.add_edge(nm(x), nm(ret), label=sop)
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
-    if getattr(ret, "st", None) is not None and not ret.st.contiguous:   # checked twice to make type checker happy
+
+    if getattr(ret, "st", None) is not None and not ret.st.contiguous:
       G.nodes[nm(ret)]['label'] = str(ret.shape)+"\n"+str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
       dashed = True
     else:
@@ -246,6 +247,7 @@ class LazyBuffer:
     ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
             LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
 
+    # NOTE: if ret is in the cache, it can already be realized
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]
       if ret.st.shape == root.shape and root.st.contiguous:
@@ -267,6 +269,7 @@ class LazyBuffer:
       return x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
                                           .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))
     elif x.device == "OPENCL":
+      # TODO: these can be properties on the device buffer
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       x,w,Cn = preprocessing_op(x, w, C)
       ret = LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
