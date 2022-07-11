@@ -179,7 +179,7 @@ class OpenCLBuffer(GPUBuffer):
       assert C.py == 0, "batched conv doesn't work with y-padding"
     if C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1 and C.cin == 1: options.append("-DDEPTHWISE_UNSTRIDED")
     elif C.cin == 1: options.append("-DDEPTHWISE")
-    if int(os.getenv("MATMUL", 0)) and C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1:
+    if int(os.getenv("MATMUL", 0)) and C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1:
       options.append("-DMATMUL")
       # NOTE: this is not actually a matmul, it's a vector * matrix
 
@@ -202,7 +202,7 @@ class OpenCLBuffer(GPUBuffer):
       global_work_size = [4, 16, C.cout//4]
 
       # must be even
-      lw = CL.devices[0].max_work_group_size // (global_work_size[0] * global_work_size[1])
+      lw = CL.cl_ctx.devices[0].max_work_group_size // (global_work_size[0] * global_work_size[1])
       while global_work_size[2] % lw != 0:
         lw -= 1
       local_work_size = [4, global_work_size[1], lw]
