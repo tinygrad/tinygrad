@@ -6,7 +6,6 @@ import os
 import time
 import io
 
-os.environ['GRAPH'] = '1'
 os.environ['OPT'] = '99'
 os.environ['STRONG_CACHE'] = '1'
 if os.getenv("GPU", None) is None:
@@ -46,6 +45,7 @@ def get_random_input_tensors():
 
 if __name__ == "__main__":
   Tensor.no_grad = True
+  using_graph = ops.GRAPH
   ops.GRAPH = False
 
   dat = fetch(OPENPILOT_MODEL)
@@ -69,7 +69,7 @@ if __name__ == "__main__":
   tinygrad_out = run_onnx(inputs)['outputs']
 
   CL.CACHE = []
-  ops.GRAPH = True
+  if using_graph: ops.GRAPH = True
   ops_gpu.DEBUG = 2
   CL.kernel_count = -1
   tinygrad_out.realize()

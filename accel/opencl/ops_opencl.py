@@ -15,6 +15,7 @@ def load(x):
      ret = f.read()
    return ret
 CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
+MATMUL_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/matmul.cl')
 
 class ECL(CL):
   @staticmethod
@@ -173,11 +174,45 @@ class OpenCLBuffer(GPUBuffer):
 
     x, w = x.contiguous_op(), w.contiguous_op()
     options = []
-    if C.cin == 1: options.append("-DDEPTHWISE")
     if C.bs > 1:
       options.append("-DBATCH")
       assert C.py == 0, "batched conv doesn't work with y-padding"
     if C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1 and C.cin == 1: options.append("-DDEPTHWISE_UNSTRIDED")
+    elif C.cin == 1: options.append("-DDEPTHWISE")
+    if int(os.getenv("MATMUL", 0)) and C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.xs == 1 and C.ys == 1 and C.dx == 1 and C.dy == 1:
+      options.append("-DMATMUL")
+      # NOTE: this is not actually a matmul, it's a vector * matrix
+
+      conv_args = []
+      conv_short_names = ["numPackedInputChannelsForGroup", "totalNumPackedInputChannels", "numPackedOutputChannelsForGroup", "totalNumPackedOutputChannels", "numOutputColumns", "numOutputRows", "numInputRows"]
+      conv_shorts = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy]
+
+      conv_src = MATMUL_SRC
+      replacements["//SHORTS"] = ''.join([f"short {name} = {val};" for name,val in zip(conv_short_names, conv_shorts)])
+      if "//BINOP" in replacements:
+        replacements["//BINOP"] = replacements["//BINOP"].replace("outputValues[i]", "outputValues")
+      for k,v in replacements.items():
+        conv_src = conv_src.replace(k, v)
+
+      #print(conv_src)
+      conv_prg = CLProgram("matmul", conv_src,
+        options=tuple(options),
+        argdtypes=tuple([None, None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
+      )
+      global_work_size = [4, 16, C.cout//4]
+
+      # must be even
+      lw = CL.devices[0].max_work_group_size // (global_work_size[0] * global_work_size[1])
+      while global_work_size[2] % lw != 0:
+        lw -= 1
+      local_work_size = [4, global_work_size[1], lw]
+
+      #print(global_work_size, local_work_size)
+      conv_prg(global_work_size, local_work_size, cl.LocalMemory(4 * local_work_size[0] * local_work_size[1] * lw), x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
+      return ret
+
+    # this option is unused
+    if C.H == 1 and C.W == 1: options.append("-DONLY_1X1_CONV")
 
     assert C.cout%4 == 0
     conv_src = CONV_SRC
@@ -185,6 +220,9 @@ class OpenCLBuffer(GPUBuffer):
     conv_shorts = [C.W, C.H, C.px, C.py, C.sx, C.sy, C.dx, C.dy]
     conv_arg_names = ["numPackedInputChannelsForGroup", "totalNumPackedInputChannels", "numPackedOutputChannelsForGroup", "totalNumPackedOutputChannels", "numOutputColumns", "numOutputRows", "numInputRows"]
     conv_args = [max(1, C.cin//4), C.groups*C.cin//4, max(1, C.rcout//4), C.cout//4, C.ox, C.oy, C.iy]
+
+    NUM_OUTPUTS = 4
+    options.append(f"-DNUM_OUTPUTS={NUM_OUTPUTS}")
 
     # comment out for args
     conv_short_names += conv_arg_names
@@ -200,7 +238,7 @@ class OpenCLBuffer(GPUBuffer):
       options=tuple(options),
       argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
     )
-    global_work_size = [C.cout//4, (C.ox+3)//4, C.bs*C.oy]
+    global_work_size = [C.cout//4, (C.ox+NUM_OUTPUTS-1)//NUM_OUTPUTS, C.bs*C.oy]
     conv_prg(global_work_size, None, x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
     return ret
 
