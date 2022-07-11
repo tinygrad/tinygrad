@@ -24,9 +24,9 @@ from test.test_onnx import run_onnx_torch
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 
-OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
+#OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
 #OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/1f2f9ea9c9dc37bdea9c6e32e4cb8f88ea0a34bf/selfdrive/modeld/models/supercombo.onnx"
-#OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/0e0b5c4e24a8da64362c8dbf851dbe0f806916c0/selfdrive/modeld/models/supercombo.onnx"
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/0e0b5c4e24a8da64362c8dbf851dbe0f806916c0/selfdrive/modeld/models/supercombo.onnx"
 
 np.random.seed(1337)
 def get_random_input_tensors():
@@ -43,7 +43,8 @@ def get_random_input_tensors():
   for _,v in inputs.items(): v.realize()
   return inputs, np_inputs
 
-# UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 MATMUL=1 python3 openpilot/compile.py
+# OPTWG=1 UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 MATMUL=1 python3 openpilot/compile.py
+# 22.59 ms
 if __name__ == "__main__":
   Tensor.no_grad = True
   using_graph = ops.GRAPH
@@ -79,7 +80,7 @@ if __name__ == "__main__":
   # optimize local workgroups
   OPTWG = int(os.getenv("OPTWG", 0))
   if OPTWG:
-    MAX_WORKGROUP = CL.devices[0].max_work_group_size
+    MAX_WORKGROUP = CL.cl_ctx.devices[0].max_work_group_size
     local_cl_cache = []
     for i, (prg, args) in enumerate(CL.CACHE):
       args = list(args)
