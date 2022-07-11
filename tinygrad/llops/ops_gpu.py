@@ -157,11 +157,11 @@ class GPUBuffer:
     kernel_name = "conv" if C is not None else ("reduce" if len(loop) > 0 else "elementwise")
     views = {name:buf.contiguous_view_constant_fold(name) for name, buf in ewbufs}
     buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
-    conv_prg = CLProgram(kernel_name, f"""{chr(13).join([x[0] for x in views.values()])}
+    conv_prg = CLProgram(kernel_name, f"""{chr(10).join([x[0] for x in views.values()])}
     __kernel void {kernel_name}({','.join(["__global float* restrict output"] + buf_types + [x[0] for x in params])}) {{ {ints}
       float acc = {start}; int gid = get_global_id(0); {conv_src} int idx = gid; {view.expr.replace('//', '/')};
       {' '.join([ls for ls, _ in loop[::-1]])}
-{chr(13).join([f'        float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in ewbufs])}
+{chr(10).join([f'        float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in ewbufs])}
         acc = {code};
       {' '.join([le for _, le in loop])}
       output[gid] = acc;
