@@ -19,6 +19,8 @@ class CPUBuffer(np.ndarray):
   def permute(x, order): return x.transpose(order)
   def custompad(x, padding): return np.pad(x, padding).view(CPUBuffer) if any(x != 0 or y != 0 for x,y in padding) else x
   def expand(x, new_shape): return np.broadcast_to(x, new_shape).view(CPUBuffer)
+  def as_strided(x, size, stride): return np.lib.stride_tricks.as_strided(x, shape=size, strides=[x*4 for x in stride]).view(CPUBuffer)
+  def contiguous(x): return x.ravel().reshape(x.shape)
 
   @staticmethod
   def fromCPU(x): return x.view(CPUBuffer)
@@ -42,7 +44,7 @@ class CPUBuffer(np.ndarray):
       padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
       return x.custompad(padding)[tuple(slice(p[0] + padding[i][0], p[1] + padding[i][0], None) for i,p in enumerate(arg))]
     elif op == MovementOps.EXPAND: return x.expand(arg)
-    elif op == MovementOps.STRIDED: return np.lib.stride_tricks.as_strided(x.ravel(), shape=[x[0] for x in arg], strides=[x[1]*4 for x in arg]).view(CPUBuffer)
+    elif op == MovementOps.STRIDED: return x.contiguous().as_strided([x[0] for x in arg], [x[1] for x in arg])
 
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
