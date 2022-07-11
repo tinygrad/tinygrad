@@ -273,7 +273,8 @@ class LazyBuffer:
       # TODO: these can be properties on the device buffer
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       x,w,Cn = preprocessing_op(x, w, C)
-      ret = LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
+      w.realize().image
+      ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn))
       return postprocessing_op(ret, Cn, C)
     else:
       return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))

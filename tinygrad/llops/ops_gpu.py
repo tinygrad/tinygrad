@@ -22,7 +22,7 @@ class CLBuffer:
     else: CL.mem_used -= self.cl.size
 
 class CL:
-  CACHE, kernel_count, mem_used = None, 0, 0
+  CACHE, kernel_count, mem_used = None, -1, 0
   BUFFER_CACHE : Dict[int, List[cl.Buffer]] = defaultdict(list)
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
@@ -51,7 +51,7 @@ class CLProgram:
   def __call__(self, *args):
     CL.kernel_count += 1
     if CL.CACHE is not None: CL.CACHE.append((self, args))
-    else: e = self.clprg(CL().cl_queue, *args)
+    e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2: CL.cl_queue.finish()
     if DEBUG >= 1:
       print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):20s}" + \

@@ -6,7 +6,10 @@ import os
 import time
 import io
 
-if not int(os.getenv("NOIMAGE", 0)):
+os.environ['GRAPH'] = '1'
+os.environ['OPT'] = '99'
+os.environ['STRONG_CACHE'] = '1'
+if os.getenv("GPU", None) is None:
   os.environ['OPENCL'] = '1'
 
 DEBUGCL = int(os.getenv("DEBUGCL", 0))
@@ -16,6 +19,7 @@ import numpy as np
 
 import tinygrad.ops as ops
 
+from tinygrad.llops import ops_gpu
 from tinygrad.llops.ops_gpu import CL
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
@@ -41,6 +45,7 @@ def get_random_input_tensors():
   return inputs, np_inputs
 
 if __name__ == "__main__":
+  Tensor.no_grad = True
   ops.GRAPH = False
 
   dat = fetch(OPENPILOT_MODEL)
@@ -65,6 +70,8 @@ if __name__ == "__main__":
 
   CL.CACHE = []
   ops.GRAPH = True
+  ops_gpu.DEBUG = 2
+  CL.kernel_count = -1
   tinygrad_out.realize()
   ops.GRAPH = False
   print("kernel count:", len(CL.CACHE))
