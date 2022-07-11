@@ -43,15 +43,17 @@ class CL:
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
+  kernel_cnt = 0
   def __init__(self, name:str, prg:str, options=tuple(), argdtypes=None):
-    self.name, self.prg = name, prg
-    self.built = cl.Program(CL().cl_ctx, self.prg).build(options=options)
-    self.clprg = self.built.__getattr__(self.name)
-    if argdtypes is not None: self.clprg.set_scalar_arg_dtypes(argdtypes)
+    self.name, self.prg, self.options, self.argdtypes = f"{name}_{CLProgram.kernel_cnt}", prg.replace(f"{name}(", f"{name}_{CLProgram.kernel_cnt}("), options, argdtypes
+    self.clprogram = cl.Program(CL().cl_ctx, self.prg)
+    self.clprg = self.clprogram.build(options=self.options).__getattr__(self.name)
+    if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
+    CLProgram.kernel_cnt += 1
   def __call__(self, *args):
     CL.kernel_count += 1
     if CL.CACHE is not None: CL.CACHE.append((self, args))
-    e = self.clprg(CL().cl_queue, *args)
+    else: e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2: CL.cl_queue.finish()
     if DEBUG >= 1:
       print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):20s}" + \
