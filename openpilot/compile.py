@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from collections import defaultdict
 
 import os
 import time
@@ -24,9 +25,7 @@ from test.test_onnx import run_onnx_torch
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 
-#OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8078c934bee9a199f0280/selfdrive/modeld/models/supercombo.onnx"
-#OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/1f2f9ea9c9dc37bdea9c6e32e4cb8f88ea0a34bf/selfdrive/modeld/models/supercombo.onnx"
-OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/0e0b5c4e24a8da64362c8dbf851dbe0f806916c0/selfdrive/modeld/models/supercombo.onnx"
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/ea449f1fe0bbff0eff5b12d64f0b5e75b7983998/selfdrive/modeld/models/supercombo.onnx"
 
 np.random.seed(1337)
 def get_random_input_tensors():
@@ -137,13 +136,17 @@ if __name__ == "__main__":
     et = time.monotonic()
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {(et-st)*1000.0:.2f} ms")
     total_runtime = 0
+    runtimes = defaultdict(float)
     for i, ((prg, args), e) in enumerate(zip(local_cl_cache, events)):
       # profile types https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clGetEventProfilingInfo.html
       runtime = e.profile.end - e.profile.start
+      runtimes[prg.name.rsplit("_", 1)[0]] += runtime
       if DEBUGCL:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
         #if prg.name == "matmul": print(f"   {args[3].shape} {args[4].shape} -> {args[5].shape}")
       total_runtime += runtime
+    for k,v in runtimes.items():
+      print(f"{k:20s} runtime: {v/1e6:.2f} ms")
     print(f"total runtime: {total_runtime/1e6:.2f} ms")
 
   tinygrad_out = tinygrad_out.numpy()
@@ -195,10 +198,11 @@ if __name__ == "__main__":
         if ptr not in saved_objs:
           if isinstance(a, cl.Buffer):
             jdat['objects'].append({
-              "id": ptr, "needs_load": False, "size": a.size,
+              "id": ptr, "arg_type": "float*", "needs_load": False, "size": a.size,
             })
           elif isinstance(a, cl.Image):
             #print(a.size, a.shape, a.row_pitch)
+            # TODO: modify thneed to respect unbacked flag
             jdat['objects'].append({
               "id": ptr, "needs_load": False, "size": a.size,
               "arg_type": "image2d_t", "unbacked": True,

@@ -57,7 +57,7 @@ class CLProgram:
     if DEBUG >= 2: CL.cl_queue.finish()
     if DEBUG >= 1:
       print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):20s}" + \
-            ("" if DEBUG <= 1 else f"runtime {(e.profile.end - e.profile.start)/1e3:9.2f} us"))
+            ("" if DEBUG <= 1 or CL.CACHE is not None else f"runtime {(e.profile.end - e.profile.start)/1e3:9.2f} us"))
     if DEBUG >= 4: print(self.prg)
 
 # **** end CL wrappers ****
