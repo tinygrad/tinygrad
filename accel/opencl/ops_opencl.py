@@ -9,6 +9,8 @@ from typing import List, Tuple, Optional, Dict
 import numpy as np
 import pyopencl as cl
 
+UNSAFE_FLOAT4 = int(os.getenv("UNSAFE_FLOAT4", 0))
+
 import pathlib
 def load(x):
    with open(x) as f:
@@ -132,7 +134,13 @@ class OpenCLBuffer(GPUBuffer):
     ewtypes = []
     getters = []
     for name, buf in ewbufs:
-      if buf.is_image() and buf.shape == ret.shape and buf.st.contiguous:
+      view, unfolded = buf.contiguous_view_constant_fold(name)
+      if not unfolded:
+        getters.append(view)
+        fakebufs.append(name)
+        getters.append(f"inline float4 get4_{name}(int gid) {{"+
+          f"return (float4)(get_{name}(gid+0), get_{name}(gid+1), get_{name}(gid+2), get_{name}(gid+3)); }}")
+      elif buf.is_image() and buf.shape == ret.shape and buf.st.contiguous:
         # use an image here
         ewtypes.append(f"read_only image2d_t {name}_g")
         getters.append(f"inline float4 get4_{name}(read_only image2d_t x, const sampler_t smp, int2 loc, int gid) {{ return read_imagef(x, smp, loc); }}")
@@ -141,7 +149,7 @@ class OpenCLBuffer(GPUBuffer):
         ewtypes.append(f"__global const float4 *{name}_g")
         getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
           f"return x[gid/4]; }}")
-      elif int(os.getenv("UNSAFE_FLOAT4", 0)) and x._backing is not None:
+      elif UNSAFE_FLOAT4:
         # use float4 indexed (HACK!)
         # TODO: work out when this is okay
         ewtypes.append(f"__global const float4 *{name}_g")
@@ -150,16 +158,10 @@ class OpenCLBuffer(GPUBuffer):
           f"return x[idx/4]; }}")
       else:
         # fallback to float
-        view, unfolded = buf.contiguous_view_constant_fold(name)
         getters.append(view)
-        if unfolded:
-          ewtypes.append(f"__global const float *{name}_g")
-          getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{"+
-            f"return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
-        else:
-          fakebufs.append(name)
-          getters.append(f"inline float4 get4_{name}(int gid) {{"+
-            f"return (float4)(get_{name}(gid+0), get_{name}(gid+1), get_{name}(gid+2), get_{name}(gid+3)); }}")
+        ewtypes.append(f"__global const float *{name}_g")
+        getters.append(f"inline float4 get4_{name}(__global const float *x, const sampler_t smp, int2 loc, int gid) {{"+
+          f"return (float4)(get_{name}(x,gid+0), get_{name}(x,gid+1), get_{name}(x,gid+2), get_{name}(x,gid+3)); }}")
 
     # remove fakebufs
     ewbufs = [x for x in ewbufs if x[0] not in fakebufs]
