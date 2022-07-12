@@ -48,12 +48,12 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
     if o['arg_type'] == "image2d_t" or o['arg_type'] == "image1d_t":
       assert not o['needs_load']
       if o['arg_type'] == "image2d_t":
-        if not o['unbacked'] and o['height'] == 1 and not bufs_loaded[o['buffer_id']]:
+        if 'buffer_id' in o and o['height'] == 1 and not bufs_loaded[o['buffer_id']]:
           # hack: use a image1d since we can back that with a buffer
           buf = cl.Image(ctx, mf.READ_WRITE, image_fmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
         else:
           # buffer isn't supported in image2d, copy buffer into image
-          if not o['unbacked'] and bufs_loaded[o['buffer_id']]:
+          if 'buffer_id' in o and bufs_loaded[o['buffer_id']]:
             arr = np.zeros(bufs[o['buffer_id']].size // 2, dtype=np.float16)
             cl.enqueue_copy(q, arr, bufs[o['buffer_id']])
             if (o['width'], o['height'], 4) == (108, 8, 4) and replace is not None:

@@ -202,10 +202,9 @@ if __name__ == "__main__":
             })
           elif isinstance(a, cl.Image):
             #print(a.size, a.shape, a.row_pitch)
-            # TODO: modify thneed to respect unbacked flag
+            # TODO: modify thneed to respect no buffer_id here
             jdat['objects'].append({
-              "id": ptr, "needs_load": False, "size": a.size,
-              "arg_type": "image2d_t", "unbacked": True,
+              "id": ptr, "needs_load": False, "size": a.size, "arg_type": "image2d_t",
               "width": a.shape[0], "height": a.shape[1], "row_pitch": a.row_pitch,
             })
           else:
