@@ -151,7 +151,6 @@ class OpenCLBuffer(GPUBuffer):
         getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
           f"return x[gid/4]; }}")
       elif UNSAFE_FLOAT4:
-        """
         # aggressive constant folding
         fakebufs.append(name)
         prt = buf._backing.reshape((-1, 4))
@@ -168,6 +167,7 @@ class OpenCLBuffer(GPUBuffer):
         getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
           "int valid = 1; int idx = gid;"+buf.st.expr()+";"+
           f"return x[idx/4]; }}")
+        """
       else:
         # fallback to float
         getters.append(view)

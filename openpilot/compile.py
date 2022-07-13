@@ -151,7 +151,8 @@ if __name__ == "__main__":
     print()
     for i, ((prg, args), e) in enumerate(zip(local_cl_cache, events)):
       # profile types https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clGetEventProfilingInfo.html
-      runtime = (e.profile.end - e.profile.start)*45
+      runtime = (e.profile.end - e.profile.start)
+      if sys.platform == "darwin": runtime *= 45
       runtimes[prg.name.rsplit("_", 1)[0]] += runtime
       if DEBUGCL:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
