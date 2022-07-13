@@ -46,10 +46,10 @@ def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
 
   replacements = {}
+  replacements["//PREFIX"] = prg_src
+  replacements["//BINOP"] = ''.join(middle_code)
   if len(opencl_type) != 0:
-    replacements["//PREFIX"] = prg_src
     replacements["//ARGS"] = ","+','.join(opencl_type)
-    replacements["//BINOP"] = ''.join(middle_code)
   return replacements
 
 def roundup(x, n=4): return (x+(n-1))//n * n
@@ -70,12 +70,12 @@ class OpenCLBuffer(GPUBuffer):
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
         if self._backing is not None:
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
-          self._backing = None
+          #self._backing = None
       if self._image is not None:
         self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
         if self._backing is not None:
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
-          self._backing = None
+          #self._backing = None
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", """
           __kernel void from_image(
@@ -151,12 +151,23 @@ class OpenCLBuffer(GPUBuffer):
         getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
           f"return x[gid/4]; }}")
       elif UNSAFE_FLOAT4:
+        # aggressive constant folding
+        fakebufs.append(name)
+        prt = buf._backing.reshape((-1, 4))
+        cc = []
+        for ii in range(prt.shape[0]): cc.append("(float4)(%ff, %ff, %ff, %ff)" % (prt[ii][0], prt[ii][1], prt[ii][2], prt[ii][3]))
+        getters.append(f"const __constant float4 const_{name}[] = {{"+', '.join(cc)+"};")
+        getters.append(f"inline float4 get4_{name}(int gid) {{"+
+          "int idx = gid;"+buf.st.expr()+";"+
+          f"return const_{name}[idx/4]; }}")
+        """
         # use float4 indexed (HACK!)
         # TODO: work out when this is okay
         ewtypes.append(f"__global const float4 *{name}_g")
         getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
           "int valid = 1; int idx = gid;"+buf.st.expr()+";"+
           f"return x[idx/4]; }}")
+        """
       else:
         # fallback to float
         getters.append(view)

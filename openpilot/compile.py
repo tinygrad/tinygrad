@@ -155,7 +155,7 @@ if __name__ == "__main__":
       runtimes[prg.name.rsplit("_", 1)[0]] += runtime
       if DEBUGCL:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
-        #if i == 2: print(prg.prg)
+        if DEBUGCL >=2 and i == 2: print(prg.prg)
         #if prg.name == "matmul": print(f"   {args[3].shape} {args[4].shape} -> {args[5].shape}")
       total_runtime += runtime
     for k,v in runtimes.items():
