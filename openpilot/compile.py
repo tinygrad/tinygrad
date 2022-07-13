@@ -2,6 +2,7 @@
 import pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from collections import defaultdict
+import pyopencl as cl
 
 import os
 import time
@@ -85,6 +86,12 @@ if __name__ == "__main__":
       args = list(args)
       if args[1] is None and len(args[0]) == 2:
         args[1] = [min(MAX_WORKGROUP, args[0][0]), 1]
+        try:
+          e = prg.clprg(CL().cl_queue, *args)
+        except cl.LogicError:
+          # INVALID_WORK_GROUP_SIZE
+          args[1] = None
+          continue
         if OPTWG == 2 and args[0][0] % args[1][0] != 0:
           args[1] = None
 
@@ -107,7 +114,11 @@ if __name__ == "__main__":
               if OPTWG == 2:
                 bad = any(g%l != 0 for g,l in zip(args[0], args[1]))
                 if bad: continue
-              e = prg.clprg(CL().cl_queue, *args)
+              try:
+                e = prg.clprg(CL().cl_queue, *args)
+              except cl.LogicError:
+                # INVALID_WORK_GROUP_SIZE
+                continue
               CL().cl_queue.finish()
               runtime = e.profile.end - e.profile.start
               #print(runtime, args[0], args[1])
@@ -137,13 +148,14 @@ if __name__ == "__main__":
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {(et-st)*1000.0:.2f} ms")
     total_runtime = 0
     runtimes = defaultdict(float)
+    print()
     for i, ((prg, args), e) in enumerate(zip(local_cl_cache, events)):
       # profile types https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clGetEventProfilingInfo.html
-      runtime = e.profile.end - e.profile.start
+      runtime = (e.profile.end - e.profile.start)*45
       runtimes[prg.name.rsplit("_", 1)[0]] += runtime
       if DEBUGCL:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
-        if i == 2: print(prg.prg)
+        #if i == 2: print(prg.prg)
         #if prg.name == "matmul": print(f"   {args[3].shape} {args[4].shape} -> {args[5].shape}")
       total_runtime += runtime
     for k,v in runtimes.items():

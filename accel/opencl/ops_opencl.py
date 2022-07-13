@@ -117,10 +117,11 @@ class OpenCLBuffer(GPUBuffer):
     return self._image
 
   seen = set()
-  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None):
+  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, start="0.0"):
     if C is None:
       # TODO: handle an opencl conv without the conv part
-      return super()._processing_op(bufs, code, C)
+      return super()._processing_op(bufs, code, C, start)
+    assert start == "0.0"
 
     x = [x for x in bufs if x[0] == "input"][0][1]
     w = [x for x in bufs if x[0] == "weight"][0][1]
