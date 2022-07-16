@@ -26,9 +26,10 @@ OPT = int(os.getenv("OPT", "1"))
 NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
-MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
+MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = False, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, SHUFFLE_RESHAPE_OPS = OPT>=2, OPT>=2
-MERGE_ONE_CONV_INTO_ELEMENTWISE, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=3, OPT>=3  # these are "late" opts
+#MERGE_ONE_CONV_INTO_ELEMENTWISE, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=3, OPT>=3  # these are "late" opts
+MERGE_ELEMENTWISE_INTO_REDUCE = False
 SHUFFLE_MOVEMENT_OPS = OPT>=4
 SHUFFLE_SLICE_OPS = OPT>=5  # NOTE: 0/0 is NaN if you slice, so this can change the output
 
@@ -83,8 +84,9 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
     if getattr(ret, "st", None) is not None and not ret.st.contiguous:
+      G.nodes[nm(ret)]['label'] = str(ret.shape)
       #G.nodes[nm(ret)]['label'] = str(ret.shape)+"\n"+str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
-      G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
+      #G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
       dashed = True
     elif optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(inp[0].shape)+"\n"+str(ret.shape)
     else: G.nodes[nm(ret)]['label'] = str(ret.shape)
@@ -236,8 +238,32 @@ class LazyBuffer:
     # TODO: look into why that copy is needed
     arg = tuple(copy(arg))
 
+    # instant nops
+    if op in [MovementOps.RESHAPE, MovementOps.EXPAND] and tuple(arg) == x.shape: return x
+    if op == MovementOps.PERMUTE and tuple(arg) == tuple(range(len(x.shape))): return x
+    if op == MovementOps.SLICE and tuple(arg) == tuple((0,i) for i in x.shape): return x
+    if op == MovementOps.FLIP and tuple(i == 1 or not f for i,f in zip(arg, x.shape)): return x
+
+    # two reshapes in a row is one reshape
+    if op == MovementOps.RESHAPE and not x.realized and x.op.op == MovementOps.RESHAPE and isinstance(x.op.src[0], LazyBuffer):
+      return x.op.src[0].movement_op(op, arg)
+
+    # two permutes in a row is one permute
+    if op == MovementOps.PERMUTE and not x.realized and x.op.op == MovementOps.PERMUTE and isinstance(x.op.src[0], LazyBuffer):
+      return x.op.src[0].movement_op(op, tuple(arg[i] for i in x.op.arg))
+
+    # reshape + strided is just strided
+    if op == MovementOps.STRIDED and not x.realized and x.op.op == MovementOps.RESHAPE and isinstance(x.op.src[0], LazyBuffer):
+      return x.op.src[0].movement_op(op, arg)
+
+    # some permutes are actually just reshapes
+    if op == MovementOps.PERMUTE and not x.realized:
+      st = ShapeTracker(x.shape).movement_op(op, arg)
+      if st.contiguous: return x.movement_op(MovementOps.RESHAPE, st.shape)
+  
     # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
-    if (SHUFFLE_MOVEMENT_OPS or (SHUFFLE_RESHAPE_OPS and op == MovementOps.RESHAPE)) and x.optype == BinaryOps and x.realized is None and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):
+    # don't shuffle strided
+    if (SHUFFLE_MOVEMENT_OPS or (SHUFFLE_RESHAPE_OPS and op == MovementOps.RESHAPE)) and x.optype == BinaryOps and x.realized is None and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE) and op != MovementOps.STRIDED:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
@@ -245,25 +271,28 @@ class LazyBuffer:
         return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
       return replace_with_movement_op(x.op)
 
-    if x.optype == ReduceOps and op == MovementOps.PERMUTE:
+    # hmm, this can be a bad choice if the buffer has other children
+    if x.optype == ReduceOps and op == MovementOps.PERMUTE and False:
       # reduceops have one buffer input, permute it
       narg = [x.op.arg[arg[i]] for i in range(len(arg))]
       return x.op.src[0].movement_op(op, arg).reduce_op(x.op.op, narg)
 
     # if a PERMUTE is applied to a RESHAPE, maybe we can invert them
-    if op == MovementOps.PERMUTE and x.op.op == MovementOps.RESHAPE and isinstance(x.op.src[0], LazyBuffer):
-      contraction = get_contraction(x.op.src[0].shape, x.shape)
-      if contraction is not None:
-        numbered = []
-        start = 0
-        for c in contraction:
-          numbered.append(list(range(start, start+len(c))))
-          start += len(c)
-        new_arg = []
-        for p in arg:
-          new_arg += numbered[p]
-        return x.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
-          .movement_op(MovementOps.RESHAPE, ShapeTracker(x.st).movement_op(op, arg).shape)
+    # goal is to push permutes to the top (or push reshapes to the bottom)
+    if op == MovementOps.PERMUTE and False:
+      if x.op.op == MovementOps.RESHAPE and isinstance(x.op.src[0], LazyBuffer):
+        contraction = get_contraction(x.op.src[0].shape, x.shape)
+        if contraction is not None:
+          numbered = []
+          start = 0
+          for c in contraction:
+            numbered.append(list(range(start, start+len(c))))
+            start += len(c)
+          new_arg = []
+          for p in arg:
+            new_arg += numbered[p]
+          return x.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
+            .movement_op(MovementOps.RESHAPE, ShapeTracker(x.st).movement_op(op, arg).shape)
 
     # if a MovementOp is applied to a MovementOp, merge them and use one buffer
     ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
