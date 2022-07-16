@@ -27,9 +27,10 @@ NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 MERGE_MOVEMENT_OPS, REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS = OPT>=1, OPT>=1, OPT>=1
-MERGE_ELEMENTWISE_OPS, MERGE_ONE_CONV_INTO_ELEMENTWISE, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_RESHAPE_OPS = OPT>=2, OPT>=2, OPT>=2, OPT>=2
-SHUFFLE_MOVEMENT_OPS = OPT>=3
-SHUFFLE_SLICE_OPS = OPT>=4  # NOTE: 0/0 is NaN if you slice, so this can change the output
+MERGE_ELEMENTWISE_OPS, SHUFFLE_RESHAPE_OPS = OPT>=2, OPT>=2
+MERGE_ONE_CONV_INTO_ELEMENTWISE, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=3, OPT>=3  # these are "late" opts
+SHUFFLE_MOVEMENT_OPS = OPT>=4
+SHUFFLE_SLICE_OPS = OPT>=5  # NOTE: 0/0 is NaN if you slice, so this can change the output
 
 # **** enumerate supported devices ****
 
@@ -172,6 +173,7 @@ _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:
 class LazyOp(NamedTuple):
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]  # type: ignore
+  shape: Tuple[int]
   arg: Any = None
   # TODO: add dest to support multiple outputs
 
@@ -221,7 +223,7 @@ class LazyBuffer:
     return self.realized
 
   @staticmethod
-  def fromCPU(x, device): return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
+  def fromCPU(x, device): return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.shape, x.copy()))
   def toCPU(x): return x.realize().toCPU()
 
   def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, x)
@@ -229,7 +231,7 @@ class LazyBuffer:
   def contiguous_op(x:LazyBuffer) -> LazyBuffer: return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape))) if x.shape != tuple(new_shape) else x
+    return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape), tuple(new_shape))) if x.shape != tuple(new_shape) else x
 
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
@@ -245,8 +247,9 @@ class LazyBuffer:
       return replace_with_movement_op(x.op)
 
     # if a MovementOp is applied to a MovementOp, merge them and use one buffer
-    ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
-            LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
+    new_st = ShapeTracker(x.st).movement_op(op, arg)
+    ret = LazyBuffer(x.device, new_st, MovementOps,
+      LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), new_st.shape, arg))
 
     # NOTE: if ret is in the cache, it can already be realized
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
@@ -275,10 +278,10 @@ class LazyBuffer:
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       x,w,Cn = preprocessing_op(x, w, C)
       w.realize().image
-      ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn))
+      ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn.out_shape, Cn))
       return postprocessing_op(ret, Cn, C)
     else:
-      return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
+      return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C.out_shape, C))
 
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
@@ -287,4 +290,4 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffe
     # remove the buffers from any (childless) BinaryOps that feed into this
     srcs = tuple(x.op if x.optype == BinaryOps and len(x.children) == 0 and x.realized is None else x for x in srcs)  # type: ignore
 
-  return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs))
+  return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs, out_shape))
