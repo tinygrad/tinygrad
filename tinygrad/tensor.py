@@ -253,7 +253,7 @@ class Tensor:
 
   def sigmoid(self): return (1.0 + (-self).exp()) ** -1.0
   # TODO: implement generic constant folding
-  def elu(self, alpha=1.0): return self.relu() - ((alpha*(1-self.exp())) if alpha != 1.0 else (1-self.exp())).relu()
+  def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def swish(self): return self * self.sigmoid()
   def relu6(self): return self.relu() - (self-6).relu()
   def hardswish(self): return self * (self+3).relu6() * (1/6)
