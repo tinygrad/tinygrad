@@ -4,7 +4,7 @@ from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 from copy import copy
 import os, sys, functools, operator, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
-from tinygrad.shapetracker import ShapeTracker
+from tinygrad.shapetracker import ShapeTracker, get_contraction
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -173,7 +173,6 @@ _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:
 class LazyOp(NamedTuple):
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]  # type: ignore
-  shape: Tuple[int]
   arg: Any = None
   # TODO: add dest to support multiple outputs
 
@@ -223,7 +222,7 @@ class LazyBuffer:
     return self.realized
 
   @staticmethod
-  def fromCPU(x, device): return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.shape, x.copy()))
+  def fromCPU(x, device): return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
   def toCPU(x): return x.realize().toCPU()
 
   def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, x)
@@ -231,7 +230,7 @@ class LazyBuffer:
   def contiguous_op(x:LazyBuffer) -> LazyBuffer: return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape), tuple(new_shape))) if x.shape != tuple(new_shape) else x
+    return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape))) if x.shape != tuple(new_shape) else x
 
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
@@ -246,10 +245,26 @@ class LazyBuffer:
         return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
       return replace_with_movement_op(x.op)
 
+    # if a PERMUTE is applied to a RESHAPE, maybe we can invert them
+    if op == MovementOps.PERMUTE and x.op.op == MovementOps.RESHAPE and False:
+      contraction = get_contraction(x.op.src[0].shape, x.shape)
+      if contraction is not None:
+        numbered = []
+        start = 0
+        for c in contraction:
+          numbered.append(list(range(start, start+len(c))))
+          start += len(c)
+        new_arg = []
+        for p in arg:
+          new_arg += numbered[p]
+
+        new_st = ShapeTracker(x.op.src[0].shape).movement_op(MovementOps.PERMUTE, new_arg)
+        return LazyBuffer(x.device, new_st, MovementOps, LazyOp(op, x.op.src, tuple(new_arg))) \
+          .movement_op(MovementOps.RESHAPE, x.shape)
+
     # if a MovementOp is applied to a MovementOp, merge them and use one buffer
-    new_st = ShapeTracker(x.st).movement_op(op, arg)
-    ret = LazyBuffer(x.device, new_st, MovementOps,
-      LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), new_st.shape, arg))
+    ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
+      LazyOp(op, (x.op if MERGE_MOVEMENT_OPS and x.optype == MovementOps and x.realized is None else x,), arg))
 
     # NOTE: if ret is in the cache, it can already be realized
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
@@ -278,10 +293,10 @@ class LazyBuffer:
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       x,w,Cn = preprocessing_op(x, w, C)
       w.realize().image
-      ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn.out_shape, Cn))
+      ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn))
       return postprocessing_op(ret, Cn, C)
     else:
-      return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C.out_shape, C))
+      return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
