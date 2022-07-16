@@ -75,7 +75,8 @@ class TestMNIST(unittest.TestCase):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=1)
+    train(model, X_train, Y_train, optimizer, BS=69, steps=1, noloss=True)
+    for p in model.parameters(): p.realize()
 
   def test_conv(self):
     np.random.seed(1337)

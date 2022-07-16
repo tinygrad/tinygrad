@@ -82,10 +82,11 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
     if getattr(ret, "st", None) is not None and not ret.st.contiguous:
-      G.nodes[nm(ret)]['label'] = str(ret.shape)+"\n"+str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
+      #G.nodes[nm(ret)]['label'] = str(ret.shape)+"\n"+str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
+      G.nodes[nm(ret)]['label'] = str(tuple(x[0] if x[1]!=0 else 0 for x in ret.st.views[-1].shape_strides))
       dashed = True
-    else:
-      G.nodes[nm(ret)]['label'] = str(ret.shape)
+    elif optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(inp[0].shape)+"\n"+str(ret.shape)
+    else: G.nodes[nm(ret)]['label'] = str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
 
@@ -250,8 +251,8 @@ class LazyBuffer:
     # NOTE: if ret is in the cache, it can already be realized
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]
-      if ret.st.shape == root.shape and root.st.contiguous:
-        return root
+      if root.st.contiguous and root != x:
+        return root.movement_op(MovementOps.RESHAPE, ret.st.shape) if ret.st.shape != root.shape else root
 
     return ret
 
