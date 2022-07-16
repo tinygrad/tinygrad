@@ -22,6 +22,7 @@ if __name__ == "__main__":
   print(f"NUM:{NUM} BS:{BS} CNT:{CNT}")
   model = EfficientNet(NUM, classes=1000, has_se=False, track_running_stats=False)
   parameters = get_parameters(model)
+  for p in parameters: p.realize()
   optimizer = optim.SGD(parameters, lr=0.001)
 
   Tensor.training = TRAINING
