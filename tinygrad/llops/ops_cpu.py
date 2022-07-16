@@ -7,19 +7,20 @@ class CPUBuffer(np.ndarray):
     UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
     UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(),
     BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
-    BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: 1.0*(x==y)
+    BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: (x==y).float()
   }
 
   def relu(x): return np.maximum(x, 0)
   def exp(x): return np.exp(x)
   def log(x): return np.log(x)
   def sign(x): return np.sign(x)
+  def float(x): return x.astype(np.float32)
   def flip(x, axis): return np.flip(x, axis)
   def amax(x, *args, **kwargs): return np.amax(x, *args, **kwargs)
   def permute(x, order): return x.transpose(order)
   def custompad(x, padding): return np.pad(x, padding).view(CPUBuffer) if any(x != 0 or y != 0 for x,y in padding) else x
   def expand(x, new_shape): return np.broadcast_to(x, new_shape).view(CPUBuffer)
-  def as_strided(x, size, stride): return np.lib.stride_tricks.as_strided(x, shape=size, strides=[x*4 for x in stride]).view(CPUBuffer)
+  def as_strided(x, size, stride): return np.lib.stride_tricks.as_strided(x, shape=size, strides=[y*x.dtype.itemsize for y in stride]).view(CPUBuffer)
   def contiguous(x): return x.ravel().reshape(x.shape)
 
   @staticmethod
@@ -49,18 +50,9 @@ class CPUBuffer(np.ndarray):
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
-    gx = x.ravel().reshape(C.bs,C.groups,C.cin,x.shape[2],x.shape[3])
-    tx = np.lib.stride_tricks.as_strided(gx,
-      shape=(C.bs, C.groups, C.cin, C.H, C.W, C.oy, C.ox),
-      strides=(*gx.strides[0:3], gx.strides[3]*C.dy, gx.strides[4]*C.dx, gx.strides[3]*C.sy, gx.strides[4]*C.sx))
+    tx = x.movement_op(MovementOps.STRIDED, (
+      (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
+      (C.oy, C.sy*x.shape[3]), (C.ox, C.sx), (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
     tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
-
-    # too bad this doesn't mix with stride_tricks, it can be very slow
-    #out = np.einsum("nGCHWhw, GkCHW -> nGkhw", tx, tw)
-
-    # 3 lines is faster than 1
-    tmp = np.empty((C.groups,C.rcout,C.bs,C.oy,C.ox), dtype=x.dtype)
-    for g in range(C.groups): tmp[g] = np.tensordot(tw[g], tx[:,g], ((1,2,3),(1,2,3)))
-    out = np.einsum("Gknhw -> nGkhw", tmp)
-
+    out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.contiguous(), tw.contiguous())
     return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)

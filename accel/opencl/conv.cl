@@ -1,5 +1,3 @@
-#define NUM_OUTPUTS 4
-
 //PREFIX
 
 __kernel void image_conv(
@@ -106,11 +104,24 @@ __kernel void image_conv(
         }
 
         for (short i = 0; i < NUM_OUTPUTS; ++i) {
+          // this is marginally faster than using dot
           float4 curOutputValues = outputValues[i];
-          curOutputValues.x += dot(inputValues[i], weightValues[0]);
-          curOutputValues.y += dot(inputValues[i], weightValues[1]);
-          curOutputValues.z += dot(inputValues[i], weightValues[2]);
-          curOutputValues.w += dot(inputValues[i], weightValues[3]);
+          curOutputValues.x += inputValues[i].x * weightValues[0].x;
+          curOutputValues.x += inputValues[i].y * weightValues[0].y;
+          curOutputValues.x += inputValues[i].z * weightValues[0].z;
+          curOutputValues.x += inputValues[i].w * weightValues[0].w;
+          curOutputValues.y += inputValues[i].x * weightValues[1].x;
+          curOutputValues.y += inputValues[i].y * weightValues[1].y;
+          curOutputValues.y += inputValues[i].z * weightValues[1].z;
+          curOutputValues.y += inputValues[i].w * weightValues[1].w;
+          curOutputValues.z += inputValues[i].x * weightValues[2].x;
+          curOutputValues.z += inputValues[i].y * weightValues[2].y;
+          curOutputValues.z += inputValues[i].z * weightValues[2].z;
+          curOutputValues.z += inputValues[i].w * weightValues[2].w;
+          curOutputValues.w += inputValues[i].x * weightValues[3].x;
+          curOutputValues.w += inputValues[i].y * weightValues[3].y;
+          curOutputValues.w += inputValues[i].z * weightValues[3].z;
+          curOutputValues.w += inputValues[i].w * weightValues[3].w;
           outputValues[i] = curOutputValues;
         }
 #endif
@@ -120,20 +131,13 @@ __kernel void image_conv(
   }
 #endif
 
-  // insert unary and binary ops here
+  // output to memory (with binop)
   int2 outputLocation;
   short outputColumn = startOutputColumn;
   outputLocation.y = outputRow;
   for (short i = 0; i < NUM_OUTPUTS; ++i) {
     outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
     //BINOP
-    ++outputColumn;
-  }
-
-  // output to memory
-  outputColumn = startOutputColumn;
-  for (short i = 0; i < NUM_OUTPUTS; ++i) {
-    outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
     if (outputColumn < numOutputColumns) {
       write_imagef(output, outputLocation, outputValues[i]);
     }
