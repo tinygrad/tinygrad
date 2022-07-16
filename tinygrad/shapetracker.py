@@ -102,7 +102,7 @@ class ShapeTracker:
 
   def reshape(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
-    assert prod(self.shape) == prod(new_shape)
+    assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
     if self.shape == new_shape: return
 
     # check if this is adding or removing 1s (only)

@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 from copy import copy
 import os, sys, functools, operator, weakref
-from tinygrad.helpers import ConvArgs, get_available_llops
+from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
 
 # lazy can recurse a lot
@@ -251,7 +251,7 @@ class LazyBuffer:
     # NOTE: if ret is in the cache, it can already be realized
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
       root = get_lazybuffers(ret.op)[0]
-      if root.st.contiguous and root != x:
+      if root.st.contiguous and root != x and prod(ret.st.shape) == prod(root.shape):
         return root.movement_op(MovementOps.RESHAPE, ret.st.shape) if ret.st.shape != root.shape else root
 
     return ret
