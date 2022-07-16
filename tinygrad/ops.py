@@ -245,8 +245,13 @@ class LazyBuffer:
         return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
       return replace_with_movement_op(x.op)
 
+    if x.optype == ReduceOps and op == MovementOps.PERMUTE:
+      # reduceops have one buffer input, permute it
+      narg = [x.op.arg[arg[i]] for i in range(len(arg))]
+      return x.op.src[0].movement_op(op, arg).reduce_op(x.op.op, narg)
+
     # if a PERMUTE is applied to a RESHAPE, maybe we can invert them
-    if op == MovementOps.PERMUTE and x.op.op == MovementOps.RESHAPE and False:
+    if op == MovementOps.PERMUTE and x.op.op == MovementOps.RESHAPE and isinstance(x.op.src[0], LazyBuffer):
       contraction = get_contraction(x.op.src[0].shape, x.shape)
       if contraction is not None:
         numbered = []
@@ -257,10 +262,8 @@ class LazyBuffer:
         new_arg = []
         for p in arg:
           new_arg += numbered[p]
-
-        new_st = ShapeTracker(x.op.src[0].shape).movement_op(MovementOps.PERMUTE, new_arg)
-        return LazyBuffer(x.device, new_st, MovementOps, LazyOp(op, x.op.src, tuple(new_arg))) \
-          .movement_op(MovementOps.RESHAPE, x.shape)
+        return x.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
+          .movement_op(MovementOps.RESHAPE, ShapeTracker(x.st).movement_op(op, arg).shape)
 
     # if a MovementOp is applied to a MovementOp, merge them and use one buffer
     ret = LazyBuffer(x.device, ShapeTracker(x.st).movement_op(op, arg), MovementOps,
