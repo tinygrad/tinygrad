@@ -29,6 +29,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
     loss = lossfn(out, y)
     optim.zero_grad()
     loss.backward()
+    if noloss: del loss
     optim.step()
 
     # printing

@@ -16,6 +16,9 @@ class BatchNorm2D:
 
   def __call__(self, x):
     if Tensor.training:
+      # This requires two full memory accesses to x
+      # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
+      # There's "online" algorithms that fix this
       x_detached = x.detach()
       batch_mean = x_detached.mean(axis=(0,2,3))
       y = (x_detached - batch_mean.reshape(shape=[1, -1, 1, 1]))

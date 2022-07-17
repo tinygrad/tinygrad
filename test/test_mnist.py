@@ -57,7 +57,13 @@ class TestMNIST(unittest.TestCase):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=5)
+    train(model, X_train, Y_train, optimizer, BS=69, steps=3)
+
+  def test_sgd_sixstep(self):
+    np.random.seed(1337)
+    model = TinyBobNet()
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
+    train(model, X_train, Y_train, optimizer, BS=69, steps=6, noloss=True)
 
   def test_adam_onestep(self):
     np.random.seed(1337)

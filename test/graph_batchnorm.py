@@ -11,11 +11,8 @@ def model_step(lm):
   optimizer = optim.SGD(get_parameters(lm), lr=0.001)
   optimizer.zero_grad()
   loss.backward()
+  del x,loss
   optimizer.step()
-  #out = loss.detach().numpy()
-  for p in optimizer.params:
-    p.realize()
-  #x.grad.realize()
   Tensor.training = False
 
 

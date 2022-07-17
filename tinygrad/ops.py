@@ -51,6 +51,17 @@ if GRAPH:
   G = nx.DiGraph()
   def save_graph_exit():
     for k,v in cnts.items(): print(k, v)
+    if int(os.getenv("PRUNEGRAPH", 0)):
+      dead_nodes = []
+      for n in G.nodes:
+        if G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80"]:
+          for x,_ in G.in_edges(n):
+            for _,y in G.out_edges(n):
+              G.add_edge(x, y)
+          dead_nodes.append(n)
+        if G.nodes[n]['fillcolor'] in ["#FFFF8080", "#FFFF80"]:
+          dead_nodes.append(n)
+      for n in dead_nodes: G.remove_node(n)
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
