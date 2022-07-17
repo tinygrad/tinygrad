@@ -44,7 +44,7 @@ class CPUBuffer(np.ndarray):
     elif op == MovementOps.SLICE:
       padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
       return x.custompad(padding)[tuple(slice(p[0] + padding[i][0], p[1] + padding[i][0], None) for i,p in enumerate(arg))]
-    elif op == MovementOps.REPEAT: return x.expand(arg)
+    elif op == MovementOps.EXPAND: return x.expand(arg)
     elif op == MovementOps.STRIDED: return x.contiguous().as_strided([x[0] for x in arg], [x[1] for x in arg])
 
   def processing_op(x,op,w,C):

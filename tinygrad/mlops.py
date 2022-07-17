@@ -39,7 +39,7 @@ class Sum(Function):
     return input.reduce_op(ReduceOps.SUM, reduce_shape(input.shape, axis))
 
   def backward(ctx, grad_output):
-    return grad_output.movement_op(MovementOps.REPEAT, ctx.input_shape)
+    return grad_output.movement_op(MovementOps.EXPAND, ctx.input_shape)
 
 class Max(Function):
   def forward(ctx, input, axis=None):
@@ -51,14 +51,14 @@ class Max(Function):
     input, ret = ctx.saved_tensors
 
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = input.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.REPEAT, input.shape))
+    max_is_1s = input.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.EXPAND, input.shape))
 
     # sum of locations, averaged
     div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape)
-    div = div.movement_op(MovementOps.REPEAT, input.shape)
+    div = div.movement_op(MovementOps.EXPAND, input.shape)
     max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
 
-    grad_output_expanded = grad_output.movement_op(MovementOps.REPEAT, input.shape)
+    grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, input.shape)
     return max_is_amount.binary_op(BinaryOps.MUL, grad_output_expanded)
 
 # ************* binary ops *************
@@ -114,7 +114,7 @@ class Pow(Function):
 class Expand(Function):
   def forward(ctx, x, shape):
     ctx.input_shape = x.shape
-    return x.movement_op(MovementOps.REPEAT, shape)
+    return x.movement_op(MovementOps.EXPAND, shape)
 
   def backward(ctx, grad_output):
     return grad_output.reduce_op(ReduceOps.SUM, ctx.input_shape)
