@@ -262,6 +262,12 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
       lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  def test_strided_conv2d_simple(self):
+    bs,H,W = 2,3,1
+    helper_test_op([(bs,1,5,1), (1,1,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
+      lambda x,w: Tensor.conv2d(x,w,stride=2).relu(), atol=1e-4)
+
   def test_strided_conv2d(self):
     bs = 4
     cin = 3
