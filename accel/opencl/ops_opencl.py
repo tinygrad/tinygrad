@@ -66,11 +66,12 @@ class OpenCLBuffer(GPUBuffer):
   @property
   def cl(self):
     if self._buf is None:
-      if self.st.contiguous:
+      if self._backing is not None:
+        self._buf = CLBuffer(4*roundup(prod(self._backing.shape)))
+        CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
+      elif self.st.contiguous:
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
-        if self._backing is not None:
-          CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
-          #self._backing = None
+
       if self._image is not None:
         self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
         if self._backing is not None:
