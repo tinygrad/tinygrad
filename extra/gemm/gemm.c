@@ -26,10 +26,10 @@
 #endif
 
 // aligned?
-float A[N*N] __attribute__ ((aligned (32)));
-float B[N*N] __attribute__ ((aligned (32)));
-float C[N*N] __attribute__ ((aligned (32)));
-float val[N*N] __attribute__ ((aligned (32)));
+float A[N*N] __attribute__ ((aligned (64)));
+float B[N*N] __attribute__ ((aligned (64)));
+float C[N*N] __attribute__ ((aligned (64)));
+float val[N*N] __attribute__ ((aligned (64)));
 
 __m256 *Am = (__m256*)A;
 __m256 *Bm = (__m256*)B;
@@ -41,7 +41,7 @@ uint64_t nanos() {
   return (uint64_t)start.tv_sec*1000000000 + (uint64_t)start.tv_nsec;
 }
 
-float Bf[N*N] __attribute__ ((aligned (32)));
+float Bf[N*N] __attribute__ ((aligned (64)));
 __m256 *Bfm = (__m256*)Bf;
 
 #define BLOCK 8
@@ -83,7 +83,7 @@ atomic_int ndone = 0;
 
 #define NTHREADS 8
 void *matmul_thread(void *n) {
-  int k = (int)n;
+  int k = (int)(int64_t)n;
   int sy = (N/NTHREADS) * k;
   int ey = (N/NTHREADS) * (k+1);
 
