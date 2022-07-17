@@ -99,7 +99,7 @@ jobs:
     - name: Run Pytest (default)
       run: GPU=1 python -m pytest -s -v
 
-  testgpu:
+  testopencl:
     name: OpenCL Tests
     runs-on: ubuntu-20.04
 
