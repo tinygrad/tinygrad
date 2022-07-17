@@ -44,14 +44,12 @@ class View:
 
 class ZeroView:
   def __init__(self, old_shape, arg):
-    expr = ['valid']
     self.shape = []
-    acc = 1
+    expr, acc = ['valid'], 1
     for s,(x,y) in list(zip(old_shape, arg))[::-1]:
       self.shape = [y-x] + self.shape
       base = divmodidx(acc, self.shape[0], len(self.shape) != len(old_shape)) + f"+{x}"
-      if x < 0: expr.append(f"(({base}) >= 0)")
-      if y > s: expr.append(f"(({base}) < {s})")
+      expr += ([f"(({base}) >= 0)"] if x < 0 else []) + ([f"(({base}) < {s})"] if y > s else [])
       acc *= self.shape[0]
     self.expr = 'valid=' + ' && '.join(expr)
 
@@ -66,8 +64,7 @@ def strides_for_shape(shape):
 
 @functools.lru_cache(maxsize=None)
 def view_from_shape(shape:Tuple[int, ...]):
-  if len(shape) == 0: shape = (1,)
-  assert all([isinstance(x, int) for x in shape])
+  assert all([isinstance(x, int) for x in shape]) and len(shape) != 0
   return View(tuple(shape), strides_for_shape(shape))
 
 class ShapeTracker:
@@ -103,7 +100,6 @@ class ShapeTracker:
   def reshape(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
-    if self.shape == new_shape: return
 
     # check if this is adding or removing 1s (only)
     if tuple([x for x in self.shape if x != 1]) == tuple([x for x in new_shape if x != 1]):
