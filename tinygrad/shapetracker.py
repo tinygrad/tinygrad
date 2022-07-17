@@ -136,7 +136,7 @@ class ShapeTracker:
       # if we add a ZeroView, we add another (stock) view also for modding
       self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
 
-  def repeat(self, *new_shape):
+  def expand(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
     assert all([x == y or x == 1 for x,y in zip(self.shape, new_shape)])
     strides = [s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape))]

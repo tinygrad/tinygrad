@@ -18,7 +18,7 @@ class DumbShapeTracker:
   def permute(self, *axis):
     self.t = np.transpose(self.t, axis)
 
-  def repeat(self, *new_shape):
+  def expand(self, *new_shape):
     self.t = np.broadcast_to(self.t, new_shape)
 
   def flip(self, *axis):
@@ -163,11 +163,11 @@ class TestShapeTracker(unittest.TestCase):
     new_shape = [self.st.shape[0], 1, self.st.shape[1]]
     self.apply(lambda x: x.reshape(*new_shape))
 
-  def test_repeat(self):
+  def test_expand(self):
     self.test_reshape_with_1()
     new_shape = list(self.st.shape)
     new_shape[1] = 2
-    self.apply(lambda x: x.repeat(*new_shape))
+    self.apply(lambda x: x.expand(*new_shape))
 
   def test_flip_0(self):
     self.apply(lambda x: x.flip(0))
@@ -198,9 +198,9 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.slice((0, 2), (2, 4)))
     self.apply(lambda x: x.permute(1, 0))
 
-  def test_slice_repeat(self):
+  def test_slice_expand(self):
     self.apply(lambda x: x.slice((0, 2), (3, 4)))
-    self.apply(lambda x: x.repeat(2, 10))
+    self.apply(lambda x: x.expand(2, 10))
 
   def test_double_stride(self):
     self.apply(lambda x: x.stride(1, 2))
@@ -217,23 +217,23 @@ class TestShapeTracker(unittest.TestCase):
     self.test_reshape()
     self.test_permute()
 
-  def test_reshape_then_repeat(self):
+  def test_reshape_then_expand(self):
     self.test_reshape()
-    self.test_repeat()
+    self.test_expand()
 
   def test_permute_then_reshape(self):
     self.test_permute()
     self.test_reshape()
 
-  def test_repeat_then_reshape(self):
-    self.test_repeat()
+  def test_expand_then_reshape(self):
+    self.test_expand()
     self.test_reshape()
 
   def test_combo(self):
     self.test_permute()
     self.test_reshape()
     self.test_slice_1()
-    self.test_repeat()
+    self.test_expand()
     self.test_permute()
 
 if __name__ == '__main__':
