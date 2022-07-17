@@ -240,11 +240,11 @@ class LazyBuffer:
     if op == MovementOps.PAD and arg == tuple((0,0) for _ in x.shape): return x
     if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(x.shape)): return x
 
-    # two reshapes in a row is one reshape
+    # two ops in a row is one op
     if op == MovementOps.RESHAPE and x.realized is None and x.op.op == MovementOps.RESHAPE: return x.op.src[0].movement_op(op, arg)
-
-    # two permutes in a row is one permute
     if op == MovementOps.PERMUTE and x.realized is None and x.op.op == MovementOps.PERMUTE: return x.op.src[0].movement_op(op, tuple(x.op.arg[i] for i in arg))
+    if op == MovementOps.SHRINK and x.realized is None and x.op.op == MovementOps.SHRINK: return x.op.src[0].movement_op(op, arg)
+    if op == MovementOps.PAD and x.realized is None and x.op.op == MovementOps.PAD: return x.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(x.op.arg, arg)))
 
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and ShapeTracker(x.shape).movement_op(op, arg).contiguous: return x.movement_op(MovementOps.RESHAPE, tuple(x.shape[i] for i in arg))
@@ -253,6 +253,7 @@ class LazyBuffer:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
+        assert isinstance(y.op, BinaryOps) or isinstance(y.op, UnaryOps)
         return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
       return replace_with_movement_op(x.op)
 
@@ -272,7 +273,7 @@ class LazyBuffer:
     # TODO: fixup C?
     if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False): x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
 
-    if NOCONV:
+    if NOCONV or not getattr(x.dbuffer, "processing_op", False):
       # universal conv, just mul and reduce
       # TODO: is there any way to replace strided with other movement ops?
       x = x.movement_op(MovementOps.STRIDED, (

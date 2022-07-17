@@ -111,11 +111,6 @@ class GPUBuffer:
   def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
   def movement_op(x, op:MovementOps, arg) -> GPUBuffer: return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
 
-  SUPPORTS_PADDING = True
-  def processing_op(x, op:ProcessingOps, w:GPUBuffer, C:ConvArgs):
-    assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
-
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]):
     return type(x)(new_shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op], None, GPUBuffer.start_for_op[op])
 
@@ -126,29 +121,8 @@ class GPUBuffer:
     # this takes a ret index to an inp index, indexing 0 on the reduced strides
     # if it's not a reduce, this should be a NOOP
     view = View(ret.shape, strides_for_shape(bufs[0][1].shape))
-    if C is not None:  # this is a conv
-      ints = ''.join(f"int {x} = {getattr(C, x)};" for x in ["H", "W", "sy", "sx", "dx", "dy", "px", "py", "groups", "rcout", "cin"])
-      params = [(f"int {x}", getattr(C, x)) for x in ["oy", "ox", "iy", "ix"]]
-      global_size = [C.bs*C.cout, C.oy, C.ox]   # [nGk, h, w]
-      assert ret.shape == C.out_shape, "output shape is wrong (NOTE: you can't reduce and conv together)"
-
-      # now input and weight can be anywhere in bufs
-      bufs = [(x[0], x[1].contiguous_op()) if x[0] in ["input", "weight"] else x for x in bufs]
-      ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
-      assert len(bufs) == len(ewbufs)+2, "input or weight missing"
-
-      # TODO: is there a way to unify this with reduce? it looks very similar
-      conv_src = """
-      int B = gid/(groups*rcout); int g = (gid/rcout)%groups; int c = gid % rcout;
-      int Y = get_global_id(1); int X = get_global_id(2); gid = gid*oy*ox + Y*ox + X;
-      for (int ci = 0; ci < cin; ci++) { for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) {
-        int idx_y = y*dy + Y*sy - py;
-        int idx_x = x*dx + X*sx - px;
-        int valid = (idx_y >= 0 && idx_y < iy && idx_x >= 0 && idx_x < ix);
-        acc += valid * input_g[B*groups*cin*iy*ix + g*cin*iy*ix + ci*iy*ix + clamp(idx_y, 0, iy-1)*ix + clamp(idx_x, 0, ix-1)] * \
-          weight_g[g*rcout*cin*H*W + c*cin*H*W + ci*H*W + y*W + x];
-      } } }"""
-    elif ret.shape != bufs[0][1].shape:   # this is a reduce
+    assert C is None
+    if ret.shape != bufs[0][1].shape:   # this is a reduce
       # reverse operation of expand, this validates inputs
       # generate loops with combined adjacent reduce axis
       acc = 1
@@ -156,7 +130,7 @@ class GPUBuffer:
         if stride == 0: loop.append((f"for (int axis_{len(loop)} = 0; axis_{len(loop)} < {shp}; axis_{len(loop)}++) {{", f"idx += {acc}; }} idx -= {shp*acc};"))
         acc *= shp
 
-    kernel_name = "conv" if C is not None else ("reduce" if len(loop) > 0 else "elementwise")
+    kernel_name = "reduce" if len(loop) > 0 else "elementwise"
     views = {name:buf.contiguous_view_constant_fold(name) for name, buf in ewbufs}
     buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
     conv_prg = CLProgram(kernel_name, f"""{chr(10).join([x[0] for x in views.values()])}

@@ -116,8 +116,12 @@ class OpenCLBuffer(GPUBuffer):
       self._buf = None
     return self._image
 
-  seen = set()
   SUPPORTS_PADDING = True
+  def processing_op(x, op:ProcessingOps, w:GPUBuffer, C:ConvArgs):
+    assert op == ProcessingOps.CONV, f"{op} isn't supported"
+    return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
+
+  seen = set()
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, start="0.0"):
     if C is None:
       # TODO: handle an opencl conv without the conv part
