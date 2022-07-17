@@ -3,7 +3,7 @@ import unittest
 import time
 import tinygrad.optim as optim
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Device
 from extra.training import train
 from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
@@ -25,6 +25,7 @@ def train_one_step(model,X,Y):
   et = time.time()-st
   print("done in %.2f ms" % (et*1000.))
 
+@unittest.skipUnless(Device.DEFAULT != Device.OPENCL, "OOM on OpenCL")
 class TestTrain(unittest.TestCase):
   def test_efficientnet(self):
     model = EfficientNet(0)

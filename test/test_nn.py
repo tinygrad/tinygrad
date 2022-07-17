@@ -6,7 +6,7 @@ from tinygrad.nn import *
 from extra.utils import get_parameters
 import torch
 
-@unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
+#@unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
 class TestNN(unittest.TestCase):
 
   def test_batchnorm2d(self, training=False):
