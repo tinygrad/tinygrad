@@ -175,6 +175,7 @@ class LazyOp(NamedTuple):
 def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
+def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.optype == MovementOps and root.realized is None else root
 
 LAZY = int(os.getenv("LAZY", "1"))
 
@@ -259,8 +260,7 @@ class LazyBuffer:
     # NOTE: if ret is in the cache, it can already be realized
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
-      root = x
-      while root.optype == MovementOps and root.realized is None: root = root.op.src[0]
+      root = get_movementroot(x)
       if root.st.contiguous and root != x and prod(ret.st.shape) == prod(root.shape):
         return root.movement_op(MovementOps.RESHAPE, ret.st.shape) if ret.st.shape != root.shape else root
 
