@@ -225,6 +225,7 @@ class LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape))) if x.shape != tuple(new_shape) else x
 
   # syntactic sugar around PAD and SHRINK
+  # TODO: turn RESHAPE into EXPAND and CONTRACT (current EXPAND should be REPEAT)
   def slice(x:LazyBuffer, arg):
     padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
     return x.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
@@ -242,6 +243,7 @@ class LazyBuffer:
 
     # two ops in a row is one op
     if op == MovementOps.RESHAPE and x.realized is None and x.op.op == MovementOps.RESHAPE: return x.op.src[0].movement_op(op, arg)
+    if op == MovementOps.EXPAND and x.realized is None and x.op.op == MovementOps.EXPAND: return x.op.src[0].movement_op(op, arg)
     if op == MovementOps.PERMUTE and x.realized is None and x.op.op == MovementOps.PERMUTE: return x.op.src[0].movement_op(op, tuple(x.op.arg[i] for i in arg))
     if op == MovementOps.SHRINK and x.realized is None and x.op.op == MovementOps.SHRINK: return x.op.src[0].movement_op(op, arg)
     if op == MovementOps.PAD and x.realized is None and x.op.op == MovementOps.PAD: return x.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(x.op.arg, arg)))
@@ -249,7 +251,7 @@ class LazyBuffer:
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and ShapeTracker(x.shape).movement_op(op, arg).contiguous: return x.movement_op(MovementOps.RESHAPE, tuple(x.shape[i] for i in arg))
 
-    if (SHUFFLE_MOVEMENT_OPS or (SHUFFLE_RESHAPE_OPS and op == MovementOps.RESHAPE)) and x.optype == BinaryOps and x.realized is None and (SHUFFLE_PAD_OPS or op != MovementOps.PAD):
+    if (SHUFFLE_MOVEMENT_OPS or (SHUFFLE_RESHAPE_OPS and op == MovementOps.RESHAPE)) and x.optype == BinaryOps and x.realized is None and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op != MovementOps.STRIDED:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
