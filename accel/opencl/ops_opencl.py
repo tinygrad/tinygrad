@@ -117,6 +117,7 @@ class OpenCLBuffer(GPUBuffer):
     return self._image
 
   seen = set()
+  SUPPORTS_PADDING = True
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, start="0.0"):
     if C is None:
       # TODO: handle an opencl conv without the conv part

@@ -111,6 +111,7 @@ class GPUBuffer:
   def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
   def movement_op(x, op:MovementOps, arg) -> GPUBuffer: return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
 
+  SUPPORTS_PADDING = True
   def processing_op(x, op:ProcessingOps, w:GPUBuffer, C:ConvArgs):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)

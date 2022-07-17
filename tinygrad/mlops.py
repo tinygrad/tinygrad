@@ -140,10 +140,10 @@ class Permute(Function):
 class Slice(Function):
   def forward(ctx, x, arg=None):
     ctx.narg = tuple((0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg))
-    return x.movement_op(MovementOps.SLICE, tuple(arg))
+    return x.slice(tuple(arg))
 
   def backward(ctx, grad_output):
-    return grad_output.movement_op(MovementOps.SLICE, ctx.narg)
+    return grad_output.slice(ctx.narg)
 
 class Flip(Function):
   def forward(ctx, x, axis):
@@ -172,8 +172,8 @@ class Conv2D(Function):
         xt = xt.movement_op(MovementOps.RESHAPE, (grad_output.shape[0], grad_output.shape[1], grad_output.shape[2], 1, grad_output.shape[3], 1))
         xt = xt.movement_op(MovementOps.PAD, ((0,0), (0,0), (0,0), (0,C.sy-1), (0,0), (0,C.sx-1)))
         xt = xt.movement_op(MovementOps.RESHAPE, (xt.shape[0], xt.shape[1], xt.shape[2]*C.sy, xt.shape[4]*C.sx))
-      wt = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W)).movement_op(MovementOps.PERMUTE, (0, 2, 1, 3, 4))
-      wt = wt.movement_op(MovementOps.RESHAPE, (C.groups*C.cin, C.rcout, C.H, C.W)).movement_op(MovementOps.FLIP, (2, 3))
+      wt = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W)).movement_op(MovementOps.PERMUTE, (0, 2, 1, 3, 4)).movement_op(MovementOps.FLIP, (3, 4))
+      wt = wt.movement_op(MovementOps.RESHAPE, (C.groups*C.cin, C.rcout, C.H, C.W))
       py, px = (C.H-1)*C.dy - C.py, (C.W-1)*C.dx - C.px
       Cdx = get_conv_args(xt.shape, wt.shape, out_shape=x.shape, dilation=(C.dy, C.dx), padding=(py, px), groups=C.groups)
       dx = xt.processing_op(ProcessingOps.CONV, wt, Cdx)

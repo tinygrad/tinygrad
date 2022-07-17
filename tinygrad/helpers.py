@@ -20,6 +20,7 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
   bs,cin_,iy,ix = x_shape
 
   # this can change px_ and py_ to make the out_shape right
+  # TOOD: copy padding names from http://nvdla.org/hw/v1/ias/unit_description.html
   if out_shape is not None:
     py_ = (out_shape[2] - 1) * sy + 1 + dy * (H-1) - iy - py
     px_ = (out_shape[3] - 1) * sx + 1 + dx * (W-1) - ix - px
@@ -29,8 +30,7 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
   oy = (iy + py + py_ - dy * (H-1) - 1)//sy + 1
   ox = (ix + px + px_ - dx * (W-1) - 1)//sx + 1
   if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
-  assert cout % groups == 0
-  assert out_shape is None or out_shape == (bs, cout, oy, ox)
+  assert cout % groups == 0 and (out_shape is None or out_shape == (bs, cout, oy, ox))
   return ConvArgs(H, W, groups, cout//groups, cin, oy, ox, iy, ix, sy, sx, bs, cout, py, py_, px, px_, dy, dx, (bs, cout, oy, ox))
 
 def get_available_llops():

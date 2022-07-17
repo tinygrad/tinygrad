@@ -10,31 +10,31 @@ def preprocessing_op(x,w,C):
   if C.bs > 1 and C.py > 0:
     # explictly add y-padding for batched inputs
     # N C H W
-    xs = [(0, s) for s in x.shape]
-    xs[2] = (-C.py, x.shape[2]+C.py)
-    x = x.movement_op(MovementOps.SLICE, xs)
+    xs = [(0, 0) for _ in x.shape]
+    xs[2] = (C.py, C.py)
+    x = x.movement_op(MovementOps.PAD, xs)
     C = C._replace(iy=C.iy + C.py*2, py=0)
 
   # hack for non multiples of 4 on C.cin
   if C.cin % 4 != 0 and not (C.cin == 1 and C.groups%4 == 0):
     to_add = 4 - (C.cin % 4)
-    ws = [(0, s) for s in w.shape]
-    ws[2] = (0, w.shape[2]+to_add)
-    w = w.movement_op(MovementOps.SLICE, ws)
+    ws = [(0, 0) for _ in w.shape]
+    ws[2] = (0, to_add)
+    w = w.movement_op(MovementOps.PAD, ws)
 
     x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix))
-    xs = [(0, s) for s in x.shape]
-    xs[2] = (0, x.shape[2]+to_add)
-    x = x.movement_op(MovementOps.SLICE, xs)
+    xs = [(0, 0) for _ in x.shape]
+    xs[2] = (0, to_add)
+    x = x.movement_op(MovementOps.PAD, xs)
     C = C._replace(cin = C.cin + to_add)
     x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups*C.cin, C.iy, C.ix))
 
   # hack for non multiples of 4 on C.rcout
   if C.rcout % 4 != 0 and not (C.rcout == 1 and C.groups%4 == 0):
     added_output_channels = 4 - (C.rcout % 4)
-    ws = [(0, s) for s in w.shape]
-    ws[1] = (0, w.shape[1]+added_output_channels)
-    w = w.movement_op(MovementOps.SLICE, ws)
+    ws = [(0, 0) for _ in w.shape]
+    ws[1] = (0, added_output_channels)
+    w = w.movement_op(MovementOps.PAD, ws)
     C = C._replace(rcout = C.rcout + added_output_channels, cout = C.groups * (C.rcout + added_output_channels))
 
   # packed
@@ -66,7 +66,7 @@ def postprocessing_op(ret, C, C_initial):
     ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.groups, C.rcout))
     xs = [(0, s) for s in ret.shape]
     xs[4] = (0, ret.shape[4]-added_output_channels)
-    ret = ret.movement_op(MovementOps.SLICE, xs)
+    ret = ret.movement_op(MovementOps.SHRINK, xs)
     C = C._replace(rcout = C.rcout - added_output_channels, cout = C.groups * (C.rcout - added_output_channels))
 
   ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout))

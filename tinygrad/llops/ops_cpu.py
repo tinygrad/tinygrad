@@ -42,15 +42,13 @@ class CPUBuffer(np.ndarray):
     elif op == MovementOps.PERMUTE: return x.permute(arg)
     elif op == MovementOps.FLIP: return x.flip(arg)
     elif op == MovementOps.PAD: return x.custompad(arg)
-    elif op == MovementOps.SLICE:
-      padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
-      return x.custompad(padding)[tuple(slice(p[0] + padding[i][0], p[1] + padding[i][0], None) for i,p in enumerate(arg))]
+    elif op == MovementOps.SHRINK: return x[tuple(slice(p[0], p[1], None) for i,p in enumerate(arg))]
     elif op == MovementOps.EXPAND: return x.expand(arg)
     elif op == MovementOps.STRIDED: return x.contiguous().as_strided([x[0] for x in arg], [x[1] for x in arg])
 
+  PREPAD = True
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
     tx = x.movement_op(MovementOps.STRIDED, (
       (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
       (C.oy, C.sy*x.shape[3]), (C.ox, C.sx), (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))

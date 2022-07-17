@@ -24,7 +24,7 @@ class DumbShapeTracker:
   def flip(self, *axis):
     self.t = np.flip(self.t, axis)
 
-  def slice(self, *arg):
+  def shrink(self, *arg):
     self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
 
   def stride(self, *arg):
@@ -104,8 +104,8 @@ class TestSingleShapeTracker(unittest.TestCase):
     self.st.permute(1,0)
     assert not self.st.contiguous
 
-  def test_slice(self):
-    self.st.slice((1,2), (0,4))
+  def test_shrink(self):
+    self.st.shrink((1,2), (0,4))
     assert not self.st.contiguous
 
   def test_double_permute(self):
@@ -179,27 +179,27 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.flip(0,1))
 
   def test_slice_0(self):
-    self.apply(lambda x: x.slice((1, x.shape[0]), (0, x.shape[1])))
+    self.apply(lambda x: x.shrink((1, x.shape[0]), (0, x.shape[1])))
 
   def test_slice_1(self):
-    self.apply(lambda x: x.slice((0, x.shape[0]), (1, x.shape[1])))
+    self.apply(lambda x: x.shrink((0, x.shape[0]), (1, x.shape[1])))
 
   def test_slice_1c1(self):
-    self.apply(lambda x: x.slice((0, 1), (0, 1)))
+    self.apply(lambda x: x.shrink((0, 1), (0, 1)))
 
   def test_slice_1c2(self):
-    self.apply(lambda x: x.slice((1, 2), (1, 2)))
+    self.apply(lambda x: x.shrink((1, 2), (1, 2)))
   
   def test_double_permute(self):
     self.apply(lambda x: x.permute(1, 0))
     self.apply(lambda x: x.permute(1, 0))
 
   def test_slice_permute(self):
-    self.apply(lambda x: x.slice((0, 2), (2, 4)))
+    self.apply(lambda x: x.shrink((0, 2), (2, 4)))
     self.apply(lambda x: x.permute(1, 0))
 
   def test_slice_expand(self):
-    self.apply(lambda x: x.slice((0, 2), (3, 4)))
+    self.apply(lambda x: x.shrink((0, 2), (3, 4)))
     self.apply(lambda x: x.expand(2, 10))
 
   def test_double_stride(self):

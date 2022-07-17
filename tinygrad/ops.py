@@ -13,7 +13,7 @@ sys.setrecursionlimit(10000)
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "SLICE", "EXPAND", "FLIP", "STRIDED", "PAD"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "EXPAND", "FLIP", "STRIDED", "PAD", "SHRINK"])
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
 LoadOps = Enum("LoadOps", ["FROMCPU"])
 
@@ -224,6 +224,11 @@ class LazyBuffer:
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape))) if x.shape != tuple(new_shape) else x
 
+  # syntactic sugar around PAD and SHRINK
+  def slice(x:LazyBuffer, arg):
+    padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
+    return x.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
+
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
     arg = tuple(copy(arg))
@@ -231,7 +236,8 @@ class LazyBuffer:
     # instant nops
     if op in [MovementOps.RESHAPE, MovementOps.EXPAND] and arg == x.shape: return x
     if op == MovementOps.PERMUTE and arg == tuple(range(len(x.shape))): return x
-    if op == MovementOps.SLICE and arg == tuple((0,i) for i in x.shape): return x
+    if op == MovementOps.SHRINK and arg == tuple((0,i) for i in x.shape): return x
+    if op == MovementOps.PAD and arg == tuple((0,0) for _ in x.shape): return x
     if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(x.shape)): return x
 
     # two reshapes in a row is one reshape
@@ -243,12 +249,10 @@ class LazyBuffer:
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and ShapeTracker(x.shape).movement_op(op, arg).contiguous: return x.movement_op(MovementOps.RESHAPE, tuple(x.shape[i] for i in arg))
 
-    # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
-    if (SHUFFLE_MOVEMENT_OPS or (SHUFFLE_RESHAPE_OPS and op == MovementOps.RESHAPE)) and x.optype == BinaryOps and x.realized is None and (SHUFFLE_PAD_OPS or op not in [MovementOps.SLICE, MovementOps.PAD]):
+    if (SHUFFLE_MOVEMENT_OPS or (SHUFFLE_RESHAPE_OPS and op == MovementOps.RESHAPE)) and x.optype == BinaryOps and x.realized is None and (SHUFFLE_PAD_OPS or op != MovementOps.PAD):
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
-        assert isinstance(y.op, BinaryOps) or isinstance(y.op, UnaryOps)
         return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
       return replace_with_movement_op(x.op)
 
@@ -265,9 +269,11 @@ class LazyBuffer:
     return ret
 
   def processing_op(x:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
+    # TODO: fixup C?
+    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False): x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
+
     if NOCONV:
       # universal conv, just mul and reduce
-      x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
       # TODO: is there any way to replace strided with other movement ops?
       x = x.movement_op(MovementOps.STRIDED, (
         (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
