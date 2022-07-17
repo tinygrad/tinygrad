@@ -236,13 +236,13 @@ class LazyBuffer:
     if op in [MovementOps.RESHAPE, MovementOps.EXPAND] and arg == x.shape: return x
     if op == MovementOps.PERMUTE and arg == tuple(range(len(x.shape))): return x
     if op == MovementOps.SLICE and arg == tuple((0,i) for i in x.shape): return x
-    if op == MovementOps.FLIP and tuple(i == 1 or not f for i,f in zip(arg, x.shape)): return x
+    if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(x.shape)): return x
 
     # two reshapes in a row is one reshape
-    if op == MovementOps.RESHAPE and not x.realized and x.op.op == MovementOps.RESHAPE: return x.op.src[0].movement_op(op, arg)
+    if op == MovementOps.RESHAPE and x.realized is None and x.op.op == MovementOps.RESHAPE: return x.op.src[0].movement_op(op, arg)
 
     # two permutes in a row is one permute
-    if op == MovementOps.PERMUTE and not x.realized and x.op.op == MovementOps.PERMUTE: return x.op.src[0].movement_op(op, tuple(arg[i] for i in x.op.arg))
+    if op == MovementOps.PERMUTE and x.realized is None and x.op.op == MovementOps.PERMUTE: return x.op.src[0].movement_op(op, tuple(arg[i] for i in x.op.arg))
 
     # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
     if (SHUFFLE_MOVEMENT_OPS or (SHUFFLE_RESHAPE_OPS and op == MovementOps.RESHAPE)) and x.optype == BinaryOps and x.realized is None and (SHUFFLE_SLICE_OPS or op != MovementOps.SLICE):
@@ -260,7 +260,7 @@ class LazyBuffer:
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = x
-      while root.optype == MovementOps: root = root.op.src[0]
+      while root.optype == MovementOps and root.realized is None: root = root.op.src[0]
       if root.st.contiguous and root != x and prod(ret.st.shape) == prod(root.shape):
         return root.movement_op(MovementOps.RESHAPE, ret.st.shape) if ret.st.shape != root.shape else root
 
