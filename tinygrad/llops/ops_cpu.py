@@ -41,6 +41,7 @@ class CPUBuffer(np.ndarray):
     if op == MovementOps.RESHAPE: return x.reshape(arg)
     elif op == MovementOps.PERMUTE: return x.permute(arg)
     elif op == MovementOps.FLIP: return x.flip(arg)
+    elif op == MovementOps.PAD: return x.custompad(arg)
     elif op == MovementOps.SLICE:
       padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
       return x.custompad(padding)[tuple(slice(p[0] + padding[i][0], p[1] + padding[i][0], None) for i,p in enumerate(arg))]

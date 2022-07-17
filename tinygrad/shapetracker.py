@@ -123,6 +123,11 @@ class ShapeTracker:
 
   # *** under this line are not invertible ***
 
+  # TODO: take this functionality out of slice
+  def pad(self, *arg):
+    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
+    return self.slice(*[(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
+
   def slice(self, *arg):
     assert len(arg) == len(self.shape)
     offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
