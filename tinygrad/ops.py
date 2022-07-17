@@ -91,6 +91,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
     elif optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(inp[0].shape)+"\n"+str(ret.shape)
     else: G.nodes[nm(ret)]['label'] = str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
+    if op[0] == MovementOps.STRIDED: G.nodes[nm(ret)]['fillcolor'] = "#ffc080"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
 
 
@@ -255,11 +256,17 @@ class LazyBuffer:
     # reshape + strided is just strided
     if op == MovementOps.STRIDED and not x.realized and x.op.op == MovementOps.RESHAPE and isinstance(x.op.src[0], LazyBuffer):
       return x.op.src[0].movement_op(op, arg)
+    
+    # NOTE: slice + slice != slice. refactor slice into slice and pad
 
     # some permutes are actually just reshapes
-    if op == MovementOps.PERMUTE and not x.realized:
+    if op == MovementOps.PERMUTE:
       st = ShapeTracker(x.shape).movement_op(op, arg)
       if st.contiguous: return x.movement_op(MovementOps.RESHAPE, st.shape)
+
+    # some reshapes are actually splits and contracts
+    if op == MovementOps.RESHAPE:
+      print(x.shape, "->", arg, get_contraction(x.shape, arg))
   
     # TODO: SHUFFLE_SLICE_OPS is okay if it's a shrink
     # don't shuffle strided
@@ -272,15 +279,19 @@ class LazyBuffer:
       return replace_with_movement_op(x.op)
 
     # hmm, this can be a bad choice if the buffer has other children
-    if x.optype == ReduceOps and op == MovementOps.PERMUTE and False:
+    if x.optype == ReduceOps and op == MovementOps.PERMUTE and False: # and len(x.op.src[0].children) == 1:
       # reduceops have one buffer input, permute it
       narg = [x.op.arg[arg[i]] for i in range(len(arg))]
       return x.op.src[0].movement_op(op, arg).reduce_op(x.op.op, narg)
 
     # if a PERMUTE is applied to a RESHAPE, maybe we can invert them
     # goal is to push permutes to the top (or push reshapes to the bottom)
-    if op == MovementOps.PERMUTE and False:
-      if x.op.op == MovementOps.RESHAPE and isinstance(x.op.src[0], LazyBuffer):
+    if op == MovementOps.PERMUTE:
+      if x.op.op == MovementOps.EXPAND and x.realized is None and isinstance(x.op.src[0], LazyBuffer):
+          return x.op.src[0].movement_op(MovementOps.PERMUTE, arg) \
+            .movement_op(MovementOps.EXPAND, tuple(x.shape[arg[i]] for i in range(len(x.shape))))
+
+      if x.op.op == MovementOps.RESHAPE and x.realized is None and isinstance(x.op.src[0], LazyBuffer):
         contraction = get_contraction(x.op.src[0].shape, x.shape)
         if contraction is not None:
           numbered = []
@@ -300,7 +311,8 @@ class LazyBuffer:
 
     # NOTE: if ret is in the cache, it can already be realized
     if REMOVE_MOVEMENT_NOPS and ret.realized is None and x.realized is None and ret.st.contiguous:
-      root = get_lazybuffers(ret.op)[0]
+      root = x
+      while root.optype == MovementOps: root = root.op.src[0]
       if root.st.contiguous and root != x and prod(ret.st.shape) == prod(root.shape):
         return root.movement_op(MovementOps.RESHAPE, ret.st.shape) if ret.st.shape != root.shape else root
 
@@ -311,6 +323,8 @@ class LazyBuffer:
       # universal conv, just mul and reduce
       x = x.movement_op(MovementOps.SLICE, ((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
       # TODO: is there any way to replace strided with other movement ops?
+      # yes, but only if C.H == C.W == 1
+      # actually, i think it's possible all the time with reshapes and repeats
       x = x.movement_op(MovementOps.STRIDED, (
         (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
         (C.rcout, 0), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
