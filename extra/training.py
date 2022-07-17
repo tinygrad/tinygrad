@@ -31,9 +31,6 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
     loss.backward()
     optim.step()
 
-    # TODO: corealize
-    for p in optim.params: p.realize()
-
     # printing
     if not noloss:
       cat = np.argmax(out.cpu().data, axis=-1)
