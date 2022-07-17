@@ -4,7 +4,7 @@ import cProfile
 import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 
 def start_profile():
   import time
@@ -19,6 +19,7 @@ def stop_profile(pr, sort='cumtime'):
   ps.sort_stats(sort)
   ps.print_stats(0.2)
 
+@unittest.skipUnless(getattr(Device, "OPENCL", None) is None or Device.DEFAULT != Device.OPENCL, "OOM on OpenCL")
 class TestConvSpeed(unittest.TestCase):
 
   def test_mnist(self):
