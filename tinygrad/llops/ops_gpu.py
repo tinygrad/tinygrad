@@ -116,17 +116,17 @@ class GPUBuffer:
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, start="0.0", input_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
     assert C is None
-    input_shape = bufs[0][1].shape if input_shape is None else input_shape
+    input_shape = (bufs[0][1].shape, ret.shape) if input_shape is None else input_shape
 
     # this takes a ret index to an inp index, indexing 0 on the reduced strides
     # if it's not a reduce, this should be a NOOP
-    view = View(ret.shape, strides_for_shape(input_shape))
+    view = View(input_shape[1], strides_for_shape(input_shape[0]))
     loop : List[Tuple[str, str]] = []
-    if ret.shape != input_shape:   # this is a reduce
+    if input_shape[1] != input_shape[0]:   # this is a reduce
       # reverse operation of expand, this validates inputs
       # generate loops with combined adjacent reduce axis
       acc = 1
-      for shp,stride in ShapeTracker(ret.shape).movement_op(MovementOps.EXPAND, input_shape).views[-1].shape_strides[::-1]:
+      for shp,stride in ShapeTracker(input_shape[1]).movement_op(MovementOps.EXPAND, input_shape[0]).views[-1].shape_strides[::-1]:
         if stride == 0: loop.append((f"for (int axis_{len(loop)} = 0; axis_{len(loop)} < {shp}; axis_{len(loop)}++) {{", f"idx += {acc}; }} idx -= {shp*acc};"))
         acc *= shp
 
@@ -139,8 +139,8 @@ class GPUBuffer:
       {' '.join([ls for ls, _ in loop[::-1]])}
 {chr(10).join([f'        float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in bufs if name in earlybufs])}
         acc = {earlycode};
-      {' '.join([le for _, le in loop])}
-{chr(10).join([f'      float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in bufs if name not in earlybufs])}
+      {' '.join([le for _, le in loop])} idx = gid;
+{chr(10).join([f'      float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in bufs])}
       output[gid] = {code};
     }}""", argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types))))
     conv_prg([prod(ret.shape), 1, 1], None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]])
