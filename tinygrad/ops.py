@@ -92,7 +92,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
-    if optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(inp[0].shape)+"\n"+str(ret.shape)
+    if optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
     else: G.nodes[nm(ret)]['label'] = str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
@@ -156,7 +156,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
 
     # same thing with reduce ops
     maybe_movementroot = lambda x: get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
-    psrcs = [(k,x) for k,x in zip(real_srcs.keys(), map(maybe_movementroot, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and len(x.children) <= 1]
+    psrcs = [(k,x) for k,x in zip(real_srcs.keys(), map(maybe_movementroot, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
     if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
       src = psrcs[0][1].op.src[0]
       if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
@@ -183,7 +183,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       _ast(self.op, buf_names, self.dbuffer.code_for_op),
       earlycode=earlycode, earlybufs=set(x for x in buf_names.values() if x.startswith("earlyarg_")),
       C=conv_args, input_shape=input_shape), \
-      list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if earlycode != "acc" else BinaryOps)
+      list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if input_shape[0] != input_shape[1] else BinaryOps)
   else:
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
     # slow path, creates middle buffers
