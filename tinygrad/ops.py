@@ -152,22 +152,22 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       buf_names[psrcs[0]] = "acc"
 
     # same thing with reduce ops
-    psrcs = [x for x in real_srcs.keys() if x.optype == ReduceOps and x.realized is None and len(x.children) <= 1]
+    psrcs = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and len(x.children) <= 1]
     if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
-      src = psrcs[0].op.src[0]
+      src = psrcs[0][1].op.src[0]
       if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
         for i,x in enumerate(get_lazybuffers(src.op)):
           real_srcs[x] = None
           buf_names[x] = f"earlyarg_{i}"
-        del real_srcs[psrcs[0]]
-        earlycode = _ast(LazyOp(psrcs[0].op.op, (src.op,), psrcs[0].op.arg), buf_names, psrcs[0].dbuffer.code_for_op)
-        buf_names[psrcs[0]] = "acc"
+        del real_srcs[psrcs[0][0]]
+        earlycode = _ast(LazyOp(psrcs[0][1].op.op, (src.op,), psrcs[0][1].op.arg), buf_names, psrcs[0][1].dbuffer.code_for_op)
+        buf_names[psrcs[0][0]] = "acc"
       else:
         real_srcs[src] = None
         buf_names[src] = "earlyarg_0"
-        del real_srcs[psrcs[0]]
-        buf_names[psrcs[0]] = "acc"
-        earlycode = psrcs[0].dbuffer.code_for_op[psrcs[0].op.op].replace("A", "earlyarg_0")
+        del real_srcs[psrcs[0][0]]
+        buf_names[psrcs[0][0]] = "acc"
+        earlycode = psrcs[0][1].dbuffer.code_for_op[psrcs[0][1].op.op].replace("A", "earlyarg_0")
     else:
       earlycode = "acc"
 
