@@ -102,6 +102,7 @@ jobs:
   testopencl:
     name: OpenCL Tests
     runs-on: ubuntu-20.04
+    if: ${{ false }}
 
     steps:
     - name: Checkout Code
