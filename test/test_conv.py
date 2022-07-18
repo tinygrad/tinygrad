@@ -87,6 +87,13 @@ class TestConv(unittest.TestCase):
     out = x.numpy()
     Tensor.no_grad = False
 
+  def test_reduce_relu(self):
+    Tensor.no_grad = True
+    x = Tensor.ones(1,12,128,256)
+    x = x.sum(keepdim=True).relu()
+    out = x.numpy()
+    Tensor.no_grad = False
+
   def test_bias(self):
     Tensor.no_grad = True
     from tinygrad.nn import Conv2d

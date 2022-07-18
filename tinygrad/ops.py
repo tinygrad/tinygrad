@@ -27,7 +27,7 @@ NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=1, OPT>=1, OPT>=1
-MERGE_ELEMENTWISE_OPS, MERGE_ONE_CONV_INTO_ELEMENTWISE = OPT>=2, OPT>=2
+MERGE_ELEMENTWISE_OPS, MERGE_ONE_CONV_INTO_ELEMENTWISE, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2, OPT>=2
 SHUFFLE_MOVEMENT_OPS = OPT>=3
 SHUFFLE_PAD_OPS = OPT>=4  # NOTE: 0/0 is NaN if you pad, so this can change the output
 
@@ -123,7 +123,7 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
 
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()], \
-      _ast(LazyOp(self.op.op, (src.op,), self.op.arg), buf_names, self.dbuffer.code_for_op), start=self.dbuffer.start_for_op[self.op.op]), \
+      earlycode=_ast(LazyOp(self.op.op, (src.op,), self.op.arg), buf_names, self.dbuffer.code_for_op), earlybufs=buf_names.values(), start=self.dbuffer.start_for_op[self.op.op]), \
       list(real_srcs.values()), ReduceOps
   else:
     real_src = src.realize(self.device)
@@ -135,6 +135,7 @@ def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuff
 
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:None for x in get_lazybuffers(self.op)}
+  #root_srcs : Dict[LazyBuffer, LazyBuffer] = {x:get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x for x in real_srcs.keys()}
   if getattr(self.dbuffer, "_processing_op", None) is not None:
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
 
@@ -150,11 +151,33 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       buf_names[psrcs[0].op.src[0]], buf_names[psrcs[0].op.src[1]] = "input", "weight"   # NOTE: these will not be in the ast
       buf_names[psrcs[0]] = "acc"
 
+    # same thing with reduce ops
+    psrcs = [x for x in real_srcs.keys() if x.optype == ReduceOps and x.realized is None and len(x.children) <= 1]
+    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+      src = psrcs[0].op.src[0]
+      if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
+        for i,x in enumerate(get_lazybuffers(src.op)):
+          real_srcs[x] = None
+          buf_names[x] = f"earlyarg_{i}"
+        del real_srcs[psrcs[0]]
+        earlycode = _ast(LazyOp(psrcs[0].op.op, (src.op,), psrcs[0].op.arg), buf_names, psrcs[0].dbuffer.code_for_op)
+        buf_names[psrcs[0]] = "acc"
+      else:
+        real_srcs[src] = None
+        buf_names[src] = "earlyarg_0"
+        del real_srcs[psrcs[0]]
+        buf_names[psrcs[0]] = "acc"
+        earlycode = psrcs[0].dbuffer.code_for_op[psrcs[0].op.op].replace("A", "earlyarg_0")
+    else:
+      earlycode = "acc"
+
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
     # fast path, no middle buffers
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()], \
-      _ast(self.op, buf_names, self.dbuffer.code_for_op), C=conv_args), \
-      list(real_srcs.values()), ProcessingOps if conv_args is not None else BinaryOps
+      _ast(self.op, buf_names, self.dbuffer.code_for_op),
+      earlycode=earlycode, earlybufs=set(x for x in buf_names.values() if x.startswith("earlyarg_")),
+      C=conv_args, input_shape=list(real_srcs.keys())[0].shape), \
+      list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if earlycode != "acc" else BinaryOps)
   else:
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
     # slow path, creates middle buffers
@@ -311,7 +334,7 @@ class LazyBuffer:
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
 
-  if (MERGE_UNARY_OPS and len(srcs) == 1) or MERGE_ELEMENTWISE_OPS:
+  if MERGE_ELEMENTWISE_OPS or (MERGE_UNARY_OPS and len(set(srcs)) == 1):
     # remove the buffers from any (childless) BinaryOps that feed into this
     srcs = tuple(x.op if x.optype == BinaryOps and len(x.children) == 0 and x.realized is None else x for x in srcs)  # type: ignore
 
