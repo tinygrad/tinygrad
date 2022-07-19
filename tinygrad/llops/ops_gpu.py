@@ -116,10 +116,10 @@ class GPUBuffer:
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, start="0.0", reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
     assert C is None
-    reduce_shape = (bufs[0][1].shape, ret.shape) if reduce_shape is None else reduce_shape
 
     # this takes a ret index to an inp index, indexing 0 on the reduced strides
     # if it's not a reduce, this should be a NOOP
+    reduce_shape = (bufs[0][1].shape, ret.shape) if reduce_shape is None else reduce_shape
     view = View(reduce_shape[1], strides_for_shape(reduce_shape[0]))
     loop : List[Tuple[str, str]] = []
     if reduce_shape[1] != reduce_shape[0]:   # this is a reduce
