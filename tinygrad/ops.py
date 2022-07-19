@@ -2,7 +2,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 from copy import copy
-import os, sys, functools, operator, weakref
+import os, sys, functools, itertools, operator, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
 
@@ -54,12 +54,8 @@ if GRAPH:
     if int(os.getenv("PRUNEGRAPH", 0)):
       dead_nodes = []
       for n in G.nodes:
-        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80"]:
-          for x,_ in G.in_edges(n):
-            for _,y in G.out_edges(n):
-              G.add_edge(x, y)
-          dead_nodes.append(n)
-        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#FFFF8080", "#FFFF80"]:
+        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80", "#FFFF8080", "#FFFF80"]:
+          for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n)): G.add_edge(x, y)
           dead_nodes.append(n)
       for n in dead_nodes: G.remove_node(n)
     print("saving", G)
@@ -317,7 +313,6 @@ class LazyBuffer:
       # TODO: these can be properties on the device buffer
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       x,w,Cn = preprocessing_op(x, w, C)
-      w.realize().image
       ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn))
       return postprocessing_op(ret, Cn, C)
     else:
