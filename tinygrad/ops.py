@@ -161,18 +161,17 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
         for i,x in enumerate(get_lazybuffers(src.op)):
           real_srcs[x] = None
           buf_names[x] = f"earlyarg_{i}"
-        del real_srcs[rsrcs[0][0]]
-        reduce_shape = (src.shape, rsrcs[0][1].shape)
-        earlycode = _ast(LazyOp(rsrcs[0][1].op.op, (src.op,), rsrcs[0][1].op.arg), buf_names, self.dbuffer.code_for_op)
-        buf_names[rsrcs[0][0]] = "acc"
+        rsrc = src.op
       else:
         real_srcs[src] = None
         buf_names[src] = "earlyarg_0"
-        del real_srcs[rsrcs[0][0]]
-        reduce_shape = (src.shape, rsrcs[0][1].shape)
-        earlycode = self.dbuffer.code_for_op[rsrcs[0][1].op.op].replace("A", "earlyarg_0")
-        buf_names[rsrcs[0][0]] = "acc"
+        rsrc = src
+      del real_srcs[rsrcs[0][0]]
+      reduce_shape = (src.shape, rsrcs[0][1].shape)
+      earlycode = _ast(LazyOp(rsrcs[0][1].op.op, (rsrc,), rsrcs[0][1].op.arg), buf_names, self.dbuffer.code_for_op)
+      buf_names[rsrcs[0][0]] = "acc"
     else:
+      # no reduce here
       earlycode = "acc"
 
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
