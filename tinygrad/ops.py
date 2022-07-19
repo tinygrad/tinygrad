@@ -27,7 +27,7 @@ NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=1, OPT>=1, OPT>=1
-MERGE_ELEMENTWISE_OPS, MERGE_ONE_CONV_INTO_ELEMENTWISE, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2, OPT>=2
+MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
 SHUFFLE_MOVEMENT_OPS = OPT>=3
 SHUFFLE_PAD_OPS = OPT>=4  # NOTE: 0/0 is NaN if you pad, so this can change the output
 
@@ -150,23 +150,21 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
     # NOTE: we can do the same get_movementroot_contiguous trick here
     psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
-    if len(psrcs) == 1 and psrcs[0][1].optype == ProcessingOps and MERGE_ONE_CONV_INTO_ELEMENTWISE:
-      # TODO: do something similar to what i did with reduceop to use the ast engine?
-      conv_args = psrcs[0][1].op.arg
-      real_srcs[psrcs[0][1].op.src[0]], real_srcs[psrcs[0][1].op.src[1]] = None, None
-      buf_names[psrcs[0][1].op.src[0]], buf_names[psrcs[0][1].op.src[1]] = "input", "weight"   # NOTE: these will not be in the ast
+    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+      if psrcs[0][1].optype == ProcessingOps:
+        # TODO: do something similar to what i did with reduceop to use the ast engine?
+        conv_args = psrcs[0][1].op.arg
+        real_srcs[psrcs[0][1].op.src[0]], real_srcs[psrcs[0][1].op.src[1]] = None, None
+        buf_names[psrcs[0][1].op.src[0]], buf_names[psrcs[0][1].op.src[1]] = "input", "weight"   # NOTE: these will not be in the ast
+      elif psrcs[0][1].optype == ReduceOps:
+        src = psrcs[0][1].op.src[0]
+        reduce_shape = (src.shape, psrcs[0][1].shape)
 
-      del real_srcs[psrcs[0][0]]
-      buf_names[psrcs[0][0]] = "acc"
-    elif len(psrcs) == 1 and psrcs[0][1].optype == ReduceOps and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
-      src = psrcs[0][1].op.src[0]
-      reduce_shape = (src.shape, psrcs[0][1].shape)
-
-      if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1: src = src.op
-      for i,x in enumerate(get_lazybuffers(src) if isinstance(src, LazyOp) else [src]):
-        real_srcs[x] = None
-        buf_names[x] = f"earlyarg_{i}"
-      earlycode = _ast(LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg), buf_names, self.dbuffer.code_for_op)
+        if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1: src = src.op
+        for i,x in enumerate(get_lazybuffers(src) if isinstance(src, LazyOp) else [src]):
+          real_srcs[x] = None
+          buf_names[x] = f"earlyarg_{i}"
+        earlycode = _ast(LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg), buf_names, self.dbuffer.code_for_op)
 
       del real_srcs[psrcs[0][0]]
       buf_names[psrcs[0][0]] = "acc"
@@ -272,11 +270,9 @@ class LazyBuffer:
     if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(x.shape)): return x
 
     # two ops in a row is one op
-    if op == MovementOps.RESHAPE and x.realized is None and x.op.op == MovementOps.RESHAPE: return x.op.src[0].movement_op(op, arg)
-    if op == MovementOps.EXPAND and x.realized is None and x.op.op == MovementOps.EXPAND: return x.op.src[0].movement_op(op, arg)
-    if op == MovementOps.PERMUTE and x.realized is None and x.op.op == MovementOps.PERMUTE: return x.op.src[0].movement_op(op, tuple(x.op.arg[i] for i in arg))
-    if op == MovementOps.SHRINK and x.realized is None and x.op.op == MovementOps.SHRINK: return x.op.src[0].movement_op(op, arg)
-    if op == MovementOps.PAD and x.realized is None and x.op.op == MovementOps.PAD: return x.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(x.op.arg, arg)))
+    if op in [MovementOps.RESHAPE, MovementOps.EXPAND, MovementOps.SHRINK] and x.realized is None and x.op.op == op: return x.op.src[0].movement_op(op, arg)
+    if op == MovementOps.PERMUTE and x.realized is None and x.op.op == op: return x.op.src[0].movement_op(op, tuple(x.op.arg[i] for i in arg))
+    if op == MovementOps.PAD and x.realized is None and x.op.op == op: return x.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(x.op.arg, arg)))
 
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and ShapeTracker(x.shape).movement_op(op, arg).contiguous: return x.movement_op(MovementOps.RESHAPE, tuple(x.shape[i] for i in arg))
