@@ -238,7 +238,12 @@ def compile(input, output_fn):
       "args_size": args_size 
     })
   
-  jdat['outputs'] = [{"buffer_id": tinygrad_out.lazydata.realized.cl.global_id}]
+  jdat['outputs'] = [{
+    "buffer_id": tinygrad_out.lazydata.realized.cl.global_id,
+    "size": tinygrad_out.lazydata.realized.cl.size,
+  }]
+  print(jdat['outputs'])
+
   jdat['inputs'] = [{
     "buffer_id": v.lazydata.realized.cl.global_id,
     "size": v.lazydata.realized.cl.size,
