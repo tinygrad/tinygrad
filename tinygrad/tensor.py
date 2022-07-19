@@ -189,23 +189,16 @@ class Tensor:
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
-  def _canonicalize_reduce_axis(self, axis):
+  def _reduce(self, fxn, axis=None, keepdim=False):
     if axis is None: axis = range(len(self.shape))
     if isinstance(axis, int): axis = [axis]
     axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
-    shape = [1] if shape == [] else shape
-    return axis, shape
+    ret = fxn(axis=axis)
+    return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
 
-  def sum(self, axis=None, keepdim=False):
-    axis, out_shape = self._canonicalize_reduce_axis(axis)
-    ret = self._sum(axis=axis)
-    return ret if keepdim else ret.reshape(shape=out_shape)
-
-  def max(self, axis=None, keepdim=False):
-    axis, out_shape = self._canonicalize_reduce_axis(axis)
-    ret = self._max(axis=axis)
-    return ret if keepdim else ret.reshape(shape=out_shape)
+  def sum(self, axis=None, keepdim=False): return self._reduce(self._sum, axis, keepdim)
+  def max(self, axis=None, keepdim=False): return self._reduce(self._max, axis, keepdim)
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)

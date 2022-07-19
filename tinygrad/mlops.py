@@ -90,6 +90,7 @@ class Mul(Function):
     return grad_x, grad_y
 
 # TODO: add Div? is the optimizer on Pow good enough?
+# nope, we def need div, can't optimize that
 
 class Pow(Function):
   def forward(ctx, x, y):

@@ -134,6 +134,8 @@ class TestOps(unittest.TestCase):
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
 
+  def test_broadcast_simple(self):
+    helper_test_op([(45,65), (45,1)], lambda x,y: x/y, lambda x,y: x/y)
 
   def test_broadcast_partial(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),

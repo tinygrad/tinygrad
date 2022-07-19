@@ -2,7 +2,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 from copy import copy
-import os, sys, functools, operator, weakref
+import os, sys, functools, itertools, operator, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
 
@@ -27,7 +27,7 @@ NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=1, OPT>=1, OPT>=1
-MERGE_ELEMENTWISE_OPS, MERGE_ONE_CONV_INTO_ELEMENTWISE = OPT>=2, OPT>=2
+MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
 SHUFFLE_MOVEMENT_OPS = OPT>=3
 SHUFFLE_PAD_OPS = OPT>=4  # NOTE: 0/0 is NaN if you pad, so this can change the output
 
@@ -54,12 +54,9 @@ if GRAPH:
     if int(os.getenv("PRUNEGRAPH", 0)):
       dead_nodes = []
       for n in G.nodes:
-        if G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80"]:
-          for x,_ in G.in_edges(n):
-            for _,y in G.out_edges(n):
-              G.add_edge(x, y)
-          dead_nodes.append(n)
-        if G.nodes[n]['fillcolor'] in ["#FFFF8080", "#FFFF80"]:
+        # prune movementops and loadops
+        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80", "#FFFF8080", "#FFFF80"]:
+          for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n)): G.add_edge(x, y)
           dead_nodes.append(n)
       for n in dead_nodes: G.remove_node(n)
     print("saving", G)
@@ -81,7 +78,6 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       return f"<<< {x.global_num} >>>"
 
     top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
-
     dashed = (optype == LoadOps and getattr(ret, "_backing", None) is not None) or (getattr(ret, "st", None) is not None and not ret.st.contiguous)
 
     for x in inp:
@@ -92,7 +88,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
-    if optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(inp[0].shape)+"\n"+str(ret.shape)
+    if optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
     else: G.nodes[nm(ret)]['label'] = str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
@@ -114,6 +110,11 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   assert self.op.op == LoadOps.FROMCPU
   return Device._buffers[self.device].fromCPU(self.op.arg), [], LoadOps
 
+def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
+  real_src = self.op.src[0].realize(self.device)
+  return real_src.movement_op(self.op.op, self.op.arg), [real_src], MovementOps
+
+# TODO: unify _realize_reduceops, _realize_processingops, and _realize_binaryops
 def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
@@ -123,38 +124,53 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
 
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()], \
-      _ast(LazyOp(self.op.op, (src.op,), self.op.arg), buf_names, self.dbuffer.code_for_op), start=self.dbuffer.start_for_op[self.op.op]), \
+      earlycode=_ast(LazyOp(self.op.op, (src.op,), self.op.arg), buf_names, self.dbuffer.code_for_op), earlybufs=buf_names.values(), start=self.dbuffer.start_for_op[self.op.op]), \
       list(real_srcs.values()), ReduceOps
   else:
     real_src = src.realize(self.device)
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
 
-def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  real_src = self.op.src[0].realize(self.device)
-  return real_src.movement_op(self.op.op, self.op.arg), [real_src], MovementOps
+def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
+  real_src_x, real_src_w = [x.realize(self.device) for x in self.op.src]
+  return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w], ProcessingOps
 
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:None for x in get_lazybuffers(self.op)}
   if getattr(self.dbuffer, "_processing_op", None) is not None:
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
-
-    # if there's *one* processing op in here, we can corealize it. we can corealize binary op sibilings as well
-    # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
+    reduce_shape = (list(real_srcs.keys())[0].shape, list(real_srcs.keys())[0].shape)
+    earlycode = "acc"
     conv_args : Optional[ConvArgs] = None
-    psrcs = [x for x in real_srcs.keys() if x.optype == ProcessingOps and x.realized is None and len(x.children) <= 1]
-    if len(psrcs) == 1 and MERGE_ONE_CONV_INTO_ELEMENTWISE:
-      # TODO: do something similar to what i did with reduceop to use the ast engine?
-      conv_args = psrcs[0].op.arg
-      del real_srcs[psrcs[0]]
-      real_srcs[psrcs[0].op.src[0]], real_srcs[psrcs[0].op.src[1]] = None, None
-      buf_names[psrcs[0].op.src[0]], buf_names[psrcs[0].op.src[1]] = "input", "weight"   # NOTE: these will not be in the ast
-      buf_names[psrcs[0]] = "acc"
+
+    # if there's *one* processing or reduce op in here, we can corealize it. we can corealize binary op sibilings as well
+    # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
+    psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
+    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+      if psrcs[0][1].optype == ProcessingOps:
+        # TODO: do something similar to what i did with reduceop to use the ast engine?
+        # it's hard because conv also has convargs
+        conv_args = psrcs[0][1].op.arg
+        real_srcs[psrcs[0][1].op.src[0]], real_srcs[psrcs[0][1].op.src[1]] = None, None
+        buf_names[psrcs[0][1].op.src[0]], buf_names[psrcs[0][1].op.src[1]] = "input", "weight"   # NOTE: these will not be in the ast
+      elif psrcs[0][1].optype == ReduceOps:
+        src = psrcs[0][1].op.src[0]
+        reduce_shape = (src.shape, psrcs[0][1].shape)
+
+        if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1: src = src.op
+        for i,x in enumerate(get_lazybuffers(src) if isinstance(src, LazyOp) else [src]):
+          real_srcs[x] = None
+          buf_names[x] = f"earlyarg_{i}"
+        earlycode = _ast(LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg), buf_names, self.dbuffer.code_for_op)
+
+      del real_srcs[psrcs[0][0]]
+      buf_names[psrcs[0][0]] = "acc"
 
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
     # fast path, no middle buffers
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()], \
-      _ast(self.op, buf_names, self.dbuffer.code_for_op), C=conv_args), \
-      list(real_srcs.values()), ProcessingOps if conv_args is not None else BinaryOps
+      _ast(self.op, buf_names, self.dbuffer.code_for_op), earlycode=earlycode, earlybufs=set(x for x in buf_names.values() if x.startswith("earlyarg_")),
+      C=conv_args, reduce_shape=reduce_shape), \
+      list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if reduce_shape[0] != reduce_shape[1] else BinaryOps)
   else:
     for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
     # slow path, creates middle buffers
@@ -163,10 +179,6 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       if isinstance(x.op, UnaryOps): return ast_eval(x.src[0]).unary_op(x.op)
       if isinstance(x.op, BinaryOps): return ast_eval(x.src[0]).binary_op(x.op, ast_eval(x.src[1]))
     return ast_eval(self.op), list(real_srcs.values()), BinaryOps
-
-def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  real_src_x, real_src_w = [x.realize(self.device) for x in self.op.src]
-  return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w], ProcessingOps
 
 _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:_realize_movementops, BinaryOps:_realize_binaryops, ProcessingOps:_realize_processingops}
 
@@ -182,6 +194,7 @@ def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(oper
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
 def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.optype == MovementOps and root.realized is None else root
+def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
 
 LAZY = int(os.getenv("LAZY", "1"))
 
@@ -253,16 +266,14 @@ class LazyBuffer:
     if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(x.shape)): return x
 
     # two ops in a row is one op
-    if op == MovementOps.RESHAPE and x.realized is None and x.op.op == MovementOps.RESHAPE: return x.op.src[0].movement_op(op, arg)
-    if op == MovementOps.EXPAND and x.realized is None and x.op.op == MovementOps.EXPAND: return x.op.src[0].movement_op(op, arg)
-    if op == MovementOps.PERMUTE and x.realized is None and x.op.op == MovementOps.PERMUTE: return x.op.src[0].movement_op(op, tuple(x.op.arg[i] for i in arg))
-    if op == MovementOps.SHRINK and x.realized is None and x.op.op == MovementOps.SHRINK: return x.op.src[0].movement_op(op, arg)
-    if op == MovementOps.PAD and x.realized is None and x.op.op == MovementOps.PAD: return x.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(x.op.arg, arg)))
+    if op in [MovementOps.RESHAPE, MovementOps.EXPAND, MovementOps.SHRINK] and x.realized is None and x.op.op == op: return x.op.src[0].movement_op(op, arg)
+    if op == MovementOps.PERMUTE and x.realized is None and x.op.op == op: return x.op.src[0].movement_op(op, tuple(x.op.arg[i] for i in arg))
+    if op == MovementOps.PAD and x.realized is None and x.op.op == op: return x.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(x.op.arg, arg)))
 
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and ShapeTracker(x.shape).movement_op(op, arg).contiguous: return x.movement_op(MovementOps.RESHAPE, tuple(x.shape[i] for i in arg))
 
-    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and x.realized is None and len(x.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op != MovementOps.STRIDED:
+    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and x.realized is None and len(x.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
@@ -302,7 +313,6 @@ class LazyBuffer:
       # TODO: these can be properties on the device buffer
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       x,w,Cn = preprocessing_op(x, w, C)
-      w.realize().image
       ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn))
       return postprocessing_op(ret, Cn, C)
     else:
@@ -311,7 +321,7 @@ class LazyBuffer:
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
 
-  if (MERGE_UNARY_OPS and len(srcs) == 1) or MERGE_ELEMENTWISE_OPS:
+  if MERGE_ELEMENTWISE_OPS or (MERGE_UNARY_OPS and len(set(srcs)) == 1):
     # remove the buffers from any (childless) BinaryOps that feed into this
     srcs = tuple(x.op if x.optype == BinaryOps and len(x.children) == 0 and x.realized is None else x for x in srcs)  # type: ignore
 
