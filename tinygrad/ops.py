@@ -245,8 +245,16 @@ class LazyBuffer:
   def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, x, y)
   def contiguous_op(x:LazyBuffer) -> LazyBuffer: return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
+  # TODO: permute to put all the reduce axis at the end
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape))) if x.shape != tuple(new_shape) else x
+    if x.shape == tuple(new_shape): return x
+    if getattr(x.dbuffer, "REQUIRES_SIMPLE_REDUCE", False) and (len(new_shape) != 2 or new_shape[1] != 1):
+      num, red = prod([s for s,n in zip(x.shape, new_shape) if n != 1]), prod([s for s,n in zip(x.shape, new_shape) if n == 1])
+      x = x.movement_op(MovementOps.PERMUTE, [i for i,n in enumerate(new_shape) if n != 1] + [i for i,n in enumerate(new_shape) if n == 1])
+      x = x.movement_op(MovementOps.RESHAPE, (num, red))
+      return x.reduce_op(op, (num, 1)).movement_op(MovementOps.RESHAPE, new_shape)
+    else:
+      return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
 
   # syntactic sugar around PAD and SHRINK
   # TODO: turn RESHAPE into EXPAND and CONTRACT (current EXPAND should be REPEAT)

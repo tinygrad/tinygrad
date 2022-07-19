@@ -23,10 +23,8 @@ class Tensor:
     if isinstance(data, np.ndarray):
       if data.shape == tuple(): data = data.reshape((1,))
       self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
-    elif isinstance(data, LazyBuffer):
-      self.lazydata = data
-    else:
-      raise Exception(f"can't create Tensor from {data}")
+    elif isinstance(data, LazyBuffer): self.lazydata = data
+    else: raise Exception(f"can't create Tensor from {data}")
 
     # tensors have gradients, buffers do not
     self.grad : Optional[Tensor] = None
@@ -55,8 +53,7 @@ class Tensor:
     return self
 
   def assign(self, x):
-    if not isinstance(x, Tensor):
-      x = Tensor(x)
+    if not isinstance(x, Tensor): x = Tensor(x)
     assert self.shape == x.shape
     self.lazydata = x.lazydata
     return x
@@ -127,8 +124,7 @@ class Tensor:
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
-          assert g.shape == t.shape, \
-            f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
+          assert g.shape == t.shape, f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
 
   # ***** non first class ops (hlops) *****
