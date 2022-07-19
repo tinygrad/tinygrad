@@ -42,7 +42,7 @@ class CPUBuffer(np.ndarray):
     elif op == MovementOps.PERMUTE: return x.permute(arg)
     elif op == MovementOps.FLIP: return x.flip(arg)
     elif op == MovementOps.PAD: return x.custompad(arg)
-    elif op == MovementOps.SHRINK: return x[tuple(slice(p[0], p[1], None) for i,p in enumerate(arg))]
+    elif op == MovementOps.SHRINK: return x[tuple(slice(p[0], p[1], None) for p in arg)]
     elif op == MovementOps.EXPAND: return x.expand(arg)
     elif op == MovementOps.STRIDED: return x.contiguous().as_strided([x[0] for x in arg], [x[1] for x in arg])
 

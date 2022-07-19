@@ -33,7 +33,7 @@ class BatchNorm2D:
 
       return batch_normalize(x, self.weight, self.bias, batch_mean, batch_var, self.eps)
 
-    return batch_normalize(x, self.weight, self.bias, self.running_mean, self.running_var,self.eps)
+    return batch_normalize(x, self.weight, self.bias, self.running_mean, self.running_var, self.eps)
 
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):
