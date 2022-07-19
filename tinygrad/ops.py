@@ -54,12 +54,12 @@ if GRAPH:
     if int(os.getenv("PRUNEGRAPH", 0)):
       dead_nodes = []
       for n in G.nodes:
-        if G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80"]:
+        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80"]:
           for x,_ in G.in_edges(n):
             for _,y in G.out_edges(n):
               G.add_edge(x, y)
           dead_nodes.append(n)
-        if G.nodes[n]['fillcolor'] in ["#FFFF8080", "#FFFF80"]:
+        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#FFFF8080", "#FFFF80"]:
           dead_nodes.append(n)
       for n in dead_nodes: G.remove_node(n)
     print("saving", G)
