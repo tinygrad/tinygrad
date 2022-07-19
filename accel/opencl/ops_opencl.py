@@ -123,8 +123,8 @@ class OpenCLBuffer(GPUBuffer):
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
   seen = set()
-  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, start="0.0", input_shape=None, latecode:str="acc"):
-    assert latecode == "acc"
+  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, start="0.0", input_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
+    assert earlycode == "acc"
     if C is None:
       # TODO: handle an opencl conv without the conv part
       return super()._processing_op(bufs, code, C, start)

@@ -143,7 +143,6 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     # if there's *one* processing op in here, we can corealize it. we can corealize binary op sibilings as well
     # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
     conv_args : Optional[ConvArgs] = None
-    """
     psrcs = [x for x in real_srcs.keys() if x.optype == ProcessingOps and x.realized is None and len(x.children) <= 1]
     if len(psrcs) == 1 and MERGE_ONE_CONV_INTO_ELEMENTWISE:
       # TODO: do something similar to what i did with reduceop to use the ast engine?
@@ -152,7 +151,6 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       real_srcs[psrcs[0].op.src[0]], real_srcs[psrcs[0].op.src[1]] = None, None
       buf_names[psrcs[0].op.src[0]], buf_names[psrcs[0].op.src[1]] = "input", "weight"   # NOTE: these will not be in the ast
       buf_names[psrcs[0]] = "acc"
-    """
 
     # same thing with reduce ops
     maybe_movementroot = lambda x: get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
