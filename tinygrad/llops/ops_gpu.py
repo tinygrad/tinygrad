@@ -114,19 +114,19 @@ class GPUBuffer:
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]):
     return type(x)(new_shape)._processing_op([("A", x)], code="acc", earlycode=GPUBuffer.code_for_op[op], earlybufs=set("A"), start=GPUBuffer.start_for_op[op])
 
-  def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, start="0.0", input_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
+  def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, start="0.0", reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
     assert C is None
-    input_shape = (bufs[0][1].shape, ret.shape) if input_shape is None else input_shape
+    reduce_shape = (bufs[0][1].shape, ret.shape) if reduce_shape is None else reduce_shape
 
     # this takes a ret index to an inp index, indexing 0 on the reduced strides
     # if it's not a reduce, this should be a NOOP
-    view = View(input_shape[1], strides_for_shape(input_shape[0]))
+    view = View(reduce_shape[1], strides_for_shape(reduce_shape[0]))
     loop : List[Tuple[str, str]] = []
-    if input_shape[1] != input_shape[0]:   # this is a reduce
+    if reduce_shape[1] != reduce_shape[0]:   # this is a reduce
       # reverse operation of expand, this validates inputs
       # generate loops with combined adjacent reduce axis
       acc = 1
-      for shp,stride in ShapeTracker(input_shape[1]).movement_op(MovementOps.EXPAND, input_shape[0]).views[-1].shape_strides[::-1]:
+      for shp,stride in ShapeTracker(reduce_shape[1]).movement_op(MovementOps.EXPAND, reduce_shape[0]).views[-1].shape_strides[::-1]:
         if stride == 0: loop.append((f"for (int axis_{len(loop)} = 0; axis_{len(loop)} < {shp}; axis_{len(loop)}++) {{", f"idx += {acc}; }} idx -= {shp*acc};"))
         acc *= shp
 
