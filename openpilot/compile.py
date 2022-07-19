@@ -212,11 +212,12 @@ def compile(input, output_fn):
               "id": ptr, "arg_type": "float*", "needs_load": False, "size": a.size,
             })
           elif isinstance(a, cl.Image):
-            #print(a.size, a.shape, a.row_pitch)
-            # TODO: modify thneed to respect no buffer_id here
+            # multiple of 32 isn't enough
+            row_pitch = (a.shape[0]*4*2 + 63)//64 * 64
+            size = row_pitch * a.shape[1]
             jdat['objects'].append({
-              "id": ptr, "needs_load": False, "size": a.size, "arg_type": "image2d_t",
-              "width": a.shape[0], "height": a.shape[1], "row_pitch": a.row_pitch,
+              "id": ptr, "needs_load": False, "size": size, "arg_type": "image2d_t",
+              "width": a.shape[0], "height": a.shape[1], "row_pitch": row_pitch,
             })
           else:
             raise Exception("unknown object", a)
