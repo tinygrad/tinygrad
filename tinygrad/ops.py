@@ -54,6 +54,7 @@ if GRAPH:
     if int(os.getenv("PRUNEGRAPH", 0)):
       dead_nodes = []
       for n in G.nodes:
+        # prune movementops and loadops
         if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80", "#FFFF8080", "#FFFF80"]:
           for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n)): G.add_edge(x, y)
           dead_nodes.append(n)
@@ -77,7 +78,6 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       return f"<<< {x.global_num} >>>"
 
     top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
-
     dashed = (optype == LoadOps and getattr(ret, "_backing", None) is not None) or (getattr(ret, "st", None) is not None and not ret.st.contiguous)
 
     for x in inp:
@@ -144,11 +144,11 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
 
     # if there's *one* processing or reduce op in here, we can corealize it. we can corealize binary op sibilings as well
     # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
-    # NOTE: we can do the same get_movementroot_contiguous trick here
     psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
     if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
       if psrcs[0][1].optype == ProcessingOps:
         # TODO: do something similar to what i did with reduceop to use the ast engine?
+        # it's hard because conv also has convargs
         conv_args = psrcs[0][1].op.arg
         real_srcs[psrcs[0][1].op.src[0]], real_srcs[psrcs[0][1].op.src[1]] = None, None
         buf_names[psrcs[0][1].op.src[0]], buf_names[psrcs[0][1].op.src[1]] = "input", "weight"   # NOTE: these will not be in the ast
