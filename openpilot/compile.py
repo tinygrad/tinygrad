@@ -239,13 +239,13 @@ def compile(input, output_fn):
     })
   
   jdat['outputs'] = [{
-    "buffer_id": tinygrad_out.lazydata.realized.cl.global_id,
+    "buffer_id": struct.pack("Q", tinygrad_out.lazydata.realized.cl.global_id).decode("latin_1"),
     "size": tinygrad_out.lazydata.realized.cl.size,
   }]
   print(jdat['outputs'])
 
   jdat['inputs'] = [{
-    "buffer_id": v.lazydata.realized.cl.global_id,
+    "buffer_id": struct.pack("Q", v.lazydata.realized.cl.global_id).decode("latin_1"),
     "size": v.lazydata.realized.cl.size,
     "name": k
   } for k,v in inputs.items()][::-1]
