@@ -291,7 +291,7 @@ class LazyBuffer:
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and ShapeTracker(x.shape).movement_op(op, arg).contiguous: return x.movement_op(MovementOps.RESHAPE, tuple(x.shape[i] for i in arg))
 
-    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and x.realized is None and len(x.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op != MovementOps.STRIDED:
+    if SHUFFLE_MOVEMENT_OPS and x.optype == BinaryOps and x.realized is None and len(x.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
