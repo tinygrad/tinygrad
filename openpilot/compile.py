@@ -232,6 +232,11 @@ def compile(input, output_fn):
             row_pitch = (a.shape[0]*4*2 + 63)//64 * 64
             size = row_pitch * a.shape[1]
             buf = CLBuffer(size)
+
+            # zero out the buffer
+            zeros = np.zeros(size, dtype=np.uint8)
+            CL.enqueue_copy(buf.cl, zeros, is_blocking=True)
+
             CLProgram("from_image_strided", """
               __kernel void from_image_strided(read_only image2d_t in, __global float4 *out, int row_pitch) {
                 const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
