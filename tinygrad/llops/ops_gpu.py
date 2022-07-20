@@ -3,7 +3,7 @@ import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
-from typing import List, Tuple, Optional, Dict, Union, Set
+from typing import List, Tuple, Optional, Dict, Union, Set, Tuple
 from tinygrad.helpers import prod, ConvArgs
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
@@ -44,10 +44,10 @@ class CL:
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   kernel_cnt = 0
-  def __init__(self, name:str, prg:str, options=tuple(), argdtypes=None):
+  def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None):
     self.name, self.prg, self.options, self.argdtypes = f"{name}_{CLProgram.kernel_cnt}", prg.replace(f"{name}(", f"{name}_{CLProgram.kernel_cnt}("), options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, self.prg)
-    self.clprg = self.clprogram.build(options=self.options).__getattr__(self.name)
+    self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
     if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
     CLProgram.kernel_cnt += 1
   def __call__(self, *args):
