@@ -97,15 +97,25 @@ class TestOnnxModel(unittest.TestCase):
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
+  def test_efficientnet(self):
+    dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx")
+    input_name, input_new = "images:0", True
+    self._test_model(dat, input_name, input_new)
+
+  @unittest.skip("maxpool not implemented w strides")
   def test_resnet(self):
     # NOTE: many onnx models can't be run right now due to max pool with strides != kernel_size
-    dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx")
+    dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx")
+    input_name, input_new = "data", False
+    self._test_model(dat, input_name, input_new)
+
+  def _test_model(self, dat, input_name, input_new):
     onnx_model = onnx.load(io.BytesIO(dat))
     from test.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
     run_onnx = get_run_onnx(onnx_model)
 
     def run(img):
-      inputs = {"images:0": preprocess(img, new=True)}
+      inputs = {input_name: preprocess(img, new=input_new)}
       tinygrad_out = list(run_onnx(inputs, False).values())[0].numpy()
       return tinygrad_out.argmax()
     
