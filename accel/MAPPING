@@ -18,9 +18,6 @@ On M1 GPU, theoretical is 2.275 TFLOPS. https://www.notebookcheck.net/Apple-M1-G
 We observe 2000ms for BS=8 (37 GFLOP). 37/2275 = 11.9 ms. tinygrad is over a factor of 100x off (similar on AMD GPU)
 
 
-Making matters worse, flop estimates may be off by a factor of 10.
-
-
 TPUs:
 
 

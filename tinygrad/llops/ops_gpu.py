@@ -50,14 +50,14 @@ class CLProgram:
     self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
     if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
     CLProgram.kernel_cnt += 1
-  def __call__(self, *args):
+  def __call__(self, *args, op_estimate=0):
     CL.kernel_count += 1
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2: CL.cl_queue.finish()
     if DEBUG >= 1:
-      CL.ops_sum += max([x.size//4 for x in args[2:]])*(len(args)-2)
-      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):14s} GOPs {CL.ops_sum/1e9:7.2f}  " + \
+      CL.ops_sum += op_estimate
+      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):14s} OPs {op_estimate/1e6:5.1f}M/{CL.ops_sum/1e9:7.2f}G  " + \
             ("" if DEBUG <= 1 or CL.CACHE is not None else f"runtime {(e.profile.end - e.profile.start)/1e3:9.2f} us"))
     if DEBUG >= 4: print(self.prg)
 
@@ -143,5 +143,5 @@ class GPUBuffer:
 {chr(10).join([f'      float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in bufs if name not in earlybufs])}
       output[gid] = {code};
     }}""", argdtypes=tuple(None if i < 1+len(buf_types) else np.int32 for i in range(1+len(buf_types))))
-    conv_prg([prod(ret.shape), 1, 1], None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]])
+    conv_prg([prod(ret.shape), 1, 1], None, ret.cl, *[buf.cl for name, buf in bufs if name not in views or views[name][1]], op_estimate=prod(reduce_shape[0])*len(earlybufs) + prod(reduce_shape[1])*len(bufs))
     return ret
