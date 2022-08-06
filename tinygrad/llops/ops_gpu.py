@@ -22,7 +22,7 @@ class CLBuffer:
     else: CL.mem_used -= self.cl.size
 
 class CL:
-  CACHE, kernel_count, mem_used = None, -1, 0
+  CACHE, kernel_count, mem_used, ops_sum = None, -1, 0, 0.0
   BUFFER_CACHE : Dict[int, List[cl.Buffer]] = defaultdict(list)
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
@@ -56,7 +56,8 @@ class CLProgram:
     else: e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2: CL.cl_queue.finish()
     if DEBUG >= 1:
-      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):20s}" + \
+      CL.ops_sum += max([x.size//4 for x in args[2:]])*(len(args)-2)
+      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  size {prod(args[0]):8d}  kernels {str(args[0]):20s} {str(args[1]):14s} GOPs {CL.ops_sum/1e9:7.2f}  " + \
             ("" if DEBUG <= 1 or CL.CACHE is not None else f"runtime {(e.profile.end - e.profile.start)/1e3:9.2f} us"))
     if DEBUG >= 4: print(self.prg)
 

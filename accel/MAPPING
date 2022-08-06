@@ -1,0 +1,31 @@
+We have to figure out how to make the tinygrad ops match to hw.
+Generic folded reduce may not work.
+
+
+GPUs:
+
+RDNA2: https://developer.amd.com/wp-content/resources/RDNA2_Shader_ISA_November2020.pdf
+
+We have RX6900XT with 80 CU, 40 WGP, and 20 "processors"
+@ 1.825 GHz, there's 18,688 FP32 GFLOPS of compute. 10240 FLOPS/cycle, 128 per CU
+
+286 GFLOP for ENET=2 BS=64. At theoretical max, (286/18688)*1000 = 15.3 ms.
+We observe about 10x factor off with pytorch.
+
+
+On M1 GPU, theoretical is 2.275 TFLOPS. https://www.notebookcheck.net/Apple-M1-GPU-Benchmarks-and-Specs.503610.0.html
+
+We observe 2000ms for BS=8 (37 GFLOP). 37/2275 = 11.9 ms. tinygrad is over a factor of 100x off (similar on AMD GPU)
+
+
+Making matters worse, flop estimates may be off by a factor of 10.
+
+
+TPUs:
+
+
+
+
+
+
+

@@ -28,7 +28,6 @@ class BatchNorm2D:
       if self.track_running_stats:
         self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
         self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
-        if self.num_batches_tracked is None: self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
         self.num_batches_tracked += 1
 
       return batch_normalize(x, self.weight, self.bias, batch_mean, batch_var, self.eps)
