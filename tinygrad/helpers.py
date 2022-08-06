@@ -36,6 +36,6 @@ def get_available_llops():
     name = op[len("ops_"):].upper()
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
     try: _buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module('tinygrad.llops.'+op), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
-    except ImportError as e:
+    except ImportError as e:  # NOTE: this can't be put on one line due to mypy issue
       print(op, "not available", e)
   return _buffers, DEFAULT
