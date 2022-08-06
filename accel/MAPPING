@@ -18,6 +18,8 @@ We observe about 10x factor off with pytorch.
 We will focus on speed for AMD, since we have complete docs for that GPU.
 Each "processor" has an "ultra threaded dispatch processor"
 
+Each SIMD unit has 256 vector registers (or 1024?), and operates on 32 at once.
+Ahh, I think there's 1024 total, but only 256 per wavefront
 
 
 M1:

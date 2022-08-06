@@ -194,7 +194,7 @@ int ANE_CompilePlist(char *path, bool debug=false) {
   return ANECCompile(optionsDictionary, flagsDictionary, 0);
 }
 
-void _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(
+/*void _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(
   unsigned long param_1, void *param_2,int param_3, std::basic_ostream<char> *param_4);
 char *ANE_RegDebug(int a1, void *dat, int a2) {
   std::ostringstream ss;
@@ -204,7 +204,7 @@ char *ANE_RegDebug(int a1, void *dat, int a2) {
   char *ret = (char *)malloc(strlen(str)+1);
   strcpy(ret, str);
   return ret;
-}
+}*/
 
 }
 
