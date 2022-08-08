@@ -64,3 +64,16 @@ smol :: ~/fun/tinygrad » sha1sum /usr/libexec/amfid
 
 This disables the entitlement check, then you don't need a bootarg. I wish Apple made a better way to do this.
 
+## Extracting ANEServices.framework
+
+```
+brew install keith/formulae/dyld-shared-cache-extractor
+# TODO: finish this
+```
+
+## Other work
+
+```
+# sadly also relies on ZinIrRegBitPrintOutDebug
+https://github.com/antgroup-arclab/ANETools.git
+```

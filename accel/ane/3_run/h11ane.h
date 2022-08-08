@@ -54,11 +54,15 @@ namespace H11ANE {
       uint64_t unused;
   };
 
+  // we should switch to the IOKit kernel interface, it's likely a lot more stable
+  // https://googleprojectzero.blogspot.com/2020/11/oops-i-missed-it-again.html
+
   // H11ANEInDirectPathClient
   // _ANE_DeviceOpen
   // _ANE_DeviceClose
   // _ANE_ProgramSendRequest
 
+  // * if they need kernel debugger attached
   // H11ANEInUserClient
   // _ANE_DeviceOpen
   // _ANE_DeviceClose
@@ -71,30 +75,30 @@ namespace H11ANE {
   // _ANE_PowerOn
   // _ANE_PowerOff
   // _ANE_IsPowered
-  // _ANE_LoadFirmware
-  // _ANE_ForgetFirmware
-  // _ANE_SendCommand
+  // * _ANE_LoadFirmware
+  // * _ANE_ForgetFirmware
+  // * _ANE_SendCommand
   // _ANE_SetPowerManagement
   // _ANE_GetTime
-  // _ANE_SetDriverLoggingFlags
-  // _ANE_ShowSharedMemoryAllocations
-  // _ANE_SetDARTCacheTTL
-  // _ANE_SetFirmwareBootArg
-  // _ANE_SetThrottlingPercentage
-  // _ANE_AddPersistentClient
-  // _ANE_RemovePersistentClient
-  // _ANE_CreateClientLoggingSession
-  // _ANE_TerminateClientLoggingSession
+  // * _ANE_SetDriverLoggingFlags
+  // * _ANE_ShowSharedMemoryAllocations
+  // * _ANE_SetDARTCacheTTL
+  // * _ANE_SetFirmwareBootArg
+  // * _ANE_SetThrottlingPercentage
+  // * _ANE_AddPersistentClient
+  // * _ANE_RemovePersistentClient
+  // * _ANE_CreateClientLoggingSession
+  // * _ANE_TerminateClientLoggingSession
   // _ANE_GetDriverLoggingFlags
-  // _ANE_FlushInactiveDARTMappings
+  // * _ANE_FlushInactiveDARTMappings
   // _ANE_GetVersion
   // _ANE_RegisterFirmwareWorkProcessor
   // _ANE_UnregisterFirmwareWorkProcessor
-  // _ANE_GetFirmwareWorkProcessorItem
+  // * _ANE_GetFirmwareWorkProcessorItem
   // _ANE_CompleteFirmwareWorkProcessorItem
   // _ANE_ReleaseFirmwareWorkProcessorBuffers
-  // _ANE_ReadANERegister
-  // _ANE_WriteANERegister
+  // * _ANE_ReadANERegister
+  // * _ANE_WriteANERegister
   // _ANE_ProgramCreateInstance
 
   // note, this is not the raw IOKit class, it's in ANEServices.framework
