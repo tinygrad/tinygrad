@@ -97,6 +97,8 @@ If all you want to do is ReLU, you are in luck! You can do very fast ReLU (at le
 
 Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement, which also requires `amfi_get_out_of_my_way=0x1` in your `boot-args`. Build the library with `ane/lib/build.sh`
 
+In order to set arg and for the AMFI kext to respect that arg, csrutil must have `csrutil enable --without-kext --without-nvram` in recovery mode.
+
 ```python
 from tinygrad.tensor import Tensor
 
