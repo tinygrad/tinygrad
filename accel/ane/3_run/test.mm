@@ -54,6 +54,11 @@ int main() {
   ret = dev->ANE_IsPowered();
   printf("powered? %d\n", ret);
 
+  if (ret == 0) {
+    printf("POWER ON FAILED\n");
+    return -1;
+  }
+
   char *prog = (char*)aligned_alloc(0x1000, 0x8000);
   FILE *f = fopen("../2_compile/model.hwx", "rb");
   int sz = fread(prog, 1, 0x8000, f);

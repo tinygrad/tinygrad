@@ -45,3 +45,22 @@ It can work with 8 base addresses for the DMA streams per OP
 
 This is a Mach-O file. We haven't figured out all the details, but the ops are at 0x4000. See `hwx_parse.py`
 
+## amfid
+
+Sadly disabling amfi breaks things like vscode. You can runtime patch
+
+```
+# MacOS 12.4
+
+smol :: ~/fun/tinygrad » sha1sum /usr/libexec/amfid 
+0f7e7f7e41408f83d7ebc7564a3828f41cb2ab58  /usr/libexec/amfid
+
+# with patching +0x8e38
+
+(lldb) image list
+[  0] 04B6DF6C-6068-3F18-81A7-978985574387 0x0000000102ad0000 /usr/libexec/amfid 
+(lldb) p *(unsigned int *)0x102ad8e38=0xd2800000
+```
+
+This disables the entitlement check, then you don't need a bootarg. I wish Apple made a better way to do this.
+

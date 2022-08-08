@@ -54,6 +54,50 @@ namespace H11ANE {
       uint64_t unused;
   };
 
+  // H11ANEInDirectPathClient
+  // _ANE_DeviceOpen
+  // _ANE_DeviceClose
+  // _ANE_ProgramSendRequest
+
+  // H11ANEInUserClient
+  // _ANE_DeviceOpen
+  // _ANE_DeviceClose
+  // _ANE_ProgramSendRequest
+  // _ANE_ProgramCreate
+  // _ANE_ProgramPrepare
+  // _ANE_ProgramUnprepare
+  // _ANE_ProgramDestroy
+  // _ANE_GetStatus
+  // _ANE_PowerOn
+  // _ANE_PowerOff
+  // _ANE_IsPowered
+  // _ANE_LoadFirmware
+  // _ANE_ForgetFirmware
+  // _ANE_SendCommand
+  // _ANE_SetPowerManagement
+  // _ANE_GetTime
+  // _ANE_SetDriverLoggingFlags
+  // _ANE_ShowSharedMemoryAllocations
+  // _ANE_SetDARTCacheTTL
+  // _ANE_SetFirmwareBootArg
+  // _ANE_SetThrottlingPercentage
+  // _ANE_AddPersistentClient
+  // _ANE_RemovePersistentClient
+  // _ANE_CreateClientLoggingSession
+  // _ANE_TerminateClientLoggingSession
+  // _ANE_GetDriverLoggingFlags
+  // _ANE_FlushInactiveDARTMappings
+  // _ANE_GetVersion
+  // _ANE_RegisterFirmwareWorkProcessor
+  // _ANE_UnregisterFirmwareWorkProcessor
+  // _ANE_GetFirmwareWorkProcessorItem
+  // _ANE_CompleteFirmwareWorkProcessorItem
+  // _ANE_ReleaseFirmwareWorkProcessorBuffers
+  // _ANE_ReadANERegister
+  // _ANE_WriteANERegister
+  // _ANE_ProgramCreateInstance
+
+  // note, this is not the raw IOKit class, it's in ANEServices.framework
   class H11ANEDevice {
     public:
       H11ANEDevice(H11ANE::H11ANEDeviceController *param_1, unsigned int param_2);
