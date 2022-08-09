@@ -55,6 +55,7 @@ namespace H11ANE {
   };
 
   // we should switch to the IOKit kernel interface, it's likely a lot more stable
+  // actually this probably isn't true. ANEServices is normal dynamic links
   // https://googleprojectzero.blogspot.com/2020/11/oops-i-missed-it-again.html
 
   // H11ANEInDirectPathClient
