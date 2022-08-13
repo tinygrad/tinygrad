@@ -74,6 +74,7 @@ brew install keith/formulae/dyld-shared-cache-extractor
 dyld-shared-cache-extractor /System/Library/dyld/dyld_shared_cache_arm64e /tmp/libraries
 cp /tmp/libraries/System/Library/PrivateFrameworks/ANECompiler.framework/Versions/A/ANECompiler .
 cp /tmp/libraries/System/Library/PrivateFrameworks/ANEServices.framework/Versions/A/ANEServices .
+cp /tmp/libraries/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/Versions/A/AppleNeuralEngine .
 ```
 
 ## Other work
@@ -81,4 +82,17 @@ cp /tmp/libraries/System/Library/PrivateFrameworks/ANEServices.framework/Version
 ```
 # sadly also relies on ZinIrRegBitPrintOutDebug
 https://github.com/antgroup-arclab/ANETools.git
+
+# sadly looks like we do actually need a direct connection to run hwx files, aned is at the espresso level
+* frame #0: 0x00000001c250fecc AppleNeuralEngine`-[_ANEDaemonConnection loadModel:sandboxExtension:options:qos:withReply:]
+(lldb) po $x2
+_ANEModel: { modelURL=file:///var/folders/l8/38vj8bm52_gfgsqgdn__sh2w0000gn/T/test_F48D9B88-A68D-476F-ADC8-32BDAF9A2498.mlmodelc/ : key={"isegment":0,"inputs":{"image":{"shape":[1,1,1,64,1]},"image2":{"shape":[1,1,1,64,1]}},"outputs":{"probs":{"shape":[1,1,1,64,1]}}} : string_id=0x00000000 : program=(null) : state=1 : programHandle=0 : intermediateBufferHandle=0 : queueDepth=0 : attr={
+} : perfStatsMask=0} 
 ```
+
+## Choices
+
+* Disable amfid (breaks vscode)
+* Patch amfid to allow restricted entitlements
+* Sign with a "provisioning profile" to allow the entitlement
+* Patch the ANE kext to not require a special entitlement (this is ideal, as we don't need to resign python)

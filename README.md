@@ -95,9 +95,9 @@ from tinygrad.tensor import Tensor
 
 If all you want to do is ReLU, you are in luck! You can do very fast ReLU (at least 30 MEGAReLUs/sec confirmed)
 
-Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement, which also requires `amfi_get_out_of_my_way=0x1` in your `boot-args`. Build the library with `ane/lib/build.sh`
+Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement, which also requires `sudo nvram boot-args="amfi_get_out_of_my_way=1 ipc_control_port_options=0"`. Build the library with `ane/lib/build.sh`
 
-In order to set arg and for the AMFI kext to respect that arg, csrutil must have `csrutil enable --without-kext --without-nvram` in recovery mode.
+In order to set boot-args and for the AMFI kext to respect that arg, run `csrutil enable --without-kext --without-nvram` in recovery mode.
 
 ```python
 from tinygrad.tensor import Tensor
