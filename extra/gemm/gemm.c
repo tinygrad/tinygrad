@@ -44,6 +44,7 @@ uint64_t nanos() {
 float Bf[N*N] __attribute__ ((aligned (64)));
 __m256 *Bfm = (__m256*)Bf;
 
+#define STRIDE 8
 #define BLOCK 8
 #define BLOCK_Y 4
 #define BLOCK_X 2
@@ -55,22 +56,27 @@ void matmul(int sy, int ey) {
   // multicore theo max = 2508.8 GFLOPS, we see 1501.434299
 
   // Bf = (y/8, k, 8)
-  for (int y = sy; y < ey; y+=BLOCK_Y) {
-    for (int x = 0; x < N; x+=BLOCK*BLOCK_X) {
+  for (int y = sy; y < ey; y+=STRIDE*BLOCK_Y) {
+    for (int x = 0; x < N; x+=STRIDE*BLOCK*BLOCK_X) {
 
-      __m256 acc[BLOCK_Y][BLOCK_X] = {};
-      for (int k = 0; k < N; k++) {
-        for (int iy = 0; iy < BLOCK_Y; iy++) {
-          __m256 ta = _mm256_broadcast_ss(&A[(y+iy)*N + k]);
-          for (int ix = 0; ix < BLOCK_X; ix++) {
-            acc[iy][ix] = _mm256_fmadd_ps(ta, Bfm[((x+ix*BLOCK)*N + k*8)/8], acc[iy][ix]);
+      for (int y2 = 0; y2 < STRIDE*BLOCK_Y; y2+=BLOCK_Y) {
+        for (int x2 = 0; x2 < STRIDE*BLOCK*BLOCK_X; x2+=BLOCK*BLOCK_X) {
+
+          __m256 acc[BLOCK_Y][BLOCK_X] = {};
+          for (int k = 0; k < N; k++) {
+            for (int iy = 0; iy < BLOCK_Y; iy++) {
+              __m256 ta = _mm256_broadcast_ss(&A[(y+y2+iy)*N + k]);
+              for (int ix = 0; ix < BLOCK_X; ix++) {
+                acc[iy][ix] = _mm256_fmadd_ps(ta, Bfm[((x+x2+ix*BLOCK)*N + k*8)/8], acc[iy][ix]);
+              }
+            }
           }
-        }
-      }
 
-      for (int iy = 0; iy < BLOCK_Y; iy++) {
-        for (int ix = 0; ix < BLOCK_X; ix++) {
-          Cm[((y+iy)*N + x + ix * BLOCK)/8] = acc[iy][ix];
+          for (int iy = 0; iy < BLOCK_Y; iy++) {
+            for (int ix = 0; ix < BLOCK_X; ix++) {
+              Cm[((y+y2+iy)*N + x + x2 + ix * BLOCK)/8] = acc[iy][ix];
+            }
+          }
         }
       }
     }
