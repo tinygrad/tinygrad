@@ -5,8 +5,13 @@ enum ANEDeviceUsageType {
 };
 
 struct H11ANEDeviceInfoStruct {
-  uint64_t nothing;
   uint64_t program_handle;
+  uint64_t program_auth_code;
+  uint64_t sleep_timer;
+  uint64_t junk[0x100];
+};
+
+struct H11ANEStatusStruct {
   uint64_t junk[0x100];
 };
 
@@ -112,6 +117,8 @@ namespace H11ANE {
         void *param_2, ANEDeviceUsageType param_3, H11ANEDeviceInfoStruct *param_4);
 
       void EnableDeviceMessages();
+      int ANE_AddPersistentClient();
+      int ANE_GetStatus(H11ANEStatusStruct *param_1);
 
       // power management
       int ANE_IsPowered();
