@@ -12,6 +12,12 @@ public:
     }
   }
 
+  void mul(CBuffer *x, CBuffer *y) {
+    for (int i = 0; i < size; i++) {
+      buf[i] = x->buf[i] * y->buf[i];
+    }
+  }
+
   float *buf;
   int size;
 };

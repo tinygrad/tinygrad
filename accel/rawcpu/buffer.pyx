@@ -9,10 +9,9 @@ cdef class RawCPUBuffer:
   cdef CBuffer *buf
   st: ShapeTracker
 
-  def __init__(self, shape, CBuffer *buf):
+  def __init__(self, shape):
     # TODO: copied from ops gpu, generic this?
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.buf = new CBuffer(x.size, x.data)
 
   @property
   def shape(self): return self.st.shape
@@ -23,7 +22,8 @@ cdef class RawCPUBuffer:
     ret.buf = new CBuffer(x.size, x.data)
     return ret
 
-  def toCPU(self):
+  def toCPU(RawCPUBuffer self):
+    print("toCPU", self.buf.size, self.st)
     buf = memoryview(<float[:prod(self.shape)]> self.buf.buf)
     return np.frombuffer(buf, dtype=np.float32).reshape(self.shape)
 
@@ -33,9 +33,12 @@ cdef class RawCPUBuffer:
     return ret
 
   def binary_op(RawCPUBuffer x, op, RawCPUBuffer y):
+    print(op, x.st, y.st)
     ret = RawCPUBuffer(x.shape)
     ret.buf = new CBuffer(prod(x.shape))
     if op == BinaryOps.ADD: ret.buf.add(x.buf, y.buf)
+    elif op == BinaryOps.MUL: ret.buf.mul(x.buf, y.buf)
+    else: raise NotImplementedError()
     # TODO: write binary op in c++
     return ret
 

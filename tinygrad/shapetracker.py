@@ -68,6 +68,7 @@ def view_from_shape(shape:Tuple[int, ...]):
 class ShapeTracker:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]]):
     self.views : List[ViewTypes] = shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)]
+  def __repr__(self): return f"ShapeTracker<{self.shape}, {self.views}>"
 
   @property
   def contiguous(self): return len(self.views) == 1 and self.views[-1].contiguous
@@ -85,6 +86,7 @@ class ShapeTracker:
   def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
   def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
 
+  # TODO: this is not really needed
   def __getitem__(self, val):
     locals = {"idx": val, "valid": 1}
     exec(self.expr(), None, locals)
