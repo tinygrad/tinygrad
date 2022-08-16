@@ -1,10 +1,17 @@
 class CBuffer {
 public:
-  CBuffer(int size, void* dat = NULL) {
+  CBuffer(int size_, void* dat = NULL) {
+    size = size_;
     buf = (float*)malloc(size*4);
     if (dat != NULL) memcpy(buf, dat, size*4);
   }
-private:
-  float *buf;
-};
 
+  void add(CBuffer *x, CBuffer *y) {
+    for (int i = 0; i < size; i++) {
+      buf[i] = x->buf[i] + y->buf[i];
+    }
+  }
+
+  float *buf;
+  int size;
+};
