@@ -41,6 +41,7 @@ cdef class RawCPUBuffer:
 
   # 3 actual ops
 
+  REQUIRES_SIMPLE_REDUCE = True
   def reduce_op(RawCPUBuffer x, op:ReduceOps, new_shape:Tuple[int, ...]): 
     return x
 

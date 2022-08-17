@@ -251,7 +251,7 @@ class LazyBuffer:
     if getattr(x.dbuffer, "REQUIRES_SIMPLE_REDUCE", False) and (len(new_shape) != 2 or new_shape[1] != 1):
       num, red = prod([s for s,n in zip(x.shape, new_shape) if n != 1]), prod([s for s,n in zip(x.shape, new_shape) if n == 1])
       x = x.movement_op(MovementOps.PERMUTE, [i for i,n in enumerate(new_shape) if n != 1] + [i for i,n in enumerate(new_shape) if n == 1])
-      x = x.movement_op(MovementOps.RESHAPE, (num, red))
+      x = x.movement_op(MovementOps.RESHAPE, (num, red))    # remove this reshape, at the end is enough
       return x.reduce_op(op, (num, 1)).movement_op(MovementOps.RESHAPE, new_shape)
     else:
       return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))

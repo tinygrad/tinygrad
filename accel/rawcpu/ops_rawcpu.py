@@ -1,3 +1,4 @@
+# type: ignore
 import sys
 
 # only pyximport this
