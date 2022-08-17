@@ -3,7 +3,10 @@ public:
   CBuffer(int size_, void* dat = NULL) {
     size = size_;
     buf = (float*)malloc(size*4);
-    if (dat != NULL) memcpy(buf, dat, size*4);
+  }
+
+  void copyin(void *dat) {
+    memcpy(buf, dat, size*4);
   }
 
   void add(CBuffer *x, CBuffer *y) {

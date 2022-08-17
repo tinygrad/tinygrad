@@ -14,7 +14,7 @@ cdef class RawCPUBuffer:
     # TODO: copied from ops gpu, generic this?
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     if parent is not None: self.buf = parent.buf
-    # TODO: construct new CBuffer here?
+    else: self.buf = new CBuffer(prod(shape))
 
   @property
   def shape(self): return self.st.shape
@@ -25,7 +25,7 @@ cdef class RawCPUBuffer:
   @staticmethod
   def fromCPU(np.ndarray x):
     ret = RawCPUBuffer([x.shape[i] for i in range(x.ndim)])
-    ret.buf = new CBuffer(x.size, x.data)
+    ret.buf.copyin(x.data)
     return ret
 
   def toCPU(RawCPUBuffer self):
