@@ -1,20 +1,26 @@
 from cbuffer cimport CBuffer
 cimport numpy as np
 import numpy as np
+from typing import Tuple
 from tinygrad.helpers import prod
-from tinygrad.ops import BinaryOps, MovementOps
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps
 from tinygrad.shapetracker import ShapeTracker
 
 cdef class RawCPUBuffer:
   cdef CBuffer *buf
   st: ShapeTracker
 
-  def __init__(self, shape):
+  def __init__(self, shape, RawCPUBuffer parent=None):
     # TODO: copied from ops gpu, generic this?
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
+    if parent is not None: self.buf = parent.buf
+    # TODO: construct new CBuffer here?
 
   @property
   def shape(self): return self.st.shape
+
+  def contiguous_op(RawCPUBuffer x) -> RawCPUBuffer:
+    return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   @staticmethod
   def fromCPU(np.ndarray x):
@@ -23,15 +29,26 @@ cdef class RawCPUBuffer:
     return ret
 
   def toCPU(RawCPUBuffer self):
+    x: RawCPUBuffer
     print("toCPU", self.buf.size, self.st)
-    buf = memoryview(<float[:prod(self.shape)]> self.buf.buf)
-    return np.frombuffer(buf, dtype=np.float32).reshape(self.shape)
+    x = self.contiguous_op()
+    buf = memoryview(<float[:prod(x.shape)]> x.buf.buf)
+    return np.frombuffer(buf, dtype=np.float32).reshape(x.shape)
 
-  def movement_op(RawCPUBuffer x, op, arg):
-    ret = RawCPUBuffer(ShapeTracker(x.st).movement_op(op, arg))
-    ret.buf = x.buf
-    return ret
+  # 1 free generic op same as GPU (superclass with shapetracker?)
 
+  def movement_op(RawCPUBuffer x, op, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
+
+  # 3 actual ops
+
+  def reduce_op(RawCPUBuffer x, op:ReduceOps, new_shape:Tuple[int, ...]): 
+    return x
+
+  def unary_op(RawCPUBuffer x, op):
+    print(op, x.st)
+    return x
+
+  # TODO: shape/strides for x and y combined
   def binary_op(RawCPUBuffer x, op, RawCPUBuffer y):
     print(op, x.st, y.st)
     ret = RawCPUBuffer(x.shape)
@@ -42,3 +59,4 @@ cdef class RawCPUBuffer:
     # TODO: write binary op in c++
     return ret
 
+  # can all be combined into _processing_op
