@@ -35,6 +35,8 @@ jobs:
       run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
       run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
+    - name: Lint tinygrad with pylint
+      run: pylint tinygrad/
 
   testcpu:
     name: CPU Tests
