@@ -51,7 +51,7 @@ if GRAPH:
   G = nx.DiGraph()
   def save_graph_exit():
     for k,v in cnts.items(): print(k, v)
-    if int(os.getenv("PRUNEGRAPH", 0)):
+    if int(os.getenv("PRUNEGRAPH", "0")):
       dead_nodes = []
       for n in G.nodes:
         # prune movementops and loadops
@@ -238,12 +238,12 @@ class LazyBuffer:
     return self.realized
 
   @staticmethod
-  def fromCPU(x, device): return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
-  def toCPU(x): return x.realize().toCPU()
+  def fromCPU(self, device): return LazyBuffer(device, self.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), self.copy()))
+  def toCPU(self): return self.realize().toCPU()
 
-  def unary_op(x:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, x)
-  def binary_op(x:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, x, y)
-  def contiguous_op(x:LazyBuffer) -> LazyBuffer: return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
+  def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
+  def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
+  def contiguous_op(self:LazyBuffer) -> LazyBuffer: return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
   # TODO: permute to put all the reduce axis at the end
   def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:

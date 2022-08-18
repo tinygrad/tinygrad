@@ -5,50 +5,50 @@ from tinygrad.tensor import Function
 # ************* unary ops *************
 
 class ReLU(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
+  def forward(self, input):
+    self.save_for_backward(input)
     return input.unary_op(UnaryOps.RELU)
 
-  def backward(ctx, grad_output):
-    return ctx.saved_tensors[0].unary_op(UnaryOps.SIGN).unary_op(UnaryOps.RELU).binary_op(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output):
+    return self.saved_tensors[0].unary_op(UnaryOps.SIGN).unary_op(UnaryOps.RELU).binary_op(BinaryOps.MUL, grad_output)
 
 class Log(Function):
-  def forward(ctx, input):
-    ctx.save_for_backward(input)
+  def forward(self, input):
+    self.save_for_backward(input)
     return input.unary_op(UnaryOps.LOG)
 
-  def backward(ctx, grad_output):
-    return grad_output.binary_op(BinaryOps.DIV, ctx.saved_tensors[0])
+  def backward(self, grad_output):
+    return grad_output.binary_op(BinaryOps.DIV, self.saved_tensors[0])
 
 class Exp(Function):
-  def forward(ctx, input):
+  def forward(self, input):
     ret = input.unary_op(UnaryOps.EXP)
-    ctx.save_for_backward(ret)   # we save the output here, not the input
+    self.save_for_backward(ret)   # we save the output here, not the input
     return ret
 
-  def backward(ctx, grad_output):
-    return ctx.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output):
+    return self.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output)
 
 # TODO: add Neg? confirm the optimizer on Sub good enough
 
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(ctx, input, axis=None):
-    ctx.input_shape = input.shape
+  def forward(self, input, axis=None):
+    self.input_shape = input.shape
     return input.reduce_op(ReduceOps.SUM, reduce_shape(input.shape, axis))
 
-  def backward(ctx, grad_output):
-    return grad_output.movement_op(MovementOps.EXPAND, ctx.input_shape)
+  def backward(self, grad_output):
+    return grad_output.movement_op(MovementOps.EXPAND, self.input_shape)
 
 class Max(Function):
-  def forward(ctx, input, axis=None):
+  def forward(self, input, axis=None):
     ret = input.reduce_op(ReduceOps.MAX, reduce_shape(input.shape, axis))
-    ctx.save_for_backward(input, ret)
+    self.save_for_backward(input, ret)
     return ret
 
-  def backward(ctx, grad_output):
-    input, ret = ctx.saved_tensors
+  def backward(self, grad_output):
+    input, ret = self.saved_tensors
 
     # 1s in locations where the max was chosen (can be two locations)
     max_is_1s = input.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.EXPAND, input.shape))
@@ -64,47 +64,47 @@ class Max(Function):
 # ************* binary ops *************
 
 class Add(Function):
-  def forward(ctx, x, y):
+  def forward(self, x, y):
     return x.binary_op(BinaryOps.ADD, y)
 
-  def backward(ctx, grad_output):
-    return grad_output if ctx.needs_input_grad[0] else None, \
-           grad_output if ctx.needs_input_grad[1] else None
+  def backward(self, grad_output):
+    return grad_output if self.needs_input_grad[0] else None, \
+           grad_output if self.needs_input_grad[1] else None
 
 class Sub(Function):
-  def forward(ctx, x, y):
+  def forward(self, x, y):
     return x.binary_op(BinaryOps.SUB, y)
 
-  def backward(ctx, grad_output):
-    return grad_output if ctx.needs_input_grad[0] else None, \
-           grad_output.unary_op(UnaryOps.NEG) if ctx.needs_input_grad[1] else None
+  def backward(self, grad_output):
+    return grad_output if self.needs_input_grad[0] else None, \
+           grad_output.unary_op(UnaryOps.NEG) if self.needs_input_grad[1] else None
 
 class Mul(Function):
-  def forward(ctx, x, y):
-    ctx.save_for_backward(x, y)
+  def forward(self, x, y):
+    self.save_for_backward(x, y)
     return x.binary_op(BinaryOps.MUL, y)
 
-  def backward(ctx, grad_output):
-    grad_x = ctx.saved_tensors[1].binary_op(BinaryOps.MUL, grad_output) if ctx.needs_input_grad[0] else None
-    grad_y = ctx.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output) if ctx.needs_input_grad[1] else None
+  def backward(self, grad_output):
+    grad_x = self.saved_tensors[1].binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None
+    grad_y = self.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
     return grad_x, grad_y
 
 # TODO: add Div? is the optimizer on Pow good enough?
 # nope, we def need div, can't optimize that
 
 class Pow(Function):
-  def forward(ctx, x, y):
+  def forward(self, x, y):
     ret = x.binary_op(BinaryOps.POW, y)
-    ctx.save_for_backward(x, y, ret)
+    self.save_for_backward(x, y, ret)
     return ret
 
-  def backward(ctx, grad_output):
-    x,y,powxy = ctx.saved_tensors
+  def backward(self, grad_output):
+    x,y,powxy = self.saved_tensors
     grad_x, grad_y = None, None
-    if ctx.needs_input_grad[0]:
+    if self.needs_input_grad[0]:
       tmp = y.binary_op(BinaryOps.MUL, powxy.binary_op(BinaryOps.DIV, x))      # y * (pow(x,y)/x)
       grad_x = grad_output.binary_op(BinaryOps.MUL, tmp)
-    if ctx.needs_input_grad[1]:
+    if self.needs_input_grad[1]:
       tmp = x.unary_op(UnaryOps.LOG).binary_op(BinaryOps.MUL, powxy)  # log(x) * pow(x,y)
       grad_y = grad_output.binary_op(BinaryOps.MUL, tmp)
     return grad_x, grad_y
@@ -113,61 +113,61 @@ class Pow(Function):
 
 # NOTE: this is sum in reverse
 class Expand(Function):
-  def forward(ctx, x, shape):
-    ctx.input_shape = x.shape
+  def forward(self, x, shape):
+    self.input_shape = x.shape
     return x.movement_op(MovementOps.EXPAND, shape)
 
-  def backward(ctx, grad_output):
-    return grad_output.reduce_op(ReduceOps.SUM, ctx.input_shape)
+  def backward(self, grad_output):
+    return grad_output.reduce_op(ReduceOps.SUM, self.input_shape)
 
 class Reshape(Function):
-  def forward(ctx, x, shape):
-    ctx.input_shape = x.shape
+  def forward(self, x, shape):
+    self.input_shape = x.shape
     shape = tuple(-prod(x.shape) // prod(shape) if s == -1 else s for s in shape)
     return x.movement_op(MovementOps.RESHAPE, shape)
 
-  def backward(ctx, grad_output):
-    return grad_output.movement_op(MovementOps.RESHAPE, ctx.input_shape)
+  def backward(self, grad_output):
+    return grad_output.movement_op(MovementOps.RESHAPE, self.input_shape)
 
 class Permute(Function):
-  def forward(ctx, x, order=(1,0)):
-    ctx.input_order = order
+  def forward(self, x, order=(1,0)):
+    self.input_order = order
     return x.movement_op(MovementOps.PERMUTE, order)
 
-  def backward(ctx, grad_output):
-    return grad_output.movement_op(MovementOps.PERMUTE, tuple(argsort(ctx.input_order)))
+  def backward(self, grad_output):
+    return grad_output.movement_op(MovementOps.PERMUTE, tuple(argsort(self.input_order)))
 
 # TODO: merge Slice and Flip into Stride with the 3 arguments
 class Slice(Function):
-  def forward(ctx, x, arg=None):
-    ctx.narg = tuple((0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg))
+  def forward(self, x, arg=None):
+    self.narg = tuple((0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg))
     return x.slice(tuple(arg))
 
-  def backward(ctx, grad_output):
-    return grad_output.slice(ctx.narg)
+  def backward(self, grad_output):
+    return grad_output.slice(self.narg)
 
 class Flip(Function):
-  def forward(ctx, x, axis):
-    ctx.axis = axis
+  def forward(self, x, axis):
+    self.axis = axis
     return x.movement_op(MovementOps.FLIP, axis)
 
-  def backward(ctx, grad_output):
-    return grad_output.movement_op(MovementOps.FLIP, ctx.axis)
+  def backward(self, grad_output):
+    return grad_output.movement_op(MovementOps.FLIP, self.axis)
 
 # ************* processing ops *************
 
 class Conv2D(Function):
-  def forward(ctx, x, w, stride=1, groups=1, dilation=1, padding=0):
-    ctx.C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
-    ctx.save_for_backward(x,w)
-    return x.processing_op(ProcessingOps.CONV, w, ctx.C)
+  def forward(self, x, w, stride=1, groups=1, dilation=1, padding=0):
+    self.C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
+    self.save_for_backward(x,w)
+    return x.processing_op(ProcessingOps.CONV, w, self.C)
 
-  def backward(ctx, grad_output):
-    x, w = ctx.saved_tensors
-    C = ctx.C   # conv args from the context
+  def backward(self, grad_output):
+    x, w = self.saved_tensors
+    C = self.C   # conv args from the context
     dx, dw = None, None
 
-    if ctx.needs_input_grad[0]:    # compute derivative of inputs using ProcessingOps.CONV (this is a transposed conv)
+    if self.needs_input_grad[0]:    # compute derivative of inputs using ProcessingOps.CONV (this is a transposed conv)
       xt = grad_output
       if C.sx > 1 or C.sy > 1:   # unstride. NOTE: this is really memory intensive for big strides. (but only when we contiguous it)
         xt = xt.movement_op(MovementOps.RESHAPE, (grad_output.shape[0], grad_output.shape[1], grad_output.shape[2], 1, grad_output.shape[3], 1))
@@ -179,7 +179,7 @@ class Conv2D(Function):
       Cdx = get_conv_args(xt.shape, wt.shape, out_shape=x.shape, dilation=(C.dy, C.dx), padding=(py, px), groups=C.groups)
       dx = xt.processing_op(ProcessingOps.CONV, wt, Cdx)
 
-    if ctx.needs_input_grad[1]:   # compute derivative of weights using ProcessingOps.CONV
+    if self.needs_input_grad[1]:   # compute derivative of weights using ProcessingOps.CONV
       xdw = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix)).movement_op(MovementOps.PERMUTE, (2, 1, 0, 3, 4))
       xdw = xdw.movement_op(MovementOps.RESHAPE, (C.cin, C.groups*C.bs, C.iy, C.ix))
       grad_output_dw = grad_output.movement_op(MovementOps.PERMUTE, (1,0,2,3))
