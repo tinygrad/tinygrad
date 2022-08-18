@@ -176,8 +176,8 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     # slow path, creates middle buffers
     def ast_eval(x: Union[LazyBuffer, LazyOp]) -> DeviceBuffer:
       if isinstance(x, LazyBuffer): return real_srcs[x]
-      if isinstance(x.op, UnaryOps): return ast_eval(x.src[0]).unary_op(x.op)
-      if isinstance(x.op, BinaryOps): return ast_eval(x.src[0]).binary_op(x.op, ast_eval(x.src[1]))
+      if x.op in UnaryOps: return ast_eval(x.src[0]).unary_op(x.op)
+      if x.op in BinaryOps: return ast_eval(x.src[0]).binary_op(x.op, ast_eval(x.src[1]))
     return ast_eval(self.op), list(real_srcs.values()), BinaryOps
 
 _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:_realize_movementops, BinaryOps:_realize_binaryops, ProcessingOps:_realize_processingops}
@@ -238,7 +238,7 @@ class LazyBuffer:
     return self.realized
 
   @staticmethod
-  def fromCPU(self, device): return LazyBuffer(device, self.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), self.copy()))
+  def fromCPU(x, device): return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
   def toCPU(self): return self.realize().toCPU()
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
@@ -246,21 +246,21 @@ class LazyBuffer:
   def contiguous_op(self:LazyBuffer) -> LazyBuffer: return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
   # TODO: permute to put all the reduce axis at the end
-  def reduce_op(x:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    if x.shape == tuple(new_shape): return x
-    if getattr(x.dbuffer, "REQUIRES_SIMPLE_REDUCE", False) and (len(new_shape) != 2 or new_shape[1] != 1):
+  def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
+    if self.shape == tuple(new_shape): return self
+    if getattr(self.dbuffer, "REQUIRES_SIMPLE_REDUCE", False) and (len(new_shape) != 2 or new_shape[1] != 1):
       num, red = prod([s for s,n in zip(x.shape, new_shape) if n != 1]), prod([s for s,n in zip(x.shape, new_shape) if n == 1])
-      x = x.movement_op(MovementOps.PERMUTE, [i for i,n in enumerate(new_shape) if n != 1] + [i for i,n in enumerate(new_shape) if n == 1])
+      x = self.movement_op(MovementOps.PERMUTE, [i for i,n in enumerate(new_shape) if n != 1] + [i for i,n in enumerate(new_shape) if n == 1])
       x = x.movement_op(MovementOps.RESHAPE, (num, red))    # remove this reshape, at the end is enough
       return x.reduce_op(op, (num, 1)).movement_op(MovementOps.RESHAPE, new_shape)
     else:
-      return LazyBuffer(x.device, tuple(new_shape), ReduceOps, LazyOp(op, (x,), tuple(new_shape)))
+      return LazyBuffer(self.device, tuple(new_shape), ReduceOps, LazyOp(op, (self,), tuple(new_shape)))
 
   # syntactic sugar around PAD and SHRINK
   # TODO: turn RESHAPE into EXPAND and CONTRACT (current EXPAND should be REPEAT)
-  def slice(x:LazyBuffer, arg):
-    padding = [(max(0, -p[0]), max(0, p[1]-x.shape[i])) for i,p in enumerate(arg)]
-    return x.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
+  def slice(self:LazyBuffer, arg):
+    padding = [(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg)]
+    return self.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
 
   def movement_op(x:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
@@ -285,7 +285,7 @@ class LazyBuffer:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
-        assert isinstance(y.op, BinaryOps) or isinstance(y.op, UnaryOps)
+        assert y.op in BinaryOps or y.op in UnaryOps
         return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
       return replace_with_movement_op(x.op)
 
