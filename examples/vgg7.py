@@ -1,6 +1,6 @@
 from PIL import Image
 from tinygrad.tensor import Tensor
-from tinygrad.optim import SGD
+from tinygrad.nn.optim import SGD
 import examples.yolo.waifu2x
 from examples.yolo.kinne import KinneDir
 import sys

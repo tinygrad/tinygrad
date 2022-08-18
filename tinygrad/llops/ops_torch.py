@@ -1,6 +1,6 @@
 import torch
 from tinygrad.llops.ops_cpu import CPUBuffer  # type: ignore
-from tinygrad.ops import MovementOps, ProcessingOps
+from tinygrad.ops import ProcessingOps
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class TorchBuffer(torch.Tensor):

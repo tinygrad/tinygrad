@@ -128,6 +128,11 @@ class TestSingleShapeTracker(unittest.TestCase):
     self.st.permute(1,0)
     assert not self.st.contiguous
 
+def shapetracker_getitem(st, val):
+  locals = {"idx": val, "valid": 1}
+  exec(st.expr(), None, locals)
+  return locals["idx"] if locals["valid"] else -1
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = ShapeTracker((7,4))
@@ -135,7 +140,7 @@ class TestShapeTracker(unittest.TestCase):
     self.apply = lambda fxn: [fxn(x) for x in [self.st, self.dt]]
 
   def tearDown(self):
-    x = [self.st[i] for i in range(prod(self.st.shape))]
+    x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
     y = [self.dt[i] for i in range(prod(self.dt.shape))]
     print(x,y, self.st.shape, self.dt.shape, self.st.expr())
     assert self.st.shape == self.dt.shape

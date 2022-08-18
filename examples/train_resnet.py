@@ -8,10 +8,10 @@ from tinygrad.tensor import Device
 from extra.utils import get_parameters
 from extra.training import train, evaluate
 from models.resnet import ResNet
-from tinygrad.optim import Adam
+from tinygrad.nn.optim import Adam
 from datasets import fetch_mnist
 
-from tinygrad.optim import Adam
+from tinygrad.nn.optim import Adam
 
 class ComposeTransforms:
   def __init__(self, trans):

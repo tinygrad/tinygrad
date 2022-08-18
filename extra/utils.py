@@ -1,5 +1,4 @@
 from tinygrad.tensor import Tensor
-import tinygrad.nn as nn
 import pickle
 import numpy as np
 

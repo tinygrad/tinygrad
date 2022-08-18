@@ -4,7 +4,7 @@ import time
 from tqdm import trange
 from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
-import tinygrad.optim as optim
+import tinygrad.nn.optim as optim
 from tinygrad.tensor import Tensor
 from tinygrad.llops.ops_gpu import CL
 
