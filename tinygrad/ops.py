@@ -285,7 +285,7 @@ class LazyBuffer:
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
         assert y.op in BinaryOps or y.op in UnaryOps
-        return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])
+        return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])   # type: ignore
       return replace_with_movement_op(self.op)
 
     # create the buffer
