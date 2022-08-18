@@ -3,9 +3,9 @@ import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
-from typing import List, Tuple, Optional, Dict, Union, Set, Tuple
+from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, ConvArgs
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps
 from tinygrad.shapetracker import ShapeTracker, View, strides_for_shape
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -58,7 +58,7 @@ class CLProgram:
     if DEBUG >= 1:
       CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else (e.profile.end - e.profile.start)
       CL.ops_sum += op_estimate
-      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:6.1f}M/{CL.ops_sum/1e9:7.2f}G  " + \
+      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:6.1f}M/{CL.ops_sum/1e9:7.2f}G  " +
             ("" if DEBUG <= 1 or CL.CACHE is not None else f"tm {(e.profile.end - e.profile.start)/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({op_estimate/(e.profile.end - e.profile.start):8.2f} GFLOPS)"))
     if DEBUG >= 4: print(self.prg)
 

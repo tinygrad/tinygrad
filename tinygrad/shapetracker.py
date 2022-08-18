@@ -83,14 +83,10 @@ class ShapeTracker:
   def offset(self): return self.views[-1].offset
 
   def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
-  def movement_op(self, op, arg): getattr(self, str(op).split(".")[1].lower())(*arg); return self
+  def movement_op(self, op, arg):
+    getattr(self, str(op).split(".")[1].lower())(*arg)
+    return self
   def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
-
-  # TODO: this is not really needed, only for testing
-  def __getitem__(self, val):
-    locals = {"idx": val, "valid": 1}
-    exec(self.expr(), None, locals)
-    return locals["idx"] if locals["valid"] else -1
 
   # TODO: do we really need this for conv?
   # if we replace, confirm the ops taken fold into one view

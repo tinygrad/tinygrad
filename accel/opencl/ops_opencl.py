@@ -5,7 +5,7 @@ import os
 from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, CLBuffer
 from tinygrad.ops import ProcessingOps
 from tinygrad.helpers import prod, ConvArgs
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Set
 import numpy as np
 import pyopencl as cl
 
@@ -40,7 +40,7 @@ def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
     args = [f"(outputRow * get_image_width(output) + outputLocation.x)*4+{i}", acc]+args
     middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
   """
-  acc = f"outputValues[i]"
+  acc = "outputValues[i]"
   args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
   args = ["smp", "outputLocation", "(outputLocation.y * get_image_width(output) + outputLocation.x)*4", acc]+args
   middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
@@ -155,8 +155,7 @@ class OpenCLBuffer(GPUBuffer):
       elif buf.st.contiguous:
         # use float4
         ewtypes.append(f"__global const float4 *{name}_g")
-        getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{"+
-          f"return x[gid/4]; }}")
+        getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{ return x[gid/4]; }}")
       elif UNSAFE_FLOAT4:
         # aggressive constant folding
         fakebufs.append(name)
