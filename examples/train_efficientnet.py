@@ -7,7 +7,7 @@ from tinygrad.tensor import Tensor
 from extra.utils import get_parameters
 from tqdm import trange
 from tinygrad.nn import BatchNorm2D
-import tinygrad.optim as optim
+import tinygrad.nn.optim as optim
 from datasets import fetch_cifar
 
 class TinyConvNet:

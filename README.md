@@ -54,13 +54,13 @@ print(y.grad)  # dz/dy
 
 ## Neural networks?
 
-It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, RMSprop, and Adam implemented) from tinygrad.optim, write some boilerplate minibatching code, and you have all you need.
+It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, RMSprop, and Adam implemented) from tinygrad.nn.optim, write some boilerplate minibatching code, and you have all you need.
 
 ### Neural network example (from test/test_mnist.py)
 
 ```python
 from tinygrad.tensor import Tensor
-import tinygrad.optim as optim
+import tinygrad.nn.optim as optim
 
 class TinyBobNet:
   def __init__(self):

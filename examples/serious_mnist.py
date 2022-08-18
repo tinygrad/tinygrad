@@ -11,7 +11,7 @@ from tinygrad.nn import BatchNorm2D
 from extra.utils import get_parameters
 from datasets import fetch_mnist
 from extra.training import train, evaluate, sparse_categorical_crossentropy
-import tinygrad.optim as optim
+import tinygrad.nn.optim as optim
 from extra.augment import augment_img
 GPU = os.getenv("GPU", None) is not None
 QUICK = os.getenv("QUICK", None) is not None

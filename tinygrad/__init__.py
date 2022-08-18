@@ -1,1 +1,1 @@
-from tinygrad import optim, tensor, nn
+from tinygrad import tensor, nn

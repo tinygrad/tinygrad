@@ -3,7 +3,7 @@ import os
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-import tinygrad.optim as optim
+import tinygrad.nn.optim as optim
 from extra.training import train, evaluate
 from extra.utils import get_parameters
 from datasets import fetch_mnist
