@@ -146,7 +146,7 @@ class Tensor:
     s = [[] for _ in range(len(args))]
     for i in range(len(self.shape)):
       if i != dim:
-        assert self.shape[i] == y.shape[i]
+        for y in args: assert self.shape[i] == y.shape[i]
         for j in range(len(args)):
           s[j].append((0, self.shape[i]))
       else:
@@ -161,18 +161,18 @@ class Tensor:
       ret += y.slice(arg=ts)
     return ret
 
-  def matmul(x:Tensor, w:Tensor):
+  def matmul(self:Tensor, w:Tensor):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    bs, groups = prod(x.shape[0:-2]), prod(w.shape[0:-2])
+    bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
     cin, cout = w.shape[-2], w.shape[-1]
-    out_shape_t = tuple(list(x.shape[0:-2])+[cout,-1])
-    if len(x.shape) > 1: order = tuple(list(range(len(x.shape)-2))+[len(x.shape)-1, len(x.shape)-2])
+    out_shape_t = tuple(list(self.shape[0:-2])+[cout,-1])
+    if len(self.shape) > 1: order = tuple(list(range(len(self.shape)-2))+[len(self.shape)-1, len(self.shape)-2])
     else: order, out_shape_t = (0,), (cout, )
     worder = tuple(list(range(len(w.shape)-2))+[len(w.shape)-1, len(w.shape)-2])
 
     # NOTE: with NHWC we can remove the transposes
     # bs x groups*cin x H x W
-    cx = x.transpose(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
+    cx = self.transpose(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
     # groups*cout x cin x H, W
     cw = w.transpose(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
     return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).transpose(order=order)
@@ -234,7 +234,7 @@ class Tensor:
 
   def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)
-  def clip(self, min, max): return ((self-min).relu()+min) - (self-max).relu()
+  def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
 
@@ -247,7 +247,7 @@ class Tensor:
   def relu6(self): return self.relu() - (self-6).relu()
   def hardswish(self): return self * (self+3).relu6() * (1/6)
   def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-  def gelu(x): return 0.5 * x * (1 + (x * 0.7978845608 * (1 + 0.044715 * x * x)).tanh())
+  def gelu(self): return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
   def leakyrelu(self, neg_slope=0.01): return self.relu() - (-neg_slope*self).relu()
   def mish(self): return self * self.softplus().tanh()
   def softplus(self, limit=20, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
@@ -285,8 +285,8 @@ class Tensor:
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
 
-  def layernorm(x, eps=1e-5):
-    y = (x - x.mean(axis=-1, keepdim=True))
+  def layernorm(self, eps=1e-5):
+    y = (self - self.mean(axis=-1, keepdim=True))
     return y.div((y*y).mean(axis=-1, keepdim=True).add(eps).sqrt())
 
 # An instantiation of the Function is the Context

@@ -9,9 +9,9 @@ class Optimizer:
     for param in self.params:
       param.grad = None
 
-  def realize(self, extra=[]):
+  def realize(self, extra=None):
     # TODO: corealize
-    for p in self.params + extra: p.realize()
+    for p in self.params + extra if extra is not None else self.params: p.realize()
 
 class SGD(Optimizer):
   def __init__(self, params, lr=0.001):

@@ -5,24 +5,24 @@ from tinygrad.tensor import Function
 # ************* unary ops *************
 
 class ReLU(Function):
-  def forward(self, input):
-    self.save_for_backward(input)
-    return input.unary_op(UnaryOps.RELU)
+  def forward(self, x):
+    self.save_for_backward(x)
+    return x.unary_op(UnaryOps.RELU)
 
   def backward(self, grad_output):
     return self.saved_tensors[0].unary_op(UnaryOps.SIGN).unary_op(UnaryOps.RELU).binary_op(BinaryOps.MUL, grad_output)
 
 class Log(Function):
-  def forward(self, input):
-    self.save_for_backward(input)
-    return input.unary_op(UnaryOps.LOG)
+  def forward(self, x):
+    self.save_for_backward(x)
+    return x.unary_op(UnaryOps.LOG)
 
   def backward(self, grad_output):
     return grad_output.binary_op(BinaryOps.DIV, self.saved_tensors[0])
 
 class Exp(Function):
-  def forward(self, input):
-    ret = input.unary_op(UnaryOps.EXP)
+  def forward(self, x):
+    ret = x.unary_op(UnaryOps.EXP)
     self.save_for_backward(ret)   # we save the output here, not the input
     return ret
 
@@ -34,31 +34,31 @@ class Exp(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, input, axis=None):
-    self.input_shape = input.shape
-    return input.reduce_op(ReduceOps.SUM, reduce_shape(input.shape, axis))
+  def forward(self, x, axis=None):
+    self.input_shape = x.shape
+    return x.reduce_op(ReduceOps.SUM, reduce_shape(x.shape, axis))
 
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.EXPAND, self.input_shape)
 
 class Max(Function):
-  def forward(self, input, axis=None):
-    ret = input.reduce_op(ReduceOps.MAX, reduce_shape(input.shape, axis))
-    self.save_for_backward(input, ret)
+  def forward(self, x, axis=None):
+    ret = x.reduce_op(ReduceOps.MAX, reduce_shape(x.shape, axis))
+    self.save_for_backward(x, ret)
     return ret
 
   def backward(self, grad_output):
-    input, ret = self.saved_tensors
+    x, ret = self.saved_tensors
 
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = input.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.EXPAND, input.shape))
+    max_is_1s = x.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.EXPAND, x.shape))
 
     # sum of locations, averaged
     div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape)
-    div = div.movement_op(MovementOps.EXPAND, input.shape)
+    div = div.movement_op(MovementOps.EXPAND, x.shape)
     max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
 
-    grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, input.shape)
+    grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, x.shape)
     return max_is_amount.binary_op(BinaryOps.MUL, grad_output_expanded)
 
 # ************* binary ops *************
