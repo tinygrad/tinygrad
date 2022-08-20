@@ -247,13 +247,11 @@ class LazyBuffer:
   # TODO: permute to put all the reduce axis at the end
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
-    if getattr(self.dbuffer, "REQUIRES_SIMPLE_REDUCE", False) and (len(new_shape) != 2 or new_shape[1] != 1):
-      num, red = prod([s for s,n in zip(self.shape, new_shape) if n != 1]), prod([s for s,n in zip(self.shape, new_shape) if n == 1])
-      x = self.movement_op(MovementOps.PERMUTE, [i for i,n in enumerate(new_shape) if n != 1] + [i for i,n in enumerate(new_shape) if n == 1])
-      x = x.movement_op(MovementOps.RESHAPE, (num, red))    # remove this reshape, at the end is enough
-      return x.reduce_op(op, (num, 1)).movement_op(MovementOps.RESHAPE, new_shape)
-    else:
-      return LazyBuffer(self.device, tuple(new_shape), ReduceOps, LazyOp(op, (self,), tuple(new_shape)))
+    # move the reduce axes to the end
+    x = self.movement_op(MovementOps.PERMUTE, [i for i,n in enumerate(new_shape) if n != 1] + [i for i,n in enumerate(new_shape) if n == 1])
+    new_tmp_shape = tuple([n for n in new_shape if n != 1] + [1 for n in new_shape if n == 1])
+    # NOTE: this reshape can only move around 1s
+    return LazyBuffer(x.device, new_tmp_shape, ReduceOps, LazyOp(op, (x,), new_tmp_shape)).movement_op(MovementOps.RESHAPE, new_shape)
 
   # syntactic sugar around PAD and SHRINK
   # TODO: turn RESHAPE into EXPAND and CONTRACT (current EXPAND should be REPEAT)

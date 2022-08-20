@@ -1,6 +1,5 @@
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Conv2d, BatchNorm2D
-from tinygrad import optim
+from tinygrad.nn import Conv2d, BatchNorm2D, optim
 from extra.utils import get_parameters  # TODO: move to optim
 import unittest
 
