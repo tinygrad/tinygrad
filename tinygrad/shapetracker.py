@@ -17,6 +17,20 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
     else: ret.append((shape[i], strides[i]))
   return ret
 
+# is contract? if so, group the axis
+def get_contraction(old_shape:Tuple[int], new_shape:Tuple[int]):
+  out, curr = [], []
+  for t in old_shape:
+    if len(out) >= len(new_shape): break
+    if t*prod(curr) <= new_shape[len(out)]:
+      curr.append(t)
+    else:
+      out.append(curr)
+      curr = [t]
+  out.append(curr)
+  if len(new_shape) == len(out) and all(prod(i) == j and len(i) >= 1 for i,j in zip(out, new_shape)):
+    return out
+
 class View:
   def __init__(self, shape, strides, offset:int=0):
     self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset

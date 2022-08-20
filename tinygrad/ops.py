@@ -4,7 +4,7 @@ from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
 from copy import copy
 import os, sys, functools, itertools, operator, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
-from tinygrad.shapetracker import ShapeTracker
+from tinygrad.shapetracker import ShapeTracker, get_contraction
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -274,8 +274,36 @@ class LazyBuffer:
     if op == MovementOps.PERMUTE and self.realized is None and self.op.op == op: return self.op.src[0].movement_op(op, tuple(self.op.arg[i] for i in arg))
     if op == MovementOps.PAD and self.realized is None and self.op.op == op: return self.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)))
 
+    # hmm, this can be a bad choice if the buffer has other children
+    # TODO: do this at resolve time
+    if self.optype == ReduceOps and op == MovementOps.PERMUTE: # and False: # and len(x.op.src[0].children) == 1:
+      # reduceops have one buffer input, permute it
+      narg = [self.op.arg[arg[i]] for i in range(len(arg))]
+      src, rop = self.op.src[0], self.op.op
+      src.children = [y for y in src.children if self != y]
+      del self  # TODO: why doesn't this delete remove it from the children
+      return src.movement_op(op, arg).reduce_op(rop, narg)
+
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and ShapeTracker(self.shape).movement_op(op, arg).contiguous: return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
+
+    # move permutes before expands
+    if op == MovementOps.PERMUTE and self.realized is None and self.op.op == MovementOps.EXPAND: return self.op.src[0].movement_op(MovementOps.PERMUTE, arg).movement_op(MovementOps.EXPAND, [self.op.arg[a] for a in arg])
+
+    # move permutes before reshapes
+    if op == MovementOps.PERMUTE and self.op.op == MovementOps.RESHAPE and self.realized is None and isinstance(self.op.src[0], LazyBuffer):
+      contraction = get_contraction(self.op.src[0].shape, self.shape)
+      if contraction is not None:
+        numbered = []
+        start = 0
+        for c in contraction:
+          numbered.append(list(range(start, start+len(c))))
+          start += len(c)
+        new_arg = []
+        for p in arg:
+          new_arg += numbered[p]
+        return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
+          .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
