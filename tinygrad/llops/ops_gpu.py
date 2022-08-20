@@ -123,7 +123,7 @@ class GPUBuffer:
 
     # if it's a partial reduce, assert last non reduced axis is before the first reduced axis
     if red > 1 and prod(ret.shape) != 1: assert max([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s == n and n != 1]) < min([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s != 1 and n == 1])
-    inter_red = 256 if (prod(ret.shape) < 256 and red >= 256) else 1
+    inter_red = 256 if (prod(ret.shape) < 8192 and red >= 256) else 1
 
     kernel_name = "reduce" if red > 1 else "elementwise"
     views = {name:buf.contiguous_view_constant_fold(name) for name, buf in bufs}
