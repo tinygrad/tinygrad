@@ -291,7 +291,7 @@ class LazyBuffer:
     if op == MovementOps.PERMUTE and self.realized is None and self.op.op == MovementOps.EXPAND: return self.op.src[0].movement_op(MovementOps.PERMUTE, arg).movement_op(MovementOps.EXPAND, [self.op.arg[a] for a in arg])
 
     # move permutes before reshapes
-    if op == MovementOps.PERMUTE and self.op.op == MovementOps.RESHAPE and self.realized is None and isinstance(self.op.src[0], LazyBuffer):
+    if op == MovementOps.PERMUTE  and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
       contraction = get_contraction(self.op.src[0].shape, self.shape)
       if contraction is not None:
         numbered = []
