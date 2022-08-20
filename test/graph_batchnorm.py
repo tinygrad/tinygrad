@@ -14,7 +14,6 @@ def model_step(lm):
   optimizer.step()
   Tensor.training = False
 
-
 class TestBatchnorm(unittest.TestCase):
   def test_conv(self):
     class LilModel:
@@ -32,6 +31,19 @@ class TestBatchnorm(unittest.TestCase):
         self.c2 = Conv2d(32, 32, 3, padding=1, bias=False)
       def forward(self, x):
         return self.c2(self.c(x)).relu()
+    lm = LilModel()
+    model_step(lm)
+  
+  def test_two_conv_bn(self):
+    class LilModel:
+      def __init__(self):
+        self.c = Conv2d(12, 24, 3, padding=1, bias=False)
+        self.bn = BatchNorm2D(24, track_running_stats=False)
+        self.c2 = Conv2d(24, 32, 3, padding=1, bias=False)
+        self.bn2 = BatchNorm2D(32, track_running_stats=False)
+      def forward(self, x):
+        x = self.bn(self.c(x)).relu()
+        return self.bn2(self.c2(x)).relu()
     lm = LilModel()
     model_step(lm)
 

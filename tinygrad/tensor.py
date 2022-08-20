@@ -126,6 +126,7 @@ class Tensor:
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, f"grad shape must match tensor shape in {self._ctx!r}, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
+      del t0._ctx
 
   # ***** non first class ops (hlops) *****
   
