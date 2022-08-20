@@ -100,7 +100,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest (default)
-      run: OPT=3 GPU=1 python -m pytest -s -v
+      run: OPT=1 GPU=1 python -m pytest -s -v
 
   testopencl:
     name: OpenCL Tests

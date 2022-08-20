@@ -26,10 +26,9 @@ OPT = int(os.getenv("OPT", "1"))
 NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
-REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE = OPT>=1, OPT>=1, OPT>=1
+REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
-SHUFFLE_MOVEMENT_OPS = OPT>=3
-SHUFFLE_PAD_OPS = OPT>=4  # NOTE: 0/0 is NaN if you pad, so this can change the output
+SHUFFLE_PAD_OPS = OPT>=3  # NOTE: 0/0 is NaN if you pad, so this can change the output
 
 # **** enumerate supported devices ****
 
@@ -244,7 +243,6 @@ class LazyBuffer:
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
   def contiguous_op(self:LazyBuffer) -> LazyBuffer: return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
-  # TODO: permute to put all the reduce axis at the end
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     # move the reduce axes to the end
