@@ -1,10 +1,10 @@
 //PREFIX
 
 __kernel void matmul(
+  write_only image2d_t output,
   __local float *outputScratch,
   read_only image1d_t input,
-  read_only image2d_t weights,
-  write_only image2d_t output
+  read_only image2d_t weights
   //ARGS
   ) {
 

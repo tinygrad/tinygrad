@@ -3,7 +3,7 @@
 from __future__ import annotations
 import os
 from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, CLBuffer
-from tinygrad.ops import ProcessingOps
+from tinygrad.ops import ProcessingOps, ReduceOps
 from tinygrad.helpers import prod, ConvArgs
 from typing import List, Tuple, Optional, Dict, Set
 import numpy as np
@@ -80,8 +80,8 @@ class OpenCLBuffer(GPUBuffer):
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", """
           __kernel void from_image(
-              read_only image2d_t in,
-              __global float4 *out) {
+              __global float4 *out,
+              read_only image2d_t in) {
             const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
             int2 l;
             l.y = get_global_id(1);
@@ -89,7 +89,7 @@ class OpenCLBuffer(GPUBuffer):
             int W = get_image_width(in);
             out[l.y*W + l.x] = read_imagef(in, smp, l);
           }
-        """)(self._image.shape, None, self._image, self._buf.cl)
+        """)(self._image.shape, None, self._buf.cl, self._image)
         self._image = None
     return self._buf.cl
   
@@ -105,15 +105,15 @@ class OpenCLBuffer(GPUBuffer):
         #print(f"converting {self.shape} to image with shape {self._image.shape}")
         CLProgram("to_image", """
           __kernel void to_image(
-              __global const float4 *in,
-              write_only image2d_t out) {
+              write_only image2d_t out,
+              __global const float4 *in) {
             int2 l;
             l.y = get_global_id(1);
             l.x = get_global_id(0);
             int W = get_image_width(out);
             write_imagef(out, l, in[l.y*W + l.x]);
           }
-        """)(self._image.shape, None, self._buf.cl, self._image)
+        """)(self._image.shape, None, self._image, self._buf.cl)
       self._buf = None
     return self._image
 
@@ -123,12 +123,11 @@ class OpenCLBuffer(GPUBuffer):
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
   seen = set()
-  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, start="0.0", reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
+  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
     if C is None or earlycode != "acc":
       # TODO: handle an opencl conv without the conv part
-      return super()._processing_op(bufs, code, C, start, reduce_shape, earlybufs, earlycode)
+      return super()._processing_op(bufs, code, C, op, reduce_shape, earlybufs, earlycode)
     assert earlycode == "acc"
-    assert start == "0.0"
 
     x = [x for x in bufs if x[0] == "input"][0][1]
     w = [x for x in bufs if x[0] == "weight"][0][1]
@@ -228,7 +227,7 @@ class OpenCLBuffer(GPUBuffer):
       local_work_size = [4, global_work_size[1], lw]
 
       #print(global_work_size, local_work_size)
-      conv_prg(global_work_size, local_work_size, cl.LocalMemory(4 * local_work_size[0] * local_work_size[1] * lw), x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
+      conv_prg(global_work_size, local_work_size, ret.image, cl.LocalMemory(4 * local_work_size[0] * local_work_size[1] * lw), x.image, w.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
       return ret
 
     # this option is unused
@@ -259,7 +258,7 @@ class OpenCLBuffer(GPUBuffer):
       argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
     )
     global_work_size = [C.cout//4, (C.ox+NUM_OUTPUTS-1)//NUM_OUTPUTS, C.bs*C.oy]
-    conv_prg(global_work_size, None, x.image, w.image, ret.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
+    conv_prg(global_work_size, None, ret.image, x.image, w.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
     return ret
 
 GPUBuffer = OpenCLBuffer

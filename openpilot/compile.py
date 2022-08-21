@@ -178,18 +178,13 @@ def compile(input, output_fn):
   saved_binaries = set()
 
   kernels_to_save = set()
-  kernels_to_not_save = set()
+  kernels_to_not_save = set(inputs)
   import pyopencl as cl
   for self, args in local_cl_cache:
-    for i,a in enumerate(args[2:]):
-      access_qualifer = self.clprg.get_arg_info(i, cl.kernel_arg_info.ACCESS_QUALIFIER)
-      type_qualifer = self.clprg.get_arg_info(i, cl.kernel_arg_info.TYPE_QUALIFIER)
-      type_name = self.clprg.get_arg_info(i, cl.kernel_arg_info.TYPE_NAME)
-      if cl.kernel_arg_access_qualifier.READ_ONLY == access_qualifer or cl.kernel_arg_type_qualifier.CONST == type_qualifer:
-        kernels_to_save.add(a)
-      else:
-        # this is written to at some point, we don't have to save it
-        kernels_to_not_save.add(a)
+    # output is always the first parameter
+    kernels_to_not_save.add(args[2])
+    for a in args[3:]:
+      kernels_to_save.add(a)
   kernels_to_save -= kernels_to_not_save
 
   gobj = 0
@@ -259,7 +254,7 @@ def compile(input, output_fn):
             })
 
             if needs_load:
-              data = np.empty(size//2, dtype=np.float32)
+              data = np.empty(size//(2 if FLOAT16 else 4), dtype=np.float32)
               CL.enqueue_copy(data, buf.cl, is_blocking=True)
               if FLOAT16: data = data.astype(np.float16)
               weights.append(data.tobytes())

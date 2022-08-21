@@ -103,7 +103,7 @@ jobs:
       run: OPT=1 GPU=1 python -m pytest -s -v
 
   testopencl:
-    name: OpenCL Tests
+    name: OpenCL (openpilot) Test
     runs-on: ubuntu-20.04
     if: ${{ false }}
 
@@ -125,7 +125,10 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest (default)
-      run: OPENCL=1 python -m pytest -s -v
+      run: |
+        UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
+        FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
+        python3 openpilot/run_thneed.py /tmp/output.thneed
 
   testmypy:
     name: Mypy Tests

@@ -1,9 +1,9 @@
 //PREFIX
 
 __kernel void image_conv(
+  write_only image2d_t output,
   read_only image2d_t input,
-  read_only image2d_t weights,
-  write_only image2d_t output
+  read_only image2d_t weights
 #ifndef NOARGS
   ,short numPackedInputChannelsForGroup,
   short totalNumPackedInputChannels,

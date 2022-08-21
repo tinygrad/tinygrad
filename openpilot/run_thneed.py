@@ -11,8 +11,8 @@ THNEED_KERNELS = "../../selfdrive/modeld/thneed/kernels/"
 def load_thneed_model(fn="model.thneed", float32=False, replace=None):
   import pyopencl as cl
   platform = [x for x in cl.get_platforms()]
-  assert len(platform) == 1
-  ctx = cl.Context(devices=platform[0].get_devices(device_type=cl.device_type.GPU))
+  assert len(platform) >= 1
+  ctx = cl.Context(devices=platform[0].get_devices(device_type=cl.device_type.GPU)[0:1])
   q = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
   mf = cl.mem_flags
   image_fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT if float32 else cl.channel_type.HALF_FLOAT)
@@ -110,7 +110,10 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
     k['args_name'] = []
     prg = prgs[k['name']]
     for i,arg in enumerate(k['args']):
-      k['args_name'].append(prg.get_arg_info(i, cl.kernel_arg_info.NAME))
+      try:
+        k['args_name'].append(prg.get_arg_info(i, cl.kernel_arg_info.NAME))
+      except cl.RuntimeError:
+        k['args_name'].append("<UNKNOWN>")
 
   vision = vision[0:1]
   vnum = vnum[0] if len(vnum) >= 1 else None
