@@ -28,7 +28,8 @@ NOCONV = int(os.getenv("NOCONV", "0"))
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
-SHUFFLE_PAD_OPS = OPT>=3  # NOTE: 0/0 is NaN if you pad, so this can change the output
+PUSH_PERMUTES = OPT>=3
+SHUFFLE_PAD_OPS = OPT>=4  # NOTE: 0/0 is NaN if you pad, so this can change the output
 
 # **** enumerate supported devices ****
 
@@ -276,7 +277,7 @@ class LazyBuffer:
 
     # hmm, this can be a bad choice if the buffer has other children
     # TODO: do this at resolve time
-    if self.optype == ReduceOps and op == MovementOps.PERMUTE: # and False: # and len(x.op.src[0].children) == 1:
+    if PUSH_PERMUTES and self.optype == ReduceOps and op == MovementOps.PERMUTE: # and False: # and len(x.op.src[0].children) == 1:
       # reduceops have one buffer input, permute it
       narg = tuple(self.op.arg[arg[i]] for i in range(len(arg)))
       src, rop = self.op.src[0], self.op.op
