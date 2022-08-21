@@ -278,7 +278,7 @@ class LazyBuffer:
     # TODO: do this at resolve time
     if self.optype == ReduceOps and op == MovementOps.PERMUTE: # and False: # and len(x.op.src[0].children) == 1:
       # reduceops have one buffer input, permute it
-      narg = [self.op.arg[arg[i]] for i in range(len(arg))]
+      narg = tuple(self.op.arg[arg[i]] for i in range(len(arg)))
       src, rop = self.op.src[0], self.op.op
       src.children = [y for y in src.children if self != y]
       del self  # TODO: why doesn't this delete remove it from the children
