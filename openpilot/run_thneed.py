@@ -10,9 +10,10 @@ THNEED_KERNELS = "../../selfdrive/modeld/thneed/kernels/"
 
 def load_thneed_model(fn="model.thneed", float32=False, replace=None):
   import pyopencl as cl
-  platform = [x for x in cl.get_platforms()]
-  assert len(platform) >= 1
-  ctx = cl.Context(devices=platform[0].get_devices(device_type=cl.device_type.GPU)[0:1])
+  devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
+  if len(devices) == 0:  # settle for CPU
+    devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
+  ctx = cl.Context(devices=devices[0:1])
   q = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
   mf = cl.mem_flags
   image_fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT if float32 else cl.channel_type.HALF_FLOAT)
