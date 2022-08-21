@@ -103,9 +103,8 @@ jobs:
       run: OPT=1 GPU=1 python -m pytest -s -v
 
   testopencl:
-    name: OpenCL (openpilot) Test
+    name: openpilot (OpenCL) Test
     runs-on: ubuntu-20.04
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
