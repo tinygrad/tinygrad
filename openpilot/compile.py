@@ -30,8 +30,8 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/ea449f1fe0bbff0eff5b
 np.random.seed(1337)
 def get_random_input_tensors():
   np_inputs = {
-    "input_imgs": np.random.randn(*(1, 12, 128, 256)),
-    "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+    "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
+    "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
     "desire": np.zeros((1, 8)),
     "traffic_convention": np.array([[1., 0.]]),
     "initial_state": np.zeros((1, 512))

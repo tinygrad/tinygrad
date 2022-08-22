@@ -56,16 +56,10 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
           if 'buffer_id' in o and bufs_loaded[o['buffer_id']]:
             arr = np.zeros(bufs[o['buffer_id']].size // 2, dtype=np.float16)
             cl.enqueue_copy(q, arr, bufs[o['buffer_id']])
-            if (o['width'], o['height'], 4) == (108, 8, 4) and replace is not None:
-              replace = replace.flatten()
-              arr[:replace.shape[0]] = replace
-              o['row_pitch'] = 108*4*2
-            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR,
-              cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT),
+            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, image_fmt,
               shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=arr)
           elif o['needs_load']:
-            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR,
-              cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT),
+            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, image_fmt,
               shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=o['data'])
           else:
             buf = cl.Image(ctx, mf.READ_WRITE, image_fmt, shape=(o['width'], o['height']))
@@ -118,13 +112,6 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
 
   vision = vision[0:1]
   vnum = vnum[0] if len(vnum) >= 1 else None
-
-  if float32:
-    for k in ['image1d_to_buffer_float', 'concatenation_to_buffer_float']:
-      v = open(BASEDIR+"kernels/%s.cl" % k).read()
-      prgs[k] = cl.Program(ctx, v).build().__getattr__(k)
-    for i,k in enumerate(jdat['kernels']):
-      k['name'] = k['name'].replace("_half", "_float")
 
   def runner(inp=[], policy_only=False, vision_only=False, debug=False):
     kernels = []
@@ -232,34 +219,40 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
   return runner
 
 if __name__ == "__main__":
-  runner = load_thneed_model("/data/openpilot/selfdrive/modeld/models/supercombo.thneed" if len(sys.argv) == 1 else sys.argv[1])
+  runner = load_thneed_model("/data/openpilot/selfdrive/modeld/models/supercombo.thneed" if len(sys.argv) == 1 else sys.argv[1], float32=bool(int(os.getenv("FLOAT32", "0"))))
 
-  inputs = [
-    np.zeros((1,512,), dtype=np.float32),
-    np.zeros((1,2), dtype=np.float32),
-    np.zeros((1,8), dtype=np.float32),
-    np.zeros((1,12,128,256), dtype=np.float32),
-    np.zeros((1,12,128,256), dtype=np.float32)]
+  np.random.seed(1338)
+  np_inputs = {
+    "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
+    "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
+    "desire": np.zeros((1, 8)),
+    "traffic_convention": np.array([[1., 0.]]),
+    "initial_state": np.zeros((1, 512))
+  }
+  np_inputs = {k:v.astype(np.float32) for k,v in np_inputs.items()}
+  inputs = list(np_inputs.values())[::-1]
 
   ret = runner(inputs, vision_only=False, debug=True)
   print(ret.shape)
 
   if len(sys.argv) > 2:
     print("comparing to ONNX")
-    from xx.torch.lib.reporter import TorchOnnxRunner
-    mdl = TorchOnnxRunner(sys.argv[2], force_cpu=True)
-    print(mdl.get_inputs())
-    out = mdl.run(dict(zip(mdl.get_inputs(), inputs[::-1])))['outputs'].flatten()
-    print(out.shape)
+    from test.test_onnx import run_onnx_torch
+    from extra.utils import fetch
+    import onnx, io
+    dat = fetch(sys.argv[2])
+    onnx_model = onnx.load(io.BytesIO(dat))
+    out = run_onnx_torch(onnx_model, np_inputs).numpy()[0]
 
     diff = 0
     for i in range(ret.shape[0]):
-      if out[i]-ret[i] > 0.1:
+      if out[i]-ret[i] > 0.1 and (out[i]-ret[i])/out[i] > 0.01:
         print(i, out[i], ret[i], out[i]-ret[i])
         diff += 1
         if diff == 10:
           print("...")
           break
+    assert diff == 0
 
   """
   for i in range(0, len(ret), 0x10):
