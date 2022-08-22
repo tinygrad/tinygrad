@@ -167,7 +167,7 @@ class OpenCLBuffer(GPUBuffer):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
-  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, str, str]:
+  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, Optional[str], str]:
     if x.is_image():
       #print("is image")
       return f"""inline float get_{name}(const sampler_t smp, read_only image2d_t x, int gid) {{
