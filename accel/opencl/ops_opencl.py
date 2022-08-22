@@ -167,6 +167,23 @@ class OpenCLBuffer(GPUBuffer):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
+  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, str]:
+    if x.is_image():
+      #print("is image")
+      return f"""inline float get_{name}(read_only image2d_t x, int gid) {{
+        int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')};
+        const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
+        int2 l;
+        int W = get_image_width(x);
+        l.y = idx / (W*4);
+        l.x = (idx/4) % W;
+        int idx4 = idx % 4;
+        float4 dat = read_imagef(x, smp, l);
+        return valid ? (idx4 == 0 ? dat.x : (idx4 == 1 ? dat.y : (idx4 == 2 ? dat.z : dat.w))) : 0.0;
+      }}""", f"read_only image2d_t {name}_g"
+    #ewtypes.append(f"read_only image2d_t {name}_g")
+    return super().contiguous_view_constant_fold(name)
+
   seen = set()
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
     if C is None or earlycode != "acc":

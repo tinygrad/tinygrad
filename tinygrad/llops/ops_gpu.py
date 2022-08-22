@@ -102,11 +102,11 @@ class GPUBuffer:
   def contiguous_view(x, name:str) -> str:
     return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, bool]:
+  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, str]:
     if x._base_shape == (1,) and x._backing is not None:
-      return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", False
+      return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", None
     else:
-      return x.contiguous_view(name), True
+      return x.contiguous_view(name), f"__global const float *{name}_g"
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
@@ -127,12 +127,12 @@ class GPUBuffer:
 
     kernel_name = "reduce" if red > 1 else "elementwise"
     views = {name:buf.contiguous_view_constant_fold(name) for name, buf in bufs}
-    buf_types = [f"__global const float *{name}_g" for name, _ in bufs if name not in views or views[name][1]] 
+    buf_types = [views[name][1] for name, _ in bufs if views[name][1] is not None]
     conv_prg = CLProgram(kernel_name, f"""{chr(10).join([x[0] for x in views.values()])}
     __kernel void {kernel_name}({','.join(["__global float* restrict output"] + buf_types + (["__local float *temp"] if inter_red > 1 else []))}) {{
       float acc = {GPUBuffer.start_for_op[op]}; int gid = get_global_id(0); {'int mid = get_global_id(1);' if inter_red > 1 else 'int mid = 0;'}
       for (int idx = gid * {red} + {red//inter_red + 1} * mid; idx < gid * {red} + min({red}, {red//inter_red + 1} * (mid+1)); idx++) {{
-{chr(10).join([f'        float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] else f'get_{name}(idx);') for name, _ in bufs if name in earlybufs])}
+{chr(10).join([f'        float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] is not None else f'get_{name}(idx);') for name, _ in bufs if name in earlybufs])}
         acc = {earlycode};
       }}"""+(f"""
       temp[mid] = acc; barrier(CLK_LOCAL_MEM_FENCE);
@@ -144,6 +144,6 @@ class GPUBuffer:
       }}
     }}""")
     conv_prg([prod(ret.shape), inter_red, 1], [1, inter_red, 1] if inter_red > 1 else None, ret.cl,
-      *([buf.cl for name, buf in bufs if name not in views or views[name][1]] + ([cl.LocalMemory(inter_red*4)] if inter_red > 1 else [])),
+      *([buf.cl if 'image2d_t' not in views[name][1] else buf.image for name, buf in bufs if views[name][1] is not None] + ([cl.LocalMemory(inter_red*4)] if inter_red > 1 else [])),
       op_estimate=prod(reduce_shape[0])*len(earlybufs) + prod(reduce_shape[1])*len(bufs))
     return ret
