@@ -57,7 +57,7 @@ def get_getters(ewbufs, ret):
   ewtypes = []
   getters = []
   for name, buf in ewbufs:
-    view, unfolded = buf.contiguous_view_constant_fold(name)
+    view, unfolded, _ = buf.contiguous_view_constant_fold(name)
     if not unfolded:
       getters.append(view)
       fakebufs.append(name)
@@ -167,12 +167,11 @@ class OpenCLBuffer(GPUBuffer):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
-  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, str]:
+  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, str, str]:
     if x.is_image():
       #print("is image")
-      return f"""inline float get_{name}(read_only image2d_t x, int gid) {{
+      return f"""inline float get_{name}(const sampler_t smp, read_only image2d_t x, int gid) {{
         int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')};
-        const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
         int2 l;
         int W = get_image_width(x);
         l.y = idx / (W*4);
@@ -180,7 +179,7 @@ class OpenCLBuffer(GPUBuffer):
         int idx4 = idx % 4;
         float4 dat = read_imagef(x, smp, l);
         return valid ? (idx4 == 0 ? dat.x : (idx4 == 1 ? dat.y : (idx4 == 2 ? dat.z : dat.w))) : 0.0;
-      }}""", f"read_only image2d_t {name}_g"
+      }}""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, idx);"
     #ewtypes.append(f"read_only image2d_t {name}_g")
     return super().contiguous_view_constant_fold(name)
 

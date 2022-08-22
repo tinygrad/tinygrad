@@ -102,11 +102,11 @@ class GPUBuffer:
   def contiguous_view(x, name:str) -> str:
     return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
 
-  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, str]:
+  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, str, str]:
     if x._base_shape == (1,) and x._backing is not None:
-      return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", None
+      return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", None, f"get_{name}(idx);"
     else:
-      return x.contiguous_view(name), f"__global const float *{name}_g"
+      return x.contiguous_view(name), f"__global const float *{name}_g", f"get_{name}({name}_g, idx);"
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
@@ -130,16 +130,17 @@ class GPUBuffer:
     buf_types = [views[name][1] for name, _ in bufs if views[name][1] is not None]
     conv_prg = CLProgram(kernel_name, f"""{chr(10).join([x[0] for x in views.values()])}
     __kernel void {kernel_name}({','.join(["__global float* restrict output"] + buf_types + (["__local float *temp"] if inter_red > 1 else []))}) {{
+      const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
       float acc = {GPUBuffer.start_for_op[op]}; int gid = get_global_id(0); {'int mid = get_global_id(1);' if inter_red > 1 else 'int mid = 0;'}
       for (int idx = gid * {red} + {red//inter_red + 1} * mid; idx < gid * {red} + min({red}, {red//inter_red + 1} * (mid+1)); idx++) {{
-{chr(10).join([f'        float {name} = ' + (f'get_{name}({name}_g, idx);' if views[name][1] is not None else f'get_{name}(idx);') for name, _ in bufs if name in earlybufs])}
+{chr(10).join([f'        float {name} = ' + views[name][2] for name, _ in bufs if name in earlybufs])}
         acc = {earlycode};
-      }}"""+(f"""
+      }} int idx = gid;"""+(f"""
       temp[mid] = acc; barrier(CLK_LOCAL_MEM_FENCE);
       if (mid == 0) {{ acc = {GPUBuffer.start_for_op[op]};
         for (int rdx = 0; rdx < {inter_red}; rdx++) {{ acc = {GPUBuffer.code_for_op[op].replace('A', 'temp[rdx]')}; }}
       """ if inter_red != 1 else "{")+f"""
-{chr(10).join([f'        float {name} = ' + (f'get_{name}({name}_g, gid);' if views[name][1] else f'get_{name}(gid);') for name, _ in bufs if name not in earlybufs])}
+{chr(10).join([f'        float {name} = ' + views[name][2] for name, _ in bufs if name not in earlybufs])}
         output[gid] = {code};
       }}
     }}""")
