@@ -250,7 +250,7 @@ def compile(input, output_fn):
             # multiple of 32 isn't enough
             jdat['objects'].append({
               "id": ptr, "needs_load": needs_load, "size": size, "arg_type": "image2d_t",
-              "width": a.shape[0], "height": a.shape[1], "row_pitch": row_pitch,
+              "width": a.shape[0], "height": a.shape[1], "row_pitch": row_pitch, "float32": not FLOAT16,
             })
 
             if needs_load:
