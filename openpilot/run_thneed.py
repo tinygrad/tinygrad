@@ -17,6 +17,7 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
   q = cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
   mf = cl.mem_flags
   image_fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT if float32 else cl.channel_type.HALF_FLOAT)
+  image_fmt_32 = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
 
   import json
   import traceback
@@ -47,26 +48,27 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
       ptr = nptr
 
     if o['arg_type'] == "image2d_t" or o['arg_type'] == "image1d_t":
+      tfmt = image_fmt_32 if 'float32' in o and o['float32'] else image_fmt
       if o['arg_type'] == "image2d_t":
         if 'buffer_id' in o and o['height'] == 1 and not bufs_loaded[o['buffer_id']]:
           # hack: use a image1d since we can back that with a buffer
-          buf = cl.Image(ctx, mf.READ_WRITE, image_fmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+          buf = cl.Image(ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
         else:
           # buffer isn't supported in image2d, copy buffer into image
           if 'buffer_id' in o and bufs_loaded[o['buffer_id']]:
             arr = np.zeros(bufs[o['buffer_id']].size // 2, dtype=np.float16)
             cl.enqueue_copy(q, arr, bufs[o['buffer_id']])
-            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, image_fmt,
+            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
               shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=arr)
           elif o['needs_load']:
-            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, image_fmt,
+            buf = cl.Image(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
               shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=o['data'])
           else:
-            buf = cl.Image(ctx, mf.READ_WRITE, image_fmt, shape=(o['width'], o['height']))
+            buf = cl.Image(ctx, mf.READ_WRITE, tfmt, shape=(o['width'], o['height']))
       if o['arg_type'] == "image1d_t":
         assert not o['needs_load']
         assert not bufs_loaded[o['buffer_id']]
-        buf = cl.Image(ctx, mf.READ_WRITE, image_fmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+        buf = cl.Image(ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
     else:
       if 'data' in o:
         buf = cl.Buffer(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=o['data'])

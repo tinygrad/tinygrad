@@ -3,6 +3,10 @@ import pickle
 import numpy as np
 
 def fetch(url):
+  if url.startswith("/"):
+    with open(url, "rb") as f:
+      dat = f.read()
+    return dat
   import requests, os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
   if os.path.isfile(fp) and os.stat(fp).st_size > 0 and os.getenv("NOCACHE", None) is None:

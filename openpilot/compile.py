@@ -37,6 +37,11 @@ def get_random_input_tensors():
     "initial_state": np.zeros((1, 512))
     #"initial_state": np.zeros((1, 768))
   }
+
+  #for i,k in enumerate(np_inputs.keys()):
+  #  dat = open("/home/batman/openpilot/xx/ml_tools/snpe/compile_test_data/dlc_input_%d" % i, "rb").read()
+  #  np_inputs[k] = np.frombuffer(dat, np.float32).reshape(np_inputs[k].shape)
+
   np_inputs = {k:v.astype(np.float32) for k,v in np_inputs.items()}
   inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
   for _,v in inputs.items(): v.realize()

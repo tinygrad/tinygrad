@@ -17,8 +17,8 @@ def load(x):
    with open(x) as f:
      ret = f.read()
    return ret
-CONV_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/conv.cl')
-MATMUL_SRC = load(pathlib.Path(__file__).parent.parent.parent / 'accel/opencl/matmul.cl')
+CONV_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/conv.cl')
+MATMUL_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/matmul.cl')
 
 class ECL(CL):
   @staticmethod
