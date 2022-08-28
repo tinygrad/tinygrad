@@ -125,8 +125,8 @@ jobs:
       run: pip install -e '.[gpu,testing]'
     - name: Run Pytest (default)
       run: |
-        UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
         FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
+        UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
         PYTHONPATH="." python3 openpilot/run_thneed.py /tmp/output.thneed https://github.com/commaai/openpilot/raw/ea449f1fe0bbff0eff5b12d64f0b5e75b7983998/selfdrive/modeld/models/supercombo.onnx
 
   testmypy:
