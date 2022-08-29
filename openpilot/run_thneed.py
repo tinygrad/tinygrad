@@ -88,10 +88,12 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
   inputs, vnum, vision, outputs = [], [], [], []
 
   for k in jdat['inputs'] if 'inputs' in jdat else []:
+    print(f"new style input {k['name']} with size {k['size']}")
     inputs.append(bufs[k['buffer_id']])
   for k in jdat['outputs'] if 'outputs' in jdat else []:
     outputs.append(bufs[k['buffer_id']])
 
+  # old style inputs
   for i,k in enumerate(jdat['kernels']):
     if k['name'] == 'zero_pad_image_float':
       inputs.append(bufs[k['args'][1]])
