@@ -29,6 +29,15 @@ class Exp(Function):
   def backward(self, grad_output):
     return self.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output)
 
+class Reciprocal(Function):
+  def forward(self, x):
+    ret = x.unary_op(UnaryOps.RECIPROCAL)
+    self.save_for_backward(ret)
+    return ret
+
+  def backward(self, grad_output):
+    return grad_output.unary_op(UnaryOps.NEG).binary_op(BinaryOps.MUL, self.saved_tensors[0]).binary_op(BinaryOps.MUL, self.saved_tensors[0])
+
 # TODO: add Neg? confirm the optimizer on Sub good enough
 
 # ************* reduce ops *************
@@ -88,9 +97,6 @@ class Mul(Function):
     grad_x = self.saved_tensors[1].binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None
     grad_y = self.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
     return grad_x, grad_y
-
-# TODO: add Div? is the optimizer on Pow good enough?
-# nope, we def need div, can't optimize that
 
 class Pow(Function):
   def forward(self, x, y):

@@ -241,7 +241,7 @@ class Tensor:
 
   # ***** activation functions (unary) *****
 
-  def sigmoid(self): return (1.0 + (-self).exp()) ** -1.0
+  def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
   # TODO: implement generic constant folding
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def swish(self): return self * self.sigmoid()
@@ -268,9 +268,7 @@ class Tensor:
   def sub(self, x): return Tensor.broadcasted(Tensor._sub, self, x)
   def mul(self, x): return Tensor.broadcasted(Tensor._mul, self, x)
   def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
-
-  # TODO: should be broadcasted binary op
-  def div(self, y): return self * (y ** -1.0)
+  def div(self, y): return self * y.reciprocal()
   __truediv__ = div
 
   # ***** functional nn ops *****
