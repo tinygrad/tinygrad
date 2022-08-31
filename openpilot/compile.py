@@ -193,7 +193,6 @@ def compile(input, output_fn):
 
   kernels_to_save = set()
   kernels_to_not_save = set(inputs)
-  import pyopencl as cl
   for self, args in local_cl_cache:
     # output is always the first parameter
     kernels_to_not_save.add(args[2])
