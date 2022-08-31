@@ -8,7 +8,7 @@ def preprocessing_op(x,w,C):
   #print(x.shape, w.shape)
 
   if C.bs > 1 and C.py > 0:
-    # explictly add y-padding for batched inputs
+    # explicitly add y-padding for batched inputs
     # N C H W
     xs = [(0, 0) for _ in x.shape]
     xs[2] = (C.py, C.py)

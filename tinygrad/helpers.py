@@ -18,7 +18,7 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
   bs,cin_,iy,ix = x_shape
 
   # this can change px_ and py_ to make the out_shape right
-  # TOOD: copy padding names from http://nvdla.org/hw/v1/ias/unit_description.html
+  # TODO: copy padding names from http://nvdla.org/hw/v1/ias/unit_description.html
   if out_shape is not None:
     py_ = (out_shape[2] - 1) * sy + 1 + dy * (H-1) - iy - py
     px_ = (out_shape[3] - 1) * sx + 1 + dx * (W-1) - ix - px

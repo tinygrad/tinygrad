@@ -141,7 +141,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     earlycode = "acc"
     conv_args : Optional[ConvArgs] = None
 
-    # if there's *one* processing or reduce op in here, we can corealize it. we can corealize binary op sibilings as well
+    # if there's *one* processing or reduce op in here, we can corealize it. we can corealize binary op siblings as well
     # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
     psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
     if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:

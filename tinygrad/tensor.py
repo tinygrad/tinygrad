@@ -61,7 +61,7 @@ class Tensor:
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
   def numpy(self): return np.array(self.lazydata.toCPU())
   
-  # TOOD: this keeps the legacy behavior working, remove it after refactor
+  # TODO: this keeps the legacy behavior working, remove it after refactor
   @property
   def data(self): return self.numpy()
 
