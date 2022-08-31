@@ -207,7 +207,7 @@ def compile(input, output_fn):
   saved_binaries = set()
 
   kernels_to_save = set()
-  kernels_to_not_save = set(inputs)
+  kernels_to_not_save = set([x.lazydata.realized.cl for x in inputs.values()])
   for self, args in local_cl_cache:
     # output is always the first parameter
     kernels_to_not_save.add(args[2])
@@ -318,6 +318,8 @@ def compile(input, output_fn):
     "name": k
   } for k,v in inputs.items()][::-1]
   print(jdat['inputs'])
+  
+  print(f"saving {len([x for x in jdat['objects'] if x['needs_load']])} objects")
 
   print("saving thneed")
   with open(output_fn, "wb") as f:
