@@ -163,7 +163,7 @@ def compile(input, output_fn):
       runtimes[prg.name.rsplit("_", 1)[0]] += runtime
       if DEBUGCL:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
-        if DEBUGCL >=2 and i == 2: print(prg.prg)
+        if DEBUGCL >=2 and prg.name == "elementwise_166": print(prg.prg)
         #if prg.name == "matmul": print(f"   {args[3].shape} {args[4].shape} -> {args[5].shape}")
       total_runtime += runtime
     for k,v in runtimes.items():
@@ -298,7 +298,8 @@ def compile(input, output_fn):
 
   jdat['inputs'] = [{
     "buffer_id": struct.pack("Q", v.lazydata.realized.cl.global_id).decode("latin_1"),
-    "size": v.lazydata.realized.cl.size,
+    #"size": v.lazydata.realized.cl.size,
+    "size": prod(v.shape)*4,
     "name": k
   } for k,v in inputs.items()][::-1]
   print(jdat['inputs'])
