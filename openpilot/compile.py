@@ -80,6 +80,14 @@ def compile(input, output_fn):
     et = time.monotonic()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
+  # realize all non GCed tensors (fix for batchnorm folding)
+  import gc
+  gc.collect()
+  def tensors_allocated():
+    return [x for x in gc.get_objects() if isinstance(x, Tensor)]
+  for x in tensors_allocated():
+    x.realize()
+
   # real run
   inputs, np_inputs = get_random_input_tensors()
   tinygrad_out = run_onnx(inputs)['outputs']

@@ -81,7 +81,9 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt['perm'])
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
       elif n.op_type == "GlobalAveragePool": ret = inp[0].mean(axis=tuple(range(2, len(inp[0].shape))), keepdim=True)
-      elif n.op_type == "BatchNormalization": ret = batch_normalize(inp[0], inp[1], inp[2], inp[3], inp[4], opt.get('epsilon', 1e-5))
+      elif n.op_type == "BatchNormalization":
+        invstd = inp[4].add(opt.get('epsilon', 1e-5))**-0.5
+        ret = batch_normalize(inp[0], inp[1], inp[2], inp[3], invstd)
       elif n.op_type == "Gemm": ret = inp[0].linear(inp[1].transpose() if opt.get('transB', 0) == 1 else inp[1], inp[2])
       elif n.op_type == "Conv":
         x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)

@@ -1,8 +1,8 @@
 from tinygrad.tensor import Tensor
 
-def batch_normalize(x, weight, bias, mean, var, eps):
+def batch_normalize(x, weight, bias, mean, invstd):
   x = (x - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
-  return x.mul(var.add(eps).reshape(shape=[1, -1, 1, 1])**-0.5) + bias.reshape(shape=[1, -1, 1, 1])
+  return x.mul(invstd.reshape(shape=[1, -1, 1, 1])) + bias.reshape(shape=[1, -1, 1, 1])
 
 class BatchNorm2D:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -18,7 +18,7 @@ class BatchNorm2D:
     if Tensor.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
-      # There's "online" algorithms that fix this
+      # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       x_detached = x.detach()
       batch_mean = x_detached.mean(axis=(0,2,3))
       y = (x_detached - batch_mean.reshape(shape=[1, -1, 1, 1]))
@@ -29,10 +29,12 @@ class BatchNorm2D:
         self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
         self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
         self.num_batches_tracked += 1
+    else:
+      batch_mean, batch_var = self.running_mean, self.running_var
 
-      return batch_normalize(x, self.weight, self.bias, batch_mean, batch_var, self.eps)
-
-    return batch_normalize(x, self.weight, self.bias, self.running_mean, self.running_var, self.eps)
+    # NOTE: this can be precomputed for static inference. if you manually update running_var, you have to reset this
+    if Tensor.training or getattr(self, "batch_invstd", None) is None: self.batch_invstd = batch_var.add(self.eps)**-0.5
+    return batch_normalize(x, self.weight, self.bias, batch_mean, self.batch_invstd)
 
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):
