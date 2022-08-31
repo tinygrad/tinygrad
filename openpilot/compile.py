@@ -57,10 +57,17 @@ def compile(input, output_fn):
   Tensor.no_grad = True
   using_graph = ops.GRAPH
   ops.GRAPH = False
-
-  onnx_model = onnx.load(io.BytesIO(dat))
-  run_onnx = get_run_onnx(onnx_model)
   inputs, _ = get_random_input_tensors()
+
+  if os.getenv("TEST_ENET", None) is not None:
+    from models.efficientnet import EfficientNet
+    Tensor.training = False
+    enet = EfficientNet(number=int(os.getenv("TEST_ENET", None)), has_se=False, input_channels=12, has_fc_output=False)
+    def run_onnx(x):
+      return {"outputs": enet.forward(x['input_imgs'])}
+  else:
+    onnx_model = onnx.load(io.BytesIO(dat))
+    run_onnx = get_run_onnx(onnx_model)
 
   # initial run(s) to load weights
   for _ in range(2):

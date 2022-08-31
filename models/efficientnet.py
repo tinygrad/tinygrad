@@ -52,7 +52,7 @@ class MBConvBlock:
     return x
 
 class EfficientNet:
-  def __init__(self, number=0, classes=1000, has_se=True, track_running_stats=True):
+  def __init__(self, number=0, classes=1000, has_se=True, track_running_stats=True, input_channels=3, has_fc_output=True):
     self.number = number
     global_params = [
       # width, depth
@@ -81,7 +81,7 @@ class EfficientNet:
       return int(math.ceil(global_params[1] * repeats))
 
     out_channels = round_filters(32)
-    self._conv_stem = Tensor.uniform(out_channels, 3, 3, 3)
+    self._conv_stem = Tensor.uniform(out_channels, input_channels, 3, 3)
     self._bn0 = BatchNorm2D(out_channels, track_running_stats=track_running_stats)
     blocks_args = [
       [1, 3, (1,1), 1, 32, 16, 0.25],
@@ -117,8 +117,11 @@ class EfficientNet:
     out_channels = round_filters(1280)
     self._conv_head = Tensor.uniform(out_channels, in_channels, 1, 1)
     self._bn1 = BatchNorm2D(out_channels, track_running_stats=track_running_stats)
-    self._fc = Tensor.uniform(out_channels, classes)
-    self._fc_bias = Tensor.zeros(classes)
+    if has_fc_output:
+      self._fc = Tensor.uniform(out_channels, classes)
+      self._fc_bias = Tensor.zeros(classes)
+    else:
+      self._fc = None
 
   def forward(self, x):
     x = self._bn0(x.conv2d(self._conv_stem, padding=(0,1,0,1), stride=2)).swish()
@@ -126,7 +129,7 @@ class EfficientNet:
     x = self._bn1(x.conv2d(self._conv_head)).swish()
     x = x.avg_pool2d(kernel_size=x.shape[2:4])
     x = x.reshape(shape=(-1, x.shape[1]))
-    return x.linear(self._fc, self._fc_bias)
+    return x.linear(self._fc, self._fc_bias) if self._fc is not None else x
 
   def load_from_pretrained(self):
     model_urls = {

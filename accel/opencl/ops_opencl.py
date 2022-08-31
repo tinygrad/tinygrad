@@ -152,7 +152,7 @@ class OpenCLBuffer(GPUBuffer):
   @property
   def image(self):
     if self._image is None:
-      assert self.shape[2] == 4 and len(self.shape) == 3
+      assert len(self.shape) == 3 and self.shape[2] == 4, f"bad shape for image {self.shape}"
       self._image = ECL.image(shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
