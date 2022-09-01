@@ -131,13 +131,21 @@ __kernel void image_conv(
   }
 #endif
 
-  // output to memory (with binop)
   int2 outputLocation;
-  short outputColumn = startOutputColumn;
   outputLocation.y = outputRow;
+
+  // do binops
+  short outputColumn = startOutputColumn;
   for (short i = 0; i < NUM_OUTPUTS; ++i) {
     outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
     //BINOP
+    ++outputColumn;
+  }
+
+  // output to memory
+  outputColumn = startOutputColumn;
+  for (short i = 0; i < NUM_OUTPUTS; ++i) {
+    outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
     if (outputColumn < numOutputColumns) {
       write_imagef(output, outputLocation, outputValues[i]);
     }
