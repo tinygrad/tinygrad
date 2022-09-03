@@ -1,6 +1,7 @@
 from tinygrad.tensor import Tensor
 import pickle
 import numpy as np
+from tinygrad.helpers import prod
 
 def fetch(url):
   if url.startswith("/"):
@@ -42,7 +43,8 @@ def my_unpickle(fb0):
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
 
-      ret = np.zeros(obj_size, dtype=storage_type)
+      assert prod(args[2]) == obj_size
+      ret = np.zeros(args[2], dtype=storage_type)
       key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
       return ret
 
@@ -79,26 +81,29 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def fake_torch_load_zipped(b0):
-  import io, zipfile
-  with zipfile.ZipFile(io.BytesIO(b0), 'r') as myzip:
+def fake_torch_load_zipped(fb0, load_weights=True):
+  import zipfile
+  with zipfile.ZipFile(fb0, 'r') as myzip:
     with myzip.open('archive/data.pkl') as myfile:
       ret = my_unpickle(myfile)
-    for k,v in ret[1].items():
-      with myzip.open(f'archive/data/{k}') as myfile:
-        v[2][:] = np.frombuffer(myfile.read(), v[2].dtype)
-        v[2].shape = v[3]
+    if load_weights:
+      for k,v in ret[1].items():
+        with myzip.open(f'archive/data/{k}') as myfile:
+          if v[2].dtype == "object":
+            print(f"issue assigning object on {k}")
+            continue
+          np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
   return ret[0]
 
 def fake_torch_load(b0):
-  if b0[0:2] == b"\x50\x4b":
-    return fake_torch_load_zipped(b0)
-
   import io
   import struct
 
   # convert it to a file
   fb0 = io.BytesIO(b0)
+
+  if b0[0:2] == b"\x50\x4b":
+    return fake_torch_load_zipped(fb0)
 
   # skip three junk pickles
   pickle.load(fb0)
