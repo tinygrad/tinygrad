@@ -31,7 +31,12 @@ class Normalize:
     x = x.div((x*x).mean(axis=(2,3,4), keepdim=True).add(eps).sqrt())
 
     # return to old shape
-    return x.reshape((x.shape[0], x.shape[1]*x.shape[2], x.shape[3], x.shape[4]))
+    x = x.reshape((x.shape[0], x.shape[1]*x.shape[2], x.shape[3], x.shape[4]))
+
+    x *= self.weight.reshape((1, -1, 1, 1))
+    x += self.bias.reshape((1, -1, 1, 1))
+
+    return x
 
 
 class AttnBlock:
@@ -85,12 +90,11 @@ class Decoder:
 
     arr = []
     for i,s in enumerate(sz):
-      x = {}
-      if i != 0: x['upsample'] = {"conv": Conv2d(s[0], s[0], 3, padding=1)}
-      x['block'] = [ResnetBlock(s[1], s[0]),
-      ResnetBlock(s[0], s[0]),
-      ResnetBlock(s[0], s[0])]
-      arr.append(x)
+      arr.append({"block":
+        [ResnetBlock(s[1], s[0]),
+         ResnetBlock(s[0], s[0]),
+         ResnetBlock(s[0], s[0])]})
+      if i != 0: arr[-1]['upsample'] = {"conv": Conv2d(s[0], s[0], 3, padding=1)}
     self.up = arr
 
     block_in = 512
@@ -194,30 +198,75 @@ for k,v in dat['state_dict'].items():
   if w is not None:
     assert w.shape == v.shape
 
-
-"""
 IMG = "/Users/kafka/fun/mps/stable-diffusion/outputs/txt2img-samples/grid-0006.png"
 from PIL import Image
-img = Tensor(np.array(Image.open(IMG))).permute((2,0,1)).reshape((1,3,512,512))
-print(img.shape)
-x = model(img)
+realimg = Tensor(np.array(Image.open(IMG))).permute((2,0,1)).reshape((1,3,512,512))*(1/255)
+#print(img.shape)
+#x = model(img)
+
+# PYTHONPATH="$PWD:/Users/kafka/fun/mps/stable-diffusion" 
+from ldm.models.autoencoder import AutoencoderKL
+import torch
+ckpt = torch.load(FILENAME)
+dat = ckpt['state_dict']
+sd = {}
+for k in dat:
+  if k.startswith("first_stage_model."):
+    sd[k[len("first_stage_model."):]] = dat[k]
+print("loading", len(sd))
+
+tmodel = AutoencoderKL(
+  ddconfig = {
+    "double_z": True,
+    "z_channels": 4,
+    "resolution": 256,
+    "in_channels": 3,
+    "out_ch": 3,
+    "ch": 128,
+    "ch_mult": [1,2,4,4],
+    "num_res_blocks": 2,
+    "attn_resolutions": []
+  },
+  lossconfig={"target": "torch.nn.Identity"},
+  embed_dim=4)
+tmodel.load_state_dict(sd, strict=True)
+
 """
-x = Tensor.uniform(1,4,64,64)
+posterior = tmodel.encode(torch.tensor(realimg.numpy()))
+z = posterior.mode()
+print(z.shape)
+#exit(0)
+nz = z.detach().numpy()
+np.save("/tmp/apple.npy", nz)
+exit(0)
+"""
+nz = np.load("datasets/stable_diffusion_apple.npy")
+nz *= -1
+
+#x, latent = tmodel(torch.tensor(realimg.numpy()))
+x = tmodel.decode(torch.tensor(nz))
+x = x.reshape(3,512,512).permute(1,2,0)
+
+"""
+x = Tensor.randn(1,4,64,64)
+x = model.first_stage_model.post_quant_conv(x)
 x = model.first_stage_model.decoder(x)
 
 print(x.shape)
 x = x.reshape((3,512,512)).permute((1,2,0))
 print(x.shape)
 if not REAL: exit(0)
+"""
 
-dat = (x.numpy()*256).astype(np.uint8)
+#dat = (x.detach().numpy()*256).astype(np.uint8)
+dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
 print(dat.shape)
 
 from PIL import Image
 im = Image.fromarray(dat)
 im.save("/tmp/rendered.png")
 
-
+"""
 # ** ldm.models.autoencoder.AutoencoderKL
 # 3x512x512 <--> 4x64x64 (16384)
 # decode torch.Size([1, 4, 64, 64]) torch.Size([1, 3, 512, 512])
@@ -234,4 +283,4 @@ im.save("/tmp/rendered.png")
 
 # ** ldm.modules.encoders.modules.FrozenCLIPEmbedder
 # cond_stage_model.transformer.text_model
-
+"""
