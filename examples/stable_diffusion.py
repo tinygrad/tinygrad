@@ -197,6 +197,7 @@ for k,v in dat['state_dict'].items():
   print(f"{str(v.shape):30s}", w, k)
   if w is not None:
     assert w.shape == v.shape
+    w.assign(v.astype(np.float32))
 
 IMG = "/Users/kafka/fun/mps/stable-diffusion/outputs/txt2img-samples/grid-0006.png"
 from PIL import Image
@@ -230,6 +231,47 @@ tmodel = AutoencoderKL(
   lossconfig={"target": "torch.nn.Identity"},
   embed_dim=4)
 tmodel.load_state_dict(sd, strict=True)
+nz = np.load("datasets/stable_diffusion_apple.npy")
+zmodel = model.first_stage_model
+
+x_torch = torch.tensor(nz)
+x_tiny = Tensor(nz)
+
+x_torch = tmodel.post_quant_conv(x_torch)
+x_tiny = zmodel.post_quant_conv(x_tiny)
+
+x_torch = tmodel.decoder.conv_in(x_torch)
+x_tiny = zmodel.decoder.conv_in(x_tiny)
+
+#x_torch = tmodel.decoder.mid.block_1(x_torch, None)
+#x_tiny = zmodel.decoder.mid['block_1'](x_tiny)
+
+x_torch = tmodel.decoder.mid.block_1.norm1(x_torch)
+x_tiny = zmodel.decoder.mid['block_1'].norm1(x_tiny)
+
+x_torch = x_torch * torch.sigmoid(x_torch)
+x_tiny = x_tiny.swish()
+
+print(zmodel.decoder.mid['block_1'].conv1.weight.shape)
+print(x_tiny.shape)
+
+x_torch = tmodel.decoder.mid.block_1.conv1(x_torch)
+x_tiny = zmodel.decoder.mid['block_1'].conv1(x_tiny)
+
+#print(tmodel.decoder.mid.block_1.conv1.weight)
+#print(zmodel.decoder.mid['block_1'].conv1.weight.numpy())
+
+print(abs(x_torch.detach().numpy() - x_tiny.numpy()).mean())
+print(x_torch.shape, x_tiny.shape)
+
+exit(0)
+
+
+#exit(0)
+
+x = model.first_stage_model.post_quant_conv(x_tiny)
+x = model.first_stage_model.decoder(x)
+x = x.reshape((3,512,512)).permute((1,2,0))
 
 """
 posterior = tmodel.encode(torch.tensor(realimg.numpy()))
@@ -240,12 +282,10 @@ nz = z.detach().numpy()
 np.save("/tmp/apple.npy", nz)
 exit(0)
 """
-nz = np.load("datasets/stable_diffusion_apple.npy")
-nz *= -1
 
 #x, latent = tmodel(torch.tensor(realimg.numpy()))
-x = tmodel.decode(torch.tensor(nz))
-x = x.reshape(3,512,512).permute(1,2,0)
+#x = tmodel.decode(torch.tensor(nz))
+#x = x.reshape(3,512,512).permute(1,2,0)
 
 """
 x = Tensor.randn(1,4,64,64)

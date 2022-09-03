@@ -184,6 +184,13 @@ class TestOps(unittest.TestCase):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
 
+  @unittest.skip
+  def test_sd_big_conv(self):
+    # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
+    helper_test_op([(1,512,64,64), (512,512,3,3)],
+                    lambda x,w: torch.nn.functional.conv2d(x, w),
+                    lambda x,w: x.conv2d(w), atol=1e-4)
+
   def test_biased_conv2d(self):
     C = 8
     helper_test_op([(1,C,5,5), (C,C,1,1), (C,)],
