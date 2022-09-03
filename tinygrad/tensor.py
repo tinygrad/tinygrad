@@ -2,7 +2,7 @@
 from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, argfix
 from typing import List, Tuple, Callable, Optional
 from tinygrad.ops import Device
 
@@ -262,9 +262,9 @@ class Tensor:
 
   # TODO: fix the kwargs problem, then remove these
   # NOTE: perhaps don't, since they create NOOPs if the shape already matches. (now lazy should do this)
-  def reshape(self, shape): return self._reshape(shape=shape) if tuple(self.shape) != tuple(shape) else self
-  def expand(self, shape): return self._expand(shape=shape) if tuple(self.shape) != tuple(shape) else self
-  def permute(self, order): return self._permute(order=order)
+  def reshape(self, shape, *args): shape = argfix(shape, *args); return self._reshape(shape=shape) if tuple(self.shape) != shape else self
+  def expand(self, shape, *args): shape = argfix(shape, *args); return self._expand(shape=shape) if tuple(self.shape) != shape else self
+  def permute(self, order, *args): order = argfix(order, *args); return self._permute(order=order)
 
   def linear(self, weight:Tensor, bias:Tensor):
     shp = [1] * (len(self.shape)-1) + [-1]

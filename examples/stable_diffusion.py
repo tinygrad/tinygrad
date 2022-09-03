@@ -27,8 +27,8 @@ class Normalize:
     # return to old shape
     x = x.reshape((x.shape[0], x.shape[1]*x.shape[2], x.shape[3], x.shape[4]))
 
-    x *= self.weight.reshape((1, -1, 1, 1))
-    x += self.bias.reshape((1, -1, 1, 1))
+    x *= self.weight.reshape(1, -1, 1, 1)
+    x += self.bias.reshape(1, -1, 1, 1)
 
     return x
 
@@ -49,18 +49,18 @@ class AttnBlock:
 
     # compute attention
     b,c,h,w = q.shape
-    q = q.reshape((b,c,h*w))
-    q = q.permute((0,2,1))   # b,hw,c
-    k = k.reshape((b,c,h*w)) # b,c,hw
+    q = q.reshape(b,c,h*w)
+    q = q.permute(0,2,1)   # b,hw,c
+    k = k.reshape(b,c,h*w) # b,c,hw
     w_ = q @ k
     w_ = w_ * (c**(-0.5))
     w_ = w_.softmax()
 
     # attend to values
-    v = v.reshape((b,c,h*w))
-    w_ = w_.permute((0,2,1))
+    v = v.reshape(b,c,h*w)
+    w_ = w_.permute(0,2,1)
     h_ = v @ w_
-    h_ = h_.reshape((b,c,h,w))
+    h_ = h_.reshape(b,c,h,w)
 
     return x + self.proj_out(h_)
 
@@ -114,9 +114,7 @@ class Decoder:
       if 'upsample' in l:
         # https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html ?
         bs,c,py,px = x.shape
-        x = x.reshape((bs, c, py, 1, px, 1))
-        x = x.expand((bs, c, py, 2, px, 2))
-        x = x.reshape((bs, c, py*2, px*2))
+        x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
     
     return self.conv_out(self.norm_out(x).swish())
@@ -197,8 +195,8 @@ class StableDiffusion:
 # cond_stage_model.transformer.text_model
 
 # this is sd-v1-4.ckpt
-#FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
-FILENAME = "/home/kafka/model.ckpt"
+FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
+#FILENAME = "/home/kafka/model.ckpt"
 REAL = int(os.getenv("REAL", 0))
 
 if __name__ == "__main__":
@@ -230,7 +228,7 @@ if __name__ == "__main__":
   x = model.first_stage_model.post_quant_conv(Tensor(nz))
   x = model.first_stage_model.decoder(x)
 
-  x = x.reshape((3,512,512)).permute((1,2,0))
+  x = x.reshape(3,512,512).permute(1,2,0)
   dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
   print(dat.shape)
 
