@@ -1,17 +1,11 @@
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
-# this is sd-v1-4.ckpt
-FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
 
 import os
 import numpy as np
 from extra.utils import fake_torch_load_zipped, get_child
 from tinygrad.nn import Conv2d
 from tinygrad.tensor import Tensor
-
-REAL = int(os.getenv("REAL", 0))
-
-dat = fake_torch_load_zipped(open(FILENAME, "rb"), load_weights=REAL)
 
 class Normalize:
   def __init__(self, in_channels, num_groups=32):
@@ -164,7 +158,6 @@ class Encoder:
 
     return self.conv_out(self.norm_out(x).swish())
 
-
 class AutoencoderKL:
   def __init__(self):
     self.encoder = Encoder()
@@ -175,7 +168,7 @@ class AutoencoderKL:
   def __call__(self, x):
     latent = self.encoder(x)
     latent = self.quant_conv(latent)
-    latent = latent[:, 0:4]   # only the means
+    latent = latent[:, 0:4]  # only the means
     print("latent", latent.shape)
     latent = self.post_quant_conv(latent)
     return self.decoder(latent)
@@ -187,25 +180,77 @@ class StableDiffusion:
   def __call__(self, x):
     return self.first_stage_model(x)
 
-model = StableDiffusion()
+# ** ldm.models.autoencoder.AutoencoderKL (done!)
+# 3x512x512 <--> 4x64x64 (16384)
+# decode torch.Size([1, 4, 64, 64]) torch.Size([1, 3, 512, 512])
+# section 4.3 of paper
+# first_stage_model.encoder, first_stage_model.decoder
 
-for k,v in dat['state_dict'].items():
-  try:
-    w = get_child(model, k)
-  except (AttributeError, KeyError, IndexError):
-    w = None 
-  print(f"{str(v.shape):30s}", w, k)
-  if w is not None:
-    assert w.shape == v.shape
-    w.assign(v.astype(np.float32))
+# ** ldm.modules.diffusionmodules.openaimodel.UNetModel
+# this is what runs each time to sample. is this the LDM?
+# input:  4x64x64
+# output: 4x64x64
+# model.diffusion_model
+# it has attention?
 
-IMG = "/Users/kafka/fun/mps/stable-diffusion/outputs/txt2img-samples/grid-0006.png"
-from PIL import Image
-realimg = Tensor(np.array(Image.open(IMG))).permute((2,0,1)).reshape((1,3,512,512))*(1/255)
+# ** ldm.modules.encoders.modules.FrozenCLIPEmbedder
+# cond_stage_model.transformer.text_model
+
+# this is sd-v1-4.ckpt
+#FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
+FILENAME = "/home/kafka/model.ckpt"
+REAL = int(os.getenv("REAL", 0))
+
+if __name__ == "__main__":
+  model = StableDiffusion()
+
+  # load in weights
+  dat = fake_torch_load_zipped(open(FILENAME, "rb"), load_weights=REAL)
+  for k,v in dat['state_dict'].items():
+    try:
+      w = get_child(model, k)
+    except (AttributeError, KeyError, IndexError):
+      w = None 
+    print(f"{str(v.shape):30s}", w, k)
+    if w is not None:
+      assert w.shape == v.shape
+      w.assign(v.astype(np.float32))
+
+  if not REAL: exit(0)
+
+  # load image
+  #IMG = "/tmp/apple.png"
+  #from PIL import Image
+  #realimg = Tensor(np.array(Image.open(IMG))).permute((2,0,1)).reshape((1,3,512,512))*(1/255)
+  #print(realimg.shape)
+  #x = model(realimg)
+
+  # load latent space
+  nz = np.load("datasets/stable_diffusion_apple.npy")
+  x = model.first_stage_model.post_quant_conv(Tensor(nz))
+  x = model.first_stage_model.decoder(x)
+
+  x = x.reshape((3,512,512)).permute((1,2,0))
+  dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
+  print(dat.shape)
+
+  from PIL import Image
+  im = Image.fromarray(dat)
+  im.save("/tmp/rendered.png")
+
+
+# torch junk
+
+#IMG = "/Users/kafka/fun/mps/stable-diffusion/outputs/txt2img-samples/grid-0006.png"
+#from PIL import Image
+#realimg = Tensor(np.array(Image.open(IMG))).permute((2,0,1)).reshape((1,3,512,512))*(1/255)
 #print(img.shape)
 #x = model(img)
 
+#nz = np.random.randn(*nz.shape) * 100
+
 # PYTHONPATH="$PWD:/Users/kafka/fun/mps/stable-diffusion" 
+"""
 from ldm.models.autoencoder import AutoencoderKL
 import torch
 ckpt = torch.load(FILENAME)
@@ -245,6 +290,7 @@ x_tiny = zmodel.decoder.conv_in(x_tiny)
 
 x_torch = tmodel.decoder.mid.block_1(x_torch, None)
 x_tiny = zmodel.decoder.mid['block_1'](x_tiny)
+"""
 
 """
 x_torch = tmodel.decoder.mid.block_1.norm1(x_torch)
@@ -263,17 +309,14 @@ x_tiny = zmodel.decoder.mid['block_1'].conv1(x_tiny)
 #print(tmodel.decoder.mid.block_1.conv1.weight)
 #print(zmodel.decoder.mid['block_1'].conv1.weight.numpy())
 
-print(abs(x_torch.detach().numpy() - x_tiny.numpy()).mean())
-print(x_torch.shape, x_tiny.shape)
+#print(abs(x_torch.detach().numpy() - x_tiny.numpy()).mean())
+#print(x_torch.shape, x_tiny.shape)
 
 #exit(0)
 
 
 #exit(0)
 
-x = model.first_stage_model.post_quant_conv(Tensor(nz))
-x = model.first_stage_model.decoder(x)
-x = x.reshape((3,512,512)).permute((1,2,0))
 
 """
 posterior = tmodel.encode(torch.tensor(realimg.numpy()))
@@ -300,6 +343,7 @@ print(x.shape)
 if not REAL: exit(0)
 """
 
+"""
 #dat = (x.detach().numpy()*256).astype(np.uint8)
 dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
 print(dat.shape)
@@ -308,21 +352,4 @@ from PIL import Image
 im = Image.fromarray(dat)
 im.save("/tmp/rendered.png")
 
-"""
-# ** ldm.models.autoencoder.AutoencoderKL
-# 3x512x512 <--> 4x64x64 (16384)
-# decode torch.Size([1, 4, 64, 64]) torch.Size([1, 3, 512, 512])
-# section 4.3 of paper
-# first_stage_model.encoder
-# first_stage_model.decoder
-
-# ** ldm.modules.diffusionmodules.openaimodel.UNetModel
-# this is what runs each time to sample. is this the LDM?
-# input:  4x64x64
-# output: 4x64x64
-# model.diffusion_model
-# it has attention?
-
-# ** ldm.modules.encoders.modules.FrozenCLIPEmbedder
-# cond_stage_model.transformer.text_model
 """
