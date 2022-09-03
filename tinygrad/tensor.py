@@ -260,11 +260,10 @@ class Tensor:
 
   # ***** functional nn ops *****
 
-  # TODO: fix the kwargs problem, then remove these
-  # NOTE: perhaps don't, since they create NOOPs if the shape already matches. (now lazy should do this)
-  def reshape(self, shape, *args): shape = argfix(shape, *args); return self._reshape(shape=shape) if tuple(self.shape) != shape else self
-  def expand(self, shape, *args): shape = argfix(shape, *args); return self._expand(shape=shape) if tuple(self.shape) != shape else self
-  def permute(self, order, *args): order = argfix(order, *args); return self._permute(order=order)
+  # TODO: fix the kwargs problem, then remove these (or not, since they now fix tuples)
+  def reshape(self, shape, *args): return self._reshape(shape=argfix(shape, *args))
+  def expand(self, shape, *args): return self._expand(shape=argfix(shape, *args))
+  def permute(self, order, *args): return self._permute(order=argfix(order, *args))
 
   def linear(self, weight:Tensor, bias:Tensor):
     shp = [1] * (len(self.shape)-1) + [-1]

@@ -7,6 +7,7 @@ from extra.utils import fake_torch_load_zipped, get_child
 from tinygrad.nn import Conv2d
 from tinygrad.tensor import Tensor
 
+# TODO: rename to GroupNorm and put in nn.py
 class Normalize:
   def __init__(self, in_channels, num_groups=32):
     self.weight = Tensor.uniform(in_channels)
@@ -14,19 +15,11 @@ class Normalize:
     self.num_groups = num_groups
 
   def __call__(self, x):
-    x = x.reshape(x.shape[0], self.num_groups, x.shape[1]//self.num_groups, x.shape[2], x.shape[3])
+    # reshape for layernorm to work as group norm
+    # subtract mean and divide stddev
+    x = x.reshape(x.shape[0], self.num_groups, -1).layernorm().reshape(x.shape)
 
-    # subtract mean
-    x = x - x.mean(axis=(2,3,4), keepdim=True)
-
-    # divide stddev
-    eps = 1e-5
-    x = x.div((x*x).mean(axis=(2,3,4), keepdim=True).add(eps).sqrt())
-
-    # return to old shape
-    x = x.reshape(x.shape[0], x.shape[1]*x.shape[2], x.shape[3], x.shape[4])
-
-    # elementwise_affine
+    # elementwise_affine on channels
     return (x * self.weight.reshape(1, -1, 1, 1)) + self.bias.reshape(1, -1, 1, 1)
 
 
