@@ -112,12 +112,12 @@ class Decoder:
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-    
-    return self.conv_out(self.norm_out(x).swish())
+
+    return x.sequential([self.norm_out, Tensor.swish, self.conv_out])
 
 
 class Encoder:
-  def __init__(self, decode=False):
+  def __init__(self):
     sz = [(128, 128), (128, 256), (256, 512), (512, 512)]
     self.conv_in = Conv2d(3,128,3, padding=1)
 
@@ -139,9 +139,8 @@ class Encoder:
       print("encode", x.shape)
       for b in l['block']: x = b(x)
       if 'downsample' in l: x = l['downsample']['conv'](x)
-  
-    x = self.mid(x)
-    return self.conv_out(self.norm_out(x).swish())
+
+    return x.sequential([self.mid, self.norm_out, Tensor.swish, self.conv_out])
 
 class AutoencoderKL:
   def __init__(self):
