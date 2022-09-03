@@ -124,8 +124,7 @@ def fake_torch_load(b0):
     assert ll == obj_size
     bytes_size = {np.float32: 4, np.int64: 8}[storage_type]
     mydat = fb0.read(ll * bytes_size)
-    np_array[:] = np.frombuffer(mydat, storage_type)
-    np_array.shape = np_shape
+    np.copyto(np_array, np.frombuffer(mydat, storage_type).reshape(np_shape))
 
     # numpy stores its strides in bytes
     real_strides = tuple([x*bytes_size for x in np_strides])
