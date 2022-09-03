@@ -243,9 +243,10 @@ x_tiny = zmodel.post_quant_conv(x_tiny)
 x_torch = tmodel.decoder.conv_in(x_torch)
 x_tiny = zmodel.decoder.conv_in(x_tiny)
 
-#x_torch = tmodel.decoder.mid.block_1(x_torch, None)
-#x_tiny = zmodel.decoder.mid['block_1'](x_tiny)
+x_torch = tmodel.decoder.mid.block_1(x_torch, None)
+x_tiny = zmodel.decoder.mid['block_1'](x_tiny)
 
+"""
 x_torch = tmodel.decoder.mid.block_1.norm1(x_torch)
 x_tiny = zmodel.decoder.mid['block_1'].norm1(x_tiny)
 
@@ -257,6 +258,7 @@ print(x_tiny.shape)
 
 x_torch = tmodel.decoder.mid.block_1.conv1(x_torch)
 x_tiny = zmodel.decoder.mid['block_1'].conv1(x_tiny)
+"""
 
 #print(tmodel.decoder.mid.block_1.conv1.weight)
 #print(zmodel.decoder.mid['block_1'].conv1.weight.numpy())
@@ -264,12 +266,12 @@ x_tiny = zmodel.decoder.mid['block_1'].conv1(x_tiny)
 print(abs(x_torch.detach().numpy() - x_tiny.numpy()).mean())
 print(x_torch.shape, x_tiny.shape)
 
-exit(0)
+#exit(0)
 
 
 #exit(0)
 
-x = model.first_stage_model.post_quant_conv(x_tiny)
+x = model.first_stage_model.post_quant_conv(Tensor(nz))
 x = model.first_stage_model.decoder(x)
 x = x.reshape((3,512,512)).permute((1,2,0))
 
