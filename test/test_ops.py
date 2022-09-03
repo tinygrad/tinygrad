@@ -50,6 +50,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x*y, Tensor.mul)
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
+  def test_div_const(self):
+    helper_test_op([(45,65)], lambda x: x/255, lambda x: x/255)
   def test_pow(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
   def test_sqrt(self):

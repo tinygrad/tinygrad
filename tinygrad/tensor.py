@@ -242,13 +242,10 @@ class Tensor:
 
   # ***** broadcasted binary ops *****
 
-  # TODO: cache common number Tensors?
-  def from_number_like(self, t): return Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t 
-
   @staticmethod
   def broadcasted(fxn, x, y):
     tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    x,y = [tt.from_number_like(t) for t in [x,y]]
+    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [x,y]]
     x,y = [t.reshape(list(t.shape) + [1]*(max(len(x.shape), len(y.shape))-len(t.shape))) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn(x.expand(shape_ret), y.expand(shape_ret))
@@ -258,7 +255,7 @@ class Tensor:
   def sub(self, x): return Tensor.broadcasted(Tensor._sub, self, x)
   def mul(self, x): return Tensor.broadcasted(Tensor._mul, self, x)
   def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
-  def div(self, y): return self * self.from_number_like(y).reciprocal()
+  def div(self, y): return self * (y.reciprocal() if isinstance(y, Tensor) else (1/y))
   __truediv__ = div
 
   # ***** functional nn ops *****
