@@ -14,8 +14,7 @@ class Normalize:
     self.num_groups = num_groups
 
   def __call__(self, x):
-    print("norm", x.shape)
-    x = x.reshape((x.shape[0], self.num_groups, x.shape[1]//self.num_groups, x.shape[2], x.shape[3]))
+    x = x.reshape(x.shape[0], self.num_groups, x.shape[1]//self.num_groups, x.shape[2], x.shape[3])
 
     # subtract mean
     x = x - x.mean(axis=(2,3,4), keepdim=True)
@@ -25,12 +24,10 @@ class Normalize:
     x = x.div((x*x).mean(axis=(2,3,4), keepdim=True).add(eps).sqrt())
 
     # return to old shape
-    x = x.reshape((x.shape[0], x.shape[1]*x.shape[2], x.shape[3], x.shape[4]))
+    x = x.reshape(x.shape[0], x.shape[1]*x.shape[2], x.shape[3], x.shape[4])
 
-    x *= self.weight.reshape(1, -1, 1, 1)
-    x += self.bias.reshape(1, -1, 1, 1)
-
-    return x
+    # elementwise_affine
+    return (x * self.weight.reshape(1, -1, 1, 1)) + self.bias.reshape(1, -1, 1, 1)
 
 
 class AttnBlock:
@@ -43,7 +40,6 @@ class AttnBlock:
 
   # copied from AttnBlock in ldm repo
   def __call__(self, x):
-    print("attention:", x.shape)
     h_ = self.norm(x)
     q,k,v = self.q(h_), self.k(h_), self.v(h_)
 
@@ -77,10 +73,20 @@ class ResnetBlock:
     h = self.conv2(self.norm2(h).swish())
     return self.nin_shortcut(x) + h
 
+class Mid:
+  def __init__(self, block_in):
+    self.block_1 = ResnetBlock(block_in, block_in)
+    self.attn_1 = AttnBlock(block_in)
+    self.block_2 = ResnetBlock(block_in, block_in)
+
+  def __call__(self, x):
+    return x.sequential([self.block_1, self.attn_1, self.block_2])
+
 class Decoder:
   def __init__(self):
     sz = [(128, 256), (256, 512), (512, 512), (512, 512)]
     self.conv_in = Conv2d(4,512,3, padding=1)
+    self.mid = Mid(512)
 
     arr = []
     for i,s in enumerate(sz):
@@ -91,22 +97,12 @@ class Decoder:
       if i != 0: arr[-1]['upsample'] = {"conv": Conv2d(s[0], s[0], 3, padding=1)}
     self.up = arr
 
-    block_in = 512
-    self.mid = {
-      "block_1": ResnetBlock(block_in, block_in),
-      "attn_1": AttnBlock(block_in),
-      "block_2": ResnetBlock(block_in, block_in),
-    }
-
     self.norm_out = Normalize(128)
     self.conv_out = Conv2d(128, 3, 3, padding=1)
 
   def __call__(self, x):
     x = self.conv_in(x)
-
-    x = self.mid['block_1'](x)
-    x = self.mid['attn_1'](x)
-    x = self.mid['block_2'](x)
+    x = self.mid(x)
 
     for l in self.up[::-1]:
       print("decode", x.shape)
@@ -133,15 +129,9 @@ class Encoder:
       if i != 3: arr[-1]['downsample'] = {"conv": Conv2d(s[1], s[1], 3, stride=2, padding=(0,1,0,1))}
     self.down = arr
 
-    block_in = 512
-    self.mid = {
-      "block_1": ResnetBlock(block_in, block_in),
-      "attn_1": AttnBlock(block_in),
-      "block_2": ResnetBlock(block_in, block_in),
-    }
-
-    self.norm_out = Normalize(block_in)
-    self.conv_out = Conv2d(block_in, 8, 3, padding=1)
+    self.mid = Mid(512)
+    self.norm_out = Normalize(512)
+    self.conv_out = Conv2d(512, 8, 3, padding=1)
 
   def __call__(self, x):
     x = self.conv_in(x)
@@ -150,10 +140,7 @@ class Encoder:
       for b in l['block']: x = b(x)
       if 'downsample' in l: x = l['downsample']['conv'](x)
   
-    x = self.mid['block_1'](x)
-    x = self.mid['attn_1'](x)
-    x = self.mid['block_2'](x)
-
+    x = self.mid(x)
     return self.conv_out(self.norm_out(x).swish())
 
 class AutoencoderKL:
