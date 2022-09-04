@@ -11,7 +11,7 @@ from tinygrad.ops import LazyBuffer
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  training, no_grad = False, False
+  training, no_grad, no_init = False, False, False
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
     if isinstance(data, list):

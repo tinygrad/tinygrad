@@ -208,14 +208,17 @@ class CrossAttention:
 
     # compute attention
     b,hw,c = q.shape
-    print(q.shape, k.shape, v.shape)
+    print("cross attention", q.shape, k.shape, v.shape)
     k = k.permute(0,2,1) # b,c,hw
     w_ = q @ k
     w_ = w_ * (c**(-0.5))
     w_ = w_.softmax()
 
     # attend to values
-    h_ = v @ w_
+    # TODO: ugh this is probably wrong
+    #print(v.shape, w_.shape)
+    h_ = w_ @ v
+    #print(h_.shape)
 
     return h_.sequential(self.to_out)
 
@@ -274,11 +277,19 @@ class SpatialTransformer:
 
 class Downsample:
   def __init__(self, channels):
-    self.op = Conv2d(channels, channels, 3, padding=1)
+    self.op = Conv2d(channels, channels, 3, stride=2, padding=(0,1,0,1))
+
+  def __call__(self, x):
+    return self.op(x)
 
 class Upsample:
   def __init__(self, channels):
     self.conv = Conv2d(channels, channels, 3, padding=1)
+
+  def __call__(self, x):
+    bs,c,py,px = x.shape
+    x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
+    return self.conv(x)
 
 class UNetModel:
   def __init__(self):
@@ -288,7 +299,7 @@ class UNetModel:
       Linear(1280, 1280),
     ]
     self.input_blocks = [
-      [Conv2d(4, 320, kernel_size=3)],
+      [Conv2d(4, 320, kernel_size=3, padding=1)],
       # TODO: my head sizes and counts are a guess
       [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 10, 32)],
       [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 10, 32)],
@@ -338,12 +349,17 @@ class UNetModel:
       else: x = bb(x)
       return x
 
-    for b in self.input_blocks:
+    saved_inputs = []
+    for i,b in enumerate(self.input_blocks):
+      print("input block", i)
       for bb in b:
         x = run(x, bb)
+      saved_inputs.append(x)
     for bb in self.middle_block:
       x = run(x, bb)
-    for b in self.output_blocks:
+    for i,b in enumerate(self.output_blocks):
+      print("output block", i)
+      x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
     return x.sequential(self.out)
@@ -354,7 +370,7 @@ class StableDiffusion:
     #self.first_stage_model = AutoencoderKL()
   
   def __call__(self, x):
-    context = Tensor.uniform(1, 3844, 768)
+    context = Tensor.uniform(1, 77, 768)
     return self.model.diffusion_model(x, context)
     #return self.first_stage_model(x)
 
@@ -380,6 +396,7 @@ FILENAME = "/home/kafka/model.ckpt"
 REAL = int(os.getenv("REAL", 0))
 
 if __name__ == "__main__":
+  Tensor.no_init = True
   model = StableDiffusion()
 
   # load in weights

@@ -138,7 +138,7 @@ class ShapeTracker:
 
   def expand(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
-    assert all([x == y or x == 1 for x,y in zip(self.shape, new_shape)])
+    assert all([x == y or x == 1 for x,y in zip(self.shape, new_shape)]), f"can't expand {self.shape} into {new_shape}"
     strides = [s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape))]
     self.views[-1] = View(new_shape, strides, self.offset)
 
