@@ -367,7 +367,7 @@ class UNetModel:
 class StableDiffusion:
   def __init__(self):
     self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
-    #self.first_stage_model = AutoencoderKL()
+    self.first_stage_model = AutoencoderKL()
   
   def __call__(self, x):
     context = Tensor.uniform(1, 77, 768)
@@ -397,6 +397,8 @@ REAL = int(os.getenv("REAL", 0))
 
 if __name__ == "__main__":
   Tensor.no_init = True
+  # WTF!! no_grad brakes it
+  #Tensor.no_grad = True
   model = StableDiffusion()
 
   # load in weights
@@ -412,10 +414,27 @@ if __name__ == "__main__":
       assert w.shape == v.shape
       w.assign(v.astype(np.float32))
 
-  out = model(Tensor.zeros(1,4,64,64))
+  # load apple latent space
+  nz = Tensor(np.load("datasets/stable_diffusion_apple.npy"))
+
+  # run one pass of unet
+  nz = model(nz)
+  del model.model
+
+  # clear unet
+  nz = nz.detach()
+  import gc
+  gc.collect()
+  import torch
+  torch.cuda.empty_cache()
+
+  """
   print(out)
+  print(out.numpy())
+  exit(0)
 
   if not REAL: exit(0)
+  """
 
   # load image
   #IMG = "/tmp/apple.png"
@@ -425,8 +444,7 @@ if __name__ == "__main__":
   #x = model(realimg)
 
   # load latent space
-  nz = np.load("datasets/stable_diffusion_apple.npy")
-  x = model.first_stage_model.post_quant_conv(Tensor(nz))
+  x = model.first_stage_model.post_quant_conv(nz)
   x = model.first_stage_model.decoder(x)
 
   x = x.reshape(3,512,512).permute(1,2,0)
