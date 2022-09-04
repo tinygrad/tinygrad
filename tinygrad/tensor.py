@@ -97,7 +97,7 @@ class Tensor:
 
   # TODO: uniform should be a late binding thing
   @classmethod
-  def uniform(cls, *shape, **kwargs): s = prod(shape)**-0.5; return cls(((np.random.default_rng().random(size=shape, dtype=np.float32) * (s * 2) - s)), **kwargs)
+  def uniform(cls, *shape, **kwargs): return cls(((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * prod(shape)**-0.5), **kwargs)
 
   @classmethod
   def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
