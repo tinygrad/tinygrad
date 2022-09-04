@@ -90,17 +90,17 @@ class Tensor:
   def empty(cls, *shape, **kwargs): return cls(np.empty(shape, dtype=np.float32), **kwargs)
 
   @classmethod
-  def randn(cls, *shape, **kwargs): return cls(np.random.randn(*shape).astype(np.float32), **kwargs)
+  def randn(cls, *shape, **kwargs): return cls(np.random.default_rng().standard_normal(size=shape, dtype=np.float32), **kwargs)
   
   @classmethod
-  def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop).astype(np.float32), **kwargs)
+  def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop, dtype=np.float32), **kwargs)
 
   # TODO: uniform should be a late binding thing
   @classmethod
-  def uniform(cls, *shape, **kwargs): return cls((np.random.uniform(-1., 1., size=shape)/np.sqrt(prod(shape))).astype(np.float32), **kwargs)
+  def uniform(cls, *shape, **kwargs): return cls(((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * prod(shape)**-0.5), **kwargs)
 
   @classmethod
-  def eye(cls, dim, **kwargs): return cls(np.eye(dim).astype(np.float32), **kwargs)
+  def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
 
   # ***** toposort and backward pass *****
 
