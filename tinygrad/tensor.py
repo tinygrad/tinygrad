@@ -87,11 +87,15 @@ class Tensor:
   def ones(cls, *shape, **kwargs): return cls(np.ones(shape, dtype=np.float32), **kwargs)
 
   @classmethod
+  def empty(cls, *shape, **kwargs): return cls(np.empty(shape, dtype=np.float32), **kwargs)
+
+  @classmethod
   def randn(cls, *shape, **kwargs): return cls(np.random.randn(*shape).astype(np.float32), **kwargs)
   
   @classmethod
   def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop).astype(np.float32), **kwargs)
 
+  # TODO: uniform should be a late binding thing
   @classmethod
   def uniform(cls, *shape, **kwargs): return cls((np.random.uniform(-1., 1., size=shape)/np.sqrt(prod(shape))).astype(np.float32), **kwargs)
 
@@ -146,8 +150,14 @@ class Tensor:
     shape_cumsum = [0, *itertools.accumulate(y.shape[dim] for y in args)]
     slc = [[(0, s) for s in self.shape] for _ in args]
     for s,k in zip(slc, shape_cumsum): s[dim] = (-k, shape_cumsum[-1]-k)
-    slices = [arg.slice(arg=s) for arg,s in zip(args, slc)]
-    return functools.reduce(Tensor.__iadd__, slices)
+    return functools.reduce(Tensor.__iadd__, [arg.slice(arg=s) for arg,s in zip(args, slc)])
+
+  # TODO: make this nicer with syntactic sugar in slice
+  def chunk(self, num, dim):
+    slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
+    for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
+      slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
+    return [self.slice(arg=p) for p in slice_params]
 
   def matmul(self:Tensor, w:Tensor):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
@@ -232,6 +242,7 @@ class Tensor:
   # TODO: implement generic constant folding
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def swish(self): return self * self.sigmoid()
+  silu = swish   # The SiLU function is also known as the swish function.
   def relu6(self): return self.relu() - (self-6).relu()
   def hardswish(self): return self * (self+3).relu6() * (1/6)
   def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
@@ -265,9 +276,10 @@ class Tensor:
   def expand(self, shape, *args): return self._expand(shape=argfix(shape, *args))
   def permute(self, order, *args): return self._permute(order=argfix(order, *args))
 
-  def linear(self, weight:Tensor, bias:Tensor):
+  def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     shp = [1] * (len(self.shape)-1) + [-1]
-    return (self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)).add(bias.reshape(shape=shp))
+    x = self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)
+    return x.add(bias.reshape(shape=shp)) if bias is not None else x
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
 
