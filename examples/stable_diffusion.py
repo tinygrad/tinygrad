@@ -583,14 +583,18 @@ if __name__ == "__main__":
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  alphas = [0.9983, 0.6722, 0.2750, 0.0557]
-  alphas_prev = [0.9991499781608582, 0.9982960224151611, 0.6721514463424683, 0.27499905228614807]
-  sigmas = [0,0,0,0]
-  sqrt_one_minus_alphas = [0.0413, 0.5726, 0.8515, 0.9717]
+  #alphas = [0.9983, 0.6722, 0.2750, 0.0557]
+  #alphas_prev = [0.9991499781608582, 0.9982960224151611, 0.6721514463424683, 0.27499905228614807]
+
+  alphas = [0.9983, 0.8930, 0.7521, 0.5888, 0.4229, 0.2750, 0.1598, 0.0819, 0.0365, 0.0140]
+  alphas_prev = [1.0, 0.9983, 0.8930, 0.7521, 0.5888, 0.4229, 0.2750, 0.1598, 0.0819, 0.0365]
 
   def get_x_prev_and_pred_x0(x, e_t, index):
     temperature = 1
-    a_t, a_prev, sigma_t, sqrt_one_minus_at = alphas[index], alphas_prev[index], sigmas[index], sqrt_one_minus_alphas[index]
+    a_t, a_prev = alphas[index], alphas_prev[index]
+    sigma_t = 0
+    sqrt_one_minus_at = math.sqrt(1-a_t)
+
     pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
 
     # direction pointing to x_t
@@ -604,7 +608,8 @@ if __name__ == "__main__":
   latent = Tensor.randn(1,4,64,64)
 
   # is this the diffusion?
-  for index, timestep in tqdm(list(enumerate([1, 251, 501, 751]))[::-1]):
+  #for index, timestep in tqdm(list(enumerate([1, 251, 501, 751]))[::-1]):
+  for index, timestep in tqdm(list(enumerate([1, 101, 201, 301, 401, 501, 601, 701, 801, 901]))[::-1]):
     print(index, timestep)
     e_t = get_model_output(latent, timestep)
     #print(e_t.numpy())
