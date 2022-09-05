@@ -364,11 +364,115 @@ class UNetModel:
         x = run(x, bb)
     return x.sequential(self.out)
 
+class CLIPMLP:
+  def __init__(self):
+    self.fc1 = Linear(768, 3072)
+    self.fc2 = Linear(3072, 768)
+
+  def __call__(self, hidden_states):
+    hidden_states = self.fc1(hidden_states)
+    hidden_states = hidden_states.quick_gelu()
+    hidden_states = self.fc2(hidden_states)
+    return hidden_states
+
+class CLIPAttention:
+  def __init__(self):
+    self.embed_dim = 768
+    self.num_heads = 12
+    self.head_dim = self.embed_dim // self.num_heads
+    self.scale = self.head_dim**-0.5
+    self.k_proj = Linear(self.embed_dim, self.embed_dim)
+    self.v_proj = Linear(self.embed_dim, self.embed_dim)
+    self.q_proj = Linear(self.embed_dim, self.embed_dim)
+    self.out_proj = Linear(self.embed_dim, self.embed_dim)
+
+  def _shape(self, tensor, seq_len: int, bsz: int):
+    return tensor.reshape(bsz, seq_len, self.num_heads, self.head_dim).permute(0,2,1,3)
+
+  def __call__(self, hidden_states):
+    bsz, tgt_len, embed_dim = hidden_states.shape
+
+    query_states = self.q_proj(hidden_states) * self.scale
+    key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
+    value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
+
+    proj_shape = (bsz * self.num_heads, -1, self.head_dim)
+    query_states = self._shape(query_states, tgt_len, bsz).reshape(*proj_shape)
+    key_states = key_states.reshape(*proj_shape)
+    value_states = value_states.reshape(*proj_shape)
+
+    attn_weights = query_states @ key_states.permute(0,2,1)
+    attn_weights = attn_weights.softmax()
+
+    attn_output = attn_weights @ value_states
+
+    attn_output = attn_output.reshape(bsz, self.num_heads, tgt_len, self.head_dim)
+    attn_output = attn_output.permute(0,2,1,3)
+    attn_output = attn_output.reshape(bsz, tgt_len, embed_dim)
+
+    attn_output = self.out_proj(attn_output)
+    return attn_output
+
+class CLIPEncoderLayer:
+  def __init__(self):
+    self.self_attn = CLIPAttention()
+    self.layer_norm1 = Normalize(768, num_groups=1)
+    self.mlp = CLIPMLP()
+    self.layer_norm2 = Normalize(768, num_groups=1)
+
+  def __call__(self, hidden_states):
+    residual = hidden_states
+    hidden_states = self.layer_norm1(hidden_states)
+    hidden_states = self.self_attn(hidden_states)
+    hidden_states = residual + hidden_states
+
+    residual = hidden_states
+    hidden_states = self.layer_norm2(hidden_states)
+    hidden_states = self.mlp(hidden_states)
+    hidden_states = residual + hidden_states
+
+    return hidden_states
+
+class CLIPEncoder:
+  def __init__(self):
+    self.layers = [CLIPEncoderLayer() for i in range(12)]
+  
+  def __call__(self, hidden_states):
+    return hidden_states.sequential(self.layers)
+
+class CLIPTextEmbeddings:
+  def __init__(self):
+    self.position_ids = Tensor.empty(1, 77)
+    self.token_embedding = {"weight": Tensor.empty(49408, 768)}
+    self.position_embedding = {"weight": Tensor.empty(77, 768)}
+
+  def __call__(self, input_ids, position_ids):
+    # TODO: actually support batches
+    inputs = np.zeros((1, len(input_ids), 49408))
+    positions = np.zeros((1, len(position_ids), 77))
+    for i,x in enumerate(input_ids): inputs[0][i][x] = 1
+    for i,x in enumerate(position_ids): positions[0][i][x] = 1
+    inputs_embeds = Tensor(inputs, device=self.token_embedding['weight'].device) @ self.token_embedding['weight']
+    position_embeddings = Tensor(positions, device=self.position_embedding['weight'].device) @ self.position_embedding['weight'] 
+    return inputs_embeds + position_embeddings
+
+class CLIPTextTransformer:
+  def __init__(self):
+    self.embeddings = CLIPTextEmbeddings()
+    self.encoder = CLIPEncoder()
+    self.final_layer_norm = Normalize(768, num_groups=1)
+
+  def __call__(self, input_ids):
+    x = self.embeddings(input_ids, list(range(len(input_ids))))
+    x = self.encoder(x)
+    return self.final_layer_norm(x)
+
 class StableDiffusion:
   def __init__(self):
-    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
-    self.first_stage_model = AutoencoderKL()
-  
+    #self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
+    #self.first_stage_model = AutoencoderKL()
+    self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
+
   def __call__(self, x):
     context = Tensor.uniform(1, 77, 768)
     return self.model.diffusion_model(x, context)
@@ -413,6 +517,11 @@ if __name__ == "__main__":
     if w is not None:
       assert w.shape == v.shape
       w.assign(v.astype(np.float32))
+
+  outs = model.cond_stage_model.transformer.text_model([1,2,3])
+  print(outs.numpy())
+
+  exit(0)
 
   # load apple latent space
   nz = Tensor(np.load("datasets/stable_diffusion_apple.npy"))

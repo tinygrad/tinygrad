@@ -112,7 +112,7 @@ class ShapeTracker:
 
   def permute(self, *axis):
     assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape)
+    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View([self.shape[a] for a in axis], [self.strides[a] for a in axis], self.offset)
 
   # TODO: this is a special case of slice with strides, remove it

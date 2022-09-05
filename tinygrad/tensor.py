@@ -180,6 +180,7 @@ class Tensor:
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Tuple[int, ...]): return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
+  # TODO: this is totally not transpose
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
@@ -247,6 +248,7 @@ class Tensor:
   def hardswish(self): return self * (self+3).relu6() * (1/6)
   def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
   def gelu(self): return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
+  def quick_gelu(self): return self * (self * 1.702).sigmoid()
   def leakyrelu(self, neg_slope=0.01): return self.relu() - (-neg_slope*self).relu()
   def mish(self): return self * self.softplus().tanh()
   def softplus(self, limit=20, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
