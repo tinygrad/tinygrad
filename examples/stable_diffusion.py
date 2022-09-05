@@ -5,6 +5,7 @@ import os
 import math
 import numpy as np
 import traceback
+from tqdm import tqdm
 from collections import namedtuple
 from extra.utils import fake_torch_load_zipped, get_child
 from tinygrad.nn import Conv2d
@@ -545,8 +546,8 @@ REAL = int(os.getenv("REAL", 0))
 
 if __name__ == "__main__":
   Tensor.no_init = True
-  # WTF!! no_grad brakes it
-  #Tensor.no_grad = True
+  # WTF!! no_grad breaks it
+  Tensor.no_grad = True
   model = StableDiffusion()
 
   # load in weights
@@ -572,9 +573,9 @@ if __name__ == "__main__":
   unconditional_context = model.cond_stage_model.transformer.text_model(phrase)
   print("got unconditional CLIP context", unconditional_context.shape)
 
-  def get_model_output(latent):
+  def get_model_output(latent, t):
     # put into diffuser
-    timesteps = Tensor([1])
+    timesteps = Tensor([t])
     unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context)
 
     latent = model.model.diffusion_model(latent, timesteps, context)
@@ -582,9 +583,14 @@ if __name__ == "__main__":
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
+  alphas = [0.9983, 0.6722, 0.2750, 0.0557]
+  alphas_prev = [0.9991499781608582, 0.9982960224151611, 0.6721514463424683, 0.27499905228614807]
+  sigmas = [0,0,0,0]
+  sqrt_one_minus_alphas = [0.0413, 0.5726, 0.8515, 0.9717]
+
   def get_x_prev_and_pred_x0(x, e_t, index):
     temperature = 1
-    a_t, a_prev, sigma_t, sqrt_one_minus_at = 0.9983, 0.9991, 0., 0.0413
+    a_t, a_prev, sigma_t, sqrt_one_minus_at = alphas[index], alphas_prev[index], sigmas[index], sqrt_one_minus_alphas[index]
     pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
 
     # direction pointing to x_t
@@ -598,15 +604,16 @@ if __name__ == "__main__":
   latent = Tensor.randn(1,4,64,64)
 
   # is this the diffusion?
-  index = 0
-  e_t = get_model_output(latent)
-  print(e_t.numpy())
-  x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
-  #e_t_next = get_model_output(x_prev)
-  #e_t_prime = (e_t + e_t_next) / 2
-  #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
-
-  latent = x_prev
+  for index, timestep in tqdm(list(enumerate([1, 251, 501, 751]))[::-1]):
+    print(index, timestep)
+    e_t = get_model_output(latent, timestep)
+    #print(e_t.numpy())
+    x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
+    #e_t_next = get_model_output(x_prev)
+    #e_t_prime = (e_t + e_t_next) / 2
+    #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
+    latent = x_prev
+    latent.realize()
 
   print(latent.numpy())
   #exit(0)
@@ -615,7 +622,7 @@ if __name__ == "__main__":
   #latent = Tensor(np.load("datasets/stable_diffusion_apple.npy"))
 
   # upsample latent space to image with autoencoder
-  x = model.first_stage_model.post_quant_conv(latent)
+  x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)
   x = model.first_stage_model.decoder(x)
 
   # make image correct size and scale
