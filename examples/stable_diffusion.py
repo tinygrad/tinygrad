@@ -2,6 +2,7 @@
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 
 import os
+import math
 import numpy as np
 import traceback
 from collections import namedtuple
@@ -19,7 +20,11 @@ class Normalize:
   def __call__(self, x):
     # reshape for layernorm to work as group norm
     # subtract mean and divide stddev
-    x = x.reshape(x.shape[0], self.num_groups, -1).layernorm().reshape(x.shape)
+    if self.num_groups == None:  # just layernorm
+      x = x.layernorm()
+    else:
+      x = x.reshape(x.shape[0], self.num_groups, -1).layernorm().reshape(x.shape)
+    #print(x.shape)
 
     # elementwise_affine on channels
     if len(x.shape) == 4:
@@ -192,34 +197,34 @@ class ResBlock:
     emb_out = emb.sequential(self.emb_layers)
     h = h + emb_out
     h = h.sequential(self.out_layers)
-    return self.skip_connection(x) + h
+    ret = self.skip_connection(x) + h
+    #print(ret.numpy())
+    return ret
 
 class CrossAttention:
   def __init__(self, query_dim, context_dim, n_heads, d_head):
     self.to_q = Linear(query_dim, n_heads*d_head, bias=False)
     self.to_k = Linear(context_dim, n_heads*d_head, bias=False)
     self.to_v = Linear(context_dim, n_heads*d_head, bias=False)
+    self.num_heads = n_heads
+    self.head_size = d_head
     self.to_out = [Linear(n_heads*d_head, query_dim)]
 
   # TODO: this is probably very wrong
   def __call__(self, x, context=None):
     context = x if context is None else context
+    #print(x.numpy())
     q,k,v = self.to_q(x), self.to_k(context), self.to_v(context)
+    #print(q.numpy())
+    q = q.reshape(x.shape[0], -1, self.num_heads, self.head_size).permute(0,2,1,3)  # (bs, num_heads, time, head_size)
+    k = k.reshape(x.shape[0], -1, self.num_heads, self.head_size).permute(0,2,3,1)  # (bs, num_heads, head_size, time)
+    v = v.reshape(x.shape[0], -1, self.num_heads, self.head_size).permute(0,2,1,3)  # (bs, num_heads, time, head_size)
 
-    # compute attention
-    b,hw,c = q.shape
-    print("cross attention", q.shape, k.shape, v.shape)
-    k = k.permute(0,2,1) # b,c,hw
-    w_ = q @ k
-    w_ = w_ * (c**(-0.5))
-    w_ = w_.softmax()
+    score = q.dot(k) * (1 / np.sqrt(self.head_size))
+    weights = score.softmax()                     # (bs, num_heads, time, time)
+    attention = weights.dot(v).permute(0,2,1,3)   # (bs, time, num_heads, head_size)
 
-    # attend to values
-    # TODO: ugh this is probably wrong
-    #print(v.shape, w_.shape)
-    h_ = w_ @ v
-    #print(h_.shape)
-
+    h_ = attention.reshape(shape=(x.shape[0], -1, self.num_heads * self.head_size))
     return h_.sequential(self.to_out)
 
 class GEGLU:
@@ -247,13 +252,15 @@ class BasicTransformerBlock:
     self.attn1 = CrossAttention(dim, dim, n_heads, d_head)
     self.ff = FeedForward(dim)
     self.attn2 = CrossAttention(dim, context_dim, n_heads, d_head)
-    self.norm1 = Normalize(dim, num_groups=1)
-    self.norm2 = Normalize(dim, num_groups=1)
-    self.norm3 = Normalize(dim, num_groups=1)
+    self.norm1 = Normalize(dim, num_groups=None)
+    self.norm2 = Normalize(dim, num_groups=None)
+    self.norm3 = Normalize(dim, num_groups=None)
 
   def __call__(self, x, context=None):
+    #print(self.norm1(x).numpy())
     x = self.attn1(self.norm1(x)) + x
     x = self.attn2(self.norm2(x), context=context) + x
+    #print(x.numpy())
     x = self.ff(self.norm3(x)) + x
     return x
 
@@ -269,11 +276,14 @@ class SpatialTransformer:
     x_in = x
     x = self.norm(x)
     x = self.proj_in(x)
+    # correct to here
     x = x.reshape(b, c, h*w).permute(0,2,1)
     for block in self.transformer_blocks:
       x = block(x, context=context)
+    #print(x.shape, x.numpy())
     x = x.permute(0,2,1).reshape(b, c, h, w)
-    return self.proj_out(x) + x_in
+    ret = self.proj_out(x) + x_in
+    return ret
 
 class Downsample:
   def __init__(self, channels):
@@ -291,6 +301,13 @@ class Upsample:
     x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
     return self.conv(x)
 
+def timestep_embedding(timesteps, dim, max_period=10000):
+  half = dim // 2
+  freqs = np.exp(-math.log(max_period) * np.arange(0, half, dtype=np.float32) / half)
+  args = timesteps.numpy() * freqs
+  embedding = np.concatenate([np.cos(args), np.sin(args)])
+  return Tensor(embedding).reshape(1, -1)
+
 class UNetModel:
   def __init__(self):
     self.time_embed = [
@@ -301,36 +318,36 @@ class UNetModel:
     self.input_blocks = [
       [Conv2d(4, 320, kernel_size=3, padding=1)],
       # TODO: my head sizes and counts are a guess
-      [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 10, 32)],
-      [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 10, 32)],
+      [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
+      [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
       [Downsample(320)],
-      [ResBlock(320, 1280, 640), SpatialTransformer(640, 768, 10, 64)],
-      [ResBlock(640, 1280, 640), SpatialTransformer(640, 768, 10, 64)],
+      [ResBlock(320, 1280, 640), SpatialTransformer(640, 768, 8, 80)],
+      [ResBlock(640, 1280, 640), SpatialTransformer(640, 768, 8, 80)],
       [Downsample(640)],
-      [ResBlock(640, 1280, 1280), SpatialTransformer(1280, 768, 10, 128)],
-      [ResBlock(1280, 1280, 1280), SpatialTransformer(1280, 768, 10, 128)],
+      [ResBlock(640, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
+      [ResBlock(1280, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
       [Downsample(1280)],
       [ResBlock(1280, 1280, 1280)],
       [ResBlock(1280, 1280, 1280)]
     ]
     self.middle_block = [
       ResBlock(1280, 1280, 1280),
-      SpatialTransformer(1280, 768, 10, 128),
+      SpatialTransformer(1280, 768, 8, 160),
       ResBlock(1280, 1280, 1280)
     ]
     self.output_blocks = [
       [ResBlock(2560, 1280, 1280)],
       [ResBlock(2560, 1280, 1280)],
       [ResBlock(2560, 1280, 1280), Upsample(1280)],
-      [ResBlock(2560, 1280, 1280), SpatialTransformer(1280, 768, 10, 128)],
-      [ResBlock(2560, 1280, 1280), SpatialTransformer(1280, 768, 10, 128)],
-      [ResBlock(1920, 1280, 1280), SpatialTransformer(1280, 768, 10, 128), Upsample(1280)],
-      [ResBlock(1920, 1280, 640), SpatialTransformer(640, 768, 10, 64)],  # 6
-      [ResBlock(1280, 1280, 640), SpatialTransformer(640, 768, 10, 64)],
-      [ResBlock(960, 1280, 640), SpatialTransformer(640, 768, 10, 64), Upsample(640)],
-      [ResBlock(960, 1280, 320), SpatialTransformer(320, 768, 10, 32)],
-      [ResBlock(640, 1280, 320), SpatialTransformer(320, 768, 10, 32)],
-      [ResBlock(640, 1280, 320), SpatialTransformer(320, 768, 10, 32)],
+      [ResBlock(2560, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
+      [ResBlock(2560, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
+      [ResBlock(1920, 1280, 1280), SpatialTransformer(1280, 768, 8, 160), Upsample(1280)],
+      [ResBlock(1920, 1280, 640), SpatialTransformer(640, 768, 8, 80)],  # 6
+      [ResBlock(1280, 1280, 640), SpatialTransformer(640, 768, 8, 80)],
+      [ResBlock(960, 1280, 640), SpatialTransformer(640, 768, 8, 80), Upsample(640)],
+      [ResBlock(960, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
+      [ResBlock(640, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
+      [ResBlock(640, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
     ]
     self.out = [
       Normalize(320),
@@ -338,9 +355,9 @@ class UNetModel:
       Conv2d(320, 4, kernel_size=3, padding=1)
     ]
 
-  def __call__(self, x, context=None):
+  def __call__(self, x, timesteps=None, context=None):
     # TODO: real time embedding
-    t_emb = Tensor.uniform(x.shape[0], 320)
+    t_emb = timestep_embedding(timesteps, 320)
     emb = t_emb.sequential(self.time_embed)
 
     def run(x, bb):
@@ -354,6 +371,9 @@ class UNetModel:
       print("input block", i)
       for bb in b:
         x = run(x, bb)
+      print(x.numpy())
+      if i == 1:
+        return None
       saved_inputs.append(x)
     for bb in self.middle_block:
       x = run(x, bb)
@@ -416,9 +436,9 @@ class CLIPAttention:
 class CLIPEncoderLayer:
   def __init__(self):
     self.self_attn = CLIPAttention()
-    self.layer_norm1 = Normalize(768, num_groups=1)
+    self.layer_norm1 = Normalize(768, num_groups=None)
     self.mlp = CLIPMLP()
-    self.layer_norm2 = Normalize(768, num_groups=1)
+    self.layer_norm2 = Normalize(768, num_groups=None)
 
   def __call__(self, hidden_states):
     residual = hidden_states
@@ -442,7 +462,7 @@ class CLIPEncoder:
 
 class CLIPTextEmbeddings:
   def __init__(self):
-    self.position_ids = Tensor.empty(1, 77)
+    self.position_ids = Tensor.empty(1, 77)  # what is this?
     self.token_embedding = {"weight": Tensor.empty(49408, 768)}
     self.position_embedding = {"weight": Tensor.empty(77, 768)}
 
@@ -460,7 +480,7 @@ class CLIPTextTransformer:
   def __init__(self):
     self.embeddings = CLIPTextEmbeddings()
     self.encoder = CLIPEncoder()
-    self.final_layer_norm = Normalize(768, num_groups=1)
+    self.final_layer_norm = Normalize(768, num_groups=None)
 
   def __call__(self, input_ids):
     x = self.embeddings(input_ids, list(range(len(input_ids))))
@@ -469,13 +489,12 @@ class CLIPTextTransformer:
 
 class StableDiffusion:
   def __init__(self):
-    #self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
+    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
     #self.first_stage_model = AutoencoderKL()
-    self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
+    #self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
 
-  def __call__(self, x):
-    context = Tensor.uniform(1, 77, 768)
-    return self.model.diffusion_model(x, context)
+  def __call__(self, x, timesteps, context):
+    return self.model.diffusion_model(x, timesteps, context)
     #return self.first_stage_model(x)
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
@@ -518,16 +537,78 @@ if __name__ == "__main__":
       assert w.shape == v.shape
       w.assign(v.astype(np.float32))
 
+  """
   outs = model.cond_stage_model.transformer.text_model([1,2,3])
   print(outs.numpy())
+  print(outs.numpy().shape)
+  """
 
-  exit(0)
+  from ldm.modules.diffusionmodules.openaimodel import UNetModel
+  tmodel = UNetModel(
+    image_size = 32,
+    in_channels = 4,
+    out_channels = 4,
+    model_channels = 320,
+    attention_resolutions = [4, 2, 1],
+    num_res_blocks = 2,
+    channel_mult = [ 1, 2, 4, 4 ],
+    num_heads = 8,
+    use_spatial_transformer = True,
+    transformer_depth = 1,
+    context_dim = 768,
+    use_checkpoint = True,
+    legacy = False)
+  prefix = "model.diffusion_model."
+
+  #from ldm.modules.encoders.modules import FrozenCLIPEmbedder
+  #tmodel = FrozenCLIPEmbedder()
+  #prefix = "cond_stage_model."
+
+  #from ldm.models.autoencoder import AutoencoderKL
+  #tmodel = AutoencoderKL(
+  #  ddconfig = {
+  #    "double_z": True,
+  #    "z_channels": 4,
+  #    "resolution": 256,
+  #    "in_channels": 3,
+  #    "out_ch": 3,
+  #    "ch": 128,
+  #    "ch_mult": [1,2,4,4],
+  #    "num_res_blocks": 2,
+  #    "attn_resolutions": []
+  #  },
+  #  lossconfig={"target": "torch.nn.Identity"},
+  #  embed_dim=4)
+  #prefix = "first_stage_model."
+
+  import torch
+  ckpt = torch.load(FILENAME)
+  dat = ckpt['state_dict']
+  sd = {}
+  for k in dat:
+    if k.startswith(prefix):
+      sd[k[len(prefix):]] = dat[k]
+  print("loading", len(sd))
+  tmodel.load_state_dict(sd, strict=True)
 
   # load apple latent space
   nz = Tensor(np.load("datasets/stable_diffusion_apple.npy"))
 
   # run one pass of unet
-  nz = model(nz)
+  tnz = torch.Tensor(nz.numpy())
+  ttimesteps = torch.Tensor([0])
+  tcontext = torch.zeros(1, 77, 768)
+  tnz = tmodel(tnz, ttimesteps, tcontext)
+  timesteps = Tensor([0])
+  context = Tensor.zeros(1, 77, 768)
+  nz = model(nz, timesteps, context)
+
+  print(tnz)
+  print(nz.numpy())
+
+
+  exit(0)
+
   del model.model
 
   # clear unet
