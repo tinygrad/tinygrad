@@ -64,7 +64,7 @@ class Tensor:
 
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
   def numpy(self): return np.array(self.lazydata.toCPU())
-  
+
   # TODO: this keeps the legacy behavior working, remove it after refactor
   @property
   def data(self): return self.numpy()
@@ -97,7 +97,7 @@ class Tensor:
 
   @classmethod
   def randn(cls, *shape, **kwargs): return cls(np.random.default_rng().standard_normal(size=shape, dtype=np.float32), **kwargs)
-  
+
   @classmethod
   def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop, dtype=np.float32), **kwargs)
 
@@ -140,7 +140,7 @@ class Tensor:
       del t0._ctx
 
   # ***** non first class ops (hlops) *****
-  
+
   def __getitem__(self, val):
     arg = []
     for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]) if val is not None else []:
@@ -274,7 +274,7 @@ class Tensor:
   def broadcasted(fxn, x, y):
     tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
     x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [x,y]]
-    x,y = [t.reshape(list(t.shape) + [1]*(max(len(x.shape), len(y.shape))-len(t.shape))) for t in [x,y]]
+    x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn(x.expand(shape_ret), y.expand(shape_ret))
 

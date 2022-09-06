@@ -44,6 +44,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
   def test_broadcasted_add(self):
     helper_test_op([(45,65), (45,1)], lambda x,y: x+y, lambda x,y: x+y)
+  def test_broadcasted_add_2(self):
+    helper_test_op([(45,65), (65,)], lambda x,y: x+y, lambda x,y: x+y)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
   def test_mul(self):
@@ -224,7 +226,7 @@ class TestOps(unittest.TestCase):
                 helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
                   lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
-               
+
   def test_large_input_conv2d(self):
     bs = 4
     cin = 16
