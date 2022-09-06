@@ -10,8 +10,8 @@ from collections import namedtuple
 from extra.utils import fake_torch_load_zipped, get_child
 from tinygrad.nn import Conv2d
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
-from extra.introspection import print_objects
+
+# TODO: refactor AttnBlock, CrossAttention, CLIPAttention to share code
 
 # TODO: rename to GroupNorm and put in nn.py
 class Normalize:
@@ -560,7 +560,6 @@ if __name__ == "__main__":
   def get_model_output(latent, t):
     # put into diffuser
     timesteps = Tensor([t])
-    print_objects()
     unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context).realize()
     latent = model.model.diffusion_model(latent, timesteps, context).realize()
 
