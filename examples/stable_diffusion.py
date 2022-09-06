@@ -25,7 +25,6 @@ class Normalize:
       x = x.layernorm()
     else:
       x = x.reshape(x.shape[0], self.num_groups, -1).layernorm().reshape(x.shape)
-    #print(x.shape)
 
     # elementwise_affine on channels
     if len(x.shape) == 4:
@@ -170,7 +169,6 @@ class Linear:
     self.bias = Tensor.empty(out_features) if bias else None
 
   def __call__(self, x):
-    #print(x.shape, self.weight.shape, self.bias.shape)
     return x.linear(self.weight.transpose(), self.bias)
 
 # not to be confused with ResnetBlock
@@ -199,7 +197,6 @@ class ResBlock:
     h = h + emb_out
     h = h.sequential(self.out_layers)
     ret = self.skip_connection(x) + h
-    #print(ret.numpy())
     return ret
 
 class CrossAttention:
@@ -212,19 +209,14 @@ class CrossAttention:
     self.head_size = d_head
     self.to_out = [Linear(n_heads*d_head, query_dim)]
 
-  # TODO: this is probably very wrong
   def __call__(self, x, context=None):
     context = x if context is None else context
-    #print(x.numpy())
     q,k,v = self.to_q(x), self.to_k(context), self.to_v(context)
     q = q.reshape(x.shape[0], -1, self.num_heads, self.head_size).permute(0,2,1,3)  # (bs, num_heads, time, head_size)
     k = k.reshape(x.shape[0], -1, self.num_heads, self.head_size).permute(0,2,3,1)  # (bs, num_heads, head_size, time)
     v = v.reshape(x.shape[0], -1, self.num_heads, self.head_size).permute(0,2,1,3)  # (bs, num_heads, time, head_size)
 
     score = q.dot(k) * self.scale
-    #print("score", score.shape, score.numpy())
-    #exit(0)
-
     weights = score.softmax()                     # (bs, num_heads, time, time)
     attention = weights.dot(v).permute(0,2,1,3)   # (bs, time, num_heads, head_size)
 
@@ -261,7 +253,6 @@ class BasicTransformerBlock:
     self.norm3 = Normalize(dim, num_groups=None)
 
   def __call__(self, x, context=None):
-    #print(self.norm1(x).numpy())
     x = self.attn1(self.norm1(x)) + x
     x = self.attn2(self.norm2(x), context=context) + x
     x = self.ff(self.norm3(x)) + x
@@ -280,12 +271,9 @@ class SpatialTransformer:
     x_in = x
     x = self.norm(x)
     x = self.proj_in(x)
-    # correct to here
     x = x.reshape(b, c, h*w).permute(0,2,1)
     for block in self.transformer_blocks:
       x = block(x, context=context)
-    #print(x.numpy())
-    #print(x.shape, x.numpy())
     x = x.permute(0,2,1).reshape(b, c, h, w)
     ret = self.proj_out(x) + x_in
     return ret
@@ -371,18 +359,12 @@ class UNetModel:
       else: x = bb(x)
       return x
 
-    #print(emb.numpy())
-
     saved_inputs = []
     for i,b in enumerate(self.input_blocks):
       print("input block", i)
       for bb in b:
         x = run(x, bb)
-      #if i == 1:
-        #print(x.numpy())
-        #exit(0)
       saved_inputs.append(x)
-    #print(x.numpy())
     for bb in self.middle_block:
       x = run(x, bb)
     for i,b in enumerate(self.output_blocks):
@@ -420,13 +402,9 @@ class CLIPAttention:
   def __call__(self, hidden_states, causal_attention_mask):
     bsz, tgt_len, embed_dim = hidden_states.shape
 
-
     query_states = self.q_proj(hidden_states) * self.scale
     key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
     value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
-
-    #print("ATTN", query_states.numpy())
-    #print(hidden_states.shape, query_states.shape, key_states.shape, value_states.shape)
 
     proj_shape = (bsz * self.num_heads, -1, self.head_dim)
     query_states = self._shape(query_states, tgt_len, bsz).reshape(*proj_shape)
@@ -434,10 +412,8 @@ class CLIPAttention:
     src_len = key_states.shape[1]
     value_states = value_states.reshape(*proj_shape)
 
-    #print(query_states.shape, key_states.shape)
     attn_weights = query_states @ key_states.permute(0,2,1)
 
-    #print(attn_weights.shape, causal_attention_mask.shape)
     attn_weights = attn_weights.reshape(bsz, self.num_heads, tgt_len, src_len) + causal_attention_mask
     attn_weights = attn_weights.reshape(bsz * self.num_heads, tgt_len, src_len)
     
@@ -478,9 +454,6 @@ class CLIPEncoder:
   
   def __call__(self, hidden_states, causal_attention_mask):
     for i,l in enumerate(self.layers):
-      #if i == 2:
-      #  print(hidden_states.numpy())
-      #  break
       hidden_states = l(hidden_states, causal_attention_mask)
     return hidden_states
 
@@ -508,7 +481,6 @@ class CLIPTextTransformer:
 
   def __call__(self, input_ids):
     x = self.embeddings(input_ids, list(range(len(input_ids))))
-    #print(x.numpy())
     causal_attention_mask = np.triu(np.ones((1,1,77,77), dtype=np.float32) * -np.inf, k=1)
     x = self.encoder(x, Tensor(causal_attention_mask, device=x.device))
     return self.final_layer_norm(x)
@@ -543,7 +515,6 @@ class StableDiffusion:
 # this is sd-v1-4.ckpt
 #FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
 FILENAME = "/home/kafka/model.ckpt"
-REAL = int(os.getenv("REAL", 0))
 
 if __name__ == "__main__":
   Tensor.no_init = True
@@ -552,7 +523,7 @@ if __name__ == "__main__":
   model = StableDiffusion()
 
   # load in weights
-  dat = fake_torch_load_zipped(open(FILENAME, "rb"), load_weights=REAL)
+  dat = fake_torch_load_zipped(open(FILENAME, "rb"))
   for k,v in dat['state_dict'].items():
     try:
       w = get_child(model, k)
@@ -589,13 +560,8 @@ if __name__ == "__main__":
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  #alphas = [0.9983, 0.6722, 0.2750, 0.0557]
-  #alphas_prev = [0.9991499781608582, 0.9982960224151611, 0.6721514463424683, 0.27499905228614807]
-
-  #alphas = [0.9983, 0.8930, 0.7521, 0.5888, 0.4229, 0.2750, 0.1598, 0.0819, 0.0365, 0.0140]
-  #alphas_prev = [1.0, 0.9983, 0.8930, 0.7521, 0.5888, 0.4229, 0.2750, 0.1598, 0.0819, 0.0365]
-  #timesteps = [1, 101, 201, 301, 401, 501, 601, 701, 801, 901]
-  timesteps = list(np.arange(1, 1000, 1000//20))
+  TIMESTEPS = 4
+  timesteps = list(np.arange(1, 1000, 1000//TIMESTEPS))
   print(timesteps)
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
   alphas_prev = [1.0] + alphas[:-1]
@@ -619,24 +585,16 @@ if __name__ == "__main__":
   # start with random noise
   latent = Tensor.randn(1,4,64,64)
 
-  # is this the diffusion?
-  #for index, timestep in tqdm(list(enumerate([1, 251, 501, 751]))[::-1]):
+  # this is diffusion
   for index, timestep in tqdm(list(enumerate(timesteps))[::-1]):
     print(index, timestep)
     e_t = get_model_output(latent, timestep)
-    #print(e_t.numpy())
     x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
     latent = x_prev
     latent.realize()
-
-  print(latent.numpy())
-  #exit(0)
-
-  # sanity check
-  #latent = Tensor(np.load("datasets/stable_diffusion_apple.npy"))
 
   # upsample latent space to image with autoencoder
   x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)
@@ -652,266 +610,3 @@ if __name__ == "__main__":
   from PIL import Image
   im = Image.fromarray(dat)
   im.save("/tmp/rendered.png")
-  exit(0)
-
-
-
-  """
-  # load apple latent space
-  nz = Tensor(np.load("datasets/stable_diffusion_apple.npy"))
-
-  # run unet (without context)
-  timesteps = Tensor([32])
-  context = Tensor.zeros(1, 77, 768)
-  nz = model(nz, timesteps, context)
-
-  # upsample latent space to image with autoencoder
-  x = model.first_stage_model.post_quant_conv(nz)
-  x = model.first_stage_model.decoder(x)
-
-  # make image correct size
-  x = x.reshape(3,512,512).permute(1,2,0)
-  dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
-  print(dat.shape)
-
-  # save image
-  from PIL import Image
-  im = Image.fromarray(dat)
-  im.save("/tmp/rendered.png")
-  exit(0)
-  """
-
-  """
-  outs = model.cond_stage_model.transformer.text_model([1,2,3])
-  print(outs.numpy())
-  print(outs.numpy().shape)
-  """
-
-  """
-  from ldm.modules.diffusionmodules.openaimodel import UNetModel
-  tmodel = UNetModel(
-    image_size = 32,
-    in_channels = 4,
-    out_channels = 4,
-    model_channels = 320,
-    attention_resolutions = [4, 2, 1],
-    num_res_blocks = 2,
-    channel_mult = [ 1, 2, 4, 4 ],
-    num_heads = 8,
-    use_spatial_transformer = True,
-    transformer_depth = 1,
-    context_dim = 768,
-    use_checkpoint = True,
-    legacy = False)
-  prefix = "model.diffusion_model."
-  """
-
-  from ldm.modules.encoders.modules import FrozenCLIPEmbedder
-  tmodel = FrozenCLIPEmbedder()
-  prefix = "cond_stage_model."
-
-  #from ldm.models.autoencoder import AutoencoderKL
-  #tmodel = AutoencoderKL(
-  #  ddconfig = {
-  #    "double_z": True,
-  #    "z_channels": 4,
-  #    "resolution": 256,
-  #    "in_channels": 3,
-  #    "out_ch": 3,
-  #    "ch": 128,
-  #    "ch_mult": [1,2,4,4],
-  #    "num_res_blocks": 2,
-  #    "attn_resolutions": []
-  #  },
-  #  lossconfig={"target": "torch.nn.Identity"},
-  #  embed_dim=4)
-  #prefix = "first_stage_model."
-
-  import torch
-  ckpt = torch.load(FILENAME)
-  dat = ckpt['state_dict']
-  sd = {}
-  for k in dat:
-    if k.startswith(prefix):
-      sd[k[len(prefix):]] = dat[k]
-  print("loading", len(sd))
-  tmodel.load_state_dict(sd, strict=True)
-  tmodel = tmodel.cuda()
-
-  ret = tmodel("a horse sized cat eating a bagel")
-  print(ret)
-
-  re = model.cond_stage_model.transformer.text_model(phrase)
-  print(re.numpy())
-
-  exit(0)
-
-  # run one pass of unet
-  tnz = torch.Tensor(nz.numpy())
-  timesteps = Tensor([10])
-  context = Tensor.uniform(1, 77, 768)
-
-  ttimesteps = torch.Tensor(timesteps.numpy())
-  tcontext = torch.Tensor(context.numpy())
-  tnz = tmodel(tnz, ttimesteps, tcontext)
-  nz = model(nz, timesteps, context)
-
-  print(tnz)
-  print(nz.numpy())
-
-  print("match", np.mean((tnz.detach().numpy() - nz.numpy())**2))
-
-
-  exit(0)
-
-  del model.model
-
-  # clear unet
-  nz = nz.detach()
-  import gc
-  gc.collect()
-  import torch
-  torch.cuda.empty_cache()
-
-  """
-  print(out)
-  print(out.numpy())
-  exit(0)
-
-  if not REAL: exit(0)
-  """
-
-  # load image
-  #IMG = "/tmp/apple.png"
-  #from PIL import Image
-  #realimg = Tensor(np.array(Image.open(IMG))).permute((2,0,1)).reshape((1,3,512,512))*(1/255)
-  #print(realimg.shape)
-  #x = model(realimg)
-
-  # load latent space
-  x = model.first_stage_model.post_quant_conv(nz)
-  x = model.first_stage_model.decoder(x)
-
-  x = x.reshape(3,512,512).permute(1,2,0)
-  dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
-  print(dat.shape)
-
-  from PIL import Image
-  im = Image.fromarray(dat)
-  im.save("/tmp/rendered.png")
-
-
-# torch junk
-
-#IMG = "/Users/kafka/fun/mps/stable-diffusion/outputs/txt2img-samples/grid-0006.png"
-#from PIL import Image
-#realimg = Tensor(np.array(Image.open(IMG))).permute((2,0,1)).reshape((1,3,512,512))*(1/255)
-#print(img.shape)
-#x = model(img)
-
-#nz = np.random.randn(*nz.shape) * 100
-
-# PYTHONPATH="$PWD:/Users/kafka/fun/mps/stable-diffusion" 
-"""
-from ldm.models.autoencoder import AutoencoderKL
-import torch
-ckpt = torch.load(FILENAME)
-dat = ckpt['state_dict']
-sd = {}
-for k in dat:
-  if k.startswith("first_stage_model."):
-    sd[k[len("first_stage_model."):]] = dat[k]
-print("loading", len(sd))
-
-tmodel = AutoencoderKL(
-  ddconfig = {
-    "double_z": True,
-    "z_channels": 4,
-    "resolution": 256,
-    "in_channels": 3,
-    "out_ch": 3,
-    "ch": 128,
-    "ch_mult": [1,2,4,4],
-    "num_res_blocks": 2,
-    "attn_resolutions": []
-  },
-  lossconfig={"target": "torch.nn.Identity"},
-  embed_dim=4)
-tmodel.load_state_dict(sd, strict=True)
-nz = np.load("datasets/stable_diffusion_apple.npy")
-zmodel = model.first_stage_model
-
-x_torch = torch.tensor(nz)
-x_tiny = Tensor(nz)
-
-x_torch = tmodel.post_quant_conv(x_torch)
-x_tiny = zmodel.post_quant_conv(x_tiny)
-
-x_torch = tmodel.decoder.conv_in(x_torch)
-x_tiny = zmodel.decoder.conv_in(x_tiny)
-
-x_torch = tmodel.decoder.mid.block_1(x_torch, None)
-x_tiny = zmodel.decoder.mid['block_1'](x_tiny)
-"""
-
-"""
-x_torch = tmodel.decoder.mid.block_1.norm1(x_torch)
-x_tiny = zmodel.decoder.mid['block_1'].norm1(x_tiny)
-
-x_torch = x_torch * torch.sigmoid(x_torch)
-x_tiny = x_tiny.swish()
-
-print(zmodel.decoder.mid['block_1'].conv1.weight.shape)
-print(x_tiny.shape)
-
-x_torch = tmodel.decoder.mid.block_1.conv1(x_torch)
-x_tiny = zmodel.decoder.mid['block_1'].conv1(x_tiny)
-"""
-
-#print(tmodel.decoder.mid.block_1.conv1.weight)
-#print(zmodel.decoder.mid['block_1'].conv1.weight.numpy())
-
-#print(abs(x_torch.detach().numpy() - x_tiny.numpy()).mean())
-#print(x_torch.shape, x_tiny.shape)
-
-#exit(0)
-
-
-#exit(0)
-
-
-"""
-posterior = tmodel.encode(torch.tensor(realimg.numpy()))
-z = posterior.mode()
-print(z.shape)
-#exit(0)
-nz = z.detach().numpy()
-np.save("/tmp/apple.npy", nz)
-exit(0)
-"""
-
-#x, latent = tmodel(torch.tensor(realimg.numpy()))
-#x = tmodel.decode(torch.tensor(nz))
-#x = x.reshape(3,512,512).permute(1,2,0)
-
-"""
-x = Tensor.randn(1,4,64,64)
-x = model.first_stage_model.post_quant_conv(x)
-x = model.first_stage_model.decoder(x)
-
-print(x.shape)
-x = x.reshape((3,512,512)).permute((1,2,0))
-print(x.shape)
-if not REAL: exit(0)
-"""
-
-"""
-#dat = (x.detach().numpy()*256).astype(np.uint8)
-dat = (x.detach().numpy().clip(0, 1)*255).astype(np.uint8)
-print(dat.shape)
-
-from PIL import Image
-im = Image.fromarray(dat)
-im.save("/tmp/rendered.png")
-
-"""
