@@ -13,8 +13,10 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0])]
   for i in range(1, len(shape)):
-    if (strides[i] != 0 and ret[-1][1] == shape[i]*strides[i]) or (strides[i] == 0 and ret[-1][1] == 0): ret[-1] = (ret[-1][0] * shape[i], strides[i])
-    else: ret.append((shape[i], strides[i]))
+    if (strides[i] != 0 and ret[-1][1] == shape[i]*strides[i]) or (strides[i] == 0 and ret[-1][1] == 0):
+      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+    else:
+      ret.append((shape[i], strides[i]))
   return ret
 
 class View:
@@ -54,14 +56,14 @@ class ZeroView:
 ViewTypes = Union[View, ZeroView]
 
 @functools.lru_cache(maxsize=None)
-def strides_for_shape(shape):
+def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   strides = [1]
   for d in shape[::-1][:-1]:
     strides = [d*strides[0]] + strides
   return tuple(strides)
 
 @functools.lru_cache(maxsize=None)
-def view_from_shape(shape:Tuple[int, ...]):
+def view_from_shape(shape:Tuple[int, ...]) -> View:
   assert all([isinstance(x, int) for x in shape]) and len(shape) != 0
   return View(tuple(shape), strides_for_shape(shape))
 
@@ -92,8 +94,10 @@ class ShapeTracker:
   # if we replace, confirm the ops taken fold into one view
   def strided(self, *arg):
     view = View([x[0] for x in arg], [x[1] for x in arg])
-    if self.contiguous: self.views[-1] = view
-    else: self.views.append(view)
+    if self.contiguous:
+      self.views[-1] = view
+    else:
+      self.views.append(view)
 
   def reshape(self, *new_shape):
     assert all([isinstance(x, int) for x in new_shape])
@@ -107,8 +111,10 @@ class ShapeTracker:
       return
 
     view = View(new_shape, strides_for_shape(new_shape))
-    if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
-    else: self.views.append(view)
+    if self.contiguous:
+      self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
+    else:
+      self.views.append(view)
 
   def permute(self, *axis):
     assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])

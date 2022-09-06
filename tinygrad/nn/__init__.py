@@ -33,7 +33,8 @@ class BatchNorm2D:
       batch_mean, batch_var = self.running_mean, self.running_var
 
     # NOTE: this can be precomputed for static inference. if you manually update running_var, you have to reset this
-    if Tensor.training or getattr(self, "batch_invstd", None) is None: self.batch_invstd = batch_var.add(self.eps)**-0.5
+    if Tensor.training or getattr(self, "batch_invstd", None) is None:
+      self.batch_invstd = batch_var.add(self.eps)**-0.5
     return batch_normalize(x, self.weight, self.bias, batch_mean, self.batch_invstd)
 
 class Conv2d:

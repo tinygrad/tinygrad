@@ -22,10 +22,10 @@ CONV_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/o
 MATMUL_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/matmul.cl')
 
 class CLImage:
+  fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+
   def __init__(self, shape):
-    # HALF_FLOAT breaks tests
-    fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
-    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=shape)
+    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=shape)
     CL.mem_used += self.cl.row_pitch * self.cl.height
 
   def __del__(self):
@@ -78,7 +78,8 @@ def get_getters(ewbufs, ret):
       fakebufs.append(name)
       prt = buf._backing.reshape((-1, 4))
       cc = []
-      for ii in range(prt.shape[0]): cc.append("(float4)(%ff, %ff, %ff, %ff)" % (prt[ii][0], prt[ii][1], prt[ii][2], prt[ii][3]))
+      for ii in range(prt.shape[0]):
+        cc.append("(float4)(%ff, %ff, %ff, %ff)" % (prt[ii][0], prt[ii][1], prt[ii][2], prt[ii][3]))
       getters.append(f"const __constant float4 const_{name}[] = {{"+', '.join(cc)+"};")
       getters.append(f"inline float4 get4_{name}(int gid) {{"+
         "int idx = gid;"+buf.st.expr()+";"+
@@ -112,6 +113,7 @@ class OpenCLBuffer(GPUBuffer):
   def __init__(self, shape, hostbuf:Optional[OpenCLBuffer]=None, backing:Optional[np.ndarray]=None):
     self._image = hostbuf._image if hostbuf is not None else None
     super().__init__(shape, hostbuf, backing)
+    assert not (self._image and self._buf)
 
   @staticmethod
   def fromCPU(x): return OpenCLBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
@@ -225,8 +227,10 @@ class OpenCLBuffer(GPUBuffer):
     if C.bs > 1:
       options.append("-DBATCH")
       assert C.py == 0, "batched conv doesn't work with y-padding"
-    if C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1 and C.cin == 1: options.append("-DDEPTHWISE_UNSTRIDED")
-    elif C.cin == 1: options.append("-DDEPTHWISE")
+    if C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1 and C.cin == 1:
+      options.append("-DDEPTHWISE_UNSTRIDED")
+    elif C.cin == 1:
+      options.append("-DDEPTHWISE")
     if int(os.getenv("MATMUL", 0)) and C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1:
       options.append("-DMATMUL")
       # NOTE: this is not actually a matmul, it's a vector * matrix
@@ -260,7 +264,8 @@ class OpenCLBuffer(GPUBuffer):
       return ret
 
     # this option is unused
-    if C.H == 1 and C.W == 1: options.append("-DONLY_1X1_CONV")
+    if C.H == 1 and C.W == 1:
+      options.append("-DONLY_1X1_CONV")
 
     assert C.cout%4 == 0
     conv_src = CONV_SRC

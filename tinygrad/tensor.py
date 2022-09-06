@@ -21,10 +21,13 @@ class Tensor:
       data = data.realize().toCPU()
 
     if isinstance(data, np.ndarray):
-      if data.shape == tuple(): data = data.reshape((1,))
+      if data.shape == tuple():
+        data = data.reshape((1,))
       self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
-    elif isinstance(data, LazyBuffer): self.lazydata = data
-    else: raise Exception(f"can't create Tensor from {data}")
+    elif isinstance(data, LazyBuffer):
+      self.lazydata = data
+    else:
+      raise Exception(f"can't create Tensor from {data}")
 
     # tensors have gradients, buffers do not
     self.grad : Optional[Tensor] = None
@@ -53,7 +56,8 @@ class Tensor:
     return self
 
   def assign(self, x):
-    if not isinstance(x, Tensor): x = Tensor(x)
+    if not isinstance(x, Tensor):
+      x = Tensor(x)
     assert self.shape == x.shape
     self.lazydata = x.lazydata
     return x
@@ -69,11 +73,13 @@ class Tensor:
   def to_(self, device:str):
     assert self.lazydata.realized is None
     self.lazydata.device = device
-    if self.grad: self.grad.lazydata.device = device
+    if self.grad:
+      self.grad.lazydata.device = device
 
   def to(self, device:str):
     ret = Tensor(self.lazydata, device)
-    if self.grad: ret.grad = self.grad.to(device)
+    if self.grad:
+      ret.grad = self.grad.to(device)
     return ret
 
   # ***** creation helper functions *****
@@ -121,7 +127,8 @@ class Tensor:
     self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if not any(x.requires_grad for x in t0._ctx.parents): continue
+      if not any(x.requires_grad for x in t0._ctx.parents):
+        continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
@@ -137,7 +144,8 @@ class Tensor:
   def __getitem__(self, val):
     arg = []
     for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]) if val is not None else []:
-      if isinstance(s, int): s = slice(s, s+1, None)
+      if isinstance(s, int):
+        s = slice(s, s+1, None)
       arg.append((s.start if s.start is not None else 0,
         (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
       assert s.step is None or s.step == 1
@@ -145,11 +153,13 @@ class Tensor:
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
-    for y in args: assert len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim)
+    for y in args:
+      assert len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim)
     args = [self] + list(args)
     shape_cumsum = [0, *itertools.accumulate(y.shape[dim] for y in args)]
     slc = [[(0, s) for s in self.shape] for _ in args]
-    for s,k in zip(slc, shape_cumsum): s[dim] = (-k, shape_cumsum[-1]-k)
+    for s,k in zip(slc, shape_cumsum):
+      s[dim] = (-k, shape_cumsum[-1]-k)
     return functools.reduce(Tensor.__iadd__, [arg.slice(arg=s) for arg,s in zip(args, slc)])
 
   # TODO: make this nicer with syntactic sugar in slice
@@ -164,8 +174,10 @@ class Tensor:
     bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
     cin, cout = w.shape[-2], w.shape[-1]
     out_shape_t = tuple(list(self.shape[0:-2])+[cout,-1])
-    if len(self.shape) > 1: order = tuple(list(range(len(self.shape)-2))+[len(self.shape)-1, len(self.shape)-2])
-    else: order, out_shape_t = (0,), (cout, )
+    if len(self.shape) > 1:
+      order = tuple(list(range(len(self.shape)-2))+[len(self.shape)-1, len(self.shape)-2])
+    else:
+      order, out_shape_t = (0,), (cout, )
     worder = tuple(list(range(len(w.shape)-2))+[len(w.shape)-1, len(w.shape)-2])
 
     # NOTE: with NHWC we can remove the transposes
@@ -185,8 +197,10 @@ class Tensor:
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
   def _reduce(self, fxn, axis=None, keepdim=False):
-    if axis is None: axis = range(len(self.shape))
-    if isinstance(axis, int): axis = [axis]
+    if axis is None:
+      axis = range(len(self.shape))
+    if isinstance(axis, int):
+      axis = [axis]
     axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
     ret = fxn(axis=axis)
@@ -213,7 +227,8 @@ class Tensor:
     return m - ss.log()
 
   def dropout(self, p=0.5):
-    if not Tensor.training: return self
+    if not Tensor.training:
+      return self
     _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
@@ -307,7 +322,8 @@ class Function:
   def apply(cls, *x:Tensor, **kwargs):
     ctx = cls(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
-    if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
+    if ctx.requires_grad and not Tensor.no_grad:
+      ret._ctx = ctx    # used by autograd engine
     return ret
 
 # register functions to move between devices
@@ -319,7 +335,8 @@ for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
 def register(name:str, fxn:Function):
   setattr(Tensor, "_"+name if (getattr(Tensor, name, None) is not None) else name, functools.partialmethod(fxn.apply))
 for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
-  if name[0] != "_" and name != "Function" and not name.endswith("Ops"): register(name.lower(), cls)
+  if name[0] != "_" and name != "Function" and not name.endswith("Ops"):
+    register(name.lower(), cls)
 
 # register the operators
 # TODO: add div
@@ -327,4 +344,5 @@ def register_op(name, fxn):
   setattr(Tensor, f"__{name}__", fxn)
   setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self,x)))
   setattr(Tensor, f"__r{name}__", lambda self,x: fxn(x,self))
-for name in ['add', 'sub', 'mul', 'pow', 'matmul']: register_op(name, getattr(Tensor, name))
+for name in ['add', 'sub', 'mul', 'pow', 'matmul']:
+  register_op(name, getattr(Tensor, name))

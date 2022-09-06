@@ -11,15 +11,18 @@ from tinygrad.shapetracker import ShapeTracker
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:
   def __init__(self, size):
-    if len(CL.BUFFER_CACHE[size]) > 0: self.cl = CL.BUFFER_CACHE[size].pop()
+    if len(CL.BUFFER_CACHE[size]) > 0:
+      self.cl = CL.BUFFER_CACHE[size].pop()
     else:
       # TODO: on GPU OOM, clear the cache
       self.cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
       CL.mem_used += self.cl.size
 
   def __del__(self):
-    if CLCACHE: CL.BUFFER_CACHE[self.cl.size].append(self.cl)
-    else: CL.mem_used -= self.cl.size
+    if CLCACHE:
+      CL.BUFFER_CACHE[self.cl.size].append(self.cl)
+    else:
+      CL.mem_used -= self.cl.size
 
 class CL:
   CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
@@ -27,18 +30,22 @@ class CL:
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
-    if CL.cl_queue is not None: return
+    if CL.cl_queue is not None:  # already initted
+      return
     devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
     CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
-    if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
+    if len(devices) > 1 or DEBUG >= 1:
+      print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
-    if CL.CACHE is not None: assert False, "can't copy while caching"
-    if DEBUG >= 1: print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
+    if CL.CACHE is not None:
+      assert False, "can't copy while caching"
+    if DEBUG >= 1:
+      print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
 @functools.lru_cache(maxsize=None)
@@ -48,19 +55,24 @@ class CLProgram:
     self.name, self.prg, self.options, self.argdtypes = f"{name}_{CLProgram.kernel_cnt}", prg.replace(f"{name}(", f"{name}_{CLProgram.kernel_cnt}("), options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, self.prg)
     self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
-    if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
+    if self.argdtypes is not None:
+      self.clprg.set_scalar_arg_dtypes(self.argdtypes)
     CLProgram.kernel_cnt += 1
   def __call__(self, *args, op_estimate=0):
     CL.kernel_count += 1
-    if CL.CACHE is not None: CL.CACHE.append((self, args))
-    else: e = self.clprg(CL().cl_queue, *args)
-    if DEBUG >= 2: CL.cl_queue.finish()
+    if CL.CACHE is not None:
+      CL.CACHE.append((self, args))
+    else:
+      e = self.clprg(CL().cl_queue, *args)
+    if DEBUG >= 2:
+      CL.cl_queue.finish()
     if DEBUG >= 1:
       CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else (e.profile.end - e.profile.start)
       CL.ops_sum += op_estimate
       print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:6.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
             ("" if DEBUG <= 1 or CL.CACHE is not None else f"tm {(e.profile.end - e.profile.start)/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({op_estimate/(e.profile.end - e.profile.start):8.2f} GFLOPS)"))
-    if DEBUG >= 4: print(self.prg)
+    if DEBUG >= 4:
+      print(self.prg)
 
 # **** end CL wrappers ****
 
@@ -79,11 +91,13 @@ class GPUBuffer:
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     # early copy in for large buffers
-    if self._backing is not None and self._backing.shape != (1,): self.cl
+    if self._backing is not None and self._backing.shape != (1,):
+      self.cl
   
   @property
   def cl(self):
-    if self._buf is None: self._buf = CLBuffer(4*prod(self._base_shape))
+    if self._buf is None:
+      self._buf = CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
       CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
       self._backing = None
@@ -116,14 +130,16 @@ class GPUBuffer:
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
     assert C is None
-    for _, b in bufs: assert prod(b.shape) < 2**31, f"GPU buffers must be under 2**31, {b.shape} isn't"
+    for _, b in bufs:
+      assert prod(b.shape) < 2**31, f"GPU buffers must be under 2**31, {b.shape} isn't"
 
     # get the input/output shape and the reduce amount
     reduce_shape = (bufs[0][1].shape, ret.shape) if reduce_shape is None else reduce_shape
     red = prod([s for s,n in zip(*reduce_shape) if n == 1])
 
     # if it's a partial reduce, assert last non reduced axis is before the first reduced axis
-    if red > 1 and prod(ret.shape) != 1: assert max([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s == n and n != 1]) < min([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s != 1 and n == 1])
+    if red > 1 and prod(ret.shape) != 1:
+      assert max([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s == n and n != 1]) < min([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s != 1 and n == 1])
     inter_red = 256 if (prod(ret.shape) < 8192 and red >= 256) else 1
 
     kernel_name = "reduce" if red > 1 else "elementwise"

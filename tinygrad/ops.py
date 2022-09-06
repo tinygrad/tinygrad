@@ -49,15 +49,18 @@ if GRAPH:
   import networkx as nx  # type: ignore
   G = nx.DiGraph()
   def save_graph_exit():
-    for k,v in cnts.items(): print(k, v)
+    for k,v in cnts.items():
+      print(k, v)
     if int(os.getenv("PRUNEGRAPH", "0")):
       dead_nodes = []
       for n in G.nodes:
         # prune movementops and loadops
         if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80", "#FFFF8080", "#FFFF80"]:
-          for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n)): G.add_edge(x, y)
+          for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n)):
+            G.add_edge(x, y)
           dead_nodes.append(n)
-      for n in dead_nodes: G.remove_node(n)
+      for n in dead_nodes:
+        G.remove_node(n)
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
@@ -67,7 +70,8 @@ if GRAPH:
 global_num_max = 0
 def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[DeviceBuffer]):
   cnts[optype] += 1
-  if DEBUG >= 3: print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
+  if DEBUG >= 3:
+    print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
   if GRAPH:
     def nm(x):
       global global_num_max
@@ -80,15 +84,22 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
     dashed = (optype == LoadOps and getattr(ret, "_backing", None) is not None) or (getattr(ret, "st", None) is not None and not ret.st.contiguous)
 
     for x in inp:
-      if len(op) <= 2: sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
-      elif len(op) <= 4: sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
-      else: sop = str(len(op))
+      if len(op) <= 2:
+        sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
+      elif len(op) <= 4:
+        sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
+      else:
+        sop = str(len(op))
       G.add_edge(nm(x), nm(ret), label=sop)
-      if 'label' not in G.nodes[nm(x)]: G.nodes[nm(x)]['label'] = str(x.shape)
-    if nm(ret) not in G.nodes: G.add_node(nm(ret))
+      if 'label' not in G.nodes[nm(x)]:
+        G.nodes[nm(x)]['label'] = str(x.shape)
+    if nm(ret) not in G.nodes:
+      G.add_node(nm(ret))
 
-    if optype == ReduceOps: G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
-    else: G.nodes[nm(ret)]['label'] = str(ret.shape)
+    if optype == ReduceOps:
+      G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
+    else:
+      G.nodes[nm(ret)]['label'] = str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
 
@@ -96,11 +107,14 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
 # **** realize helpers ****
 
 def _ast(x: Union[LazyBuffer, LazyOp], buf_names: Dict[LazyBuffer, str], code_for_op: Dict[Op, str]) -> str:
-  if isinstance(x, LazyBuffer): return buf_names[x]
+  if isinstance(x, LazyBuffer):
+    return buf_names[x]
   srcs_code = [_ast(src, buf_names, code_for_op) for src in x.src]
   code = code_for_op[x.op]
-  if len(srcs_code) >= 1: code = code.replace("A", srcs_code[0])
-  if len(srcs_code) >= 2: code = code.replace("B", srcs_code[1])
+  if len(srcs_code) >= 1:
+    code = code.replace("A", srcs_code[0])
+  if len(srcs_code) >= 2:
+    code = code.replace("B", srcs_code[1])
   return code
 
 # **** realize functions ****
@@ -155,7 +169,8 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
         src = psrcs[0][1].op.src[0]
         reduce_shape = (src.shape, psrcs[0][1].shape)
 
-        if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1: src = src.op
+        if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
+          src = src.op
         for i,x in enumerate(get_lazybuffers(src) if isinstance(src, LazyOp) else [src]):
           real_srcs[x] = None
           buf_names[x] = f"earlyarg_{i}"
@@ -164,19 +179,24 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       del real_srcs[psrcs[0][0]]
       buf_names[psrcs[0][0]] = "acc"
 
-    for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
+    for x in real_srcs.keys():
+      real_srcs[x] = x.realize(self.device)
     # fast path, no middle buffers
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()],
       _ast(self.op, buf_names, self.dbuffer.code_for_op), earlycode=earlycode, earlybufs=set(x for x in buf_names.values() if x.startswith("earlyarg_")),
       C=conv_args, reduce_shape=reduce_shape), \
       list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if reduce_shape[0] != reduce_shape[1] else BinaryOps)
   else:
-    for x in real_srcs.keys(): real_srcs[x] = x.realize(self.device)
+    for x in real_srcs.keys():
+      real_srcs[x] = x.realize(self.device)
     # slow path, creates middle buffers
     def ast_eval(x: Union[LazyBuffer, LazyOp]) -> DeviceBuffer:
-      if isinstance(x, LazyBuffer): return real_srcs[x]
-      if x.op in UnaryOps: return ast_eval(x.src[0]).unary_op(x.op)
-      if x.op in BinaryOps: return ast_eval(x.src[0]).binary_op(x.op, ast_eval(x.src[1]))
+      if isinstance(x, LazyBuffer):
+        return real_srcs[x]
+      if x.op in UnaryOps:
+        return ast_eval(x.src[0]).unary_op(x.op)
+      if x.op in BinaryOps:
+        return ast_eval(x.src[0]).binary_op(x.op, ast_eval(x.src[1]))
     return ast_eval(self.op), list(real_srcs.values()), BinaryOps
 
 _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:_realize_movementops, BinaryOps:_realize_binaryops, ProcessingOps:_realize_processingops}
@@ -201,28 +221,34 @@ class LazyBuffer:
   lazycache : weakref.WeakValueDictionary[LazyOp, LazyBuffer] = weakref.WeakValueDictionary()
   def __new__(cls, device, shape, optype, op):
     # loadops aren't cached
-    if optype == LoadOps: return super().__new__(cls)
+    if optype == LoadOps:
+      return super().__new__(cls)
     wop = (device, optype, get_weakop(op))   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
     # NOTE: we need "ret" to prevent the new buffer from being immediately deleted
-    if wop not in LazyBuffer.lazycache: LazyBuffer.lazycache[wop] = ret = super().__new__(cls) # noqa: F841, pylint: disable=W0612
+    if wop not in LazyBuffer.lazycache:
+      LazyBuffer.lazycache[wop] = ret = super().__new__(cls) # noqa: F841, pylint: disable=W0612
     return LazyBuffer.lazycache[wop]
 
   def __init__(self, device, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
-    if getattr(self, 'device', None) is not None: return  # cache hit, we return and don't reinit
+    if getattr(self, 'device', None) is not None:
+      return  # cache hit, we return and don't reinit
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape, self.optype, self.op = self.st.shape, optype, op
     self.realized : Optional[DeviceBuffer] = None
     self.device, self.dbuffer = device, Device._buffers[device]
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    for x in get_lazybuffers(op): x.children.add(self)
-    if not LAZY: self.realize()
+    for x in get_lazybuffers(op):
+      x.children.add(self)
+    if not LAZY:
+      self.realize()
 
   def __repr__(self): return f"<LB {self.shape} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
   def realize(self:LazyBuffer, required_device=None) -> DeviceBuffer:
-    if required_device is not None: assert required_device == self.device
+    if required_device is not None:
+      assert required_device == self.device
     if self.realized is None:
       # we haven't realized the Buffer yet
       self.realized, real_srcs, real_type = _realize[self.optype](self)
@@ -244,7 +270,8 @@ class LazyBuffer:
   def contiguous_op(self:LazyBuffer) -> LazyBuffer: return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    if self.shape == tuple(new_shape): return self
+    if self.shape == tuple(new_shape):
+      return self
     reduce = list(enumerate(zip(self.shape, new_shape)))
     # move the reduce axes to the end
     x = self.movement_op(MovementOps.PERMUTE, [i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
@@ -263,24 +290,34 @@ class LazyBuffer:
     arg = tuple(copy(arg))
 
     # instant nops
-    if op in [MovementOps.RESHAPE, MovementOps.EXPAND] and arg == self.shape: return self
-    if op == MovementOps.PERMUTE and arg == tuple(range(len(self.shape))): return self
-    if op == MovementOps.SHRINK and arg == tuple((0,i) for i in self.shape): return self
-    if op == MovementOps.PAD and arg == tuple((0,0) for _ in self.shape): return self
-    if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(self.shape)): return self
+    if op in [MovementOps.RESHAPE, MovementOps.EXPAND] and arg == self.shape:
+      return self
+    if op == MovementOps.PERMUTE and arg == tuple(range(len(self.shape))):
+      return self
+    if op == MovementOps.SHRINK and arg == tuple((0,i) for i in self.shape):
+      return self
+    if op == MovementOps.PAD and arg == tuple((0,0) for _ in self.shape):
+      return self
+    if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(self.shape)):
+      return self
 
     # two ops in a row is one op
-    if op in [MovementOps.RESHAPE, MovementOps.EXPAND, MovementOps.SHRINK] and self.realized is None and self.op.op == op: return self.op.src[0].movement_op(op, arg)
-    if op == MovementOps.PERMUTE and self.realized is None and self.op.op == op: return self.op.src[0].movement_op(op, tuple(self.op.arg[i] for i in arg))
-    if op == MovementOps.PAD and self.realized is None and self.op.op == op: return self.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)))
+    if op in [MovementOps.RESHAPE, MovementOps.EXPAND, MovementOps.SHRINK] and self.realized is None and self.op.op == op:
+      return self.op.src[0].movement_op(op, arg)
+    if op == MovementOps.PERMUTE and self.realized is None and self.op.op == op:
+      return self.op.src[0].movement_op(op, tuple(self.op.arg[i] for i in arg))
+    if op == MovementOps.PAD and self.realized is None and self.op.op == op:
+      return self.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)))
 
     # some permutes are actually just reshapes
-    if op == MovementOps.PERMUTE and ShapeTracker(self.shape).movement_op(op, arg).contiguous: return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
+    if op == MovementOps.PERMUTE and ShapeTracker(self.shape).movement_op(op, arg).contiguous:
+      return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
 
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
       # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
-        if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
+        if isinstance(y, LazyBuffer):
+          return y.movement_op(op, arg)
         assert y.op in BinaryOps or y.op in UnaryOps
         return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])   # type: ignore
       return replace_with_movement_op(self.op)
@@ -300,7 +337,8 @@ class LazyBuffer:
   def processing_op(self:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     x = self
     # TODO: fixup C?
-    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False): x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
+    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False):
+      x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False):
       # universal conv, just mul and reduce

@@ -11,7 +11,8 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   cout,cin,H,W = w_shape
   sy,sx = (stride, stride) if isinstance(stride, int) else stride
-  if not isinstance(padding, int) and len(padding) == 4: px,px_,py,py_ = padding
+  if not isinstance(padding, int) and len(padding) == 4:
+    px,px_,py,py_ = padding
   else:
     py,px = (padding, padding) if isinstance(padding, int) else padding
     py_, px_ = py, px
@@ -28,7 +29,8 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
   # https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html describes these sizes well
   oy = (iy + py + py_ - dy * (H-1) - 1)//sy + 1
   ox = (ix + px + px_ - dx * (W-1) - 1)//sx + 1
-  if cin*groups != cin_: raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
+  if cin*groups != cin_:
+    raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0 and (out_shape is None or out_shape == (bs, cout, oy, ox))
   return ConvArgs(H, W, groups, cout//groups, cin, oy, ox, iy, ix, sy, sx, bs, cout, py, py_, px, px_, dy, dx, (bs, cout, oy, ox))
 
@@ -38,7 +40,8 @@ def get_available_llops():
   for op in [os.path.splitext(x)[0] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops"))) if x.startswith("ops_")]:
     name = op[len("ops_"):].upper()
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
-    try: _buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module('tinygrad.llops.'+op), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
+    try:
+      _buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module('tinygrad.llops.'+op), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
     except ImportError as e:  # NOTE: this can't be put on one line due to mypy issue
       print(op, "not available", e)
   return _buffers, DEFAULT

@@ -560,13 +560,24 @@ if __name__ == "__main__":
     # put into diffuser
     timesteps = Tensor([t])
     from tinygrad.llops.ops_gpu import CL
+    from tinygrad.llops.ops_gpu import CLBuffer
+    from tinygrad.llops.ops_opencl import CLImage, OpenCLBuffer
     import gc
 
-    print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+    def print_ram():
+      print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+      img_count = sum([x.is_image() for x in gc.get_objects() if isinstance(x, OpenCLBuffer)])
+      print("img_count", img_count)
+      buffer_bytes = sum([x.cl.size for x in gc.get_objects() if isinstance(x, CLBuffer)])
+      image_bytes = sum([x.cl.row_pitch*x.cl.height for x in gc.get_objects() if isinstance(x, CLImage)])
+      print("buffer bytes", buffer_bytes/1e9, "image bytes", image_bytes/1e9, "sum", (buffer_bytes+image_bytes)/1e9)
+
+    print_ram()
     unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context).realize()
-    print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+    print_ram()
     latent = model.model.diffusion_model(latent, timesteps, context).realize()
-    print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+    print_ram()
+
     unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t

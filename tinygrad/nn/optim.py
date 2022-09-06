@@ -6,11 +6,13 @@ class Optimizer:
     self.params = [x for x in params if x.requires_grad]
 
   def zero_grad(self):
-    for param in self.params: param.grad = None
+    for param in self.params:
+      param.grad = None
 
   def realize(self, extra=None):
     # TODO: corealize
-    for p in self.params + extra if extra is not None else self.params: p.realize()
+    for p in self.params + extra if extra is not None else self.params:
+      p.realize()
 
 class SGD(Optimizer):
   def __init__(self, params, lr=0.001):
@@ -18,7 +20,8 @@ class SGD(Optimizer):
     self.lr = lr
 
   def step(self):
-    for t in self.params: t.assign(t.detach() - t.grad * self.lr)
+    for t in self.params:
+      t.assign(t.detach() - t.grad * self.lr)
     self.realize()
 
 class RMSprop(Optimizer):
