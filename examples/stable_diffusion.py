@@ -516,7 +516,8 @@ class StableDiffusion:
 
 # this is sd-v1-4.ckpt
 #FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
-FILENAME = "/home/kafka/model.ckpt"
+#FILENAME = "/home/kafka/model.ckpt"
+FILENAME = "weights/sd-v1-4.ckpt"
 
 if __name__ == "__main__":
   Tensor.no_init = True
