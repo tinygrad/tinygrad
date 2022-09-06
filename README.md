@@ -160,6 +160,16 @@ PROTIP: Set "GPU=1" environment variable if you want this to go faster.
 
 PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
+### tinygrad supports Stable Diffusion!
+
+Run `LAZY=0 OPT=2 TORCH=1 python3 examples/stable_diffusion.py`
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg">
+</p>
+
+"a horse sized cat eating a bagel"
+
 ### tinygrad supports GANs
 
 See `examples/mnist_gan.py`

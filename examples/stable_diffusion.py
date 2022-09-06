@@ -361,14 +361,14 @@ class UNetModel:
 
     saved_inputs = []
     for i,b in enumerate(self.input_blocks):
-      print("input block", i)
+      #print("input block", i)
       for bb in b:
         x = run(x, bb)
       saved_inputs.append(x)
     for bb in self.middle_block:
       x = run(x, bb)
     for i,b in enumerate(self.output_blocks):
-      print("output block", i)
+      #print("output block", i)
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
@@ -492,9 +492,7 @@ class StableDiffusion:
     self.first_stage_model = AutoencoderKL()
     self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
 
-  #def __call__(self, x, timesteps, context):
-    #return self.model.diffusion_model(x, timesteps, context)
-    #return self.first_stage_model(x)
+  # TODO: make __call__ run the model
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
 # 3x512x512 <--> 4x64x64 (16384)
@@ -530,7 +528,7 @@ if __name__ == "__main__":
     except (AttributeError, KeyError, IndexError):
       #traceback.print_exc()
       w = None 
-    print(f"{str(v.shape):30s}", w, k)
+    print(f"{str(v.shape):30s}", w.shape if w is not None else w, k)
     if w is not None:
       assert w.shape == v.shape
       w.assign(v.astype(np.float32))
@@ -560,9 +558,9 @@ if __name__ == "__main__":
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  TIMESTEPS = 4
+  TIMESTEPS = 50
   timesteps = list(np.arange(1, 1000, 1000//TIMESTEPS))
-  print(timesteps)
+  print(f"running for {timesteps} timesteps")
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
   alphas_prev = [1.0] + alphas[:-1]
 
@@ -571,7 +569,7 @@ if __name__ == "__main__":
     a_t, a_prev = alphas[index], alphas_prev[index]
     sigma_t = 0
     sqrt_one_minus_at = math.sqrt(1-a_t)
-    print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
+    #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
 
     pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
 
@@ -586,8 +584,8 @@ if __name__ == "__main__":
   latent = Tensor.randn(1,4,64,64)
 
   # this is diffusion
-  for index, timestep in tqdm(list(enumerate(timesteps))[::-1]):
-    print(index, timestep)
+  for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+    t.set_description("%3d %3d" % (index, timestep))
     e_t = get_model_output(latent, timestep)
     x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t, index)
     #e_t_next = get_model_output(x_prev)
