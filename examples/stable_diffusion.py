@@ -197,7 +197,7 @@ class ResBlock:
   def __call__(self, x, emb):
     h = x.sequential(self.in_layers)
     emb_out = emb.sequential(self.emb_layers)
-    h = h + emb_out
+    h = h + emb_out.reshape(*emb_out.shape, 1, 1)
     h = h.sequential(self.out_layers)
     ret = self.skip_connection(x) + h
     return ret
