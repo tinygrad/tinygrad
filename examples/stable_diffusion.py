@@ -11,6 +11,7 @@ from extra.utils import fake_torch_load_zipped, get_child
 from tinygrad.nn import Conv2d
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
+from extra.introspection import print_objects
 
 # TODO: rename to GroupNorm and put in nn.py
 class Normalize:
@@ -363,7 +364,7 @@ class UNetModel:
 
     saved_inputs = []
     for i,b in enumerate(self.input_blocks):
-      print("input block", i)
+      #print("input block", i)
       for bb in b:
         x = run(x, bb)
       saved_inputs.append(x)
@@ -371,7 +372,7 @@ class UNetModel:
     for bb in self.middle_block:
       x = run(x, bb)
     for i,b in enumerate(self.output_blocks):
-      print("output block", i)
+      #print("output block", i)
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
@@ -559,30 +560,15 @@ if __name__ == "__main__":
   def get_model_output(latent, t):
     # put into diffuser
     timesteps = Tensor([t])
-    from tinygrad.llops.ops_gpu import CL
-    from tinygrad.llops.ops_gpu import CLBuffer
-    from tinygrad.llops.ops_opencl import CLImage, OpenCLBuffer
-    import gc
-
-    def print_ram():
-      print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
-      img_count = sum([x.is_image() for x in gc.get_objects() if isinstance(x, OpenCLBuffer)])
-      print("img_count", img_count)
-      buffer_bytes = sum([x.cl.size for x in gc.get_objects() if isinstance(x, CLBuffer)])
-      image_bytes = sum([x.cl.row_pitch*x.cl.height for x in gc.get_objects() if isinstance(x, CLImage)])
-      print("buffer bytes", buffer_bytes/1e9, "image bytes", image_bytes/1e9, "sum", (buffer_bytes+image_bytes)/1e9)
-
-    print_ram()
+    print_objects()
     unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context).realize()
-    print_ram()
     latent = model.model.diffusion_model(latent, timesteps, context).realize()
-    print_ram()
 
     unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  TIMESTEPS = 5
+  TIMESTEPS = int(os.getenv("TIMESTEPS", "5"))
   timesteps = list(np.arange(1, 1000, 1000//TIMESTEPS))
   print(f"running for {timesteps} timesteps")
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]

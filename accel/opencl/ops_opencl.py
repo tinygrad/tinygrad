@@ -195,7 +195,8 @@ class OpenCLBuffer(GPUBuffer):
     #ewtypes.append(f"read_only image2d_t {name}_g")
     return super().contiguous_view_constant_fold(name)
 
-  seen = set()
+  # THIS WAS STUPIDLY OOMING THE WHOLE THING!
+  #seen = set()
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
     if C is None or earlycode != "acc":
       # TODO: handle an opencl conv without the conv part
@@ -206,9 +207,9 @@ class OpenCLBuffer(GPUBuffer):
     w = [x for x in bufs if x[0] == "weight"][0][1]
     ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
 
-    if (x,w) in OpenCLBuffer.seen:
-      print("WARNING: recomputing CONV with", x, w)
-    OpenCLBuffer.seen.add((x,w))
+    #if (x,w) in OpenCLBuffer.seen:
+    #  print("WARNING: recomputing CONV with", x, w)
+    #OpenCLBuffer.seen.add((x,w))
 
     # remove fakebufs
     fakebufs, ewtypes, getters = get_getters(ewbufs, ret)
