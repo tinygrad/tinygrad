@@ -83,9 +83,7 @@ def compile(input, output_fn):
   # realize all non GCed tensors (fix for batchnorm folding)
   import gc
   gc.collect()
-  def tensors_allocated():
-    return [x for x in gc.get_objects() if isinstance(x, Tensor)]
-  for x in tensors_allocated():
+  for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
     x.realize()
 
   # real run

@@ -144,7 +144,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     # if there's *one* processing or reduce op in here, we can corealize it. we can corealize binary op siblings as well
     # NOTE: if it references the same conv multiple times, they should already be merged by the dictionary
     psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
-    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE and (self.device != "OPENCL" or self.shape[-1] == 4):
       if psrcs[0][1].optype == ProcessingOps:
         # TODO: do something similar to what i did with reduceop to use the ast engine?
         # it's hard because conv also has convargs

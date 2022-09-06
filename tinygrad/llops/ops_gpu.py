@@ -13,9 +13,9 @@ class CLBuffer:
   def __init__(self, size):
     if len(CL.BUFFER_CACHE[size]) > 0: self.cl = CL.BUFFER_CACHE[size].pop()
     else:
-      CL.mem_used += size
       # TODO: on GPU OOM, clear the cache
       self.cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
+      CL.mem_used += self.cl.size
 
   def __del__(self):
     if CLCACHE: CL.BUFFER_CACHE[self.cl.size].append(self.cl)
@@ -58,7 +58,7 @@ class CLProgram:
     if DEBUG >= 1:
       CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else (e.profile.end - e.profile.start)
       CL.ops_sum += op_estimate
-      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:6.1f}M/{CL.ops_sum/1e9:7.2f}G  " +
+      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:6.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
             ("" if DEBUG <= 1 or CL.CACHE is not None else f"tm {(e.profile.end - e.profile.start)/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({op_estimate/(e.profile.end - e.profile.start):8.2f} GFLOPS)"))
     if DEBUG >= 4: print(self.prg)
 

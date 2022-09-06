@@ -10,7 +10,7 @@ import numpy as np
 import pyopencl as cl
 
 UNSAFE_FLOAT4 = int(os.getenv("UNSAFE_FLOAT4", 0))
-NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))
+FLOAT16 = int(os.getenv("FLOAT16", 0))
 
 import pathlib
 def load(x):
@@ -20,15 +20,15 @@ def load(x):
 CONV_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/conv.cl')
 MATMUL_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/matmul.cl')
 
-class ECL(CL):
-  @staticmethod
-  def image(shape):
-    if int(os.getenv("FLOAT16", 0)):
-      # HALF_FLOAT breaks tests
-      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT)
-    else:
-      fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
-    return cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=shape)
+class CLImage:
+  def __init__(self, shape):
+    # HALF_FLOAT breaks tests
+    fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=shape)
+    CL.mem_used += self.cl.row_pitch * self.cl.height
+
+  def __del__(self):
+    CL.mem_used -= self.cl.row_pitch * self.cl.height
 
 def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   middle_code = []
@@ -102,9 +102,9 @@ def roundup(x, n=4): return (x+(n-1))//n * n
 class OpenCLBuffer(GPUBuffer):
   code_for_op = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
-    UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
-    UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
-    UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "(1.0/A)",
+    UnaryOps.EXP: "native_exp(A)",
+    UnaryOps.LOG: "native_log(A)",
+    UnaryOps.RECIPROCAL: "native_recip(A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
     ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
   }
@@ -127,7 +127,7 @@ class OpenCLBuffer(GPUBuffer):
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
 
       if self._image is not None:
-        self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
+        self._buf = CLBuffer(4*roundup(prod(self._image.cl.shape)*4))
         if self._backing is not None:
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
           #self._backing = None
@@ -143,7 +143,7 @@ class OpenCLBuffer(GPUBuffer):
             int W = get_image_width(in);
             out[l.y*W + l.x] = read_imagef(in, smp, l);
           }
-        """)(self._image.shape, None, self._buf.cl, self._image)
+        """)(self._image.cl.shape, None, self._buf.cl, self._image.cl)
         self._image = None
     return self._buf.cl
   
@@ -153,9 +153,9 @@ class OpenCLBuffer(GPUBuffer):
   def image(self):
     if self._image is None:
       assert len(self.shape) == 3 and self.shape[2] == 4, f"bad shape for image {self.shape}"
-      self._image = ECL.image(shape=(self.shape[1], self.shape[0]))
+      self._image = CLImage(shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
-        assert prod(self.shape) == prod(self._image.shape)*4
+        assert prod(self.shape) == prod(self._image.cl.shape)*4
         #print(f"converting {self.shape} to image with shape {self._image.shape}")
         CLProgram("to_image", """
           __kernel void to_image(
@@ -167,9 +167,9 @@ class OpenCLBuffer(GPUBuffer):
             int W = get_image_width(out);
             write_imagef(out, l, in[l.y*W + l.x]);
           }
-        """)(self._image.shape, None, self._image, self._buf.cl)
+        """)(self._image.cl.shape, None, self._image.cl, self._buf.cl)
       self._buf = None
-    return self._image
+    return self._image.cl
 
   SUPPORTS_PADDING = True
   def processing_op(x, op:ProcessingOps, w:GPUBuffer, C:ConvArgs):

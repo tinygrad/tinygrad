@@ -10,6 +10,7 @@ from collections import namedtuple
 from extra.utils import fake_torch_load_zipped, get_child
 from tinygrad.nn import Conv2d
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import prod
 
 # TODO: rename to GroupNorm and put in nn.py
 class Normalize:
@@ -116,6 +117,7 @@ class Decoder:
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
+      x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
 
@@ -361,17 +363,19 @@ class UNetModel:
 
     saved_inputs = []
     for i,b in enumerate(self.input_blocks):
-      #print("input block", i)
+      print("input block", i)
       for bb in b:
         x = run(x, bb)
       saved_inputs.append(x)
+      x.realize()
     for bb in self.middle_block:
       x = run(x, bb)
     for i,b in enumerate(self.output_blocks):
-      #print("output block", i)
+      print("output block", i)
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
+      x.realize()
     return x.sequential(self.out)
 
 class CLIPMLP:
@@ -516,7 +520,7 @@ FILENAME = "/home/kafka/model.ckpt"
 
 if __name__ == "__main__":
   Tensor.no_init = True
-  # WTF!! no_grad breaks it
+  # WTF!! no_grad breaks it (only with OPENCL, now fixed)
   Tensor.no_grad = True
   model = StableDiffusion()
 
@@ -541,24 +545,32 @@ if __name__ == "__main__":
   # "penguin with fire extinguisher"
   #phrase = [49406, 14952, 593, 1769, 38567, 4510, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407]
 
-  context = model.cond_stage_model.transformer.text_model(phrase)
+  context = model.cond_stage_model.transformer.text_model(phrase).realize()
   print("got CLIP context", context.shape)
 
   phrase = [49406, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407]
-  unconditional_context = model.cond_stage_model.transformer.text_model(phrase)
+  unconditional_context = model.cond_stage_model.transformer.text_model(phrase).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
+
+  # done with clip model
+  del model.cond_stage_model
 
   def get_model_output(latent, t):
     # put into diffuser
     timesteps = Tensor([t])
-    unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context)
+    from tinygrad.llops.ops_gpu import CL
+    import gc
 
-    latent = model.model.diffusion_model(latent, timesteps, context)
+    print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+    unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context).realize()
+    print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+    latent = model.model.diffusion_model(latent, timesteps, context).realize()
+    print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
     unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  TIMESTEPS = 50
+  TIMESTEPS = 5
   timesteps = list(np.arange(1, 1000, 1000//TIMESTEPS))
   print(f"running for {timesteps} timesteps")
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
