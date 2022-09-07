@@ -75,7 +75,7 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
       # one liners
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
-      elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -9.99e-13), opt.get('max', 9.99e13))))
+      elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -3.4e38), opt.get('max', 3.4e38))))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Flatten": ret = inp[0].flatten(opt['axis'] if 'axis' in opt else 0)
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt['perm'])
