@@ -158,6 +158,9 @@ class TestOps(unittest.TestCase):
   def test_slice_one(self):
     helper_test_op([(3)], lambda x: x[1], lambda x: x[1])
 
+  def test_slice_one_multi(self):
+    helper_test_op([(10,10)], lambda x: x[1], lambda x: x[1])
+
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
 

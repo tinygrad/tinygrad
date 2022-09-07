@@ -143,14 +143,15 @@ class Tensor:
   # ***** non first class ops (hlops) *****
 
   def __getitem__(self, val):
-    arg = []
-    for i, s in enumerate(val if isinstance(val, (list, tuple)) else [val]) if val is not None else []:
-      if isinstance(s, int):
-        s = slice(s, s+1, None)
-      arg.append((s.start if s.start is not None else 0,
-        (s.stop if s.stop >=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
+    arg, new_shape = [], []
+    for i, rs in enumerate(val if isinstance(val, (list, tuple)) else [val]) if val is not None else []:
+      s = slice(rs, rs+1, None) if isinstance(rs, int) else rs
+      arg.append((s.start if s.start is not None else 0, (s.stop if s.stop>=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
       assert s.step is None or s.step == 1
-    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))])
+      if not isinstance(rs, int):  # don't include in shape if it's an int
+        new_shape.append(arg[-1][1] - arg[-1][0])
+    new_shape += [self.shape[i] for i in range(len(arg), len(self.shape))]
+    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))]).reshape(new_shape if len(new_shape) else (1,))
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
@@ -293,9 +294,8 @@ class Tensor:
   def permute(self, order, *args): return self._permute(order=argfix(order, *args))
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
-    shp = [1] * (len(self.shape)-1) + [-1]
-    x = self.mul(weight.reshape(shape=shp)) if len(weight.shape) == 1 else self.dot(weight)
-    return x.add(bias.reshape(shape=shp)) if bias is not None else x
+    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
+    return x.add(bias) if bias is not None else x
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
 
