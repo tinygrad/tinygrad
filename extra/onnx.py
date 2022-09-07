@@ -75,12 +75,26 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
       # one liners
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
-      elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt['min'], opt['max'])))
+      elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -3.4e38), opt.get('max', 3.4e38))))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Flatten": ret = inp[0].flatten(opt['axis'] if 'axis' in opt else 0)
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt['perm'])
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
+      elif n.op_type == "Unsqueeze": ret = inp[0].reshape(np.insert(inp[0].shape, opt['axes'][0], 1).tolist())
+      elif n.op_type == "ReduceL2": ret = inp[0].pow(2).sum(axis=opt['axes'], keepdim=opt['keepdims']).sqrt()
       elif n.op_type == "GlobalAveragePool": ret = inp[0].mean(axis=tuple(range(2, len(inp[0].shape))), keepdim=True)
+      elif n.op_type == "Shape": ret = inp[0].shape
+      elif n.op_type == "Expand": ret = inp[0].reshape([1]*(max(len(inp[0].shape), len(inp[1]))-len(inp[0].shape)) + list(inp[0].shape)) # just broadcast
+      elif n.op_type == "Div": ret = inp[0].div(inp[1])
+      elif n.op_type == "Constant": ret = opt['value']
+      elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) for x in inp[1].numpy()])
+      elif n.op_type == "Gather":
+        axis = opt['axis']
+        shape = list(inp[0].shape)
+        assert axis==0, 'untested for other values'
+        indices = [shape[axis]+int(x) if x<0 else int(x) for x in inp[1].numpy()]
+        shape[axis] = 1
+        ret = inp[0][indices[0]].reshape(shape).cat(*[inp[0][x].reshape(shape) for x in indices[1:]], dim=axis)
       elif n.op_type == "BatchNormalization":
         invstd = inp[4].add(opt.get('epsilon', 1e-5))**-0.5
         ret = batch_normalize(inp[0], inp[1], inp[2], inp[3], invstd)
@@ -130,10 +144,15 @@ def get_run_onnx(onnx_model):
         #w = Tensor.eye(chan).reshape((chan, chan, 1, 1))
         #ret = ret.conv2d(w, stride=opt['strides'])
       elif n.op_type == "Slice":
+        assert onnx_model.opset_import[0].version == 10
         arg = [(0,x) for x in inp[0].shape]
-        assert len(opt['axes']) == 1
-        arg[opt['axes'][0]] = (opt['starts'][0], opt['ends'][0])
-        ret = inp[0].slice(arg = arg)
+        starts, ends, axes = inp[1:4]
+        assert axes.shape == (1,)
+        axis, starts, ends  = int(axes.numpy()[0]), int(starts.numpy()[0]), int(ends.numpy()[0])
+        ends = min(ends, inp[0].shape[axis])
+        starts = starts + inp[0].shape[axis] if starts < 0 else starts
+        arg[0] = (starts, ends)
+        ret = inp[0].slice(arg=arg)
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
@@ -144,3 +163,4 @@ def get_run_onnx(onnx_model):
 
     return {outp.name:intermediate_tensors[outp.name] for outp in onnx_model.graph.output}
   return run_onnx
+
