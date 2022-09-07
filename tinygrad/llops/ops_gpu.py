@@ -147,7 +147,7 @@ class GPUBuffer:
     views = {name:buf.contiguous_view_constant_fold(name) for name, buf in bufs}
 
     buf_types : List[str] = [views[name][1] for name, _ in bufs if views[name][1] is not None]  # type: ignore
-    buf_cl = [buf.cl if 'image2d_t' not in views[name][1] else buf.image for name, buf in bufs if views[name][1] is not None]
+    buf_cl = [buf.cl if 'image2d_t' not in views[name][1] else buf.image for name, buf in bufs if views[name][1] is not None]  # type: ignore
 
     # use local memory if it's a multistage reduce
     inter_red = 256 if (prod(ret.shape) < 8192 and red >= 256) else 1
