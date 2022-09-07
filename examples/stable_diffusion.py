@@ -8,7 +8,7 @@ import traceback
 from tqdm import tqdm
 from collections import namedtuple
 from extra.utils import fake_torch_load_zipped, get_child
-from tinygrad.nn import Conv2d
+from tinygrad.nn import Conv2d, Linear
 from tinygrad.tensor import Tensor
 
 # TODO: refactor AttnBlock, CrossAttention, CLIPAttention to share code
@@ -34,7 +34,6 @@ class Normalize:
       return (x * self.weight.reshape(1, -1, 1, 1)) + self.bias.reshape(1, -1, 1, 1)
     else:
       return x.linear(self.weight, self.bias)
-
 
 class AttnBlock:
   def __init__(self, in_channels):
@@ -165,14 +164,6 @@ class AutoencoderKL:
     print("latent", latent.shape)
     latent = self.post_quant_conv(latent)
     return self.decoder(latent)
-
-class Linear:
-  def __init__(self, in_features, out_features, bias=True):
-    self.weight = Tensor.empty(out_features, in_features)
-    self.bias = Tensor.empty(out_features) if bias else None
-
-  def __call__(self, x):
-    return x.linear(self.weight.transpose(), self.bias)
 
 # not to be confused with ResnetBlock
 class ResBlock:
