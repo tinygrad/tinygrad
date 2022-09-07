@@ -57,14 +57,14 @@ class TestNN(unittest.TestCase):
     def _test_linear(x):
 
       # create in tinygrad
-      layer = (Tensor.uniform(in_dim, out_dim), Tensor.zeros(out_dim))
-      z = x.linear(*layer)
+      model = Linear(in_dim, out_dim)
+      z = model(x)
 
       # create in torch
       with torch.no_grad():
         torch_layer = torch.nn.Linear(in_dim, out_dim).eval()
-        torch_layer.weight[:] = torch.tensor(layer[0].data.T, dtype=torch.float32)
-        torch_layer.bias[:] = torch.tensor(layer[1].data, dtype=torch.float32)
+        torch_layer.weight[:] = torch.tensor(model.weight.numpy(), dtype=torch.float32)
+        torch_layer.bias[:] = torch.tensor(model.bias.numpy(), dtype=torch.float32)
         torch_x = torch.tensor(x.cpu().data, dtype=torch.float32)
         torch_z = torch_layer(torch_x)
 

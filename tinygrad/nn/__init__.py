@@ -48,3 +48,10 @@ class Conv2d:
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride)
 
+class Linear:
+  def __init__(self, in_features, out_features, bias=True):
+    self.weight = (Tensor.uniform if not Tensor.no_init else Tensor.empty)(out_features, in_features)
+    self.bias = (Tensor.zeros if not Tensor.no_init else Tensor.empty)(out_features) if bias else None
+
+  def __call__(self, x):
+    return x.linear(self.weight.transpose(), self.bias)
