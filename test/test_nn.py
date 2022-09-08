@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from cmath import exp
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
@@ -8,6 +9,28 @@ import torch
 
 @unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
 class TestNN(unittest.TestCase):
+
+  def test_max_pool2d(self):
+    for size, kernel_size, stride in [
+        # kernel size == stride
+        ((1, 1, 8, 16), (3, 3), (3, 3)),
+        ((1, 1, 8, 8), (3, 3), (3, 3)),
+        # kernel size < stride
+        ((1, 1, 8, 16), (3, 3), (1, 1)),
+        ((1, 1, 8, 8), (3, 3), (1, 1)),
+        # kernel size < stride
+        ((1, 1, 8, 16), (3, 3), (5, 5)),
+        ((1, 1, 8, 8), (3, 3), (5, 5)),
+        # rectange kernel
+        ((1, 1, 8, 16), (3, 2), (3, 2)),
+        ((1, 1, 8, 8), (3, 2), (3, 2)),
+      ]:
+      array = np.random.uniform(size=size)
+      expected = torch.nn.functional.max_pool2d(torch.from_numpy(array), kernel_size=kernel_size, stride=stride).numpy()
+      actual = Tensor(array).max_pool2d(kernel_size=kernel_size, stride=stride).numpy()
+      print(expected.dtype)
+      print(actual.dtype)
+      np.testing.assert_allclose(actual, expected)
 
   def test_batchnorm2d(self, training=False):
     sz = 4

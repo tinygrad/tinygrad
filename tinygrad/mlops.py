@@ -155,6 +155,14 @@ class Flip(Function):
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.FLIP, self.axis)
 
+class Stride(Function):
+  def forward(self, x, stride):
+    self.stride = stride
+    return x.movement_op(MovementOps.STRIDED, stride)
+
+  def backward(self, grad_output):
+    return grad_output.movement_op(MovementOps.STRIDED, self.stride)
+
 # ************* processing ops *************
 
 class Conv2D(Function):

@@ -234,13 +234,30 @@ class Tensor:
     _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
-  # TODO: support arbitrary strides
-  def _pool2d(self, py, px):
-    xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px] if (self.shape[2]%py != 0) or (self.shape[3]%px != 0) else self
-    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
+  def _pool2d(self, py, px, stride=None):
+    if stride is None:
+      sy, sx = py, px
+    elif isinstance(stride, int):
+      sy, sx = stride, stride
+    else:
+      sy, sx = stride
+
+    b, c, h, w = self.shape
+    dx, dy = px - sx, py - sy
+    nh = h - dy
+    nw = w - dx
+    # s = Stride(device=self.device)
+    return self.stride(stride=[
+      (b, h * w * c),  # No change in batch
+      (c, h * w),  # No change in channel
+      (nh // sy, w * sx),
+      (nw // sx, sy),
+      (py, w),
+      (px, 1),
+    ])
 
   def avg_pool2d(self, kernel_size=(2,2)): return self._pool2d(*kernel_size).mean(axis=(3,5))
-  def max_pool2d(self, kernel_size=(2,2)): return self._pool2d(*kernel_size).max(axis=(3,5))
+  def max_pool2d(self, kernel_size=(2, 2), stride=None): return self._pool2d(*kernel_size, stride=stride).max(axis=(4, 5))
 
   def conv2d(self, weight, bias=None, **kwargs):
     ret = self._conv2d(weight, **kwargs)
