@@ -1,5 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
+import math
+
 import inspect, functools, importlib, itertools
 import numpy as np
 from tinygrad.helpers import prod, argfix
@@ -234,30 +236,15 @@ class Tensor:
     _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
-  def _pool2d(self, py, px, stride=None):
-    if stride is None:
-      sy, sx = py, px
-    elif isinstance(stride, int):
-      sy, sx = stride, stride
-    else:
-      sy, sx = stride
-
+  def _pool2d(self, py, px, stride):
+    sy, sx = (py, px) if stride is None else stride
     b, c, h, w = self.shape
-    dx, dy = px - sx, py - sy
-    nh = h - dy
-    nw = w - dx
-    # s = Stride(device=self.device)
-    return self.stride(stride=[
-      (b, h * w * c),  # No change in batch
-      (c, h * w),  # No change in channel
-      (nh // sy, w * sx),
-      (nw // sx, sy),
-      (py, w),
-      (px, 1),
-    ])
+    h_out = math.floor(((h - 1 * (py - 1) - 1) / sy) + 1)
+    w_out = math.floor(((w - 1 * (px - 1) - 1) / sx) + 1)
+    return self.stride(stride=[(b, h * w * c), (c, h * w), (h_out, w * sy), (w_out, sx), (py, w), (px, 1)])
 
-  def avg_pool2d(self, kernel_size=(2,2)): return self._pool2d(*kernel_size).mean(axis=(3,5))
-  def max_pool2d(self, kernel_size=(2, 2), stride=None): return self._pool2d(*kernel_size, stride=stride).max(axis=(4, 5))
+  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*kernel_size, stride).mean(axis=(4,5))
+  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*kernel_size, stride).max(axis=(4,5))
 
   def conv2d(self, weight, bias=None, **kwargs):
     ret = self._conv2d(weight, **kwargs)

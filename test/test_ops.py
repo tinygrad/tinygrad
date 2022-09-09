@@ -338,6 +338,35 @@ class TestOps(unittest.TestCase):
           lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
           lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4)
 
+  def test_max_pool2d(self):
+    for size, kernel_size, stride in [
+        # kernel size == stride
+        ((1, 1, 8, 16), (3, 3), (3, 3)),
+        ((1, 1, 8, 8), (3, 3), (3, 3)),
+        # kernel size > stride
+        ((1, 1, 8, 16), (3, 3), (1, 1)),
+        ((1, 1, 8, 8), (3, 3), (1, 1)),
+        # kernel size < stride
+        ((1, 1, 8, 16), (3, 3), (5, 5)),
+        ((1, 1, 8, 8), (3, 3), (5, 5)),
+        # kernel is rectangular
+        ((1, 1, 8, 16), (3, 2), (3, 3)),
+        ((1, 1, 8, 8), (3, 2), (3, 3)),
+        # stride is rectangular
+        ((1, 1, 8, 16), (3, 3), (3, 2)),
+        ((1, 1, 8, 8), (3, 3), (3, 2)),
+        # both are rectangular
+        ((1, 1, 8, 16), (3, 2), (3, 2)),
+        ((1, 1, 8, 8), (3, 2), (3, 2)),
+        # Batch and channel > 1
+        ((2, 3, 8, 16), (3, 2), (3, 2)),
+        ((2, 3, 8, 8), (3, 2), (3, 2)),
+      ]:
+      array = np.random.uniform(size=size)
+      expected = torch.nn.functional.max_pool2d(torch.from_numpy(array), kernel_size=kernel_size, stride=stride).numpy()
+      actual = Tensor(array).max_pool2d(kernel_size=kernel_size, stride=stride).numpy()
+      np.testing.assert_allclose(actual, expected)
+
   def test_maxpool2d_simple(self):
     ksz = (2,2)
     helper_test_op([(1,1,2,3)],
