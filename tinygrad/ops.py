@@ -22,7 +22,7 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
-OPT = int(os.getenv("OPT", "1"))
+OPT = int(os.getenv("OPT", "2"))
 NOCONV = int(os.getenv("NOCONV", "0"))
 
 # TODO: movement ops that only change shape are really nops. treat them as such
