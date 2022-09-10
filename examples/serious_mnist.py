@@ -6,7 +6,7 @@ sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
 
 import numpy as np
-from tinygrad.tensor import Tensor, GPU
+from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2D
 from extra.utils import get_parameters
 from datasets import fetch_mnist
