@@ -30,7 +30,13 @@ lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw
 lbls = ast.literal_eval(lbls.decode('utf-8'))
 
 #url = "https://upload.wikimedia.org/wikipedia/commons/4/41/Chicken.jpg"
-url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
+#url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
+if len(sys.argv) > 1:
+    url = sys.argv[1]
+else:
+
+    url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
+
 
 # junk
 from PIL import Image
