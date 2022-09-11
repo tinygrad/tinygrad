@@ -3,7 +3,7 @@
 from __future__ import annotations
 import os
 from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, CLBuffer
-from tinygrad.ops import DEBUG, ProcessingOps, ReduceOps, UnaryOps, BinaryOps
+from tinygrad.ops import ProcessingOps, ReduceOps, UnaryOps, BinaryOps
 from tinygrad.helpers import prod, ConvArgs
 from typing import List, Tuple, Optional, Dict, Set
 import numpy as np
@@ -22,26 +22,23 @@ CONV_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/o
 MATMUL_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/matmul.cl')
 
 class CLImage:
-  MAX_HW = 16_384
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
 
   def __init__(self, shape):
+    self.max_hw = min(CL().cl_ctx.devices[0].image2d_max_width, CL.cl_ctx.devices[0].image2d_max_height)
     self.shape = shape
-    self.n_tile = int(np.ceil(max(shape) / CLImage.MAX_HW).item())
+    self.n_tile = int(np.ceil(max(shape) / self.max_hw).item())
     # if n_tile > 1, we can't fit the image into a CL image at native size,
     # and need to internally store it as a set of disjoint tiles
-    if self.n_tile * min(shape) > CLImage.MAX_HW:
+    if self.n_tile * min(shape) > self.max_hw:
       raise Exception(f"shape {shape} exceeds Metal image limits, even after tiling")
     if shape[0] >= shape[1]:
       # wider than it is tall; extra tiles overflow on y
-      self.tile_axis, tiled_width, tiled_height = 1, min(shape[0], CLImage.MAX_HW), self.n_tile * shape[1]
+      self.tile_axis, tiled_width, tiled_height = 1, min(shape[0], self.max_hw), self.n_tile * shape[1]
     else:
       # taller than it is wide; extra tiles overflow on x
-      self.tile_axis, tiled_width, tiled_height = 0, self.n_tile * shape[0], min(shape[1], CLImage.MAX_HW)
-    if DEBUG >= 1:
-      print(f"To create image with shape {shape}, made a tiled image with shape {tiled_width, tiled_height} and n_tile {self.n_tile} and tile axis {self.tile_axis}")
-      print(f"   to get coords for l, we sample {self.pos_to_sample_pos()}")
-    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(tiled_width, tiled_height))
+      self.tile_axis, tiled_width, tiled_height = 0, self.n_tile * shape[0], min(shape[1], self.max_hw)
+    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(tiled_width, tiled_height))
     CL.mem_used += self.cl.row_pitch * self.cl.height
 
   def pos_to_sample_pos(self, l="l", check_bounds=True):
@@ -50,11 +47,12 @@ class CLImage:
       return l
     # sad tiled path
     if self.tile_axis == 1:
-      sample_pos = f"((int2)({l}.x % {CLImage.MAX_HW}, ({l}.x / {CLImage.MAX_HW}) * {self.shape[1]} + {l}.y))"
+      sample_pos = f"((int2)({l}.x % {self.max_hw}, ({l}.x / {self.max_hw}) * {self.shape[1]} + {l}.y))"
+      in_bounds = f"(({l}.x < {self.shape[0]}) && (0 <= {l}.y) && ({l}.y < {self.shape[1]}))"
     else:
-      sample_pos = f"((int2)(({l}.y / {CLImage.MAX_HW}) * {self.shape[0]} + {l}.x, {l}.y % {CLImage.MAX_HW}))"
+      sample_pos = f"((int2)(({l}.y / {self.max_hw}) * {self.shape[0]} + {l}.x, {l}.y % {self.max_hw}))"
+      in_bounds = f"((0 <= {l}.x) && ({l}.x < {self.shape[0]}) && ({l}.y < {self.shape[1]}))"
     if check_bounds:
-      in_bounds = f"((0 <= {l}.x) && ({l}.x < {self.shape[0]}) && (0 <= {l}.y) && ({l}.y < {self.shape[1]}))"
       return f"({in_bounds} ? {sample_pos} : (int2)(-1, -1))"
     return sample_pos
 
@@ -190,7 +188,7 @@ class OpenCLBuffer(GPUBuffer):
       assert len(self.shape) == 3 and self.shape[2] == 4, f"bad shape for image {self.shape}"
       self._image = CLImage(shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
-        assert prod(self.shape) == prod(self._image.shape)*4
+        assert prod(self.shape) <= prod(self._image.cl.shape)*4
         #print(f"converting {self.shape} to image with shape {self._image.shape}")
         CLProgram("to_image", f"""
           __kernel void to_image(
