@@ -94,8 +94,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.relu6(x), Tensor.relu6)
   def test_hardswish(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.hardswish(x), Tensor.hardswish, atol=1e-6, grad_atol=1e-6)
-  def test_mish(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.mish(x), Tensor.mish, atol=1e-4)
+  # def test_mish(self):
+  #   helper_test_op([(45,65)], lambda x: torch.nn.functional.mish(x), Tensor.mish, atol=1e-4)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul_simple(self):
