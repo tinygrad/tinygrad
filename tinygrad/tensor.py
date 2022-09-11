@@ -59,7 +59,7 @@ class Tensor:
   def assign(self, x):
     if not isinstance(x, Tensor):
       x = Tensor(x)
-    assert self.shape == x.shape
+    
     self.lazydata = x.lazydata
     return x
 
@@ -121,7 +121,8 @@ class Tensor:
     return _deepwalk(self, set(), [])
 
   def backward(self):
-    assert self.shape == (1,)
+    
+   self.shape == (1,)
 
     # fill in the first grad with one
     # this is "implicit gradient creation"
