@@ -260,7 +260,7 @@ class Tensor:
 
   # ***** activation functions (unary) *****
 
-  def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
+  def sigmoid(self): return (1.0 + (-self).exp()) ** -1.0
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def swish(self): return self * self.sigmoid()
   silu = swish   # The SiLU function is also known as the swish function.
