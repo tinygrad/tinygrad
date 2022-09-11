@@ -27,9 +27,9 @@ class CLImage:
 
   def __init__(self, shape):
     self.shape = shape
-    self.n_tile = 1 + max(shape) // CLImage.MAX_HW
-    # if n_tile > 1, we can't fit the image into a CL image at native size, and need to
-    # internally store it as a set of disjoint tiles
+    self.n_tile = int(np.ceil(max(shape) / CLImage.MAX_HW).item())
+    # if n_tile > 1, we can't fit the image into a CL image at native size,
+    # and need to internally store it as a set of disjoint tiles
     if self.n_tile * min(shape) > CLImage.MAX_HW:
       raise Exception(f"shape {shape} exceeds Metal image limits, even after tiling")
     if shape[0] >= shape[1]:
@@ -166,18 +166,18 @@ class OpenCLBuffer(GPUBuffer):
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
           #self._backing = None
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
-        CLProgram("from_image", """
+        CLProgram("from_image", f"""
           __kernel void from_image(
               __global float4 *out,
-              read_only image2d_t in) {
+              read_only image2d_t in) {{
             const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
             int2 l;
             l.y = get_global_id(1);
             l.x = get_global_id(0);
-            int2 l_smp = """ + self._image.pos_to_sample_pos("l") + """;
-            int W = """ + str(self._image.shape[0]) + """;
+            int2 l_smp = {self._image.pos_to_sample_pos('l')};
+            int W = {str(self._image.shape[0])};
             out[l.y*W + l.x] = read_imagef(in, smp, l_smp);
-          }
+          }}
         """)(self._image.cl.shape, None, self._buf.cl, self._image.cl)
         self._image = None
     return self._buf.cl
@@ -192,17 +192,17 @@ class OpenCLBuffer(GPUBuffer):
       if self._buf is not None:
         assert prod(self.shape) == prod(self._image.shape)*4
         #print(f"converting {self.shape} to image with shape {self._image.shape}")
-        CLProgram("to_image", """
+        CLProgram("to_image", f"""
           __kernel void to_image(
               write_only image2d_t out,
-              __global const float4 *in) {
+              __global const float4 *in) {{
             int2 l;
             l.y = get_global_id(1);
             l.x = get_global_id(0);
-            int2 l_write = """ + self._image.pos_to_sample_pos("l", check_bounds=False) + """;
-            int W = """ + str(self._image.shape[0]) + """;
-            write_imagef(out, l_write, in[l.y*W + l.x]);
-          }
+            int2 l_out = {self._image.pos_to_sample_pos('l', check_bounds=False)};
+            int W = {str(self._image.shape[0])};
+            write_imagef(out, l_out, in[l.y*W + l.x]);
+          }}
         """)(self._image.shape, None, self._image.cl, self._buf.cl)
       self._buf = None
     return self._image.cl
@@ -218,14 +218,14 @@ class OpenCLBuffer(GPUBuffer):
       return f"""inline float get_{name}(const sampler_t smp, read_only image2d_t x, int gid) {{
         int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')};
         int2 l;
-        int W = """ + str(x._image.shape[0]) + """;
+        int W = {str(x._image.shape[0])};
         l.y = idx / (W*4);
         l.x = (idx/4) % W;
         int idx4 = idx % 4;
-        int2 l_smp = """ + x._image.pos_to_sample_pos("l") + """;
+        int2 l_smp = {x._image.pos_to_sample_pos('l')};
         float4 dat = read_imagef(x, smp, l_smp);
         return valid ? (idx4 == 0 ? dat.x : (idx4 == 1 ? dat.y : (idx4 == 2 ? dat.z : dat.w))) : 0.0;
-      }""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, idx);"
+      }}""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, idx);"
     #ewtypes.append(f"read_only image2d_t {name}_g")
     return super().contiguous_view_constant_fold(name)
 
