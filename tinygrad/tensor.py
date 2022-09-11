@@ -260,7 +260,7 @@ class Tensor:
 
   # ***** activation functions (unary) *****
 
-  def sigmoid(self): return (1.0 + (-self).exp()) ** -1.0
+  def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def swish(self): return self * self.sigmoid()
   silu = swish   # The SiLU function is also known as the swish function.
@@ -270,7 +270,7 @@ class Tensor:
   def gelu(self): return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
   def quick_gelu(self): return self * (self * 1.702).sigmoid()
   def leakyrelu(self, neg_slope=0.01): return self.relu() - (-neg_slope*self).relu()
-  def mish(self): return self * self.softplus().tanh()
+  def mish(self): return self - (2.0 * self) * (2.0 * self.exp() + (2.0 * self).exp() + 2.0).reciprocal()
   def softplus(self, limit=20, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
 
   # ***** broadcasted binary ops *****
