@@ -72,7 +72,7 @@ class Tensor:
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
-    assert self.lazydata.realized is None
+   
     self.lazydata.device = device
     if self.grad:
       self.grad.lazydata.device = device
