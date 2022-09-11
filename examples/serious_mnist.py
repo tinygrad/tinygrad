@@ -6,7 +6,7 @@ sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
 
 import numpy as np
-from tinygrad.tensor import Tensor, GPU
+from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2D
 from extra.utils import get_parameters
 from datasets import fetch_mnist
@@ -43,7 +43,7 @@ class ConvBlock:
     self.cweights = [Tensor.uniform(filters, inp if i==0 else filters, conv, conv) for i in range(3)]
     self.cbiases = [Tensor.uniform(1, filters, 1, 1) for i in range(3)]
     #init layers
-    self._bn = BatchNorm2D(128, training=True)
+    self._bn = BatchNorm2D(128)
     self._seb = SqueezeExciteBlock2D(filters)
 
   def __call__(self, input):
