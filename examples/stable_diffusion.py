@@ -655,7 +655,7 @@ if __name__ == "__main__":
   context = model.cond_stage_model.transformer.text_model(phrase).realize()
   print("got CLIP context", context.shape)
 
-  phrase = [49406] * 77
+  phrase = [49406] + [49407] * 76
   unconditional_context = model.cond_stage_model.transformer.text_model(phrase).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
 
