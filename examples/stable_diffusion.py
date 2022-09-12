@@ -593,8 +593,8 @@ class ClipTokenizer(object):
             token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
             bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
         # Truncation, keeping two slots for start and end token.
-        if len(bpe_tokens) >= 75:
-            bpe_tokens = bpe_tokens[:74]
+        if len(bpe_tokens) = 75:
+            bpe_tokens = bpe_tokens[:75]
         return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
 
 class StableDiffusion:
@@ -655,7 +655,7 @@ if __name__ == "__main__":
   context = model.cond_stage_model.transformer.text_model(phrase).realize()
   print("got CLIP context", context.shape)
 
-  phrase = [49406] + [49407] * 76
+  phrase = tokenizer.encode("")
   unconditional_context = model.cond_stage_model.transformer.text_model(phrase).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
 
