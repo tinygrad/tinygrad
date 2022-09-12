@@ -499,8 +499,8 @@ def get_pairs(word):
   pairs = set()
   prev_char = word[0]
   for char in word[1:]:
-      pairs.add((prev_char, char))
-      prev_char = char
+    pairs.add((prev_char, char))
+    prev_char = char
   return pairs
 
 def whitespace_clean(text):
@@ -538,7 +538,7 @@ class ClipTokenizer(object):
     vocab = list(bytes_to_unicode().values())
     vocab = vocab + [v+'</w>' for v in vocab]
     for merge in merges:
-        vocab.append(''.join(merge))
+      vocab.append(''.join(merge))
     vocab.extend(['<|startoftext|>', '<|endoftext|>'])
     self.encoder = dict(zip(vocab, range(len(vocab))))
     self.bpe_ranks = dict(zip(merges, range(len(merges))))
@@ -594,7 +594,7 @@ class ClipTokenizer(object):
       bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
     # Truncation, keeping two slots for start and end tokens.
     if len(bpe_tokens) > 75:
-        bpe_tokens = bpe_tokens[:75]
+      bpe_tokens = bpe_tokens[:75]
     return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
 
 class StableDiffusion:
