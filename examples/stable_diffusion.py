@@ -592,6 +592,9 @@ class ClipTokenizer(object):
         for token in re.findall(self.pat, text):
             token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
             bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
+        # Truncation
+        if len(bpe_tokens) >= 77:
+            bpe_tokens = bpe_tokens[:75]
         return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
 
 class StableDiffusion:
