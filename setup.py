@@ -19,12 +19,13 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=['numpy', 'requests', 'pillow', 'networkx'],
+      install_requires=['numpy', 'requests', 'pillow'],
       python_requires='>=3.8',
       extras_require={
         'gpu': ["pyopencl", "six"],
         'testing': [
             "pytest",
+            "networkx",
             "torch~=1.11.0",
             "tqdm",
             "protobuf~=3.19.0",
