@@ -18,7 +18,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   ret = tinygrad_fxn(*tst)
 
   def compare(s, x,y,atol,rtol):
-    assert x.shape == y.shape
+    if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch {x.shape} != {y.shape}"
     try:
       np.testing.assert_allclose(x,y, atol=atol, rtol=rtol)
     except Exception:
