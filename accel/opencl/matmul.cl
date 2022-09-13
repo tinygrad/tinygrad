@@ -25,7 +25,8 @@ __kernel void matmul(
 
   short scratchIndex = mad24((short)get_local_id(2), mul24((short)get_local_size(1), 4), scratchOffset);
   outputScratch[scratchIndex] = outputValue;
-  //barrier(CLK_LOCAL_MEM_FENCE);
+
+  barrier(CLK_LOCAL_MEM_FENCE);
 
   if (scratchOffset == 0) {
     float4 outputValues = (float4)(0, 0, 0, 0);
