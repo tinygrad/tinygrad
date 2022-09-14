@@ -17,14 +17,21 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
 
-  np.testing.assert_allclose(ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
+  def compare(s, x,y,atol,rtol):
+    if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch {x.shape} != {y.shape}"
+    try:
+      np.testing.assert_allclose(x,y, atol=atol, rtol=rtol)
+    except Exception:
+      raise Exception(f"{s} failed shape {x.shape}")
+
+  compare("forward pass", ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
 
   if not forward_only:
     out.mean().backward()
     ret.mean().backward()
 
-    for t, tt in zip(ts, tst):
-      np.testing.assert_allclose(t.grad, tt.cpu().grad.data, atol=grad_atol, rtol=grad_rtol)
+    for i, (t, tt) in enumerate(zip(ts, tst)):
+      compare(f"backward pass tensor {i}", t.grad, tt.cpu().grad.data, atol=grad_atol, rtol=grad_rtol)
 
   # speed
   torch_fp = timeit.Timer(functools.partial(torch_fxn, *ts)).timeit(5) * 1000/5
@@ -92,6 +99,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], _mish_pytorch, Tensor.mish, atol=1e-4)
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+  def test_matmul_simple(self):
+    helper_test_op([(2), (2,2)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+  def test_matmul(self):
+    helper_test_op([(65), (65,99)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
   def test_multidot(self):

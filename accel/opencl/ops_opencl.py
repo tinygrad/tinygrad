@@ -232,7 +232,7 @@ class OpenCLBuffer(GPUBuffer):
       options.append("-DDEPTHWISE_UNSTRIDED")
     elif C.cin == 1:
       options.append("-DDEPTHWISE")
-    if int(os.getenv("MATMUL", 0)) and C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1:
+    if int(os.getenv("MATMUL", 0)) and C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1 and C.bs == 1:
       options.append("-DMATMUL")
       # NOTE: this is not actually a matmul, it's a vector * matrix
 
