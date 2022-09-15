@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.nn import batch_normalize
@@ -9,10 +10,8 @@ MAX_CONVS = int(os.getenv("MAX_CONVS", -1))
 def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
-    if inp.data_type == 1:
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.float32).reshape(inp.dims).copy(), requires_grad=False)
-    elif inp.data_type == 7:
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=np.int64).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+    if inp.data_type in (1,10,7):
+      ret = Tensor(np.frombuffer(inp.raw_data, dtype=TENSOR_TYPE_TO_NP_TYPE[inp.data_type]).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
