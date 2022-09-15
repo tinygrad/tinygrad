@@ -159,7 +159,7 @@ class OpenCLBuffer(GPUBuffer):
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
 
       if self._image is not None:
-        self._buf = CLBuffer(4*roundup(prod(self._image.cl.shape)*4))
+        self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
         if self._backing is not None:
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
           #self._backing = None
@@ -176,7 +176,7 @@ class OpenCLBuffer(GPUBuffer):
             int W = {str(self._image.shape[0])};
             out[l.y*W + l.x] = read_imagef(in, smp, l_smp);
           }}
-        """)(self._image.cl.shape, None, self._buf.cl, self._image.cl)
+        """)(self._image.shape, None, self._buf.cl, self._image.cl)
         self._image = None
     return self._buf.cl
   
