@@ -39,13 +39,13 @@ __kernel void image_conv(
   short startX = mad24(mad24(startOutputColumn, strideX, -paddingX), totalNumPackedInputChannels, startPackedInputChannel);
   short strideWithChannels = mul24(strideX, totalNumPackedInputChannels);
 
-  short outputRow = get_global_id(2);
+  int outputRow = get_global_id(2);
   int2 inputLocation;
 
 #ifdef BATCH
   // TODO: this doesn't work with y padding
   inputLocation.y = mad24(outputRow % numOutputRows, strideY, -paddingY);
-  short batchOffset = (outputRow / numOutputRows) * numInputRows;
+  int batchOffset = (outputRow / numOutputRows) * numInputRows;
   inputLocation.y += batchOffset;
 #else
   inputLocation.y = mad24(outputRow, strideY, -paddingY);

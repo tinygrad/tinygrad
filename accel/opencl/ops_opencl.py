@@ -45,13 +45,13 @@ class CLImage:
     if self.n_tile == 1:
       # happy path where no indexing ops are needed
       return l
-    # sad tiled path
+    # sad tiled path; need to adjust indices, and manually check bounds for the tiled axis
     if self.tile_axis == 1:
       sample_pos = f"((int2)({l}.x % {self.max_hw}, ({l}.x / {self.max_hw}) * {self.shape[1]} + {l}.y))"
-      in_bounds = f"(({l}.x < {self.shape[0]}) && (0 <= {l}.y) && ({l}.y < {self.shape[1]}))"
+      in_bounds = f"((0 <= {l}.y) && ({l}.y < {self.shape[1]}))"
     else:
       sample_pos = f"((int2)(({l}.y / {self.max_hw}) * {self.shape[0]} + {l}.x, {l}.y % {self.max_hw}))"
-      in_bounds = f"((0 <= {l}.x) && ({l}.x < {self.shape[0]}) && ({l}.y < {self.shape[1]}))"
+      in_bounds = f"((0 <= {l}.x) && ({l}.x < {self.shape[0]}))"
     if check_bounds:
       return f"({in_bounds} ? {sample_pos} : (int2)(-1, -1))"
     return sample_pos
