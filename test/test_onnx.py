@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor
 def run_onnx_torch(onnx_model, inputs):
   import torch
   from onnx2torch import convert
-  torch_model = convert(onnx_model)
+  torch_model = convert(onnx_model).float()
   with torch.no_grad():
     torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
   return torch_out
@@ -118,7 +118,7 @@ class TestOnnxModel(unittest.TestCase):
       inputs = {input_name: preprocess(img, new=input_new)}
       tinygrad_out = list(run_onnx(inputs, False).values())[0].numpy()
       return tinygrad_out.argmax()
-    
+
     cls = run(chicken_img)
     print(cls, _LABELS[cls])
     assert _LABELS[cls] == "hen"
