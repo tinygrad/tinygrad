@@ -27,7 +27,7 @@ def get_pts(*boundary_coords):
   c = sum(([i - 1, i, i + 1] for i in boundary_coords), start=[CL().cl_ctx.devices[0].image2d_max_width])
   return [[i, j] for i in c for j in c]
 
-@unittest.skipUnless(Device.DEFAULT == getattr(Device, "OPENCL", None), "Test is only relevant for OpenCL")
+@unittest.skipUnless(getattr(Device, "OPENCL", None) is not None, "Test requires OpenCL")
 class TestCLTiler(unittest.TestCase):
   """Test for CLImage tiling logic, which allows large tensors to fit within limited-size OpenCL images."""
 
