@@ -18,10 +18,8 @@ __kernel void matmul(
   // fast path precompute (32x speedup)
   float outputValue = 0.0f;
   for (short inputSet = (short)get_global_id(1); inputSet < numPackedInputChannelsForGroup; inputSet += get_global_size(1)) {
-    int2 inputLocation = (int2)(inputSet, 0);
-    float4 inputValues = read_imagef(input, smp, INPUT_LOCATION);
-    int2 weightLocation = (int2)(mad24(inputSet, 4, weightIndex), packedOutputChannel);
-    float4 weightValues = read_imagef(weights, smp, WEIGHT_LOCATION);
+    float4 inputValues = read_imagef(input, smp, (int2)(inputSet, 0));
+    float4 weightValues = read_imagef(weights, smp, (int2)(mad24(inputSet, 4, weightIndex), packedOutputChannel));
     outputValue += dot(inputValues, weightValues);
   }
 
@@ -44,6 +42,6 @@ __kernel void matmul(
     //BINOP
 
     // output to memory
-    write_imagef(output, OUTPUT_LOCATION, outputValues);
+    write_imagef(output, outputLocation, outputValues);
   }
 }
