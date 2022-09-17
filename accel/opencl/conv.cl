@@ -39,13 +39,13 @@ __kernel void image_conv(
   short startX = mad24(mad24(startOutputColumn, strideX, -paddingX), totalNumPackedInputChannels, startPackedInputChannel);
   short strideWithChannels = mul24(strideX, totalNumPackedInputChannels);
 
-  short outputRow = get_global_id(2);
+  int outputRow = get_global_id(2);
   int2 inputLocation;
 
 #ifdef BATCH
   // TODO: this doesn't work with y padding
   inputLocation.y = mad24(outputRow % numOutputRows, strideY, -paddingY);
-  short batchOffset = (outputRow / numOutputRows) * numInputRows;
+  int batchOffset = (outputRow / numOutputRows) * numInputRows;
   inputLocation.y += batchOffset;
 #else
   inputLocation.y = mad24(outputRow, strideY, -paddingY);
@@ -56,16 +56,16 @@ __kernel void image_conv(
     float4 inputValues[4];
     inputLocation.x = startX;
     for (short i = 1; i < 4; ++i) {
-      inputValues[i] = read_imagef(input, smp, inputLocation);
+      inputValues[i] = read_imagef(input, smp, INPUT_LOCATION);
       inputLocation.x += totalNumPackedOutputChannels;
     }
     for (short rfColumn = 0; rfColumn < filterSizeX; ++rfColumn) {
       inputValues[0] = inputValues[1];
       inputValues[1] = inputValues[2];
       inputValues[2] = inputValues[3];
-      inputValues[3] = read_imagef(input, smp, inputLocation);
+      inputValues[3] = read_imagef(input, smp, INPUT_LOCATION);
       inputLocation.x += totalNumPackedInputChannels;
-      float4 weightValues = read_imagef(weights, smp, weightLocation);
+      float4 weightValues = read_imagef(weights, smp, WEIGHT_LOCATION);
       ++weightLocation.x;
       outputValues[0] += inputValues[0] * weightValues;
       outputValues[1] += inputValues[1] * weightValues;
@@ -86,12 +86,12 @@ __kernel void image_conv(
         inputLocation.x = mad24(rfColumn, dilatedStepX, startXForChannel);
         float4 inputValues[NUM_OUTPUTS];
         for (short i = 0; i < NUM_OUTPUTS; ++i) {
-          inputValues[i] = read_imagef(input, smp, inputLocation);
+          inputValues[i] = read_imagef(input, smp, INPUT_LOCATION);
           inputLocation.x += strideWithChannels;
         }
 
 #ifdef DEPTHWISE
-        float4 weightValues = read_imagef(weights, smp, weightLocation);
+        float4 weightValues = read_imagef(weights, smp, WEIGHT_LOCATION);
         ++weightLocation.x;
         for (short i = 0; i < NUM_OUTPUTS; ++i) {
           outputValues[i] += inputValues[i] * weightValues;
@@ -99,7 +99,7 @@ __kernel void image_conv(
 #else
         float4 weightValues[4];
         for (short outChIdx = 0; outChIdx < 4; ++outChIdx) {
-          weightValues[outChIdx] = read_imagef(weights, smp, weightLocation);
+          weightValues[outChIdx] = read_imagef(weights, smp, WEIGHT_LOCATION);
           ++weightLocation.x;
         }
 
@@ -147,7 +147,7 @@ __kernel void image_conv(
   for (short i = 0; i < NUM_OUTPUTS; ++i) {
     outputLocation.x = mad24(outputColumn, totalNumPackedOutputChannels, packedOutputChannel);
     if (outputColumn < numOutputColumns) {
-      write_imagef(output, outputLocation, outputValues[i]);
+      write_imagef(output, OUTPUT_LOCATION, outputValues[i]);
     }
     ++outputColumn;
   }
