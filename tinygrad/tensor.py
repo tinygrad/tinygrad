@@ -210,7 +210,7 @@ class Tensor:
 
   def sum(self, axis=None, keepdim=False): return self._reduce(Tensor._sum, axis, keepdim)
   def max(self, axis=None, keepdim=False): return self._reduce(Tensor._max, axis, keepdim)
-  def min(self, axis=None, keepdim=False): return -((-self)._reduce(Tensor._max, axis, keepdim))
+  def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
