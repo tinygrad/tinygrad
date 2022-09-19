@@ -115,6 +115,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(0,2)), lambda x: Tensor.sum(x, axis=(0,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=1), lambda x: Tensor.sum(x, axis=1))
+  def test_min(self):
+    helper_test_op([(3,3)], lambda x: x.min(), Tensor.min)
+    helper_test_op([(45,3)], lambda x: x.min(), Tensor.min)
+    helper_test_op([(45,3)], lambda x: x.min().mul(0.5), lambda x: Tensor.min(x).mul(0.5))
   def test_max(self):
     helper_test_op([(45,3)], lambda x: x.max(), Tensor.max)
     helper_test_op([(45,3)], lambda x: x.max().mul(0.5), lambda x: Tensor.max(x).mul(0.5))

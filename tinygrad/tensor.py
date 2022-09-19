@@ -205,11 +205,12 @@ class Tensor:
       axis = [axis]
     axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
-    ret = fxn(axis=axis)
+    ret = fxn(self, axis=axis)
     return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
 
-  def sum(self, axis=None, keepdim=False): return self._reduce(self._sum, axis, keepdim)
-  def max(self, axis=None, keepdim=False): return self._reduce(self._max, axis, keepdim)
+  def sum(self, axis=None, keepdim=False): return self._reduce(Tensor._sum, axis, keepdim)
+  def max(self, axis=None, keepdim=False): return self._reduce(Tensor._max, axis, keepdim)
+  def min(self, axis=None, keepdim=False): return -((-self)._reduce(Tensor._max, axis, keepdim))
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
