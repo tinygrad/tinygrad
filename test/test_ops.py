@@ -8,6 +8,7 @@ from tinygrad.tensor import Tensor, Device
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
   torch.manual_seed(0)
+  np.random.seed(0)
   if shps is None:
     ts = [torch.tensor(x, requires_grad=True) for x in vals]
   else:
@@ -210,6 +211,19 @@ class TestOps(unittest.TestCase):
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
     helper_test_op([(1,512,64,64), (512,512,3,3)],
+                    lambda x,w: torch.nn.functional.conv2d(x, w),
+                    lambda x,w: x.conv2d(w), atol=1e-4)
+
+  def test_large_bs_conv(self):
+    # large batch size can cause OpenCL image to exceed max image height on macOS
+    # (or cause the conv kernel to overflow short sampling coords)
+    helper_test_op([(4096,3,3,3), (1,3,3,3)],
+                    lambda x,w: torch.nn.functional.conv2d(x, w),
+                    lambda x,w: x.conv2d(w), atol=1e-4, rtol=1e-2)
+
+  def test_large_ic_conv(self):
+    # large input channel count can cause OpenCL image to exceed max image width on macOS
+    helper_test_op([(1,2048,3,3), (1,2048,3,3)],
                     lambda x,w: torch.nn.functional.conv2d(x, w),
                     lambda x,w: x.conv2d(w), atol=1e-4)
 

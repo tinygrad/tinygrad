@@ -25,7 +25,6 @@ def train_one_step(model,X,Y):
   et = time.time()-st
   print("done in %.2f ms" % (et*1000.))
 
-@unittest.skipUnless(getattr(Device, "OPENCL", None) is None or Device.DEFAULT != Device.OPENCL, "OOM on OpenCL")
 class TestTrain(unittest.TestCase):
   def test_efficientnet(self):
     model = EfficientNet(0)
