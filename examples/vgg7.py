@@ -154,8 +154,8 @@ elif cmd == "train":
     x_img = extra.waifu2x.image_load(samples_base + "/" + str(sample_idx) + "a.png")
     y_img = extra.waifu2x.image_load(samples_base + "/" + str(sample_idx) + "b.png")
 
-    sample_x = Tensor(x_img, requires_grad = False)
-    sample_y = Tensor(y_img, requires_grad = False)
+    sample_x = Tensor(x_img)
+    sample_y = Tensor(y_img)
 
     # magic code roughly from readme example
     # An explanation, in case anyone else has to go down this path:
