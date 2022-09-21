@@ -23,10 +23,11 @@ def fetch(url):
     os.rename(fp+".tmp", fp)
   return dat
 
+# TODO: move this to optim.py?
 def get_parameters(obj):
   parameters = []
   if isinstance(obj, Tensor):
-    if obj.requires_grad is not False: parameters.append(obj)
+    parameters.append(obj)
   elif isinstance(obj, list) or isinstance(obj, tuple):
     for x in obj:
       parameters.extend(get_parameters(x))

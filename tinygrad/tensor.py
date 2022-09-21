@@ -34,7 +34,7 @@ class Tensor:
     self.grad : Optional[Tensor] = None
 
     # NOTE: this can be in three states. False and None: no gradient, True: gradient
-    # None will be updated to True if it's put in an optimizer
+    # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad : Optional[bool] = requires_grad
 
     # internal variables used for autograd graph construction
