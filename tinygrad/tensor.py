@@ -14,7 +14,7 @@ class Tensor:
   # TODO: remove no_init when uniform is late bind
   training, no_grad, no_init = False, False, False
 
-  def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
+  def __init__(self, data, device=Device.DEFAULT, requires_grad=None):
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -32,7 +32,10 @@ class Tensor:
 
     # tensors have gradients, buffers do not
     self.grad : Optional[Tensor] = None
-    self.requires_grad = requires_grad
+
+    # NOTE: this can be in three states. False and None: no gradient, True: gradient
+    # None (the default) will be updated to True if it's put in an optimizer
+    self.requires_grad : Optional[bool] = requires_grad
 
     # internal variables used for autograd graph construction
     self._ctx : Optional[Function] = None
@@ -205,11 +208,12 @@ class Tensor:
       axis = [axis]
     axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
-    ret = fxn(axis=axis)
+    ret = fxn(self, axis=axis)
     return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
 
-  def sum(self, axis=None, keepdim=False): return self._reduce(self._sum, axis, keepdim)
-  def max(self, axis=None, keepdim=False): return self._reduce(self._max, axis, keepdim)
+  def sum(self, axis=None, keepdim=False): return self._reduce(Tensor._sum, axis, keepdim)
+  def max(self, axis=None, keepdim=False): return self._reduce(Tensor._max, axis, keepdim)
+  def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)

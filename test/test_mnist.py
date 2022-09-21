@@ -44,7 +44,6 @@ class TinyConvNet:
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1).logsoftmax()
 
-@unittest.skipUnless(getattr(Device, "OPENCL", None) is None or Device.DEFAULT != Device.OPENCL, "OOM on OpenCL")
 class TestMNIST(unittest.TestCase):
   def test_sgd_onestep(self):
     np.random.seed(1337)
