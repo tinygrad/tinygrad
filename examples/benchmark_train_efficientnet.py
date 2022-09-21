@@ -31,8 +31,8 @@ if __name__ == "__main__":
   Tensor.no_grad = not BACKWARD
   for i in trange(CNT):
     cpy = time.monotonic()
-    x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
-    y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
+    x_train = Tensor.randn(BS, 3, 224, 224).realize()
+    y_train = Tensor.randn(BS, 1000).realize()
 
     st = time.monotonic()
     out = model.forward(x_train)

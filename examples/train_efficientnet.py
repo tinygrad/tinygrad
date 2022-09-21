@@ -75,12 +75,12 @@ if __name__ == "__main__":
       X, Y = X_train[samp], Y_train[samp]
 
     st = time.time()
-    out = model.forward(Tensor(X.astype(np.float32), requires_grad=False))
+    out = model.forward(Tensor(X.astype(np.float32)))
     fp_time = (time.time()-st)*1000.0
 
     y = np.zeros((BS,classes), np.float32)
     y[range(y.shape[0]),Y] = -classes
-    y = Tensor(y, requires_grad=False)
+    y = Tensor(y)
     loss = out.logsoftmax().mul(y).mean()
 
     optimizer.zero_grad()

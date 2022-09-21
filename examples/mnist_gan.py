@@ -62,7 +62,7 @@ if __name__ == "__main__":
   output_folder = "outputs"
   os.makedirs(output_folder, exist_ok=True)
   train_data_size = len(X_train)
-  ds_noise = Tensor(np.random.randn(64,128).astype(np.float32), requires_grad=False)
+  ds_noise = Tensor(np.random.randn(64,128).astype(np.float32))
   n_steps = int(train_data_size/batch_size)
   if GPU:
     [x.gpu_() for x in generator_params+discriminator_params]

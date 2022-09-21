@@ -36,7 +36,7 @@ class TestOnnxModel(unittest.TestCase):
         "initial_state": np.zeros((1, 512))
         #"initial_state": np.zeros((1, 768))
       }
-      inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
+      inputs = {k:Tensor(v.astype(np.float32)) for k,v in np_inputs.items()}
       return inputs
 
     for _ in range(7):

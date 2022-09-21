@@ -20,7 +20,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
-    x = Tensor(transform(X_train[samp]), requires_grad=False)
+    x = Tensor(transform(X_train[samp]))
     y = target_transform(Y_train[samp])
 
     # network

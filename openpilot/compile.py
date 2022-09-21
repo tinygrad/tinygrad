@@ -49,7 +49,7 @@ def get_random_input_tensors():
   #  np_inputs[k] = np.frombuffer(dat, np.float32).reshape(np_inputs[k].shape)
 
   np_inputs = {k:v.astype(np.float32) for k,v in np_inputs.items()}
-  inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
+  inputs = {k:Tensor(v.astype(np.float32)) for k,v in np_inputs.items()}
   for _,v in inputs.items(): v.realize()
   return inputs, np_inputs
 
