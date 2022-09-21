@@ -3,6 +3,11 @@ from tinygrad.tensor import Tensor
 
 class Optimizer:
   def __init__(self, params):
+    # if it's None, but being put into an optimizer, set it to True
+    for x in params:
+      if x.requires_grad is None:
+        x.requires_grad = True
+
     self.params = [x for x in params if x.requires_grad]
 
   def zero_grad(self):

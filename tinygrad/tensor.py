@@ -14,7 +14,7 @@ class Tensor:
   # TODO: remove no_init when uniform is late bind
   training, no_grad, no_init = False, False, False
 
-  def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
+  def __init__(self, data, device=Device.DEFAULT, requires_grad=None):
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -32,7 +32,10 @@ class Tensor:
 
     # tensors have gradients, buffers do not
     self.grad : Optional[Tensor] = None
-    self.requires_grad = requires_grad
+
+    # NOTE: this can be in three states. False and None: no gradient, True: gradient
+    # None will be updated to True if it's put in an optimizer
+    self.requires_grad : Optional[bool] = requires_grad
 
     # internal variables used for autograd graph construction
     self._ctx : Optional[Function] = None
