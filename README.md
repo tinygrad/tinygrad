@@ -29,8 +29,8 @@ python3 setup.py develop
 ```python
 from tinygrad.tensor import Tensor
 
-x = Tensor.eye(3)
-y = Tensor([[2.0,0,-2.0]])
+x = Tensor.eye(3, requires_grad=True)
+y = Tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
