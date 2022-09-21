@@ -14,8 +14,8 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 # create a model
 class TinyBobNet:
   def __init__(self):
-    self.l1 = Tensor.uniform(784, 128)
-    self.l2 = Tensor.uniform(128, 10)
+    self.l1 = Tensor.uniform(784, 128, requires_grad=True)
+    self.l2 = Tensor.uniform(128, 10, requires_grad=True)
 
   def parameters(self):
     return get_parameters(self)
@@ -30,9 +30,9 @@ class TinyConvNet:
     conv = 3
     #inter_chan, out_chan = 32, 64
     inter_chan, out_chan = 8, 16   # for speed
-    self.c1 = Tensor.uniform(inter_chan,1,conv,conv)
-    self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv)
-    self.l1 = Tensor.uniform(out_chan*5*5, 10)
+    self.c1 = Tensor.uniform(inter_chan,1,conv,conv,requires_grad=True)
+    self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv,requires_grad=True)
+    self.l1 = Tensor.uniform(out_chan*5*5, 10,requires_grad=True)
 
   def parameters(self):
     return get_parameters(self)

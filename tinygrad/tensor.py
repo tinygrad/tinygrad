@@ -14,7 +14,7 @@ class Tensor:
   # TODO: remove no_init when uniform is late bind
   training, no_grad, no_init = False, False, False
 
-  def __init__(self, data, device=Device.DEFAULT, requires_grad=True):
+  def __init__(self, data, device=Device.DEFAULT, requires_grad=False):
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -63,7 +63,7 @@ class Tensor:
     self.lazydata = x.lazydata
     return x
 
-  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
+  def detach(self): return Tensor(self.lazydata, device=self.device)
   def numpy(self): return np.array(self.lazydata.toCPU())
 
   # TODO: this keeps the legacy behavior working, remove it after refactor
@@ -125,14 +125,14 @@ class Tensor:
 
     # fill in the first grad with one
     # this is "implicit gradient creation"
-    self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
+    self.grad = Tensor.ones(*self.shape, device=self.device)
 
     for t0 in reversed(self.deepwalk()):
       if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
-      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+      grads = [Tensor(g, device=self.device) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
@@ -233,7 +233,7 @@ class Tensor:
     if not Tensor.training:
       return self
     _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    return self * Tensor(_mask, device=self.device) * (1/(1.0 - p))
 
   # TODO: support arbitrary strides
   def _pool2d(self, py, px):
@@ -275,7 +275,7 @@ class Tensor:
   @staticmethod
   def broadcasted(fxn, x, y):
     tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [x,y]]
+    x,y = [Tensor([t], device=tt.device) if not isinstance(t, Tensor) else t for t in [x,y]]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn(x.expand(shape_ret), y.expand(shape_ret))

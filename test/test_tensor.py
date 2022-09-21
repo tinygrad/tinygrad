@@ -22,9 +22,9 @@ class TestTinygrad(unittest.TestCase):
 
   def test_backward_pass(self):
     def test_tinygrad():
-      x = Tensor(x_init)
-      W = Tensor(W_init)
-      m = Tensor(m_init, requires_grad=False)
+      x = Tensor(x_init, requires_grad=True)
+      W = Tensor(W_init, requires_grad=True)
+      m = Tensor(m_init)
       out = x.dot(W).relu()
       out = out.logsoftmax()
       out = out.mul(m).add(m).sum()
@@ -46,9 +46,9 @@ class TestTinygrad(unittest.TestCase):
 
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
-      u = Tensor(U_init)
-      v = Tensor(V_init)
-      w = Tensor(W_init)
+      u = Tensor(U_init, requires_grad=True)
+      v = Tensor(V_init, requires_grad=True)
+      w = Tensor(W_init, requires_grad=True)
       x = u.mul(v).relu()
       y = u.mul(w).relu()
       out = x.add(y).mul(y).relu()
@@ -73,8 +73,8 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_nograd(self):
-    x = Tensor(x_init, requires_grad=False)
-    m = Tensor(m_init, requires_grad=False)
+    x = Tensor(x_init)
+    m = Tensor(m_init)
     W = Tensor(W_init, requires_grad=True)
     tmp = x.mul(m)
     mm = tmp.matmul(W)
