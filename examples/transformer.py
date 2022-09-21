@@ -3,7 +3,7 @@ import os
 import numpy as np
 import random
 
-from tinygrad.tensor import Device
+from tinygrad.ops import Device
 from extra.utils import get_parameters
 from extra.training import train, evaluate
 from models.transformer import Transformer
