@@ -39,7 +39,6 @@ class BatchNorm2D:
 
 # TODO: is this good weight init?
 # https://adityassrana.github.io/blog/theory/2020/08/26/Weight-Init.html
-# https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
 # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):

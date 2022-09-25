@@ -313,7 +313,7 @@ class Function:
   def __init__(self, device:str, *tensors:Tensor):
     self.device, self.parents = device, tensors
     self.needs_input_grad = [t.requires_grad for t in self.parents]
-    self.requires_grad = any(self.needs_input_grad)
+    self.requires_grad = True if any(self.needs_input_grad) else None
     self.saved_tensors : List[Tensor] = []
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
