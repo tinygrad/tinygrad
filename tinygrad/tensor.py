@@ -105,8 +105,10 @@ class Tensor:
   def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop, dtype=np.float32), **kwargs)
 
   # TODO: uniform should be a late binding thing
+  # Return random number between -1 and 1
+  # NOTE: this behavior changed from depending on the shape to not
   @classmethod
-  def uniform(cls, *shape, **kwargs): return cls(((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * prod(shape)**-0.5), **kwargs)
+  def uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1), **kwargs)
 
   @classmethod
   def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
