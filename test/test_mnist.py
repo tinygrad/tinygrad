@@ -10,10 +10,6 @@ from datasets import fetch_mnist
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()
-#mu = X_train.mean()
-#stddev = X_train.var() ** 0.5
-#X_train = (X_train - mu) / stddev
-#X_test = (X_test - mu) / stddev
 
 # create a model
 class TinyBobNet:
