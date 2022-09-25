@@ -628,7 +628,6 @@ class StableDiffusion:
 FILENAME = "weights/sd-v1-4.ckpt"
 
 if __name__ == "__main__":
-  Tensor.no_init = True
   # WTF!! no_grad breaks it (only with OPENCL, now fixed)
   Tensor.no_grad = True
   model = StableDiffusion()

@@ -1,3 +1,4 @@
+import math
 from tinygrad.tensor import Tensor
 
 def batch_normalize(x, weight, bias, mean, invstd):
@@ -37,21 +38,24 @@ class BatchNorm2D:
       self.batch_invstd = batch_var.add(self.eps)**-0.5
     return batch_normalize(x, self.weight, self.bias, batch_mean, self.batch_invstd)
 
+# TODO: is this good weight init?
+# https://adityassrana.github.io/blog/theory/2020/08/26/Weight-Init.html
+# https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else (kernel_size[0], kernel_size[1])
     self.stride = (stride, stride) if isinstance(stride, int) else (stride[0], stride[1])
     self.padding = (padding, ) * 4 if isinstance(padding, int) else ((padding[0], padding[0], padding[1], padding[1]) if len(padding) == 2 else padding)
-    self.weight = (Tensor.uniform if not Tensor.no_init else Tensor.empty)(out_channels, in_channels, self.kernel_size[0], self.kernel_size[1])
-    self.bias = (Tensor.uniform if not Tensor.no_init else Tensor.empty)(out_channels) if bias else None
+    self.weight = Tensor.uniform(out_channels, in_channels, self.kernel_size[0], self.kernel_size[1])/math.sqrt(in_channels))
+    self.bias = Tensor.zeros(out_channels) if bias else None
 
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride)
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
-    self.weight = (Tensor.uniform if not Tensor.no_init else Tensor.empty)(out_features, in_features)
-    self.bias = (Tensor.zeros if not Tensor.no_init else Tensor.empty)(out_features) if bias else None
+    self.weight = Tensor.uniform(out_features, in_features)/math.sqrt(in_features)
+    self.bias = Tensor.zeros(out_features) if bias else None
 
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)

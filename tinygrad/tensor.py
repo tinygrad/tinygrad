@@ -11,8 +11,7 @@ from tinygrad.ops import LazyBuffer
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  # TODO: remove no_init when uniform is late bind
-  training, no_grad, no_init = False, False, False
+  training, no_grad = False, False
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=None):
     if isinstance(data, list):
