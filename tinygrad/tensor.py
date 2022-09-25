@@ -114,6 +114,10 @@ class Tensor:
   def scaled_uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * (prod(shape)**-0.5), **kwargs)
 
   @classmethod
+  # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
+  def glorot_uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * ((6/(shape[0]+prod(shape[1:])))**0.5), **kwargs)
+
+  @classmethod
   def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
 
   # ***** toposort and backward pass *****

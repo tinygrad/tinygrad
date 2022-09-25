@@ -43,7 +43,7 @@ class Conv2d:
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else (kernel_size[0], kernel_size[1])
     self.stride = (stride, stride) if isinstance(stride, int) else (stride[0], stride[1])
     self.padding = (padding, ) * 4 if isinstance(padding, int) else ((padding[0], padding[0], padding[1], padding[1]) if len(padding) == 2 else padding)
-    self.weight = Tensor.scaled_uniform(out_channels, in_channels, self.kernel_size[0], self.kernel_size[1])
+    self.weight = Tensor.glorot_uniform(out_channels, in_channels, self.kernel_size[0], self.kernel_size[1])
     self.bias = Tensor.zeros(out_channels) if bias else None
 
   def __call__(self, x):
@@ -51,7 +51,7 @@ class Conv2d:
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
-    self.weight = Tensor.scaled_uniform(out_features, in_features)
+    self.weight = Tensor.glorot_uniform(out_features, in_features)
     self.bias = Tensor.zeros(out_features) if bias else None
 
   def __call__(self, x):
