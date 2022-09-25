@@ -255,6 +255,7 @@ class Tensor:
 
   def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)
+  def square(self): return self*self
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
