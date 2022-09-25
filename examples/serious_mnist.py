@@ -108,6 +108,8 @@ if __name__ == "__main__":
   lmbd = 0.00025
   lossfn = lambda out,y: sparse_categorical_crossentropy(out, y) + lmbd*(model.weight1.abs() + model.weight2.abs()).sum()
   X_train, Y_train, X_test, Y_test = fetch_mnist()
+  X_train = X_train.reshape(-1, 28, 28).astype(np.uint8)
+  X_test = X_test.reshape(-1, 28, 28).astype(np.uint8)
   steps = len(X_train)//BS
   np.random.seed(1337)
   if QUICK:
