@@ -23,18 +23,7 @@ def fetch(url):
     os.rename(fp+".tmp", fp)
   return dat
 
-# TODO: move this to optim.py?
-def get_parameters(obj):
-  parameters = []
-  if isinstance(obj, Tensor):
-    parameters.append(obj)
-  elif isinstance(obj, list) or isinstance(obj, tuple):
-    for x in obj:
-      parameters.extend(get_parameters(x))
-  elif hasattr(obj, '__dict__'):
-    for v in obj.__dict__.values():
-      parameters.extend(get_parameters(v))
-  return parameters
+from tinygrad.nn.optim import get_parameters
 
 def my_unpickle(fb0):
   key_prelookup = {}
