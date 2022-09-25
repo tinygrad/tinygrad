@@ -111,6 +111,9 @@ class Tensor:
   def uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1), **kwargs)
 
   @classmethod
+  def scaled_uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * (prod(shape)**-0.5), **kwargs)
+
+  @classmethod
   def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
 
   # ***** toposort and backward pass *****
