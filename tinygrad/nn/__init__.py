@@ -39,13 +39,16 @@ class BatchNorm2D:
 
 # TODO: is this good weight init?
 # https://adityassrana.github.io/blog/theory/2020/08/26/Weight-Init.html
+
 # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
+def init_scale(fan_in, fan_out): return (6/(fan_in+fan_out))**0.5
+
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else (kernel_size[0], kernel_size[1])
     self.stride = (stride, stride) if isinstance(stride, int) else (stride[0], stride[1])
     self.padding = (padding, ) * 4 if isinstance(padding, int) else ((padding[0], padding[0], padding[1], padding[1]) if len(padding) == 2 else padding)
-    self.weight = Tensor.uniform(out_channels, in_channels, self.kernel_size[0], self.kernel_size[1]) * ((1/(in_channels*out_channels))**0.5)
+    self.weight = Tensor.uniform(out_channels, in_channels, self.kernel_size[0], self.kernel_size[1]) * init_scale(in_channels*self.kernel_size[0]*self.kernel_size[1], out_channels)
     self.bias = Tensor.zeros(out_channels) if bias else None
 
   def __call__(self, x):
@@ -53,7 +56,7 @@ class Conv2d:
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
-    self.weight = Tensor.uniform(out_features, in_features) * ((1/(in_features*out_features))**0.5)
+    self.weight = Tensor.uniform(out_features, in_features) * init_scale(in_features, out_features)
     self.bias = Tensor.zeros(out_features) if bias else None
 
   def __call__(self, x):
