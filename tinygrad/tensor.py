@@ -11,8 +11,7 @@ from tinygrad.ops import LazyBuffer
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  # TODO: remove no_init when uniform is late bind
-  training, no_grad, no_init = False, False, False
+  training, no_grad = False, False
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=None):
     if isinstance(data, list):
@@ -106,8 +105,17 @@ class Tensor:
   def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop, dtype=np.float32), **kwargs)
 
   # TODO: uniform should be a late binding thing
+  # Return random number between -1 and 1
+  # NOTE: this behavior changed from depending on the shape to not
   @classmethod
-  def uniform(cls, *shape, **kwargs): return cls(((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * prod(shape)**-0.5), **kwargs)
+  def uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1), **kwargs)
+
+  @classmethod
+  def scaled_uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * (prod(shape)**-0.5), **kwargs)
+
+  @classmethod
+  # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
+  def glorot_uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * ((6/(shape[0]+prod(shape[1:])))**0.5), **kwargs)
 
   @classmethod
   def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
@@ -254,6 +262,7 @@ class Tensor:
 
   def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)
+  def square(self): return self*self
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
@@ -312,7 +321,7 @@ class Function:
   def __init__(self, device:str, *tensors:Tensor):
     self.device, self.parents = device, tensors
     self.needs_input_grad = [t.requires_grad for t in self.parents]
-    self.requires_grad = any(self.needs_input_grad)
+    self.requires_grad = True if any(self.needs_input_grad) else (None if any([x is None for x in self.needs_input_grad]) else False)
     self.saved_tensors : List[Tensor] = []
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
