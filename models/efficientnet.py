@@ -8,7 +8,7 @@ class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se, track_running_stats=True):
     oup = expand_ratio * input_filters
     if expand_ratio != 1:
-      self._expand_conv = Tensor.uniform(oup, input_filters, 1, 1)
+      self._expand_conv = Tensor.glorot_uniform(oup, input_filters, 1, 1)
       self._bn0 = BatchNorm2D(oup, track_running_stats=track_running_stats)
     else:
       self._expand_conv = None
@@ -19,18 +19,18 @@ class MBConvBlock:
     else:
       self.pad = [(kernel_size-1)//2]*4
 
-    self._depthwise_conv = Tensor.uniform(oup, 1, kernel_size, kernel_size)
+    self._depthwise_conv = Tensor.glorot_uniform(oup, 1, kernel_size, kernel_size)
     self._bn1 = BatchNorm2D(oup, track_running_stats=track_running_stats)
 
     self.has_se = has_se
     if self.has_se:
       num_squeezed_channels = max(1, int(input_filters * se_ratio))
-      self._se_reduce = Tensor.uniform(num_squeezed_channels, oup, 1, 1)
+      self._se_reduce = Tensor.glorot_uniform(num_squeezed_channels, oup, 1, 1)
       self._se_reduce_bias = Tensor.zeros(num_squeezed_channels)
-      self._se_expand = Tensor.uniform(oup, num_squeezed_channels, 1, 1)
+      self._se_expand = Tensor.glorot_uniform(oup, num_squeezed_channels, 1, 1)
       self._se_expand_bias = Tensor.zeros(oup)
 
-    self._project_conv = Tensor.uniform(output_filters, oup, 1, 1)
+    self._project_conv = Tensor.glorot_uniform(output_filters, oup, 1, 1)
     self._bn2 = BatchNorm2D(output_filters, track_running_stats=track_running_stats)
 
   def __call__(self, inputs):
@@ -81,7 +81,7 @@ class EfficientNet:
       return int(math.ceil(global_params[1] * repeats))
 
     out_channels = round_filters(32)
-    self._conv_stem = Tensor.uniform(out_channels, input_channels, 3, 3)
+    self._conv_stem = Tensor.glorot_uniform(out_channels, input_channels, 3, 3)
     self._bn0 = BatchNorm2D(out_channels, track_running_stats=track_running_stats)
     blocks_args = [
       [1, 3, (1,1), 1, 32, 16, 0.25],
@@ -115,10 +115,10 @@ class EfficientNet:
 
     in_channels = round_filters(320)
     out_channels = round_filters(1280)
-    self._conv_head = Tensor.uniform(out_channels, in_channels, 1, 1)
+    self._conv_head = Tensor.glorot_uniform(out_channels, in_channels, 1, 1)
     self._bn1 = BatchNorm2D(out_channels, track_running_stats=track_running_stats)
     if has_fc_output:
-      self._fc = Tensor.uniform(out_channels, classes)
+      self._fc = Tensor.glorot_uniform(out_channels, classes)
       self._fc_bias = Tensor.zeros(classes)
     else:
       self._fc = None

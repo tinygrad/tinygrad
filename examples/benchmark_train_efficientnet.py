@@ -2,7 +2,6 @@
 import os
 import time
 from tqdm import trange
-from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
 import tinygrad.nn.optim as optim
 from tinygrad.tensor import Tensor
@@ -22,7 +21,7 @@ ADAM = int(os.getenv("ADAM", 0))
 if __name__ == "__main__":
   print(f"NUM:{NUM} BS:{BS} CNT:{CNT}")
   model = EfficientNet(NUM, classes=1000, has_se=False, track_running_stats=False)
-  parameters = get_parameters(model)
+  parameters = optim.get_parameters(model)
   for p in parameters: p.realize()
   if ADAM: optimizer = optim.Adam(parameters, lr=0.001)
   else: optimizer = optim.SGD(parameters, lr=0.001)
