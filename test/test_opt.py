@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+os.environ["LAZY"] = "1"
 os.environ["OPT"] = "2"
 
 import gc
@@ -8,7 +9,11 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad import nn
-from tinygrad.llops.ops_gpu import CL
+
+try:
+  from tinygrad.llops.ops_gpu import CL
+except ImportError:
+  pass
 
 class CLCache():
   def __enter__(self):
