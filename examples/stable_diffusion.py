@@ -3,10 +3,10 @@
 
 import os
 import gzip
+import argparse
 import math
 import os
 import re
-import traceback
 from functools import lru_cache
 from collections import namedtuple
 
@@ -628,19 +628,25 @@ class StableDiffusion:
 FILENAME = "weights/sd-v1-4.ckpt"
 
 if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
+  parser.add_argument('--phrase', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
+  parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
+  args = parser.parse_args()
+
   # WTF!! no_grad breaks it (only with OPENCL, now fixed)
   Tensor.no_grad = True
   model = StableDiffusion()
 
   # load in weights
   dat = fake_torch_load_zipped(open(FILENAME, "rb"))
-  for k,v in dat['state_dict'].items():
+  for k,v in tqdm(dat['state_dict'].items()):
     try:
       w = get_child(model, k)
     except (AttributeError, KeyError, IndexError):
       #traceback.print_exc()
       w = None 
-    print(f"{str(v.shape):30s}", w.shape if w is not None else w, k)
+    #print(f"{str(v.shape):30s}", w.shape if w is not None else w, k)
     if w is not None:
       assert w.shape == v.shape
       w.assign(v.astype(np.float32))
@@ -648,12 +654,7 @@ if __name__ == "__main__":
   # run through CLIP to get context
 
   tokenizer = ClipTokenizer()
-  phrase = tokenizer.encode("a horse sized cat eating a bagel")
-  _phrase = [49406, 320, 4558, 9832, 2368, 4371, 320, 28777, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407]
-  assert tuple(phrase) == tuple(_phrase)
-
-  # phrase = tokenizer.encode("penguin with fire extinguisher")
-
+  phrase = tokenizer.encode(args.phrase)
   context = model.cond_stage_model.transformer.text_model(phrase).realize()
   print("got CLIP context", context.shape)
 
@@ -674,8 +675,7 @@ if __name__ == "__main__":
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
-  TIMESTEPS = int(os.getenv("TIMESTEPS", "5"))
-  timesteps = list(np.arange(1, 1000, 1000//TIMESTEPS))
+  timesteps = list(np.arange(1, 1000, 1000//args.steps))
   print(f"running for {timesteps} timesteps")
   alphas = [model.alphas_cumprod.numpy()[t] for t in timesteps]
   alphas_prev = [1.0] + alphas[:-1]
@@ -723,4 +723,5 @@ if __name__ == "__main__":
   # save image
   from PIL import Image
   im = Image.fromarray(dat)
-  im.save("/tmp/rendered.png")
+  print(f"saving {args.out}")
+  im.save(args.out)
