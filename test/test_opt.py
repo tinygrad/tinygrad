@@ -9,6 +9,7 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad import nn
+from tinygrad.nn import optim
 
 try:
   from tinygrad.llops.ops_gpu import CL
@@ -56,6 +57,32 @@ class TestOpt(unittest.TestCase):
       img_bn = bn(img).realize()
       print(img_bn)
       assert len(CL.CACHE) == 3, "optimizer didn't fold batchnorm"
+    Tensor.training = False
+
+  def test_fold_conv_batchnorm_sgd(self):
+    # TODO: with Tensor.training
+    Tensor.training = True
+    img = Tensor.ones(1,3,4,4)
+    c1 = nn.Conv2d(3,32,3)
+    bn = nn.BatchNorm2D(32, track_running_stats=False)
+    opt = optim.SGD(optim.get_parameters([c1, bn]))
+    with CLCache():
+      img_bn = bn(c1(img)).elu().sum()
+      opt.zero_grad()
+      img_bn.backward()
+      opt.step()
+      assert len(CL.CACHE) == 10, "optimizer didn't fold conv-backward batchnorm"
+    Tensor.training = False
+
+  def test_fold_conv_batchnorm(self):
+    Tensor.training = True
+    img = Tensor.ones(1,3,8,8)
+    c1 = nn.Conv2d(3,32,3)
+    bn = nn.BatchNorm2D(32, track_running_stats=False)
+    with CLCache():
+      img_conv = bn(c1(img)).relu().realize()
+      print(img_conv)
+      assert len(CL.CACHE) == 4, "optimizer didn't fold conv-batchnorm"
     Tensor.training = False
 
   def test_fold_conv_elu(self):
