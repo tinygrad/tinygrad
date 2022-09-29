@@ -28,9 +28,6 @@ class CLCache():
       e = prg.clprg(CL().cl_queue, *args)
     CL.CACHE = None
 
-Tensor.training = True
-Tensor.no_grad = True
-
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOpt(unittest.TestCase):
   def test_muladd(self):
@@ -51,12 +48,15 @@ class TestOpt(unittest.TestCase):
     assert ret.numpy()[0] == 33
 
   def test_fold_batchnorm(self):
+    # TODO: with Tensor.training
+    Tensor.training = True
     img = Tensor.ones(1,32,4,4)
     bn = nn.BatchNorm2D(32, track_running_stats=False)
     with CLCache():
       img_bn = bn(img).realize()
       print(img_bn)
       assert len(CL.CACHE) == 3, "optimizer didn't fold batchnorm"
+    Tensor.training = False
 
   def test_fold_conv_elu(self):
     img = Tensor.ones(1,4,8,8)
