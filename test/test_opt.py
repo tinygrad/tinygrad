@@ -31,7 +31,7 @@ class CLCache():
 Tensor.training = True
 Tensor.no_grad = True
 
-@unittest.skipUnless(Device.DEFAULT == Device.GPU, "Not Implemented")
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOpt(unittest.TestCase):
   def test_muladd(self):
     a,b,c = [Tensor.ones(2,2) for _ in range(3)]
