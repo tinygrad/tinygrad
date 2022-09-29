@@ -25,11 +25,40 @@ class CLImage:
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
 
   def __init__(self, shape):
-    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=shape)
+    self.max_hw = min(CL().cl_ctx.devices[0].image2d_max_width, CL.cl_ctx.devices[0].image2d_max_height)
+    self.shape = shape
+    self.n_tile = int(np.ceil(max(shape) / self.max_hw).item())
+    # if n_tile > 1, we can't fit the image into a CL image at native size,
+    # and need to internally store it as a set of disjoint tiles
+    if self.n_tile * min(shape) > self.max_hw:
+      raise Exception(f"shape {shape} exceeds Metal image limits, even after tiling")
+    if shape[0] >= shape[1]:
+      # wider than it is tall; extra tiles overflow on y
+      self.tile_axis, tiled_width, tiled_height = 1, min(shape[0], self.max_hw), self.n_tile * shape[1]
+    else:
+      # taller than it is wide; extra tiles overflow on x
+      self.tile_axis, tiled_width, tiled_height = 0, self.n_tile * shape[0], min(shape[1], self.max_hw)
+    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(tiled_width, tiled_height))
     CL.mem_used += self.cl.row_pitch * self.cl.height
 
+  def pos_to_sample_pos(self, l="l", check_bounds=True):
+    if self.n_tile == 1:
+      # happy path where no indexing ops are needed
+      return l
+    # sad tiled path; need to adjust indices, and manually check bounds for the tiled axis
+    if self.tile_axis == 1:
+      sample_pos = f"((int2)({l}.x % {self.max_hw}, ({l}.x / {self.max_hw}) * {self.shape[1]} + {l}.y))"
+      in_bounds = f"((0 <= {l}.y) && ({l}.y < {self.shape[1]}))"
+    else:
+      sample_pos = f"((int2)(({l}.y / {self.max_hw}) * {self.shape[0]} + {l}.x, {l}.y % {self.max_hw}))"
+      in_bounds = f"((0 <= {l}.x) && ({l}.x < {self.shape[0]}))"
+    if check_bounds:
+      return f"({in_bounds} ? {sample_pos} : (int2)(-1, -1))"
+    return sample_pos
+
   def __del__(self):
-    CL.mem_used -= self.cl.row_pitch * self.cl.height
+    if hasattr(self, "cl"):
+      CL.mem_used -= self.cl.row_pitch * self.cl.height
 
 def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
   middle_code = []
@@ -68,7 +97,7 @@ def get_getters(ewbufs, ret):
     elif buf.is_image() and buf.shape == ret.shape and buf.st.contiguous:
       # use an image here
       ewtypes.append(f"read_only image2d_t {name}_g")
-      getters.append(f"inline float4 get4_{name}(read_only image2d_t x, const sampler_t smp, int2 loc, int gid) {{ return read_imagef(x, smp, loc); }}")
+      getters.append(f"inline float4 get4_{name}(read_only image2d_t x, const sampler_t smp, int2 loc, int gid) {{ return read_imagef(x, smp, {buf._image.pos_to_sample_pos('loc')}); }}")
     elif buf.st.contiguous:
       # use float4
       ewtypes.append(f"__global const float4 *{name}_g")
@@ -130,23 +159,24 @@ class OpenCLBuffer(GPUBuffer):
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
 
       if self._image is not None:
-        self._buf = CLBuffer(4*roundup(prod(self._image.cl.shape)*4))
+        self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
         if self._backing is not None:
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
           #self._backing = None
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
-        CLProgram("from_image", """
+        CLProgram("from_image", f"""
           __kernel void from_image(
               __global float4 *out,
-              read_only image2d_t in) {
+              read_only image2d_t in) {{
             const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
             int2 l;
             l.y = get_global_id(1);
             l.x = get_global_id(0);
-            int W = get_image_width(in);
-            out[l.y*W + l.x] = read_imagef(in, smp, l);
-          }
-        """)(self._image.cl.shape, None, self._buf.cl, self._image.cl)
+            int2 l_smp = {self._image.pos_to_sample_pos('l')};
+            int W = {str(self._image.shape[0])};
+            out[l.y*W + l.x] = read_imagef(in, smp, l_smp);
+          }}
+        """)(self._image.shape, None, self._buf.cl, self._image.cl)
         self._image = None
     return self._buf.cl
   
@@ -158,19 +188,20 @@ class OpenCLBuffer(GPUBuffer):
       assert len(self.shape) == 3 and self.shape[2] == 4, f"bad shape for image {self.shape}"
       self._image = CLImage(shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
-        assert prod(self.shape) == prod(self._image.cl.shape)*4
+        assert prod(self.shape) <= prod(self._image.cl.shape)*4
         #print(f"converting {self.shape} to image with shape {self._image.shape}")
-        CLProgram("to_image", """
+        CLProgram("to_image", f"""
           __kernel void to_image(
               write_only image2d_t out,
-              __global const float4 *in) {
+              __global const float4 *in) {{
             int2 l;
             l.y = get_global_id(1);
             l.x = get_global_id(0);
-            int W = get_image_width(out);
-            write_imagef(out, l, in[l.y*W + l.x]);
-          }
-        """)(self._image.cl.shape, None, self._image.cl, self._buf.cl)
+            int2 l_out = {self._image.pos_to_sample_pos('l', check_bounds=False)};
+            int W = {str(self._image.shape[0])};
+            write_imagef(out, l_out, in[l.y*W + l.x]);
+          }}
+        """)(self._image.shape, None, self._image.cl, self._buf.cl)
       self._buf = None
     return self._image.cl
 
@@ -185,11 +216,12 @@ class OpenCLBuffer(GPUBuffer):
       return f"""inline float get_{name}(const sampler_t smp, read_only image2d_t x, int gid) {{
         int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')};
         int2 l;
-        int W = get_image_width(x);
+        int W = {str(x._image.shape[0])};
         l.y = idx / (W*4);
         l.x = (idx/4) % W;
         int idx4 = idx % 4;
-        float4 dat = read_imagef(x, smp, l);
+        int2 l_smp = {x._image.pos_to_sample_pos('l')};
+        float4 dat = read_imagef(x, smp, l_smp);
         return valid ? (idx4 == 0 ? dat.x : (idx4 == 1 ? dat.y : (idx4 == 2 ? dat.z : dat.w))) : 0.0;
       }}""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, idx);"
     #ewtypes.append(f"read_only image2d_t {name}_g")
@@ -222,6 +254,14 @@ class OpenCLBuffer(GPUBuffer):
       f"return {code}; }}"
 
     replacements = get_replacements(elementwise_prefix, ewtypes)
+
+    (x.image, w.image, ret.image)
+    # fix sampling
+    replacements["INPUT_LOCATION"] = x._image.pos_to_sample_pos("inputLocation")
+    replacements["WEIGHT_LOCATION"] = w._image.pos_to_sample_pos("weightLocation")
+    replacements["OUTPUT_LOCATION"] = ret._image.pos_to_sample_pos("outputLocation", check_bounds=False)
+    # fix widths
+    replacements["get_image_width(output)"] = f"({ret._image.shape[0]})"
 
     x, w = x.contiguous_op(), w.contiguous_op()
     options = []
