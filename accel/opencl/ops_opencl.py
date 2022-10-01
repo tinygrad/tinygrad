@@ -227,8 +227,6 @@ class OpenCLBuffer(GPUBuffer):
     #ewtypes.append(f"read_only image2d_t {name}_g")
     return super().contiguous_view_constant_fold(name)
 
-  # THIS WAS STUPIDLY OOMING THE WHOLE THING!
-  #seen = set()
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
     if C is None or earlycode != "acc":
       # TODO: handle an opencl conv without the conv part
@@ -238,10 +236,6 @@ class OpenCLBuffer(GPUBuffer):
     x = [x for x in bufs if x[0] == "input"][0][1]
     w = [x for x in bufs if x[0] == "weight"][0][1]
     ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
-
-    #if (x,w) in OpenCLBuffer.seen:
-    #  print("WARNING: recomputing CONV with", x, w)
-    #OpenCLBuffer.seen.add((x,w))
 
     # remove fakebufs
     fakebufs, ewtypes, getters = get_getters(ewbufs, ret)
@@ -272,7 +266,7 @@ class OpenCLBuffer(GPUBuffer):
       options.append("-DDEPTHWISE_UNSTRIDED")
     elif C.cin == 1:
       options.append("-DDEPTHWISE")
-    if int(os.getenv("MATMUL", 0)) and C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1 and C.bs == 1:
+    if C.groups == 1 and C.H == 1 and C.W == 1 and C.iy == 1 and C.ix == 1 and C.oy == 1 and C.ox == 1 and C.sx == 1 and C.sy == 1 and C.dx == 1 and C.dy == 1 and C.bs == 1:
       options.append("-DMATMUL")
       # NOTE: this is not actually a matmul, it's a vector * matrix
 
