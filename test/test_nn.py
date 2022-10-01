@@ -43,7 +43,7 @@ class TestNN(unittest.TestCase):
     toutt = tbn(torch.tensor(inn.cpu().data))
 
     # close
-    np.testing.assert_allclose(outt.data, toutt.detach().numpy(), rtol=5e-5)
+    np.testing.assert_allclose(outt.data, toutt.detach().numpy(), rtol=5e-4)
 
     np.testing.assert_allclose(bn.running_mean.data, tbn.running_mean.detach().numpy(), rtol=1e-5)
 
