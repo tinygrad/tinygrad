@@ -117,12 +117,17 @@ class GPUBuffer:
 
   def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
     if reduce is not None:
+      if prod(x.shape) >= 2**31:
+        # needs long indexes
+        idx_getter = f"int valid = 1; long idx = gid; idx *= {reduce}; idx += subidx; {x.st.expr().replace('//', '/').replace('int', 'long')};"
+      else:
+        idx_getter = f"int valid = 1; int idx = gid; idx *= {reduce}; idx += subidx; {x.st.expr().replace('//', '/')};"
       if x._base_shape == (1,) and x._backing is not None:
         # this function doesn't need a memory access
-        return f"inline float get_{name}(int gid, int subidx) {{ int valid = 1; int idx = gid*{reduce} + subidx; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", \
+        return f"inline float get_{name}(int gid, int subidx) {{ {idx_getter} return valid ? {x._backing[0]} : 0.0;}}", \
           None, f"get_{name}(gid, idx);"
       else:
-        return f"inline float get_{name}(__global const float *x, int gid, int subidx) {{ int valid = 1; int idx = gid*{reduce} + subidx; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}", \
+        return f"inline float get_{name}(__global const float *x, int gid, int subidx) {{ {idx_getter} return valid ? x[idx] : 0.0;}}", \
           f"__global const float *{name}_g", f"get_{name}({name}_g, gid, idx);"
     else:
       if x._base_shape == (1,) and x._backing is not None:
@@ -141,8 +146,6 @@ class GPUBuffer:
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
     assert C is None
-    for _, b in bufs:
-      assert prod(b.shape) < 2**31, f"GPU buffers must be under 2**31, {b.shape} isn't"
 
     # get the input/output shape and the reduce amount
     reduce_shape = (bufs[0][1].shape, ret.shape) if reduce_shape is None else reduce_shape
