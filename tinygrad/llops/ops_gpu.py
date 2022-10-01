@@ -119,7 +119,7 @@ class GPUBuffer:
     if reduce is not None:
       if prod(x.shape) >= 2**31:
         # needs long indexes
-        idx_getter = f"int valid = 1; long idx = gid; idx *= {reduce}; idx += subidx; {x.st.expr().replace('//', '/').replace('int', 'long')};"
+        idx_getter = f"int valid = 1; long idx = gid; idx *= {reduce}; idx += subidx; {x.st.expr().replace('//', '/')};"
       else:
         idx_getter = f"int valid = 1; int idx = gid; idx *= {reduce}; idx += subidx; {x.st.expr().replace('//', '/')};"
       if x._base_shape == (1,) and x._backing is not None:
