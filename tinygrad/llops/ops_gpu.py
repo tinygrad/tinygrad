@@ -115,15 +115,23 @@ class GPUBuffer:
     CL.enqueue_copy(data, self.contiguous_op().cl, is_blocking=True)
     return data
 
-  def contiguous_view(x, name:str) -> str:
-    return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}"
-
-  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, Optional[str], str]:
-    if x._base_shape == (1,) and x._backing is not None:
-      # this function doesn't need a memory access
-      return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", None, f"get_{name}(idx);"
+  def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
+    if reduce is not None:
+      if x._base_shape == (1,) and x._backing is not None:
+        # this function doesn't need a memory access
+        return f"inline float get_{name}(int gid, int subidx) {{ int valid = 1; int idx = gid*{reduce} + subidx; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", \
+          None, f"get_{name}(gid, idx);"
+      else:
+        return f"inline float get_{name}(__global const float *x, int gid, int subidx) {{ int valid = 1; int idx = gid*{reduce} + subidx; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}", \
+          f"__global const float *{name}_g", f"get_{name}({name}_g, gid, idx);"
     else:
-      return x.contiguous_view(name), f"__global const float *{name}_g", f"get_{name}({name}_g, idx);"
+      if x._base_shape == (1,) and x._backing is not None:
+        # this function doesn't need a memory access
+        return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", \
+          None, f"get_{name}(idx);"
+      else:
+        return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}", \
+          f"__global const float *{name}_g", f"get_{name}({name}_g, idx);"
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
@@ -139,13 +147,16 @@ class GPUBuffer:
     # get the input/output shape and the reduce amount
     reduce_shape = (bufs[0][1].shape, ret.shape) if reduce_shape is None else reduce_shape
     red = prod([s for s,n in zip(*reduce_shape) if n == 1])
+    assert red < 2**31, f"reduce must be under 2**31, {red} isn't"
 
     # if it's a partial reduce, assert last non reduced axis is before the first reduced axis
     if red > 1 and prod(ret.shape) != 1:
       assert max([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s == n and n != 1]) < min([i for i,(s,n) in enumerate(zip(*reduce_shape)) if s != 1 and n == 1])
 
     kernel_name = "reduce" if red > 1 else "elementwise"
-    views = {name:buf.contiguous_view_constant_fold(name) for name, buf in bufs}
+    early_views = {name:buf.contiguous_view_constant_fold(name, red) for name, buf in bufs if name in earlybufs}
+    late_views = {name:buf.contiguous_view_constant_fold(name) for name, buf in bufs if name not in earlybufs}
+    views = {**early_views, **late_views}
 
     buf_types : List[str] = [views[name][1] for name, _ in bufs if views[name][1] is not None]  # type: ignore
     buf_cl = [buf.cl if 'image2d_t' not in views[name][1] else buf.image for name, buf in bufs if views[name][1] is not None]  # type: ignore
@@ -161,8 +172,8 @@ class GPUBuffer:
       float acc = {GPUBuffer.start_for_op[op]};
       int gid = get_global_id(0);
       {'int mid = get_global_id(1);' if inter_red > 1 else 'int mid = 0;'}
-      for (int idx = gid * {red} + {red//inter_red + 1} * mid; idx < gid * {red} + min({red}, {red//inter_red + 1} * (mid+1)); idx++) {{
-{chr(10).join([f'        float {name} = ' + views[name][2] for name, _ in bufs if name in earlybufs])}
+      for (int idx = {red//inter_red + 1} * mid; idx < min({red}, {red//inter_red + 1} * (mid+1)); idx++) {{
+{chr(10).join([f'        float {name} = ' + early_views[name][2] for name in early_views])}
         acc = {earlycode};
       }} int idx = gid;"""+(f"""
       temp[mid] = acc; barrier(CLK_LOCAL_MEM_FENCE);
@@ -170,7 +181,7 @@ class GPUBuffer:
         for (int rdx = 0; rdx < {inter_red}; rdx++) {{
           acc = {GPUBuffer.code_for_op[op].replace('A', 'temp[rdx]')};
         }}""" if inter_red != 1 else "{")+f"""
-{chr(10).join([f'        float {name} = ' + views[name][2] for name, _ in bufs if name not in earlybufs])}
+{chr(10).join([f'        float {name} = ' + late_views[name][2] for name in late_views])}
         output[gid] = {code};
       }}
     }}""")
