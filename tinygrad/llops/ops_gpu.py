@@ -120,6 +120,7 @@ class GPUBuffer:
 
   def contiguous_view_constant_fold(x, name:str) -> Tuple[str, Optional[str], str]:
     if x._base_shape == (1,) and x._backing is not None:
+      # this function doesn't need a memory access
       return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", None, f"get_{name}(idx);"
     else:
       return x.contiguous_view(name), f"__global const float *{name}_g", f"get_{name}({name}_g, idx);"
