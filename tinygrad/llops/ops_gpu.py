@@ -116,27 +116,12 @@ class GPUBuffer:
     return data
 
   def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
-    if reduce is not None:
-      if prod(x.shape) >= 2**31:
-        # needs long indexes
-        idx_getter = f"int valid = 1; long idx = gid; idx *= {reduce}; idx += subidx; {x.st.expr().replace('//', '/')};"
-      else:
-        idx_getter = f"int valid = 1; int idx = gid; idx *= {reduce}; idx += subidx; {x.st.expr().replace('//', '/')};"
-      if x._base_shape == (1,) and x._backing is not None:
-        # this function doesn't need a memory access
-        return f"inline float get_{name}(int gid, int subidx) {{ {idx_getter} return valid ? {x._backing[0]} : 0.0;}}", \
-          None, f"get_{name}(gid, idx);"
-      else:
-        return f"inline float get_{name}(__global const float *x, int gid, int subidx) {{ {idx_getter} return valid ? x[idx] : 0.0;}}", \
-          f"__global const float *{name}_g", f"get_{name}({name}_g, gid, idx);"
-    else:
-      if x._base_shape == (1,) and x._backing is not None:
-        # this function doesn't need a memory access
-        return f"inline float get_{name}(int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? {x._backing[0]} : 0.0;}}", \
-          None, f"get_{name}(idx);"
-      else:
-        return f"inline float get_{name}(__global const float *x, int gid) {{ int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')}; return valid ? x[idx] : 0.0;}}", \
-          f"__global const float *{name}_g", f"get_{name}({name}_g, idx);"
+    idx_getter = f"int valid = 1; {'long' if prod(x.shape) >= 2**31 else 'int'} idx = gid; {'idx *= '+str(reduce)+'; idx += subidx;' if reduce is not None else ''} {x.st.expr().replace('//', '/')};"
+    constant = x._backing[0] if x._base_shape == (1,) and x._backing is not None else None
+    args = (["__global const float *x"] if constant is None else []) + ["int gid"] + (["int subidx"] if reduce is not None else []) 
+    return f"inline float get_{name}({','.join(args)}) {{ {idx_getter} return valid ? {constant if constant is not None else 'x[idx]'} : 0.0;}}", \
+      f"__global const float *{name}_g" if constant is None else None, \
+      f"get_{name}({name+'_g, ' if constant is None else ''}{'gid, ' if reduce is not None else ''}idx);"
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
