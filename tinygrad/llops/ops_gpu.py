@@ -121,7 +121,7 @@ class GPUBuffer:
     args = (["__global const float *x"] if constant is None else []) + ["int gid"] + (["int subidx"] if reduce is not None else []) 
     return f"inline float get_{name}({','.join(args)}) {{ {idx_getter} return valid ? {constant if constant is not None else 'x[idx]'} : 0.0;}}", \
       f"__global const float *{name}_g" if constant is None else None, \
-      f"get_{name}({name+'_g, ' if constant is None else ''}{'gid, ' if reduce is not None else ''}idx);"
+      f"get_{name}({name+'_g, ' if constant is None else ''}gid{', subidx' if reduce is not None else ''});"
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
@@ -154,7 +154,7 @@ class GPUBuffer:
     if inter_red > 1:
       buf_cl.append(cl.LocalMemory(inter_red*4))
 
-    reduce_loop = f"int mid = get_global_id(1); for (int idx = {red//inter_red + 1} * mid; idx < min({red}, {red//inter_red + 1} * (mid+1)); idx++)" if inter_red > 1 else f"for (int idx = 0; idx < {red}; idx++)"
+    reduce_loop = f"int mid = get_global_id(1); for (int subidx = {red//inter_red + 1} * mid; subidx < min({red}, {red//inter_red + 1} * (mid+1)); subidx++)" if inter_red > 1 else f"for (int subidx = 0; subidx < {red}; subidx++)"
     conv_prg = CLProgram(kernel_name, f"""{chr(10).join([x[0] for x in views.values()])}
     __kernel void {kernel_name}({','.join(["__global float* restrict output"] + buf_types + (["__local float *temp"] if inter_red > 1 else []))}) {{
       const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
@@ -163,7 +163,7 @@ class GPUBuffer:
       {reduce_loop} {{
 {chr(10).join([f'        float {name} = ' + early_views[name][2] for name in early_views])}
         acc = {earlycode};
-      }} int idx = gid;"""+(f"""
+      }}"""+(f"""
       temp[mid] = acc; barrier(CLK_LOCAL_MEM_FENCE);
       if (mid == 0) {{ acc = {GPUBuffer.start_for_op[op]};
         for (int rdx = 0; rdx < {inter_red}; rdx++) {{

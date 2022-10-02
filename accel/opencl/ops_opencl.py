@@ -225,7 +225,7 @@ class OpenCLBuffer(GPUBuffer):
         int2 l_smp = {x._image.pos_to_sample_pos('l')};
         float4 dat = read_imagef(x, smp, l_smp);
         return valid ? (idx4 == 0 ? dat.x : (idx4 == 1 ? dat.y : (idx4 == 2 ? dat.z : dat.w))) : 0.0;
-      }}""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, idx);"
+      }}""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, gid);"
     #ewtypes.append(f"read_only image2d_t {name}_g")
     return super().contiguous_view_constant_fold(name, reduce)
 
