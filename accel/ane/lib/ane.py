@@ -27,7 +27,7 @@ def init_libane():
   libane.ANE_Run.argtypes = [c_void_p]*4
   libane.ANE_Run.restype = c_int
 
-  libane.ANE_RegDebug.restype = c_char_p
+  #libane.ANE_RegDebug.restype = c_char_p
 
   with open(os.path.join(basedir, "aneregs.json")) as f:
     aneregs = json.load(f)

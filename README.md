@@ -19,9 +19,6 @@ We are working on support for the Apple Neural Engine and the Google TPU in the 
 ### Installation
 
 ```bash
-pip3 install git+https://github.com/geohot/tinygrad.git --upgrade
-
-# or for development
 git clone https://github.com/geohot/tinygrad.git
 cd tinygrad
 python3 setup.py develop
@@ -32,8 +29,8 @@ python3 setup.py develop
 ```python
 from tinygrad.tensor import Tensor
 
-x = Tensor.eye(3)
-y = Tensor([[2.0,0,-2.0]])
+x = Tensor.eye(3, requires_grad=True)
+y = Tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
@@ -57,13 +54,13 @@ print(y.grad)  # dz/dy
 
 ## Neural networks?
 
-It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, RMSprop, and Adam implemented) from tinygrad.optim, write some boilerplate minibatching code, and you have all you need.
+It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, RMSprop, and Adam implemented) from tinygrad.nn.optim, write some boilerplate minibatching code, and you have all you need.
 
 ### Neural network example (from test/test_mnist.py)
 
 ```python
 from tinygrad.tensor import Tensor
-import tinygrad.optim as optim
+import tinygrad.nn.optim as optim
 
 class TinyBobNet:
   def __init__(self):
@@ -98,7 +95,9 @@ from tinygrad.tensor import Tensor
 
 If all you want to do is ReLU, you are in luck! You can do very fast ReLU (at least 30 MEGAReLUs/sec confirmed)
 
-Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement, which also requires `amfi_get_out_of_my_way=0x1` in your `boot-args`. Build the library with `ane/lib/build.sh`
+Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement, which also requires `sudo nvram boot-args="amfi_get_out_of_my_way=1 ipc_control_port_options=0"`. Build the library with `ane/lib/build.sh`
+
+In order to set boot-args and for the AMFI kext to respect that arg, run `csrutil enable --without-kext --without-nvram` in recovery mode.
 
 ```python
 from tinygrad.tensor import Tensor
@@ -110,19 +109,38 @@ print(b.cpu())
 
 Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doing something important with tinygrad and wanted to use the ANE, you might have a bad time.
 
-### Adding an accelerator
+### hlops (in tensor.py)
 
-You need to support 14 first class ops:
+hlops are syntactic sugar around mlops. They support most things torch does.
+
+### mlops
+
+mlops are mid level ops, there's 15 of them. They understand memory allocation and derivatives
 
 ```
-Relu, Log, Exp                  # unary ops
-Sum, Max                        # reduce ops (with axis argument)
-Add, Sub, Mul, Pow              # binary ops (with broadcasting)
-Reshape, Transpose, Slice       # movement ops
-Matmul, Conv2D(NCHW)            # processing ops
+Relu, Log, Exp                          # unary ops
+Sum, Max                                # reduce ops (with axis argument)
+Add, Sub, Mul, Pow                      # binary ops (no broadcasting, use expand)
+Reshape, Permute, Slice, Expand, Flip   # movement ops
+Conv2D(NCHW)                            # processing op (Matmul is also Conv2D)
 ```
 
-While more ops may be added, I think this base is stable.
+You no longer need to write mlops for a new accelerator
+
+### Adding an accelerator (llops)
+
+The autodiff stuff is all in mlops now so you can focus on the raw operations
+
+```
+Buffer                                                     # class of memory on this device
+unary_op  (RELU, EXP, LOG, NEG, SIGN)                      # A -> A
+reduce_op (SUM, MAX)                                       # A -> B (smaller size, B has 1 in shape)
+binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + B -> C (all the same size)
+movement_op (RESHAPE, PERMUTE, PAD, SHRINK, EXPAND, FLIP)  # A -> B (different size)
+processing_op (CONV)                                       # A + B -> C
+```
+
+When tinygrad moves to lazy evaluation, optimizations will happen here.
 
 ## ImageNet inference
 
@@ -141,6 +159,20 @@ ipython3 examples/efficientnet.py webcam
 PROTIP: Set "GPU=1" environment variable if you want this to go faster.
 
 PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
+
+### tinygrad supports Stable Diffusion!
+
+Run `TORCH=1 python3 examples/stable_diffusion.py`
+
+(or without torch: `OPT=2 OPENCL=1 python3 examples/stable_diffusion.py`)
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg">
+</p>
+
+<p align="center">
+"a horse sized cat eating a bagel"
+</p>
 
 ### tinygrad supports GANs
 
@@ -172,7 +204,7 @@ tinygrad will always be below 1000 lines. If it isn't, we will revert commits un
 
 ```bash
 GRAPH=1 python3 test/test_mnist.py TestMNIST.test_sgd_onestep
-dot -Tsvg /tmp/net.dot -o /tmp/net.svg && open /tmp/net.svg
+# requires dot, outputs /tmp/net.svg
 ```
 
 ### Running tests

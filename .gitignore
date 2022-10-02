@@ -9,3 +9,4 @@ dist
 /env
 a.out
 boxes.jpg
+weights/*

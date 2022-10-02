@@ -5,8 +5,13 @@ enum ANEDeviceUsageType {
 };
 
 struct H11ANEDeviceInfoStruct {
-  uint64_t nothing;
   uint64_t program_handle;
+  uint64_t program_auth_code;
+  uint64_t sleep_timer;
+  uint64_t junk[0x100];
+};
+
+struct H11ANEStatusStruct {
   uint64_t junk[0x100];
 };
 
@@ -54,6 +59,55 @@ namespace H11ANE {
       uint64_t unused;
   };
 
+  // we should switch to the IOKit kernel interface, it's likely a lot more stable
+  // actually this probably isn't true. ANEServices is normal dynamic links
+  // https://googleprojectzero.blogspot.com/2020/11/oops-i-missed-it-again.html
+
+  // H11ANEInDirectPathClient
+  // _ANE_DeviceOpen
+  // _ANE_DeviceClose
+  // _ANE_ProgramSendRequest
+
+  // * if they need kernel debugger attached
+  // H11ANEInUserClient
+  // _ANE_DeviceOpen
+  // _ANE_DeviceClose
+  // _ANE_ProgramSendRequest
+  // _ANE_ProgramCreate
+  // _ANE_ProgramPrepare
+  // _ANE_ProgramUnprepare
+  // _ANE_ProgramDestroy
+  // _ANE_GetStatus
+  // _ANE_PowerOn
+  // _ANE_PowerOff
+  // _ANE_IsPowered
+  // * _ANE_LoadFirmware
+  // * _ANE_ForgetFirmware
+  // * _ANE_SendCommand
+  // _ANE_SetPowerManagement
+  // _ANE_GetTime
+  // * _ANE_SetDriverLoggingFlags
+  // * _ANE_ShowSharedMemoryAllocations
+  // * _ANE_SetDARTCacheTTL
+  // * _ANE_SetFirmwareBootArg
+  // * _ANE_SetThrottlingPercentage
+  // * _ANE_AddPersistentClient
+  // * _ANE_RemovePersistentClient
+  // * _ANE_CreateClientLoggingSession
+  // * _ANE_TerminateClientLoggingSession
+  // _ANE_GetDriverLoggingFlags
+  // * _ANE_FlushInactiveDARTMappings
+  // _ANE_GetVersion
+  // _ANE_RegisterFirmwareWorkProcessor
+  // _ANE_UnregisterFirmwareWorkProcessor
+  // * _ANE_GetFirmwareWorkProcessorItem
+  // _ANE_CompleteFirmwareWorkProcessorItem
+  // _ANE_ReleaseFirmwareWorkProcessorBuffers
+  // * _ANE_ReadANERegister
+  // * _ANE_WriteANERegister
+  // _ANE_ProgramCreateInstance
+
+  // note, this is not the raw IOKit class, it's in ANEServices.framework
   class H11ANEDevice {
     public:
       H11ANEDevice(H11ANE::H11ANEDeviceController *param_1, unsigned int param_2);
@@ -63,6 +117,8 @@ namespace H11ANE {
         void *param_2, ANEDeviceUsageType param_3, H11ANEDeviceInfoStruct *param_4);
 
       void EnableDeviceMessages();
+      int ANE_AddPersistentClient();
+      int ANE_GetStatus(H11ANEStatusStruct *param_1);
 
       // power management
       int ANE_IsPowered();

@@ -45,24 +45,40 @@ int main() {
 
   char empty[0x90] = {0};
   H11ANEDeviceInfoStruct dis = {0};
+  //dis.nothing = 0x87c15a20a;
+  //dis.sleep_timer = 5000;
   ret = dev->H11ANEDeviceOpen(MyH11ANEDeviceMessageNotification, empty, UsageCompile, &dis);
   printf("open 0x%x %p\n", ret, dev);
 
+  /*ret = dev->ANE_AddPersistentClient();
+  printf("add persistent %x\n", ret);*/
+
+  H11ANEStatusStruct blah = {0};
+  ret = dev->ANE_GetStatus(&blah);
+  printf("get status %x\n", ret);
+
+  // this isn't callable anymore, it requires debugger
   ret = dev->ANE_PowerOn();
-  printf("power on: %d\n", ret);
+  printf("power on: %x\n", ret);
 
   ret = dev->ANE_IsPowered();
   printf("powered? %d\n", ret);
 
-  char *prog = (char*)aligned_alloc(0x1000, 0x8000);
-  FILE *f = fopen("../2_compile/model.hwx", "rb");
-  int sz = fread(prog, 1, 0x8000, f);
-  printf("read %x %p\n", sz, prog);
-  fclose(f);
+  /*if (ret == 0) {
+    printf("POWER ON FAILED\n");
+    return -1;
+  }*/
 
   H11ANEProgramCreateArgsStruct mprog = {0};
+  mprog.program_length = 0xc000;
+  char *prog = (char*)aligned_alloc(0x1000, mprog.program_length);
   mprog.program = prog;
-  mprog.program_length = 0x8000;
+
+  FILE *f = fopen("../2_compile/model.hwx", "rb");
+  assert(f);
+  int sz = fread(prog, 1, mprog.program_length, f);
+  printf("read %x %p\n", sz, prog);
+  fclose(f);
 
   H11ANEProgramCreateArgsStructOutput *out = new H11ANEProgramCreateArgsStructOutput;
   memset(out, 0, sizeof(H11ANEProgramCreateArgsStructOutput));
@@ -73,6 +89,7 @@ int main() {
   H11ANEProgramPrepareArgsStruct pas = {0};
   pas.program_handle = program_handle;
   pas.flags = 0x0000000100010001;
+  //pas.flags = 0x0000000102010001;
   ret = dev->ANE_ProgramPrepare(&pas);
   printf("program prepare: %lx\n", ret);
 
@@ -129,7 +146,20 @@ int main() {
   IOCreateReceivePort(kOSAsyncCompleteMessageID, &recvPort);
   printf("recv port: 0x%x\n", recvPort);
 
-  // run program
+  // *** reopen with other client ***
+  H11ANEDeviceController dc2(MyH11ANEDeviceControllerNotification, NULL);
+  dc2.SetupDeviceController();
+  assert(device != NULL);
+  dev = device;
+  dev->EnableDeviceMessages();
+
+  char empty2[0x90] = {0};
+  dis.program_handle = program_handle;
+  dis.program_auth_code = 0;
+  ret = dev->H11ANEDeviceOpen(MyH11ANEDeviceMessageNotification, empty2, UsageWithProgram, &dis);
+  printf("reopen 0x%x %p\n", ret, dev);
+
+  // run program (i think we need the other client for this)
   ret = dev->ANE_ProgramSendRequest(pras, recvPort);
   printf("send 0x%x\n", ret);
 

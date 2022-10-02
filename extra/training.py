@@ -15,12 +15,12 @@ def sparse_categorical_crossentropy(out, Y):
   return out.mul(y).mean()
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
-        transform=lambda x: x, target_transform=lambda x: x):
+        transform=lambda x: x, target_transform=lambda x: x, noloss=False):
   Tensor.training = True
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=os.getenv('CI') is not None)):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
-    x = Tensor(transform(X_train[samp]))
+    x = Tensor(transform(X_train[samp]), requires_grad=False)
     y = target_transform(Y_train[samp])
 
     # network
@@ -29,16 +29,19 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
     loss = lossfn(out, y)
     optim.zero_grad()
     loss.backward()
+    if noloss: del loss
     optim.step()
 
-    cat = np.argmax(out.cpu().data, axis=-1)
-    accuracy = (cat == y).mean()
-
     # printing
-    loss = loss.cpu().data
-    losses.append(loss)
-    accuracies.append(accuracy)
-    t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
+    if not noloss:
+      cat = np.argmax(out.cpu().data, axis=-1)
+      accuracy = (cat == y).mean()
+
+      loss = loss.detach().cpu().data
+      losses.append(loss)
+      accuracies.append(accuracy)
+      t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
+    
 
 def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False, transform=lambda x: x, 
              target_transform=lambda y: y):

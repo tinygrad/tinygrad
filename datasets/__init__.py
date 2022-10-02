@@ -1,3 +1,4 @@
+import os
 import io
 import numpy as np
 import gzip
@@ -7,10 +8,10 @@ from extra.utils import fetch
 
 def fetch_mnist():
   parse = lambda file: np.frombuffer(gzip.open(file).read(), dtype=np.uint8).copy()
-  X_train = parse("datasets/mnist/train-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
-  Y_train = parse("datasets/mnist/train-labels-idx1-ubyte.gz")[8:]
-  X_test = parse("datasets/mnist/t10k-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
-  Y_test = parse("datasets/mnist/t10k-labels-idx1-ubyte.gz")[8:]
+  X_train = parse(os.path.dirname(__file__)+"/mnist/train-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
+  Y_train = parse(os.path.dirname(__file__)+"/mnist/train-labels-idx1-ubyte.gz")[8:]
+  X_test = parse(os.path.dirname(__file__)+"/mnist/t10k-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
+  Y_test = parse(os.path.dirname(__file__)+"/mnist/t10k-labels-idx1-ubyte.gz")[8:]
   return X_train, Y_train, X_test, Y_test
 
 def fetch_cifar():

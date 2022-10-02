@@ -14,7 +14,7 @@ def get_macho(fn):
     f.close()
   return MachO.MachO(f.name)
 
-a = get_macho("model.hwx")
+a = get_macho("model.hwx.golden")
 
 # load commands
 for c in a.headers[0].commands:

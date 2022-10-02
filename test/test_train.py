@@ -1,9 +1,9 @@
 import os
 import unittest
 import time
-import tinygrad.optim as optim
+import tinygrad.nn.optim as optim
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Device
 from extra.training import train
 from extra.utils import get_parameters
 from models.efficientnet import EfficientNet

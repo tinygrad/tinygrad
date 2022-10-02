@@ -11,12 +11,12 @@ extern "C" {
   std::string _ZN19ZinMirCacheHintUtil17CacheHintToStringE15ZinMirCacheHint(int op);
   std::string _ZN30ZinMirKernelSizeSplitterEngine16ConvKindToStringENS_8ConvKindE(int op);
 
-  void _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(
+  /*void _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(
     unsigned long param_1, void *param_2,int param_3, std::basic_ostream<char> *param_4);
 
 void debugregs(int a1, void *dat, int a2) {
   _Z24ZinIrRegBitPrintOutDebugILj7EE11ZinIrStatusjRN11ZinHWTraitsIXT_EE6HwTypeEiRNSt3__113basic_ostreamIcNS5_11char_traitsIcEEEE(a1, dat, a2, &std::cout);
-}
+}*/
 
 }
 

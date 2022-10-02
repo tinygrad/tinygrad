@@ -1,9 +1,13 @@
 from tinygrad.tensor import Tensor
-import tinygrad.nn as nn
 import pickle
 import numpy as np
+from tinygrad.helpers import prod
 
 def fetch(url):
+  if url.startswith("/"):
+    with open(url, "rb") as f:
+      dat = f.read()
+    return dat
   import requests, os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
   if os.path.isfile(fp) and os.stat(fp).st_size > 0 and os.getenv("NOCACHE", None) is None:
@@ -19,17 +23,7 @@ def fetch(url):
     os.rename(fp+".tmp", fp)
   return dat
 
-def get_parameters(obj):
-  parameters = []
-  if isinstance(obj, Tensor):
-    parameters.append(obj)
-  elif isinstance(obj, list) or isinstance(obj, tuple):
-    for x in obj:
-      parameters.extend(get_parameters(x))
-  elif hasattr(obj, '__dict__'):
-    for v in obj.__dict__.values():
-      parameters.extend(get_parameters(v))
-  return parameters
+from tinygrad.nn.optim import get_parameters
 
 def my_unpickle(fb0):
   key_prelookup = {}
@@ -39,7 +33,8 @@ def my_unpickle(fb0):
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
 
-      ret = np.zeros(obj_size, dtype=storage_type)
+      assert prod(args[2]) == obj_size
+      ret = np.zeros(args[2], dtype=storage_type)
       key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
       return ret
 
@@ -76,12 +71,29 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
+def fake_torch_load_zipped(fb0, load_weights=True):
+  import zipfile
+  with zipfile.ZipFile(fb0, 'r') as myzip:
+    with myzip.open('archive/data.pkl') as myfile:
+      ret = my_unpickle(myfile)
+    if load_weights:
+      for k,v in ret[1].items():
+        with myzip.open(f'archive/data/{k}') as myfile:
+          if v[2].dtype == "object":
+            print(f"issue assigning object on {k}")
+            continue
+          np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
+  return ret[0]
+
 def fake_torch_load(b0):
   import io
   import struct
 
   # convert it to a file
   fb0 = io.BytesIO(b0)
+
+  if b0[0:2] == b"\x50\x4b":
+    return fake_torch_load_zipped(fb0)
 
   # skip three junk pickles
   pickle.load(fb0)
@@ -102,8 +114,7 @@ def fake_torch_load(b0):
     assert ll == obj_size
     bytes_size = {np.float32: 4, np.int64: 8}[storage_type]
     mydat = fb0.read(ll * bytes_size)
-    np_array[:] = np.frombuffer(mydat, storage_type)
-    np_array.shape = np_shape
+    np.copyto(np_array, np.frombuffer(mydat, storage_type).reshape(np_shape))
 
     # numpy stores its strides in bytes
     real_strides = tuple([x*bytes_size for x in np_strides])

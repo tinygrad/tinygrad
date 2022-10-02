@@ -4,7 +4,7 @@ import cProfile
 import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 
 def start_profile():
   import time
