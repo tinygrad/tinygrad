@@ -32,9 +32,9 @@ def get_random_input_tensors():
   np_inputs = {
     "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
     "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
-    "desire": np.zeros((1, 8)),
+    "desire": np.zeros((1,100, 8)),
     "traffic_convention": np.array([[1., 0.]]),
-    "initial_state": np.random.randn(*(1, 512))
+    "features_buffer": np.random.randn(*(1, 99, 2048))
     #"initial_state": np.zeros((1, 768))
   }
 
@@ -300,9 +300,9 @@ def compile(input, output_fn):
       "local_work_size": [1 for x in args[0]] if args[1] is None else args[1],
       "num_args": len(args)-2,
       "args": targs,
-      "args_size": args_size 
+      "args_size": args_size
     })
-  
+
   jdat['outputs'] = [{
     "buffer_id": struct.pack("Q", tinygrad_out.lazydata.realized.cl.global_id).decode("latin_1"),
     "size": tinygrad_out.lazydata.realized.cl.size,
@@ -316,7 +316,7 @@ def compile(input, output_fn):
     "name": k
   } for k,v in inputs.items()][::-1]
   print(jdat['inputs'])
-  
+
   print(f"saving {len([x for x in jdat['objects'] if x['needs_load']])} objects")
 
   print("saving thneed")
