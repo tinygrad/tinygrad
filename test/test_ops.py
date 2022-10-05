@@ -207,7 +207,6 @@ class TestOps(unittest.TestCase):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
 
-  @unittest.skipUnless(Device.DEFAULT != "GPU", "GPU doesn't work with convs with virtual dimensions > 2**31")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
     helper_test_op([(1,256,64,64), (512,256,3,3)],

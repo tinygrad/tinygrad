@@ -210,8 +210,10 @@ class OpenCLBuffer(GPUBuffer):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
-  def contiguous_view_constant_fold(x, name:str) -> Tuple[str, Optional[str], str]:
+  def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
     if x.is_image():
+      # this will only be for convs, so it shouldn't be a reduce
+      assert reduce is None
       #print("is image")
       return f"""inline float get_{name}(const sampler_t smp, read_only image2d_t x, int gid) {{
         int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')};
@@ -223,9 +225,9 @@ class OpenCLBuffer(GPUBuffer):
         int2 l_smp = {x._image.pos_to_sample_pos('l')};
         float4 dat = read_imagef(x, smp, l_smp);
         return valid ? (idx4 == 0 ? dat.x : (idx4 == 1 ? dat.y : (idx4 == 2 ? dat.z : dat.w))) : 0.0;
-      }}""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, idx);"
+      }}""", f"read_only image2d_t {name}_g", f"get_{name}(smp, {name}_g, gid);"
     #ewtypes.append(f"read_only image2d_t {name}_g")
-    return super().contiguous_view_constant_fold(name)
+    return super().contiguous_view_constant_fold(name, reduce)
 
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
     if C is None or earlycode != "acc":
