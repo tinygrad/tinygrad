@@ -34,7 +34,7 @@ def get_random_input_tensors():
     "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
     "desire": np.zeros((1,100, 8)),
     "traffic_convention": np.array([[1., 0.]]),
-    "features_buffer": np.random.randn(*(1, 99, 2048))
+    "features_buffer": np.random.randn(*(1, 99, 128))
     #"initial_state": np.zeros((1, 768))
   }
 
@@ -108,7 +108,7 @@ def compile(input, output_fn):
         args[1] = [min(MAX_WORKGROUP, args[0][0]), 1]
         try:
           e = prg.clprg(CL().cl_queue, *args)
-        except cl.LogicError:
+        except (cl.LogicError, cl.RuntimeError):
           # INVALID_WORK_GROUP_SIZE
           args[1] = None
           continue
@@ -136,7 +136,7 @@ def compile(input, output_fn):
                 if bad: continue
               try:
                 e = prg.clprg(CL().cl_queue, *args)
-              except cl.LogicError:
+              except (cl.LogicError, cl.RuntimeError):
                 # INVALID_WORK_GROUP_SIZE
                 continue
               CL().cl_queue.finish()
