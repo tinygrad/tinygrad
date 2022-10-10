@@ -11,7 +11,7 @@ class TestSpeedVTorch(unittest.TestCase):
     torch.manual_seed(0)
     for bs in [32]:
       for in_chans in [1,16,64]:
-        for out_chans in [128]:
+        for out_chans in [64]:
           device = 'cuda' if torch.cuda.is_available() else 'cpu'
           img_size = 64 if device == 'cuda' else 32
           src = torch.rand(bs, in_chans, img_size, img_size)
