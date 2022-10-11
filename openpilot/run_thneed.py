@@ -251,7 +251,7 @@ if __name__ == "__main__":
     diff = 0
     diffs = []
     for i in range(ret.shape[0]):
-      if abs(out[i]-ret[i]) > 0.15 and abs((out[i]-ret[i])/out[i]) > 0.01:
+      if abs(out[i]-ret[i]) > 0.1 and abs((out[i]-ret[i])/out[i]) > 0.01:
         diff += 1
         diffs.append(out[i] - ret[i])
         if diff == 10:
