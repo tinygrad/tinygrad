@@ -66,7 +66,7 @@ def compile(input, output_fn):
     def run_onnx(x):
       return {"outputs": enet.forward(x['input_imgs'])}
   else:
-    onnx_model = onnx.load(io.BytesIO(dat))
+    onnx_model = onnx.load(io.BytesIO(input))
     run_onnx = get_run_onnx(onnx_model)
 
   # initial run(s) to load weights
