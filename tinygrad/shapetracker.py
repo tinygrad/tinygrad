@@ -64,7 +64,7 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
 
 @functools.lru_cache(maxsize=None)
 def view_from_shape(shape:Tuple[int, ...]) -> View:
-  assert all([isinstance(x, int) for x in shape]) and len(shape) != 0
+  assert all(isinstance(x, int) for x in shape) and len(shape) != 0
   return View(tuple(shape), strides_for_shape(shape))
 
 class ShapeTracker:
@@ -100,7 +100,7 @@ class ShapeTracker:
       self.views.append(view)
 
   def reshape(self, *new_shape):
-    assert all([isinstance(x, int) for x in new_shape])
+    assert all(isinstance(x, int) for x in new_shape)
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # check if this is adding or removing 1s (only)
@@ -117,7 +117,7 @@ class ShapeTracker:
       self.views.append(view)
 
   def permute(self, *axis):
-    assert all([isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis])
+    assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis)
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View([self.shape[a] for a in axis], [self.strides[a] for a in axis], self.offset)
 
@@ -143,14 +143,14 @@ class ShapeTracker:
       self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
 
   def expand(self, *new_shape):
-    assert all([isinstance(x, int) for x in new_shape])
-    assert all([x == y or x == 1 for x,y in zip(self.shape, new_shape)]), f"can't expand {self.shape} into {new_shape}"
+    assert all(isinstance(x, int) for x in new_shape)
+    assert all(x == y or x == 1 for x,y in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
     strides = [s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape))]
     self.views[-1] = View(new_shape, strides, self.offset)
 
   # TODO: combine with slice? this doesn't require a ZeroView, though slice shouldn't always either
   def stride(self, *mul):
-    assert all([isinstance(x, int) for x in mul])
+    assert all(isinstance(x, int) for x in mul)
     strides = [z*m for z,m in zip(self.strides, mul)]
     new_shape = [(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)]
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])

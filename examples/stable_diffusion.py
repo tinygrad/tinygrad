@@ -529,7 +529,7 @@ def bytes_to_unicode():
   cs = [chr(n) for n in cs]
   return dict(zip(bs, cs))
 
-class ClipTokenizer(object):
+class ClipTokenizer:
   def __init__(self, bpe_path: str = default_bpe()):
     self.byte_encoder = bytes_to_unicode()
     merges = gzip.open(bpe_path).read().decode("utf-8").split('\n')
