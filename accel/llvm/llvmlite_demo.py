@@ -36,19 +36,6 @@ llvm.initialize()
 llvm.initialize_native_target()
 llvm.initialize_native_asmprinter()  # yes, even this one
 
-llvm_ir = """
-   ; ModuleID = "examples/ir_fpadd.py"
-   target triple = "unknown-unknown-unknown"
-   target datalayout = ""
-
-   define double @"fpadd"(double %".1", double %".2")
-   {
-   entry:
-     %"res" = fadd double %".1", %".2"
-     ret double %"res"
-   }
-   """
-
 def create_execution_engine():
     """
     Create an ExecutionEngine suitable for JIT code generation on

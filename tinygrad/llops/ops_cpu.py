@@ -11,6 +11,7 @@ class CPUBuffer(np.ndarray):
     ReduceOps.SUM: lambda x, axis: x.sum(axis, keepdims=True), ReduceOps.MAX: lambda x, axis: x.amax(axis, keepdims=True)
   }
 
+  # functions to make a np.array behave like a torch.tensor
   def relu(x): return np.maximum(x, 0)
   def exp(x): return np.exp(x)
   def log(x): return np.log(x)
