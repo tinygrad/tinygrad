@@ -77,16 +77,13 @@ class TestOps(unittest.TestCase):
   def test_exp(self):
     helper_test_op([(45,65)], lambda x: torch.exp(x), Tensor.exp)
   def test_sign(self):
-    pass
-    #helper_test_op([(45,65)], lambda x: torch.sign(x), Tensor.sign) --> broken test
+    helper_test_op([(45,65)], lambda x: torch.sign(x), Tensor.sign)
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
   def test_softplus(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
   def test_gelu(self):
-    pass
-    # fails?
-    #helper_test_op([(45,65)], lambda x: 0.5 * x * (1.0 + torch.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x))), Tensor.gelu)
+    helper_test_op([(45,65)], lambda x: 0.5 * x * (1.0 + torch.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x))), Tensor.gelu)
   def test_elu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x), Tensor.elu)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x, alpha=0.1), lambda x: Tensor.elu(x, alpha=0.1))
@@ -123,10 +120,10 @@ class TestOps(unittest.TestCase):
   def test_max(self):
     helper_test_op([(45,3)], lambda x: x.max(), Tensor.max)
     helper_test_op([(45,3)], lambda x: x.max().mul(0.5), lambda x: Tensor.max(x).mul(0.5))
-    #helper_test_op(None, lambda x: x.max().mul(0.5), lambda x: Tensor.max(x).mul(0.5),
-    #        vals=[
-    #            [[1.0,1.0,0.0,1.0]],
-    #            ]) --> broken test
+    helper_test_op(None, lambda x: x.max().mul(0.5), lambda x: Tensor.max(x).mul(0.5),
+            vals=[
+                [[1.0,1.0,0.0,1.0]],
+                ])
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: Tensor.max(x, axis=1))
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)))
@@ -370,16 +367,14 @@ class TestOps(unittest.TestCase):
     ksz = (2,2)
     helper_test_op([(1,1,2,3)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
-      # TODO: why is this tolerance so high?
-      lambda x: Tensor.max_pool2d(x, kernel_size=ksz), grad_atol=1e-4)
+      lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
   def test_maxpool2d(self):
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
-          # TODO: why is this tolerance so high?
-          lambda x: Tensor.max_pool2d(x, kernel_size=ksz), grad_atol=1e-4)
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
