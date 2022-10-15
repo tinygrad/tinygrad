@@ -29,6 +29,7 @@ class LLVMBuffer:
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._dumb_processing_op([x], op)
   def binary_op(x, op:BinaryOps, y): return type(x)(x.shape)._dumb_processing_op([x, y], op)
+  #def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape)._processing_op([("A", x)], code="acc", earlycode=GPUBuffer.code_for_op[op], earlybufs=set("A"), op=op)
 
   @staticmethod
   def fromCPU(x):
@@ -40,6 +41,7 @@ class LLVMBuffer:
 
   def _dumb_processing_op(ret, bufs, op):
     typ = ir.PointerType(ir.FloatType())
+
     fnty = ir.FunctionType(ir.VoidType(), [typ]*(1+len(bufs)))
     module = ir.Module(name=__file__)
     func = ir.Function(module, fnty, name="fpadd")
@@ -60,11 +62,13 @@ class LLVMBuffer:
 
     if op == BinaryOps.ADD:
       r, a, b = func.args
+      print(bufs[0].st, bufs[1].st)
       ap = builder.load(builder.gep(a, [idx]))
       bp = builder.load(builder.gep(b, [idx]))
       val = builder.fadd(ap, bp)
       builder.store(val, builder.gep(r, [idx]))
     elif op == UnaryOps.NOOP:
+      print(bufs[0].st)
       r, a = func.args
       ap = builder.load(builder.gep(a, [idx]))
       val = ap
@@ -74,15 +78,6 @@ class LLVMBuffer:
     idx.add_incoming(idx_new, block)
 
     builder.cbranch(builder.icmp_unsigned("==", idx, end), exit_block, block)
-
-
-    #idx = builder.add(idx, ir.Constant(ir.IntType(32), 1))
-
-    #bp = builder.load(b)
-    
-    #result = builder.fadd(a, b, name="res")
-    #builder.ret(result)
-
     llvm_ir = str(module)
     print(llvm_ir)
 
@@ -100,10 +95,11 @@ class LLVMBuffer:
     engine.finalize_object()
     engine.run_static_constructors()
 
-
-    func_ptr = engine.get_function_address("fpadd")
     bufs = [ret] + bufs
-    cfunc = CFUNCTYPE(*[ctypes.c_float * prod(x.shape) for x in bufs])(func_ptr)
+    func_ptr = engine.get_function_address("fpadd")
+    argtypes = [ctypes.POINTER(ctypes.c_float) for _ in bufs]
+    cfunc = CFUNCTYPE(*argtypes)(func_ptr)
+    cfunc.argtypes = argtypes
     cfunc(*[x._buf for x in bufs])
 
     return ret

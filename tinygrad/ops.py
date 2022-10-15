@@ -10,12 +10,16 @@ from tinygrad.shapetracker import ShapeTracker
 sys.setrecursionlimit(10000)
 
 # these are the llops your accelerator must implement, along with toCpu
-UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN", "RECIPROCAL"])
-BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
+LoadOps = Enum("LoadOps", ["FROMCPU"])  # TODO: add zeros and randomness as load sources
+
+# these 4 form the core ops of tinygrad
+UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN", "RECIPROCAL"])  # f(x)
+BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])  # f(x,y)
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "EXPAND", "FLIP", "STRIDED", "PAD", "SHRINK"])
+MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "EXPAND", "FLIP", "STRIDED", "PAD", "SHRINK"])  # these don't change data, only move it
+
+# ProcessingOps don't have to be implemented if you can fuse Binary + Reduce
 ProcessingOps = Enum("ProcessingOps", ["CONV"])
-LoadOps = Enum("LoadOps", ["FROMCPU"])
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps]]
