@@ -60,26 +60,31 @@ class LLVMBuffer:
     idx = builder.phi(ir.IntType(32))
     idx.add_incoming(start, start_block)
 
-    if op == BinaryOps.ADD:
+    print(op, [x.st for x in bufs])
+    if op in [BinaryOps.ADD, BinaryOps.MUL]:
       r, a, b = func.args
-      print(bufs[0].st, bufs[1].st)
       ap = builder.load(builder.gep(a, [idx]))
       bp = builder.load(builder.gep(b, [idx]))
-      val = builder.fadd(ap, bp)
+      if op == BinaryOps.ADD:
+        val = builder.fadd(ap, bp)
+      elif op == BinaryOps.MUL:
+        val = builder.fmul(ap, bp)
       builder.store(val, builder.gep(r, [idx]))
     elif op == UnaryOps.NOOP:
-      print(bufs[0].st)
       r, a = func.args
       ap = builder.load(builder.gep(a, [idx]))
       val = ap
       builder.store(val, builder.gep(r, [idx]))
+    else:
+      raise NotImplementedError(f"{op} not implemented in LLVM backend")
 
     idx_new = builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_new, block)
 
     builder.cbranch(builder.icmp_unsigned("==", idx, end), exit_block, block)
     llvm_ir = str(module)
-    print(llvm_ir)
+    if DEBUG >= 1:
+      print(llvm_ir)
 
     llvm.initialize()
     llvm.initialize_native_target()
@@ -88,7 +93,8 @@ class LLVMBuffer:
     mod = llvm.parse_assembly(llvm_ir)
     mod.verify()
     target_machine = llvm.Target.from_default_triple().create_target_machine()
-    print(target_machine.emit_assembly(mod))
+    if DEBUG >= 2:
+      print(target_machine.emit_assembly(mod))
 
     engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), target_machine)
     engine.add_module(mod)
@@ -98,8 +104,7 @@ class LLVMBuffer:
     bufs = [ret] + bufs
     func_ptr = engine.get_function_address("fpadd")
     argtypes = [ctypes.POINTER(ctypes.c_float) for _ in bufs]
-    cfunc = CFUNCTYPE(*argtypes)(func_ptr)
-    cfunc.argtypes = argtypes
+    cfunc = CFUNCTYPE(ctypes.c_int, *argtypes)(func_ptr)
     cfunc(*[x._buf for x in bufs])
 
     return ret
