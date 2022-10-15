@@ -51,8 +51,7 @@ class LLVMBuffer:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
-    # TODO: WTF, you have to allocate a bit of extra room or weird segfaults
-    self._buf = (ctypes.c_float * (prod(self.shape)+1))() if hostbuf is None else hostbuf._buf
+    self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
 
   # copied from GPUBuffer
   def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
@@ -101,7 +100,7 @@ class LLVMBuffer:
     exit_builder.ret_void()
 
     start = ir.Constant(ir.IntType(32), 0)
-    end = ir.Constant(ir.IntType(32), prod(ret.shape))
+    end = ir.Constant(ir.IntType(32), prod(ret.shape)-1)
     idx = builder.phi(ir.IntType(32))
     idx.add_incoming(start, start_block)
 
