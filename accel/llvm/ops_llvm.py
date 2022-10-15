@@ -60,21 +60,30 @@ class LLVMBuffer:
     idx = builder.phi(ir.IntType(32))
     idx.add_incoming(start, start_block)
 
-    print(op, [x.st for x in bufs])
-    if op in [BinaryOps.ADD, BinaryOps.MUL]:
-      r, a, b = func.args
-      ap = builder.load(builder.gep(a, [idx]))
-      bp = builder.load(builder.gep(b, [idx]))
-      if op == BinaryOps.ADD:
-        val = builder.fadd(ap, bp)
-      elif op == BinaryOps.MUL:
-        val = builder.fmul(ap, bp)
-      builder.store(val, builder.gep(r, [idx]))
-    elif op == UnaryOps.NOOP:
-      r, a = func.args
-      ap = builder.load(builder.gep(a, [idx]))
-      val = ap
-      builder.store(val, builder.gep(r, [idx]))
+    def idx_deref(buf, ptr, idx):
+      if DEBUG >= 1:
+        print(buf.st.expr(), ptr)
+      # TODO: make this work with all shapes
+      if buf.st.expr() == "idx=0":
+        return builder.load(builder.gep(ptr, [ir.Constant(ir.IntType(32), 0)]))
+      elif buf.st.expr() == "":
+        return builder.load(builder.gep(ptr, [idx]))
+      else:
+        raise NotImplementedError(f"{buf.st.expr()} is not implemented")
+    values = [idx_deref(buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
+    op_lookup = {
+      BinaryOps.ADD: builder.fadd,
+      BinaryOps.SUB: builder.fsub,
+      BinaryOps.MUL: builder.fmul,
+      UnaryOps.RECIPROCAL: lambda x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x),
+      UnaryOps.NEG: builder.fneg,
+      UnaryOps.NOOP: lambda x: x,
+      UnaryOps.RELU: lambda x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), x, ir.Constant(ir.FloatType(), 0)),
+      UnaryOps.SIGN: lambda x: builder.select(builder.fcmp_ordered("==", x, ir.Constant(ir.FloatType(), 0)), ir.Constant(ir.FloatType(), 0), builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), -1)))
+    }
+    if op in op_lookup:
+      val = op_lookup[op](*values)
+      builder.store(val, builder.gep(func.args[0], [idx]))
     else:
       raise NotImplementedError(f"{op} not implemented in LLVM backend")
 
