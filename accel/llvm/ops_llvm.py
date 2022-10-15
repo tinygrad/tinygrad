@@ -60,24 +60,36 @@ class LLVMBuffer:
     idx = builder.phi(ir.IntType(32))
     idx.add_incoming(start, start_block)
 
+    int_const = lambda x: ir.Constant(ir.IntType(32), x)
     def idx_deref(buf, ptr, idx):
       if DEBUG >= 1:
         print(buf.st.expr(), ptr)
-      # TODO: make this work with all shapes
-      if buf.st.expr() == "idx=0":
-        return builder.load(builder.gep(ptr, [ir.Constant(ir.IntType(32), 0)]))
-      elif buf.st.expr() == "":
-        return builder.load(builder.gep(ptr, [idx]))
-      else:
-        raise NotImplementedError(f"{buf.st.expr()} is not implemented")
+      # TODO: unify this with expr in ShapeTracker
+      for v in buf.st.views:
+        acc = 1
+        ret = int_const(0)
+        for i,(d,s) in enumerate(v.shape_strides[::-1]):
+          if d != 1 and s != 0:
+            lr = builder.urem(builder.udiv(idx, int_const(acc)), int_const(d))
+            lr = builder.mul(lr, int_const(s))
+            ret = builder.add(ret, lr)
+          acc *= d
+        idx = ret
+      return builder.load(builder.gep(ptr, [idx]))
+
     values = [idx_deref(buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
+    llvm_pow = module.declare_intrinsic('llvm.pow', [ir.FloatType()])
+    llvm_log = module.declare_intrinsic('llvm.log', [ir.FloatType()])
     op_lookup = {
       BinaryOps.ADD: builder.fadd,
       BinaryOps.SUB: builder.fsub,
       BinaryOps.MUL: builder.fmul,
-      UnaryOps.RECIPROCAL: lambda x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x),
-      UnaryOps.NEG: builder.fneg,
+      BinaryOps.DIV: builder.fdiv,
+      BinaryOps.POW: lambda x,y: builder.call(llvm_pow, [x,y]),
+      UnaryOps.LOG: lambda x: builder.call(llvm_log, [x]),
       UnaryOps.NOOP: lambda x: x,
+      UnaryOps.NEG: builder.fneg,
+      UnaryOps.RECIPROCAL: lambda x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x),
       UnaryOps.RELU: lambda x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), x, ir.Constant(ir.FloatType(), 0)),
       UnaryOps.SIGN: lambda x: builder.select(builder.fcmp_ordered("==", x, ir.Constant(ir.FloatType(), 0)), ir.Constant(ir.FloatType(), 0), builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), -1)))
     }
