@@ -1,10 +1,7 @@
 import operator
 import numpy as np
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
-
-def shape_to_axis(old_shape, new_shape):
-  assert len(old_shape) == len(new_shape)
-  return tuple([i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b])
+from tinygrad.helpers import shape_to_axis
 
 class CPUBuffer(np.ndarray):
   fxn_for_op = {
@@ -12,8 +9,8 @@ class CPUBuffer(np.ndarray):
     UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(), UnaryOps.RECIPROCAL: lambda x: 1.0/x,
     BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
     BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: (x==y).float(),
-    ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True),
-    ReduceOps.MAX: lambda x, new_shape: x.amax(shape_to_axis(x.shape, new_shape), keepdims=True)
+    ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
+    ReduceOps.MAX: lambda x, new_shape: x.amax(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:]
   }
 
   # functions to make a np.array behave like a torch.tensor
@@ -36,7 +33,7 @@ class CPUBuffer(np.ndarray):
 
   def unary_op(x, op): return CPUBuffer.fxn_for_op[op](x)
   def binary_op(x, op, y): return CPUBuffer.fxn_for_op[op](x, y)
-  def reduce_op(x, op, new_shape): return CPUBuffer.fxn_for_op[op](x, new_shape) if tuple(x.shape) != tuple(new_shape) else x[:]
+  def reduce_op(x, op, new_shape): return CPUBuffer.fxn_for_op[op](x, new_shape)
 
   def movement_op(x, op, arg=None):
     if op == MovementOps.SHRINK:

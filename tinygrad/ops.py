@@ -1,6 +1,7 @@
 import os
 from enum import Enum
-from typing import Tuple, NamedTuple, Union, Any, Type
+from typing import Tuple, NamedTuple, Union, Any, Type, List
+import functools, operator
 
 DEBUG = int(os.getenv("DEBUG", "0"))
 
@@ -25,3 +26,7 @@ class LazyOp(NamedTuple):
   src: Tuple[Any, ...]  # type: ignore
   arg: Any = None
   # TODO: add dest to support multiple outputs
+
+# Any == Union[LazyBuffer, DeviceBuffer]
+def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
+def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])

@@ -11,7 +11,7 @@ import ctypes
 import numpy as np
 from llvmlite import ir
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops
 import llvmlite.binding as llvm
 
 int_const = lambda x: ir.Constant(ir.IntType(64), x)
@@ -66,9 +66,6 @@ def init_llvm():
   target_machine = target.create_target_machine()
   engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), target_machine)
 
-# TODO: unify with get_lazybuffers
-def get_buffers(op:LazyOp) -> List[LLVMBuffer]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
-
 # TODO: write this
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
 class LLVMBuffer:
@@ -93,7 +90,7 @@ class LLVMBuffer:
     self.shape = self.st.shape
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
 
-  # copied from GPUBuffer
+  # universal for shape tracked
   def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
 
   # universal

@@ -4,7 +4,7 @@ from copy import copy
 import os, sys, functools, itertools, operator, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
-from tinygrad.ops import DEBUG, LazyOp, OpType, LoadOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.ops import get_buffers, get_lazyops, DEBUG, LazyOp, OpType, LoadOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -121,7 +121,7 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
   src = self.op.src[0]
   if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
     # TODO: this code is (somewhat) repeated in _realize_binaryops
-    real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_lazybuffers(src.op)}
+    real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_buffers(src.op)}
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
 
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()],
@@ -136,7 +136,7 @@ def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBu
   return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w], ProcessingOps
 
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:None for x in get_lazybuffers(self.op)}
+  real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:None for x in get_buffers(self.op)}
   if getattr(self.dbuffer, "_processing_op", None) is not None:
     buf_names : Dict[LazyBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(real_srcs.keys())}
     reduce_shape = (list(real_srcs.keys())[0].shape, list(real_srcs.keys())[0].shape)
@@ -161,7 +161,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
 
         if MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "start_for_op", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
           src = src.op
-        for i,x in enumerate(get_lazybuffers(src) if isinstance(src, LazyOp) else [src]):
+        for i,x in enumerate(get_buffers(src) if isinstance(src, LazyOp) else [src]):
           real_srcs[x] = None
           buf_names[x] = f"earlyarg_{i}"
         earlycode = _ast(LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg), buf_names, self.dbuffer.code_for_op)
@@ -193,8 +193,6 @@ _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:
 
 # **** lazy operations ****
 
-def get_lazybuffers(op:LazyOp) -> List[LazyBuffer]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
-def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
 def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.optype == MovementOps and root.realized is None else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
@@ -222,7 +220,7 @@ class LazyBuffer:
     self.device, self.dbuffer = device, Device._buffers[device]
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    for x in get_lazybuffers(op):
+    for x in get_buffers(op):
       x.children.add(self)
     if not LAZY:
       self.realize()
