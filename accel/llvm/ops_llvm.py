@@ -1,11 +1,12 @@
 # https://github.com/numba/llvmlite/blob/main/llvmlite/ir/builder.py
 from __future__ import annotations
-import os
+import os, operator
 import math
-from typing import Tuple, Union, Dict
+import functools
+from typing import Tuple, Union, Dict, List
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
-#from tinygrad.ops import LazyBuffer, LazyOp
+from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
 from llvmlite import ir
@@ -65,6 +66,9 @@ def init_llvm():
   target_machine = target.create_target_machine()
   engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), target_machine)
 
+# TODO: unify with get_lazybuffers
+def get_buffers(op:LazyOp) -> List[LLVMBuffer]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
+
 # TODO: write this
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
 class LLVMBuffer:
@@ -93,9 +97,10 @@ class LLVMBuffer:
   def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
   def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
-  def unary_op(x, op:UnaryOps): return type(x)(x.shape)._dumb_processing_op([x], op)
-  def binary_op(x, op:BinaryOps, y): return type(x)(x.shape)._dumb_processing_op([x, y], op)
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape)._dumb_processing_op([x], op)
+  #def unary_op(x, op:UnaryOps):return type(x)(x.shape)._dumb_processing_op([x], op)
+  def unary_op(x, op:UnaryOps): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=[x]))
+  def binary_op(x, op:BinaryOps, y): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=[x, y]))
+  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape).exec_ast(LazyOp(op=op, src=[x]))
 
   @staticmethod
   def fromCPU(x):
@@ -107,76 +112,61 @@ class LLVMBuffer:
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
   def exec_ast(ret, ast:Union[LLVMBuffer, LazyOp]):
-    pass
-
-  def _dumb_processing_op(ret, bufs, op):
     if engine is None:
       init_llvm()
-
     module = ir.Module(name=__file__)
+    bufs = get_buffers(ast)
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
 
-    typ = ir.PointerType(ir.FloatType())
-    fnty = ir.FunctionType(ir.VoidType(), [typ]*(1+len(bufs)))
-    func = ir.Function(module, fnty, name='exec')
+    # enter
+    start_builder = ir.IRBuilder(func.append_basic_block(name="entry"))
+    body_builder = ir.IRBuilder(func.append_basic_block(name="inner_loop"))
+    start_builder.branch(body_builder._block)
 
-    start_block = func.append_basic_block(name="entry")
-    block = func.append_basic_block(name="inner_loop")
-    builder = ir.IRBuilder(block)
-    start_builder = ir.IRBuilder(start_block)
-    start_builder.branch(block)
-
-    start = ir.Constant(ir.IntType(64), 0)
     end = ir.Constant(ir.IntType(64), prod(ret.shape)-1)
-    idx = builder.phi(ir.IntType(64))
-    idx.add_incoming(start, start_block)
+    idx = body_builder.phi(ir.IntType(64))
+    idx.add_incoming(ir.Constant(ir.IntType(64), 0), start_builder._block)
 
-    reduce_block = func.append_basic_block(name="reduce_loop")
-    reduce_builder = ir.IRBuilder(reduce_block)
-    store_block = func.append_basic_block(name="store_block")
-    store_builder = ir.IRBuilder(store_block)
+    reduce_builder = ir.IRBuilder(func.append_basic_block(name="reduce_loop"))
+    store_builder = ir.IRBuilder(func.append_basic_block(name="store_block"))
 
-    if isinstance(op, ReduceOps):
+    if isinstance(ast.op, ReduceOps):
       red = prod([s for s,n in zip(bufs[0].shape, ret.shape) if n == 1])
-      red_idx_start = builder.mul(idx, int_const(red))
-      red_idx_end = builder.add(red_idx_start, int_const(red-1))
+      red_idx_start = body_builder.mul(idx, int_const(red))
+      red_idx_end = body_builder.add(red_idx_start, int_const(red-1))
       red_idx = reduce_builder.phi(ir.IntType(64))
-      red_idx.add_incoming(red_idx_start, block)
+      red_idx.add_incoming(red_idx_start, body_builder._block)
 
       val = reduce_builder.phi(ir.FloatType())
       tval = idx_deref(reduce_builder, bufs[0], func.args[1], red_idx)
-      if op == ReduceOps.SUM:
+      if ast.op == ReduceOps.SUM:
+        val.add_incoming(ir.Constant(ir.FloatType(), 0), body_builder._block)
         new_val = reduce_builder.fadd(tval, val)
-        val.add_incoming(ir.Constant(ir.FloatType(), 0), block)
-        val.add_incoming(new_val, reduce_block)
-      elif op == ReduceOps.MAX:
-        llvm_maxnum = ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32")
-        new_val = reduce_builder.call(llvm_maxnum, [tval, val])
-        val.add_incoming(ir.Constant(ir.FloatType(), -math.inf), block)
-        val.add_incoming(new_val, reduce_block)
-      else:
-        raise Exception(f"unknown op {op}")
+      elif ast.op == ReduceOps.MAX:
+        val.add_incoming(ir.Constant(ir.FloatType(), -math.inf), body_builder._block)
+        new_val = reduce_builder.call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32"), [tval, val])
+      val.add_incoming(new_val, reduce_builder._block)
+      val = new_val
 
       red_idx_p1 = reduce_builder.add(red_idx, int_const(1))
-      red_idx.add_incoming(red_idx_p1, reduce_block)
-      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx, red_idx_end), store_block, reduce_block)
-      val = new_val
-    elif op in LLVMBuffer.op_lookup:
-      values = [idx_deref(builder, buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
-      val = LLVMBuffer.op_lookup[op](builder, *values)
-      reduce_builder.branch(store_block)
+      red_idx.add_incoming(red_idx_p1, reduce_builder._block)
+      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx, red_idx_end), store_builder._block, reduce_builder._block)
     else:
-      raise NotImplementedError(f"{op} not implemented in LLVM backend")
+      values = [idx_deref(body_builder, buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
+      val = LLVMBuffer.op_lookup[ast.op](body_builder, *values)
+      reduce_builder.branch(store_builder._block)
 
-    builder.branch(reduce_block)
+    body_builder.branch(reduce_builder._block)
     store_builder.store(val, store_builder.gep(func.args[0], [idx]))
     idx_new = store_builder.add(idx, ir.Constant(ir.IntType(64), 1))
-    idx.add_incoming(idx_new, store_block)
+    idx.add_incoming(idx_new, store_builder._block)
 
-    exit_block = func.append_basic_block(name="exit")
-    exit_builder = ir.IRBuilder(exit_block)
+    exit_builder = ir.IRBuilder(func.append_basic_block(name="exit"))
     exit_builder.ret_void()
 
-    store_builder.cbranch(store_builder.icmp_unsigned("==", idx, end), exit_block, block)
+    store_builder.cbranch(store_builder.icmp_unsigned("==", idx, end), exit_builder._block, body_builder._block)
+
+    # **** llvm running ****
     llvm_ir = str(module)
     if DEBUG >= 1:
       print(llvm_ir)
@@ -187,9 +177,6 @@ class LLVMBuffer:
       print(target_machine.emit_assembly(mod))
     engine.add_module(mod)
     engine.finalize_object()
-
-    # needed?
-    #engine.run_static_constructors()
 
     # call function
     bufs = [ret] + bufs

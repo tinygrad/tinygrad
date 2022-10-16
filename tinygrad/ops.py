@@ -21,6 +21,7 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 class LazyOp(NamedTuple):
   op: Op
+  # Any == Union[LazyOp, LazyBuffer, DeviceBuffer]
   src: Tuple[Any, ...]  # type: ignore
   arg: Any = None
   # TODO: add dest to support multiple outputs

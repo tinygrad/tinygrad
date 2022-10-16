@@ -4,12 +4,11 @@ from copy import copy
 import os, sys, functools, itertools, operator, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
-from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.ops import DEBUG, LazyOp, OpType, LoadOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
-DEBUG = int(os.getenv("DEBUG", "0"))
 GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
 NOCONV = int(os.getenv("NOCONV", "0"))
