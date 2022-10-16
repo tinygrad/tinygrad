@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import math
-from typing import Tuple, Union
+from typing import Tuple, Union, Dict
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
 #from tinygrad.ops import LazyBuffer, LazyOp
@@ -95,9 +95,7 @@ class LLVMBuffer:
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._dumb_processing_op([x], op)
   def binary_op(x, op:BinaryOps, y): return type(x)(x.shape)._dumb_processing_op([x, y], op)
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]):
-    return type(x)(new_shape)._dumb_processing_op([x], op)
-    #._processing_op([("A", x)], code="acc", earlycode=GPUBuffer.code_for_op[op], earlybufs=set("A"), op=op)
+  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape)._dumb_processing_op([x], op)
 
   @staticmethod
   def fromCPU(x):
@@ -108,14 +106,10 @@ class LLVMBuffer:
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
-  def _exec_ast(ret, ast:Union[LazyBuffer, LazyOp]):
+  def exec_ast(ret, ast:Union[LLVMBuffer, LazyOp]):
     pass
 
-  function_idx = 0
   def _dumb_processing_op(ret, bufs, op):
-    name = f"fpadd_{LLVMBuffer.function_idx}"
-    LLVMBuffer.function_idx += 1
-
     if engine is None:
       init_llvm()
 
@@ -123,7 +117,7 @@ class LLVMBuffer:
 
     typ = ir.PointerType(ir.FloatType())
     fnty = ir.FunctionType(ir.VoidType(), [typ]*(1+len(bufs)))
-    func = ir.Function(module, fnty, name=name)
+    func = ir.Function(module, fnty, name='exec')
 
     start_block = func.append_basic_block(name="entry")
     block = func.append_basic_block(name="inner_loop")
@@ -192,17 +186,14 @@ class LLVMBuffer:
     if DEBUG >= 2:
       print(target_machine.emit_assembly(mod))
     engine.add_module(mod)
+    engine.finalize_object()
 
     # needed?
-    engine.finalize_object()
-    engine.run_static_constructors()
+    #engine.run_static_constructors()
 
     # call function
     bufs = [ret] + bufs
-    func_ptr = engine.get_function_address(name)
-    argtypes = [ctypes.POINTER(ctypes.c_float) for _ in bufs]
-    functype = CFUNCTYPE(ctypes.c_int, *argtypes)
-    cfunc = functype(func_ptr)
+    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(engine.get_function_address('exec'))
     cfunc(*[x._buf for x in bufs])
 
     # we are done
