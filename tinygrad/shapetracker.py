@@ -44,7 +44,7 @@ class View:
 
 class ZeroView:
   def __init__(self, old_shape, arg):
-    self.shape = []
+    self.old_shape, self.arg, self.shape = old_shape, arg, []
     expr, acc = ['valid'], 1
     for s,(x,y) in list(zip(old_shape, arg))[::-1]:
       self.shape = [y-x] + self.shape

@@ -17,9 +17,22 @@ def idx_deref(builder, buf, ptr, idx):
   if DEBUG >= 1:
     print(buf.st.expr(), ptr)
   # TODO: unify this with expr in ShapeTracker
+  valid = None
   for v in buf.st.views:
     if isinstance(v, ZeroView):
-      raise NotImplementedError("no support for zeroview")
+      if valid is None:
+        valid = ir.Constant(ir.IntType(1), 1)
+      acc = 1
+      for s,(x,y) in list(zip(v.old_shape, v.arg))[::-1]:
+        lr = idx
+        if acc != 1:
+          lr = builder.sdiv(lr, int_const(acc))
+        lr = builder.srem(lr, int_const(y-x))
+        if x < 0:
+          valid = builder.and_(valid, builder.icmp_signed(">=", lr, int_const(0)))
+        if y > s:
+          valid = builder.and_(valid, builder.icmp_signed("<", lr, int_const(s)))
+        acc *= y-x
     else:
       acc = 1
       ret = int_const(v.offset)
@@ -27,14 +40,17 @@ def idx_deref(builder, buf, ptr, idx):
         if d != 1 and s != 0:
           lr = idx
           if acc != 1:
-            lr = builder.udiv(lr, int_const(acc))
-          lr = builder.urem(lr, int_const(d))
+            lr = builder.sdiv(lr, int_const(acc))
+          lr = builder.srem(lr, int_const(d))
           if s != 1:
             lr = builder.mul(lr, int_const(s))
           ret = builder.add(ret, lr)
         acc *= d
       idx = ret
-  return builder.load(builder.gep(ptr, [idx]))
+  if valid is not None:
+    return builder.select(valid, builder.load(builder.gep(ptr, [idx])), ir.Constant(ir.FloatType(), 0))
+  else:
+    return builder.load(builder.gep(ptr, [idx]))
 
 target_machine, engine = None, None
 def init_llvm():
