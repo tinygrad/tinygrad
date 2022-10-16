@@ -11,10 +11,6 @@ from ctypes import CFUNCTYPE
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps
 import llvmlite.binding as llvm
 
-import gc
-#gc.set_debug(gc.DEBUG_COLLECTABLE)
-#gc.disable()
-
 int_const = lambda x: ir.Constant(ir.IntType(32), x)
 def idx_deref(builder, buf, ptr, idx):
   if DEBUG >= 1:
@@ -28,8 +24,12 @@ def idx_deref(builder, buf, ptr, idx):
       ret = int_const(v.offset)
       for i,(d,s) in enumerate(v.shape_strides[::-1]):
         if d != 1 and s != 0:
-          lr = builder.urem(builder.udiv(idx, int_const(acc)), int_const(d))
-          lr = builder.mul(lr, int_const(s))
+          lr = idx
+          if acc != 1:
+            lr = builder.udiv(lr, int_const(acc))
+          lr = builder.urem(lr, int_const(d))
+          if s != 1:
+            lr = builder.mul(lr, int_const(s))
           ret = builder.add(ret, lr)
         acc *= d
       idx = ret
@@ -60,8 +60,8 @@ class LLVMBuffer:
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._dumb_processing_op([x], op)
   def binary_op(x, op:BinaryOps, y): return type(x)(x.shape)._dumb_processing_op([x, y], op)
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]):
-    raise NotImplementedError("reduceops don't work")
-    return type(x)(new_shape) #._processing_op([("A", x)], code="acc", earlycode=GPUBuffer.code_for_op[op], earlybufs=set("A"), op=op)
+    return type(x)(new_shape)._dumb_processing_op([x], op)
+    #._processing_op([("A", x)], code="acc", earlycode=GPUBuffer.code_for_op[op], earlybufs=set("A"), op=op)
 
   @staticmethod
   def fromCPU(x):
@@ -91,20 +91,15 @@ class LLVMBuffer:
 
     start_block = func.append_basic_block(name="entry")
     block = func.append_basic_block(name="inner_loop")
-    exit_block = func.append_basic_block(name="exit")
-
     builder = ir.IRBuilder(block)
     start_builder = ir.IRBuilder(start_block)
     start_builder.branch(block)
-    exit_builder = ir.IRBuilder(exit_block)
-    exit_builder.ret_void()
 
     start = ir.Constant(ir.IntType(32), 0)
     end = ir.Constant(ir.IntType(32), prod(ret.shape)-1)
     idx = builder.phi(ir.IntType(32))
     idx.add_incoming(start, start_block)
 
-    values = [idx_deref(builder, buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
     op_lookup = {
       BinaryOps.ADD: builder.fadd,
       BinaryOps.SUB: builder.fsub,
@@ -119,16 +114,46 @@ class LLVMBuffer:
       UnaryOps.RELU: lambda x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), x, ir.Constant(ir.FloatType(), 0)),
       UnaryOps.SIGN: lambda x: builder.select(builder.fcmp_ordered("==", x, ir.Constant(ir.FloatType(), 0)), ir.Constant(ir.FloatType(), 0), builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), -1)))
     }
-    if op in op_lookup:
+
+    reduce_block = func.append_basic_block(name="reduce_loop")
+    reduce_builder = ir.IRBuilder(reduce_block)
+    store_block = func.append_basic_block(name="store_block")
+    store_builder = ir.IRBuilder(store_block)
+
+    if isinstance(op, ReduceOps):
+      assert op == ReduceOps.SUM, "only sum implemented"
+      red = prod([s for s,n in zip(bufs[0].shape, ret.shape) if n == 1])
+      red_idx_start = builder.mul(idx, int_const(red))
+      # why is this not minus 1?
+      red_idx_end = builder.add(red_idx_start, int_const(red))
+      red_idx = reduce_builder.phi(ir.IntType(32))
+      red_idx.add_incoming(red_idx_start, block)
+
+      val = reduce_builder.phi(ir.FloatType())
+      val.add_incoming(ir.Constant(ir.FloatType(), 0), block)
+      tval = idx_deref(reduce_builder, bufs[0], func.args[1], red_idx)
+      val.add_incoming(reduce_builder.fadd(tval, val), reduce_block)
+
+      red_idx_p1 = reduce_builder.add(red_idx, int_const(1))
+      red_idx.add_incoming(red_idx_p1, reduce_block)
+      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx, red_idx_end), store_block, reduce_block)
+    elif op in op_lookup:
+      values = [idx_deref(builder, buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
       val = op_lookup[op](*values)
-      builder.store(val, builder.gep(func.args[0], [idx]))
+      reduce_builder.branch(store_block)
     else:
       raise NotImplementedError(f"{op} not implemented in LLVM backend")
 
-    idx_new = builder.add(idx, ir.Constant(ir.IntType(32), 1))
-    idx.add_incoming(idx_new, block)
+    builder.branch(reduce_block)
+    store_builder.store(val, store_builder.gep(func.args[0], [idx]))
+    idx_new = store_builder.add(idx, ir.Constant(ir.IntType(32), 1))
+    idx.add_incoming(idx_new, store_block)
 
-    builder.cbranch(builder.icmp_unsigned("==", idx, end), exit_block, block)
+    exit_block = func.append_basic_block(name="exit")
+    exit_builder = ir.IRBuilder(exit_block)
+    exit_builder.ret_void()
+
+    store_builder.cbranch(store_builder.icmp_unsigned("==", idx, end), exit_block, block)
     llvm_ir = str(module)
     if DEBUG >= 1:
       print(llvm_ir)
