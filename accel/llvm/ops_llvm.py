@@ -143,24 +143,27 @@ class LLVMBuffer:
       red = prod([s for s,n in zip(bufs[0].shape, ret.shape) if n == 1])
       red_idx_start = builder.mul(idx, int_const(red))
       # why is this not minus 1?
-      red_idx_end = builder.add(red_idx_start, int_const(red))
+      red_idx_end = builder.add(red_idx_start, int_const(red-1))
       red_idx = reduce_builder.phi(ir.IntType(64))
       red_idx.add_incoming(red_idx_start, block)
 
       val = reduce_builder.phi(ir.FloatType())
       tval = idx_deref(reduce_builder, bufs[0], func.args[1], red_idx)
       if op == ReduceOps.SUM:
+        new_val = reduce_builder.fadd(tval, val)
         val.add_incoming(ir.Constant(ir.FloatType(), 0), block)
-        val.add_incoming(reduce_builder.fadd(tval, val), reduce_block)
+        val.add_incoming(new_val, reduce_block)
       elif op == ReduceOps.MAX:
+        new_val = reduce_builder.call(llvm_maxnum, [tval, val])
         val.add_incoming(ir.Constant(ir.FloatType(), -math.inf), block)
-        val.add_incoming(reduce_builder.call(llvm_maxnum, [tval, val]), reduce_block)
+        val.add_incoming(new_val, reduce_block)
       else:
         raise Exception(f"unknown op {op}")
 
       red_idx_p1 = reduce_builder.add(red_idx, int_const(1))
       red_idx.add_incoming(red_idx_p1, reduce_block)
       reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx, red_idx_end), store_block, reduce_block)
+      val = new_val
     elif op in op_lookup:
       values = [idx_deref(builder, buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
       val = op_lookup[op](*values)
