@@ -1,6 +1,7 @@
 # https://github.com/numba/llvmlite/blob/main/llvmlite/ir/builder.py
 from __future__ import annotations
 import os
+import math
 from typing import Tuple, Union
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
@@ -11,7 +12,7 @@ from ctypes import CFUNCTYPE
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps
 import llvmlite.binding as llvm
 
-int_const = lambda x: ir.Constant(ir.IntType(32), x)
+int_const = lambda x: ir.Constant(ir.IntType(64), x)
 def idx_deref(builder, buf, ptr, idx):
   if DEBUG >= 1:
     print(buf.st.expr(), ptr)
@@ -84,6 +85,7 @@ class LLVMBuffer:
     llvm_pow = module.declare_intrinsic('llvm.pow', [ir.FloatType()])
     llvm_log = module.declare_intrinsic('llvm.log', [ir.FloatType()])
     llvm_exp = module.declare_intrinsic('llvm.exp', [ir.FloatType()])
+    llvm_maxnum = ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32")
 
     typ = ir.PointerType(ir.FloatType())
     fnty = ir.FunctionType(ir.VoidType(), [typ]*(1+len(bufs)))
@@ -95,9 +97,9 @@ class LLVMBuffer:
     start_builder = ir.IRBuilder(start_block)
     start_builder.branch(block)
 
-    start = ir.Constant(ir.IntType(32), 0)
-    end = ir.Constant(ir.IntType(32), prod(ret.shape)-1)
-    idx = builder.phi(ir.IntType(32))
+    start = ir.Constant(ir.IntType(64), 0)
+    end = ir.Constant(ir.IntType(64), prod(ret.shape)-1)
+    idx = builder.phi(ir.IntType(64))
     idx.add_incoming(start, start_block)
 
     op_lookup = {
@@ -106,6 +108,7 @@ class LLVMBuffer:
       BinaryOps.MUL: builder.fmul,
       BinaryOps.DIV: builder.fdiv,
       BinaryOps.POW: lambda x,y: builder.call(llvm_pow, [x,y]),
+      BinaryOps.CMPEQ: lambda x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType()),
       UnaryOps.LOG: lambda x: builder.call(llvm_log, [x]),
       UnaryOps.EXP: lambda x: builder.call(llvm_exp, [x]),
       UnaryOps.NOOP: lambda x: x,
@@ -121,18 +124,23 @@ class LLVMBuffer:
     store_builder = ir.IRBuilder(store_block)
 
     if isinstance(op, ReduceOps):
-      assert op == ReduceOps.SUM, "only sum implemented"
       red = prod([s for s,n in zip(bufs[0].shape, ret.shape) if n == 1])
       red_idx_start = builder.mul(idx, int_const(red))
       # why is this not minus 1?
       red_idx_end = builder.add(red_idx_start, int_const(red))
-      red_idx = reduce_builder.phi(ir.IntType(32))
+      red_idx = reduce_builder.phi(ir.IntType(64))
       red_idx.add_incoming(red_idx_start, block)
 
       val = reduce_builder.phi(ir.FloatType())
-      val.add_incoming(ir.Constant(ir.FloatType(), 0), block)
       tval = idx_deref(reduce_builder, bufs[0], func.args[1], red_idx)
-      val.add_incoming(reduce_builder.fadd(tval, val), reduce_block)
+      if op == ReduceOps.SUM:
+        val.add_incoming(ir.Constant(ir.FloatType(), 0), block)
+        val.add_incoming(reduce_builder.fadd(tval, val), reduce_block)
+      elif op == ReduceOps.MAX:
+        val.add_incoming(ir.Constant(ir.FloatType(), -math.inf), block)
+        val.add_incoming(reduce_builder.call(llvm_maxnum, [tval, val]), reduce_block)
+      else:
+        raise Exception(f"unknown op {op}")
 
       red_idx_p1 = reduce_builder.add(red_idx, int_const(1))
       red_idx.add_incoming(red_idx_p1, reduce_block)
@@ -146,7 +154,7 @@ class LLVMBuffer:
 
     builder.branch(reduce_block)
     store_builder.store(val, store_builder.gep(func.args[0], [idx]))
-    idx_new = store_builder.add(idx, ir.Constant(ir.IntType(32), 1))
+    idx_new = store_builder.add(idx, ir.Constant(ir.IntType(64), 1))
     idx.add_incoming(idx_new, store_block)
 
     exit_block = func.append_basic_block(name="exit")
