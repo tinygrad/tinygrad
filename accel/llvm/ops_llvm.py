@@ -18,7 +18,7 @@ def idx_deref(builder, buf, ptr, idx):
     print(buf.st.expr(), ptr)
   # TODO: unify this with expr in ShapeTracker
   valid = None
-  for v in buf.st.views:
+  for v in buf.st.views[::-1]:
     if isinstance(v, ZeroView):
       if valid is None:
         valid = ir.Constant(ir.IntType(1), 1)
@@ -28,6 +28,8 @@ def idx_deref(builder, buf, ptr, idx):
         if acc != 1:
           lr = builder.sdiv(lr, int_const(acc))
         lr = builder.srem(lr, int_const(y-x))
+        if x != 0:
+          lr = builder.add(lr, int_const(x))
         if x < 0:
           valid = builder.and_(valid, builder.icmp_signed(">=", lr, int_const(0)))
         if y > s:

@@ -32,7 +32,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
     ret.mean().backward()
 
     for i, (t, tt) in enumerate(zip(ts, tst)):
-      compare(f"backward pass tensor {i}", t.grad, tt.cpu().grad.data, atol=grad_atol, rtol=grad_rtol)
+      compare(f"backward pass tensor {i}", tt.cpu().grad.data, t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
 
   # speed
   torch_fp = timeit.Timer(functools.partial(torch_fxn, *ts)).timeit(5) * 1000/5
@@ -169,6 +169,9 @@ class TestOps(unittest.TestCase):
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           # NOTE: ANE backwards?
           helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
+
+  def test_slice_simple(self):
+    helper_test_op([(3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
 
   def test_slice(self):
     helper_test_op([(3,3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
