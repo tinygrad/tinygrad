@@ -5,6 +5,7 @@ import math
 from typing import Tuple, Union
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
+#from tinygrad.ops import LazyBuffer, LazyOp
 import ctypes
 import numpy as np
 from llvmlite import ir
@@ -67,6 +68,22 @@ def init_llvm():
 # TODO: write this
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
 class LLVMBuffer:
+  op_lookup = {
+    UnaryOps.NOOP: lambda builder,x: x,
+    UnaryOps.NEG: lambda builder,x: builder.fneg(x),
+    UnaryOps.RELU: lambda builder,x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), x, ir.Constant(ir.FloatType(), 0)),
+    UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x]),
+    UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x]),
+    UnaryOps.SIGN: lambda builder,x: builder.select(builder.fcmp_ordered("==", x, ir.Constant(ir.FloatType(), 0)), ir.Constant(ir.FloatType(), 0),
+                                                    builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), -1))),
+    UnaryOps.RECIPROCAL: lambda builder,x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x),
+    BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y),
+    BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y),
+    BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y),
+    BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y),
+    BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y]),
+    BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType()),
+  }
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
@@ -90,9 +107,12 @@ class LLVMBuffer:
   
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
+  # ast can contain one ReduceOp with arbitrary Binary/Unary ops
+  def _exec_ast(ret, ast:Union[LazyBuffer, LazyOp]):
+    pass
+
   function_idx = 0
   def _dumb_processing_op(ret, bufs, op):
-    global nogc
     name = f"fpadd_{LLVMBuffer.function_idx}"
     LLVMBuffer.function_idx += 1
 
@@ -100,10 +120,6 @@ class LLVMBuffer:
       init_llvm()
 
     module = ir.Module(name=__file__)
-    llvm_pow = module.declare_intrinsic('llvm.pow', [ir.FloatType()])
-    llvm_log = module.declare_intrinsic('llvm.log', [ir.FloatType()])
-    llvm_exp = module.declare_intrinsic('llvm.exp', [ir.FloatType()])
-    llvm_maxnum = ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32")
 
     typ = ir.PointerType(ir.FloatType())
     fnty = ir.FunctionType(ir.VoidType(), [typ]*(1+len(bufs)))
@@ -120,22 +136,6 @@ class LLVMBuffer:
     idx = builder.phi(ir.IntType(64))
     idx.add_incoming(start, start_block)
 
-    op_lookup = {
-      BinaryOps.ADD: builder.fadd,
-      BinaryOps.SUB: builder.fsub,
-      BinaryOps.MUL: builder.fmul,
-      BinaryOps.DIV: builder.fdiv,
-      BinaryOps.POW: lambda x,y: builder.call(llvm_pow, [x,y]),
-      BinaryOps.CMPEQ: lambda x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType()),
-      UnaryOps.LOG: lambda x: builder.call(llvm_log, [x]),
-      UnaryOps.EXP: lambda x: builder.call(llvm_exp, [x]),
-      UnaryOps.NOOP: lambda x: x,
-      UnaryOps.NEG: builder.fneg,
-      UnaryOps.RECIPROCAL: lambda x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x),
-      UnaryOps.RELU: lambda x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), x, ir.Constant(ir.FloatType(), 0)),
-      UnaryOps.SIGN: lambda x: builder.select(builder.fcmp_ordered("==", x, ir.Constant(ir.FloatType(), 0)), ir.Constant(ir.FloatType(), 0), builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), -1)))
-    }
-
     reduce_block = func.append_basic_block(name="reduce_loop")
     reduce_builder = ir.IRBuilder(reduce_block)
     store_block = func.append_basic_block(name="store_block")
@@ -144,7 +144,6 @@ class LLVMBuffer:
     if isinstance(op, ReduceOps):
       red = prod([s for s,n in zip(bufs[0].shape, ret.shape) if n == 1])
       red_idx_start = builder.mul(idx, int_const(red))
-      # why is this not minus 1?
       red_idx_end = builder.add(red_idx_start, int_const(red-1))
       red_idx = reduce_builder.phi(ir.IntType(64))
       red_idx.add_incoming(red_idx_start, block)
@@ -156,6 +155,7 @@ class LLVMBuffer:
         val.add_incoming(ir.Constant(ir.FloatType(), 0), block)
         val.add_incoming(new_val, reduce_block)
       elif op == ReduceOps.MAX:
+        llvm_maxnum = ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32")
         new_val = reduce_builder.call(llvm_maxnum, [tval, val])
         val.add_incoming(ir.Constant(ir.FloatType(), -math.inf), block)
         val.add_incoming(new_val, reduce_block)
@@ -166,9 +166,9 @@ class LLVMBuffer:
       red_idx.add_incoming(red_idx_p1, reduce_block)
       reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx, red_idx_end), store_block, reduce_block)
       val = new_val
-    elif op in op_lookup:
+    elif op in LLVMBuffer.op_lookup:
       values = [idx_deref(builder, buf, ptr, idx) for buf, ptr in zip(bufs, func.args[1:])]
-      val = op_lookup[op](*values)
+      val = LLVMBuffer.op_lookup[op](builder, *values)
       reduce_builder.branch(store_block)
     else:
       raise NotImplementedError(f"{op} not implemented in LLVM backend")
