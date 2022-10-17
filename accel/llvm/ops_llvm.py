@@ -1,5 +1,6 @@
 # https://github.com/numba/llvmlite/blob/main/llvmlite/ir/builder.py
 from __future__ import annotations
+import os
 import hashlib
 import math
 from typing import Tuple, Union, Dict, List
@@ -79,7 +80,8 @@ def init_llvm():
     except FileNotFoundError:
       return None
   # enable cache
-  #engine.set_object_cache(notify_func, getbuffer_func)
+  if int(os.getenv("LLVMCACHE", "0")):
+    engine.set_object_cache(notify_func, getbuffer_func)
 
 # TODO: write this
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer

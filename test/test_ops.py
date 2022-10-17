@@ -6,6 +6,7 @@ import unittest
 import functools
 from tinygrad.tensor import Tensor, Device
 
+FORWARD_ONLY = bool(int(os.getenv("FORWARD_ONLY", "0")))
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
   torch.manual_seed(0)
   np.random.seed(0)
@@ -34,15 +35,14 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   compare("forward pass", ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
-  if not forward_only:
+  if not forward_only and not FORWARD_ONLY:
     st = time.monotonic()
     out.mean().backward()
     torch_fbp = time.monotonic() - st
 
     st = time.monotonic()
     ret.mean().backward()
-    for tt in tst:
-      tt.realize()
+    for tt in tst: tt.grad.realize()
     tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt) in enumerate(zip(ts, tst)):
