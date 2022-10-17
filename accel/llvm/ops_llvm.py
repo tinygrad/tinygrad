@@ -41,6 +41,8 @@ def idx_deref(builder, buf, ptr, idx):
     else:
       acc = 1
       ret = int_const(v.offset)
+      if DEBUG >= 2:
+        print(f"expanding index {v.shape_strides}")
       for i,(d,s) in enumerate(v.shape_strides[::-1]):
         if d != 1 and s != 0:
           lr = idx
@@ -164,9 +166,11 @@ class LLVMBuffer:
 
     if len(reduceops) > 0:
       assert len(earlybufs[0].shape) == len(ret.shape), "reduce only possible on matching shapes"
+      if DEBUG >= 1:
+        print(f"reduce {earlybufs[0].shape} -> {ret.shape}")
       red = prod([s for s,n in zip(earlybufs[0].shape, ret.shape) if n == 1])
       red_idx_start = body_builder.mul(idx, int_const(red))
-      red_idx_end = body_builder.add(red_idx_start, int_const(red-1))
+      red_idx_end = body_builder.add(red_idx_start, int_const(red))
       red_idx = reduce_builder.phi(ir.IntType(64))
       val = reduce_builder.phi(ir.FloatType())
       red_idx.add_incoming(red_idx_start, body_builder._block)
@@ -184,7 +188,7 @@ class LLVMBuffer:
 
       red_idx_p1 = reduce_builder.add(red_idx, int_const(1))
       red_idx.add_incoming(red_idx_p1, reduce_builder._block)
-      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx, red_idx_end), store_builder._block, reduce_builder._block)
+      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx_p1, red_idx_end), store_builder._block, reduce_builder._block)
     else:
       reduce_result = None
       reduce_builder.branch(store_builder._block)
@@ -192,13 +196,13 @@ class LLVMBuffer:
     body_builder.branch(reduce_builder._block)
     result = ast_parse(store_builder, ast, idx, reduce_result)
     store_builder.store(result, store_builder.gep(func.args[0], [idx]))
-    idx_new = store_builder.add(idx, ir.Constant(ir.IntType(64), 1))
-    idx.add_incoming(idx_new, store_builder._block)
+    idx_p1 = store_builder.add(idx, ir.Constant(ir.IntType(64), 1))
+    idx.add_incoming(idx_p1, store_builder._block)
 
     exit_builder = ir.IRBuilder(func.append_basic_block(name="exit"))
     exit_builder.ret_void()
 
-    store_builder.cbranch(store_builder.icmp_unsigned("==", idx, ir.Constant(ir.IntType(64), prod(ret.shape)-1)), exit_builder._block, body_builder._block)
+    store_builder.cbranch(store_builder.icmp_unsigned("==", idx_p1, ir.Constant(ir.IntType(64), prod(ret.shape))), exit_builder._block, body_builder._block)
 
     # **** llvm running ****
     llvm_ir = str(module)
