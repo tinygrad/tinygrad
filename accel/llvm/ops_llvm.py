@@ -1,8 +1,7 @@
 # https://github.com/numba/llvmlite/blob/main/llvmlite/ir/builder.py
 from __future__ import annotations
-import os, operator
+import hashlib
 import math
-import functools
 from typing import Tuple, Union, Dict, List
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
@@ -66,6 +65,21 @@ def init_llvm():
   target = llvm.Target.from_default_triple()
   target_machine = target.create_target_machine()
   engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), target_machine)
+
+  # cache
+  def notify_func(module, buffer):
+    #print("notify", module.name)
+    with open(f"/tmp/llvmcache/{module.name}", "wb") as f:
+      f.write(buffer)
+  def getbuffer_func(module):
+    #print("getbuffer", module.name)
+    try:
+      with open(f"/tmp/llvmcache/{module.name}", "rb") as f:
+        return f.read()
+    except FileNotFoundError:
+      return None
+  # enable cache
+  #engine.set_object_cache(notify_func, getbuffer_func)
 
 # TODO: write this
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
@@ -189,6 +203,7 @@ class LLVMBuffer:
 
     mod = llvm.parse_assembly(llvm_ir)
     mod.verify()
+    mod.name = hashlib.sha1(llvm_ir.encode('utf-8')).hexdigest()
     if DEBUG >= 3:
       print(target_machine.emit_assembly(mod))
     engine.add_module(mod)
