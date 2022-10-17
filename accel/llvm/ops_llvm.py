@@ -107,6 +107,8 @@ class LLVMBuffer:
     self.shape = self.st.shape
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
 
+  def __repr__(self): return f"LLVMBuffer {str(self.shape)}"
+
   # universal for shape tracked
   def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
 
