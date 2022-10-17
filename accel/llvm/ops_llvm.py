@@ -132,17 +132,20 @@ class LLVMBuffer:
     reduce_builder = ir.IRBuilder(func.append_basic_block(name="reduce_loop"))
     store_builder = ir.IRBuilder(func.append_basic_block(name="store_block"))
 
-    def ast_parse(builder, x, idx, reduce_result=None):
+    def ast_parse(builder, x, idx, reduce_result=None, depth=0):
+      if DEBUG >= 1:
+        print("  "*depth+"ast:", reduce_result, x)
       if not isinstance(x, LazyOp):
         return idx_deref(builder, x, func.args[bufs.index(x)+1], idx)
       if isinstance(x.op, ReduceOps):
         if reduce_result is None:
           raise Exception("no reduce")
         return reduce_result
-      values = [ast_parse(builder, v, idx, reduce_result) for v in x.src]
+      values = [ast_parse(builder, v, idx, reduce_result, depth=depth+1) for v in x.src]
       return LLVMBuffer.op_lookup[x.op](builder, *values)
 
     if len(reduceops) > 0:
+      assert len(earlybufs[0].shape) == len(ret.shape), "reduce only possible on matching shapes"
       red = prod([s for s,n in zip(earlybufs[0].shape, ret.shape) if n == 1])
       red_idx_start = body_builder.mul(idx, int_const(red))
       red_idx_end = body_builder.add(red_idx_start, int_const(red-1))
@@ -181,12 +184,12 @@ class LLVMBuffer:
 
     # **** llvm running ****
     llvm_ir = str(module)
-    if DEBUG >= 1:
+    if DEBUG >= 2:
       print(llvm_ir)
 
     mod = llvm.parse_assembly(llvm_ir)
     mod.verify()
-    if DEBUG >= 2:
+    if DEBUG >= 3:
       print(target_machine.emit_assembly(mod))
     engine.add_module(mod)
     engine.finalize_object()
