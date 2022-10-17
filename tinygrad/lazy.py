@@ -93,6 +93,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
 
 
 # **** realize helpers ****
+def realize_buffers(real_srcs, x): return real_srcs[x] if x in real_srcs else LazyOp(x.op, [realize_buffers(real_srcs, y) for y in x.src], x.arg)
 
 def _ast(x: Union[LazyBuffer, LazyOp], buf_names: Dict[LazyBuffer, str], code_for_op: Dict[Op, str]) -> str:
   if isinstance(x, LazyBuffer):
@@ -127,6 +128,11 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()],
       earlycode=_ast(LazyOp(self.op.op, (src.op,), self.op.arg), buf_names, self.dbuffer.code_for_op), earlybufs=buf_names.values(), op=self.op.op), \
       list(real_srcs.values()), ReduceOps
+  elif MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "exec_ast", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
+    # this is the new version, deprecate _processing_op
+    real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_buffers(src.op)}
+    ast = LazyOp(self.op.op, (realize_buffers(real_srcs, src.op),), self.op.arg)
+    return self.dbuffer(self.shape).exec_ast(ast), list(real_srcs.values()), ReduceOps
   else:
     real_src = src.realize(self.device)
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
@@ -176,6 +182,11 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       _ast(self.op, buf_names, self.dbuffer.code_for_op), earlycode=earlycode, earlybufs=set(x for x in buf_names.values() if x.startswith("earlyarg_")),
       C=conv_args, reduce_shape=reduce_shape), \
       list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if reduce_shape[0] != reduce_shape[1] else BinaryOps)
+  elif getattr(self.dbuffer, "exec_ast", None):
+    # this is the new version, deprecate _processing_op
+    for x in real_srcs.keys():
+      real_srcs[x] = x.realize(self.device)
+    return self.dbuffer(self.shape).exec_ast(realize_buffers(real_srcs, self.op)), list(real_srcs.values()), BinaryOps
   else:
     for x in real_srcs.keys():
       real_srcs[x] = x.realize(self.device)
