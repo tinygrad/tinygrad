@@ -16,6 +16,11 @@ import llvmlite.binding as llvm
 
 int_const = lambda x: ir.Constant(ir.IntType(64), x)
 def idx_deref(builder, buf, ptr, idx):
+  if idx[1] == 1 and idx[2] == None:
+    idx = idx[0]
+  else:
+    idx = builder.add(builder.mul(idx[0], int_const(idx[1])), idx[2])
+
   if DEBUG >= 1:
     print(buf.st.expr(), ptr)
   # TODO: unify this with expr in ShapeTracker
@@ -59,15 +64,20 @@ def idx_deref(builder, buf, ptr, idx):
   else:
     return builder.load(builder.gep(ptr, [idx]))
 
-target_machine, engine = None, None
+target_machine, engine, optimizer = None, None, None
 def init_llvm():
-  global target_machine, engine
+  global target_machine, engine, optimizer
   llvm.initialize()
   llvm.initialize_native_target()
   llvm.initialize_native_asmprinter()  # yes, even this one
   target = llvm.Target.from_default_triple()
   target_machine = target.create_target_machine()
   engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), target_machine)
+  optimizer = llvm.ModulePassManager()
+  builder = llvm.PassManagerBuilder()
+  builder.opt_level = 3
+  builder.loop_vectorize = True
+  builder.populate(optimizer)
 
   # cache
   def notify_func(module, buffer):
@@ -169,12 +179,10 @@ class LLVMBuffer:
       if DEBUG >= 1:
         print(f"reduce {earlybufs[0].shape} -> {ret.shape}")
       red = prod([s for s,n in zip(earlybufs[0].shape, ret.shape) if n == 1])
-      red_idx_start = body_builder.mul(idx, int_const(red))
-      red_idx_end = body_builder.add(red_idx_start, int_const(red))
       red_idx = reduce_builder.phi(ir.IntType(64))
+      red_idx.add_incoming(int_const(0), body_builder._block)
       val = reduce_builder.phi(ir.FloatType())
-      red_idx.add_incoming(red_idx_start, body_builder._block)
-      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], red_idx)
+      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (idx, red, red_idx))
 
       if reduceops[0].op == ReduceOps.SUM:
         val.add_incoming(ir.Constant(ir.FloatType(), 0), body_builder._block)
@@ -188,13 +196,13 @@ class LLVMBuffer:
 
       red_idx_p1 = reduce_builder.add(red_idx, int_const(1))
       red_idx.add_incoming(red_idx_p1, reduce_builder._block)
-      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx_p1, red_idx_end), store_builder._block, reduce_builder._block)
+      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx_p1, int_const(red)), store_builder._block, reduce_builder._block)
     else:
       reduce_result = None
       reduce_builder.branch(store_builder._block)
 
     body_builder.branch(reduce_builder._block)
-    result = ast_parse(store_builder, ast, idx, reduce_result)
+    result = ast_parse(store_builder, ast, (idx, 1, None), reduce_result)
     store_builder.store(result, store_builder.gep(func.args[0], [idx]))
     idx_p1 = store_builder.add(idx, ir.Constant(ir.IntType(64), 1))
     idx.add_incoming(idx_p1, store_builder._block)
@@ -211,6 +219,7 @@ class LLVMBuffer:
 
     mod = llvm.parse_assembly(llvm_ir)
     mod.verify()
+    optimizer.run(mod)
     mod.name = hashlib.sha1(llvm_ir.encode('utf-8')).hexdigest()
     if DEBUG >= 3:
       print(target_machine.emit_assembly(mod))
