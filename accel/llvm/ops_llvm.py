@@ -16,10 +16,10 @@ import llvmlite.binding as llvm
 
 int_const = lambda x: ir.Constant(ir.IntType(64), x)
 def idx_deref(builder, buf, ptr, eidx):
-  if eidx[1] == 1 and eidx[2] == None:
-    idx = eidx[0]
+  if eidx[2] == 1 and eidx[3] == None:
+    idx = eidx[1]
   else:
-    idx = builder.add(builder.mul(eidx[0], int_const(eidx[1])), eidx[2])
+    idx = builder.add(builder.mul(eidx[1], int_const(eidx[2])), eidx[3])
 
   if DEBUG >= 1:
     print(buf.st.expr(), ptr)
@@ -50,24 +50,27 @@ def idx_deref(builder, buf, ptr, eidx):
         print(f"expanding index {v.shape_strides}")
       for i,(d,s) in enumerate(v.shape_strides[::-1]):
         if d != 1 and s != 0:
-          if acc%eidx[1] == 0 and len(buf.st.views) == 1:
+          if acc%eidx[2] == 0 and len(buf.st.views) == 1:
             # the inner one doesn't matter
-            lr = eidx[0]
-            if acc//eidx[1] != 1:
-              lr = builder.sdiv(lr, int_const(acc//eidx[1]))
-            lr = builder.srem(lr, int_const(d))
-          elif acc*d <= eidx[1] and eidx[2] is not None and len(buf.st.views) == 1:
+            lr = eidx[1]
+            if acc//eidx[2] != 1:
+              lr = builder.sdiv(lr, int_const(acc//eidx[2]))
+            if (acc//eidx[2])*d != eidx[0]:
+              lr = builder.srem(lr, int_const(d))
+          elif acc*d <= eidx[2] and eidx[3] is not None and len(buf.st.views) == 1:
             # the outer one doesn't matter
-            lr = eidx[2]
+            lr = eidx[3]
             if acc != 1:
               lr = builder.sdiv(lr, int_const(acc))
-            lr = builder.srem(lr, int_const(d))
+            if acc*d != eidx[2]:
+              lr = builder.srem(lr, int_const(d))
           else:
             # slow path
             lr = idx
             if acc != 1:
               lr = builder.sdiv(lr, int_const(acc))
-            lr = builder.srem(lr, int_const(d))
+            if acc*d != (eidx[0]*eidx[2]):
+              lr = builder.srem(lr, int_const(d))
           if s != 1:
             lr = builder.mul(lr, int_const(s))
           ret = builder.add(ret, lr)
@@ -196,7 +199,7 @@ class LLVMBuffer:
       red_idx = reduce_builder.phi(ir.IntType(64))
       red_idx.add_incoming(int_const(0), body_builder._block)
       val = reduce_builder.phi(ir.FloatType())
-      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (idx, red, red_idx))
+      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (prod(ret.shape), idx, red, red_idx))
 
       if reduceops[0].op == ReduceOps.SUM:
         val.add_incoming(ir.Constant(ir.FloatType(), 0), body_builder._block)
@@ -216,7 +219,7 @@ class LLVMBuffer:
       reduce_builder.branch(store_builder._block)
 
     body_builder.branch(reduce_builder._block)
-    result = ast_parse(store_builder, ast, (idx, 1, None), reduce_result)
+    result = ast_parse(store_builder, ast, (prod(ret.shape), idx, 1, None), reduce_result)
     store_builder.store(result, store_builder.gep(func.args[0], [idx]))
     idx_p1 = store_builder.add(idx, int_const(1))
     idx.add_incoming(idx_p1, store_builder._block)
