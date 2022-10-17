@@ -15,11 +15,11 @@ from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get
 import llvmlite.binding as llvm
 
 int_const = lambda x: ir.Constant(ir.IntType(64), x)
-def idx_deref(builder, buf, ptr, idx):
-  if idx[1] == 1 and idx[2] == None:
-    idx = idx[0]
+def idx_deref(builder, buf, ptr, eidx):
+  if eidx[1] == 1 and eidx[2] == None:
+    idx = eidx[0]
   else:
-    idx = builder.add(builder.mul(idx[0], int_const(idx[1])), idx[2])
+    idx = builder.add(builder.mul(eidx[0], int_const(eidx[1])), eidx[2])
 
   if DEBUG >= 1:
     print(buf.st.expr(), ptr)
@@ -50,10 +50,24 @@ def idx_deref(builder, buf, ptr, idx):
         print(f"expanding index {v.shape_strides}")
       for i,(d,s) in enumerate(v.shape_strides[::-1]):
         if d != 1 and s != 0:
-          lr = idx
-          if acc != 1:
-            lr = builder.sdiv(lr, int_const(acc))
-          lr = builder.srem(lr, int_const(d))
+          if acc%eidx[1] == 0 and len(buf.st.views) == 1:
+            # the inner one doesn't matter
+            lr = eidx[0]
+            if acc//eidx[1] != 1:
+              lr = builder.sdiv(lr, int_const(acc//eidx[1]))
+            lr = builder.srem(lr, int_const(d))
+          elif acc*d <= eidx[1] and eidx[2] is not None and len(buf.st.views) == 1:
+            # the outer one doesn't matter
+            lr = eidx[2]
+            if acc != 1:
+              lr = builder.sdiv(lr, int_const(acc))
+            lr = builder.srem(lr, int_const(d))
+          else:
+            # slow path
+            lr = idx
+            if acc != 1:
+              lr = builder.sdiv(lr, int_const(acc))
+            lr = builder.srem(lr, int_const(d))
           if s != 1:
             lr = builder.mul(lr, int_const(s))
           ret = builder.add(ret, lr)
