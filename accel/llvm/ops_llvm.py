@@ -171,7 +171,7 @@ class LLVMBuffer:
     start_builder.branch(body_builder._block)
 
     idx = body_builder.phi(ir.IntType(64))
-    idx.add_incoming(ir.Constant(ir.IntType(64), 0), start_builder._block)
+    idx.add_incoming(int_const(0), start_builder._block)
 
     reduce_builder = ir.IRBuilder(func.append_basic_block(name="reduce_loop"))
     store_builder = ir.IRBuilder(func.append_basic_block(name="store_block"))
@@ -218,13 +218,13 @@ class LLVMBuffer:
     body_builder.branch(reduce_builder._block)
     result = ast_parse(store_builder, ast, (idx, 1, None), reduce_result)
     store_builder.store(result, store_builder.gep(func.args[0], [idx]))
-    idx_p1 = store_builder.add(idx, ir.Constant(ir.IntType(64), 1))
+    idx_p1 = store_builder.add(idx, int_const(1))
     idx.add_incoming(idx_p1, store_builder._block)
 
     exit_builder = ir.IRBuilder(func.append_basic_block(name="exit"))
     exit_builder.ret_void()
 
-    store_builder.cbranch(store_builder.icmp_unsigned("==", idx_p1, ir.Constant(ir.IntType(64), prod(ret.shape))), exit_builder._block, body_builder._block)
+    store_builder.cbranch(store_builder.icmp_unsigned("==", idx_p1, int_const(prod(ret.shape))), exit_builder._block, body_builder._block)
 
     # **** llvm running ****
     llvm_ir = str(module)
