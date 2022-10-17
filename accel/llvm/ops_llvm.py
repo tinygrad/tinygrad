@@ -19,7 +19,7 @@ def idx_deref(builder, buf, ptr, eidx):
   if eidx[2] == 1 and eidx[3] == None:
     idx = eidx[1]
   else:
-    idx = builder.add(builder.mul(eidx[1], int_const(eidx[2])), eidx[3])
+    idx = builder.add(builder.mul(eidx[1], int_const(eidx[2])), eidx[3], name="idx")
 
   if DEBUG >= 1:
     print(buf.st.expr(), ptr)
