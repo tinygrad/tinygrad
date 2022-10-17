@@ -1,8 +1,8 @@
 import os
 import torch
+import time
 import numpy as np
 import unittest
-import timeit
 import functools
 from tinygrad.tensor import Tensor, Device
 
@@ -15,8 +15,14 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
     ts = [torch.tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=True) for x in shps]
 
   tst = [Tensor(x.detach().numpy(), requires_grad=True) for x in ts]
+
+  st = time.monotonic()
   out = torch_fxn(*ts)
-  ret = tinygrad_fxn(*tst)
+  torch_fp = time.monotonic() - st
+
+  st = time.monotonic()
+  ret = tinygrad_fxn(*tst).realize()
+  tinygrad_fp = time.monotonic() - st
 
   def compare(s, x,y,atol,rtol):
     if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch {x.shape} != {y.shape}"
@@ -27,14 +33,22 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
 
   compare("forward pass", ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
 
+  torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only:
+    st = time.monotonic()
     out.mean().backward()
+    torch_fbp = time.monotonic() - st
+
+    st = time.monotonic()
     ret.mean().backward()
+    for tt in tst:
+      tt.realize()
+    tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt) in enumerate(zip(ts, tst)):
       compare(f"backward pass tensor {i}", tt.cpu().grad.data, t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
 
-  print("testing %30r" % (shps,))
+  print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000))
 
 class TestOps(unittest.TestCase):
 
