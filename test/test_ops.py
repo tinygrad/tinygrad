@@ -3,7 +3,6 @@ import torch
 import time
 import numpy as np
 import unittest
-import functools
 from tinygrad.tensor import Tensor, Device
 
 FORWARD_ONLY = bool(int(os.getenv("FORWARD_ONLY", "0")))

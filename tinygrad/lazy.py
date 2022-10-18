@@ -203,7 +203,6 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
         real_srcs[x] = x.realize(self.device)
     ret = self.dbuffer(real_shape).exec_ast(realize_buffers(real_srcs, self.op))
     # shape can change
-    # TODO: this is causing convs to be run twice
     return (ret if real_shape == self.shape else self.dbuffer(self.shape, ret)), [x for x in real_srcs.values() if not isinstance(x, LazyOp)], op_type
   else:
     for x in real_srcs.keys():
