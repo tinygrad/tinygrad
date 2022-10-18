@@ -22,7 +22,7 @@ def idx_deref(builder, buf, ptr, eidx):
     idx = builder.add(builder.mul(eidx[1], int_const(eidx[2])), eidx[3], name="idx")
 
   if DEBUG >= 1:
-    print(buf.st.expr(), ptr)
+    print("viewcount:", len(buf.st.views), buf.st.expr(), ptr)
   # TODO: unify this with expr in ShapeTracker
   valid = None
   for v in buf.st.views[::-1]:

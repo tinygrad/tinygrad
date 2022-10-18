@@ -94,6 +94,7 @@ class ShapeTracker:
   # if we replace, confirm the ops taken fold into one view
   def strided(self, *arg):
     view = View([x[0] for x in arg], [x[1] for x in arg])
+    # TODO: this does not always require a new view
     if self.contiguous:
       self.views[-1] = view
     else:

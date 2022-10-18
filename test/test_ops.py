@@ -254,6 +254,13 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
 
+  # expect reduce nodes == 3
+  def test_simple_conv2d_nhwc(self):
+    # weights (from tf): filter_height x filter_width x in_channels x out_channels
+    helper_test_op([(2,9,9,10), (3,3,10,20)],
+      lambda x,w: torch.nn.functional.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)).relu(),
+      lambda x,w: Tensor.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)).relu(), atol=1e-4, grad_rtol=1e-5)
+
   def test_simple_conv2d_batched(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
