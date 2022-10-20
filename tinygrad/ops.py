@@ -119,7 +119,7 @@ def _ast(x: Union[LazyBuffer, LazyOp], buf_names: Dict[LazyBuffer, str], code_fo
 
 # **** realize functions ****
 
-def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
+def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], Optional[OpType]]:
   if self.op.op == LoadOps.FROMCPU:
     return Device._buffers[self.device].fromCPU(self.op.arg), [], LoadOps
   elif self.op.op == LoadOps.CONTIGUOUS:
@@ -127,7 +127,7 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
     ret = real_src.contiguous_op()
     return ret, [real_src], LoadOps if ret != real_src else None
   else:
-    assert NotImplementedError(f"unknown LoadOp {self.op.op}")
+    raise NotImplementedError(f"unknown LoadOp {self.op.op}")
 
 def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_src = self.op.src[0].realize(self.device)
