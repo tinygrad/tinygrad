@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from ast import Assert
 import pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from collections import defaultdict
@@ -28,18 +29,21 @@ from tinygrad.helpers import prod
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/6c5693e965b9c63f8678f52b9e9b5abe35f23feb/selfdrive/modeld/models/supercombo.onnx"
 
 np.random.seed(1337)
-def get_random_input_tensors():
+def get_random_input_tensors(input_shapes):
   np_inputs = {
     "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
     "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
     "desire": np.zeros((1,100, 8)),
     "traffic_convention": np.array([[1., 0.]]),
-    "features_buffer": np.random.randn(*(1, 99, 128))
-    #"features_buffer": np.random.randn(*(1, 99, 3*512))
+    #"features_buffer": np.random.randn(*(1, 99, 128))
+    "features_buffer": np.random.randn(*input_shapes['features_buffer'])
     #"initial_state": np.zeros((1, 768))
   }
   if int(os.getenv("ZERO_OUT", "0")):
     np_inputs = {k:v*0 for k,v in np_inputs.items()}
+
+  for k,v in np_inputs.items():
+    assert v.shape == input_shapes[k], f"{k} shape mismatch, {v.shape} {input_shapes[k]}"
 
   #import pickle
   #frames, big_frames, last_state, frame_inputs, policy_outs = pickle.load(open("openpilot/test/frame_0.pkl", "rb"))
@@ -60,17 +64,15 @@ def compile(dat, output_fn):
   Tensor.no_grad = True
   using_graph = ops.GRAPH
   ops.GRAPH = False
-  inputs, _ = get_random_input_tensors()
 
-  if os.getenv("TEST_ENET", None) is not None:
-    from models.efficientnet import EfficientNet
-    Tensor.training = False
-    enet = EfficientNet(number=int(os.getenv("TEST_ENET", None)), has_se=False, input_channels=12, has_fc_output=False)
-    def run_onnx(x):
-      return {"outputs": enet.forward(x['input_imgs'])}
-  else:
-    onnx_model = onnx.load(io.BytesIO(dat))
-    run_onnx = get_run_onnx(onnx_model)
+  onnx_model = onnx.load(io.BytesIO(dat))
+  run_onnx = get_run_onnx(onnx_model)
+
+  input_shapes = {}
+  for inp in onnx_model.graph.input:
+    input_shapes[inp.name] = tuple(x.dim_value for x in inp.type.tensor_type.shape.dim)
+
+  inputs, _ = get_random_input_tensors(input_shapes)
 
   # initial run(s) to load weights
   for _ in range(2):
@@ -90,7 +92,7 @@ def compile(dat, output_fn):
     x.realize()
 
   # real run
-  inputs, np_inputs = get_random_input_tensors()
+  inputs, np_inputs = get_random_input_tensors(input_shapes)
   tinygrad_out = run_onnx(inputs)['outputs']
 
   # note, since CL.CACHE is enabled, it doesn't actually run the kernels
@@ -127,7 +129,8 @@ def compile(dat, output_fn):
       np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
 
       # test loading/run thneed
-      _, new_np_inputs = get_random_input_tensors()
+      #_, new_np_inputs = get_random_input_tensors(input_shapes)
+      new_np_inputs = np_inputs
       new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
 
       nt = Thneed()
@@ -140,7 +143,25 @@ def compile(dat, output_fn):
       nt.run()
       new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
       CL.enqueue_copy(new_thneed_out, nt.outputs[0], is_blocking=True)
-      np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
+      try:
+        np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
+      except AssertionError:
+        # NOTE: this doesn't pass even if thneed passes
+        print("THNEED ERROR")
+        for i,(a,b) in enumerate(zip(t.cl_cache, nt.cl_cache)):
+          assert len(a[1]) == len(b[1])
+          for j,(c,d) in enumerate(zip(a[1][2:], b[1][2:])):
+            if type(c) != type(d):
+              print("type mismatch", type(c), type(d))
+            if type(c) == cl.Buffer:
+              cc = np.empty((c.size//4,), dtype=np.float32)
+              CL.enqueue_copy(cc, c, is_blocking=True)
+              dd = np.empty((c.size//4,), dtype=np.float32)
+              CL.enqueue_copy(dd, d, is_blocking=True)
+              if not (cc == dd).all():
+                print(f"mismatch in layer {i} arg {j}")
+                np.testing.assert_allclose(cc, dd)
+        assert False
       print("thneed self-test passed!")
     except ModuleNotFoundError:
       pass
