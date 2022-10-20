@@ -147,8 +147,14 @@ def compile(dat, output_fn):
         np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
       except AssertionError:
         # NOTE: this doesn't pass even if thneed passes
+        # but the differences are in unused stuff
         print("THNEED ERROR")
         for i,(a,b) in enumerate(zip(t.cl_cache, nt.cl_cache)):
+          # rerun
+          a[0].clprg(CL().cl_queue, *a[1])
+          CL().cl_queue.finish()
+          b[0].clprg(CL().cl_queue, *b[1])
+          CL().cl_queue.finish()
           assert len(a[1]) == len(b[1])
           for j,(c,d) in enumerate(zip(a[1][2:], b[1][2:])):
             if type(c) != type(d):
