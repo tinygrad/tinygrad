@@ -25,16 +25,16 @@ from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 
-OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/ea449f1fe0bbff0eff5b12d64f0b5e75b7983998/selfdrive/modeld/models/supercombo.onnx"
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/6c5693e965b9c63f8678f52b9e9b5abe35f23feb/selfdrive/modeld/models/supercombo.onnx"
 
 np.random.seed(1337)
 def get_random_input_tensors():
   np_inputs = {
     "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
     "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
-    "desire": np.zeros((1, 8)),
+    "desire": np.zeros((1,100, 8)),
     "traffic_convention": np.array([[1., 0.]]),
-    "initial_state": np.random.randn(*(1, 512))
+    "features_buffer": np.random.randn(*(1, 99, 128))
     #"initial_state": np.zeros((1, 768))
   }
   if int(os.getenv("ZERO_OUT", "0")):
@@ -68,7 +68,7 @@ def compile(dat, output_fn):
     def run_onnx(x):
       return {"outputs": enet.forward(x['input_imgs'])}
   else:
-    onnx_model = onnx.load(io.BytesIO(dat))
+    onnx_model = onnx.load(io.BytesIO(input))
     run_onnx = get_run_onnx(onnx_model)
 
   # initial run(s) to load weights

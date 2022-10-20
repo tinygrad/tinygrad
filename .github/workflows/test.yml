@@ -1,6 +1,9 @@
 name: Unit Tests
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   # OMG THIS TEST IS DISABLED, PLZ MAKE TINYGRAD TINY AGAIN
@@ -133,7 +136,7 @@ jobs:
       run: |
         FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
         UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
-        PYTHONPATH="." python3 openpilot/run_thneed.py /tmp/output.thneed https://github.com/commaai/openpilot/raw/ea449f1fe0bbff0eff5b12d64f0b5e75b7983998/selfdrive/modeld/models/supercombo.onnx
+        PYTHONPATH="." python3 openpilot/run_thneed.py /tmp/output.thneed https://github.com/commaai/openpilot/raw/6c5693e965b9c63f8678f52b9e9b5abe35f23feb/selfdrive/modeld/models/supercombo.onnx
 
   testmypy:
     name: Mypy Tests
