@@ -85,11 +85,11 @@ def compile(dat, output_fn):
     et = time.monotonic()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-  # realize all non GCed tensors (fix for batchnorm folding)
-  import gc
-  gc.collect()
-  for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
-    x.realize()
+    # realize all non GCed tensors (fix for batchnorm folding)
+    import gc
+    gc.collect()
+    for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
+      x.realize()
 
   # real run
   inputs, np_inputs = get_random_input_tensors(input_shapes)
@@ -108,6 +108,9 @@ def compile(dat, output_fn):
   CL.CACHE = None
   t.optimize_local_workgroup()
 
+  # save thneed (before run)
+  t.save(output_fn)
+
   print(f"buffers to save: {len(t.buffers_to_save)}, outputs: {t.outputs}")
   t.run()
 
@@ -115,9 +118,6 @@ def compile(dat, output_fn):
   thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
   CL.enqueue_copy(thneed_out, t.outputs[0], is_blocking=True)
   np.testing.assert_allclose(thneed_out, tinygrad_out.numpy())
-
-  # save thneed
-  t.save(output_fn)
 
   # float32 only (fix this)
   FLOAT16 = int(os.getenv("FLOAT16", 0))
@@ -132,6 +132,20 @@ def compile(dat, output_fn):
       _, new_np_inputs = get_random_input_tensors(input_shapes)
       new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
 
+      # try old thneed with a different input
+      for k,v in t.inputs.items():
+        CL.enqueue_copy(v, new_np_inputs[k], is_blocking=True)
+
+      t.run()
+      old_thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
+      CL.enqueue_copy(old_thneed_out, t.outputs[0], is_blocking=True)
+
+      # compare thneed (rerun) with torch
+      np.testing.assert_allclose(new_torch_out, old_thneed_out, atol=1e-4, rtol=1e-2)
+
+      # load thneed and try that
+      _, new_np_inputs = get_random_input_tensors(input_shapes)
+      new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
       nt = Thneed()
       nt.load(output_fn)
 
@@ -142,6 +156,8 @@ def compile(dat, output_fn):
       nt.run()
       new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
       CL.enqueue_copy(new_thneed_out, nt.outputs[0], is_blocking=True)
+
+      # compare torch to thneed
       np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
       print("thneed self-test passed!")
     except ModuleNotFoundError:

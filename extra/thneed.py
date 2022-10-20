@@ -5,7 +5,7 @@ import struct
 import json
 import traceback
 import numpy as np
-from tinygrad.llops.ops_gpu import CL, CLProgram, CLBuffer
+from tinygrad.llops.ops_gpu import CL, CLProgram
 from tinygrad.helpers import prod
 import pyopencl as cl
 import networkx as nx
@@ -185,7 +185,7 @@ class Thneed:
               })
               if needs_load:
                 data = np.empty(a.size//4, dtype=np.float32)
-                CL.enqueue_copy(data, a, is_blocking=True)
+                cl.enqueue_copy(CL().cl_queue, data, a, is_blocking=True)
                 weights.append(data.tobytes())
             elif isinstance(a, cl.Image):
               needs_load = a in self.buffers_to_save
@@ -195,7 +195,7 @@ class Thneed:
               buf = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size=size * (2 if FLOAT16 else 1))
 
               # zero out the buffer
-              CL.enqueue_copy(buf, b'\x00'*buf.size, is_blocking=True)
+              cl.enqueue_copy(CL().cl_queue, buf, b'\x00'*buf.size, is_blocking=True)
 
               CLProgram("from_image_strided", """
                 __kernel void from_image_strided(read_only image2d_t in, __global float4 *out, int row_pitch) {
@@ -215,7 +215,7 @@ class Thneed:
 
               if needs_load:
                 data = np.empty(size//(2 if FLOAT16 else 4), dtype=np.float32)
-                CL.enqueue_copy(data, buf, is_blocking=True)
+                cl.enqueue_copy(CL().cl_queue, data, buf, is_blocking=True)
                 if FLOAT16: data = data.astype(np.float16)
                 weights.append(data.tobytes())
             else:

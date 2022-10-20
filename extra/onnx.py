@@ -4,8 +4,7 @@ from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.nn import batch_normalize
-
-MAX_CONVS = int(os.getenv("MAX_CONVS", -1))
+from tinygrad.ops import DEBUG
 
 def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
@@ -38,6 +37,8 @@ def get_run_onnx(onnx_model):
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
       raise Exception("no data")
+    if DEBUG >= 1:
+      print("realize", inp.name)
     tensors[inp.name].realize()
 
   def run_onnx(inputs={}, debug=False):
@@ -60,7 +61,6 @@ def get_run_onnx(onnx_model):
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
-    conv_count = 0
     for num,n in enumerate(onnx_model.graph.node):
       if debug: print(f"{num}: op {n.op_type}")
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else input_tensors[x]) for x in n.input]
@@ -71,7 +71,9 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Sigmoid": ret = inp[0].sigmoid()
       elif n.op_type == "Tanh": ret = inp[0].tanh()
       elif n.op_type == "Softmax": ret = inp[0].softmax()
-      elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
+      elif n.op_type == "MatMul":
+        assert inp[1].lazydata.realized is not None
+        ret = inp[0].matmul(inp[1])
       # one liners
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
       elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -3.4e38), opt.get('max', 3.4e38))))
@@ -110,10 +112,6 @@ def get_run_onnx(onnx_model):
         else:
           x = x.pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]))
           ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1))
-        conv_count += 1
-        if conv_count == MAX_CONVS:
-          ret.numpy()
-          break
       elif n.op_type in ["Add", "Sub", "Mul"]:
         # TODO: add this to tinygrad? i don't think it's in torch
         if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
