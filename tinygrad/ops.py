@@ -124,7 +124,8 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
     return Device._buffers[self.device].fromCPU(self.op.arg), [], LoadOps
   elif self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize(self.device)
-    return real_src.contiguous_op(), [real_src], LoadOps
+    ret = real_src.contiguous_op()
+    return ret, [real_src], LoadOps if ret != real_src else None
   else:
     assert NotImplementedError(f"unknown LoadOp {self.op.op}")
 
@@ -260,7 +261,8 @@ class LazyBuffer:
       # we haven't realized the Buffer yet
       self.realized, real_srcs, real_type = _realize[self.optype](self)
       # in lazy mode, we don't log until we realize
-      log_op(real_type, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
+      if real_type is not None:
+        log_op(real_type, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
       # no need to keep the op after realization
       del self.op
 

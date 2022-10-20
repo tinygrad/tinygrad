@@ -141,6 +141,7 @@ class OpenCLBuffer(GPUBuffer):
   }
   def __init__(self, shape, hostbuf:Optional[OpenCLBuffer]=None, backing:Optional[np.ndarray]=None):
     self._image = hostbuf._image if hostbuf is not None else None
+    self.copied_backing = False
     super().__init__(shape, hostbuf, backing)
     assert not (self._image and self._buf)
 
@@ -152,18 +153,18 @@ class OpenCLBuffer(GPUBuffer):
   @property
   def cl(self):
     if self._buf is None:
-      if self._backing is not None:
+      if self._backing is not None and not self.copied_backing:
         self._buf = CLBuffer(4*roundup(prod(self._backing.shape)))
         CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
-        self._backing = None
+        self.copied_backing = True
       elif self.st.contiguous:
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
 
       if self._image is not None:
         self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
-        if self._backing is not None:
+        if self._backing is not None and not self.copied_backing:
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
-          self._backing = None
+          self.copied_backing = True
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", f"""
           __kernel void from_image(
@@ -187,6 +188,7 @@ class OpenCLBuffer(GPUBuffer):
   def image(self):
     if self._image is None:
       assert len(self.shape) == 3 and self.shape[2] == 4, f"bad shape for image {self.shape}"
+      assert self.st.contiguous, f"{self} is not contiguous"
       self._image = CLImage(shape=(self.shape[1], self.shape[0]))
       if self._buf is not None:
         assert prod(self.shape) <= prod(self._image.cl.shape)*4

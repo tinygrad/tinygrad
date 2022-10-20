@@ -57,8 +57,8 @@ def preprocessing_op(x,w,C):
   #x = contiguous(ctx, x, x.shapetracker) if not x.shapetracker.contiguous else x
   #w = contiguous(ctx, w, w.shapetracker) if not w.shapetracker.contiguous else w
 
-  # okay but unneeded
-  #x = x.contiguous_op()
+  # contiguous before image, always
+  x = x.contiguous_op()
   w = w.contiguous_op()
 
   # early realize on the weights

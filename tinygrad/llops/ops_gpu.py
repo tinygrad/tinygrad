@@ -125,7 +125,7 @@ class GPUBuffer:
 
   def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
   def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
-  def contiguous_op(x): return type(x)(x.shape, x, x._backing) if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
+  def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
   def movement_op(x, op:MovementOps, arg) -> GPUBuffer: return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
   def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape)._processing_op([("A", x)], code="acc", earlycode=GPUBuffer.code_for_op[op], earlybufs=set("A"), op=op)
 
