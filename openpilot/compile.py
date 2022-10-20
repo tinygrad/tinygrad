@@ -90,12 +90,19 @@ def compile(input, output_fn):
   inputs, np_inputs = get_random_input_tensors()
   tinygrad_out = run_onnx(inputs)['outputs']
 
+  # note, since CL.CACHE is enabled, it doesn't actually run the kernels
   CL.CACHE = []
   if using_graph: ops.GRAPH = True
   CL.kernel_count = -1
   tinygrad_out.realize()
   ops.GRAPH = False
   print("kernel count:", len(CL.CACHE))
+
+  from extra.thneed import Thneed
+  t = Thneed(CL.CACHE)
+  t.run()
+
+  exit(0)
 
   # optimize local workgroups
   OPTWG = int(os.getenv("OPTWG", 0))
