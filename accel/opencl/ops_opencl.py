@@ -211,9 +211,8 @@ class OpenCLBuffer(GPUBuffer):
     return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
 
   def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
-    if x.is_image():
-      # this will only be for convs, so it shouldn't be a reduce
-      assert reduce is None
+    # this will only be for convs, for reduce we have to fall back to cl
+    if x.is_image() and reduce is None:
       #print("is image")
       return f"""inline float get_{name}(const sampler_t smp, read_only image2d_t x, int gid) {{
         int valid = 1; int idx = gid; {x.st.expr().replace('//', '/')};
