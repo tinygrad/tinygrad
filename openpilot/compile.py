@@ -68,7 +68,7 @@ def compile(dat, output_fn):
     def run_onnx(x):
       return {"outputs": enet.forward(x['input_imgs'])}
   else:
-    onnx_model = onnx.load(io.BytesIO(input))
+    onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
 
   # initial run(s) to load weights
@@ -103,9 +103,7 @@ def compile(dat, output_fn):
   from extra.thneed import Thneed
   t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
   CL.CACHE = None
-
-  if int(os.getenv("OPTWG", 0)):
-    t.optimize_local_workgroup()
+  t.optimize_local_workgroup()
 
   print(f"buffers to save: {len(t.buffers_to_save)}, outputs: {t.outputs}")
   t.run()
@@ -144,7 +142,7 @@ def compile(dat, output_fn):
     print("thneed self-test passed!")
 
 
-# OPTWG=1 UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 MATMUL=1 python3 openpilot/compile.py
+# UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 python3 openpilot/compile.py
 # 22.59 ms
 if __name__ == "__main__":
   if len(sys.argv) >= 3:
