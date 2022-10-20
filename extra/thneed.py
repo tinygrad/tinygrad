@@ -45,7 +45,7 @@ class Thneed:
     # this is the struct that will be saved
     jdat = {"binaries": [], "programs": {}, "kernels": [], "objects": []}
 
-    # NOTE: kernels_to_save is named wrong, it's actually buffers
+    # build the pieces of this struct
     weights = []
     binaries = []
     saved_objs = set()

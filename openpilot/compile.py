@@ -109,17 +109,23 @@ def compile(dat, output_fn):
 
   print(f"buffers to save: {len(t.buffers_to_save)}, outputs: {t.outputs}")
   t.run()
+
+  # confirm thneed found the right output
+  thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
+  CL.enqueue_copy(thneed_out, t.outputs[0], is_blocking=True)
+  np.testing.assert_allclose(thneed_out, tinygrad_out.numpy())
+
+  # save thneed
   t.save(output_fn)
 
   # float32 only
-  tinygrad_out_np = tinygrad_out.numpy()
   FLOAT16 = int(os.getenv("FLOAT16", 0))
   if FLOAT16 == 0:
     try:
       from test.test_onnx import run_onnx_torch
       torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
-      print(tinygrad_out_np, torch_out, "mse", np.sum((tinygrad_out_np-torch_out)**2), "max err", np.max(np.abs((tinygrad_out_np-torch_out))))
-      np.testing.assert_allclose(torch_out, tinygrad_out_np, atol=1e-4, rtol=1e-2)
+      print(thneed_out, torch_out, "mse", np.sum((thneed_out-torch_out)**2), "max err", np.max(np.abs((thneed_out-torch_out))))
+      np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
     except ModuleNotFoundError:
       pass
 
