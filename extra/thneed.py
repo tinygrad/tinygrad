@@ -2,34 +2,59 @@
 import os
 import time
 import struct
+import json
 import numpy as np
 from tinygrad.llops.ops_gpu import CL, CLProgram, CLBuffer
 import pyopencl as cl
+import networkx as nx
 
 DEBUGCL = int(os.getenv("DEBUGCL", 0))
 FLOAT16 = int(os.getenv("FLOAT16", 0))
 
 class Thneed:
-  def __init__(self, cl_cache=[]):
-    self.cl_cache = cl_cache[:]
+  def __init__(self, cl_cache=[], inputs={}):
+    self.cl_cache, self.inputs = cl_cache[:], inputs
+    self.gobj = 0
+
+    # build graph
+    G = nx.DiGraph()
+    for _, args in self.cl_cache:
+      # output is always the first parameter
+      for a in args[3:]:
+        G.add_edge(a, args[2])
+    
+    # get buffers to save
+    self.buffers_to_save = set()
+    self.outputs = []
+    for n in G.nodes:
+      if len(G.in_edges(n)) == 0:
+        self.buffers_to_save.add(n)
+      if len(G.out_edges(n)) == 0:
+        self.outputs.append(n)
+  
+    for n in self.inputs.values():
+      assert n in self.buffers_to_save, f"{n} was not an input"
+      self.buffers_to_save.remove(n)
 
   def load(self, fn):
     pass
 
-  def save(self, fn):
+  def save(self, output_fn):
     # this is the struct that will be saved
     jdat = {"binaries": [], "programs": {}, "kernels": [], "objects": []}
 
     # NOTE: kernels_to_save is named wrong, it's actually buffers
     weights = []
+    binaries = []
     saved_objs = set()
     saved_binaries = set()
-    for prg, args in enumerate(self.cl_cache):
+    for prg, args in self.cl_cache:
       # get binaries for saving
       if prg.name not in saved_binaries:
         binary = prg.clprogram.get_info(cl.program_info.BINARIES)
         assert len(binary) == 1
         jdat['binaries'].append({"name":prg.name, "length":len(binary[0])})
+        binaries.append(binary[0])
         saved_binaries.add(prg.name)
       
       # get the args from the kernel, some need the data saved
@@ -47,12 +72,12 @@ class Thneed:
           args_size.append(a.size)
         elif d is None:
           if getattr(a, "global_id", None) is None:
-            setattr(a, "global_id", gobj)
-            gobj += 1
+            setattr(a, "global_id", self.gobj)
+            self.gobj += 1
           ptr = struct.pack("Q", a.global_id).decode("latin_1")
           if ptr not in saved_objs:
             if isinstance(a, cl.Buffer):
-              needs_load = a in kernels_to_save
+              needs_load = a in self.buffers_to_save
               jdat['objects'].append({
                 "id": ptr, "arg_type": "float*", "needs_load": needs_load, "size": a.size,
               })
@@ -61,7 +86,7 @@ class Thneed:
                 CL.enqueue_copy(data, a, is_blocking=True)
                 weights.append(data.tobytes())
             elif isinstance(a, cl.Image):
-              needs_load = a in kernels_to_save
+              needs_load = a in self.buffers_to_save
               row_pitch = (a.shape[0]*4*(2 if FLOAT16 else 4) + 63)//64 * 64
               size = row_pitch * a.shape[1]
               # this is *2 if float16 and *4 if float32
@@ -103,7 +128,7 @@ class Thneed:
 
       # save the kernel itself
       jdat['kernels'].append({
-        "name": self.name,
+        "name": prg.name,
         "work_dim": len(args[0]),
         "global_work_size": args[0],
         # TODO: C++ thneed requires a local_work_size, so we fill it with ones
@@ -112,6 +137,25 @@ class Thneed:
         "args": targs,
         "args_size": args_size 
       })
+
+    jdat['outputs'] = [{
+      "buffer_id": struct.pack("Q", x.global_id).decode("latin_1"),
+      "size": x.size,
+    } for x in self.outputs]
+
+    jdat['inputs'] = [{
+      "buffer_id": struct.pack("Q", v.global_id).decode("latin_1"),
+      "size": v.size,
+      "name": k
+    } for k,v in self.inputs.items()][::-1]
+
+    print(f"saving thneed to {output_fn}")
+    with open(output_fn, "wb") as f:
+      j = json.dumps(jdat, ensure_ascii=False).encode('latin_1')
+      f.write(struct.pack("I", len(j)))
+      f.write(j)
+      f.write(b''.join(weights))
+      f.write(b''.join(binaries))
 
   def run(self):
     events = []

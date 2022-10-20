@@ -55,7 +55,7 @@ def get_random_input_tensors():
   for _,v in inputs.items(): v.realize()
   return inputs, np_inputs
 
-def compile(input, output_fn):
+def compile(dat, output_fn):
   Tensor.no_grad = True
   using_graph = ops.GRAPH
   ops.GRAPH = False
@@ -101,8 +101,12 @@ def compile(input, output_fn):
   print("kernel count:", len(CL.CACHE))
 
   from extra.thneed import Thneed
-  t = Thneed(CL.CACHE)
+  t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
+  CL.CACHE = None
+
+  print(f"buffers to save: {len(t.buffers_to_save)}, outputs: {t.outputs}")
   t.run()
+  t.save(output_fn)
 
   exit(0)
 
