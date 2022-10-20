@@ -138,8 +138,10 @@ def compile(dat, output_fn):
       CL.enqueue_copy(v, np_inputs[k], is_blocking=True)
 
     nt.run()
-    thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
-    np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
+    new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
+    CL.enqueue_copy(new_thneed_out, t.outputs[0], is_blocking=True)
+    np.testing.assert_allclose(torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
+    print("thneed self-test passed!")
 
 
 # OPTWG=1 UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 MATMUL=1 python3 openpilot/compile.py
