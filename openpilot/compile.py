@@ -150,6 +150,10 @@ def compile(dat, output_fn):
         # but the differences are in unused stuff
         print("THNEED ERROR")
         for i,(a,b) in enumerate(zip(t.cl_cache, nt.cl_cache)):
+          for j,(c,d) in enumerate(zip(a[1][2:], b[1][2:])):
+            if type(c) == cl.Buffer and c not in t.buffers_to_save:
+              CL.enqueue_copy(c, b'\x00'*c.size)
+              CL.enqueue_copy(d, b'\x00'*d.size)
           # rerun
           a[0].clprg(CL().cl_queue, *a[1])
           CL().cl_queue.finish()
@@ -167,7 +171,7 @@ def compile(dat, output_fn):
               if not (cc == dd).all():
                 print(f"mismatch in layer {i} arg {j}")
                 np.testing.assert_allclose(cc, dd)
-        assert False
+        assert False, "all layers match?"
       print("thneed self-test passed!")
     except ModuleNotFoundError:
       pass

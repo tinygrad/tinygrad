@@ -111,10 +111,10 @@ class Thneed:
       ptr = nptr
   
     # populate the cl_cache
-    for k in jdat['kernels']:
+    for i,k in enumerate(jdat['kernels']):
       kernel = prgs[k['name']]
       aaa = []
-      for i,(a,sz) in enumerate(zip(k['args'], k['args_size'])):
+      for j,(a,sz) in enumerate(zip(k['args'], k['args_size'])):
         if len(a) == 0:
           aa = cl.LocalMemory(sz)
         elif len(a) == 4:
@@ -124,6 +124,7 @@ class Thneed:
           a = a.encode('latin_1')
           aa = np.uint16(struct.unpack("H", a)[0])
         elif len(a) == 8:
+          #print(i,j,struct.unpack("Q", a.encode('latin_1'))[0])
           aa = bufs[a]
         aaa.append(aa)
       self.cl_cache.append((kernel, [k['global_work_size'], k['local_work_size'], *aaa]))
