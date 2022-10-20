@@ -37,6 +37,8 @@ def get_random_input_tensors():
     "initial_state": np.random.randn(*(1, 512))
     #"initial_state": np.zeros((1, 768))
   }
+  if int(os.getenv("ZERO_OUT", "0")):
+    np_inputs = {k:v*0 for k,v in np_inputs.items()}
 
   #import pickle
   #frames, big_frames, last_state, frame_inputs, policy_outs = pickle.load(open("openpilot/test/frame_0.pkl", "rb"))
@@ -183,7 +185,7 @@ def compile(input, output_fn):
       runtimes[prg.name.rsplit("_", 1)[0]] += runtime
       if DEBUGCL:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
-        if DEBUGCL >=2 and prg.name == "elementwise_166": print(prg.prg)
+        #if DEBUGCL >=2 and prg.name == "elementwise_166": print(prg.prg)
         #if prg.name == "matmul": print(f"   {args[3].shape} {args[4].shape} -> {args[5].shape}")
       total_runtime += runtime
     for k,v in runtimes.items():
@@ -326,7 +328,7 @@ def compile(input, output_fn):
   
   print(f"saving {len([x for x in jdat['objects'] if x['needs_load']])} objects")
 
-  print("saving thneed")
+  print(f"saving thneed to {output_fn}")
   with open(output_fn, "wb") as f:
     j = json.dumps(jdat, ensure_ascii=False).encode('latin_1')
     f.write(struct.pack("I", len(j)))
