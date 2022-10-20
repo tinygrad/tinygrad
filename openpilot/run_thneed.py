@@ -246,6 +246,8 @@ if __name__ == "__main__":
     import onnx, io
     dat = fetch(sys.argv[2])
     onnx_model = onnx.load(io.BytesIO(dat))
+    for inp, numpy_name in zip(onnx_model.graph.input, np_inputs.keys()):
+      assert inp.name == numpy_name, f"name mismatch {inp.name} {numpy_name}"
     out = run_onnx_torch(onnx_model, np_inputs).numpy()[0]
 
     diff = 0
