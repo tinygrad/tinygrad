@@ -125,6 +125,8 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   elif self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize(self.device)
     return real_src.contiguous_op(), [real_src], LoadOps
+  else:
+    assert NotImplementedError(f"unknown LoadOp {self.op.op}")
 
 def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_src = self.op.src[0].realize(self.device)

@@ -155,6 +155,7 @@ class OpenCLBuffer(GPUBuffer):
       if self._backing is not None:
         self._buf = CLBuffer(4*roundup(prod(self._backing.shape)))
         CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
+        self._backing = None
       elif self.st.contiguous:
         self._buf = CLBuffer(4*roundup(prod(self.shape)))
 
@@ -162,7 +163,7 @@ class OpenCLBuffer(GPUBuffer):
         self._buf = CLBuffer(4*roundup(prod(self._image.shape)*4))
         if self._backing is not None:
           CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
-          #self._backing = None
+          self._backing = None
         #print(f"converting {self.shape} back to buffer, image shape is {self._image.shape}")
         CLProgram("from_image", f"""
           __kernel void from_image(
