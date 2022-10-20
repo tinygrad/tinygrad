@@ -75,7 +75,7 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
       else:
         # zero out buffers
         buf = cl.Buffer(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=b'\x00'*o['size']*(2 if float32 else 1))
-      
+
     bufs[o['id']] = buf
     bufs_loaded[o['id']] = 'data' in o
 
@@ -185,7 +185,7 @@ def load_thneed_model(fn="model.thneed", float32=False, replace=None):
       #if k['name'] == 'zero_pad_image_float':
         #arr = np.zeros((aaa[1].size//4), dtype=np.float32)
         #cl.enqueue_copy(q, arr, aaa[1])
-    
+
       """
       if k['name'] == "convolution_horizontal_reduced_reads":
         print(aaa)
@@ -229,9 +229,9 @@ if __name__ == "__main__":
   np_inputs = {
     "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
     "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
-    "desire": np.zeros((1, 8)),
+    "desire": np.zeros((1, 100, 8)),
     "traffic_convention": np.array([[1., 0.]]),
-    "initial_state": np.random.randn(*(1, 512))
+    "features_buffer": np.random.randn(*(1, 99, 128))
   }
   np_inputs = {k:v.astype(np.float32) for k,v in np_inputs.items()}
   inputs = list(np_inputs.values())[::-1]
