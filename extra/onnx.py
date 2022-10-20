@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import functools
 from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
@@ -41,6 +42,21 @@ def get_run_onnx(onnx_model):
       print("realize", inp.name)
     tensors[inp.name].realize()
 
+  # preparse the attributes
+  attribute_dict = {}
+  for num,n in enumerate(onnx_model.graph.node):
+    attribute_dict[num] = attribute_to_dict(n.attribute)
+
+  # and cache them
+  numpy_cache = {}
+  def safe_numpy(t):
+    nonlocal numpy_cache
+    if t not in numpy_cache:
+      if DEBUG >= 1:
+        print("numpy cache miss", t)
+      numpy_cache[t] = t.numpy()
+    return numpy_cache[t]
+
   def run_onnx(inputs={}, debug=False):
     input_tensors = {}
     intermediate_tensors = {}
@@ -64,7 +80,7 @@ def get_run_onnx(onnx_model):
     for num,n in enumerate(onnx_model.graph.node):
       if debug: print(f"{num}: op {n.op_type}")
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else input_tensors[x]) for x in n.input]
-      opt = attribute_to_dict(n.attribute)
+      opt = attribute_dict[num]
 
       # free ones
       if n.op_type == "Relu": ret = inp[0].relu()
@@ -72,7 +88,8 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Tanh": ret = inp[0].tanh()
       elif n.op_type == "Softmax": ret = inp[0].softmax()
       elif n.op_type == "MatMul":
-        assert inp[1].lazydata.realized is not None
+        if inp[1].lazydata.realized is not None:
+          print("WARNING: matmul weights are not static")
         ret = inp[0].matmul(inp[1])
       # one liners
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
@@ -89,12 +106,12 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Expand": ret = inp[0].reshape([1]*(max(len(inp[0].shape), len(inp[1]))-len(inp[0].shape)) + list(inp[0].shape)) # just broadcast
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value']
-      elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) for x in inp[1].numpy()])
+      elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) for x in safe_numpy(inp[1])])
       elif n.op_type == "Gather":
         # TODO: is this correct? seems to work for simple gather ops
         axis = opt['axis']
         shape = list(inp[0].shape)
-        indices = [shape[axis]+int(x) if x<0 else int(x) for x in inp[1].numpy()]
+        indices = [shape[axis]+int(x) if x<0 else int(x) for x in safe_numpy(inp[1])]
         args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
@@ -147,7 +164,7 @@ def get_run_onnx(onnx_model):
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
-        axis, starts, ends  = int(axes.numpy()[0]), int(starts.numpy()[0]), int(ends.numpy()[0])
+        axis, starts, ends  = int(safe_numpy(axes)[0]), int(safe_numpy(starts)[0]), int(safe_numpy(ends)[0])
         ends = min(ends, inp[0].shape[axis])
         starts = starts + inp[0].shape[axis] if starts < 0 else starts
         arg[axis] = (starts, ends)
