@@ -92,6 +92,9 @@ class Thneed:
         
       bufs[o['id']] = buf
       bufs_loaded[o['id']] = 'data' in o
+      # if it's loaded, it's saved
+      if 'data' in o:
+        self.buffers_to_save.add(buf)
 
     # load in the programs (this isn't used)
     prgs = {}
@@ -189,11 +192,10 @@ class Thneed:
               row_pitch = (a.shape[0]*4*(2 if FLOAT16 else 4) + 63)//64 * 64
               size = row_pitch * a.shape[1]
               # this is *2 if float16 and *4 if float32
-              buf = CLBuffer(size * (2 if FLOAT16 else 1))
+              buf = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size=size * (2 if FLOAT16 else 1))
 
               # zero out the buffer
-              zeros = np.zeros(size, dtype=np.uint8)
-              CL.enqueue_copy(buf.cl, zeros, is_blocking=True)
+              CL.enqueue_copy(buf, b'\x00'*buf.size, is_blocking=True)
 
               CLProgram("from_image_strided", """
                 __kernel void from_image_strided(read_only image2d_t in, __global float4 *out, int row_pitch) {
@@ -203,7 +205,7 @@ class Thneed:
                   l.x = get_global_id(0);
                   out[l.y*row_pitch + l.x] = read_imagef(in, smp, l);
                 }
-              """, argdtypes=(None, None, np.int32))(a.shape, None, a, buf.cl, row_pitch//(4*(2 if FLOAT16 else 4)))
+              """, argdtypes=(None, None, np.int32))(a.shape, None, a, buf, row_pitch//(4*(2 if FLOAT16 else 4)))
 
               # multiple of 32 isn't enough
               jdat['objects'].append({
@@ -213,7 +215,7 @@ class Thneed:
 
               if needs_load:
                 data = np.empty(size//(2 if FLOAT16 else 4), dtype=np.float32)
-                CL.enqueue_copy(data, buf.cl, is_blocking=True)
+                CL.enqueue_copy(data, buf, is_blocking=True)
                 if FLOAT16: data = data.astype(np.float16)
                 weights.append(data.tobytes())
             else:

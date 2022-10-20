@@ -129,8 +129,7 @@ def compile(dat, output_fn):
       np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
 
       # test loading/run thneed
-      #_, new_np_inputs = get_random_input_tensors(input_shapes)
-      new_np_inputs = np_inputs
+      _, new_np_inputs = get_random_input_tensors(input_shapes)
       new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
 
       nt = Thneed()
@@ -143,35 +142,7 @@ def compile(dat, output_fn):
       nt.run()
       new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
       CL.enqueue_copy(new_thneed_out, nt.outputs[0], is_blocking=True)
-      try:
-        np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
-      except AssertionError:
-        # NOTE: this doesn't pass even if thneed passes
-        # but the differences are in unused stuff
-        print("THNEED ERROR")
-        for i,(a,b) in enumerate(zip(t.cl_cache, nt.cl_cache)):
-          for j,(c,d) in enumerate(zip(a[1][2:], b[1][2:])):
-            if type(c) == cl.Buffer and c not in t.buffers_to_save:
-              CL.enqueue_copy(c, b'\x00'*c.size)
-              CL.enqueue_copy(d, b'\x00'*d.size)
-          # rerun
-          a[0].clprg(CL().cl_queue, *a[1])
-          CL().cl_queue.finish()
-          b[0].clprg(CL().cl_queue, *b[1])
-          CL().cl_queue.finish()
-          assert len(a[1]) == len(b[1])
-          for j,(c,d) in enumerate(zip(a[1][2:], b[1][2:])):
-            if type(c) != type(d):
-              print("type mismatch", type(c), type(d))
-            if type(c) == cl.Buffer:
-              cc = np.empty((c.size//4,), dtype=np.float32)
-              CL.enqueue_copy(cc, c, is_blocking=True)
-              dd = np.empty((c.size//4,), dtype=np.float32)
-              CL.enqueue_copy(dd, d, is_blocking=True)
-              if not (cc == dd).all():
-                print(f"mismatch in layer {i} arg {j}")
-                np.testing.assert_allclose(cc, dd)
-        assert False, "all layers match?"
+      np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
       print("thneed self-test passed!")
     except ModuleNotFoundError:
       pass
