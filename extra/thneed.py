@@ -1,9 +1,9 @@
 # this can be constructed from a cl_cache or loaded from a thneed file 
 import os
-from threading import local
 import time
 import struct
 import json
+import traceback
 import numpy as np
 from tinygrad.llops.ops_gpu import CL, CLProgram, CLBuffer
 from tinygrad.helpers import prod
@@ -38,8 +38,104 @@ class Thneed:
       assert n in self.buffers_to_save, f"{n} was not an input"
       self.buffers_to_save.remove(n)
 
-  def load(self, fn):
-    pass
+  def load(self, input_fn):
+    float32 = not FLOAT16
+
+    mf = cl.mem_flags
+    image_fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT if float32 else cl.channel_type.HALF_FLOAT)
+    image_fmt_32 = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.FLOAT)
+
+    with open(input_fn, "rb") as f:
+      json_len = struct.unpack("I", f.read(4))[0]
+      jdat = json.loads(f.read(json_len).decode('latin_1'))
+      weights = f.read()
+
+    # load in the buffers
+    bufs = {'\x00\x00\x00\x00\x00\x00\x00\x00': None}
+    bufs_loaded = {}
+    ptr = 0
+    for o in jdat['objects']:
+      #print(o)
+      if o['needs_load']:
+        nptr = ptr + o['size']
+        o['data'] = weights[ptr:nptr]
+        ptr = nptr
+
+      if o['arg_type'] == "image2d_t" or o['arg_type'] == "image1d_t":
+        tfmt = image_fmt_32 if 'float32' in o and o['float32'] else image_fmt
+        if o['arg_type'] == "image2d_t":
+          if 'buffer_id' in o and o['height'] == 1 and not bufs_loaded[o['buffer_id']]:
+            # hack: use a image1d since we can back that with a buffer
+            buf = cl.Image(CL().cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+          else:
+            # buffer isn't supported in image2d, copy buffer into image
+            if 'buffer_id' in o and bufs_loaded[o['buffer_id']]:
+              arr = np.zeros(bufs[o['buffer_id']].size // 2, dtype=np.float16)
+              cl.enqueue_copy(q, arr, bufs[o['buffer_id']])
+              buf = cl.Image(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
+                shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=arr)
+            elif o['needs_load']:
+              buf = cl.Image(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
+                shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=o['data'])
+            else:
+              buf = cl.Image(CL().cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'], o['height']))
+        if o['arg_type'] == "image1d_t":
+          assert not o['needs_load']
+          assert not bufs_loaded[o['buffer_id']]
+          buf = cl.Image(CL().cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+      else:
+        if 'data' in o:
+          buf = cl.Buffer(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=o['data'])
+        else:
+          # zero out buffers
+          buf = cl.Buffer(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=b'\x00'*o['size'])
+        
+      bufs[o['id']] = buf
+      bufs_loaded[o['id']] = 'data' in o
+
+    # load in the programs (this isn't used)
+    prgs = {}
+    for k,v in jdat['programs'].items():
+      print("building", k)
+      try:
+        prgs[k] = CLProgram(k, v, rename=False)
+      except Exception:
+        print("FAILED", k)
+        traceback.print_exc()
+        exit(0)
+    
+    # load binaries
+    for o in jdat['binaries']:
+      nptr = ptr + o['length']
+      prgs[o['name']] = CLProgram(o['name'], weights[ptr:nptr], rename=False, binary=True)
+      ptr = nptr
+  
+    # populate the cl_cache
+    for k in jdat['kernels']:
+      kernel = prgs[k['name']]
+      aaa = []
+      for i,(a,sz) in enumerate(zip(k['args'], k['args_size'])):
+        if len(a) == 0:
+          aa = cl.LocalMemory(sz)
+        elif len(a) == 4:
+          a = a.encode('latin_1')
+          aa = np.uint32(struct.unpack("I", a)[0])
+        elif len(a) == 2:
+          a = a.encode('latin_1')
+          aa = np.uint16(struct.unpack("H", a)[0])
+        elif len(a) == 8:
+          aa = bufs[a]
+        aaa.append(aa)
+      self.cl_cache.append((kernel, [k['global_work_size'], k['local_work_size'], *aaa]))
+
+    # load inputs
+    for k in jdat['inputs']:
+      self.inputs[k['name']] = bufs[k['buffer_id']]
+
+    # load outputs
+    for k in jdat['outputs']:
+      self.outputs.append(bufs[k['buffer_id']])
+
 
   def save(self, output_fn):
     # this is the struct that will be saved

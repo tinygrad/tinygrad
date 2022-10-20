@@ -118,7 +118,7 @@ def compile(dat, output_fn):
   # save thneed
   t.save(output_fn)
 
-  # float32 only
+  # float32 only (fix this)
   FLOAT16 = int(os.getenv("FLOAT16", 0))
   if FLOAT16 == 0:
     try:
@@ -128,6 +128,19 @@ def compile(dat, output_fn):
       np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
     except ModuleNotFoundError:
       pass
+  
+    # test loading/run thneed
+    nt = Thneed()
+    nt.load(output_fn)
+
+    # inputs
+    for k,v in nt.inputs.items():
+      CL.enqueue_copy(v, np_inputs[k], is_blocking=True)
+
+    nt.run()
+    thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
+    np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
+
 
 # OPTWG=1 UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 MATMUL=1 python3 openpilot/compile.py
 # 22.59 ms
