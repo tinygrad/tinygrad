@@ -1,10 +1,12 @@
 # this can be constructed from a cl_cache or loaded from a thneed file 
 import os
+from threading import local
 import time
 import struct
 import json
 import numpy as np
 from tinygrad.llops.ops_gpu import CL, CLProgram, CLBuffer
+from tinygrad.helpers import prod
 import pyopencl as cl
 import networkx as nx
 
@@ -175,8 +177,46 @@ class Thneed:
         total_runtime += runtime
       print(f"total runtime: {total_runtime/1e6:.2f} ms")
 
-  # TODO: does this belong here?
   def optimize_local_workgroup(self):
-    pass
+    MAX_WORKGROUP = CL.cl_ctx.devices[0].max_work_group_size
+    local_cl_cache = []
+    for prg, args in self.cl_cache:
+      args = list(args)
+      if args[1] is None and len(args[0]) == 2:
+        args[1] = [min(MAX_WORKGROUP, args[0][0]), 1]
+        try:
+          e = prg.clprg(CL().cl_queue, *args)
+        except cl.LogicError:
+          # INVALID_WORK_GROUP_SIZE
+          args[1] = None
+          continue
+
+      if args[1] is None and len(args[0]) == 3:
+        runtimes = []
+        for l2 in [16,args[0][1],MAX_WORKGROUP]:
+          for l3 in [4,16,args[0][2],MAX_WORKGROUP]:
+            for l1 in [max(1, MAX_WORKGROUP//(l2*l3)), args[0][0], 4, 16, MAX_WORKGROUP]:
+              if l1 > args[0][0] or l2 > args[0][1] or l3 > args[0][2]: continue
+              local_args = (l1, l2, l3)
+              if prod(local_args) > MAX_WORKGROUP: continue
+              args[1] = local_args
+              try:
+                e = prg.clprg(CL().cl_queue, *args)
+              except (cl.LogicError, cl.RuntimeError):
+                # INVALID_WORK_GROUP_SIZE
+                continue
+              CL().cl_queue.finish()
+              runtime = e.profile.end - e.profile.start
+              #print(runtime, args[0], args[1])
+              runtimes.append((runtime, local_args))
+        #print(sorted(runtimes)[0:5])
+        if len(runtimes) > 0:
+          args[1] = sorted(runtimes)[0][1]
+        else:
+          args[1] = None
+          print("couldn't optimize", args[0])
+
+      local_cl_cache.append((prg, args))
+    self.cl_cache = local_cl_cache
 
 
