@@ -314,5 +314,3 @@ class Thneed:
 
       local_cl_cache.append((prg, args))
     self.cl_cache = local_cl_cache
-
-
