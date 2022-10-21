@@ -62,7 +62,12 @@ def preprocessing_op(x,w,C):
   w = w.contiguous_op()
 
   # early realize on the weights
-  w.realize().image
+  bw = w
+  while getattr(bw, 'op', None) and len(bw.op.src) == 1:
+    bw = bw.op.src[0]
+  if bw.realized:
+    # weights are static
+    w.realize().image
   return x,w,C
 
 def postprocessing_op(ret, C, C_initial):

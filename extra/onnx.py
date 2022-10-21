@@ -87,10 +87,7 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Sigmoid": ret = inp[0].sigmoid()
       elif n.op_type == "Tanh": ret = inp[0].tanh()
       elif n.op_type == "Softmax": ret = inp[0].softmax()
-      elif n.op_type == "MatMul":
-        if inp[1].lazydata.realized is not None:
-          print("WARNING: matmul weights are not static")
-        ret = inp[0].matmul(inp[1])
+      elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
       # one liners
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
       elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -3.4e38), opt.get('max', 3.4e38))))

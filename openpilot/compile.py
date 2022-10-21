@@ -93,6 +93,7 @@ def compile(dat, output_fn):
 
   # real run
   inputs, np_inputs = get_random_input_tensors(input_shapes)
+  print("***** REAL RUN *****")
   tinygrad_out = run_onnx(inputs)['outputs']
 
   # note, since CL.CACHE is enabled, it doesn't actually run the kernels

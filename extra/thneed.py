@@ -281,7 +281,8 @@ class Thneed:
     local_cl_cache = []
     for prg, args in self.cl_cache:
       args = list(args)
-      if args[1] is None and len(args[0]) == 2:
+      # TODO: WTF is wrong with to_image?
+      if args[1] is None and len(args[0]) == 2 and 'to_image' not in prg.name:
         args[1] = [min(MAX_WORKGROUP, args[0][0]), 1]
         try:
           e = prg.clprg(CL().cl_queue, *args)
