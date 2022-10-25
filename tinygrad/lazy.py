@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Optional, Tuple, NamedTuple, Union, Any, List, Dict, Type
+from typing import Optional, Tuple, Union, Any, List, Dict
 from copy import copy
-import os, sys, functools, itertools, operator, weakref
+import os, sys, itertools, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_lazybuffers, get_lazyops
