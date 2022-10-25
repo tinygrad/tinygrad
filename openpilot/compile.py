@@ -18,7 +18,7 @@ DEBUGCL = int(os.getenv("DEBUGCL", 0))
 import onnx
 import numpy as np
 
-import tinygrad.ops as ops
+import tinygrad.lazy as lazy
 
 from tinygrad.llops.ops_gpu import CL, CLProgram, CLBuffer
 from extra.utils import fetch
@@ -62,8 +62,8 @@ def get_random_input_tensors(input_shapes):
 
 def compile(dat, output_fn):
   Tensor.no_grad = True
-  using_graph = ops.GRAPH
-  ops.GRAPH = False
+  using_graph = lazy.GRAPH
+  lazy.GRAPH = False
 
   onnx_model = onnx.load(io.BytesIO(dat))
   run_onnx = get_run_onnx(onnx_model)
@@ -98,10 +98,10 @@ def compile(dat, output_fn):
 
   # note, since CL.CACHE is enabled, it doesn't actually run the kernels
   CL.CACHE = []
-  if using_graph: ops.GRAPH = True
+  if using_graph: lazy.GRAPH = True
   CL.kernel_count = -1
   tinygrad_out.realize()
-  ops.GRAPH = False
+  lazy.GRAPH = False
   print("kernel count:", len(CL.CACHE))
 
   from extra.thneed import Thneed

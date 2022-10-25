@@ -4,9 +4,9 @@ import inspect, functools, importlib, itertools
 import numpy as np
 from tinygrad.helpers import prod, argfix
 from typing import List, Tuple, Callable, Optional
-from tinygrad.ops import Device
+from tinygrad.lazy import Device
 
-from tinygrad.ops import LazyBuffer
+from tinygrad.lazy import LazyBuffer
 
 # **** start with two base classes, Tensor and Function ****
 
