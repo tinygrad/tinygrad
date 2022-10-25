@@ -2,7 +2,7 @@
 import gc
 from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LazyBuffer
+from tinygrad.lazy import LazyBuffer
 from tinygrad.llops.ops_gpu import CL, GPUBuffer
 #from tinygrad.llops.ops_opencl import CLImage, OpenCLBuffer
 
