@@ -149,8 +149,9 @@ class LLVMBuffer:
 
   @staticmethod
   def fromCPU(x):
+    x = x.astype(np.float32)
     ret = LLVMBuffer(x.shape)
-    ctypes.memmove(ret._buf, x.astype(np.float32).ctypes.data, prod(ret.shape)*4)
+    ctypes.memmove(ret._buf, x.ctypes.data, prod(ret.shape)*4)
     return ret
   
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
