@@ -182,7 +182,7 @@ class LLVMBuffer:
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
   @staticmethod
-  def exec_ast(ast:LazyOp):
+  def exec_ast(ast:LazyOp) -> LLVMBuffer:
     # get the real buffers from the ast
     bufs = get_buffers(ast)
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]

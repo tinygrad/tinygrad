@@ -193,22 +193,26 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if reduce_shape[0] != reduce_shape[1] else BinaryOps)
   elif getattr(self.dbuffer, "exec_ast", None):
     op_type = BinaryOps
-    psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
-    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+    # not for ProcessingOps
+    psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
+    # TODO: this is broken, the reshape just shouldn't be pushed, not hacked out later
+    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE and False:
       src = psrcs[0][1].op.src[0]
       if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
         src = src.op
       for i,x in enumerate(get_buffers(src) if isinstance(src, LazyOp) else [src]):
         real_srcs[x] = None
       real_srcs[psrcs[0][0]] = LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg)
+      print(real_srcs[psrcs[0][0]])
       op_type = ReduceOps
     for x in real_srcs.keys():
       if real_srcs[x] is None:
         real_srcs[x] = x.realize(self.device)
     ret = self.dbuffer.exec_ast(realize_buffers(real_srcs, self.op))
     # shape can change
-    return (ret if ret.shape == self.shape else self.dbuffer(self.shape, ret)), [x for x in real_srcs.values() if not isinstance(x, LazyOp)], op_type
+    return (ret if ret.shape == self.shape else ret.movement_op(MovementOps.RESHAPE, self.shape)), [x for x in real_srcs.values() if not isinstance(x, LazyOp)], op_type
   else:
+    raise Exception("all DeviceBuffers must have exec_ast")
     for x in real_srcs.keys():
       real_srcs[x] = x.realize(self.device)
     # slow path, creates middle buffers
