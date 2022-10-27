@@ -5,7 +5,7 @@ import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, ConvArgs, dedup
-from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, get_buffers, get_lazyops, Op
+from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_shape
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -133,17 +133,11 @@ class GPUBuffer:
   def exec_ast(cls, ast:LazyOp):
     # copied from llvm
     bufs = dedup(get_buffers(ast))
-    movementops = [x for x in get_lazyops(ast) if isinstance(x.op, MovementOps)]
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps) or isinstance(x.op, ProcessingOps)]
     assert len(reduceops) <= 1, f"max one reduce op in an ast, {reduceops}"
     earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
-    output_shape, reduce_shape = bufs[0].shape, None
-    if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps):
-      output_shape = reduceops[0].arg
-      reduce_shape = (earlybufs[0].shape, reduceops[0].arg)
-    if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps): output_shape = (reduceops[0].arg.bs, reduceops[0].arg.groups * reduceops[0].arg.rcout, reduceops[0].arg.oy, reduceops[0].arg.ox)
-    if len(movementops) > 0: output_shape = movementops[0].arg
-    ret = cls(output_shape)
+    reduce_shape = (earlybufs[0].shape, reduceops[0].arg) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else None
+    ret = cls(get_lazyop_shape(ast))
 
     buf_names : Dict[GPUBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(bufs)}
 

@@ -44,6 +44,20 @@ class GenericExecAST:
     else: raise Exception("unknown op")
     return ret
 
+def get_lazyop_shape(ast):
+  srcs = [get_lazyop_shape(x) if isinstance(x, LazyOp) else x.shape for x in ast.src]
+  if isinstance(ast.op, UnaryOps): return srcs[0]
+  elif isinstance(ast.op, BinaryOps):
+    assert srcs[0] == srcs[1], f"BinaryOp must have matching shape {srcs[0]}, {srcs[1]}"
+    return srcs[0]
+  elif isinstance(ast.op, ReduceOps):
+    assert all(r == n or n == 1 for r,n in zip(srcs[0], ast.arg))
+    return ast.arg
+  elif isinstance(ast.op, MovementOps):
+    return ShapeTracker(srcs[0]).movement_op(ast.op, ast.arg).shape
+  elif isinstance(ast.op, ProcessingOps):
+    return (ast.arg.bs, ast.arg.groups * ast.arg.rcout, ast.arg.oy, ast.arg.ox)
+
 # assumes you are using ShapeTracker
 # used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
 class ExplicitExecAST:

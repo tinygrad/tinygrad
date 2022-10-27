@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops, ExplicitExecAST
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_shape
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 
@@ -154,6 +154,7 @@ class LLVMBuffer(ExplicitExecAST):
     BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y),
     BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y]),
     BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType()),
+    MovementOps.RESHAPE: lambda builder,x: x,
   }
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
@@ -179,7 +180,7 @@ class LLVMBuffer(ExplicitExecAST):
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
     earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
-    ret = cls(reduceops[0].arg if len(reduceops) > 0 else bufs[0].shape)
+    ret = cls(get_lazyop_shape(ast))
 
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
@@ -208,14 +209,14 @@ class LLVMBuffer(ExplicitExecAST):
       return LLVMBuffer.op_lookup[x.op](builder, *values)
 
     if len(reduceops) > 0:
-      assert len(earlybufs[0].shape) == len(ret.shape), "reduce only possible on matching shapes"
+      assert len(earlybufs[0].shape) == len(reduceops[0].arg), "reduce only possible on matching shapes"
       if DEBUG >= 1:
-        print(f"reduce {earlybufs[0].shape} -> {ret.shape}")
-      red = prod([s for s,n in zip(earlybufs[0].shape, ret.shape) if n == 1])
+        print(f"reduce {earlybufs[0].shape} -> {reduceops[0].arg}")
+      red = prod([s for s,n in zip(earlybufs[0].shape, reduceops[0].arg) if n == 1])
       red_idx = reduce_builder.phi(ir.IntType(64))
       red_idx.add_incoming(int_const(0), body_builder._block)
       val = reduce_builder.phi(ir.FloatType())
-      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (prod(ret.shape), idx, red, red_idx))
+      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (prod(reduceops[0].arg), idx, red, red_idx))
 
       if reduceops[0].op == ReduceOps.SUM:
         val.add_incoming(ir.Constant(ir.FloatType(), 0), body_builder._block)
