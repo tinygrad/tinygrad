@@ -138,7 +138,8 @@ class GPUBuffer(ExplicitExecAST):
     def _ast(x: Union[GPUBuffer, LazyOp], buf_names: Dict[GPUBuffer, str], code_for_op: Dict[Op, str], allow_reduce=False) -> str:
       if isinstance(x, GPUBuffer):
         return buf_names[x]
-      if not allow_reduce and type(x.op) in [ProcessingOps, ReduceOps]: return "acc"
+      if not allow_reduce and type(x.op) in [ProcessingOps, ReduceOps]:
+        return "acc"
       srcs_code = [_ast(src, buf_names, code_for_op) for src in x.src]
       code = code_for_op[x.op]
       if len(srcs_code) >= 1:

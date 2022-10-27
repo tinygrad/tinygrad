@@ -34,19 +34,24 @@ class GenericExecAST:
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
-    if isinstance(ast.op, UnaryOps): ret = srcs[0].unary_op(ast.op)
+    if isinstance(ast.op, UnaryOps):
+      ret = srcs[0].unary_op(ast.op)
     elif isinstance(ast.op, BinaryOps):
       assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
       ret = srcs[0].binary_op(ast.op, srcs[1])
-    elif isinstance(ast.op, ReduceOps): ret = srcs[0].reduce_op(ast.op, ast.arg)
-    elif isinstance(ast.op, MovementOps): ret = srcs[0].movement_op(ast.op, ast.arg)
-    elif isinstance(ast.op, ProcessingOps): ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
+    elif isinstance(ast.op, ReduceOps):
+      ret = srcs[0].reduce_op(ast.op, ast.arg)
+    elif isinstance(ast.op, MovementOps):
+      ret = srcs[0].movement_op(ast.op, ast.arg)
+    elif isinstance(ast.op, ProcessingOps):
+      ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
     else: raise Exception("unknown op")
     return ret
 
 def get_lazyop_shape(ast:LazyOp) -> Tuple[int, ...]:
   srcs = [get_lazyop_shape(x) if isinstance(x, LazyOp) else x.shape for x in ast.src]
-  if isinstance(ast.op, UnaryOps): return srcs[0]
+  if isinstance(ast.op, UnaryOps):
+    return srcs[0]
   elif isinstance(ast.op, BinaryOps):
     assert srcs[0] == srcs[1], f"BinaryOp must have matching shape {srcs[0]}, {srcs[1]}"
     return srcs[0]

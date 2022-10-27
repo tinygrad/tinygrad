@@ -1,7 +1,7 @@
 from __future__ import annotations
 import operator
 import numpy as np
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, GenericExecAST
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, GenericExecAST
 from tinygrad.helpers import shape_to_axis
 
 class CPUBuffer(np.ndarray, GenericExecAST):
