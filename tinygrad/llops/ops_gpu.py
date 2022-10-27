@@ -127,7 +127,7 @@ class GPUBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp):
     # copied from llvm
     bufs = dedup(get_buffers(ast))
-    reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps) or isinstance(x.op, ProcessingOps)]
+    reduceops = dedup([x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps) or isinstance(x.op, ProcessingOps)])
     assert len(reduceops) <= 1, f"max one reduce op in an ast, {reduceops}"
     earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
     reduce_shape = (earlybufs[0].shape, reduceops[0].arg) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else None

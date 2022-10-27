@@ -96,7 +96,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
 def realize_buffers(real_srcs, x):
   if x in real_srcs:
     return realize_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
-  return LazyOp(x.op, [realize_buffers(real_srcs, y) for y in x.src], x.arg)
+  return LazyOp(x.op, tuple(realize_buffers(real_srcs, y) for y in x.src), x.arg)
 
 def _ast(x: Union[LazyBuffer, LazyOp], buf_names: Dict[LazyBuffer, str], code_for_op: Dict[Op, str]) -> str:
   if isinstance(x, LazyBuffer):
