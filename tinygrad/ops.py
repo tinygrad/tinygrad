@@ -44,7 +44,7 @@ class GenericExecAST:
     else: raise Exception("unknown op")
     return ret
 
-def get_lazyop_shape(ast):
+def get_lazyop_shape(ast:LazyOp) -> Tuple[int, ...]:
   srcs = [get_lazyop_shape(x) if isinstance(x, LazyOp) else x.shape for x in ast.src]
   if isinstance(ast.op, UnaryOps): return srcs[0]
   elif isinstance(ast.op, BinaryOps):
