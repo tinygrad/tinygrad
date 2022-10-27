@@ -2,6 +2,7 @@ import os
 from enum import Enum
 from typing import Union, Type, NamedTuple, Tuple, Any, List
 import functools, operator
+from tinygrad.shapetracker import ShapeTracker
 
 DEBUG = int(os.getenv("DEBUG", "0"))
 
@@ -41,3 +42,14 @@ class GenericExecAST:
     elif isinstance(ast.op, ProcessingOps): ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
     else: raise Exception("unknown op")
     return ret
+
+# assumes you are using ShapeTracker
+class ExplicitExecAST:
+  # universal
+  def unary_op(x, op:UnaryOps): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x,)))
+  def binary_op(x, op:BinaryOps, y): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x, y)))
+  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape).exec_ast(LazyOp(op=op, src=(x,), arg=new_shape))
+
+  # universal for shape tracked
+  def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
+  def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)

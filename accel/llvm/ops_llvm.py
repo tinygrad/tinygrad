@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops, ExplicitExecAST
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 
@@ -138,7 +138,7 @@ class LLVM:
 
 
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
-class LLVMBuffer:
+class LLVMBuffer(ExplicitExecAST):
   op_lookup = {
     UnaryOps.NOOP: lambda builder,x: x,
     UnaryOps.NEG: lambda builder,x: builder.fneg(x),
@@ -161,15 +161,6 @@ class LLVMBuffer:
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
 
   def __repr__(self): return f"LLVMBuffer {str(self.shape)}"
-
-  # universal for shape tracked
-  def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
-
-  # universal
-  def unary_op(x, op:UnaryOps): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x,)))
-  def binary_op(x, op:BinaryOps, y): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x, y)))
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape).exec_ast(LazyOp(op=op, src=(x,), arg=new_shape))
-  def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   @staticmethod
   def fromCPU(x):
