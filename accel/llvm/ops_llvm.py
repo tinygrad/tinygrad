@@ -1,22 +1,21 @@
-# https://github.com/numba/llvmlite/blob/main/llvmlite/ir/builder.py
 from __future__ import annotations
 import os
 import hashlib
 import math
-from typing import Tuple, Union, Dict, List
+from typing import Tuple, Union
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
 from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
-from llvmlite import ir
 from ctypes import CFUNCTYPE
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops
-import llvmlite.binding as llvm
+from llvmlite import ir  # type: ignore
+import llvmlite.binding as llvm  # type: ignore
 
-int_const = lambda x: ir.Constant(ir.IntType(64), x)
+def int_const(x): return ir.Constant(ir.IntType(64), x)
 def idx_deref(builder, buf, ptr, eidx):
-  if eidx[2] == 1 and eidx[3] == None:
+  if eidx[2] == 1 and eidx[3] is None:
     idx = eidx[1]
   else:
     idx = builder.add(builder.mul(eidx[1], int_const(eidx[2])), eidx[3], name="idx")
@@ -81,38 +80,63 @@ def idx_deref(builder, buf, ptr, eidx):
   else:
     return builder.load(builder.gep(ptr, [idx]))
 
-target_machine, engine, optimizer = None, None, None
-def init_llvm():
-  global target_machine, engine, optimizer
-  llvm.initialize()
-  llvm.initialize_native_target()
-  llvm.initialize_native_asmprinter()  # yes, even this one
-  target = llvm.Target.from_default_triple()
-  target_machine = target.create_target_machine()
-  engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), target_machine)
-  optimizer = llvm.ModulePassManager()
-  builder = llvm.PassManagerBuilder()
-  builder.opt_level = 3
-  builder.loop_vectorize = True
-  builder.populate(optimizer)
+class LLVM:
+  target_machine = None
+  engine = None
+  optimizer = None
+  def __init__(self):
+    if LLVM.engine is not None:
+      return
+    llvm.initialize()
+    llvm.initialize_native_target()
+    llvm.initialize_native_asmprinter()  # yes, even this one
+    target = llvm.Target.from_default_triple()
+    LLVM.target_machine = target.create_target_machine()
+    LLVM.engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), LLVM.target_machine)
+    LLVM.optimizer = llvm.ModulePassManager()
+    builder = llvm.PassManagerBuilder()
+    builder.opt_level = 3
+    builder.loop_vectorize = True
+    builder.populate(LLVM.optimizer)
 
-  # cache
-  def notify_func(module, buffer):
-    #print("notify", module.name)
-    with open(f"/tmp/llvmcache/{module.name}", "wb") as f:
-      f.write(buffer)
-  def getbuffer_func(module):
-    #print("getbuffer", module.name)
-    try:
-      with open(f"/tmp/llvmcache/{module.name}", "rb") as f:
-        return f.read()
-    except FileNotFoundError:
-      return None
-  # enable cache
-  if int(os.getenv("LLVMCACHE", "0")):
-    engine.set_object_cache(notify_func, getbuffer_func)
+    # cache
+    def notify_func(module, buffer):
+      #print("notify", module.name)
+      with open(f"/tmp/llvmcache/{module.name}", "wb") as f:
+        f.write(buffer)
+    def getbuffer_func(module):
+      #print("getbuffer", module.name)
+      try:
+        with open(f"/tmp/llvmcache/{module.name}", "rb") as f:
+          return f.read()
+      except FileNotFoundError:
+        return None
+    # enable cache
+    if int(os.getenv("LLVMCACHE", "0")):
+      LLVM.engine.set_object_cache(notify_func, getbuffer_func)
 
-# TODO: write this
+  def exec(self, module, bufs):
+    llvm_ir = str(module)
+    if DEBUG >= 2:
+      print(llvm_ir)
+
+    mod = llvm.parse_assembly(llvm_ir)
+    mod.verify()
+    LLVM.optimizer.run(mod)
+    mod.name = hashlib.sha1(llvm_ir.encode('utf-8')).hexdigest()
+    if DEBUG >= 3:
+      print(LLVM.target_machine.emit_assembly(mod))
+    LLVM.engine.add_module(mod)
+    LLVM.engine.finalize_object()
+
+    # call function
+    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(LLVM.engine.get_function_address('exec'))
+    cfunc(*[x._buf for x in bufs])
+
+    # we are done
+    LLVM.engine.remove_module(mod)
+
+
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
 class LLVMBuffer:
   op_lookup = {
@@ -157,15 +181,13 @@ class LLVMBuffer:
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
-  def exec_ast(ret, ast:Union[LLVMBuffer, LazyOp]):
+  def exec_ast(ret, ast:LazyOp):
     # get the real buffers from the ast
     bufs = get_buffers(ast)
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
     earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
 
-    if engine is None:
-      init_llvm()
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
 
@@ -231,25 +253,5 @@ class LLVMBuffer:
     store_builder.cbranch(store_builder.icmp_unsigned("==", idx_p1, int_const(prod(ret.shape))), exit_builder._block, body_builder._block)
 
     # **** llvm running ****
-    llvm_ir = str(module)
-    if DEBUG >= 2:
-      print(llvm_ir)
-
-    mod = llvm.parse_assembly(llvm_ir)
-    mod.verify()
-    optimizer.run(mod)
-    mod.name = hashlib.sha1(llvm_ir.encode('utf-8')).hexdigest()
-    if DEBUG >= 3:
-      print(target_machine.emit_assembly(mod))
-    engine.add_module(mod)
-    engine.finalize_object()
-
-    # call function
-    bufs = [ret] + bufs
-    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(engine.get_function_address('exec'))
-    cfunc(*[x._buf for x in bufs])
-
-    # we are done
-    engine.remove_module(mod)
-
+    LLVM().exec(module, [ret] + bufs)
     return ret
