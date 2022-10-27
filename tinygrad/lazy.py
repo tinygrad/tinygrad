@@ -93,6 +93,10 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
 
 
 # **** realize helpers ****
+def realize_buffers(real_srcs, x):
+  if x in real_srcs:
+    return realize_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
+  return LazyOp(x.op, [realize_buffers(real_srcs, y) for y in x.src], x.arg)
 
 def _ast(x: Union[LazyBuffer, LazyOp], buf_names: Dict[LazyBuffer, str], code_for_op: Dict[Op, str]) -> str:
   if isinstance(x, LazyBuffer):
@@ -133,6 +137,11 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     return self.dbuffer(self.shape)._processing_op([(buf_names[lb], db) for lb,db in real_srcs.items()],
       earlycode=_ast(LazyOp(self.op.op, (src.op,), self.op.arg), buf_names, self.dbuffer.code_for_op), earlybufs=buf_names.values(), op=self.op.op), \
       list(real_srcs.values()), ReduceOps
+  elif MERGE_ELEMENTWISE_INTO_REDUCE and getattr(self.dbuffer, "exec_ast", None) and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
+    # this is the new version, deprecate _processing_op
+    real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_buffers(src.op)}
+    ast = LazyOp(self.op.op, (realize_buffers(real_srcs, src.op),), self.op.arg)
+    return self.dbuffer(self.shape).exec_ast(ast), list(real_srcs.values()), ReduceOps
   else:
     real_src = src.realize(self.device)
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
@@ -182,6 +191,25 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       _ast(self.op, buf_names, self.dbuffer.code_for_op), earlycode=earlycode, earlybufs=set(x for x in buf_names.values() if x.startswith("earlyarg_")),
       C=conv_args, reduce_shape=reduce_shape), \
       list(real_srcs.values()), ProcessingOps if conv_args is not None else (ReduceOps if reduce_shape[0] != reduce_shape[1] else BinaryOps)
+  elif getattr(self.dbuffer, "exec_ast", None):
+    real_shape = self.shape
+    op_type = BinaryOps
+    psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
+    if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+      src = psrcs[0][1].op.src[0]
+      if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
+        src = src.op
+      for i,x in enumerate(get_buffers(src) if isinstance(src, LazyOp) else [src]):
+        real_srcs[x] = None
+      real_srcs[psrcs[0][0]] = LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg)
+      real_shape = psrcs[0][1].shape
+      op_type = ReduceOps
+    for x in real_srcs.keys():
+      if real_srcs[x] is None:
+        real_srcs[x] = x.realize(self.device)
+    ret = self.dbuffer(real_shape).exec_ast(realize_buffers(real_srcs, self.op))
+    # shape can change
+    return (ret if real_shape == self.shape else self.dbuffer(self.shape, ret)), [x for x in real_srcs.values() if not isinstance(x, LazyOp)], op_type
   else:
     for x in real_srcs.keys():
       real_srcs[x] = x.realize(self.device)
