@@ -168,7 +168,7 @@ class LLVMBuffer:
   # universal
   def unary_op(x, op:UnaryOps): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x,)))
   def binary_op(x, op:BinaryOps, y): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x, y)))
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape).exec_ast(LazyOp(op=op, src=(x,)))
+  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape).exec_ast(LazyOp(op=op, src=(x,), arg=new_shape))
   def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   @staticmethod
@@ -181,12 +181,14 @@ class LLVMBuffer:
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
-  def exec_ast(ret, ast:LazyOp):
+  @staticmethod
+  def exec_ast(ast:LazyOp):
     # get the real buffers from the ast
     bufs = get_buffers(ast)
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
     earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
+    ret = LLVMBuffer(reduceops[0].arg if len(reduceops) > 0 else bufs[0].shape)
 
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
