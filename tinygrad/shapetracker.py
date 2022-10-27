@@ -44,7 +44,7 @@ class View:
 
 class ZeroView:
   def __init__(self, old_shape, arg):
-    self.shape = []
+    self.old_shape, self.arg, self.shape = old_shape, arg, []
     expr, acc = ['valid'], 1
     for s,(x,y) in list(zip(old_shape, arg))[::-1]:
       self.shape = [y-x] + self.shape
@@ -94,6 +94,7 @@ class ShapeTracker:
   # if we replace, confirm the ops taken fold into one view
   def strided(self, *arg):
     view = View([x[0] for x in arg], [x[1] for x in arg])
+    # TODO: this does not always require a new view if non contiguous
     if self.contiguous:
       self.views[-1] = view
     else:

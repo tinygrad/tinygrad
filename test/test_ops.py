@@ -1,11 +1,11 @@
 import os
 import torch
+import time
 import numpy as np
 import unittest
-import timeit
-import functools
 from tinygrad.tensor import Tensor, Device
 
+FORWARD_ONLY = bool(int(os.getenv("FORWARD_ONLY", "0")))
 def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
   torch.manual_seed(0)
   np.random.seed(0)
@@ -15,8 +15,14 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
     ts = [torch.tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=True) for x in shps]
 
   tst = [Tensor(x.detach().numpy(), requires_grad=True) for x in ts]
+
+  st = time.monotonic()
   out = torch_fxn(*ts)
-  ret = tinygrad_fxn(*tst)
+  torch_fp = time.monotonic() - st
+
+  st = time.monotonic()
+  ret = tinygrad_fxn(*tst).realize()
+  tinygrad_fp = time.monotonic() - st
 
   def compare(s, x,y,atol,rtol):
     if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch {x.shape} != {y.shape}"
@@ -27,24 +33,21 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
 
   compare("forward pass", ret.cpu().data, out.detach().numpy(), atol=atol, rtol=rtol)
 
-  if not forward_only:
+  torch_fbp, tinygrad_fbp = np.nan, np.nan
+  if not forward_only and not FORWARD_ONLY:
+    st = time.monotonic()
     out.mean().backward()
+    torch_fbp = time.monotonic() - st
+
+    st = time.monotonic()
     ret.mean().backward()
+    for tt in tst: tt.grad.realize()
+    tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt) in enumerate(zip(ts, tst)):
-      compare(f"backward pass tensor {i}", t.grad, tt.cpu().grad.data, atol=grad_atol, rtol=grad_rtol)
+      compare(f"backward pass tensor {i}", tt.cpu().grad.data, t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
 
-  # speed
-  torch_fp = timeit.Timer(functools.partial(torch_fxn, *ts)).timeit(5) * 1000/5
-  tinygrad_fp = timeit.Timer(functools.partial(tinygrad_fxn, *tst)).timeit(5) * 1000/5
-
-  if not forward_only:
-    torch_fbp = timeit.Timer(functools.partial(lambda f,x: f(*x).mean().backward(), torch_fxn, ts)).timeit(5) * 1000/5
-    tinygrad_fbp = timeit.Timer(functools.partial(lambda f,x: f(*x).mean().backward(), tinygrad_fxn, tst)).timeit(5) * 1000/5
-  else:
-    torch_fbp, tinygrad_fbp = np.nan, np.nan
-
-  print("testing %30r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms" % (shps, torch_fp, tinygrad_fp, torch_fbp-torch_fp, tinygrad_fbp-tinygrad_fp))
+  print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
 class TestOps(unittest.TestCase):
 
@@ -106,6 +109,8 @@ class TestOps(unittest.TestCase):
   def test_multidot(self):
     helper_test_op([(10,45,65), (10,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
+  def test_sum_simple(self):
+    helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[1.,1.]])
   def test_sum(self):
     helper_test_op([(45,3)], lambda x: x.sum(), Tensor.sum)
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=3), lambda x: Tensor.sum(x, axis=3))
@@ -163,6 +168,9 @@ class TestOps(unittest.TestCase):
           # NOTE: ANE backwards?
           helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
 
+  def test_slice_simple(self):
+    helper_test_op([(3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
+
   def test_slice(self):
     helper_test_op([(3,3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
     helper_test_op([(3,3,3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
@@ -204,6 +212,7 @@ class TestOps(unittest.TestCase):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
 
+  @unittest.skip("very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
     helper_test_op([(1,256,64,64), (512,256,3,3)],
@@ -238,6 +247,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,10,9,9), (10,10,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=True)
+
+  # expect reduce nodes == 3
+  def test_simple_conv2d_nhwc(self):
+    # weights (from tf): filter_height x filter_width x in_channels x out_channels
+    helper_test_op([(2,9,9,10), (3,3,10,20)],
+      lambda x,w: torch.nn.functional.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)).relu(),
+      lambda x,w: Tensor.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_simple_conv2d_batched(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],

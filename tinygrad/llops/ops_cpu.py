@@ -1,6 +1,7 @@
 import operator
 import numpy as np
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.helpers import shape_to_axis
 
 class CPUBuffer(np.ndarray):
   fxn_for_op = {
@@ -8,7 +9,8 @@ class CPUBuffer(np.ndarray):
     UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(), UnaryOps.RECIPROCAL: lambda x: 1.0/x,
     BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
     BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: (x==y).float(),
-    ReduceOps.SUM: lambda x, axis: x.sum(axis, keepdims=True), ReduceOps.MAX: lambda x, axis: x.amax(axis, keepdims=True)
+    ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
+    ReduceOps.MAX: lambda x, new_shape: x.amax(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:]
   }
 
   def relu(x): return np.maximum(x, 0)
@@ -30,11 +32,7 @@ class CPUBuffer(np.ndarray):
 
   def unary_op(x, op): return CPUBuffer.fxn_for_op[op](x)
   def binary_op(x, op, y): return CPUBuffer.fxn_for_op[op](x, y)
-
-  def reduce_op(x, op, new_shape):
-    assert len(x.shape) == len(new_shape)
-    axis = tuple([i for i,(a,b) in enumerate(zip(x.shape, new_shape)) if a != b])
-    return CPUBuffer.fxn_for_op[op](x, axis) if len(axis) > 0 else x[:]
+  def reduce_op(x, op, new_shape): return CPUBuffer.fxn_for_op[op](x, new_shape)
 
   def movement_op(x, op, arg=None):
     if op == MovementOps.SHRINK:
