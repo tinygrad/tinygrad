@@ -172,14 +172,14 @@ class LLVMBuffer(ExplicitExecAST):
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
-  @staticmethod
-  def exec_ast(ast:LazyOp) -> LLVMBuffer:
+  @classmethod
+  def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
     # get the real buffers from the ast
     bufs = get_buffers(ast)
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
     earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
-    ret = LLVMBuffer(reduceops[0].arg if len(reduceops) > 0 else bufs[0].shape)
+    ret = cls(reduceops[0].arg if len(reduceops) > 0 else bufs[0].shape)
 
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')

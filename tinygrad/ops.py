@@ -29,6 +29,7 @@ def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 
 # extend this if you don't have an exec_ast function
+# used in CPUBuffer and TorchBuffer
 class GenericExecAST:
   @classmethod
   def exec_ast(cls, ast:LazyOp):
@@ -44,6 +45,7 @@ class GenericExecAST:
     return ret
 
 # assumes you are using ShapeTracker
+# used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
 class ExplicitExecAST:
   # universal
   def unary_op(x, op:UnaryOps): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x,)))
