@@ -45,7 +45,8 @@ class GenericExecAST:
       ret = srcs[0].movement_op(ast.op, ast.arg)
     elif isinstance(ast.op, ProcessingOps):
       ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
-    else: raise Exception("unknown op")
+    else:
+      raise Exception("unknown op")
     return ret
 
 def get_lazyop_shape(ast:LazyOp) -> Tuple[int, ...]:
