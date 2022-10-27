@@ -4,7 +4,7 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
-from tinygrad.helpers import prod, ConvArgs
+from tinygrad.helpers import prod, ConvArgs, dedup
 from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, get_buffers, get_lazyops, Op
 from tinygrad.shapetracker import ShapeTracker
 
@@ -82,7 +82,7 @@ class GPUBuffer:
     UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)", UnaryOps.RECIPROCAL: "((float)1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
+    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)", MovementOps.RESHAPE: "(A)"
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
@@ -132,13 +132,17 @@ class GPUBuffer:
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     # copied from llvm
-    bufs = list(set(get_buffers(ast)))
+    bufs = dedup(get_buffers(ast))
+    movementops = [x for x in get_lazyops(ast) if isinstance(x.op, MovementOps)]
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps) or isinstance(x.op, ProcessingOps)]
-    assert len(reduceops) <= 1, "max one reduce op in an ast"
-    earlybufs = list(set(get_buffers(reduceops[0]))) if len(reduceops) > 0 else []
-    output_shape = bufs[0].shape
-    if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps): output_shape = reduceops[0].arg
+    assert len(reduceops) <= 1, f"max one reduce op in an ast, {reduceops}"
+    earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
+    output_shape, reduce_shape = bufs[0].shape, None
+    if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps):
+      output_shape = reduceops[0].arg
+      reduce_shape = (earlybufs[0].shape, reduceops[0].arg)
     if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps): output_shape = (reduceops[0].arg.bs, reduceops[0].arg.groups * reduceops[0].arg.rcout, reduceops[0].arg.oy, reduceops[0].arg.ox)
+    if len(movementops) > 0: output_shape = movementops[0].arg
     ret = cls(output_shape)
 
     buf_names : Dict[GPUBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(bufs)}
@@ -160,7 +164,7 @@ class GPUBuffer:
 
     C = reduceops[0].arg if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps) else None
     reduce_op = reduceops[0].op if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else ReduceOps.SUM
-    return ret._processing_op([(buf_names[x], x) for x in bufs], code, C, reduce_op, None, set(buf_names[x] for x in earlybufs), earlycode)
+    return ret._processing_op([(buf_names[x], x) for x in bufs], code, C, reduce_op, reduce_shape, set(buf_names[x] for x in earlybufs), earlycode)
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
     assert C is None, f"conv isn't handled by GPU anymore {C}"

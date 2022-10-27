@@ -1,6 +1,7 @@
 from collections import namedtuple
 import os, math
 
+def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x): return math.prod(x)
 def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0], tuple) or isinstance(x[0], list) else tuple(x)
 def argsort(x): return sorted(range(len(x)), key=x.__getitem__) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
