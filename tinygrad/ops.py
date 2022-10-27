@@ -24,5 +24,5 @@ class LazyOp(NamedTuple):
   # TODO: add dest to support multiple outputs
 
 # Any == Union[LazyBuffer, DeviceBuffer]
-def get_lazybuffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_lazybuffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
+def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
