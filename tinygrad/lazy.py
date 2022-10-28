@@ -241,13 +241,11 @@ class LazyBuffer:
   def movement_op(self:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
     # TODO: look into why that copy is needed
     arg = tuple(copy(arg))
+    local_st = ShapeTracker(self.shape).movement_op(op, arg)
 
     # instant nops
-    if op in [MovementOps.RESHAPE, MovementOps.EXPAND] and arg == self.shape: return self
-    if op == MovementOps.PERMUTE and arg == tuple(range(len(self.shape))): return self
-    if op == MovementOps.SHRINK and arg == tuple((0,i) for i in self.shape): return self
-    if op == MovementOps.PAD and arg == tuple((0,0) for _ in self.shape): return self
-    if op == MovementOps.FLIP and all(s == 1 or i not in arg for i,s in enumerate(self.shape)): return self
+    if local_st.contiguous and self.shape == local_st.shape:
+      return self
 
     # two ops in a row is one op
     if op in [MovementOps.RESHAPE, MovementOps.EXPAND, MovementOps.SHRINK] and self.realized is None and self.op.op == op:
@@ -258,7 +256,7 @@ class LazyBuffer:
       return self.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)))
 
     # some permutes are actually just reshapes
-    if op == MovementOps.PERMUTE and ShapeTracker(self.shape).movement_op(op, arg).contiguous:
+    if op == MovementOps.PERMUTE and local_st.contiguous:
       return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
 
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
