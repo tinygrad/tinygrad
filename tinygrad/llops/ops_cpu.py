@@ -11,7 +11,8 @@ class CPUBuffer(np.ndarray, GenericExecAST):
     BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
     BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: (x==y).float(),
     ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
-    ReduceOps.MAX: lambda x, new_shape: x.amax(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:]
+    ReduceOps.MAX: lambda x, new_shape: x.amax(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
+    MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)]
   }
 
   def relu(x): return np.maximum(x, 0)
@@ -24,8 +25,7 @@ class CPUBuffer(np.ndarray, GenericExecAST):
   def permute(x, order): return x.transpose(order)
   def pad(x, padding): return np.pad(x, padding).view(CPUBuffer)
   def expand(x, new_shape): return np.broadcast_to(x, new_shape).view(CPUBuffer)
-  def as_strided(x, size, stride): return np.lib.stride_tricks.as_strided(x, shape=size, strides=[y*x.dtype.itemsize for y in stride]).view(CPUBuffer)
-  def contiguous(x): return x.ravel().reshape(x.shape)
+  def strided(x, arg): return np.lib.stride_tricks.as_strided(x.ravel().reshape(x.shape), shape=[y[0] for y in arg], strides=[y[1]*x.dtype.itemsize for y in arg]).view(CPUBuffer)
 
   @staticmethod
   def fromCPU(x): return x.view(CPUBuffer)
@@ -34,21 +34,13 @@ class CPUBuffer(np.ndarray, GenericExecAST):
   def unary_op(x, op): return CPUBuffer.fxn_for_op[op](x)
   def binary_op(x, op, y): return CPUBuffer.fxn_for_op[op](x, y)
   def reduce_op(x, op, new_shape): return CPUBuffer.fxn_for_op[op](x, new_shape)
+  def movement_op(x, op, arg=None): return CPUBuffer.fxn_for_op[op](x, arg) if op in CPUBuffer.fxn_for_op else getattr(x, op.name.lower())(arg)
 
-  def movement_op(x, op, arg=None):
-    if op == MovementOps.SHRINK:
-      return x[tuple(slice(p[0], p[1], None) for p in arg)]
-    elif op == MovementOps.STRIDED:
-      return x.contiguous().as_strided([x[0] for x in arg], [x[1] for x in arg])
-    else:
-      return getattr(x, op.name.lower())(arg)
-
-  PREPAD = True
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     tx = x.movement_op(MovementOps.STRIDED, (
       (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
       (C.oy, C.sy*x.shape[3]), (C.ox, C.sx), (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
     tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
-    out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.contiguous(), tw.contiguous())
+    out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
     return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox).view(CPUBuffer)

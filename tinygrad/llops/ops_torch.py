@@ -5,6 +5,7 @@ from tinygrad.ops import ProcessingOps, GenericExecAST
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class TorchBuffer(torch.Tensor, GenericExecAST):
   def pad(x, padding): return torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
+  def strided(x, arg): return x.contiguous().as_strided([y[0] for y in arg], [y[1] for y in arg])
 
   @staticmethod
   def fromCPU(data): return TorchBuffer(torch.from_numpy(data).requires_grad_(False)).to(device)
