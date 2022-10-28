@@ -64,7 +64,7 @@ def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBu
   return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w], ProcessingOps
 
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:None for x in get_buffers(self.op)}
+  real_srcs : Dict[LazyBuffer, Union[None, LazyOp, DeviceBuffer]] = {x:None for x in get_buffers(self.op)}
   op_type : OpType = BinaryOps
   psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE and (self.device != "OPENCL" or self.shape[-1] == 4):
@@ -88,7 +88,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       real_srcs[x] = x.realize(self.device)
   ret = self.dbuffer.exec_ast(realize_buffers(real_srcs, self.op))
   assert ret.shape == self.shape, f"shape mismatch {ret.shape} != {self.shape}"
-  return ret, [x for x in real_srcs.values() if not isinstance(x, LazyOp)], op_type
+  return ret, [x for x in real_srcs.values() if not isinstance(x, LazyOp) and x is not None], op_type
 
 _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:_realize_movementops, BinaryOps:_realize_binaryops, ProcessingOps:_realize_processingops}
 
@@ -113,7 +113,7 @@ class LazyBuffer:
     return LazyBuffer.lazycache[wop]
 
   def __init__(self, device, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
-    if getattr(self, 'device', None) is not None:
+    if hasattr(self, 'device'):
       return  # cache hit, we return and don't reinit
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape, self.optype, self.op = self.st.shape, optype, op

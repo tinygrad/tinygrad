@@ -29,14 +29,12 @@ def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 
 # a placeholder class to extend by the exec classes
-#class DeviceBuffer: pass
-
-# TODO: fix the types for this
-DeviceBuffer = Any
+class DeviceBuffer:
+  shape: Any   # should be Tuple[int, ...] but ndarray and torch.tensor have imcompatible types
 
 # extend this if you don't have an exec_ast function
 # used in CPUBuffer and TorchBuffer
-class GenericExecAST:
+class GenericExecAST(DeviceBuffer):
   @classmethod
   def exec_ast(cls, ast:LazyOp, preprocess=lambda x: x):
     srcs = [cls.exec_ast(x, preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
@@ -67,8 +65,7 @@ def get_lazyop_shape(ast:LazyOp): return GenericShape.exec_ast(ast, GenericShape
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
-# type: ignore
-class ExplicitExecAST:
+class ExplicitExecAST(DeviceBuffer):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape

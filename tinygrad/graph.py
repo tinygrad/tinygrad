@@ -40,13 +40,13 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
   if GRAPH:
     def nm(x):
       global global_num_max
-      if getattr(x, 'global_num', None) is None:
+      if not hasattr(x, 'global_num'):
         setattr(x, 'global_num', global_num_max)
         global_num_max += 1
       return f"<<< {x.global_num} >>>"
 
     top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
-    dashed = (optype == LoadOps and getattr(ret, "_backing", None) is not None) or (getattr(ret, "st", None) is not None and not ret.st.contiguous)
+    dashed = (optype == LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
 
     for x in inp:
       if len(op) <= 2:
