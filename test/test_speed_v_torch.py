@@ -1,3 +1,4 @@
+import os
 import unittest
 import torch
 import time
@@ -5,18 +6,20 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 
+IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "1,16,64").split(",")]
+
 CNT = 5
 class TestSpeedVTorch(unittest.TestCase):
   def test_conv2d(self):
     torch.manual_seed(0)
     for bs in [32]:
-      for in_chans in [1,16,64]:
+      for in_chans in IN_CHANS:
         for out_chans in [64]:
           device = 'cuda' if torch.cuda.is_available() else 'cpu'
           img_size = 64 if device == 'cuda' else 32
           src = torch.rand(bs, in_chans, img_size, img_size)
           dat = src.clone().to(device)
-          src_conv = torch.nn.Conv2d(in_chans, out_chans, 3)
+          src_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None)
           conv = src_conv.to(device)
           with torch.no_grad():
             val_torch = conv(dat).cpu().numpy().sum()
@@ -30,9 +33,8 @@ class TestSpeedVTorch(unittest.TestCase):
 
           Tensor.no_grad = False
           dat = Tensor(src.numpy())
-          conv = Conv2d(in_chans, out_chans, 3)
+          conv = Conv2d(in_chans, out_chans, 3, bias=None)
           conv.weight = Tensor(src_conv.weight.detach().cpu().numpy())
-          conv.bias = Tensor(src_conv.bias.detach().cpu().numpy())
           val_tinygrad = conv(dat).numpy().sum()
           ets_tinygrad = []
           for _ in range(CNT):
