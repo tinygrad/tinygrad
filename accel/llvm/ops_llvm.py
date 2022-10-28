@@ -157,8 +157,7 @@ class LLVMBuffer(ExplicitExecAST):
     MovementOps.RESHAPE: lambda builder,x: x,
   }
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
-    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape = self.st.shape
+    super().__init__(shape, hostbuf)
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
 
   def __repr__(self): return f"LLVMBuffer {str(self.shape)}"

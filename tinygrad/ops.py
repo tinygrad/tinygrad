@@ -28,50 +28,60 @@ class LazyOp(NamedTuple):
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 
+def get_lazyop_shape(ast:LazyOp) -> Tuple[int, ...]:
+  srcs = [get_lazyop_shape(x) if isinstance(x, LazyOp) else x.shape for x in ast.src]
+  if ast.op in UnaryOps:
+    return srcs[0]
+  elif ast.op in BinaryOps:
+    assert srcs[0] == srcs[1], f"BinaryOp must have matching shape {srcs[0]}, {srcs[1]}"
+    return srcs[0]
+  elif ast.op in ReduceOps:
+    assert all(r == n or n == 1 for r,n in zip(srcs[0], ast.arg)), f"ReduceOp must reduce {srcs[0]} -> {ast.arg}"
+    return ast.arg
+  elif ast.op in MovementOps:
+    return ShapeTracker(srcs[0]).movement_op(ast.op, ast.arg).shape
+  elif ast.op in ProcessingOps:
+    return (ast.arg.bs, ast.arg.groups * ast.arg.rcout, ast.arg.oy, ast.arg.ox)
+  else:
+    raise Exception("unknown op")
+
 # extend this if you don't have an exec_ast function
 # used in CPUBuffer and TorchBuffer
 class GenericExecAST:
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
-    if isinstance(ast.op, UnaryOps):
+    if ast.op in UnaryOps:
       ret = srcs[0].unary_op(ast.op)
-    elif isinstance(ast.op, BinaryOps):
+    elif ast.op in BinaryOps:
       assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
       ret = srcs[0].binary_op(ast.op, srcs[1])
-    elif isinstance(ast.op, ReduceOps):
+    elif ast.op in ReduceOps:
       ret = srcs[0].reduce_op(ast.op, ast.arg)
-    elif isinstance(ast.op, MovementOps):
+    elif ast.op in MovementOps:
       ret = srcs[0].movement_op(ast.op, ast.arg)
-    elif isinstance(ast.op, ProcessingOps):
+    elif ast.op in ProcessingOps:
       ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
     else:
       raise Exception("unknown op")
     return ret
 
-def get_lazyop_shape(ast:LazyOp) -> Tuple[int, ...]:
-  srcs = [get_lazyop_shape(x) if isinstance(x, LazyOp) else x.shape for x in ast.src]
-  if isinstance(ast.op, UnaryOps):
-    return srcs[0]
-  elif isinstance(ast.op, BinaryOps):
-    assert srcs[0] == srcs[1], f"BinaryOp must have matching shape {srcs[0]}, {srcs[1]}"
-    return srcs[0]
-  elif isinstance(ast.op, ReduceOps):
-    assert all(r == n or n == 1 for r,n in zip(srcs[0], ast.arg))
-    return ast.arg
-  elif isinstance(ast.op, MovementOps):
-    return ShapeTracker(srcs[0]).movement_op(ast.op, ast.arg).shape
-  elif isinstance(ast.op, ProcessingOps):
-    return (ast.arg.bs, ast.arg.groups * ast.arg.rcout, ast.arg.oy, ast.arg.ox)
-
 # assumes you are using ShapeTracker
 # used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
+# type: ignore
 class ExplicitExecAST:
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
+    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
+    self.shape = self.st.shape
+
+  @classmethod
+  def exec_ast(cls, ast:LazyOp): raise NotImplementedError("must be implemented")
+
   # universal
-  def unary_op(x, op:UnaryOps): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x,)))
-  def binary_op(x, op:BinaryOps, y): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x, y)))
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape).exec_ast(LazyOp(op=op, src=(x,), arg=new_shape))
+  def unary_op(self, op:UnaryOps): return type(self)(self.shape).exec_ast(LazyOp(op=op, src=(self,)))
+  def binary_op(self, op:BinaryOps, y): return type(self)(self.shape).exec_ast(LazyOp(op=op, src=(self, y)))
+  def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return type(self)(new_shape).exec_ast(LazyOp(op=op, src=(self,), arg=new_shape))
 
   # universal for shape tracked
-  def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
-  def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
+  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
+  def contiguous_op(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
