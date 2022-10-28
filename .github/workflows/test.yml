@@ -134,7 +134,7 @@ jobs:
       run: OPT=2 OPENCL=1 python3 test/test_ops.py
     - name: Test openpilot model
       run: |
-        FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
+        ALLOWED_KERNEL_COUNT=206 FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
         UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
 
   testmypy:
