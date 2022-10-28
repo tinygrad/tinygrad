@@ -24,7 +24,7 @@ class Log(Function):
 class Exp(Function):
   def forward(self, x):
     ret = x.unary_op(UnaryOps.EXP)
-    self.save_for_backward(ret)   # we save the output here, not the input
+    self.save_for_backward(ret)
     return ret
 
   def backward(self, grad_output):

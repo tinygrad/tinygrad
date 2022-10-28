@@ -156,4 +156,3 @@ class ShapeTracker:
     new_shape = [(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)]
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
     self.views[-1] = View(new_shape, strides, self.offset + offset)
-

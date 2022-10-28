@@ -30,7 +30,7 @@ def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add
 
 # a placeholder class to extend by the exec classes
 class DeviceBuffer:
-  shape: Any   # should be Tuple[int, ...] but ndarray and torch.tensor have imcompatible types
+  shape: Any   # should be Tuple[int, ...] but ndarray and torch.tensor have incompatible types
 
 # extend this if you don't have an exec_ast function
 # used in CPUBuffer and TorchBuffer
