@@ -57,7 +57,7 @@ class GenericShape(GenericExecAST):
   def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return type(self)(new_shape)
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.shape).movement_op(op, arg))
   def processing_op(self, op:ProcessingOps, w, C): return type(self)(C.out_shape)
-def get_lazyop_shape(ast:LazyOp): return GenericShape.exec_ast(ast, lambda x: GenericShape(x)).shape
+def get_lazyop_shape(ast:LazyOp): return GenericShape.exec_ast(ast, GenericShape).shape
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
