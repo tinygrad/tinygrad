@@ -28,6 +28,12 @@ class LazyOp(NamedTuple):
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 
+# a placeholder class to extend by the exec classes
+#class DeviceBuffer: pass
+
+# TODO: fix the types for this
+DeviceBuffer = Any
+
 # extend this if you don't have an exec_ast function
 # used in CPUBuffer and TorchBuffer
 class GenericExecAST:

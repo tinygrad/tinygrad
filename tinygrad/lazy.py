@@ -1,15 +1,15 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, Any, List, Dict
 from copy import copy
-import os, sys, itertools, weakref
+import os, sys, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
+from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
+from tinygrad.graph import log_op
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
-GRAPH = int(os.getenv("GRAPH", "0"))
 OPT = int(os.getenv("OPT", "1"))
 NOCONV = int(os.getenv("NOCONV", "0"))
 
@@ -24,73 +24,6 @@ class Device:
   _buffers, DEFAULT = get_available_llops()
   for name in _buffers.keys():
     vars()[name] = name
-
-# TODO: get device buffer types
-DeviceBuffer = Any
-
-# **** debugging and graphing ****
-
-import atexit
-from collections import defaultdict
-cnts : Dict[OpType, int] = defaultdict(int)
-if GRAPH:
-  import networkx as nx  # type: ignore
-  G = nx.DiGraph()
-  def save_graph_exit():
-    for k,v in cnts.items():
-      print(k, v)
-    if int(os.getenv("PRUNEGRAPH", "0")):
-      dead_nodes = []
-      for n in G.nodes:
-        # prune movementops and loadops
-        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80", "#FFFF8080", "#FFFF80"]:
-          for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n)):
-            G.add_edge(x, y)
-          dead_nodes.append(n)
-      for n in dead_nodes:
-        G.remove_node(n)
-    print("saving", G)
-    nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
-    # -Gnslimit=100 can make it finish, but you won't like results
-    os.system('dot -Tsvg /tmp/net.dot -o /tmp/net.svg')
-  atexit.register(save_graph_exit)
-
-global_num_max = 0
-def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[DeviceBuffer]):
-  cnts[optype] += 1
-  if DEBUG >= 3:
-    print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
-  if GRAPH:
-    def nm(x):
-      global global_num_max
-      if getattr(x, 'global_num', None) is None:
-        setattr(x, 'global_num', global_num_max)
-        global_num_max += 1
-      return f"<<< {x.global_num} >>>"
-
-    top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
-    dashed = (optype == LoadOps and getattr(ret, "_backing", None) is not None) or (getattr(ret, "st", None) is not None and not ret.st.contiguous)
-
-    for x in inp:
-      if len(op) <= 2:
-        sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
-      elif len(op) <= 4:
-        sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
-      else:
-        sop = str(len(op))
-      G.add_edge(nm(x), nm(ret), label=sop)
-      if 'label' not in G.nodes[nm(x)]:
-        G.nodes[nm(x)]['label'] = str(x.shape)
-    if nm(ret) not in G.nodes:
-      G.add_node(nm(ret))
-
-    if optype == ReduceOps:
-      G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
-    else:
-      G.nodes[nm(ret)]['label'] = str(ret.shape)
-    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
-    G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
-
 
 # **** realize helpers ****
 def realize_buffers(real_srcs, x):
