@@ -32,8 +32,8 @@ def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add
 # used in CPUBuffer and TorchBuffer
 class GenericExecAST:
   @classmethod
-  def exec_ast(cls, ast:LazyOp):
-    srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else (x if isinstance(x, cls) else cls(x)) for x in ast.src]
+  def exec_ast(cls, ast:LazyOp, preprocess=lambda x: x):
+    srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
     if ast.op in UnaryOps:
       ret = srcs[0].unary_op(ast.op)
     elif ast.op in BinaryOps:
@@ -57,7 +57,7 @@ class GenericShape(GenericExecAST):
   def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return type(self)(new_shape)
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.shape).movement_op(op, arg))
   def processing_op(self, op:ProcessingOps, w, C): return type(self)((C.bs, C.groups * C.rcout, C.oy, C.ox))
-def get_lazyop_shape(ast:LazyOp): return GenericShape.exec_ast(ast).shape
+def get_lazyop_shape(ast:LazyOp): return GenericShape.exec_ast(ast, lambda x: GenericShape(x)).shape
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
