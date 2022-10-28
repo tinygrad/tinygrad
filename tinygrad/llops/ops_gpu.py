@@ -134,6 +134,11 @@ class GPUBuffer(ExplicitExecAST):
 
     buf_names : Dict[GPUBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(bufs)}
 
+    # special names for input and weight
+    if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps):
+      buf_names[reduceops[0].src[0]] = "input"
+      buf_names[reduceops[0].src[1]] = "weight"
+
     def _ast(x: Union[GPUBuffer, LazyOp], buf_names: Dict[GPUBuffer, str], code_for_op: Dict[Op, str], allow_reduce=False) -> str:
       if isinstance(x, GPUBuffer):
         return buf_names[x]
@@ -147,7 +152,7 @@ class GPUBuffer(ExplicitExecAST):
         code = code.replace("B", srcs_code[1])
       return code
 
-    earlycode = _ast(reduceops[0], buf_names, cls.code_for_op, allow_reduce=True) if len(reduceops) > 0 else "acc"
+    earlycode = _ast(reduceops[0], buf_names, cls.code_for_op, allow_reduce=True) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else "acc"
     code = _ast(ast, buf_names, cls.code_for_op)
 
     C = reduceops[0].arg if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps) else None

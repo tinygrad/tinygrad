@@ -33,7 +33,7 @@ def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add
 class GenericExecAST:
   @classmethod
   def exec_ast(cls, ast:LazyOp, preprocess=lambda x: x):
-    srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
+    srcs = [cls.exec_ast(x, preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
     if ast.op in UnaryOps:
       ret = srcs[0].unary_op(ast.op)
     elif ast.op in BinaryOps:
