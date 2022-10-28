@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
-from ast import Assert
-import pathlib, sys
+import os, time, io, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-from collections import defaultdict
-import pyopencl as cl
-
-import os
-import time
-import io
-ALLOWED_KERNEL_COUNT = int(os.getenv("ALLOWED_KERNEL_COUNT", 0))
 
 os.environ['OPT'] = '99'
 if os.getenv("GPU", None) is None:
   os.environ['OPENCL'] = '1'
 
+ALLOWED_KERNEL_COUNT = int(os.getenv("ALLOWED_KERNEL_COUNT", 0))
 DEBUGCL = int(os.getenv("DEBUGCL", 0))
 
 import onnx
@@ -21,11 +14,10 @@ import numpy as np
 
 import tinygrad.lazy as lazy
 
-from tinygrad.llops.ops_gpu import CL, CLProgram, CLBuffer
+from tinygrad.llops.ops_gpu import CL
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/6c5693e965b9c63f8678f52b9e9b5abe35f23feb/selfdrive/modeld/models/supercombo.onnx"
 
