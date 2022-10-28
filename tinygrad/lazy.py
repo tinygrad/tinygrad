@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Union, Any, List, Dict
+from typing import Optional, Tuple, Union, List, Dict
 from copy import copy
 import os, sys, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shapetracker import ShapeTracker
-from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.graph import log_op
 
 # lazy can recurse a lot

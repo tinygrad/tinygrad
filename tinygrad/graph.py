@@ -3,7 +3,7 @@ import atexit
 import itertools
 from collections import defaultdict
 from typing import Dict, List
-from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
+from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType
 
 GRAPH = int(os.getenv("GRAPH", "0"))
 
