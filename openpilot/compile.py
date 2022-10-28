@@ -8,6 +8,7 @@ import pyopencl as cl
 import os
 import time
 import io
+ALLOWED_KERNEL_COUNT = int(os.getenv("ALLOWED_KERNEL_COUNT", 0))
 
 os.environ['OPT'] = '99'
 if os.getenv("GPU", None) is None:
@@ -103,6 +104,7 @@ def compile(dat, output_fn):
   tinygrad_out.realize()
   lazy.GRAPH = False
   print("kernel count:", len(CL.CACHE))
+  assert len(CL.CACHE) <= ALLOWED_KERNEL_COUNT or ALLOWED_KERNEL_COUNT == 0, "too many kernels!"
 
   from extra.thneed import Thneed
   t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})

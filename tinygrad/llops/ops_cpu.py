@@ -1,9 +1,10 @@
+from __future__ import annotations
 import operator
 import numpy as np
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, GenericExecAST
 from tinygrad.helpers import shape_to_axis
 
-class CPUBuffer(np.ndarray):
+class CPUBuffer(np.ndarray, GenericExecAST):
   fxn_for_op = {
     UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
     UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.SIGN: lambda x: x.sign(), UnaryOps.RECIPROCAL: lambda x: 1.0/x,

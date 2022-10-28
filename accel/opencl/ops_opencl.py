@@ -3,7 +3,7 @@
 from __future__ import annotations
 import os
 from tinygrad.llops.ops_gpu import GPUBuffer, CL, CLProgram, CLBuffer
-from tinygrad.ops import ProcessingOps, ReduceOps, UnaryOps, BinaryOps
+from tinygrad.ops import ProcessingOps, ReduceOps, UnaryOps, BinaryOps, MovementOps
 from tinygrad.helpers import prod, ConvArgs
 from typing import List, Tuple, Optional, Dict, Set
 import numpy as np
@@ -137,7 +137,7 @@ class OpenCLBuffer(GPUBuffer):
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)", BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
+    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)", MovementOps.RESHAPE: "(A)"
   }
   def __init__(self, shape, hostbuf:Optional[OpenCLBuffer]=None, backing:Optional[np.ndarray]=None):
     self._image = hostbuf._image if hostbuf is not None else None

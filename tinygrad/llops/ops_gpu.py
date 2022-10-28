@@ -4,8 +4,8 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
-from tinygrad.helpers import prod, ConvArgs
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps
+from tinygrad.helpers import prod, ConvArgs, dedup
+from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_shape, ExplicitExecAST
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -76,19 +76,18 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
-class GPUBuffer:
-  code_for_op = {
+class GPUBuffer(ExplicitExecAST):
+  code_for_op : Dict[Op, str] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)",
     UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)", UnaryOps.RECIPROCAL: "((float)1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
+    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)", MovementOps.RESHAPE: "(A)"
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
-    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape = self.st.shape
+    super().__init__(shape, hostbuf)
     self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
@@ -123,14 +122,45 @@ class GPUBuffer:
       f"__global const float *{name}_g" if constant is None else None, \
       f"get_{name}({name+'_g, ' if constant is None else ''}gid{', subidx' if reduce is not None else ''});"
 
-  def unary_op(x, op:UnaryOps): return type(x)(x.shape)._processing_op([("A", x)], GPUBuffer.code_for_op[op])
-  def binary_op(x, op:BinaryOps, y:GPUBuffer): return type(x)(x.shape)._processing_op([("A", x), ("B", y)], GPUBuffer.code_for_op[op])
-  def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
-  def movement_op(x, op:MovementOps, arg) -> GPUBuffer: return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape)._processing_op([("A", x)], code="acc", earlycode=GPUBuffer.code_for_op[op], earlybufs=set("A"), op=op)
+  @classmethod
+  def exec_ast(cls, ast:LazyOp):
+    # copied from llvm
+    bufs = dedup(get_buffers(ast))
+    reduceops = dedup([x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps) or isinstance(x.op, ProcessingOps)])
+    assert len(reduceops) <= 1, f"max one reduce op in an ast, {reduceops}"
+    earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
+    reduce_shape = (earlybufs[0].shape, reduceops[0].arg) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else None
+    ret = cls(get_lazyop_shape(ast))
+
+    buf_names : Dict[GPUBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(bufs)}
+
+    # special names for input and weight
+    if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps):
+      buf_names[reduceops[0].src[0]] = "input"
+      buf_names[reduceops[0].src[1]] = "weight"
+
+    def _ast(x: Union[GPUBuffer, LazyOp], buf_names: Dict[GPUBuffer, str], code_for_op: Dict[Op, str], allow_reduce=False) -> str:
+      if isinstance(x, GPUBuffer):
+        return buf_names[x]
+      if not allow_reduce and type(x.op) in [ProcessingOps, ReduceOps]:
+        return "acc"
+      srcs_code = [_ast(src, buf_names, code_for_op) for src in x.src]
+      code = code_for_op[x.op]
+      if len(srcs_code) >= 1:
+        code = code.replace("A", srcs_code[0])
+      if len(srcs_code) >= 2:
+        code = code.replace("B", srcs_code[1])
+      return code
+
+    earlycode = _ast(reduceops[0], buf_names, cls.code_for_op, allow_reduce=True) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else "acc"
+    code = _ast(ast, buf_names, cls.code_for_op)
+
+    C = reduceops[0].arg if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps) else None
+    reduce_op = reduceops[0].op if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else ReduceOps.SUM
+    return ret._processing_op([(buf_names[x], x) for x in bufs], code, C, reduce_op, reduce_shape, set(buf_names[x] for x in earlybufs), earlycode)
 
   def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
-    assert C is None
+    assert C is None, f"conv isn't handled by GPU anymore {C}"
 
     # get the input/output shape and the reduce amount
     reduce_shape = (bufs[0][1].shape, ret.shape) if reduce_shape is None else reduce_shape

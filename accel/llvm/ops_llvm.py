@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_shape
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 
@@ -138,7 +138,7 @@ class LLVM:
 
 
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
-class LLVMBuffer:
+class LLVMBuffer(ExplicitExecAST):
   op_lookup = {
     UnaryOps.NOOP: lambda builder,x: x,
     UnaryOps.NEG: lambda builder,x: builder.fneg(x),
@@ -154,22 +154,13 @@ class LLVMBuffer:
     BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y),
     BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y]),
     BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType()),
+    MovementOps.RESHAPE: lambda builder,x: x,
   }
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
-    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape = self.st.shape
+    super().__init__(shape, hostbuf)
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
 
   def __repr__(self): return f"LLVMBuffer {str(self.shape)}"
-
-  # universal for shape tracked
-  def movement_op(x, op:MovementOps, arg): return type(x)(ShapeTracker(x.st).movement_op(op, arg), x)
-
-  # universal
-  def unary_op(x, op:UnaryOps): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x,)))
-  def binary_op(x, op:BinaryOps, y): return type(x)(x.shape).exec_ast(LazyOp(op=op, src=(x, y)))
-  def reduce_op(x, op:ReduceOps, new_shape:Tuple[int, ...]): return type(x)(new_shape).exec_ast(LazyOp(op=op, src=(x,)))
-  def contiguous_op(x): return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   @staticmethod
   def fromCPU(x):
@@ -181,12 +172,14 @@ class LLVMBuffer:
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
-  def exec_ast(ret, ast:LazyOp):
+  @classmethod
+  def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
     # get the real buffers from the ast
     bufs = get_buffers(ast)
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
     earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
+    ret = cls(get_lazyop_shape(ast))
 
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
@@ -215,14 +208,14 @@ class LLVMBuffer:
       return LLVMBuffer.op_lookup[x.op](builder, *values)
 
     if len(reduceops) > 0:
-      assert len(earlybufs[0].shape) == len(ret.shape), "reduce only possible on matching shapes"
+      assert len(earlybufs[0].shape) == len(reduceops[0].arg), "reduce only possible on matching shapes"
       if DEBUG >= 1:
-        print(f"reduce {earlybufs[0].shape} -> {ret.shape}")
-      red = prod([s for s,n in zip(earlybufs[0].shape, ret.shape) if n == 1])
+        print(f"reduce {earlybufs[0].shape} -> {reduceops[0].arg}")
+      red = prod([s for s,n in zip(earlybufs[0].shape, reduceops[0].arg) if n == 1])
       red_idx = reduce_builder.phi(ir.IntType(64))
       red_idx.add_incoming(int_const(0), body_builder._block)
       val = reduce_builder.phi(ir.FloatType())
-      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (prod(ret.shape), idx, red, red_idx))
+      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (prod(reduceops[0].arg), idx, red, red_idx))
 
       if reduceops[0].op == ReduceOps.SUM:
         val.add_incoming(ir.Constant(ir.FloatType(), 0), body_builder._block)
