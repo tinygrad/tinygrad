@@ -28,35 +28,19 @@ class LazyOp(NamedTuple):
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 
-def get_lazyop_shape(ast:LazyOp) -> Tuple[int, ...]:
-  srcs = [get_lazyop_shape(x) if isinstance(x, LazyOp) else x.shape for x in ast.src]
-  if ast.op in UnaryOps:
-    return srcs[0]
-  elif ast.op in BinaryOps:
-    assert srcs[0] == srcs[1], f"BinaryOp must have matching shape {srcs[0]}, {srcs[1]}"
-    return srcs[0]
-  elif ast.op in ReduceOps:
-    assert all(r == n or n == 1 for r,n in zip(srcs[0], ast.arg)), f"ReduceOp must reduce {srcs[0]} -> {ast.arg}"
-    return ast.arg
-  elif ast.op in MovementOps:
-    return ShapeTracker(srcs[0]).movement_op(ast.op, ast.arg).shape
-  elif ast.op in ProcessingOps:
-    return (ast.arg.bs, ast.arg.groups * ast.arg.rcout, ast.arg.oy, ast.arg.ox)
-  else:
-    raise Exception("unknown op")
-
 # extend this if you don't have an exec_ast function
 # used in CPUBuffer and TorchBuffer
 class GenericExecAST:
   @classmethod
   def exec_ast(cls, ast:LazyOp):
-    srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
+    srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else (x if isinstance(x, cls) else cls(x)) for x in ast.src]
     if ast.op in UnaryOps:
       ret = srcs[0].unary_op(ast.op)
     elif ast.op in BinaryOps:
       assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
       ret = srcs[0].binary_op(ast.op, srcs[1])
     elif ast.op in ReduceOps:
+      assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
       ret = srcs[0].reduce_op(ast.op, ast.arg)
     elif ast.op in MovementOps:
       ret = srcs[0].movement_op(ast.op, ast.arg)
@@ -65,6 +49,15 @@ class GenericExecAST:
     else:
       raise Exception("unknown op")
     return ret
+
+class GenericShape(GenericExecAST):
+  def __init__(self, x): self.shape = x if isinstance(x, tuple) else x.shape
+  def unary_op(self, op:UnaryOps): return self
+  def binary_op(self, op:BinaryOps, y): return self
+  def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return type(self)(new_shape)
+  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.shape).movement_op(op, arg))
+  def processing_op(self, op:ProcessingOps, w, C): return type(self)((C.bs, C.groups * C.rcout, C.oy, C.ox))
+def get_lazyop_shape(ast:LazyOp): return GenericShape.exec_ast(ast).shape
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
