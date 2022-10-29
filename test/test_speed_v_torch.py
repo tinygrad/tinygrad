@@ -12,7 +12,7 @@ IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "1,16,64").split(",")]
 CNT = 5
 class TestSpeed(unittest.TestCase):
   def test_gemm(self):
-    N = 2048
+    N = 1024
     torch.manual_seed(0)
     torch_a = torch.rand(N, N)
     torch_b = torch.rand(N, N)
@@ -23,8 +23,7 @@ class TestSpeed(unittest.TestCase):
     for _ in range(CNT):
       torch_a += 1
       st = time.monotonic()
-      while 1:
-        torch_c = torch_a @ torch_b
+      torch_c = torch_a @ torch_b
       et_torch = (time.monotonic() - st) * 1000
       ets_torch.append(et_torch)
 
