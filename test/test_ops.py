@@ -111,6 +111,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
   def test_sum_simple(self):
     helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[1.,1.]])
+  def test_sum_full(self):
+    helper_test_op([(10000)], lambda x: x.sum(), lambda x: x.sum())
   def test_sum_relu(self):
     helper_test_op([(3,4,5)], lambda x: x.relu().sum().relu(), lambda x: x.relu().sum().relu())
   def test_sum(self):

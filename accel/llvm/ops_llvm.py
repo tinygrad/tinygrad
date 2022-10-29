@@ -84,6 +84,9 @@ class LLVM:
   target_machine = None
   engine = None
   optimizer = None
+  # if it can't vectorize
+  # OPT=2 DEBUG=3 LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_sum_full
+  # if can't vectorize anything
   def __init__(self):
     if LLVM.engine is not None:
       return
@@ -91,13 +94,18 @@ class LLVM:
     llvm.initialize_native_target()
     llvm.initialize_native_asmprinter()  # yes, even this one
     target = llvm.Target.from_default_triple()
-    LLVM.target_machine = target.create_target_machine()
-    LLVM.engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), LLVM.target_machine)
     LLVM.optimizer = llvm.ModulePassManager()
+
+    # does this do anything?
     builder = llvm.PassManagerBuilder()
     builder.opt_level = 3
     builder.loop_vectorize = True
     builder.populate(LLVM.optimizer)
+
+    LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
+    LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
+    LLVM.target_machine.set_asm_verbosity(True)
+    LLVM.engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), LLVM.target_machine)
 
     # cache
     def notify_func(module, buffer):
