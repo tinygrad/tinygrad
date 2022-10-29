@@ -153,8 +153,7 @@ class LLVMBuffer(ExplicitExecAST):
     BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y),
     BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y),
     BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y]),
-    BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType()),
-    MovementOps.RESHAPE: lambda builder,x: x,
+    BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType())
   }
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     super().__init__(shape, hostbuf)

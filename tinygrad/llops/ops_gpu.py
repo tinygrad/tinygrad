@@ -82,7 +82,7 @@ class GPUBuffer(ExplicitExecAST):
     UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)", UnaryOps.RECIPROCAL: "((float)1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)", MovementOps.RESHAPE: "(A)"
+    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
