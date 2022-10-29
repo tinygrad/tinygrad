@@ -98,7 +98,7 @@ class LLVM:
   # There's also AMX https://github.com/corsix/amx/blob/main/README.md
   # It seems like torch CPU must be using this? I'm seeing ~150 GFLOPS with convs
   # Calling nnp_s4gemm_only_3x3__neon and nnp_owt8x8_3x3_with_bias__neon which don't seem like AMX
-  # Could this be a winograd conv?
+  # Could this be a winograd conv? Yes, nnp_owt8x8_3x3_with_bias__neon is in NNPACK 2d-winograd-8x8-3x3.c
 
   # 2048x2048 matmul in 9.88 ms (17.18 GOPS) = 1739 GFLOPS (so much! this has to be the AMX)
   # calling libBLAS.dylib`SGEMM
@@ -113,6 +113,9 @@ class LLVM:
   #  0x1c3ac5090: 0x8b0c01ad   add    x13, x13, x12
   #  0x1c3ac5094: 0xf1000529   subs   x9, x9, #0x1
   #  0x1c3ac5098: 0x54fffec1   b.ne   0x1c3ac5070               ; <+140>
+  # z is 16x16 float32s. 1.64 TFLOPS is one dispatch per clock cycle. 3.2*16*16*2 = 1638.4
+
+  # From HN: "On M1, for single-precision, one AMX P-unit is ~1.64 TFLOPs, one P-core is ~102 GFLOPS." which matches this
 
   def __init__(self):
     if LLVM.engine is not None:
