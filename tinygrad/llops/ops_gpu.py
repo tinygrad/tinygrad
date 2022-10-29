@@ -5,7 +5,7 @@ import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, ConvArgs, dedup
-from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_shape, ExplicitExecAST
+from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_info, ExplicitExecAST
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -130,7 +130,8 @@ class GPUBuffer(ExplicitExecAST):
     assert len(reduceops) <= 1, f"max one reduce op in an ast, {reduceops}"
     earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
     reduce_shape = (earlybufs[0].shape, reduceops[0].arg) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else None
-    ret = cls(get_lazyop_shape(ast))
+    info = get_lazyop_info(ast)
+    ret = cls(info.shape)
 
     buf_names : Dict[GPUBuffer, str] = {x:f"arg_{i}" for i,x in enumerate(bufs)}
 
@@ -157,9 +158,9 @@ class GPUBuffer(ExplicitExecAST):
 
     C = reduceops[0].arg if len(reduceops) > 0 and isinstance(reduceops[0].op, ProcessingOps) else None
     reduce_op = reduceops[0].op if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else ReduceOps.SUM
-    return ret._processing_op([(buf_names[x], x) for x in bufs], code, C, reduce_op, reduce_shape, set(buf_names[x] for x in earlybufs), earlycode)
+    return ret._processing_op([(buf_names[x], x) for x in bufs], code, C, reduce_op, reduce_shape, set(buf_names[x] for x in earlybufs), earlycode, info.flops)
 
-  def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc") -> GPUBuffer:
+  def _processing_op(ret, bufs: List[Tuple[str, GPUBuffer]]=[], code:str="acc", C:Optional[ConvArgs]=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc", op_estimate=0) -> GPUBuffer:
     assert C is None, f"conv isn't handled by GPU anymore {C}"
 
     # get the input/output shape and the reduce amount
@@ -204,5 +205,5 @@ class GPUBuffer(ExplicitExecAST):
       }}
     }}""")
 
-    conv_prg([prod(ret.shape), inter_red, 1], [1, inter_red, 1] if inter_red > 1 else None, ret.cl, *buf_cl, op_estimate=prod(reduce_shape[0])*len(earlybufs) + prod(reduce_shape[1])*len(bufs))
+    conv_prg([prod(ret.shape), inter_red, 1], [1, inter_red, 1] if inter_red > 1 else None, ret.cl, *buf_cl, op_estimate=op_estimate)
     return ret

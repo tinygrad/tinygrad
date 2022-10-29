@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_shape
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_info
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 
@@ -178,7 +178,7 @@ class LLVMBuffer(ExplicitExecAST):
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
     earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
-    ret = cls(get_lazyop_shape(ast))
+    ret = cls(get_lazyop_info(ast).shape)
 
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')

@@ -2,6 +2,7 @@ import os
 from enum import Enum
 from typing import Union, Type, NamedTuple, Tuple, Any, List
 import functools, operator
+from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker
 
 DEBUG = int(os.getenv("DEBUG", "0"))
@@ -55,13 +56,13 @@ class GenericExecAST(DeviceBuffer):
     return ret
 
 class GenericShape(GenericExecAST):
-  def __init__(self, x): self.shape = x if isinstance(x, tuple) else x.shape
-  def unary_op(self, op:UnaryOps): return self
-  def binary_op(self, op:BinaryOps, y): return self
-  def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return type(self)(new_shape)
-  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.shape).movement_op(op, arg))
-  def processing_op(self, op:ProcessingOps, w, C): return type(self)(C.out_shape)
-def get_lazyop_shape(ast:LazyOp): return GenericShape.exec_ast(ast, GenericShape).shape
+  def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops
+  def unary_op(self, op:UnaryOps): return GenericShape(self.shape, self.flops + prod(self.shape))
+  def binary_op(self, op:BinaryOps, y): return GenericShape(self.shape, self.flops + y.flops + prod(self.shape))
+  def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return GenericShape(new_shape, self.flops + prod(self.shape))
+  def movement_op(self, op:MovementOps, arg): return GenericShape(ShapeTracker(self.shape).movement_op(op, arg).shape, self.flops)
+  def processing_op(self, op:ProcessingOps, w, C): return GenericShape(C.out_shape, float("nan"))  # TODO: add flops for this
+def get_lazyop_info(ast:LazyOp): return GenericShape.exec_ast(ast, lambda x: GenericShape(x.shape))
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer, OpenCLBuffer, and LLVMBuffer

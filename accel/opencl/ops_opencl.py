@@ -231,10 +231,10 @@ class OpenCLBuffer(GPUBuffer):
     #ewtypes.append(f"read_only image2d_t {name}_g")
     return super().contiguous_view_constant_fold(name, reduce)
 
-  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc"):
+  def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc", op_estimate=0):
     if C is None or earlycode != "acc":
       # TODO: handle an opencl conv without the conv part
-      return super()._processing_op(bufs, code, C, op, reduce_shape, earlybufs, earlycode)
+      return super()._processing_op(bufs, code, C, op, reduce_shape, earlybufs, earlycode, op_estimate)
     assert earlycode == "acc"
 
     x = [x for x in bufs if x[0] == "input"][0][1]
