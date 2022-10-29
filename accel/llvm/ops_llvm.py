@@ -91,6 +91,29 @@ class LLVM:
 
   # looks like we have two options, either use clang or handle vectorization in tinygrad
   # for the sake of the GPU, we should probably do in tinygrad
+
+  # ARM NEON is 128b wide, aka <4 x float> (similar to most GPUs)
+  # Firestorm (big M1 core) can do up to 4 ops per cycle @ 3.2 GHz = 3.2*4*4*2 = 102.4 GFLOPS (fma)
+
+  # There's also AMX https://github.com/corsix/amx/blob/main/README.md
+  # It seems like torch CPU must be using this? I'm seeing ~150 GFLOPS with convs
+  # Calling nnp_s4gemm_only_3x3__neon and nnp_owt8x8_3x3_with_bias__neon which don't seem like AMX
+  # Could this be a winograd conv?
+
+  # 2048x2048 matmul in 9.88 ms (17.18 GOPS) = 1739 GFLOPS (so much! this has to be the AMX)
+  # calling libBLAS.dylib`SGEMM
+  #  0x1c3ac5070: 0x0020100d   .long  0x0020100d                ; AMX instruction 0 = ldx
+  #  0x1c3ac5074: 0x0020102b   .long  0x0020102b                ; AMX instruction 1 = ldy (presumed typo in ldst.md)
+  #  0x1c3ac5078: 0x0020119f   .long  0x0020119f                ; AMX instruction 12 = fma32
+  #  0x1c3ac507c: 0x0020118e   .long  0x0020118e                ; AMX instruction 12 = fma32
+  #  0x1c3ac5080: 0x9144410f   add    x15, x8, #0x110, lsl #12  ; =0x110000
+  #  0x1c3ac5084: 0x00201188   .long  0x00201188                ; AMX instruction 12 = fma32
+  #  0x1c3ac5088: 0x0020118f   .long  0x0020118f                ; AMX instruction 12 = fma32
+  #  0x1c3ac508c: 0x8b0a016b   add    x11, x11, x10
+  #  0x1c3ac5090: 0x8b0c01ad   add    x13, x13, x12
+  #  0x1c3ac5094: 0xf1000529   subs   x9, x9, #0x1
+  #  0x1c3ac5098: 0x54fffec1   b.ne   0x1c3ac5070               ; <+140>
+
   def __init__(self):
     if LLVM.engine is not None:
       return
