@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_shape
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_shape
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 

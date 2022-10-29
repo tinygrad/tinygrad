@@ -5,7 +5,7 @@ import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, ConvArgs, dedup
-from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_shape, ExplicitExecAST
+from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_shape, ExplicitExecAST
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
