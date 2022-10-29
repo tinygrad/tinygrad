@@ -80,13 +80,17 @@ def idx_deref(builder, buf, ptr, eidx):
   else:
     return builder.load(builder.gep(ptr, [idx]))
 
+# https://blog.christianperone.com/2022/09/tutorial-on-using-llvm-to-jit-pytorch-fx-graphs-to-native-code-x86-arm-risc-v-wasm-part-i-scalars/
 class LLVM:
   target_machine = None
   engine = None
   optimizer = None
   # if it can't vectorize
-  # OPT=2 DEBUG=3 LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_sum_full
+  # OPT=2 DEBUG=3 LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_mul
   # if can't vectorize anything
+
+  # looks like we have two options, either use clang or handle vectorization in tinygrad
+  # for the sake of the GPU, we should probably do in tinygrad
   def __init__(self):
     if LLVM.engine is not None:
       return
@@ -96,10 +100,12 @@ class LLVM:
     target = llvm.Target.from_default_triple()
     LLVM.optimizer = llvm.ModulePassManager()
 
+    #llvm.set_option('', '--debug-only=loop-vectorize')
+
     # does this do anything?
     builder = llvm.PassManagerBuilder()
     builder.opt_level = 3
-    builder.loop_vectorize = True
+    builder.loop_vectorize = True    # this changes loop-vectorize debug output
     builder.populate(LLVM.optimizer)
 
     LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
