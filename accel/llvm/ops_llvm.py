@@ -76,9 +76,9 @@ def idx_deref(builder, buf, ptr, eidx):
         acc *= d
       idx = ret
   if valid is not None:
-    return builder.select(valid, builder.load(builder.gep(ptr, [idx])), ir.Constant(ir.FloatType(), 0))
+    return builder.select(valid, builder.load(builder.gep(ptr, [idx], inbounds=True)), ir.Constant(ir.FloatType(), 0))
   else:
-    return builder.load(builder.gep(ptr, [idx]))
+    return builder.load(builder.gep(ptr, [idx], inbounds=True))
 
 # https://blog.christianperone.com/2022/09/tutorial-on-using-llvm-to-jit-pytorch-fx-graphs-to-native-code-x86-arm-risc-v-wasm-part-i-scalars/
 class LLVM:
@@ -123,21 +123,25 @@ class LLVM:
     llvm.initialize()
     llvm.initialize_native_target()
     llvm.initialize_native_asmprinter()  # yes, even this one
-    target = llvm.Target.from_default_triple()
-    LLVM.optimizer = llvm.ModulePassManager()
+    target = llvm.Target.from_triple(llvm.get_process_triple())
+    LLVM.optimizer = llvm.create_module_pass_manager()
+    LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
+    LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
     #llvm.set_option('', '--debug-only=loop-vectorize')
 
     # does this do anything?
-    builder = llvm.PassManagerBuilder()
+    builder = llvm.create_pass_manager_builder()
     builder.opt_level = 3
-    builder.loop_vectorize = True    # this changes loop-vectorize debug output
+    builder.loop_vectorize = True
+    builder.slp_vectorize = 1
     builder.populate(LLVM.optimizer)
 
-    LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
     LLVM.target_machine.set_asm_verbosity(True)
-    LLVM.engine = llvm.create_mcjit_compiler(llvm.parse_assembly(""), LLVM.target_machine)
+    backing_mod = llvm.parse_assembly("")
+    backing_mod.triple = llvm.get_process_triple()
+    LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
     # cache
     def notify_func(module, buffer):
@@ -156,7 +160,10 @@ class LLVM:
       LLVM.engine.set_object_cache(notify_func, getbuffer_func)
 
   def exec(self, module, bufs):
+    module.triple = llvm.get_process_triple()
+    module.data_layout = self.engine.target_data
     llvm_ir = str(module)
+
     if DEBUG >= 2:
       print(llvm_ir)
 
@@ -170,7 +177,7 @@ class LLVM:
     LLVM.engine.finalize_object()
 
     # call function
-    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(LLVM.engine.get_function_address('exec'))
+    cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
     cfunc(*[x._buf for x in bufs])
 
     # we are done
@@ -275,7 +282,7 @@ class LLVMBuffer(ExplicitExecAST):
 
     body_builder.branch(reduce_builder._block)
     result = ast_parse(store_builder, ast, (prod(ret.shape), idx, 1, None), reduce_result)
-    store_builder.store(result, store_builder.gep(func.args[0], [idx]))
+    store_builder.store(result, store_builder.gep(func.args[0], [idx], inbounds=True))
     idx_p1 = store_builder.add(idx, int_const(1))
     idx.add_incoming(idx_p1, store_builder._block)
 
