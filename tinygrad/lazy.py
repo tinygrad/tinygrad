@@ -228,8 +228,11 @@ class LazyBuffer:
       # TODO: is there any way to replace strided with other movement ops?
       x = x.movement_op(MovementOps.STRIDED, (
         (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
-        (C.rcout, 0), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
+        (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
         (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
+      #if C.H <= 3 and C.W <= 3:  # max 9x the RAM overhead, this is im2col
+      #  x = x.contiguous_op()
+      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
       w = w.movement_op(MovementOps.RESHAPE, (1, C.groups, C.rcout, 1, 1, C.cin, C.H, C.W)) \
            .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
       return x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
