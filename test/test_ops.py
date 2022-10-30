@@ -6,7 +6,7 @@ import unittest
 from tinygrad.tensor import Tensor, Device
 
 FORWARD_ONLY = bool(int(os.getenv("FORWARD_ONLY", "0")))
-def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-6, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
   torch.manual_seed(0)
   np.random.seed(0)
   if shps is None:
@@ -36,11 +36,11 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY:
     st = time.monotonic()
-    out.mean().backward()
+    out.square().mean().backward()
     torch_fbp = time.monotonic() - st
 
     st = time.monotonic()
-    ret.mean().backward()
+    ret.square().mean().backward()
     for tt in tst: tt.grad.realize()
     tinygrad_fbp = time.monotonic() - st
 
@@ -242,7 +242,7 @@ class TestOps(unittest.TestCase):
     C = 8
     helper_test_op([(1,C,5,5), (C,C,1,1), (C,)],
       lambda x,w,b: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w,b).relu(),w,b),
-      lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4, grad_rtol=1e-5)
+      lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4)
 
   def test_simple_conv2d(self):
     helper_test_op([(1,1,9,9), (1,1,3,3)],
