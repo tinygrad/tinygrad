@@ -178,7 +178,7 @@ class LazyBuffer:
     local_st = ShapeTracker(self.shape).movement_op(op, arg)
 
     # instant nops
-    if local_st.contiguous and self.shape == local_st.shape:
+    if local_st.contiguous and self.shape == local_st.shape and op != MovementOps.STRIDED:
       return self
 
     # two ops in a row is one op. merge them if unresolved
@@ -194,6 +194,11 @@ class LazyBuffer:
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and local_st.contiguous:
       return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
+
+    # some strideds are actually just reshapes
+    # NOTE: due to how strided works, we have to check the parent to be contiguous also
+    if op == MovementOps.STRIDED and local_st.contiguous and self.st.contiguous:
+      return self.movement_op(MovementOps.RESHAPE, tuple(i for i,_ in arg))
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
