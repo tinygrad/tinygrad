@@ -6,7 +6,7 @@ import unittest
 from tinygrad.tensor import Tensor, Device
 
 FORWARD_ONLY = bool(int(os.getenv("FORWARD_ONLY", "0")))
-def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=20):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
   torch.manual_seed(0)
   np.random.seed(0)
   if shps is None:
