@@ -128,7 +128,8 @@ class LLVM:
     LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
-    #llvm.set_option('', '--debug-only=loop-vectorize')
+    if DEBUG >= 4:
+      llvm.set_option('', '--debug-only=loop-vectorize')
 
     # does this do anything?
     builder = llvm.create_pass_manager_builder()
@@ -137,7 +138,6 @@ class LLVM:
     builder.slp_vectorize = 1
     builder.populate(LLVM.optimizer)
 
-    LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
     LLVM.target_machine.set_asm_verbosity(True)
     backing_mod = llvm.parse_assembly("")
     backing_mod.triple = llvm.get_process_triple()
