@@ -32,6 +32,8 @@ def realize_buffers(real_srcs, x):
   return LazyOp(x.op, tuple(realize_buffers(real_srcs, y) for y in x.src), x.arg)
 
 # **** realize functions ****
+# TODO: make all _realize functions return an AST, perhaps unrealized
+
 def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], Optional[OpType]]:
   if self.op.op == LoadOps.FROMCPU:
     return Device._buffers[self.device].fromCPU(self.op.arg), [], LoadOps
@@ -42,11 +44,16 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   else:
     raise NotImplementedError(f"unknown LoadOp {self.op.op}")
 
+# TODO: these two are generic, replace them?
 def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_src = self.op.src[0].realize(self.device)
   return real_src.movement_op(self.op.op, self.op.arg), [real_src], MovementOps
 
-# TODO: unify _realize_reduceops, _realize_processingops, and _realize_binaryops
+def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
+  real_src_x, real_src_w = [x.realize(self.device) for x in self.op.src]
+  return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w], ProcessingOps
+
+# this supports late merging an upstream Elementwise op
 def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
@@ -59,10 +66,7 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     real_src = src.realize(self.device)
     return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
 
-def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  real_src_x, real_src_w = [x.realize(self.device) for x in self.op.src]
-  return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w], ProcessingOps
-
+# this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   real_srcs : Dict[LazyBuffer, Union[None, LazyOp, DeviceBuffer]] = {x:None for x in get_buffers(self.op)}
   op_type : OpType = BinaryOps
@@ -78,9 +82,10 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       src = psrcs[0][1].op.src[0]
       if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
         src = src.op
-      for x in (get_buffers(src) if isinstance(src, LazyOp) else [src]):
-        real_srcs[x] = x.realize(self.device)
       real_srcs[psrcs[0][0]] = LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg)
+      for x in get_buffers(real_srcs[psrcs[0][0]]):
+        # these are the early buffers
+        real_srcs[x] = x.realize(self.device)
       op_type = ReduceOps
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrcs[0][0].shape != psrcs[0][1].shape:
