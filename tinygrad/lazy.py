@@ -83,7 +83,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
         src = src.op
       real_srcs[psrcs[0][0]] = LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg)
-      for x in get_buffers(real_srcs[psrcs[0][0]]):
+      for x in get_buffers(real_srcs[psrcs[0][0]]):  # type: ignore
         # these are the early buffers
         real_srcs[x] = x.realize(self.device)
       op_type = ReduceOps
