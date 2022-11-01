@@ -1,4 +1,4 @@
-# inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
+# inspired by https://github.com/karpathy/micrograd/blob/main/micrograd/engine.py
 from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
