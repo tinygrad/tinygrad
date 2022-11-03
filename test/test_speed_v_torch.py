@@ -12,7 +12,7 @@ IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "1,16,64").split(",")]
 CNT = 5
 class TestSpeed(unittest.TestCase):
   def test_gemm(self):
-    N = 1024
+    N = 256
     torch.manual_seed(0)
     torch_a = torch.rand(N, N)
     torch_b = torch.rand(N, N)

@@ -3,8 +3,8 @@ import os
 import hashlib
 import math
 from typing import Tuple, Union
-from tinygrad.helpers import prod
-from tinygrad.shapetracker import ShapeTracker, ZeroView
+from tinygrad.helpers import prod, all_same, dedup
+from tinygrad.shapetracker import ShapeTracker, ZeroView, strides_for_shape
 from tinygrad.ops import LazyOp
 import ctypes
 import numpy as np
@@ -221,11 +221,59 @@ class LLVMBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
     # get the real buffers from the ast
-    bufs = get_buffers(ast)
+    bufs = dedup(get_buffers(ast))
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
-    earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
-    ret = cls(get_lazyop_info(ast).shape)
+    earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
+    output_shape = get_lazyop_info(ast).shape
+    ret = cls(output_shape)
+
+    # check buffer sizes
+    assert all_same([x.shape for x in earlybufs]), "all earlybufs must have the same shape"
+    assert all_same([x.shape for x in bufs if x not in earlybufs]), "all latebufs must have the same shape"
+    assert all_same([len(x.shape) for x in bufs]), "all bufs must have the same shape size"
+
+    if not all(len(x.st.views) == 1 for x in bufs):
+      print(f"WARNING: {ast} has buffers with more than 1 view, can't optimize")
+    else:
+      shapes = [x.shape for x in bufs]
+      strides = [x.st.views[0].strides for x in bufs]
+      
+      # merge dimensions if we can
+      # TODO: does this always preserve the reduce dimension
+      rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
+      new_output_shape = [output_shape[0]]
+      for i in range(1, len(shapes[0])):
+        can_merge = True
+        for j in range(len(shapes)):
+          can_merge = can_merge and ((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
+        for j in range(len(shapes)):
+          if can_merge:
+            rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
+          else:
+            rets[j].append((shapes[j][i], strides[j][i]))
+        if can_merge:
+          new_output_shape[-1] *= output_shape[i]
+        else:
+          new_output_shape.append(output_shape[i])
+      shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
+      output_shape = new_output_shape
+
+      print(ast)
+      print(shapes)
+      print(strides)
+      print(output_shape)
+
+      # the CHONKER will break things into 4x4 output blocks (or 16 if there's only 1)
+      # these 4x4 should be the final two non reduce dimensions
+
+      #strides = strides_for_shape(earlybufs[0].shape) if len(earlybufs) > 0 else strides_for_shape(bufs[0].shape)
+      #views = [x.st.views[0] for x in bufs]
+
+      #for i in range(1, len(strides)):
+      # merge the views
+      #print(views)
+      #print(strides)
 
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
