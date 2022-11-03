@@ -182,9 +182,9 @@ class Tensor:
 
   def matmul(self:Tensor, w:Tensor):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
+    bs, groups = prod(self.shape[:-2]), prod(w.shape[:-2])
     cin, cout = w.shape[-2], w.shape[-1]
-    out_shape_t = tuple(list(self.shape[0:-2])+[cout,-1])
+    out_shape_t = tuple(list(self.shape[:-2]) + [cout,-1])
     if len(self.shape) > 1:
       order = tuple(list(range(len(self.shape)-2))+[len(self.shape)-1, len(self.shape)-2])
     else:
@@ -205,17 +205,17 @@ class Tensor:
   def pad2d(self, padding:Tuple[int, ...]): return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
   # TODO: this is totally not transpose
   def transpose(self, order=(1,0)): return self.permute(order=order)
-  def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
+  def flatten(self, start_dim=0):return self.reshape(shape=tuple(list(self.shape[:start_dim]) + [-1]))
 
   def _reduce(self, fxn, axis=None, keepdim=False):
     if axis is None:
       axis = range(len(self.shape))
     if isinstance(axis, int):
       axis = [axis]
-    axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
+    axis = tuple(x if x >= 0 else x+len(self.shape) for x in axis)
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
     ret = fxn(self, axis=axis)
-    return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
+    return ret if keepdim else ret.reshape(shape=shape or [1])
 
   def sum(self, axis=None, keepdim=False): return self._reduce(Tensor._sum, axis, keepdim)
   def max(self, axis=None, keepdim=False): return self._reduce(Tensor._max, axis, keepdim)
@@ -285,7 +285,7 @@ class Tensor:
   @staticmethod
   def broadcasted(fxn, x, y):
     tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [x,y]]
+    x, y = [t if isinstance(t, Tensor) else Tensor([t], device=tt.device, requires_grad=False) for t in [x, y]]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn(x.expand(shape_ret), y.expand(shape_ret))
@@ -343,7 +343,7 @@ for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
 
 # register all the mlops "math" operations
 def register(name:str, fxn:Function):
-  setattr(Tensor, "_"+name if hasattr(Tensor, name) else name, functools.partialmethod(fxn.apply))
+  setattr(Tensor, f"_{name}" if hasattr(Tensor, name) else name,functools.partialmethod(fxn.apply))
 for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
   if name[0] != "_" and name != "Function" and not name.endswith("Ops"):
     register(name.lower(), cls)

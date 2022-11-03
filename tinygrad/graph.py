@@ -52,7 +52,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       if len(op) <= 2:
         sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
       elif len(op) <= 4:
-        sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
+        sop = '.'.join([str(y).split(".")[1][:2] for y in op][::-1])
       else:
         sop = str(len(op))
       G.add_edge(nm(x), nm(ret), label=sop)
@@ -62,7 +62,7 @@ def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[Device
       G.add_node(nm(ret))
 
     if optype == ReduceOps:
-      G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
+      G.nodes[nm(ret)]['label'] = str({x.shape for x in inp}) + "\n" + str(ret.shape)
     else:
       G.nodes[nm(ret)]['label'] = str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"

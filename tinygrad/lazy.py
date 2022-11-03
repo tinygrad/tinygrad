@@ -22,7 +22,7 @@ SHUFFLE_PAD_OPS = OPT>=3  # NOTE: 0/0 is NaN if you pad, so this can change the 
 
 class Device:
   _buffers, DEFAULT = get_available_llops()
-  for name in _buffers.keys():
+  for name in _buffers:
     vars()[name] = name
 
 # **** realize helpers ****
@@ -92,7 +92,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       intermediate_shape = psrcs[0][1].shape
       assert psrcs[0][0].shape == self.shape, f"shape mismatch {psrcs[0][0].shape} != {self.shape}"
   # NOTE: these RESHAPEs will return self if they don't change the shape
-  for x in real_srcs.keys():
+  for x in real_srcs:
     if real_srcs[x] is None:
       real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape).realize(self.device)
   ret = self.dbuffer.exec_ast(realize_buffers(real_srcs, self.op))

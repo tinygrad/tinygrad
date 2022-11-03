@@ -3,13 +3,13 @@ import os, math
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x): return math.prod(x)
-def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0], tuple) or isinstance(x[0], list) else tuple(x)
+def argfix(*x):return (tuple(x[0]) if isinstance(x[0],(tuple,list)) else tuple(x)) if x else tuple()
 def argsort(x): return sorted(range(len(x)), key=x.__getitem__) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 
 def reduce_shape(shape, axis): return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 def shape_to_axis(old_shape, new_shape):
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
-  return tuple([i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b])
+  return tuple(i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b)
 
 ConvArgs = namedtuple('ConvArgs', ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'sy', 'sx', 'bs', 'cout', 'py', 'py_', 'px', 'px_', 'dy', 'dx', 'out_shape'])
 def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, out_shape=None):
@@ -46,7 +46,7 @@ def get_available_llops():
     name = op[len("ops_"):].upper()
     DEFAULT = name if os.environ.get(name, 0) == "1" else DEFAULT
     try:
-      _buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module('tinygrad.llops.'+op), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
+      _buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.llops.{op}'), inspect.isclass) if cname.upper() == f"{name}BUFFER"][0]
     except ImportError as e:  # NOTE: this can't be put on one line due to mypy issue
       print(op, "not available", e)
   return _buffers, DEFAULT

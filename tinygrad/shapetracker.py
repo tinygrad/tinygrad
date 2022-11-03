@@ -40,7 +40,7 @@ class View:
         lr = f"({lr}*{s})" if s != 1 else lr
         ret.append(lr)
       acc *= d
-    return 'idx=' + ('+'.join(ret) if len(ret) > 0 else "0")
+    return 'idx=' + ('+'.join(ret) if ret else "0")
 
 class ZeroView:
   def __init__(self, old_shape, arg):
@@ -48,7 +48,7 @@ class ZeroView:
     expr, acc = ['valid'], 1
     for s,(x,y) in list(zip(old_shape, arg))[::-1]:
       self.shape = [y-x] + self.shape
-      base = divmodidx(acc, self.shape[0], len(self.shape) != len(old_shape)) + f"+{x}"
+      base = f"{divmodidx(acc, self.shape[0], len(self.shape) != len(old_shape))}+{x}"
       expr += ([f"(({base}) >= 0)"] if x < 0 else []) + ([f"(({base}) < {s})"] if y > s else [])
       acc *= self.shape[0]
     self.expr = 'valid=' + ' && '.join(expr)
@@ -64,7 +64,7 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
 
 @functools.lru_cache(maxsize=None)
 def view_from_shape(shape:Tuple[int, ...]) -> View:
-  assert all(isinstance(x, int) for x in shape) and len(shape) != 0
+  assert all(isinstance(x, int) for x in shape) and shape
   return View(tuple(shape), strides_for_shape(shape))
 
 class ShapeTracker:
@@ -84,7 +84,7 @@ class ShapeTracker:
   @property
   def offset(self): return self.views[-1].offset
 
-  def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
+  def expr(self):return ';'.join([v.expr for v in self.views[::-1]if v.expr not in ['idx=idx', 'valid=valid']])
   def movement_op(self, op, arg):
     getattr(self, str(op).split(".")[1].lower())(*arg)
     return self
@@ -105,7 +105,7 @@ class ShapeTracker:
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # check if this is adding or removing 1s (only)
-    if tuple([x for x in self.shape if x != 1]) == tuple([x for x in new_shape if x != 1]):
+    if tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
       old_strides = [y for x,y in zip(self.shape, self.strides) if x != 1]
       new_strides = [0 if x == 1 else old_strides.pop(0) for x in new_shape]
       self.views[-1] = View(new_shape, new_strides, self.offset)
@@ -119,7 +119,7 @@ class ShapeTracker:
 
   def permute(self, *axis):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis)
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
+    assert len(set(axis)) == len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View([self.shape[a] for a in axis], [self.strides[a] for a in axis], self.offset)
 
   # TODO: this is a special case of slice with strides, remove it
@@ -136,7 +136,7 @@ class ShapeTracker:
   # TODO: take the pad functionality out of shrink
   def shrink(self, *arg):
     assert len(arg) == len(self.shape)
-    offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
+    offset = sum(self.strides[i]*x for i,(x,_) in enumerate(arg))
     zeroview = ZeroView(self.shape, arg)
     self.views[-1] = View([y-x for x,y in arg], self.strides, self.offset+offset)
     if zeroview.expr != "valid=valid":
@@ -145,7 +145,7 @@ class ShapeTracker:
 
   def expand(self, *new_shape):
     assert all(isinstance(x, int) for x in new_shape)
-    assert all(x == y or x == 1 for x,y in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+    assert all(x in [y, 1] for x, y in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
     strides = [s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape))]
     self.views[-1] = View(new_shape, strides, self.offset)
 
@@ -154,5 +154,5 @@ class ShapeTracker:
     assert all(isinstance(x, int) for x in mul)
     strides = [z*m for z,m in zip(self.strides, mul)]
     new_shape = [(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)]
-    offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
+    offset = sum((s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0)
     self.views[-1] = View(new_shape, strides, self.offset + offset)

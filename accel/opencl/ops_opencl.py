@@ -15,9 +15,7 @@ FLOAT16 = int(os.getenv("FLOAT16", 0))
 
 import pathlib
 def load(x):
-   with open(x) as f:
-     ret = f.read()
-   return ret
+   return pathlib.Path(x).read_text()
 CONV_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/conv.cl')
 MATMUL_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/matmul.cl')
 
@@ -61,9 +59,7 @@ class CLImage:
       CL.mem_used -= self.cl.row_pitch * self.cl.height
 
 def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
-  middle_code = []
-
-  """
+   """
   vv = "xyzw"
   for i in range(4):
     acc = f"outputValues[i].{vv[i%4]}"
@@ -71,17 +67,14 @@ def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
     args = [f"(outputRow * get_image_width(output) + outputLocation.x)*4+{i}", acc]+args
     middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
   """
-  acc = "outputValues[i]"
-  args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
-  args = ["smp", "outputLocation", "(outputLocation.y * get_image_width(output) + outputLocation.x)*4", acc]+args
-  middle_code.append(f"{acc} = _ewop("+', '.join(args)+");\n")
-
-  replacements = {}
-  replacements["//PREFIX"] = prg_src
-  replacements["//BINOP"] = ''.join(middle_code)
-  if len(opencl_type) != 0:
-    replacements["//ARGS"] = ","+','.join(opencl_type)
-  return replacements
+   acc = "outputValues[i]"
+   args = [x.split(" ")[-1].replace("*", "") for x in opencl_type]
+   args = ["smp", "outputLocation", "(outputLocation.y * get_image_width(output) + outputLocation.x)*4", acc]+args
+   middle_code = [f"{acc} = _ewop("+', '.join(args) + ");\n"]
+   replacements = {"//PREFIX": prg_src, "//BINOP": ''.join(middle_code)}
+   if opencl_type:
+      replacements["//ARGS"] = ","+','.join(opencl_type)
+   return replacements
 
 def get_getters(ewbufs, ret):
   fakebufs = []

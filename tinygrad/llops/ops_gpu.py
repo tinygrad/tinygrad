@@ -29,16 +29,21 @@ class CL:
   BUFFER_CACHE : Dict[int, List[cl.Buffer]] = defaultdict(list)
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
-  def __init__(self):
+def nil(self, ):
     if CL.cl_queue is not None:  # already initted
-      return
-    devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
-    if len(devices) == 0:  # settle for CPU
-      devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
-    CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
-    if len(devices) > 1 or DEBUG >= 1:
-      print(f"using {CL.cl_ctx.devices}")
-    CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
+          return
+        devices = sum((x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()), [])
+        if len(devices) == 0:  # settle for CPU
+          devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
+        CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
+        if len(devices) > 1 or DEBUG >= 1:
+          print(f"using {CL.cl_ctx.devices}")
+        CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
+
+
+
+  def __init__(self):
+    self.nil()  # this is an in-order command queue
 
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
@@ -146,12 +151,11 @@ class GPUBuffer(ExplicitExecAST):
       if not allow_reduce and type(x.op) in [ProcessingOps, ReduceOps]:
         return "acc"
       srcs_code = [_ast(src, buf_names, code_for_op) for src in x.src]
-      code = code_for_op[x.op]
       if len(srcs_code) >= 1:
-        code = code.replace("A", srcs_code[0])
+        return code_for_op[x.op].replace("A", srcs_code[0])
       if len(srcs_code) >= 2:
-        code = code.replace("B", srcs_code[1])
-      return code
+        return code_for_op[x.op].replace("B", srcs_code[1])
+      return code_for_op[x.op]
 
     earlycode = _ast(reduceops[0], buf_names, cls.code_for_op, allow_reduce=True) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else "acc"
     code = _ast(ast, buf_names, cls.code_for_op)
