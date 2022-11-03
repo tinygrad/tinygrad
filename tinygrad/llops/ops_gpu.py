@@ -151,11 +151,12 @@ class GPUBuffer(ExplicitExecAST):
       if not allow_reduce and type(x.op) in [ProcessingOps, ReduceOps]:
         return "acc"
       srcs_code = [_ast(src, buf_names, code_for_op) for src in x.src]
+      code = code_for_op[x.op]
       if len(srcs_code) >= 1:
-        return code_for_op[x.op].replace("A", srcs_code[0])
+        code = code_for_op[x.op].replace("A", srcs_code[0])
       if len(srcs_code) >= 2:
-        return code_for_op[x.op].replace("B", srcs_code[1])
-      return code_for_op[x.op]
+        code = code_for_op[x.op].replace("B", srcs_code[1])
+      return code
 
     earlycode = _ast(reduceops[0], buf_names, cls.code_for_op, allow_reduce=True) if len(reduceops) > 0 and isinstance(reduceops[0].op, ReduceOps) else "acc"
     code = _ast(ast, buf_names, cls.code_for_op)
