@@ -202,6 +202,10 @@ class LLVMBuffer(ExplicitExecAST):
     BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y]),
     BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType())
   }
+  start_for_op = {
+    ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
+    ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
+  }
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     super().__init__(shape, hostbuf)
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
@@ -233,6 +237,126 @@ class LLVMBuffer(ExplicitExecAST):
     assert all_same([x.shape for x in bufs if x not in earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in bufs]), "all bufs must have the same shape size"
 
+    # create llvm function
+    module = ir.Module(name=__file__)
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
+
+    if not all(len(x.st.views) == 1 for x in bufs):
+      print(f"WARNING: {ast} has buffers with more than 1 view, can't optimize")
+    else:
+      # include ret in the bufs
+      bufs = [ret] + bufs
+      shapes = [x.shape for x in bufs]
+      strides = [x.st.views[0].strides for x in bufs]
+
+      # find first mismatch, don't reduce this
+      first_reduce = -1
+      for i in range(len(shapes[0])):
+        if not all_same([x[i] for x in shapes]):
+          first_reduce = i
+          break
+      
+      # merge dimensions if we can
+      # TODO: does this always preserve the reduce dimension, NO
+      rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
+      for i in range(1, len(shapes[0])):
+        can_merge = []
+        for j in range(len(shapes)):
+          # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
+          can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or rets[j][-1][0] == 1 or (strides[j][i] == 0 and rets[j][-1][1] == 0))
+        # more can merge than this
+        can_merge = all(can_merge) and i != first_reduce
+        for j in range(len(shapes)):
+          if can_merge:
+            rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
+          else:
+            rets[j].append((shapes[j][i], strides[j][i]))
+      shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
+      output_shape = shapes[0]
+
+      full_shape = [x for x in shapes if x != output_shape]
+      full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
+
+      #print(ast)
+      #print(shapes)
+      #print(strides)
+      #print(full_shape, "->", output_shape)
+
+      # construct the structure of the loops
+      loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
+      loop_exit = []
+      for i,_ in enumerate(full_shape):
+        loop_entry.append(ir.IRBuilder(func.append_basic_block(name=f"loop_{i}")))
+      for i,_ in enumerate(full_shape):
+        loop_exit.append(ir.IRBuilder(func.append_basic_block(name=f"loopexit_{len(full_shape)-1-i}")))
+      loop_exit.append(ir.IRBuilder(func.append_basic_block(name="exit")))
+      loop_exit = loop_exit[::-1]
+
+      # add the buffer indexing
+      idx_level = [[int_const(0)] for _ in range(len(bufs))]
+      for i in range(len(full_shape)):
+        for j in range(len(bufs)):
+          # stride
+          si = loop_entry[i+1].phi(ir.IntType(64), name=f"idx_{j}_{i}")
+          si.add_incoming(idx_level[j][-1], loop_entry[i]._block)
+          si_ps = loop_exit[i+1].add(si, int_const(strides[j][i]))
+          si.add_incoming(si_ps, loop_exit[i+1]._block)
+          idx_level[j].append(si)
+
+      # the ast parser
+      def ast_parse(builder, x, level, reduce_result=None):
+        if not isinstance(x, LazyOp):
+          buf_index = bufs.index(x)
+          idx = idx_level[buf_index][level]
+          return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
+        if isinstance(x.op, ReduceOps):
+          if reduce_result is None:
+            raise Exception("no reduce")
+          return reduce_result
+        values = [ast_parse(builder, v, level, reduce_result) for v in x.src]
+        return LLVMBuffer.op_lookup[x.op](builder, *values)
+
+      # add the ast + final store
+      store_loop = output_shape.index(1) if 1 in output_shape else -1
+
+      # do the early ast
+      reduce_result = None
+      if len(reduceops) > 0:
+        reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
+
+        phis = [LLVMBuffer.start_for_op[ReduceOps.SUM]]
+        for i in range(store_loop+1, len(loop_entry)):
+          val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
+          val.add_incoming(phis[-1], loop_entry[i-1]._block)
+          phis.append(val)
+
+        if reduceops[0].op == ReduceOps.SUM:
+          reduce_result = loop_exit[-1].fadd(reduce_input, val)
+        elif reduceops[0].op == ReduceOps.MAX:
+          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32"), [reduce_input, val])
+
+        for i,phi in enumerate(phis[1:]):
+          phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
+
+      result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
+      loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
+      
+      # add the looping
+      for i,s in enumerate(full_shape):
+        loop_entry[i].branch(loop_entry[i+1]._block)
+        # index
+        idx = loop_entry[i+1].phi(ir.IntType(64), name=f"loopvar_{i}")
+        idx.add_incoming(int_const(0), loop_entry[i]._block)
+        idx_p1 = loop_exit[i+1].add(idx, int_const(1))
+        idx.add_incoming(idx_p1, loop_exit[i+1]._block)
+        loop_exit[i+1].cbranch(loop_exit[i+1].icmp_unsigned("==", idx_p1, int_const(s)), loop_exit[i]._block, loop_entry[i+1]._block)
+
+      loop_entry[-1].branch(loop_exit[-1]._block)
+      loop_exit[0].ret_void()
+
+      LLVM().exec(module, bufs)
+      return ret
+
     def ast_parse(builder, x, idx, reduce_result=None, depth=0):
       if DEBUG >= 1:
         print("  "*depth+"ast:", reduce_result, x)
@@ -244,78 +368,6 @@ class LLVMBuffer(ExplicitExecAST):
         return reduce_result
       values = [ast_parse(builder, v, idx, reduce_result, depth=depth+1) for v in x.src]
       return LLVMBuffer.op_lookup[x.op](builder, *values)
-
-    # create llvm function
-    module = ir.Module(name=__file__)
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
-
-    if not all(len(x.st.views) == 1 for x in bufs):
-      print(f"WARNING: {ast} has buffers with more than 1 view, can't optimize")
-    else:
-      shapes = [x.shape for x in bufs]
-      strides = [x.st.views[0].strides for x in bufs]
-      
-      # merge dimensions if we can
-      # TODO: does this always preserve the reduce dimension
-      rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
-      new_output_shape = [output_shape[0]]
-      for i in range(1, len(shapes[0])):
-        can_merge = []
-        for j in range(len(shapes)):
-          # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
-          can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or rets[j][-1][0] == 1 or (strides[j][i] == 0 and rets[j][-1][1] == 0))
-        print(can_merge)
-        can_merge = all(can_merge)
-        for j in range(len(shapes)):
-          if can_merge:
-            rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
-          else:
-            rets[j].append((shapes[j][i], strides[j][i]))
-        if can_merge:
-          new_output_shape[-1] *= output_shape[i]
-        else:
-          new_output_shape.append(output_shape[i])
-      shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
-      output_shape = new_output_shape
-
-      full_shape = [x for x in shapes if x != output_shape]
-      full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
-
-      loops = [(ir.IRBuilder(func.append_basic_block(name="entry")), None)]
-
-      for i,s in enumerate(full_shape):
-        new_loop = ir.IRBuilder(func.append_basic_block(name=f"loop_{i}"))
-        idx = new_loop.phi(ir.IntType(64))
-        idx.add_incoming(int_const(0), loops[-1][0]._block)
-        loops.append((new_loop,idx))
-
-      for i,(loop,idx) in enumerate(loops[::-1]):
-        if idx == None:
-          break
-        loop_exit = ir.IRBuilder(func.append_basic_block(name=f"loopexit_{len(loops)-2-i}"))
-        idx_p1 = loop.add(idx, int_const(1))
-        idx.add_incoming(idx_p1, loop._block)
-        loop.cbranch(loop.icmp_unsigned("==", idx_p1, int_const(full_shape[len(full_shape)-1-i])), loop._block, loop_exit._block)
-
-
-      print(ast)
-      print(shapes)
-      print(strides)
-      print(full_shape, "->", output_shape)
-      print(str(module))
-      exit(0)
-
-      # the CHONKER will break things into 4x4 output blocks (or 16 if there's only 1)
-      # these 4x4 should be the final two non reduce dimensions
-
-      #strides = strides_for_shape(earlybufs[0].shape) if len(earlybufs) > 0 else strides_for_shape(bufs[0].shape)
-      #views = [x.st.views[0] for x in bufs]
-
-      #for i in range(1, len(strides)):
-      # merge the views
-      #print(views)
-      #print(strides)
-
 
     # enter
     start_builder = ir.IRBuilder(func.append_basic_block(name="entry"))
