@@ -268,6 +268,7 @@ class LLVMBuffer(ExplicitExecAST):
       
       # merge dimensions if we can
       # TODO: does this always preserve the reduce dimension, NO
+      # TODO: move this into shapetracker
       rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
       for i in range(1, len(shapes[0])):
         can_merge = []
@@ -344,7 +345,7 @@ class LLVMBuffer(ExplicitExecAST):
           reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
         elif reduceops[0].op == ReduceOps.MAX:
           # TODO: this doesn't respect the fast math flag
-          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32"), [reduce_input, val], fastmath=('fast',))
+          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
 
         for i,phi in enumerate(phis[1:]):
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)

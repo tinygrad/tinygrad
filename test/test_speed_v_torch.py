@@ -33,7 +33,7 @@ def test_generic_square(name, N, f1, f2):
 
   print(f"{name} {N}x{N} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch, val_tinygrad)
   relative_error = abs((val_tinygrad-val_torch)/val_torch)
-  assert relative_error < 0.01
+  assert relative_error < 0.01, f"relative error too high: {relative_error}"
 
 CNT = 5
 class TestSpeed(unittest.TestCase):
@@ -44,6 +44,10 @@ class TestSpeed(unittest.TestCase):
   def test_neg(self):
     def f(a, b): return -a
     test_generic_square('neg', 4096, f, f)
+
+  def test_exp(self):
+    def f(a, b): return a.exp()
+    test_generic_square('exp', 2048, f, f)
 
   def test_relu(self):
     def f(a, b): return a.relu()
