@@ -46,8 +46,9 @@ class TestSpeed(unittest.TestCase):
     test_generic_square('mul_sum', 4096, f, f)
 
   def test_add(self):
-    def f(a, b): return a + b
-    test_generic_square('add', 4096, f, f)
+    for N in [16, 4096]:
+      def f(a, b): return a + b
+      test_generic_square('add', N, f, f)
 
   def test_add_sq(self):
     def f(a, b): return a*a + b*b

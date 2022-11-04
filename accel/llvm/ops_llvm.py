@@ -128,14 +128,16 @@ class LLVM:
     LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
+    #llvm.set_option('', '-force-vector-interleave=4')
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
 
     # does this do anything?
     builder = llvm.create_pass_manager_builder()
     builder.opt_level = 3
+    builder.size_level = 0
     builder.loop_vectorize = True
-    builder.slp_vectorize = 1
+    builder.slp_vectorize = True
     builder.populate(LLVM.optimizer)
 
     LLVM.target_machine.set_asm_verbosity(True)
@@ -182,6 +184,7 @@ class LLVM:
 
     # we are done
     LLVM.engine.remove_module(mod)
+    return cfunc
 
 
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
@@ -222,15 +225,22 @@ class LLVMBuffer(ExplicitExecAST):
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   # ast can contain one ReduceOp with arbitrary Binary/Unary ops
+  func_cache = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
-    # get the real buffers from the ast
+    key = str(ast)
     bufs = dedup(get_buffers(ast))
+    output_shape = get_lazyop_info(ast).shape
+    ret = cls(output_shape)
+
+    if key in LLVMBuffer.func_cache:
+      LLVMBuffer.func_cache[key](ret._buf, *[x._buf for x in bufs])
+      return ret
+
+    # get the real buffers from the ast
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
     earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
-    output_shape = get_lazyop_info(ast).shape
-    ret = cls(output_shape)
 
     # check buffer sizes
     assert all_same([x.shape for x in earlybufs]), "all earlybufs must have the same shape"
@@ -338,6 +348,7 @@ class LLVMBuffer(ExplicitExecAST):
         for i,phi in enumerate(phis[1:]):
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
 
+      # do the late ast
       result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
       loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
       
@@ -354,7 +365,7 @@ class LLVMBuffer(ExplicitExecAST):
       loop_entry[-1].branch(loop_exit[-1]._block)
       loop_exit[0].ret_void()
 
-      LLVM().exec(module, bufs)
+      LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs)
       return ret
 
     def ast_parse(builder, x, idx, reduce_result=None, depth=0):
@@ -419,5 +430,5 @@ class LLVMBuffer(ExplicitExecAST):
     store_builder.cbranch(store_builder.icmp_unsigned("==", idx_p1, int_const(prod(ret.shape))), exit_builder._block, body_builder._block)
 
     # **** llvm running ****
-    LLVM().exec(module, [ret] + bufs)
+    LLVMBuffer.func_cache[key] = LLVM().exec(module, [ret] + bufs)
     return ret
