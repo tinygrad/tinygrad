@@ -129,6 +129,7 @@ class LLVM:
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
     #llvm.set_option('', '-force-vector-interleave=4')
+    llvm.set_option('', '-ffast-math')
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
 
@@ -191,19 +192,19 @@ class LLVM:
 class LLVMBuffer(ExplicitExecAST):
   op_lookup = {
     UnaryOps.NOOP: lambda builder,x: x,
-    UnaryOps.NEG: lambda builder,x: builder.fneg(x),
-    UnaryOps.RELU: lambda builder,x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), x, ir.Constant(ir.FloatType(), 0)),
-    UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x]),
-    UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x]),
-    UnaryOps.SIGN: lambda builder,x: builder.select(builder.fcmp_ordered("==", x, ir.Constant(ir.FloatType(), 0)), ir.Constant(ir.FloatType(), 0),
-                                                    builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), -1))),
-    UnaryOps.RECIPROCAL: lambda builder,x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x),
-    BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y),
-    BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y),
-    BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y),
-    BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y),
-    BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y]),
-    BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y), ir.FloatType())
+    UnaryOps.NEG: lambda builder,x: builder.fneg(x, flags=('fast',)),
+    UnaryOps.RELU: lambda builder,x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x, flags=('fast',)), x, ir.Constant(ir.FloatType(), 0)),
+    UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x], fastmath=('fast',)),
+    UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x], fastmath=('fast',)),
+    UnaryOps.SIGN: lambda builder,x: builder.select(builder.fcmp_ordered("==", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), ir.Constant(ir.FloatType(), 0),
+                                                    builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x, flags=('fast',)), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), -1))),
+    UnaryOps.RECIPROCAL: lambda builder,x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x, flags=('fast',)),
+    BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y, flags=('fast',)),
+    BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),
+    BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y, flags=('fast',)),
+    BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y, flags=('fast',)),
+    BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y], fastmath=('fast',)),
+    BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType())
   }
   start_for_op = {
     ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
@@ -228,7 +229,7 @@ class LLVMBuffer(ExplicitExecAST):
   func_cache = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
-    key = str(ast)
+    key = str(ast)  # TODO: does this uniquely determine the AST?
     bufs = dedup(get_buffers(ast))
     output_shape = get_lazyop_info(ast).shape
     ret = cls(output_shape)
@@ -341,9 +342,10 @@ class LLVMBuffer(ExplicitExecAST):
           phis.append(val)
 
         if reduceops[0].op == ReduceOps.SUM:
-          reduce_result = loop_exit[-1].fadd(reduce_input, val)
+          reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
         elif reduceops[0].op == ReduceOps.MAX:
-          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32"), [reduce_input, val])
+          # TODO: this doesn't respect the fast math flag
+          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32"), [reduce_input, val], fastmath=('fast',))
 
         for i,phi in enumerate(phis[1:]):
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
