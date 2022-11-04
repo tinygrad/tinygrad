@@ -128,8 +128,7 @@ class LLVM:
     LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
-    #llvm.set_option('', '-force-vector-interleave=4')
-    llvm.set_option('', '-ffast-math')
+    llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
 
