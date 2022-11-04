@@ -179,7 +179,8 @@ class LLVM:
     LLVM.engine.finalize_object()
 
     # call function
-    cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
+    #cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
+    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(LLVM.engine.get_function_address('exec'))
     cfunc(*[x._buf for x in bufs])
 
     # we are done
@@ -213,7 +214,7 @@ class LLVMBuffer(ExplicitExecAST):
     super().__init__(shape, hostbuf)
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
 
-  def __repr__(self): return f"LLVMBuffer {str(self.shape)}"
+  def __repr__(self): return f"LLVMBuffer {str(self.st)}"
 
   @staticmethod
   def fromCPU(x):
@@ -228,7 +229,7 @@ class LLVMBuffer(ExplicitExecAST):
   func_cache = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
-    key = str(ast)  # TODO: does this uniquely determine the AST?
+    key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
     bufs = dedup(get_buffers(ast))
     output_shape = get_lazyop_info(ast).shape
     ret = cls(output_shape)
