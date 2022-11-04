@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import hashlib
 import math
+import time
 from typing import Tuple, Union
 from tinygrad.helpers import prod, all_same, dedup
 from tinygrad.shapetracker import ShapeTracker, ZeroView, strides_for_shape
@@ -161,7 +162,7 @@ class LLVM:
     if int(os.getenv("LLVMCACHE", "0")):
       LLVM.engine.set_object_cache(notify_func, getbuffer_func)
 
-  def exec(self, module, bufs):
+  def exec(self, module, bufs, op_estimate=0):
     module.triple = llvm.get_process_triple()
     module.data_layout = self.engine.target_data
     llvm_ir = str(module)
@@ -181,7 +182,12 @@ class LLVM:
     # call function
     #cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(LLVM.engine.get_function_address('exec'))
+
+    st = time.monotonic()
     cfunc(*[x._buf for x in bufs])
+    et = time.monotonic() - st
+    if DEBUG >= 1:
+      print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS")
 
     # we are done
     LLVM.engine.remove_module(mod)
@@ -231,8 +237,8 @@ class LLVMBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
     key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
     bufs = dedup(get_buffers(ast))
-    output_shape = get_lazyop_info(ast).shape
-    ret = cls(output_shape)
+    info = get_lazyop_info(ast)
+    ret = cls(info.shape)
 
     if key in LLVMBuffer.func_cache:
       LLVMBuffer.func_cache[key](ret._buf, *[x._buf for x in bufs])
@@ -368,7 +374,7 @@ class LLVMBuffer(ExplicitExecAST):
       loop_entry[-1].branch(loop_exit[-1]._block)
       loop_exit[0].ret_void()
 
-      LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs)
+      LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs, info.flops)
       return ret
 
     def ast_parse(builder, x, idx, reduce_result=None, depth=0):
@@ -433,5 +439,5 @@ class LLVMBuffer(ExplicitExecAST):
     store_builder.cbranch(store_builder.icmp_unsigned("==", idx_p1, int_const(prod(ret.shape))), exit_builder._block, body_builder._block)
 
     # **** llvm running ****
-    LLVMBuffer.func_cache[key] = LLVM().exec(module, [ret] + bufs)
+    LLVMBuffer.func_cache[key] = LLVM().exec(module, [ret] + bufs, info.flops)
     return ret
