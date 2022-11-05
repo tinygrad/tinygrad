@@ -118,7 +118,7 @@ class ShapeTracker:
     valid = True
     for s in new_shape:
       if curr_dim%s == 0:
-        curr_dim /= s
+        curr_dim //= s
         new_strides.append(self.strides[ptr] * curr_dim)
         if curr_dim == 1:
           ptr += 1
