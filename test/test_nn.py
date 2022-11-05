@@ -95,5 +95,24 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.data, torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
+  def test_groupnorm2d(self):
+    BS, H, W, C, G = 20, 10, 10, 6, 3
+
+    # create in tinygrad
+    layer = GroupNorm(C, G)
+
+    # create in torch
+    with torch.no_grad():
+      torch_layer = torch.nn.GroupNorm(G, C).eval()
+      torch_layer.weight[:] = torch.tensor(layer.weight.data, dtype=torch.float32)
+      torch_layer.bias[:] = torch.tensor(layer.bias.data, dtype=torch.float32)
+
+    # test
+    x = Tensor.randn(BS, C, H, W)
+    z = layer(x)
+    torch_x = torch.tensor(x.cpu().data)
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.data, torch_z.detach().numpy(), atol=5e-4, rtol=5e-4)
+
 if __name__ == '__main__':
   unittest.main()
