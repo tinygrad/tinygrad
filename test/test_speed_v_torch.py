@@ -18,7 +18,7 @@ def test_speed(f1, *args):
     ret = f1(*args)
     et = (time.monotonic() - st) * 1000
     ets.append(et)
-  return ret.numpy().sum(), np.median(ets)
+  return ret.numpy(), np.median(ets)
 
 def test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
@@ -31,9 +31,8 @@ def test_generic_square(name, N, f1, f2):
     val_torch, et_torch = test_speed(f1, torch_a, torch_b)
   val_tinygrad, et_tinygrad = test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
 
-  print(f"{name} {N}x{N} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch, val_tinygrad)
-  relative_error = abs((val_tinygrad-val_torch)/val_torch)
-  assert relative_error < 0.01, f"relative error too high: {relative_error}"
+  print(f"{name} {N}x{N} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch.sum(), val_tinygrad.sum())
+  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
 
 CNT = 5
 class TestSpeed(unittest.TestCase):

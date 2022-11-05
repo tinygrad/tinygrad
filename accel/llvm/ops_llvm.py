@@ -130,6 +130,7 @@ class LLVM:
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
     llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
+    #llvm.set_option('', '-ffp-contract=fast')   # does anything? is there no NEON FMA?
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
 
@@ -301,18 +302,35 @@ class LLVMBuffer(ExplicitExecAST):
       # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
       # AMX can make quick work of a MUL->SUM AST block
       # This also splits the dimensions for cache chunking
-      if len(shapes[0]) == 2 and len(reduceops) == 0:
+      if len(shapes[0]) in [2,3]: # and len(reduceops) == 0:
         new_shapes, new_strides = [], []
-        CACHE_DIM = 128
+        # there's 32 SIMD FP registers
+        # track a 4x4 chunk of the matrix at once
+        CACHE_DIM = 128 if len(shapes[0]) == 2 else 4
         for shape, stride in zip(shapes, strides):
           st = ShapeTracker(tuple(shape))
           st.strided(*zip(shape, stride))
-          st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
-          st.permute(0,2,1,3)
+          if len(shape) == 2:
+            st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
+            st.permute(0,2,1,3)
+          else:
+            st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
+            #st.permute(0,2,4,1,3)
           assert len(st.views) == 1
           new_shapes.append(st.shape)
           new_strides.append(st.strides)
         shapes, strides = new_shapes, new_strides
+
+      # the 4x4 need to go all the way at the end, even after reduce
+      
+      # remove the magic 4x4 at 2:4, since we run this as 4x4
+      # nah, this is wrong
+      #if len(shapes[0]) == 5:
+      #  new_shapes, new_strides = [], []
+      #  for shape, stride in zip(shapes, strides):
+      #    new_shapes.append(shape[0:2] + shape[4:])
+      #    new_strides.append(stride[0:2] + stride[4:])
+      #  shapes, strides = new_shapes, new_strides
 
       output_shape = shapes[0]
       full_shape = [x for x in shapes if x != output_shape]
