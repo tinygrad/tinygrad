@@ -109,6 +109,28 @@ class ShapeTracker:
       new_strides = [0 if x == 1 else old_strides.pop(0) for x in new_shape]
       self.views[-1] = View(new_shape, new_strides, self.offset)
       return self
+    
+    # check if the new dimensions factorize from the old ones
+    # TODO: is this right? can we write this better?
+    ptr = 0 
+    curr_dim = self.shape[ptr]
+    new_strides = []
+    valid = True
+    for s in new_shape:
+      if curr_dim%s == 0:
+        curr_dim /= s
+        new_strides.append(self.strides[ptr] * curr_dim)
+        if curr_dim == 1:
+          ptr += 1
+          if ptr == len(self.shape):
+            break
+          curr_dim = self.shape[ptr]
+      else:
+        valid = False
+        break
+    if valid:
+      self.views[-1] = View(new_shape, new_strides, self.offset)
+      return self
 
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous:
