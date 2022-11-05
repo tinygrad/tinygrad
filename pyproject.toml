@@ -1,0 +1,42 @@
+[build-system]
+requires = ["pdm-pep517"]
+build-backend = "pdm.pep517.api"
+
+[tool.pdm]
+version = { source = "scm" }
+
+[tool.pdm.dev-dependencies]
+gpu = [
+    "pyopencl",
+    "six",
+]
+testing = [
+    "pytest",
+    "torch~=1.11.0",
+    "tqdm",
+    "protobuf~=3.19.0",
+    "onnx",
+    "onnx2torch",
+    "mypy",
+]
+
+[project]
+name = "tinygrad"
+version = "0.3.0"
+description = "You like pytorch? You like micrograd? You love tinygrad! heart"
+authors = [
+    { name = "George Hotz" },
+]
+requires-python = ">=3.8, <3.12"
+dependencies = [
+    "numpy",
+    "requests",
+    "pillow",
+    "networkx",
+]
+
+[tool.mypy]
+files = ["tinygrad", "extra", "test"]
+strict = true
+exclude = ["venv"]
+follow_imports = "silent"
