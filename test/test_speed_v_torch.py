@@ -41,6 +41,11 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.sum()
     test_generic_square('sum', 4096, f, f)
 
+  def test_permute(self):
+    def f1(a, b): return a.permute(1,0).contiguous()
+    def f2(a, b): return a.permute(1,0) + 0
+    test_generic_square('permute', 4096, f1, f2)
+
   def test_neg(self):
     def f(a, b): return -a
     test_generic_square('neg', 4096, f, f)

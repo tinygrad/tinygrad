@@ -266,22 +266,28 @@ class LLVMBuffer(ExplicitExecAST):
       shapes = [x.shape for x in bufs]
       strides = [x.st.views[0].strides for x in bufs]
 
+      # remove places where the shape is all ones, this is cheap, easy, and correct
+      all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
+      shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in shapes]
+      strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
+
       # find first mismatch, don't reduce this
       first_reduce = -1
       for i in range(len(shapes[0])):
         if not all_same([x[i] for x in shapes]):
           first_reduce = i
           break
+      print("first reduce", first_reduce)
       
       # merge dimensions if we can
       # TODO: does this always preserve the reduce dimension, NO
-      # TODO: move this into shapetracker
+      # TODO: move this into shapetracker, with tests!
       rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
       for i in range(1, len(shapes[0])):
         can_merge = []
         for j in range(len(shapes)):
           # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
-          can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or rets[j][-1][0] == 1 or (strides[j][i] == 0 and rets[j][-1][1] == 0))
+          can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
         # more can merge than this
         can_merge = all(can_merge) and i != first_reduce
         for j in range(len(shapes)):
@@ -295,10 +301,17 @@ class LLVMBuffer(ExplicitExecAST):
       full_shape = [x for x in shapes if x != output_shape]
       full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
 
-      #print(ast)
-      #print(shapes)
-      #print(strides)
-      #print(full_shape, "->", output_shape)
+      if DEBUG >= 2:
+        print(ast)
+        print(shapes)
+        print(strides)
+        print(full_shape, "->", output_shape)
+      
+      # TODO: change the order of the output_shape, and perhaps reshape everything
+      # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
+      # a 16x16
+
+      # AMX can make quick work of a MUL->SUM AST block
 
       # construct the structure of the loops
       loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
