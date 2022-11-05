@@ -69,7 +69,7 @@ class GroupNorm:
   def __call__(self, x):
     # reshape for layernorm to work as group norm
     # subtract mean and divide stddev
-    if self.num_groups == None:  # just layernorm
+    if self.num_groups is None:  # just layernorm
       x = x.layernorm()
     else:
       x = x.reshape(x.shape[0], self.num_groups, -1).layernorm().reshape(x.shape)
