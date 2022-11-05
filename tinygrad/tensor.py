@@ -88,6 +88,9 @@ class Tensor:
   # TODO: remove use of numpy here
 
   @classmethod
+  def zeros_like(cls, tensor, **kwargs): return cls.zeros(*tensor.shape, **kwargs)
+
+  @classmethod
   def zeros(cls, *shape, **kwargs): return cls(np.zeros(shape, dtype=np.float32), **kwargs)
 
   @classmethod
