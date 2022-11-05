@@ -42,7 +42,10 @@ class TestSpeed(unittest.TestCase):
     test_generic_square('sum', 4096, f, f)
 
   def test_permute(self):
+    # this is a 64MB tensor, M1 L1 cache is 128kB
+    # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
     def f1(a, b): return a.permute(1,0).contiguous()
+    # NOTE: this isn't being constant folded
     def f2(a, b): return a.permute(1,0) + 0
     test_generic_square('permute', 4096, f1, f2)
 

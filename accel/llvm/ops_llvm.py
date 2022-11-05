@@ -277,7 +277,7 @@ class LLVMBuffer(ExplicitExecAST):
         if not all_same([x[i] for x in shapes]):
           first_reduce = i
           break
-      print("first reduce", first_reduce)
+      #print("first reduce", first_reduce)
       
       # merge dimensions if we can
       # TODO: does this always preserve the reduce dimension, NO
@@ -296,8 +296,25 @@ class LLVMBuffer(ExplicitExecAST):
           else:
             rets[j].append((shapes[j][i], strides[j][i]))
       shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
-      output_shape = shapes[0]
 
+      # TODO: change the order of the output_shape, and perhaps reshape everything
+      # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
+      # AMX can make quick work of a MUL->SUM AST block
+      # This also splits the dimensions for cache chunking
+      if len(shapes[0]) == 2 and len(reduceops) == 0:
+        new_shapes, new_strides = [], []
+        CACHE_DIM = 128
+        for shape, stride in zip(shapes, strides):
+          st = ShapeTracker(tuple(shape))
+          st.strided(*zip(shape, stride))
+          st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
+          st.permute(0,2,1,3)
+          assert len(st.views) == 1
+          new_shapes.append(st.shape)
+          new_strides.append(st.strides)
+        shapes, strides = new_shapes, new_strides
+
+      output_shape = shapes[0]
       full_shape = [x for x in shapes if x != output_shape]
       full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
 
@@ -307,12 +324,6 @@ class LLVMBuffer(ExplicitExecAST):
         print(strides)
         print(full_shape, "->", output_shape)
       
-      # TODO: change the order of the output_shape, and perhaps reshape everything
-      # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
-      # a 16x16
-
-      # AMX can make quick work of a MUL->SUM AST block
-
       # construct the structure of the loops
       loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
       loop_exit = []
