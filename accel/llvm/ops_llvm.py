@@ -129,8 +129,8 @@ class LLVM:
     LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
+    llvm.set_option('', '-ffp-contract=fast')   # does anything? is there no NEON FMA?
     llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
-    #llvm.set_option('', '-ffp-contract=fast')   # does anything? is there no NEON FMA?
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
 
