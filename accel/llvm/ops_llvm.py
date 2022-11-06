@@ -400,7 +400,13 @@ class LLVMBuffer(ExplicitExecAST):
       # do the early ast
       reduce_result = None
       if len(reduceops) > 0:
-        reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
+        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL:
+          reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
+          reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
+          fma = True
+        else:
+          reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
+          fma = False
 
         phis = [LLVMBuffer.start_for_op[ReduceOps.SUM]]
         for i in range(store_loop+1, len(loop_entry)):
@@ -410,7 +416,10 @@ class LLVMBuffer(ExplicitExecAST):
           phis.append(val)
 
         if reduceops[0].op == ReduceOps.SUM:
-          reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
+          if fma:
+            reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type, val_type]), name="llvm.fma"), [reduce_input_0, reduce_input_1, val], fastmath=('fast',))
+          else:
+            reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
         elif reduceops[0].op == ReduceOps.MAX:
           # TODO: this doesn't respect the fast math flag
           reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
