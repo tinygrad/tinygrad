@@ -213,11 +213,11 @@ class LLVMBuffer(ExplicitExecAST):
     BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y], fastmath=('fast',)),
     BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType())
   }
-  #start_for_op = {
-  #  ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
-  #  ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
-  #}
   start_for_op = {
+    ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
+    ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
+  }
+  start_for_op_4x4 = {
     ReduceOps.SUM: ir.VectorType(ir.FloatType(), 16)([ir.FloatType()(0.0)]*16),
     ReduceOps.MAX: ir.VectorType(ir.FloatType(), 16)([ir.FloatType()(-math.inf)]*16),
   }
@@ -302,6 +302,9 @@ class LLVMBuffer(ExplicitExecAST):
             rets[j].append((shapes[j][i], strides[j][i]))
       shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
+      #USE_4X4 = False
+      USE_4X4 = True
+
       # TODO: change the order of the output_shape, and perhaps reshape everything
       # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
       # AMX can make quick work of a MUL->SUM AST block
@@ -318,9 +321,13 @@ class LLVMBuffer(ExplicitExecAST):
             st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
             st.permute(0,2,1,3)
           else:
-            # 0 1 2 - 3 4 5 - 6
-            st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
-            st.permute(0,3,1,4,6,2,5)
+            if USE_4X4:
+              # 0 1 2 - 3 4 5 - 6
+              st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
+              st.permute(0,3,1,4,6,2,5)
+            else:
+              st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
+              st.permute(0,2,1,3,4)
           assert len(st.views) == 1
           new_shapes.append(st.shape)
           new_strides.append(st.strides)
@@ -333,7 +340,8 @@ class LLVMBuffer(ExplicitExecAST):
       
       # remove the magic 4x4 at 2:4, since we run this as 4x4
       # TODO: gate this
-      full_shape = full_shape[:-2]
+      if USE_4X4:
+        full_shape = full_shape[:-2]
 
       if DEBUG >= 2:
         print(ast)
@@ -363,30 +371,33 @@ class LLVMBuffer(ExplicitExecAST):
           idx_level[j].append(si)
 
 
-      val_type = ir.VectorType(ir.FloatType(), 16)
+      if USE_4X4:
+        val_type = ir.VectorType(ir.FloatType(), 16)
+      else:
+        val_type = ir.FloatType()
 
       # the ast parser
       def ast_parse(builder, x, level, reduce_result=None):
         if not isinstance(x, LazyOp):
           buf_index = bufs.index(x)
           idx = idx_level[buf_index][level]
+          if USE_4X4:
+            # load 4x4
+            idxs = []
+            for y in range(4):
+              for x in range(4):
+                idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
 
-          # load 4x4
-          idxs = []
-          for y in range(4):
-            for x in range(4):
-              idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
-
-          # build <16 x float> vector
-          m = ir.VectorType(ir.FloatType(), 16)(ir.Undefined)
-          for i, idx in enumerate(idxs):
-            pts = builder.gep(func.args[buf_index], [idx], inbounds=True)
-            element = builder.load(pts)
-            m = builder.insert_element(m, element, int_const(i))
-          return m
-
-          # load 1x1
-          return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
+            # build <16 x float> vector
+            m = ir.VectorType(ir.FloatType(), 16)(ir.Undefined)
+            for i, idx in enumerate(idxs):
+              pts = builder.gep(func.args[buf_index], [idx], inbounds=True)
+              element = builder.load(pts)
+              m = builder.insert_element(m, element, int_const(i))
+            return m
+          else:
+            # load 1x1
+            return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
         if isinstance(x.op, ReduceOps):
           if reduce_result is None:
             raise Exception("no reduce")
@@ -408,7 +419,10 @@ class LLVMBuffer(ExplicitExecAST):
           reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
           fma = False
 
-        phis = [LLVMBuffer.start_for_op[ReduceOps.SUM]]
+        if USE_4X4:
+          phis = [LLVMBuffer.start_for_op_4x4[ReduceOps.SUM]]
+        else:
+          phis = [LLVMBuffer.start_for_op[ReduceOps.SUM]]
         for i in range(store_loop+1, len(loop_entry)):
           #val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
           val = loop_entry[i].phi(val_type, f"reduce_phi_{i}")
@@ -431,15 +445,15 @@ class LLVMBuffer(ExplicitExecAST):
       result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
 
       # store 4x4
-      builder = loop_exit[store_loop]
-      for y in range(4):
-        for x in range(4):
-          idx_extra = builder.add(idx_level[0][store_loop], int_const(strides[0][-2]*y + strides[0][-1]*x))
-          result_x = builder.extract_element(result, int_const(y*4 + x))
-          builder.store(result_x, builder.gep(func.args[0], [idx_extra], inbounds=True))
-      #builder.store(result, builder.gep(func.args[0], idxs, inbounds=True))
-
-      #loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
+      if USE_4X4:
+        builder = loop_exit[store_loop]
+        for y in range(4):
+          for x in range(4):
+            idx_extra = builder.add(idx_level[0][store_loop], int_const(strides[0][-2]*y + strides[0][-1]*x))
+            result_x = builder.extract_element(result, int_const(y*4 + x))
+            builder.store(result_x, builder.gep(func.args[0], [idx_extra], inbounds=True))
+      else:
+        loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
       
       # add the looping
       for i,s in enumerate(full_shape):
