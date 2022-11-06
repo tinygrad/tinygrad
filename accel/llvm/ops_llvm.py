@@ -310,7 +310,7 @@ class LLVMBuffer(ExplicitExecAST):
         new_shapes, new_strides = [], []
         # there's 32 SIMD FP registers
         # track a 4x4 chunk of the matrix at once
-        CACHE_DIM = 64
+        CACHE_DIM = 128
         for shape, stride in zip(shapes, strides):
           st = ShapeTracker(tuple(shape))
           st.strided(*zip(shape, stride))
