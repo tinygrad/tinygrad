@@ -261,7 +261,7 @@ class LLVMBuffer(ExplicitExecAST):
 
     # create llvm function
     module = ir.Module(name=__file__)
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType())]*(1+len(bufs))), name='exec')
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(1+len(bufs))), name='exec')
 
     if not all(len(x.st.views) == 1 for x in bufs):
       print(f"WARNING: {ast} has buffers with more than 1 view, can't optimize")
@@ -310,7 +310,7 @@ class LLVMBuffer(ExplicitExecAST):
         new_shapes, new_strides = [], []
         # there's 32 SIMD FP registers
         # track a 4x4 chunk of the matrix at once
-        CACHE_DIM = 128 if len(shapes[0]) == 2 else 4
+        CACHE_DIM = 64
         for shape, stride in zip(shapes, strides):
           st = ShapeTracker(tuple(shape))
           st.strided(*zip(shape, stride))
@@ -318,8 +318,9 @@ class LLVMBuffer(ExplicitExecAST):
             st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
             st.permute(0,2,1,3)
           else:
-            st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
-            st.permute(0,2,4,1,3)
+            # 0 1 2 - 3 4 5 - 6
+            st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
+            st.permute(0,3,1,4,6,2,5)
           assert len(st.views) == 1
           new_shapes.append(st.shape)
           new_strides.append(st.strides)
@@ -332,7 +333,7 @@ class LLVMBuffer(ExplicitExecAST):
       
       # remove the magic 4x4 at 2:4, since we run this as 4x4
       # TODO: gate this
-      full_shape = full_shape[0:3]
+      full_shape = full_shape[:-2]
 
       if DEBUG >= 2:
         print(ast)
@@ -371,13 +372,17 @@ class LLVMBuffer(ExplicitExecAST):
           idx = idx_level[buf_index][level]
 
           # load 4x4
-          m = ir.VectorType(ir.FloatType(), 16)([ir.FloatType()(0.0)]*16)
-          elements = []
+          idxs = []
           for y in range(4):
             for x in range(4):
-              idx_extra = builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x))
-              elements.append(builder.load(builder.gep(func.args[buf_index], [idx_extra], inbounds=True)))
-              m = builder.insert_element(m, elements[-1], int_const(y*4 + x))
+              idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
+
+          # build <16 x float> vector
+          m = ir.VectorType(ir.FloatType(), 16)(ir.Undefined)
+          for i, idx in enumerate(idxs):
+            pts = builder.gep(func.args[buf_index], [idx], inbounds=True)
+            element = builder.load(pts)
+            m = builder.insert_element(m, element, int_const(i))
           return m
 
           # load 1x1
