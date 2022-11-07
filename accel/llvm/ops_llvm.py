@@ -304,8 +304,8 @@ class LLVMBuffer(ExplicitExecAST):
 
       #USE_4X4 = False
       USE_4X4 = True
-      DY = 64
-      DX = 1
+      DY = 8
+      DX = 8
 
       # TODO: change the order of the output_shape, and perhaps reshape everything
       # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
@@ -419,7 +419,7 @@ class LLVMBuffer(ExplicitExecAST):
       # do the early ast
       reduce_result = None
       if len(reduceops) > 0:
-        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL:
+        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL: # and False:
           reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
           reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
           fma = True
