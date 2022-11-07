@@ -302,8 +302,10 @@ class LLVMBuffer(ExplicitExecAST):
             rets[j].append((shapes[j][i], strides[j][i]))
       shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
-      #USE_4X4 = False
-      USE_4X4 = True
+      if len(shapes[0]) >= 3:
+        USE_4X4 = True
+      else:
+        USE_4X4 = False
       DY, DX = 16, 4
       #DY, DX = 1, 1
 
@@ -334,7 +336,7 @@ class LLVMBuffer(ExplicitExecAST):
             # split Y and X
             #st.reshape(shape[0], shape[1], shape[2]//DY, DY, shape[3]//DX, DX, shape[4], shape[5], shape[6])
             #st.permute(0,1,2,4,6,7,8,3,5)
-        else:
+        elif len(shape) == 3:
           if USE_4X4:
             # 0 1 2 - 3 4 5 - 6
             #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
@@ -431,7 +433,7 @@ class LLVMBuffer(ExplicitExecAST):
       # do the early ast
       reduce_result = None
       if len(reduceops) > 0:
-        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL:
+        if reduceops[0].op == ReduceOps.SUM and isinstance(reduceops[0].src[0], LazyOp) and reduceops[0].src[0].op == BinaryOps.MUL:
           reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
           reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
           fma = True

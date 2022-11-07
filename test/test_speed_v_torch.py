@@ -32,7 +32,7 @@ def test_generic_square(name, N, f1, f2):
   val_tinygrad, et_tinygrad = test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
 
   print(f"{name} {N}x{N} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch.sum(), val_tinygrad.sum())
-  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
+  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
 CNT = 5
 class TestSpeed(unittest.TestCase):
