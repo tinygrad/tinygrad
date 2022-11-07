@@ -304,42 +304,46 @@ class LLVMBuffer(ExplicitExecAST):
 
       #USE_4X4 = False
       USE_4X4 = True
-      DY = 8
-      DX = 8
+      DY, DX = 8, 8
+      #DY, DX = 1, 1
 
       # TODO: change the order of the output_shape, and perhaps reshape everything
       # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
       # AMX can make quick work of a MUL->SUM AST block
       # This also splits the dimensions for cache chunking
-      if len(shapes[0]) in [2,3]: # and len(reduceops) == 0:
-        new_shapes, new_strides = [], []
-        # there's 32 SIMD FP registers
-        # track a 4x4 chunk of the matrix at once
-        CACHE_DIM = 128
-        for shape, stride in zip(shapes, strides):
-          st = ShapeTracker(tuple(shape))
-          st.strided(*zip(shape, stride))
-          if len(shape) == 2:
-            st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
-            st.permute(0,2,1,3)
+      new_shapes, new_strides = [], []
+      # there's 32 SIMD FP registers
+      # track a 4x4 chunk of the matrix at once
+      CACHE_DIM = 128
+      for shape, stride in zip(shapes, strides):
+        st = ShapeTracker(tuple(shape))
+        st.strided(*zip(shape, stride))
+        if len(shape) == 2:
+          st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
+          st.permute(0,2,1,3)
+        elif len(shape) == 7:
+          if USE_4X4:
+            st.reshape(shape[0], shape[1], shape[2]//DY, DY, shape[3]//DX, DX, shape[4], shape[5], shape[6])
+            #print("\n\n\nSTRIDE:", st.stride)
+            st.permute(0,1,2,4,6,7,8,3,5)
+        else:
+          if USE_4X4:
+            # 0 1 2 - 3 4 5 - 6
+            #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
+            #st.permute(0,3,1,4,6,2,5)
+            st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
+            st.permute(0,2,4,1,3)
           else:
-            if USE_4X4:
-              # 0 1 2 - 3 4 5 - 6
-              #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
-              #st.permute(0,3,1,4,6,2,5)
-              st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
-              st.permute(0,2,4,1,3)
-            else:
-              #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
-              #st.permute(0,2,1,3,4)
-              st.reshape(shape[0]//4, 4, shape[1]//4, 4, shape[2])
-              st.permute(0,2,1,3,4)
-              #st.permute(0,2,1,3,4)
-              pass
-          assert len(st.views) == 1
-          new_shapes.append(st.shape)
-          new_strides.append(st.strides)
-        shapes, strides = new_shapes, new_strides
+            #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
+            #st.permute(0,2,1,3,4)
+            st.reshape(shape[0]//4, 4, shape[1]//4, 4, shape[2])
+            st.permute(0,2,1,3,4)
+            #st.permute(0,2,1,3,4)
+            pass
+        assert len(st.views) == 1
+        new_shapes.append(st.shape)
+        new_strides.append(st.strides)
+      shapes, strides = new_shapes, new_strides
 
       # the 4x4 need to go all the way at the end, even after reduce
       output_shape = shapes[0]
@@ -419,7 +423,7 @@ class LLVMBuffer(ExplicitExecAST):
       # do the early ast
       reduce_result = None
       if len(reduceops) > 0:
-        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL: # and False:
+        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL and False:
           reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
           reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
           fma = True

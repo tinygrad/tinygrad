@@ -104,7 +104,7 @@ class TestSpeed(unittest.TestCase):
     for bs in [32]:
       for in_chans in IN_CHANS:
         for out_chans in [16]:
-          img_size = 32
+          img_size = 34
           torch_dat = torch.rand(bs, in_chans, img_size, img_size)
           torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None)
 
@@ -119,9 +119,8 @@ class TestSpeed(unittest.TestCase):
             val_torch, et_torch = test_speed(f1)
           val_tinygrad, et_tinygrad = test_speed(f2)
 
-          print(f"bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch, val_tinygrad)
-          relative_error = abs((val_tinygrad-val_torch)/val_torch)
-          assert relative_error < 0.01
+          print(f"bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch.sum(), val_tinygrad.sum())
+          np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
 
 if __name__ == '__main__':
   unittest.main()
