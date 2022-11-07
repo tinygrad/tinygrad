@@ -33,15 +33,14 @@ jobs:
         python-version: 3.8
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        python -m pip install pylint flake8
-        pip install -e .
+        python -m pip install --upgrade pip pdm
+        pdm sync -G testing
     - name: Lint with pylint
-      run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
+      run: pdm run pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
-      run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E304,E502,E701,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
+      run: pdm run flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E304,E502,E701,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
     - name: Lint tinygrad with pylint
-      run: pylint tinygrad/
+      run: pdm run pylint tinygrad/
 
   testcpu:
     name: CPU Tests
@@ -57,11 +56,11 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pdm sync -G testing
     - name: Run Pytest
-      run: LAZY=0 python -m pytest -s -v
+      run: LAZY=0 pdm run pytest -s -v
     - name: Run Pytest (lazy)
-      run: LAZY=1 python -m pytest -s -v
+      run: LAZY=1 pdm run pytest -s -v
 
   testtorch:
     name: Torch Tests
@@ -77,11 +76,11 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pdm sync -G testing
     - name: Run Pytest
-      run: LAZY=0 TORCH=1 python -m pytest -s -v
+      run: LAZY=0 TORCH=1 pdm run pytest -s -v
     - name: Run Pytest (lazy)
-      run: LAZY=1 TORCH=1 python -m pytest -s -v
+      run: LAZY=1 TORCH=1 pdm run pytest -s -v
 
   testgpu:
     name: GPU Tests
@@ -103,11 +102,11 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]'
+      run: pdm sync -G gpu -G testing
     - name: Run Optimizer Test
-      run: OPT=2 GPU=1 python test/external_test_opt.py
+      run: OPT=2 GPU=1 pdm run test/external_test_opt.py
     - name: Run Pytest (default)
-      run: OPT=1 GPU=1 python -m pytest -s -v
+      run: OPT=1 GPU=1 pdm run pytest -s -v
 
   testopencl:
     name: openpilot (OpenCL) Test
@@ -129,9 +128,9 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]'
+      run: pdm sync -G gpu -G testing
     - name: Test OPENCL ops
-      run: OPT=2 OPENCL=1 python3 test/test_ops.py
+      run: OPT=2 OPENCL=1 pdm run python3 test/test_ops.py
     - name: Test openpilot model
       run: |
         ALLOWED_KERNEL_COUNT=206 FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
@@ -151,6 +150,6 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pdm sync -G testing
     - name: Run mypy
-      run: mypy tinygrad/
+      run: pdm run mypy tinygrad/

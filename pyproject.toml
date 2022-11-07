@@ -18,6 +18,8 @@ testing = [
     "onnx",
     "onnx2torch",
     "mypy",
+    "pylint",
+    "flake8",
 ]
 
 [project]

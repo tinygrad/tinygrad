@@ -10,3 +10,4 @@ dist
 a.out
 boxes.jpg
 weights/*
+.pdm.toml
