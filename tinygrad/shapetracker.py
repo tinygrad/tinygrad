@@ -123,6 +123,10 @@ class ShapeTracker:
         if curr_dim == 1:
           ptr += 1
           if ptr == len(self.shape):
+            # there might still be 1s
+            while len(new_strides) != len(new_shape):
+              assert new_shape[len(new_strides)] == 1
+              new_strides.append(1)
             break
           curr_dim = self.shape[ptr]
       else:

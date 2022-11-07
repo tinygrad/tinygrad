@@ -304,6 +304,8 @@ class LLVMBuffer(ExplicitExecAST):
 
       #USE_4X4 = False
       USE_4X4 = True
+      DY = 16
+      DX = 4
 
       # TODO: change the order of the output_shape, and perhaps reshape everything
       # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
@@ -323,11 +325,17 @@ class LLVMBuffer(ExplicitExecAST):
           else:
             if USE_4X4:
               # 0 1 2 - 3 4 5 - 6
-              st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
-              st.permute(0,3,1,4,6,2,5)
+              #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
+              #st.permute(0,3,1,4,6,2,5)
+              st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
+              st.permute(0,2,4,1,3)
             else:
-              st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
+              #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
+              #st.permute(0,2,1,3,4)
+              st.reshape(shape[0]//4, 4, shape[1]//4, 4, shape[2])
               st.permute(0,2,1,3,4)
+              #st.permute(0,2,1,3,4)
+              pass
           assert len(st.views) == 1
           new_shapes.append(st.shape)
           new_strides.append(st.strides)
@@ -372,7 +380,7 @@ class LLVMBuffer(ExplicitExecAST):
 
 
       if USE_4X4:
-        val_type = ir.VectorType(ir.FloatType(), 16)
+        val_type = ir.VectorType(ir.FloatType(), DY*DX)
       else:
         val_type = ir.FloatType()
 
@@ -384,12 +392,12 @@ class LLVMBuffer(ExplicitExecAST):
           if USE_4X4:
             # load 4x4
             idxs = []
-            for y in range(4):
-              for x in range(4):
+            for y in range(DY):
+              for x in range(DX):
                 idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
 
             # build <16 x float> vector
-            m = ir.VectorType(ir.FloatType(), 16)(ir.Undefined)
+            m = ir.VectorType(ir.FloatType(), DY*DX)(ir.Undefined)
             for i, idx in enumerate(idxs):
               pts = builder.gep(func.args[buf_index], [idx], inbounds=True)
               element = builder.load(pts)
@@ -420,7 +428,7 @@ class LLVMBuffer(ExplicitExecAST):
           fma = False
 
         if USE_4X4:
-          phis = [LLVMBuffer.start_for_op_4x4[ReduceOps.SUM]]
+          phis = [val_type([LLVMBuffer.start_for_op[ReduceOps.SUM]]*(DY*DX))]
         else:
           phis = [LLVMBuffer.start_for_op[ReduceOps.SUM]]
         for i in range(store_loop+1, len(loop_entry)):
@@ -447,11 +455,14 @@ class LLVMBuffer(ExplicitExecAST):
       # store 4x4
       if USE_4X4:
         builder = loop_exit[store_loop]
-        for y in range(4):
-          for x in range(4):
-            idx_extra = builder.add(idx_level[0][store_loop], int_const(strides[0][-2]*y + strides[0][-1]*x))
-            result_x = builder.extract_element(result, int_const(y*4 + x))
-            builder.store(result_x, builder.gep(func.args[0], [idx_extra], inbounds=True))
+        idxs = []
+        for y in range(DY):
+          for x in range(DX):
+            idxs.append(builder.add(idx_level[0][store_loop], int_const(strides[0][-2]*y + strides[0][-1]*x)))
+
+        for i, idx in enumerate(idxs):
+          result_x = builder.extract_element(result, int_const(i))
+          builder.store(result_x, builder.gep(func.args[0], [idx], inbounds=True))
       else:
         loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
       
