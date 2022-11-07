@@ -87,6 +87,12 @@ class TestSpeed(unittest.TestCase):
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     test_generic_square('gemm_unrolled', N, f1, f2)
 
+  def test_gemm_unrolled_permute(self):
+    N = 512
+    def f1(a, b): return a.T@b
+    def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
+    test_generic_square('gemm_unrolled_permute', N, f1, f2)
+
   def test_conv2d(self):
     torch.manual_seed(0)
     for bs in [32]:
