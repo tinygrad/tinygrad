@@ -129,7 +129,8 @@ class LLVM:
     LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
-    llvm.set_option('', '-ffp-contract=fast')   # does anything? is there no NEON FMA?
+    llvm.set_option('', '-ffp-contract=fast')   # does anything? why isn't is fusing automatically?
+    llvm.set_option('', '-ffast-math')          # can't hurt
     llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
@@ -458,7 +459,8 @@ class LLVMBuffer(ExplicitExecAST):
             reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
         elif reduceops[0].op == ReduceOps.MAX:
           # TODO: this doesn't respect the fast math flag
-          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
+          # err, actually i think that it doesn't fuse because the type is fixed
+          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
 
         for i,phi in enumerate(phis[1:]):
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
