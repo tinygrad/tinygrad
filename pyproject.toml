@@ -40,5 +40,5 @@ dependencies = [
 [tool.mypy]
 files = ["tinygrad", "extra", "test"]
 strict = true
-exclude = ["venv"]
+exclude = ["venv", "env", ".venv"]
 follow_imports = "silent"
