@@ -304,7 +304,7 @@ class LLVMBuffer(ExplicitExecAST):
 
       #USE_4X4 = False
       USE_4X4 = True
-      DY, DX = 8, 8
+      DY, DX = 16, 4
       #DY, DX = 1, 1
 
       # TODO: change the order of the output_shape, and perhaps reshape everything
@@ -323,9 +323,17 @@ class LLVMBuffer(ExplicitExecAST):
           st.permute(0,2,1,3)
         elif len(shape) == 7:
           if USE_4X4:
-            st.reshape(shape[0], shape[1], shape[2]//DY, DY, shape[3]//DX, DX, shape[4], shape[5], shape[6])
-            #print("\n\n\nSTRIDE:", st.stride)
-            st.permute(0,1,2,4,6,7,8,3,5)
+            # split batch and X
+            #st.reshape(shape[0]//DY, DY, shape[1], shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6])
+            #st.permute(0,2,3,4,6,7,8,1,5)
+
+            # split chans and X
+            st.reshape(shape[0], shape[1]//DY, DY, shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6])
+            st.permute(0,1,3,4,6,7,8,2,5)
+
+            # split Y and X
+            #st.reshape(shape[0], shape[1], shape[2]//DY, DY, shape[3]//DX, DX, shape[4], shape[5], shape[6])
+            #st.permute(0,1,2,4,6,7,8,3,5)
         else:
           if USE_4X4:
             # 0 1 2 - 3 4 5 - 6
@@ -423,7 +431,7 @@ class LLVMBuffer(ExplicitExecAST):
       # do the early ast
       reduce_result = None
       if len(reduceops) > 0:
-        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL and False:
+        if reduceops[0].op == ReduceOps.SUM and reduceops[0].src[0].op == BinaryOps.MUL:
           reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
           reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
           fma = True

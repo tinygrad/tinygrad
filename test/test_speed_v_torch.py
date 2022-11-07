@@ -7,7 +7,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 
-IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "1,16,64").split(",")]
+IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 
 def test_speed(f1, *args):
   ets = []
@@ -103,7 +103,7 @@ class TestSpeed(unittest.TestCase):
     torch.manual_seed(0)
     for bs in [32]:
       for in_chans in IN_CHANS:
-        for out_chans in [16]:
+        for out_chans in [32]:
           img_size = 34
           torch_dat = torch.rand(bs, in_chans, img_size, img_size)
           torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None)
