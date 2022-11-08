@@ -16,6 +16,8 @@ from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 
 def int_const(x): return ir.Constant(ir.IntType(64), x)
+
+# this is only used on the crappy path
 def idx_deref(builder, buf, ptr, eidx):
   if eidx[2] == 1 and eidx[3] is None:
     idx = eidx[1]
@@ -217,6 +219,7 @@ class LLVMBuffer(ExplicitExecAST):
     ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
     ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
   }
+
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     super().__init__(shape, hostbuf)
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
@@ -236,11 +239,11 @@ class LLVMBuffer(ExplicitExecAST):
   func_cache = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
-    key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
     bufs = dedup(get_buffers(ast))
     info = get_lazyop_info(ast)
     ret = cls(info.shape)
 
+    key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
     if key in LLVMBuffer.func_cache:
       LLVMBuffer.func_cache[key](ret._buf, *[x._buf for x in bufs])
       return ret
