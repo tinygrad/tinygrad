@@ -12,7 +12,7 @@ IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
-  if x < 1:
+  if x < 0.8:
     return colored(ret, 'green')
   elif x > 1.5:
     return colored(ret, 'red')
