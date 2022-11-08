@@ -62,8 +62,8 @@ class Linear:
 
 class GroupNorm:
   def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
-    self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
-    if affine:
+    self.num_groups, self.num_channels, self.eps, self.affine = num_groups, num_channels, eps, affine
+    if self.affine:
       self.weight, self.bias = Tensor.ones(num_channels), Tensor.zeros(num_channels)
 
   def __call__(self, x):
@@ -74,8 +74,9 @@ class GroupNorm:
     else:
       x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
 
+    if not self.affine:
+      return x
     # elementwise_affine on channels
-    # HACK for channels in conv
     if len(x.shape) == 4:
       # HACK for channels in conv
       return (x * self.weight.reshape(1, -1, 1, 1)) + self.bias.reshape(1, -1, 1, 1)
