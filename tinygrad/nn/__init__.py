@@ -75,7 +75,5 @@ class GroupNorm:
       x = x.reshape(x.shape[0], self.num_groups, -1).layernorm().reshape(x.shape)
 
     # elementwise_affine on channels
-    if len(x.shape) == 4:
-      # HACK for channels in conv
-      return (x * self.weight.reshape(1, -1, 1, 1)) + self.bias.reshape(1, -1, 1, 1)
-    return x.linear(self.weight, self.bias)
+    shape = [1 - 2 * (i == 1) for i in range(len(x.shape))]
+    return (x * self.weight.reshape(*shape)) + self.bias.reshape(*shape)
