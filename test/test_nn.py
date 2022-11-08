@@ -111,7 +111,7 @@ class TestNN(unittest.TestCase):
     z = layer(x)
     torch_x = torch.tensor(x.cpu().data)
     torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.data, torch_z.detach().numpy(), atol=5e-4, rtol=5e-4)
+    np.testing.assert_allclose(z.data, torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
 if __name__ == '__main__':
   unittest.main()
