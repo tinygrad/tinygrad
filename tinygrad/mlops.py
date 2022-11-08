@@ -64,8 +64,7 @@ class Max(Function):
     max_is_1s = x.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.EXPAND, x.shape))
 
     # sum of locations, averaged
-    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape)
-    div = div.movement_op(MovementOps.EXPAND, x.shape)
+    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).movement_op(MovementOps.EXPAND, x.shape)
     max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
 
     grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, x.shape)
