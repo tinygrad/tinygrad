@@ -18,17 +18,12 @@ import llvmlite.binding as llvm  # type: ignore
 def int_const(x): return ir.Constant(ir.IntType(64), x)
 
 # this is only used on the crappy path
-def idx_deref(builder, buf, ptr, eidx):
-  if eidx[2] == 1 and eidx[3] is None:
-    idx = eidx[1]
-  else:
-    idx = builder.add(builder.mul(eidx[1], int_const(eidx[2])), eidx[3], name="idx")
-
+def idx_deref(builder, buf, ptr, idx):
   if DEBUG >= 1:
     print("viewcount:", len(buf.st.views), buf.st.expr(), ptr, "on", buf.shape)
   # TODO: unify this with expr in ShapeTracker
   valid = None
-  for v in buf.st.views[::-1]:
+  for v in buf.st.views[0:-1][::-1]:
     if isinstance(v, ZeroView):
       if valid is None:
         valid = ir.Constant(ir.IntType(1), 1)
@@ -53,27 +48,12 @@ def idx_deref(builder, buf, ptr, eidx):
         print(f"expanding index {v.shape_strides}")
       for i,(d,s) in enumerate(v.shape_strides[::-1]):
         if d != 1 and s != 0:
-          if acc%eidx[2] == 0 and len(buf.st.views) == 1:
-            # the inner one doesn't matter
-            lr = eidx[1]
-            if acc//eidx[2] != 1:
-              lr = builder.sdiv(lr, int_const(acc//eidx[2]))
-            if (acc//eidx[2])*d != eidx[0]:
-              lr = builder.srem(lr, int_const(d))
-          elif acc*d <= eidx[2] and eidx[3] is not None and len(buf.st.views) == 1:
-            # the outer one doesn't matter
-            lr = eidx[3]
-            if acc != 1:
-              lr = builder.sdiv(lr, int_const(acc))
-            if acc*d != eidx[2]:
-              lr = builder.srem(lr, int_const(d))
-          else:
-            # slow path
-            lr = idx
-            if acc != 1:
-              lr = builder.sdiv(lr, int_const(acc))
-            if acc*d != (eidx[0]*eidx[2]):
-              lr = builder.srem(lr, int_const(d))
+          # slow path
+          lr = idx
+          if acc != 1:
+            lr = builder.sdiv(lr, int_const(acc))
+          if acc*d != prod(buf.shape):
+            lr = builder.srem(lr, int_const(d))
           if s != 1:
             lr = builder.mul(lr, int_const(s))
           ret = builder.add(ret, lr)
@@ -269,8 +249,8 @@ class LLVMBuffer(ExplicitExecAST):
     # include ret in the bufs
     bufs = [ret] + bufs
     shapes = [x.shape for x in bufs]
-    strides = [x.st.views[0].strides if len(x.st.views) == 1 else strides_for_shape(x.shape) for x in bufs]
-    offsets = [x.st.views[0].offset if len(x.st.views) == 1 else 0 for x in bufs]
+    strides = [x.st.views[-1].strides for x in bufs]
+    offsets = [x.st.views[-1].offset for x in bufs]
 
     # remove places where the shape is all ones, this is cheap, easy, and correct
     all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
@@ -435,7 +415,7 @@ class LLVMBuffer(ExplicitExecAST):
           if len(x.st.views) > 1:
             if DEBUG >= 1:
               print(f"WARNING: {x} has buffers with more than 1 view, can't optimize")
-            return idx_deref(builder, x, func.args[buf_index], (prod(x.shape), idx, 1, None))
+            return idx_deref(builder, x, func.args[buf_index], idx)
           else:
             return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
       if isinstance(x.op, ReduceOps):
