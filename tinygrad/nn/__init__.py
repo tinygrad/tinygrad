@@ -61,7 +61,7 @@ class Linear:
     return x.linear(self.weight.transpose(), self.bias)
 
 class GroupNorm:
-  def __init__(self, in_channels, num_groups=32):
+  def __init__(self, num_groups, in_channels):
     self.weight = Tensor.empty(in_channels)
     self.bias = Tensor.empty(in_channels)
     self.num_groups = num_groups

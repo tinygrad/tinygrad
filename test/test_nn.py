@@ -3,7 +3,6 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import *
-from extra.utils import get_parameters
 import torch
 
 @unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
@@ -99,7 +98,7 @@ class TestNN(unittest.TestCase):
     BS, H, W, C, G = 20, 10, 10, 6, 3
 
     # create in tinygrad
-    layer = GroupNorm(C, G)
+    layer = GroupNorm(G, C)
 
     # create in torch
     with torch.no_grad():

@@ -20,7 +20,7 @@ from tinygrad.tensor import Tensor
 
 class AttnBlock:
   def __init__(self, in_channels):
-    self.norm = GroupNorm(in_channels)
+    self.norm = GroupNorm(32, in_channels)
     self.q = Conv2d(in_channels, in_channels, 1)
     self.k = Conv2d(in_channels, in_channels, 1)
     self.v = Conv2d(in_channels, in_channels, 1)
@@ -50,9 +50,9 @@ class AttnBlock:
 
 class ResnetBlock:
   def __init__(self, in_channels, out_channels=None):
-    self.norm1 = GroupNorm(in_channels)
+    self.norm1 = GroupNorm(32, in_channels)
     self.conv1 = Conv2d(in_channels, out_channels, 3, padding=1)
-    self.norm2 = GroupNorm(out_channels)
+    self.norm2 = GroupNorm(32, out_channels)
     self.conv2 = Conv2d(out_channels, out_channels, 3, padding=1)
     self.nin_shortcut = Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else lambda x: x
 
@@ -85,7 +85,7 @@ class Decoder:
       if i != 0: arr[-1]['upsample'] = {"conv": Conv2d(s[0], s[0], 3, padding=1)}
     self.up = arr
 
-    self.norm_out = GroupNorm(128)
+    self.norm_out = GroupNorm(32, 128)
     self.conv_out = Conv2d(128, 3, 3, padding=1)
 
   def __call__(self, x):
@@ -119,7 +119,7 @@ class Encoder:
     self.down = arr
 
     self.mid = Mid(512)
-    self.norm_out = GroupNorm(512)
+    self.norm_out = GroupNorm(32, 512)
     self.conv_out = Conv2d(512, 8, 3, padding=1)
 
   def __call__(self, x):
@@ -152,7 +152,7 @@ class AutoencoderKL:
 class ResBlock:
   def __init__(self, channels, emb_channels, out_channels):
     self.in_layers = [
-      GroupNorm(channels),
+      GroupNorm(32, channels),
       Tensor.silu,
       Conv2d(channels, out_channels, 3, padding=1)
     ]
@@ -161,7 +161,7 @@ class ResBlock:
       Linear(emb_channels, out_channels)
     ]
     self.out_layers = [
-      GroupNorm(out_channels),
+      GroupNorm(32, out_channels),
       Tensor.silu,
       lambda x: x,
       Conv2d(out_channels, out_channels, 3, padding=1)
@@ -225,9 +225,9 @@ class BasicTransformerBlock:
     self.attn1 = CrossAttention(dim, dim, n_heads, d_head)
     self.ff = FeedForward(dim)
     self.attn2 = CrossAttention(dim, context_dim, n_heads, d_head)
-    self.norm1 = GroupNorm(dim, num_groups=None)
-    self.norm2 = GroupNorm(dim, num_groups=None)
-    self.norm3 = GroupNorm(dim, num_groups=None)
+    self.norm1 = GroupNorm(None, dim)
+    self.norm2 = GroupNorm(None, dim)
+    self.norm3 = GroupNorm(None, dim)
 
   def __call__(self, x, context=None):
     x = self.attn1(self.norm1(x)) + x
@@ -237,7 +237,7 @@ class BasicTransformerBlock:
 
 class SpatialTransformer:
   def __init__(self, channels, context_dim, n_heads, d_head):
-    self.norm = GroupNorm(channels)
+    self.norm = GroupNorm(32, channels)
     assert channels == n_heads * d_head
     self.proj_in = Conv2d(channels, n_heads * d_head, 1)
     self.transformer_blocks = [BasicTransformerBlock(channels, context_dim, n_heads, d_head)]
@@ -320,7 +320,7 @@ class UNetModel:
       [ResBlock(640, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
     ]
     self.out = [
-      GroupNorm(320),
+      GroupNorm(32, 320),
       Tensor.silu,
       Conv2d(320, 4, kernel_size=3, padding=1)
     ]
@@ -410,9 +410,9 @@ class CLIPAttention:
 class CLIPEncoderLayer:
   def __init__(self):
     self.self_attn = CLIPAttention()
-    self.layer_norm1 = GroupNorm(768, num_groups=None)
+    self.layer_norm1 = GroupNorm(None, 768)
     self.mlp = CLIPMLP()
-    self.layer_norm2 = GroupNorm(768, num_groups=None)
+    self.layer_norm2 = GroupNorm(None, 768)
 
   def __call__(self, hidden_states, causal_attention_mask):
     residual = hidden_states
@@ -432,7 +432,7 @@ class CLIPEncoder:
     self.layers = [CLIPEncoderLayer() for i in range(12)]
   
   def __call__(self, hidden_states, causal_attention_mask):
-    for i,l in enumerate(self.layers):
+    for l in self.layers:
       hidden_states = l(hidden_states, causal_attention_mask)
     return hidden_states
 
@@ -456,7 +456,7 @@ class CLIPTextTransformer:
   def __init__(self):
     self.embeddings = CLIPTextEmbeddings()
     self.encoder = CLIPEncoder()
-    self.final_layer_norm = GroupNorm(768, num_groups=None)
+    self.final_layer_norm = GroupNorm(None, 768)
 
   def __call__(self, input_ids):
     x = self.embeddings(input_ids, list(range(len(input_ids))))
