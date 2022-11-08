@@ -25,10 +25,10 @@ class DumbShapeTracker:
     self.t = np.flip(self.t, axis)
 
   def shrink(self, *arg):
-    self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
+    self.t = self.t[tuple(slice(x[0], x[1]) for x in arg)]
 
   def stride(self, *arg):
-    self.t = self.t[tuple([slice(None, None, x) for x in arg])]
+    self.t = self.t[tuple(slice(None, None, x) for x in arg)]
 
   def __getitem__(self, val):
     return self.t.flatten()[val]
