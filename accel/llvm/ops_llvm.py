@@ -136,6 +136,7 @@ class LLVM:
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
     #llvm.set_option('', '--debug')
+    llvm.set_option('', '-enable-no-nans-fp-math')
 
     # does this do anything?
     builder = llvm.create_pass_manager_builder()
@@ -483,9 +484,9 @@ class LLVMBuffer(ExplicitExecAST):
         else:
           reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
       elif reduceops[0].op == ReduceOps.MAX:
-        # TODO: this doesn't respect the fast math flag. it won't vectorize, and i'm not sure if llvm supports it
-        reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
-
+        #This vectorizes on apples version LLVM
+        reduce_result = loop_exit[i].select(loop_exit[-1].fcmp_unordered("<", val, reduce_input, flags=('fast',)), reduce_input, val, flags=('fast',))
+        
       for i,phi in enumerate(phis[1:]):
         if reduce_result != "AMX_Z":
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
