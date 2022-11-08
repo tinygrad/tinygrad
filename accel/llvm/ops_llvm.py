@@ -306,7 +306,8 @@ class LLVMBuffer(ExplicitExecAST):
           rets[j].append((shapes[j][i], strides[j][i]))
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
-    USE_AMX = True
+    USE_AMX = len(shapes[0]) == 3
+
     # TODO: change this independently?
     AMX_SZ_Y = 2
     AMX_SZ_X = 2
@@ -349,12 +350,12 @@ class LLVMBuffer(ExplicitExecAST):
       elif len(shape) == 3:
         # matmul
         if USE_4X4:
-          st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
-          st.permute(0,2,4,1,3)   # YyXxK -> YXKyx
+          #st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
+          #st.permute(0,2,4,1,3)   # YyXxK -> YXKyx
 
-          #CACHE_DIM = 64
-          #st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
-          #st.permute(0,3,1,4,6,2,5)
+          CACHE_DIM = 128
+          st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
+          st.permute(0,3,1,4,6,2,5)
 
       assert len(st.views) == 1
       new_shapes.append(st.shape)
@@ -541,7 +542,7 @@ class LLVMBuffer(ExplicitExecAST):
       loop_exit[i+1].cbranch(loop_exit[i+1].icmp_unsigned("==", idx_p1, int_const(s)), loop_exit[i]._block, loop_entry[i+1]._block)
 
     loop_entry[-1].branch(loop_exit[-1]._block)
-    if not set_clr:
+    if USE_AMX and not set_clr:
       AMX.clr(loop_exit[0])
     loop_exit[0].ret_void()
 
