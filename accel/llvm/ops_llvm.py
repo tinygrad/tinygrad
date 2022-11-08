@@ -266,306 +266,242 @@ class LLVMBuffer(ExplicitExecAST):
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(1+len(bufs))), name='exec')
 
-    if not all(len(x.st.views) == 1 for x in bufs):
-      if DEBUG >= 1:
-        print(f"WARNING: {ast} has buffers with more than 1 view, can't optimize")
-    else:
-      # include ret in the bufs
-      bufs = [ret] + bufs
-      shapes = [x.shape for x in bufs]
-      strides = [x.st.views[0].strides for x in bufs]
-      offsets = [x.st.views[0].offset for x in bufs]
+    # include ret in the bufs
+    bufs = [ret] + bufs
+    shapes = [x.shape for x in bufs]
+    strides = [x.st.views[0].strides if len(x.st.views) == 1 else strides_for_shape(x.shape) for x in bufs]
+    offsets = [x.st.views[0].offset if len(x.st.views) == 1 else 0 for x in bufs]
 
-      # remove places where the shape is all ones, this is cheap, easy, and correct
-      all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
-      # keep at least 1 one
-      if all(all_ones):
-        all_ones[-1] = False
-      shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in shapes]
-      strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
+    # remove places where the shape is all ones, this is cheap, easy, and correct
+    all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
+    # keep at least 1 one
+    if all(all_ones):
+      all_ones[-1] = False
+    shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in shapes]
+    strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
 
-      # find first mismatch, don't reduce this
-      first_reduce = -1
-      for i in range(len(shapes[0])):
-        if not all_same([x[i] for x in shapes]):
-          first_reduce = i
-          break
-      #print("first reduce", first_reduce)
-      
-      # merge dimensions if we can
-      # TODO: does this always preserve the reduce dimension, NO
-      # TODO: move this into shapetracker, with tests!
-      rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
-      for i in range(1, len(shapes[0])):
-        can_merge = []
-        for j in range(len(shapes)):
-          # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
-          can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
-        # more can merge than this
-        can_merge = all(can_merge) and i != first_reduce
-        for j in range(len(shapes)):
-          if can_merge:
-            rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
-          else:
-            rets[j].append((shapes[j][i], strides[j][i]))
-      shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
-
-      USE_4X4 = False
-      DY, DX = 16, 4
-
-      """
-      if len(shapes[0]) >= 3:
-        USE_4X4 = True
-      else:
-        USE_4X4 = False
-
-      # TODO: change the order of the output_shape, and perhaps reshape everything
-      # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
-      # AMX can make quick work of a MUL->SUM AST block
-      # This also splits the dimensions for cache chunking
-      new_shapes, new_strides = [], []
-      # there's 32 SIMD FP registers
-      # track a 4x4 chunk of the matrix at once
-      CACHE_DIM = 128
-      for shape, stride in zip(shapes, strides):
-        st = ShapeTracker(tuple(shape))
-        st.strided(*zip(shape, stride))
-        if len(shape) == 2:
-          st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
-          st.permute(0,2,1,3)
-        elif len(shape) == 7:
-          if USE_4X4:
-            # split batch and X
-            #st.reshape(shape[0]//DY, DY, shape[1], shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6])
-            #st.permute(0,2,3,4,6,7,8,1,5)
-
-            # split chans and X
-            st.reshape(shape[0], shape[1]//DY, DY, shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6])
-            st.permute(0,1,3,4,6,7,8,2,5)
-
-            # split Y and X
-            #st.reshape(shape[0], shape[1], shape[2]//DY, DY, shape[3]//DX, DX, shape[4], shape[5], shape[6])
-            #st.permute(0,1,2,4,6,7,8,3,5)
-        elif len(shape) == 3:
-          if USE_4X4:
-            # 0 1 2 - 3 4 5 - 6
-            #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
-            #st.permute(0,3,1,4,6,2,5)
-
-            #st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
-            #st.permute(0,2,4,1,3)
-
-            CACHE_DIM = 32
-            st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
-            st.permute(0,3,1,4,6,2,5)
-
-            #st.permute(0,2,4,1,3)
-          else:
-            #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
-            #st.permute(0,2,1,3,4)
-            st.reshape(shape[0]//4, 4, shape[1]//4, 4, shape[2])
-            st.permute(0,2,1,3,4)
-            #st.permute(0,2,1,3,4)
-            pass
-        assert len(st.views) == 1
-        new_shapes.append(st.shape)
-        new_strides.append(st.strides)
-      shapes, strides = new_shapes, new_strides
-      """
-
-      # the 4x4 need to go all the way at the end, even after reduce
-      output_shape = shapes[0]
-      full_shape = [x for x in shapes if x != output_shape]
-      full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
-      
-      # remove the magic 4x4 at 2:4, since we run this as 4x4
-      # TODO: gate this
-      if USE_4X4:
-        full_shape = full_shape[:-2]
-
-      if DEBUG >= 2:
-        print(ast)
-        print(shapes)
-        print(strides)
-        print(full_shape, "->", output_shape)
-      
-      # construct the structure of the loops
-      loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
-      loop_exit = []
-      for i,_ in enumerate(full_shape):
-        loop_entry.append(ir.IRBuilder(func.append_basic_block(name=f"loop_{i}")))
-      for i,_ in enumerate(full_shape):
-        loop_exit.append(ir.IRBuilder(func.append_basic_block(name=f"loopexit_{len(full_shape)-1-i}")))
-      loop_exit.append(ir.IRBuilder(func.append_basic_block(name="exit")))
-      loop_exit = loop_exit[::-1]
-
-      # add the buffer indexing
-      idx_level = [[int_const(o)] for o in offsets]
-      for i in range(len(full_shape)):
-        for j in range(len(bufs)):
-          # stride
-          si = loop_entry[i+1].phi(ir.IntType(64), name=f"idx_{j}_{i}")
-          si.add_incoming(idx_level[j][-1], loop_entry[i]._block)
-          si_ps = loop_exit[i+1].add(si, int_const(strides[j][i]))
-          si.add_incoming(si_ps, loop_exit[i+1]._block)
-          idx_level[j].append(si)
-
-      if USE_4X4:
-        val_type = ir.VectorType(ir.FloatType(), DY*DX)
-      else:
-        val_type = ir.FloatType()
-
-      # the ast parser
-      def ast_parse(builder, x, level, reduce_result=None):
-        if not isinstance(x, LazyOp):
-          buf_index = bufs.index(x)
-          idx = idx_level[buf_index][level]
-          if USE_4X4:
-            # load 4x4
-            idxs = []
-            for y in range(DY):
-              for x in range(DX):
-                idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
-
-            # build <16 x float> vector
-            m = ir.VectorType(ir.FloatType(), DY*DX)(ir.Undefined)
-            for i, idx in enumerate(idxs):
-              pts = builder.gep(func.args[buf_index], [idx], inbounds=True)
-              element = builder.load(pts)
-              m = builder.insert_element(m, element, int_const(i))
-            return m
-          else:
-            # load 1x1
-            return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
-        if isinstance(x.op, ReduceOps):
-          if reduce_result is None:
-            raise Exception("no reduce")
-          return reduce_result
-        values = [ast_parse(builder, v, level, reduce_result) for v in x.src]
-        return LLVMBuffer.op_lookup[x.op](builder, *values)
-
-      # add the ast + final store
-      store_loop = output_shape.index(1) if 1 in output_shape else -1
-
-      # do the early ast
-      reduce_result = None
-      if len(reduceops) > 0:
-        reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
-
-        if USE_4X4:
-          phis = [val_type([LLVMBuffer.start_for_op[reduceops[0].op]]*(DY*DX))]
+    # find first mismatch, don't reduce this
+    first_reduce = -1
+    for i in range(len(shapes[0])):
+      if not all_same([x[i] for x in shapes]):
+        first_reduce = i
+        break
+    #print("first reduce", first_reduce)
+    
+    # merge dimensions if we can
+    # TODO: does this always preserve the reduce dimension, NO
+    # TODO: move this into shapetracker, with tests!
+    rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
+    for i in range(1, len(shapes[0])):
+      can_merge = []
+      for j in range(len(shapes)):
+        # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
+        can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
+      # more can merge than this
+      can_merge = all(can_merge) and i != first_reduce
+      for j in range(len(shapes)):
+        if can_merge:
+          rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
         else:
-          phis = [LLVMBuffer.start_for_op[reduceops[0].op]]
-        for i in range(store_loop+1, len(loop_entry)):
-          #val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
-          val = loop_entry[i].phi(val_type, f"reduce_phi_{i}")
-          val.add_incoming(phis[-1], loop_entry[i-1]._block)
-          phis.append(val)
+          rets[j].append((shapes[j][i], strides[j][i]))
+    shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
-        if reduceops[0].op == ReduceOps.SUM:
-          reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
-        elif reduceops[0].op == ReduceOps.MAX:
-          # TODO: this doesn't respect the fast math flag
-          # err, actually i think that it doesn't fuse because the type is fixed
-          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
+    USE_4X4 = False
+    DY, DX = 16, 4
 
-        for i,phi in enumerate(phis[1:]):
-          phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
+    """
+    if len(shapes[0]) >= 3:
+      USE_4X4 = True
+    else:
+      USE_4X4 = False
 
-      # do the late ast
-      result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
+    # TODO: change the order of the output_shape, and perhaps reshape everything
+    # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
+    # AMX can make quick work of a MUL->SUM AST block
+    # This also splits the dimensions for cache chunking
+    new_shapes, new_strides = [], []
+    # there's 32 SIMD FP registers
+    # track a 4x4 chunk of the matrix at once
+    CACHE_DIM = 128
+    for shape, stride in zip(shapes, strides):
+      st = ShapeTracker(tuple(shape))
+      st.strided(*zip(shape, stride))
+      if len(shape) == 2:
+        st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
+        st.permute(0,2,1,3)
+      elif len(shape) == 7:
+        if USE_4X4:
+          # split batch and X
+          #st.reshape(shape[0]//DY, DY, shape[1], shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6])
+          #st.permute(0,2,3,4,6,7,8,1,5)
 
-      # store 4x4
-      if USE_4X4:
-        builder = loop_exit[store_loop]
-        idxs = []
-        for y in range(DY):
-          for x in range(DX):
-            idxs.append(builder.add(idx_level[0][store_loop], int_const(strides[0][-2]*y + strides[0][-1]*x)))
+          # split chans and X
+          st.reshape(shape[0], shape[1]//DY, DY, shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6])
+          st.permute(0,1,3,4,6,7,8,2,5)
 
-        for i, idx in enumerate(idxs):
-          result_x = builder.extract_element(result, int_const(i))
-          builder.store(result_x, builder.gep(func.args[0], [idx], inbounds=True))
-      else:
-        loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
-      
-      # add the looping
-      for i,s in enumerate(full_shape):
-        loop_entry[i].branch(loop_entry[i+1]._block)
-        # index
-        idx = loop_entry[i+1].phi(ir.IntType(64), name=f"loopvar_{i}")
-        idx.add_incoming(int_const(0), loop_entry[i]._block)
-        idx_p1 = loop_exit[i+1].add(idx, int_const(1))
-        idx.add_incoming(idx_p1, loop_exit[i+1]._block)
-        loop_exit[i+1].cbranch(loop_exit[i+1].icmp_unsigned("==", idx_p1, int_const(s)), loop_exit[i]._block, loop_entry[i+1]._block)
+          # split Y and X
+          #st.reshape(shape[0], shape[1], shape[2]//DY, DY, shape[3]//DX, DX, shape[4], shape[5], shape[6])
+          #st.permute(0,1,2,4,6,7,8,3,5)
+      elif len(shape) == 3:
+        if USE_4X4:
+          # 0 1 2 - 3 4 5 - 6
+          #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
+          #st.permute(0,3,1,4,6,2,5)
 
-      loop_entry[-1].branch(loop_exit[-1]._block)
-      loop_exit[0].ret_void()
+          #st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
+          #st.permute(0,2,4,1,3)
 
-      LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs, info.flops)
-      return ret
+          CACHE_DIM = 32
+          st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
+          st.permute(0,3,1,4,6,2,5)
 
-    def ast_parse(builder, x, idx, reduce_result=None, depth=0):
-      if DEBUG >= 1:
-        print("  "*depth+"ast:", reduce_result, x)
+          #st.permute(0,2,4,1,3)
+        else:
+          #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
+          #st.permute(0,2,1,3,4)
+          st.reshape(shape[0]//4, 4, shape[1]//4, 4, shape[2])
+          st.permute(0,2,1,3,4)
+          #st.permute(0,2,1,3,4)
+          pass
+      assert len(st.views) == 1
+      new_shapes.append(st.shape)
+      new_strides.append(st.strides)
+    shapes, strides = new_shapes, new_strides
+    """
+
+    # the 4x4 need to go all the way at the end, even after reduce
+    output_shape = shapes[0]
+    full_shape = [x for x in shapes if x != output_shape]
+    full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
+    
+    # remove the magic 4x4 at 2:4, since we run this as 4x4
+    # TODO: gate this
+    if USE_4X4:
+      full_shape = full_shape[:-2]
+
+    if DEBUG >= 2:
+      print(ast)
+      print(shapes)
+      print(strides)
+      print(full_shape, "->", output_shape)
+    
+    # construct the structure of the loops
+    loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
+    loop_exit = []
+    for i,_ in enumerate(full_shape):
+      loop_entry.append(ir.IRBuilder(func.append_basic_block(name=f"loop_{i}")))
+    for i,_ in enumerate(full_shape):
+      loop_exit.append(ir.IRBuilder(func.append_basic_block(name=f"loopexit_{len(full_shape)-1-i}")))
+    loop_exit.append(ir.IRBuilder(func.append_basic_block(name="exit")))
+    loop_exit = loop_exit[::-1]
+
+    # add the buffer indexing
+    idx_level = [[int_const(o)] for o in offsets]
+    for i in range(len(full_shape)):
+      for j in range(len(bufs)):
+        # stride
+        si = loop_entry[i+1].phi(ir.IntType(64), name=f"idx_{j}_{i}")
+        si.add_incoming(idx_level[j][-1], loop_entry[i]._block)
+        si_ps = loop_exit[i+1].add(si, int_const(strides[j][i]))
+        si.add_incoming(si_ps, loop_exit[i+1]._block)
+        idx_level[j].append(si)
+
+    if USE_4X4:
+      val_type = ir.VectorType(ir.FloatType(), DY*DX)
+    else:
+      val_type = ir.FloatType()
+
+    # the ast parser
+    def ast_parse(builder, x, level, reduce_result=None):
       if not isinstance(x, LazyOp):
-        return idx_deref(builder, x, func.args[bufs.index(x)+1], idx)
+        buf_index = bufs.index(x)
+        idx = idx_level[buf_index][level]
+        if USE_4X4:
+          # load 4x4
+          idxs = []
+          for y in range(DY):
+            for x in range(DX):
+              idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
+
+          # build <16 x float> vector
+          m = ir.VectorType(ir.FloatType(), DY*DX)(ir.Undefined)
+          for i, idx in enumerate(idxs):
+            pts = builder.gep(func.args[buf_index], [idx], inbounds=True)
+            element = builder.load(pts)
+            m = builder.insert_element(m, element, int_const(i))
+          return m
+        else:
+          # load 1x1
+          if len(x.st.views) > 1:
+            if DEBUG >= 1:
+              print(f"WARNING: {x} has buffers with more than 1 view, can't optimize")
+            return idx_deref(builder, x, func.args[buf_index], (prod(x.shape), idx, 1, None))
+          else:
+            return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
       if isinstance(x.op, ReduceOps):
         if reduce_result is None:
           raise Exception("no reduce")
         return reduce_result
-      values = [ast_parse(builder, v, idx, reduce_result, depth=depth+1) for v in x.src]
+      values = [ast_parse(builder, v, level, reduce_result) for v in x.src]
       return LLVMBuffer.op_lookup[x.op](builder, *values)
 
-    # enter
-    start_builder = ir.IRBuilder(func.append_basic_block(name="entry"))
-    body_builder = ir.IRBuilder(func.append_basic_block(name="inner_loop"))
-    start_builder.branch(body_builder._block)
+    # add the ast + final store
+    store_loop = output_shape.index(1) if 1 in output_shape else -1
 
-    idx = body_builder.phi(ir.IntType(64))
-    idx.add_incoming(int_const(0), start_builder._block)
-
-    reduce_builder = ir.IRBuilder(func.append_basic_block(name="reduce_loop"))
-    store_builder = ir.IRBuilder(func.append_basic_block(name="store_block"))
-
+    # do the early ast
+    reduce_result = None
     if len(reduceops) > 0:
-      assert len(earlybufs[0].shape) == len(reduceops[0].arg), "reduce only possible on matching shapes"
-      if DEBUG >= 1:
-        print(f"reduce {earlybufs[0].shape} -> {reduceops[0].arg}")
-      red = prod([s for s,n in zip(earlybufs[0].shape, reduceops[0].arg) if n == 1])
-      red_idx = reduce_builder.phi(ir.IntType(64))
-      red_idx.add_incoming(int_const(0), body_builder._block)
-      val = reduce_builder.phi(ir.FloatType())
-      reduce_input = ast_parse(reduce_builder, reduceops[0].src[0], (prod(reduceops[0].arg), idx, red, red_idx))
+      reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
+
+      if USE_4X4:
+        phis = [val_type([LLVMBuffer.start_for_op[reduceops[0].op]]*(DY*DX))]
+      else:
+        phis = [LLVMBuffer.start_for_op[reduceops[0].op]]
+      for i in range(store_loop+1, len(loop_entry)):
+        #val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
+        val = loop_entry[i].phi(val_type, f"reduce_phi_{i}")
+        val.add_incoming(phis[-1], loop_entry[i-1]._block)
+        phis.append(val)
 
       if reduceops[0].op == ReduceOps.SUM:
-        val.add_incoming(ir.Constant(ir.FloatType(), 0), body_builder._block)
-        reduce_result = reduce_builder.fadd(reduce_input, val)
+        reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
       elif reduceops[0].op == ReduceOps.MAX:
-        val.add_incoming(ir.Constant(ir.FloatType(), -math.inf), body_builder._block)
-        reduce_result = reduce_builder.call(ir.Function(module, ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()]), name="llvm.maxnum.f32"), [reduce_input, val])
-      else:
-        raise Exception(f"unknown ReduceOps {ast.op}")
-      val.add_incoming(reduce_result, reduce_builder._block)
+        # TODO: this doesn't respect the fast math flag
+        # err, actually i think that it doesn't fuse because the type is fixed
+        reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
 
-      red_idx_p1 = reduce_builder.add(red_idx, int_const(1))
-      red_idx.add_incoming(red_idx_p1, reduce_builder._block)
-      reduce_builder.cbranch(reduce_builder.icmp_unsigned("==", red_idx_p1, int_const(red)), store_builder._block, reduce_builder._block)
+      for i,phi in enumerate(phis[1:]):
+        phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
+
+    # do the late ast
+    result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
+
+    # store 4x4
+    if USE_4X4:
+      builder = loop_exit[store_loop]
+      idxs = []
+      for y in range(DY):
+        for x in range(DX):
+          idxs.append(builder.add(idx_level[0][store_loop], int_const(strides[0][-2]*y + strides[0][-1]*x)))
+
+      for i, idx in enumerate(idxs):
+        result_x = builder.extract_element(result, int_const(i))
+        builder.store(result_x, builder.gep(func.args[0], [idx], inbounds=True))
     else:
-      reduce_result = None
-      reduce_builder.branch(store_builder._block)
+      loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
+    
+    # add the looping
+    for i,s in enumerate(full_shape):
+      loop_entry[i].branch(loop_entry[i+1]._block)
+      # index
+      idx = loop_entry[i+1].phi(ir.IntType(64), name=f"loopvar_{i}")
+      idx.add_incoming(int_const(0), loop_entry[i]._block)
+      idx_p1 = loop_exit[i+1].add(idx, int_const(1))
+      idx.add_incoming(idx_p1, loop_exit[i+1]._block)
+      loop_exit[i+1].cbranch(loop_exit[i+1].icmp_unsigned("==", idx_p1, int_const(s)), loop_exit[i]._block, loop_entry[i+1]._block)
 
-    body_builder.branch(reduce_builder._block)
-    result = ast_parse(store_builder, ast, (prod(ret.shape), idx, 1, None), reduce_result)
-    store_builder.store(result, store_builder.gep(func.args[0], [idx], inbounds=True))
-    idx_p1 = store_builder.add(idx, int_const(1))
-    idx.add_incoming(idx_p1, store_builder._block)
+    loop_entry[-1].branch(loop_exit[-1]._block)
+    loop_exit[0].ret_void()
 
-    exit_builder = ir.IRBuilder(func.append_basic_block(name="exit"))
-    exit_builder.ret_void()
-
-    store_builder.cbranch(store_builder.icmp_unsigned("==", idx_p1, int_const(prod(ret.shape))), exit_builder._block, body_builder._block)
-
-    # **** llvm running ****
-    LLVMBuffer.func_cache[key] = LLVM().exec(module, [ret] + bufs, info.flops)
+    LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs, info.flops)
     return ret
