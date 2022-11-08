@@ -25,16 +25,16 @@ class Thneed:
       for a in args[3:]:
         nodes[a]['out_edges'].append(args[2])
         nodes[args[2]]['in_edges'].append(a)
-    
+
     # get buffers to save
     self.buffers_to_save = set()
     self.outputs = []
-    for n in nodes.keys():
+    for n in nodes:
       if len(nodes[n]['in_edges']) == 0:
         self.buffers_to_save.add(n)
       if len(nodes[n]['out_edges']) == 0:
         self.outputs.append(n)
-  
+
     for n in self.inputs.values():
       assert n in self.buffers_to_save, f"{n} was not an input"
       self.buffers_to_save.remove(n)
@@ -260,10 +260,8 @@ class Thneed:
       f.write(b''.join(binaries))
 
   def run(self):
-    events = []
     st = time.monotonic()
-    for prg, args in self.cl_cache:
-      events.append(prg.clprg(CL().cl_queue, *args))
+    events = [prg.clprg(CL().cl_queue, *args) for prg, args in self.cl_cache]
     mt = time.monotonic()
     CL().cl_queue.finish()
     et = time.monotonic()
@@ -309,7 +307,7 @@ class Thneed:
               #print(runtime, args[0], args[1])
               runtimes.append((runtime, local_args))
         #print(sorted(runtimes)[0:5])
-        if len(runtimes) > 0:
+        if runtimes:
           args[1] = sorted(runtimes)[0][1]
         else:
           args[1] = None
