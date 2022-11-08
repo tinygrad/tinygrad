@@ -292,11 +292,8 @@ class LLVMBuffer(ExplicitExecAST):
     USE_4X4 = False
     DY, DX = 16, 4
 
-    """
     if len(shapes[0]) >= 3:
       USE_4X4 = True
-    else:
-      USE_4X4 = False
 
     # TODO: change the order of the output_shape, and perhaps reshape everything
     # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
@@ -313,6 +310,7 @@ class LLVMBuffer(ExplicitExecAST):
         st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
         st.permute(0,2,1,3)
       elif len(shape) == 7:
+        # conv
         if USE_4X4:
           # split batch and X
           #st.reshape(shape[0]//DY, DY, shape[1], shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6])
@@ -326,31 +324,15 @@ class LLVMBuffer(ExplicitExecAST):
           #st.reshape(shape[0], shape[1], shape[2]//DY, DY, shape[3]//DX, DX, shape[4], shape[5], shape[6])
           #st.permute(0,1,2,4,6,7,8,3,5)
       elif len(shape) == 3:
+        # matmul
         if USE_4X4:
-          # 0 1 2 - 3 4 5 - 6
-          #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
-          #st.permute(0,3,1,4,6,2,5)
-
-          #st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
-          #st.permute(0,2,4,1,3)
-
-          CACHE_DIM = 32
           st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
           st.permute(0,3,1,4,6,2,5)
 
-          #st.permute(0,2,4,1,3)
-        else:
-          #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
-          #st.permute(0,2,1,3,4)
-          st.reshape(shape[0]//4, 4, shape[1]//4, 4, shape[2])
-          st.permute(0,2,1,3,4)
-          #st.permute(0,2,1,3,4)
-          pass
       assert len(st.views) == 1
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     shapes, strides = new_shapes, new_strides
-    """
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = shapes[0]
@@ -358,7 +340,6 @@ class LLVMBuffer(ExplicitExecAST):
     full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
     
     # remove the magic 4x4 at 2:4, since we run this as 4x4
-    # TODO: gate this
     if USE_4X4:
       full_shape = full_shape[:-2]
 
@@ -409,8 +390,7 @@ class LLVMBuffer(ExplicitExecAST):
           # build <16 x float> vector
           m = ir.VectorType(ir.FloatType(), DY*DX)(ir.Undefined)
           for i, idx in enumerate(idxs):
-            pts = builder.gep(func.args[buf_index], [idx], inbounds=True)
-            element = builder.load(pts)
+            element = builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
             m = builder.insert_element(m, element, int_const(i))
           return m
         else:
@@ -441,7 +421,6 @@ class LLVMBuffer(ExplicitExecAST):
       else:
         phis = [LLVMBuffer.start_for_op[reduceops[0].op]]
       for i in range(store_loop+1, len(loop_entry)):
-        #val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
         val = loop_entry[i].phi(val_type, f"reduce_phi_{i}")
         val.add_incoming(phis[-1], loop_entry[i-1]._block)
         phis.append(val)
@@ -449,8 +428,7 @@ class LLVMBuffer(ExplicitExecAST):
       if reduceops[0].op == ReduceOps.SUM:
         reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
       elif reduceops[0].op == ReduceOps.MAX:
-        # TODO: this doesn't respect the fast math flag
-        # err, actually i think that it doesn't fuse because the type is fixed
+        # TODO: this doesn't respect the fast math flag. it won't vectorize, and i'm not sure if llvm supports it
         reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
 
       for i,phi in enumerate(phis[1:]):
