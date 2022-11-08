@@ -6,8 +6,18 @@ import time
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
+from termcolor import colored
 
 IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
+
+def colorize_float(x):
+  ret = f"{x:7.2f}x"
+  if x < 1:
+    return colored(ret, 'green')
+  elif x > 1.5:
+    return colored(ret, 'red')
+  else:
+    return colored(ret, 'yellow')
 
 CNT = 8
 def test_speed(f1, *args):
@@ -32,7 +42,7 @@ def test_generic_square(name, N, f1, f2):
     val_torch, et_torch = test_speed(f1, torch_a, torch_b)
   val_tinygrad, et_tinygrad = test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
 
-  print(f"{name:30s} {N:4d}x{N:4d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch.sum(), val_tinygrad.sum())
+  print(f"{name:30s} {N:4d}x{N:4d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
 class TestSpeed(unittest.TestCase):
@@ -119,7 +129,7 @@ class TestSpeed(unittest.TestCase):
             val_torch, et_torch = test_speed(f1)
           val_tinygrad, et_tinygrad = test_speed(f2)
 
-          print(f"bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch.sum(), val_tinygrad.sum())
+          print(f"bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}                   {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
           np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
 
 if __name__ == '__main__':
