@@ -307,9 +307,9 @@ class LLVMBuffer(ExplicitExecAST):
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
     USE_4X4 = False
-    DY, DX = 16, 4
+    #DY, DX = 16, 4
+    DY, DX = 16, 16
 
-    """
     if len(shapes[0]) >= 3:
       USE_4X4 = True
 
@@ -344,14 +344,16 @@ class LLVMBuffer(ExplicitExecAST):
       elif len(shape) == 3:
         # matmul
         if USE_4X4:
-          st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
-          st.permute(0,3,1,4,6,2,5)
+          st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
+          st.permute(0,2,4,1,3)   # YyXxK -> YXKyx
+
+          #st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
+          #st.permute(0,3,1,4,6,2,5)
 
       assert len(st.views) == 1
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     shapes, strides = new_shapes, new_strides
-    """
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = shapes[0]
@@ -393,6 +395,13 @@ class LLVMBuffer(ExplicitExecAST):
       val_type = ir.VectorType(ir.FloatType(), DY*DX)
     else:
       val_type = ir.FloatType()
+    
+    def get_idxs(builder, idx, buf_index):
+      idxs = []
+      for y in range(DY):
+        for x in range(DX):
+          idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
+      return idxs
 
     # the ast parser
     def ast_parse(builder, x, level, reduce_result=None):
@@ -400,15 +409,9 @@ class LLVMBuffer(ExplicitExecAST):
         buf_index = bufs.index(x)
         idx = idx_level[buf_index][level]
         if USE_4X4:
-          # load 4x4
-          idxs = []
-          for y in range(DY):
-            for x in range(DX):
-              idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
-
           # build <16 x float> vector
           m = ir.VectorType(ir.FloatType(), DY*DX)(ir.Undefined)
-          for i, idx in enumerate(idxs):
+          for i, idx in enumerate(get_idxs(builder, idx, buf_index)):
             element = builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
             m = builder.insert_element(m, element, int_const(i))
           return m
@@ -459,12 +462,7 @@ class LLVMBuffer(ExplicitExecAST):
     # store 4x4
     if USE_4X4:
       builder = loop_exit[store_loop]
-      idxs = []
-      for y in range(DY):
-        for x in range(DX):
-          idxs.append(builder.add(idx_level[0][store_loop], int_const(strides[0][-2]*y + strides[0][-1]*x)))
-
-      for i, idx in enumerate(idxs):
+      for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
         result_x = builder.extract_element(result, int_const(i))
         builder.store(result_x, builder.gep(func.args[0], [idx], inbounds=True))
     else:
