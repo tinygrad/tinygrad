@@ -11,6 +11,11 @@ import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_info
+
+#from llvmlite import __version__
+#print(__version__)
+#exit(0)
+
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 
@@ -126,14 +131,15 @@ class LLVM:
     llvm.initialize_native_asmprinter()  # yes, even this one
     target = llvm.Target.from_triple(llvm.get_process_triple())
     LLVM.optimizer = llvm.create_module_pass_manager()
-    LLVM.target_machine = target.create_target_machine(opt=3)  # this opt actually can change things
+
+    # opt=3 means no FMA, opt=2 means FMA
+    LLVM.target_machine = target.create_target_machine(opt=2)  # this opt actually can change things
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
-    llvm.set_option('', '-ffp-contract=fast')   # does anything? why isn't is fusing automatically?
-    llvm.set_option('', '-ffast-math')          # can't hurt
     llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
     if DEBUG >= 4:
       llvm.set_option('', '--debug-only=loop-vectorize')
+    #llvm.set_option('', '--debug')
 
     # does this do anything?
     builder = llvm.create_pass_manager_builder()
@@ -171,6 +177,8 @@ class LLVM:
 
     if DEBUG >= 2:
       print(llvm_ir)
+      #with open("/tmp/llvm.ll", "w") as f:
+      #  f.write(llvm_ir)
 
     mod = llvm.parse_assembly(llvm_ir)
     mod.verify()
@@ -342,8 +350,15 @@ class LLVMBuffer(ExplicitExecAST):
             # 0 1 2 - 3 4 5 - 6
             #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM//4), 4, shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM//4), 4, shape[2])
             #st.permute(0,3,1,4,6,2,5)
-            st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
-            st.permute(0,2,4,1,3)
+
+            #st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
+            #st.permute(0,2,4,1,3)
+
+            CACHE_DIM = 32
+            st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
+            st.permute(0,3,1,4,6,2,5)
+
+            #st.permute(0,2,4,1,3)
           else:
             #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM), shape[2])
             #st.permute(0,2,1,3,4)
@@ -434,13 +449,7 @@ class LLVMBuffer(ExplicitExecAST):
       # do the early ast
       reduce_result = None
       if len(reduceops) > 0:
-        if reduceops[0].op == ReduceOps.SUM and isinstance(reduceops[0].src[0], LazyOp) and reduceops[0].src[0].op == BinaryOps.MUL:
-          reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
-          reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
-          fma = True
-        else:
-          reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
-          fma = False
+        reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
 
         if USE_4X4:
           phis = [val_type([LLVMBuffer.start_for_op[ReduceOps.SUM]]*(DY*DX))]
@@ -453,10 +462,7 @@ class LLVMBuffer(ExplicitExecAST):
           phis.append(val)
 
         if reduceops[0].op == ReduceOps.SUM:
-          if fma:
-            reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type, val_type]), name="llvm.fma"), [reduce_input_0, reduce_input_1, val], fastmath=('fast',))
-          else:
-            reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
+          reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
         elif reduceops[0].op == ReduceOps.MAX:
           # TODO: this doesn't respect the fast math flag
           # err, actually i think that it doesn't fuse because the type is fixed

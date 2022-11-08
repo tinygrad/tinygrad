@@ -9,6 +9,7 @@ from tinygrad.nn import Conv2d
 
 IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 
+CNT = 8
 def test_speed(f1, *args):
   ets = []
   ret = None
@@ -18,7 +19,7 @@ def test_speed(f1, *args):
     ret = f1(*args)
     et = (time.monotonic() - st) * 1000
     ets.append(et)
-  return ret.numpy(), np.median(ets)
+  return ret.numpy(), np.min(ets)
 
 def test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
@@ -34,7 +35,6 @@ def test_generic_square(name, N, f1, f2):
   print(f"{name:30s} {N:4d}x{N:4d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {et_tinygrad/et_torch:7.2f}x slower", val_torch.sum(), val_tinygrad.sum())
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
-CNT = 5
 class TestSpeed(unittest.TestCase):
   def test_sum(self):
     def f(a, b): return a.sum()
