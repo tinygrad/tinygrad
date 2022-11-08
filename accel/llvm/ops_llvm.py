@@ -25,10 +25,10 @@ def idx_deref(builder, buf, ptr, eidx):
   # TODO: unify this with expr in ShapeTracker
   valid = None
   for v in buf.st.views[::-1]:
-    acc = 1
     if isinstance(v, ZeroView):
       if valid is None:
         valid = ir.Constant(ir.IntType(1), 1)
+      acc = 1
       for s,(x,y) in list(zip(v.old_shape, v.arg))[::-1]:
         if x < 0 or y > s:
           lr = idx
@@ -37,12 +37,13 @@ def idx_deref(builder, buf, ptr, eidx):
           lr = builder.srem(lr, int_const(y-x))
           if x != 0:
             lr = builder.add(lr, int_const(x))
-        if x < 0:
-          valid = builder.and_(valid, builder.icmp_signed(">=", lr, int_const(0)))
-        if y > s:
-          valid = builder.and_(valid, builder.icmp_signed("<", lr, int_const(s)))
+          if x < 0:
+            valid = builder.and_(valid, builder.icmp_signed(">=", lr, int_const(0)))
+          if y > s:
+            valid = builder.and_(valid, builder.icmp_signed("<", lr, int_const(s)))
         acc *= y-x
     else:
+      acc = 1
       ret = int_const(v.offset)
       if DEBUG >= 2:
         print(f"expanding index {v.shape_strides}")
@@ -223,7 +224,7 @@ class LLVMBuffer(ExplicitExecAST):
     bufs = get_buffers(ast)
     reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
     assert len(reduceops) <= 1, "max one reduce op in an ast"
-    earlybufs = get_buffers(reduceops[0]) if reduceops else []
+    earlybufs = get_buffers(reduceops[0]) if len(reduceops) > 0 else []
     ret = cls(get_lazyop_info(ast).shape)
 
     module = ir.Module(name=__file__)
@@ -252,7 +253,7 @@ class LLVMBuffer(ExplicitExecAST):
       values = [ast_parse(builder, v, idx, reduce_result, depth=depth+1) for v in x.src]
       return LLVMBuffer.op_lookup[x.op](builder, *values)
 
-    if reduceops:
+    if len(reduceops) > 0:
       assert len(earlybufs[0].shape) == len(reduceops[0].arg), "reduce only possible on matching shapes"
       if DEBUG >= 1:
         print(f"reduce {earlybufs[0].shape} -> {reduceops[0].arg}")
