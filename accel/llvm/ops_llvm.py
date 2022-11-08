@@ -460,8 +460,8 @@ class LLVMBuffer(ExplicitExecAST):
     reduce_result = None
     if len(reduceops) > 0:
       if USE_AMX and reduceops[0].op == ReduceOps.SUM and isinstance(reduceops[0].src[0], LazyOp) and reduceops[0].src[0].op == BinaryOps.MUL:
-        reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
         reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
+        reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
         assert reduce_input_0 == "AMX_Y" and reduce_input_1 == "AMX_X"
         fma = True
       else:
