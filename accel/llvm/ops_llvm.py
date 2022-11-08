@@ -67,6 +67,24 @@ def idx_deref(builder, buf, ptr, idx):
   else:
     return builder.load(builder.gep(ptr, [idx], inbounds=True))
 
+# 16 lines for AMX support
+from functools import partial
+class AMX():
+  @staticmethod
+  def nop_op_imm5(op, builder, imm5): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5})", "", tuple(), True)
+  @staticmethod
+  def op_gpr(op, builder, gpr):
+    print(builder, op, gpr)
+    builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6))", "r", (gpr,), True)
+  @staticmethod
+  def set(builder): AMX.nop_op_imm5(17, builder, 0)
+  @staticmethod
+  def clr(builder): AMX.nop_op_imm5(17, builder, 1)
+ops = ["ldx", "ldy", "stx", "sty", "ldz", "stz", "ldzi", "stzi", "extrx", "extry", "fma64", "fms64", "fma32", "fms32", "mac16", "fma16", "fms16", None, "vecint", "vecfp", "matint", "matfp", "genlut"]
+for i,o in enumerate(ops):
+  if o:
+    setattr(AMX, o, partial(AMX.op_gpr, i))
+
 # https://blog.christianperone.com/2022/09/tutorial-on-using-llvm-to-jit-pytorch-fx-graphs-to-native-code-x86-arm-risc-v-wasm-part-i-scalars/
 class LLVM:
   target_machine = None
