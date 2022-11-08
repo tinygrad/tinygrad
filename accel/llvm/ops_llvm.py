@@ -456,7 +456,7 @@ class LLVMBuffer(ExplicitExecAST):
         elif reduceops[0].op == ReduceOps.MAX:
           # TODO: this doesn't respect the fast math flag
           # err, actually i think that it doesn't fuse because the type is fixed
-          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
+          reduce_result = loop_exit[-1].call(loop_exit[-1]._block.module.declare_intrinsic('llvm.maxnum', fnty=ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()])), [reduce_input, val], fastmath=('fast',))
 
         for i,phi in enumerate(phis[1:]):
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
