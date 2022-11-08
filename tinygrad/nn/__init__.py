@@ -61,19 +61,22 @@ class Linear:
     return x.linear(self.weight.transpose(), self.bias)
 
 class GroupNorm:
-  def __init__(self, num_groups, in_channels):
-    self.weight = Tensor.empty(in_channels)
-    self.bias = Tensor.empty(in_channels)
-    self.num_groups = num_groups
+  def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
+    self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
+    self.weight, self.bias = Tensor.ones(num_channels), Tensor.zeros(num_channels)
 
   def __call__(self, x):
     # reshape for layernorm to work as group norm
     # subtract mean and divide stddev
     if self.num_groups is None:  # just layernorm
-      x = x.layernorm()
+      x = x.layernorm(eps=self.eps)
     else:
-      x = x.reshape(x.shape[0], self.num_groups, -1).layernorm().reshape(x.shape)
+      x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
 
     # elementwise_affine on channels
-    shape = [1 - 2 * (i == 1) for i in range(len(x.shape))]
-    return (x * self.weight.reshape(*shape)) + self.bias.reshape(*shape)
+    # HACK for channels in conv
+    # elementwise_affine on channels
+    if len(x.shape) == 4:
+      # HACK for channels in conv
+      return (x * self.weight.reshape(1, -1, 1, 1)) + self.bias.reshape(1, -1, 1, 1)
+    return x.linear(self.weight, self.bias)
