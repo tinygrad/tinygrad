@@ -7,7 +7,12 @@ lens = {}
 dat = b"\xff"*0x300
 ret = ane.debug(dat, 16)
 for k,v in ret.items():
-  found = next((i for i in range(33) if v == (1 << i) - 1), None)
+  found = None
+  for i in range(33):
+    #print(v, (1 << i) - 1)
+    if v == (1 << i) - 1:
+      found = i
+      break
   #print(k, hex(v), found)
   lens[k] = found
 
