@@ -7,6 +7,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from termcolor import colored
+from tinygrad.llops.ops_gpu import CL
 
 IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -27,6 +28,8 @@ def test_speed(f1, *args):
     del ret
     st = time.monotonic()
     ret = f1(*args)
+    if ret.device in ["GPU", "OPENCL"]:
+      CL.cl_queue.finish()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
   return ret.numpy(), np.min(ets)
