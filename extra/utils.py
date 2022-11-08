@@ -14,13 +14,13 @@ def fetch(url):
     with open(fp, "rb") as f:
       dat = f.read()
   else:
-    print("fetching %s" % url)
+    print(f"fetching {url}")
     r = requests.get(url)
     assert r.status_code == 200
     dat = r.content
-    with open(fp+".tmp", "wb") as f:
+    with open(f"{fp}.tmp", "wb") as f:
       f.write(dat)
-    os.rename(fp+".tmp", fp)
+    os.rename(f"{fp}.tmp", fp)
   return dat
 
 from tinygrad.nn.optim import get_parameters
@@ -30,7 +30,7 @@ def my_unpickle(fb0):
   class HackTensor:
     def __new__(cls, *args):
       #print(args)
-      ident, storage_type, obj_key, location, obj_size = args[0][0:5]
+      ident, storage_type, obj_key, location, obj_size = args[0][:5]
       assert ident == 'storage'
 
       assert prod(args[2]) == obj_size
@@ -92,7 +92,7 @@ def fake_torch_load(b0):
   # convert it to a file
   fb0 = io.BytesIO(b0)
 
-  if b0[0:2] == b"\x50\x4b":
+  if b0[:2] == b"\x50\x4b":
     return fake_torch_load_zipped(fb0)
 
   # skip three junk pickles
@@ -117,7 +117,7 @@ def fake_torch_load(b0):
     np.copyto(np_array, np.frombuffer(mydat, storage_type).reshape(np_shape))
 
     # numpy stores its strides in bytes
-    real_strides = tuple([x*bytes_size for x in np_strides])
+    real_strides = tuple(x*bytes_size for x in np_strides)
     np_array.strides = real_strides
 
   return ret
