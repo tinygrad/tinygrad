@@ -28,7 +28,7 @@ def colorize_float(x):
     return ret
 
 CNT = 8
-def test_speed(f1, *args):
+def helper_test_speed(f1, *args):
   ets = []
   ret = None
   for _ in range(CNT):
@@ -41,7 +41,7 @@ def test_speed(f1, *args):
     ets.append(et)
   return ret.numpy(), np.min(ets)
 
-def test_generic_square(name, N, f1, f2):
+def helper_test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
   torch_a = torch.rand(N, N) - 0.5
   torch_b = torch.rand(N, N) - 0.5
@@ -49,8 +49,8 @@ def test_generic_square(name, N, f1, f2):
   tiny_b = Tensor(torch_b.cpu().numpy())
 
   with torch.no_grad():
-    val_torch, et_torch = test_speed(f1, torch_a, torch_b)
-  val_tinygrad, et_tinygrad = test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
+    val_torch, et_torch = helper_test_speed(f1, torch_a, torch_b)
+  val_tinygrad, et_tinygrad = helper_test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
 
   print(f"{name:30s} {N:4d}x{N:4d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
@@ -58,7 +58,7 @@ def test_generic_square(name, N, f1, f2):
 class TestSpeed(unittest.TestCase):
   def test_sum(self):
     def f(a, b): return a.sum()
-    test_generic_square('sum', 4096, f, f)
+    helper_test_generic_square('sum', 4096, f, f)
 
   def test_permute(self):
     # this is a 64MB tensor, M1 L1 cache is 128kB
@@ -66,58 +66,58 @@ class TestSpeed(unittest.TestCase):
     def f1(a, b): return a.permute(1,0).contiguous()
     # NOTE: this isn't being constant folded
     def f2(a, b): return a.permute(1,0) + 0
-    test_generic_square('permute', 4096, f1, f2)
+    helper_test_generic_square('permute', 4096, f1, f2)
 
   def test_neg(self):
     def f(a, b): return -a
-    test_generic_square('neg', 4096, f, f)
+    helper_test_generic_square('neg', 4096, f, f)
 
   def test_exp(self):
     def f(a, b): return a.exp()
-    test_generic_square('exp', 2048, f, f)
+    helper_test_generic_square('exp', 2048, f, f)
 
   def test_relu(self):
     def f(a, b): return a.relu()
-    test_generic_square('relu', 4096, f, f)
+    helper_test_generic_square('relu', 4096, f, f)
 
   def test_max(self):
     def f(a, b): return a.max()
-    test_generic_square('max', 4096, f, f)
+    helper_test_generic_square('max', 4096, f, f)
 
   def test_mul_sum(self):
     def f(a, b): return (a*b).sum()
-    test_generic_square('mul_sum', 4096, f, f)
+    helper_test_generic_square('mul_sum', 4096, f, f)
 
   def test_add(self):
     for N in [1024, 4096]:
       def f(a, b): return a + b
-      test_generic_square('add', N, f, f)
+      helper_test_generic_square('add', N, f, f)
 
   def test_add_sq(self):
     def f(a, b): return a*a + b*b
-    test_generic_square('add_sq', 4096, f, f)
+    helper_test_generic_square('add_sq', 4096, f, f)
 
   def test_gemm(self):
     def f(a, b): return a @ b
-    test_generic_square('gemm', 512, f, f)
+    helper_test_generic_square('gemm', 512, f, f)
 
   def test_gemm_unrolled(self):
     N = 512
     def f1(a, b): return a@b.T
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
-    test_generic_square('gemm_unrolled', N, f1, f2)
+    helper_test_generic_square('gemm_unrolled', N, f1, f2)
 
   def test_gemm_unrolled_permute_r(self):
     N = 512
     def f1(a, b): return a@b
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
-    test_generic_square('gemm_unrolled_permute_r', N, f1, f2)
+    helper_test_generic_square('gemm_unrolled_permute_r', N, f1, f2)
 
   def test_gemm_unrolled_permute_lr(self):
     N = 512
     def f1(a, b): return a.T@b
     def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
-    test_generic_square('gemm_unrolled_permute_lr', N, f1, f2)
+    helper_test_generic_square('gemm_unrolled_permute_lr', N, f1, f2)
 
   def test_conv2d(self):
     torch.manual_seed(0)
@@ -136,8 +136,8 @@ class TestSpeed(unittest.TestCase):
           def f2(): return tiny_conv(tiny_dat).realize()
 
           with torch.no_grad():
-            val_torch, et_torch = test_speed(f1)
-          val_tinygrad, et_tinygrad = test_speed(f2)
+            val_torch, et_torch = helper_test_speed(f1)
+          val_tinygrad, et_tinygrad = helper_test_speed(f2)
 
           print(f"bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}                   {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
           np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
