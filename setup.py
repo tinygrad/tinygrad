@@ -8,7 +8,7 @@ with open(os.path.join(directory, 'README.md'), encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.3.0',
+      version='0.4.0',
       description='You like pytorch? You like micrograd? You love tinygrad! heart',
       author='George Hotz',
       license='MIT',
