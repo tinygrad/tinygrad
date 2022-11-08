@@ -15,9 +15,7 @@ BS = int(os.getenv("BS", "2"))
 
 def train_one_step(model,X,Y):
   params = get_parameters(model)
-  pcount = 0
-  for p in params:
-    pcount += np.prod(p.shape)
+  pcount = sum(np.prod(p.shape) for p in params)
   optimizer = optim.Adam(params, lr=0.001)
   print("stepping %r with %.1fM params bs %d" % (type(model), pcount/1e6, BS))
   st = time.time()
