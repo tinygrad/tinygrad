@@ -12,10 +12,6 @@ import numpy as np
 from ctypes import CFUNCTYPE
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_info
 
-#from llvmlite import __version__
-#print(__version__)
-#exit(0)
-
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
 
@@ -131,9 +127,7 @@ class LLVM:
     llvm.initialize_native_asmprinter()  # yes, even this one
     target = llvm.Target.from_triple(llvm.get_process_triple())
     LLVM.optimizer = llvm.create_module_pass_manager()
-
-    # opt=3 means no FMA, opt=2 means FMA
-    LLVM.target_machine = target.create_target_machine(opt=2)  # this opt actually can change things
+    LLVM.target_machine = target.create_target_machine(opt=2)  # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
     llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
@@ -177,8 +171,6 @@ class LLVM:
 
     if DEBUG >= 2:
       print(llvm_ir)
-      #with open("/tmp/llvm.ll", "w") as f:
-      #  f.write(llvm_ir)
 
     mod = llvm.parse_assembly(llvm_ir)
     mod.verify()
@@ -189,9 +181,8 @@ class LLVM:
     LLVM.engine.add_module(mod)
     LLVM.engine.finalize_object()
 
-    # call function
-    #cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
-    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(LLVM.engine.get_function_address('exec'))
+    # call function (NOTE: if the types don't match, there's likely something wrong with the cache)
+    cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
 
     st = time.monotonic()
     cfunc(*[x._buf for x in bufs])
@@ -225,10 +216,6 @@ class LLVMBuffer(ExplicitExecAST):
   start_for_op = {
     ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
     ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
-  }
-  start_for_op_4x4 = {
-    ReduceOps.SUM: ir.VectorType(ir.FloatType(), 16)([ir.FloatType()(0.0)]*16),
-    ReduceOps.MAX: ir.VectorType(ir.FloatType(), 16)([ir.FloatType()(-math.inf)]*16),
   }
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     super().__init__(shape, hostbuf)

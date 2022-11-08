@@ -6,19 +6,25 @@ import time
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from termcolor import colored
 from tinygrad.llops.ops_gpu import CL
+try:
+  from termcolor import colored
+except ImportError:
+  colored = None
 
 IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
-  if x < 0.8:
-    return colored(ret, 'green')
-  elif x > 1.5:
-    return colored(ret, 'red')
+  if colored:
+    if x < 0.8:
+      return colored(ret, 'green')
+    elif x > 1.5:
+      return colored(ret, 'red')
+    else:
+      return colored(ret, 'yellow')
   else:
-    return colored(ret, 'yellow')
+    return ret
 
 CNT = 8
 def test_speed(f1, *args):
