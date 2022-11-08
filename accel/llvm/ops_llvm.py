@@ -72,9 +72,9 @@ def idx_deref(builder, buf, ptr, idx):
 from functools import partial
 class AMX():
   @staticmethod
-  def nop_op_imm5(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5})", "", tuple(), True)
+  def nop_op_imm5(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5}); amx op {op} imm {imm5}", "", tuple(), True)
   @staticmethod
-  def op_gpr(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6))", "r", (gpr,), True)
+  def op_gpr(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6)); amx op {op}", "r", (gpr,), True)
   set, clr = partial(nop_op_imm5, 17, 0), partial(nop_op_imm5, 17, 1)
   ldx, ldy, stx, sty = partial(op_gpr, 0), partial(op_gpr, 1), partial(op_gpr, 2), partial(op_gpr, 3)
   ldz, stz, ldzi, stzi = partial(op_gpr, 4), partial(op_gpr, 5), partial(op_gpr, 6), partial(op_gpr, 7)
@@ -307,11 +307,13 @@ class LLVMBuffer(ExplicitExecAST):
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
     USE_AMX = True
-    AMX_SZ = 1
+    # TODO: change this independently?
+    AMX_SZ_Y = 2
+    AMX_SZ_X = 2
     USE_4X4 = False
     #DY, DX = 16, 4
     #DY, DX = 16, 16
-    DY, DX = 16*AMX_SZ, 16*AMX_SZ
+    DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
 
     if len(shapes[0]) >= 3:
       USE_4X4 = True
@@ -350,6 +352,7 @@ class LLVMBuffer(ExplicitExecAST):
           st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
           st.permute(0,2,4,1,3)   # YyXxK -> YXKyx
 
+          #CACHE_DIM = 64
           #st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
           #st.permute(0,3,1,4,6,2,5)
 
@@ -415,14 +418,17 @@ class LLVMBuffer(ExplicitExecAST):
           fptr = builder.ptrtoint(func.args[buf_index], ir.IntType(64))
           if buf_index == 1:
             assert strides[buf_index][-2] == 1 and strides[buf_index][-1] == 0
-            for i in range(0, AMX_SZ):
-              AMX.ldy(builder, builder.add(fptr, builder.add(int_const(i << 56), builder.mul(idx, int_const(4)))))
-            return "AMX_X"
+            # TODO: this is broken for non multiples of 2
+            for i in range(0, AMX_SZ_Y, 2):
+              idx_n = builder.add(idx, int_const(i*16))
+              AMX.ldy(builder, builder.add(fptr, builder.add(int_const(1 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+            return "AMX_Y"
           elif buf_index == 2:
             assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1
-            for i in range(0, AMX_SZ):
-              AMX.ldx(builder, builder.add(fptr, builder.add(int_const(i << 56), builder.mul(idx, int_const(4)))))
-            return "AMX_Y"
+            for i in range(0, AMX_SZ_X, 2):
+              idx_n = builder.add(idx, int_const(i*16))
+              AMX.ldx(builder, builder.add(fptr, builder.add(int_const(1 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+            return "AMX_X"
           else:
             assert "AMX only supports two buffers"
         elif USE_4X4:
@@ -456,7 +462,7 @@ class LLVMBuffer(ExplicitExecAST):
       if USE_AMX and reduceops[0].op == ReduceOps.SUM and isinstance(reduceops[0].src[0], LazyOp) and reduceops[0].src[0].op == BinaryOps.MUL:
         reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
         reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
-        assert reduce_input_0 == "AMX_X" and reduce_input_1 == "AMX_Y"
+        assert reduce_input_0 == "AMX_Y" and reduce_input_1 == "AMX_X"
         fma = True
       else:
         reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
@@ -476,9 +482,12 @@ class LLVMBuffer(ExplicitExecAST):
       if reduceops[0].op == ReduceOps.SUM:
         if fma:
           #reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type, val_type]), name="llvm.fma"), [reduce_input_0, reduce_input_1, val], fastmath=('fast',))
-          for j in range(AMX_SZ):
-            for i in range(AMX_SZ):
-              AMX.fma32(loop_exit[-1], int_const(j<<10 | i))
+          for j in range(AMX_SZ_Y):
+            for i in range(AMX_SZ_X):
+              z_row = j*AMX_SZ_X + i
+              # NOTE: the x and y offsets are in <bytes> not <elements>!
+              # <Z row> <X offset> <Y offset>
+              AMX.fma32(loop_exit[-1], int_const(z_row<<20 | (i*16*4)<<10 | (j*16*4)))
           reduce_result = "AMX_Z"
         else:
           reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
@@ -500,8 +509,14 @@ class LLVMBuffer(ExplicitExecAST):
         zptr = builder.ptrtoint(func.args[0], ir.IntType(64))
         zptr = builder.add(zptr, builder.mul(idx_level[0][store_loop], int_const(4)))
         assert strides[0][-1] == 1
-        for i in range(16):
-          AMX.stz(builder, builder.add(zptr, int_const((i*4 << 56) | i*strides[0][-2]*4)))
+        # using all 64 Z registers (4 kB)
+        for j in range(AMX_SZ_X):
+          for k in range(16):
+            # TODO: non mult
+            for i in range(0,AMX_SZ_Y,2):
+              z_row = j*AMX_SZ_X + i
+              ptr = ((j*16)+k)*strides[0][-2] + i*16
+              AMX.stz(builder, builder.add(zptr, int_const(1 << 62 | ((k*4+z_row) << 56) | ptr*4)))
       else:
         for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
           result_x = builder.extract_element(result, int_const(i))
@@ -510,6 +525,7 @@ class LLVMBuffer(ExplicitExecAST):
       loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
     
     # add the looping
+    set_clr = False
     for i,s in enumerate(full_shape):
       if USE_AMX and i == store_loop:
         AMX.set(loop_entry[store_loop])
@@ -520,10 +536,13 @@ class LLVMBuffer(ExplicitExecAST):
       idx_p1 = loop_exit[i+1].add(idx, int_const(1))
       idx.add_incoming(idx_p1, loop_exit[i+1]._block)
       if USE_AMX and i+1 == store_loop:
+        set_clr = True
         AMX.clr(loop_exit[store_loop])
       loop_exit[i+1].cbranch(loop_exit[i+1].icmp_unsigned("==", idx_p1, int_const(s)), loop_exit[i]._block, loop_entry[i+1]._block)
 
     loop_entry[-1].branch(loop_exit[-1]._block)
+    if not set_clr:
+      AMX.clr(loop_exit[0])
     loop_exit[0].ret_void()
 
     LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs, info.flops)

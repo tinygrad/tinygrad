@@ -5,6 +5,7 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
+#np.set_printoptions(linewidth=460, threshold=10000000000, suppress=False)
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 try:
@@ -46,7 +47,8 @@ def helper_test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
   torch_a = torch.rand(N, N) - 0.5
   torch_b = torch.rand(N, N) - 0.5
-  #torch_a = torch.arange(N*N).reshape(N, N)
+
+  #torch_a = torch.arange(N*N).reshape(N, N) - 32*21
   #torch_b = torch.arange(N*N).reshape(N, N)
 
   tiny_a = Tensor(torch_a.cpu().numpy())
@@ -56,7 +58,7 @@ def helper_test_generic_square(name, N, f1, f2):
     val_torch, et_torch = helper_test_speed(f1, torch_a, torch_b)
   val_tinygrad, et_tinygrad = helper_test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
 
-  #print(val_tinygrad)
+  #print(val_tinygrad.astype(np.int32))
   #print(val_torch)
   print(f"{name:30s} {N:4d}x{N:4d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
@@ -126,7 +128,7 @@ class TestSpeed(unittest.TestCase):
     helper_test_generic_square('gemm_unrolled_permute_r', N, f1, f2)
 
   def test_gemm_unrolled_permute_lr(self):
-    N = 512
+    N = 1024
     def f1(a, b): return a.T@b
     def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled_permute_lr', N, f1, f2)
