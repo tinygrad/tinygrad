@@ -109,7 +109,8 @@ class LLVM:
       return
     llvm.initialize()
     llvm.initialize_native_target()
-    llvm.initialize_native_asmprinter()  # yes, even this one
+    llvm.initialize_native_asmprinter()
+    llvm.initialize_native_asmparser()
     target = llvm.Target.from_triple(llvm.get_process_triple())
     LLVM.optimizer = llvm.create_module_pass_manager()
     LLVM.target_machine = target.create_target_machine(opt=2)  # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
@@ -292,6 +293,7 @@ class LLVMBuffer(ExplicitExecAST):
     USE_4X4 = False
     DY, DX = 16, 4
 
+    """
     if len(shapes[0]) >= 3:
       USE_4X4 = True
 
@@ -333,6 +335,7 @@ class LLVMBuffer(ExplicitExecAST):
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     shapes, strides = new_shapes, new_strides
+    """
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = shapes[0]
