@@ -272,6 +272,9 @@ class LLVMBuffer(ExplicitExecAST):
 
       # remove places where the shape is all ones, this is cheap, easy, and correct
       all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
+      # keep at least 1 one
+      if all(all_ones):
+        all_ones[-1] = False
       shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in shapes]
       strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
 
@@ -301,12 +304,14 @@ class LLVMBuffer(ExplicitExecAST):
             rets[j].append((shapes[j][i], strides[j][i]))
       shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
+      USE_4X4 = False
+      DY, DX = 16, 4
+
+      """
       if len(shapes[0]) >= 3:
         USE_4X4 = True
       else:
         USE_4X4 = False
-      DY, DX = 16, 4
-      #DY, DX = 1, 1
 
       # TODO: change the order of the output_shape, and perhaps reshape everything
       # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
@@ -360,6 +365,7 @@ class LLVMBuffer(ExplicitExecAST):
         new_shapes.append(st.shape)
         new_strides.append(st.strides)
       shapes, strides = new_shapes, new_strides
+      """
 
       # the 4x4 need to go all the way at the end, even after reduce
       output_shape = shapes[0]
@@ -397,7 +403,6 @@ class LLVMBuffer(ExplicitExecAST):
           si_ps = loop_exit[i+1].add(si, int_const(strides[j][i]))
           si.add_incoming(si_ps, loop_exit[i+1]._block)
           idx_level[j].append(si)
-
 
       if USE_4X4:
         val_type = ir.VectorType(ir.FloatType(), DY*DX)
@@ -456,7 +461,9 @@ class LLVMBuffer(ExplicitExecAST):
         elif reduceops[0].op == ReduceOps.MAX:
           # TODO: this doesn't respect the fast math flag
           # err, actually i think that it doesn't fuse because the type is fixed
-          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
+          #reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
+          reduce_result = loop_exit[-1].call(loop_exit[-1]._block.module.declare_intrinsic('llvm.maxnum', fnty=ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()])), [reduce_input, val], fastmath=('fast',))
+
 
         for i,phi in enumerate(phis[1:]):
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)

@@ -139,7 +139,7 @@ class TestSpeed(unittest.TestCase):
             val_torch, et_torch = helper_test_speed(f1)
           val_tinygrad, et_tinygrad = helper_test_speed(f2)
 
-          print(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}              {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
+          print(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}             {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
           np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
 
 if __name__ == '__main__':
