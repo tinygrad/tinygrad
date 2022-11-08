@@ -17,7 +17,7 @@ def get_run_onnx(onnx_model):
     return ret
 
   def attribute_parse(a):
-    if a.type == 7: return tuple([int(x) for x in a.ints])
+    if a.type == 7: return tuple(int(x) for x in a.ints)
     elif a.type == 4: return buffer_parse(a.t)  # TENSOR
     elif a.type == 2: return int(a.i)
     elif a.type == 1: return float(a.f)
@@ -122,7 +122,7 @@ def get_run_onnx(onnx_model):
         if opt['pads'][0] == opt['pads'][2] and opt['pads'][1] == opt['pads'][3]:
           # symmetric padding
           # TODO: is this backward?
-          ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1), padding=opt['pads'][0:2])
+          ret = x.conv2d(w,b,stride=opt['strides'],groups=opt.get('group', 1),padding=opt['pads'][:2])
         else:
           x = x.pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]))
           ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1))
