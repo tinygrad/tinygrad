@@ -53,6 +53,8 @@ class ZeroView:
       acc *= self.shape[0]
     self.expr = 'valid=' + ' && '.join(expr)
 
+  def __repr__(self): return f"ZeroView<{self.old_shape}, {self.arg}>"
+
 ViewTypes = Union[View, ZeroView]
 
 @functools.lru_cache(maxsize=None)
