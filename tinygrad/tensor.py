@@ -88,6 +88,9 @@ class Tensor:
   # TODO: remove use of numpy here
 
   @classmethod
+  def zeros_like(cls, tensor, **kwargs): return cls.zeros(*tensor.shape, **kwargs)
+
+  @classmethod
   def zeros(cls, *shape, **kwargs): return cls(np.zeros(shape, dtype=np.float32), **kwargs)
 
   @classmethod
@@ -301,7 +304,7 @@ class Tensor:
 
   # TODO: fix the kwargs problem, then remove these (or not, since they now fix tuples)
   def reshape(self, shape, *args): return self._reshape(shape=argfix(shape, *args))
-  def expand(self, shape, *args): return self._expand(shape=argfix(shape, *args))
+  def expand(self, shape, *args): return self._expand(shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
   def permute(self, order, *args): return self._permute(order=argfix(order, *args))
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
