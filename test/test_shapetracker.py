@@ -80,6 +80,19 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st.permute(2,3,0,1)
     assert self.st.contiguous
 
+  def test_super_complex_2(self):
+    self.st = ShapeTracker((4, 4, 4))
+    self.st.permute(2, 0, 1)
+    self.st.reshape(4, 16)
+    self.st.permute(1, 0)
+    assert self.st.contiguous
+
+  def test_super_complex_2_fail(self):
+    self.st = ShapeTracker((4, 4, 4))
+    self.st.permute(2, 0, 1)
+    self.st.reshape(16, 4)
+    assert len(self.st.views) != 1
+
   def test_work(self):
     self.st = ShapeTracker((64, 1024, 4))
     self.st.reshape(1, 64, 128, 32)

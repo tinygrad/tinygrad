@@ -113,26 +113,25 @@ class ShapeTracker:
     # check if the new dimensions factorize from the old ones
     # TODO: is this right? can we write this better?
     ptr = 0 
-    curr_dim = self.shape[ptr]
+    min_shape_strides = to_shape_strides(self.shape, self.strides)
+    curr_dim = min_shape_strides[ptr][0]
     new_strides = []
-    valid = True
     for s in new_shape:
       if curr_dim%s == 0:
         curr_dim //= s
-        new_strides.append(self.strides[ptr] * curr_dim)
+        new_strides.append(min_shape_strides[ptr][1] * curr_dim)
         if curr_dim == 1:
           ptr += 1
-          if ptr == len(self.shape):
+          if ptr == len(min_shape_strides):
             # there might still be 1s
             while len(new_strides) != len(new_shape):
               assert new_shape[len(new_strides)] == 1
               new_strides.append(1)
             break
-          curr_dim = self.shape[ptr]
+          curr_dim = min_shape_strides[ptr][0]
       else:
-        valid = False
         break
-    if valid:
+    if len(new_shape) == len(new_strides):
       self.views[-1] = View(new_shape, new_strides, self.offset)
       return self
 
