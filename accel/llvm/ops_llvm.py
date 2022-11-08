@@ -60,7 +60,10 @@ def idx_deref(builder, buf, ptr, idx):
         acc *= d
       idx = ret
   if valid is not None:
-    return builder.select(valid, builder.load(builder.gep(ptr, [idx], inbounds=True)), ir.Constant(ir.FloatType(), 0))
+    # this always does the load, so we have it load *0 if the arg won't be used
+    # TODO: would control flow be faster?
+    aug_idx = builder.select(valid, idx, int_const(0))
+    return builder.select(valid, builder.load(builder.gep(ptr, [aug_idx], inbounds=True)), ir.Constant(ir.FloatType(), 0))
   else:
     return builder.load(builder.gep(ptr, [idx], inbounds=True))
 
