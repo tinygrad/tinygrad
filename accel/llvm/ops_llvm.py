@@ -184,7 +184,11 @@ class LLVM:
     LLVM.engine.finalize_object()
 
     # call function (NOTE: if the types don't match, there's likely something wrong with the cache)
-    cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
+    #cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
+
+    # why is this needed without the types. fixed tests below
+    # LLVM=1 OPT=2 python3 test/test_ops.py TestOps.test_cat TestOps.test_multicat
+    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for x in bufs])(LLVM.engine.get_function_address('exec'))
 
     st = time.monotonic()
     cfunc(*[x._buf for x in bufs])
@@ -263,12 +267,14 @@ class LLVMBuffer(ExplicitExecAST):
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(1+len(bufs))), name='exec')
 
     if not all(len(x.st.views) == 1 for x in bufs):
-      print(f"WARNING: {ast} has buffers with more than 1 view, can't optimize")
+      if DEBUG >= 1:
+        print(f"WARNING: {ast} has buffers with more than 1 view, can't optimize")
     else:
       # include ret in the bufs
       bufs = [ret] + bufs
       shapes = [x.shape for x in bufs]
       strides = [x.st.views[0].strides for x in bufs]
+      offsets = [x.st.views[0].offset for x in bufs]
 
       # remove places where the shape is all ones, this is cheap, easy, and correct
       all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
@@ -394,7 +400,7 @@ class LLVMBuffer(ExplicitExecAST):
       loop_exit = loop_exit[::-1]
 
       # add the buffer indexing
-      idx_level = [[int_const(0)] for _ in range(len(bufs))]
+      idx_level = [[int_const(o)] for o in offsets]
       for i in range(len(full_shape)):
         for j in range(len(bufs)):
           # stride
@@ -447,9 +453,9 @@ class LLVMBuffer(ExplicitExecAST):
         reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
 
         if USE_4X4:
-          phis = [val_type([LLVMBuffer.start_for_op[ReduceOps.SUM]]*(DY*DX))]
+          phis = [val_type([LLVMBuffer.start_for_op[reduceops[0].op]]*(DY*DX))]
         else:
-          phis = [LLVMBuffer.start_for_op[ReduceOps.SUM]]
+          phis = [LLVMBuffer.start_for_op[reduceops[0].op]]
         for i in range(store_loop+1, len(loop_entry)):
           #val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
           val = loop_entry[i].phi(val_type, f"reduce_phi_{i}")
@@ -461,9 +467,7 @@ class LLVMBuffer(ExplicitExecAST):
         elif reduceops[0].op == ReduceOps.MAX:
           # TODO: this doesn't respect the fast math flag
           # err, actually i think that it doesn't fuse because the type is fixed
-          #reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
-          reduce_result = loop_exit[-1].call(loop_exit[-1]._block.module.declare_intrinsic('llvm.maxnum', fnty=ir.FunctionType(ir.FloatType(), [ir.FloatType(), ir.FloatType()])), [reduce_input, val], fastmath=('fast',))
-
+          reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
 
         for i,phi in enumerate(phis[1:]):
           phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
