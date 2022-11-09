@@ -313,7 +313,7 @@ class LLVMBuffer(ExplicitExecAST):
           rets[j].append((shapes[j][i], strides[j][i]))
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
-    USE_AMX = False # len(shapes[0]) == 3
+    USE_AMX = len(shapes[0]) in [3,5] and len(reduceops) > 0
 
     # TODO: change this independently?
     AMX_SZ_Y = 2
@@ -323,14 +323,9 @@ class LLVMBuffer(ExplicitExecAST):
     #DY, DX = 16, 16
     DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
 
+    if len(shapes[0]) >= 3 and len(reduceops) > 0:
+      USE_4X4 = True
 
-
-    if len(shapes[0]) >= 3:
-      #st.reshape()
-      #USE_4X4 = True
-      pass
-
-    """
     # TODO: change the order of the output_shape, and perhaps reshape everything
     # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
     # AMX can make quick work of a MUL->SUM AST block
@@ -345,6 +340,8 @@ class LLVMBuffer(ExplicitExecAST):
       if len(shape) == 2:
         st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
         st.permute(0,2,1,3)
+      elif len(shape) == 5:
+        st.permute(0,2,4,1,3)
       elif len(shape) == 7:
         # conv
         if USE_4X4:
@@ -373,7 +370,6 @@ class LLVMBuffer(ExplicitExecAST):
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     shapes, strides = new_shapes, new_strides
-    """
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = shapes[0]

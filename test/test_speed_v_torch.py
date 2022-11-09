@@ -50,7 +50,7 @@ def helper_test_generic_square(name, N, f1, f2):
   torch_a = torch.rand(N, N) - 0.5
   torch_b = torch.rand(N, N) - 0.
   if DEBUG_GEMM:
-    torch_a = torch.arange(N*N).reshape(N, N) - 32*21
+    torch_a = torch.arange(N*N).reshape(N, N) - 32*48
     torch_b = torch.arange(N*N).reshape(N, N)
 
   tiny_a = Tensor(torch_a.cpu().numpy())
@@ -122,6 +122,20 @@ class TestSpeed(unittest.TestCase):
     def f1(a, b): return a@b.T
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled', N, f1, f2)
+  
+  def test_gemm_packed(self):
+    N = 1024 if not DEBUG_GEMM else 64
+    def f1(a, b):
+      a = a.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
+      b = b.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
+      return a@b.T
+    def f2(a, b):
+      # N, N//32, 32
+      a = a.reshape(N//32, N, 32).permute(0,2,1)
+      b = b.reshape(N//32, N, 32).permute(0,2,1)
+      return (a.reshape(N//32, 32, 1, 1, N).expand(N//32, 32, N//32, 32, N) *
+              b.reshape(1, 1, N//32, 32, N).expand(N//32, 32, N//32, 32, N)).sum(axis=4).reshape(N, N)
+    helper_test_generic_square('gemm_packed', N, f1, f2)
 
   def test_gemm_unrolled_permute_l(self):
     N = 512
