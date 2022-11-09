@@ -19,7 +19,7 @@ class Tensor:
       data = data.realize().toCPU()
 
     if isinstance(data, np.ndarray):
-      data = data.reshape((1,)) if data.shape == tuple() else data
+      data = data if data.shape else data.reshape((1,))
       self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
     elif isinstance(data, LazyBuffer):
       self.lazydata = data
