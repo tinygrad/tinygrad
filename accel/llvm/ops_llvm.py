@@ -316,7 +316,7 @@ class LLVMBuffer(ExplicitExecAST):
     USE_AMX = len(shapes[0]) == 3
 
     # TODO: change this independently?
-    AMX_SZ_Y = 1
+    AMX_SZ_Y = 2
     AMX_SZ_X = 2
     USE_4X4 = False
     #DY, DX = 16, 4
@@ -427,16 +427,18 @@ class LLVMBuffer(ExplicitExecAST):
           if buf_index == 1:
             assert strides[buf_index][-2] == 1 and strides[buf_index][-1] == 0
             assert shapes[buf_index][-2] == AMX_SZ_Y*16
-            for i in range(0, AMX_SZ_Y, 1):
+            double = int(AMX_SZ_Y % 2 == 0)
+            for i in range(0, AMX_SZ_Y, double+1):
               idx_n = builder.add(idx, int_const(i*16))
-              AMX.ldy(builder, builder.add(fptr, builder.add(int_const(0 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+              AMX.ldy(builder, builder.add(fptr, builder.add(int_const(double << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
             return "AMX_Y"
           elif buf_index == 2:
             assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1
             assert shapes[buf_index][-1] == AMX_SZ_X*16
-            for i in range(0, AMX_SZ_X, 1):
+            double = int(AMX_SZ_X % 2 == 0)
+            for i in range(0, AMX_SZ_X, double+1):
               idx_n = builder.add(idx, int_const(i*16))
-              AMX.ldx(builder, builder.add(fptr, builder.add(int_const(0 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+              AMX.ldx(builder, builder.add(fptr, builder.add(int_const(double << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
             return "AMX_X"
           else:
             assert "AMX only supports two buffers"
@@ -491,9 +493,9 @@ class LLVMBuffer(ExplicitExecAST):
       if reduceops[0].op == ReduceOps.SUM:
         if fma:
           #reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type, val_type]), name="llvm.fma"), [reduce_input_0, reduce_input_1, val], fastmath=('fast',))
-          for j in range(1):
-            for i in range(2):
-              z_row = i*AMX_SZ_Y + j
+          for j in range(AMX_SZ_Y):
+            for i in range(AMX_SZ_X):
+              z_row = j*AMX_SZ_X + i
               # NOTE: the x and y offsets are in <bytes> not <elements>!
               # <Z row> <X offset> <Y offset>
               AMX.fma32(loop_exit[-1], int_const(z_row<<20 | (i*16*4)<<10 | (j*16*4)))
@@ -519,12 +521,12 @@ class LLVMBuffer(ExplicitExecAST):
         zptr = builder.add(zptr, builder.mul(idx_level[0][store_loop], int_const(4)))
         assert strides[0][-1] == 1
         # using all 64 Z registers (4 kB)
-        for j in range(AMX_SZ_X):
+        for j in range(AMX_SZ_Y):
           for k in range(16):
             # TODO: non mult
-            for i in range(0,AMX_SZ_Y,1):
-              z_row = j*AMX_SZ_Y + i
-              ptr = ((i*16)+k)*strides[0][-2] + j*16
+            for i in range(0,AMX_SZ_X,1):
+              z_row = j*AMX_SZ_X + i
+              ptr = ((j*16)+k)*strides[0][-2] + i*16
               AMX.stz(builder, builder.add(zptr, int_const(0 << 62 | ((k*4+z_row) << 56) | ptr*4)))
       else:
         for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
