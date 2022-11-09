@@ -541,10 +541,11 @@ class LLVMBuffer(ExplicitExecAST):
         for j in range(AMX_SZ_Y):
           for k in range(16):
             # TODO: non mult
-            for i in range(0,AMX_SZ_X,1):
+            double = int(AMX_SZ_X % 2 == 0)
+            for i in range(0,AMX_SZ_X,double+1):
               z_row = j*AMX_SZ_X + i
               ptr = ((j*16)+k)*strides[0][-2] + i*16
-              AMX.stz(builder, builder.add(zptr, int_const(0 << 62 | ((k*4+z_row) << 56) | ptr*4)))
+              AMX.stz(builder, builder.add(zptr, int_const(double << 62 | ((k*4+z_row) << 56) | ptr*4)))
       else:
         for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
           result_x = builder.extract_element(result, int_const(i))
