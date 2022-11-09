@@ -72,14 +72,17 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.sum()
     helper_test_generic_square('sum', 4096, f, f)
 
+  def test_array_packing(self):
+    N = 1024
+    def f(a, b): return a.reshape(N, N // 32, 32).permute(1,0,2).contiguous()
+    helper_test_generic_square('array_packing', N, f, f)
+
   def test_permute(self):
     for N in [1024, 4096]:
       # this is a 64MB tensor, M1 L1 cache is 128kB
       # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
-      def f1(a, b): return a.permute(1,0).contiguous()
-      # NOTE: this isn't being constant folded
-      def f2(a, b): return a.permute(1,0) + 0
-      helper_test_generic_square('permute', N, f1, f2)
+      def f(a, b): return a.permute(1,0).contiguous()
+      helper_test_generic_square('permute', N, f, f)
 
   def test_neg(self):
     def f(a, b): return -a

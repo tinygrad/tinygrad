@@ -313,7 +313,7 @@ class LLVMBuffer(ExplicitExecAST):
           rets[j].append((shapes[j][i], strides[j][i]))
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
-    USE_AMX = len(shapes[0]) == 3
+    USE_AMX = False # len(shapes[0]) == 3
 
     # TODO: change this independently?
     AMX_SZ_Y = 2
@@ -323,9 +323,14 @@ class LLVMBuffer(ExplicitExecAST):
     #DY, DX = 16, 16
     DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
 
-    if len(shapes[0]) >= 3:
-      USE_4X4 = True
 
+
+    if len(shapes[0]) >= 3:
+      #st.reshape()
+      #USE_4X4 = True
+      pass
+
+    """
     # TODO: change the order of the output_shape, and perhaps reshape everything
     # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
     # AMX can make quick work of a MUL->SUM AST block
@@ -368,6 +373,7 @@ class LLVMBuffer(ExplicitExecAST):
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     shapes, strides = new_shapes, new_strides
+    """
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = shapes[0]
@@ -425,7 +431,7 @@ class LLVMBuffer(ExplicitExecAST):
         if USE_AMX:
           fptr = builder.ptrtoint(func.args[buf_index], ir.IntType(64))
           if buf_index == 1:
-            assert strides[buf_index][-2] == 1 and strides[buf_index][-1] == 0
+            assert strides[buf_index][-2] == 1 and strides[buf_index][-1] == 0, f"bad strides for {buf_index}: {strides[buf_index]}"
             assert shapes[buf_index][-2] == AMX_SZ_Y*16
             double = int(AMX_SZ_Y % 2 == 0)
             for i in range(0, AMX_SZ_Y, double+1):
@@ -433,7 +439,7 @@ class LLVMBuffer(ExplicitExecAST):
               AMX.ldy(builder, builder.add(fptr, builder.add(int_const(double << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
             return "AMX_Y"
           elif buf_index == 2:
-            assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1
+            assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1, f"bad strides for {buf_index}: {strides[buf_index]}"
             assert shapes[buf_index][-1] == AMX_SZ_X*16
             double = int(AMX_SZ_X % 2 == 0)
             for i in range(0, AMX_SZ_X, double+1):
