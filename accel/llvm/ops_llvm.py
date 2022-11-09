@@ -436,10 +436,11 @@ class LLVMBuffer(ExplicitExecAST):
               idx_n = builder.add(idx, int_const(i*16))
               addr = builder.mul(idx_n, int_const(4))
               addr = builder.add(fptr, addr)
-              AMX.ldy(builder, builder.add(int_const(double << 62 | i << 56), addr))
 
-              #prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(1024*4)), ir.PointerType(ir.FloatType()))
+              prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(0)), ir.PointerType(ir.FloatType()))
               #builder.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
+
+              AMX.ldy(builder, builder.add(int_const(double << 62 | i << 56), addr))
             return "AMX_Y"
           elif buf_index == 2:
             assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1, f"bad strides for {buf_index}: {strides[buf_index]}"
@@ -449,10 +450,12 @@ class LLVMBuffer(ExplicitExecAST):
               idx_n = builder.add(idx, int_const(i*16))
               addr = builder.mul(idx_n, int_const(4))
               addr = builder.add(fptr, addr)
+
+              prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(0)), ir.PointerType(ir.FloatType()))
+              #builder.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
+
               AMX.ldx(builder, builder.add(int_const(double << 62 | i << 56), addr))
 
-              #prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(1024*4)), ir.PointerType(ir.FloatType()))
-              #builder.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
             return "AMX_X"
           else:
             assert "AMX only supports two buffers"
