@@ -105,18 +105,23 @@ class LLVM:
 
   # 2048x2048 matmul in 9.88 ms (17.18 GOPS) = 1739 GFLOPS (so much! this has to be the AMX)
   # calling libBLAS.dylib`SGEMM
-  #  0x1c3ac5070: 0x0020100d   .long  0x0020100d                ; AMX instruction 0 = ldx
-  #  0x1c3ac5074: 0x0020102b   .long  0x0020102b                ; AMX instruction 1 = ldy (presumed typo in ldst.md)
-  #  0x1c3ac5078: 0x0020119f   .long  0x0020119f                ; AMX instruction 12 = fma32
-  #  0x1c3ac507c: 0x0020118e   .long  0x0020118e                ; AMX instruction 12 = fma32
+  #  0x1c3ac5070: 0x0020100d   .long  0x0020100d                ; AMX instruction 0 = ldx r13 = 0x4000000175A64100
+  #  0x1c3ac5074: 0x0020102b   .long  0x0020102b                ; AMX instruction 1 = ldy r11 = 0x4000000175464100
+  #  0x1c3ac5078: 0x0020119f   .long  0x0020119f                ; AMX instruction 12 = fma32 r31
+  #  0x1c3ac507c: 0x0020118e   .long  0x0020118e                ; AMX instruction 12 = fma32 r14 = 0x0000000000110000
   #  0x1c3ac5080: 0x9144410f   add    x15, x8, #0x110, lsl #12  ; =0x110000
-  #  0x1c3ac5084: 0x00201188   .long  0x00201188                ; AMX instruction 12 = fma32
-  #  0x1c3ac5088: 0x0020118f   .long  0x0020118f                ; AMX instruction 12 = fma32
+  #  0x1c3ac5084: 0x00201188   .long  0x00201188                ; AMX instruction 12 = fma32 r8  = 0x0000000000200040
+  #  0x1c3ac5088: 0x0020118f   .long  0x0020118f                ; AMX instruction 12 = fma32 r15 = 0x0000000000310040
   #  0x1c3ac508c: 0x8b0a016b   add    x11, x11, x10
   #  0x1c3ac5090: 0x8b0c01ad   add    x13, x13, x12
   #  0x1c3ac5094: 0xf1000529   subs   x9, x9, #0x1
   #  0x1c3ac5098: 0x54fffec1   b.ne   0x1c3ac5070               ; <+140>
   # z is 16x16 float32s. 1.64 TFLOPS is one dispatch per clock cycle. 3.2*16*16*2 = 1638.4
+
+  # 0x1c3ac78bc is the 1024x1024 mult
+  # ldx r3:  0x0000000130248640, 0x0100000130248680, 0x0000000130249640, 0x0100000130249680
+  # ldy r11: 0x4000000138491880, 0x4000000138491900
+
 
   # From HN: "On M1, for single-precision, one AMX P-unit is ~1.64 TFLOPs, one P-core is ~102 GFLOPS." which matches this
 
@@ -226,7 +231,9 @@ class LLVMBuffer(ExplicitExecAST):
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     super().__init__(shape, hostbuf)
+    # TODO: alignment
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
+    #assert ctypes.addressof(self._buf) & 0xFFF == 0
 
   def __repr__(self): return f"LLVMBuffer {str(self.st)}"
 
@@ -309,7 +316,7 @@ class LLVMBuffer(ExplicitExecAST):
     USE_AMX = len(shapes[0]) == 3
 
     # TODO: change this independently?
-    AMX_SZ_Y = 2
+    AMX_SZ_Y = 1
     AMX_SZ_X = 2
     USE_4X4 = False
     #DY, DX = 16, 4
@@ -350,12 +357,12 @@ class LLVMBuffer(ExplicitExecAST):
       elif len(shape) == 3:
         # matmul
         if USE_4X4:
-          #st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
-          #st.permute(0,2,4,1,3)   # YyXxK -> YXKyx
+          st.reshape(shape[0]//DY, DY, shape[1]//DX, DX, shape[2])
+          st.permute(0,2,4,1,3)   # YyXxK -> YXKyx
 
-          CACHE_DIM = 128
-          st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
-          st.permute(0,3,1,4,6,2,5)
+          #CACHE_DIM = 128
+          #st.reshape(shape[0]//CACHE_DIM, CACHE_DIM//DY, DY, shape[1]//CACHE_DIM, CACHE_DIM//DX, DX, shape[2])
+          #st.permute(0,3,1,4,6,2,5)
 
       assert len(st.views) == 1
       new_shapes.append(st.shape)
@@ -419,16 +426,17 @@ class LLVMBuffer(ExplicitExecAST):
           fptr = builder.ptrtoint(func.args[buf_index], ir.IntType(64))
           if buf_index == 1:
             assert strides[buf_index][-2] == 1 and strides[buf_index][-1] == 0
-            # TODO: this is broken for non multiples of 2
-            for i in range(0, AMX_SZ_Y, 2):
+            assert shapes[buf_index][-2] == AMX_SZ_Y*16
+            for i in range(0, AMX_SZ_Y, 1):
               idx_n = builder.add(idx, int_const(i*16))
-              AMX.ldy(builder, builder.add(fptr, builder.add(int_const(1 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+              AMX.ldy(builder, builder.add(fptr, builder.add(int_const(0 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
             return "AMX_Y"
           elif buf_index == 2:
             assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1
-            for i in range(0, AMX_SZ_X, 2):
+            assert shapes[buf_index][-1] == AMX_SZ_X*16
+            for i in range(0, AMX_SZ_X, 1):
               idx_n = builder.add(idx, int_const(i*16))
-              AMX.ldx(builder, builder.add(fptr, builder.add(int_const(1 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+              AMX.ldx(builder, builder.add(fptr, builder.add(int_const(0 << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
             return "AMX_X"
           else:
             assert "AMX only supports two buffers"
@@ -483,9 +491,9 @@ class LLVMBuffer(ExplicitExecAST):
       if reduceops[0].op == ReduceOps.SUM:
         if fma:
           #reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type, val_type]), name="llvm.fma"), [reduce_input_0, reduce_input_1, val], fastmath=('fast',))
-          for j in range(AMX_SZ_Y):
-            for i in range(AMX_SZ_X):
-              z_row = j*AMX_SZ_X + i
+          for j in range(1):
+            for i in range(2):
+              z_row = i*AMX_SZ_Y + j
               # NOTE: the x and y offsets are in <bytes> not <elements>!
               # <Z row> <X offset> <Y offset>
               AMX.fma32(loop_exit[-1], int_const(z_row<<20 | (i*16*4)<<10 | (j*16*4)))
@@ -514,10 +522,10 @@ class LLVMBuffer(ExplicitExecAST):
         for j in range(AMX_SZ_X):
           for k in range(16):
             # TODO: non mult
-            for i in range(0,AMX_SZ_Y,2):
-              z_row = j*AMX_SZ_X + i
-              ptr = ((j*16)+k)*strides[0][-2] + i*16
-              AMX.stz(builder, builder.add(zptr, int_const(1 << 62 | ((k*4+z_row) << 56) | ptr*4)))
+            for i in range(0,AMX_SZ_Y,1):
+              z_row = j*AMX_SZ_Y + i
+              ptr = ((i*16)+k)*strides[0][-2] + j*16
+              AMX.stz(builder, builder.add(zptr, int_const(0 << 62 | ((k*4+z_row) << 56) | ptr*4)))
       else:
         for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
           result_x = builder.extract_element(result, int_const(i))
