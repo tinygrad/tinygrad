@@ -272,7 +272,11 @@ class LLVMBuffer(ExplicitExecAST):
     # create llvm function
     module = ir.Module(name=__file__)
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(1+len(bufs))), name='exec')
-
+    
+    #Force llvmlite to allow us to add function attribute then add the attribute
+    func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
+    func.attributes.add('"no-nans-fp-math"="true"')
+    
     # include ret in the bufs
     bufs = [ret] + bufs
     shapes = [x.shape for x in bufs]
@@ -525,8 +529,7 @@ class LLVMBuffer(ExplicitExecAST):
         else:
           reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
       elif reduceops[0].op == ReduceOps.MAX:
-        # TODO: this doesn't respect the fast math flag. it won't vectorize, and i'm not sure if llvm supports it
-        reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type]), name="llvm.maximum"), [reduce_input, val], fastmath=('fast',))
+        reduce_result = loop_exit[i].select(loop_exit[-1].fcmp_unordered(">", val, reduce_input, flags=('fast',)), val, reduce_input, flags=('fast',))
 
       for i,phi in enumerate(phis[1:]):
         if reduce_result != "AMX_Z":
