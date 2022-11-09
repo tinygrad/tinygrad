@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
+import time
 np.set_printoptions(linewidth=160)
 #np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
 from tinygrad.llops.ops_llvm import LLVM, LLVMBuffer, int_const, AMX
@@ -27,9 +28,6 @@ bufs = [c,a,b]
 module = ir.Module(name=__file__)
 func = ir.Function(module, ir.FunctionType(ir.IntType(64), [ir.FloatType().as_pointer()]*3), name='exec')
 
-# turn amx on
-#AMX.set(builder)
-
 entry = ir.IRBuilder(func.append_basic_block(name="entry"))
 loop_1 = ir.IRBuilder(func.append_basic_block(name="loop_y"))
 loop_2 = ir.IRBuilder(func.append_basic_block(name="loop_x"))
@@ -40,7 +38,6 @@ loop_1_exit = ir.IRBuilder(func.append_basic_block(name="loop_y_exit"))
 
 zm, xm, ym = [entry.ptrtoint(func.args[i], ir.IntType(64)) for i in range(3)]
 exit = ir.IRBuilder(func.append_basic_block(name="exit"))
-exit.ret(int_const(0))
 
 y = loop_1.phi(ir.IntType(64), name="y")
 x = loop_2.phi(ir.IntType(64), name="x")
@@ -51,6 +48,10 @@ AMX.set(loop_2)
 # stride
 xptr = loop_3_exit.add(x, loop_3_exit.mul(k, int_const(N)))
 yptr = loop_3_exit.add(y, loop_3_exit.mul(k, int_const(N)))
+
+# if you are okay with the wrong answer, this is faster
+#xptr = loop_3_exit.add(x, loop_3_exit.mul(k, int_const(32)))
+#yptr = loop_3_exit.add(y, loop_3_exit.mul(k, int_const(32)))
 
 # double loads load 32 floats
 AMX.ldx(loop_3_exit, loop_3_exit.add(int_const(1<<62), loop_3_exit.add(xm, loop_3_exit.mul(int_const(4), xptr))))
@@ -90,6 +91,7 @@ loop_3.branch(loop_3_exit._block)
 loop_3_exit.cbranch(loop_3_exit.icmp_unsigned("==", kp, int_const(N)), loop_2_exit._block, loop_3._block)
 loop_2_exit.cbranch(loop_2_exit.icmp_unsigned("==", xp, int_const(N)), loop_1_exit._block, loop_2._block)
 loop_1_exit.cbranch(loop_1_exit.icmp_unsigned("==", yp, int_const(N)), exit._block, loop_1._block)
+exit.ret(int_const(0))
 
 print(str(module))
 #exit(0)
@@ -117,8 +119,15 @@ for i in range(N):
 #AMX.clr(builder)
 
 cfunc = LLVM().exec(module, bufs, N**3 * 2)
-cfunc = LLVM().exec(module, bufs, N**3 * 2)
-cfunc = LLVM().exec(module, bufs, N**3 * 2)
+
+times = []
+for i in range(50):
+  st = time.monotonic()
+  cfunc(*[x._buf for x in bufs])
+  et = time.monotonic() - st
+  times.append(et)
+
+print(f"{min(times)*1000:.2f} ms min time, {np.median(times)*1000:.2f} ms median time")
 
 print(c.toCPU().astype(np.int64))
 print(cn.astype(np.int64))
