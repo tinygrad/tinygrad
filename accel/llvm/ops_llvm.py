@@ -233,7 +233,7 @@ class LLVMBuffer(ExplicitExecAST):
     super().__init__(shape, hostbuf)
     # TODO: alignment
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
-    #assert ctypes.addressof(self._buf) & 0xFFF == 0
+    #assert ctypes.addressof(self._buf) & 0x1F == 0
 
   def __repr__(self): return f"LLVMBuffer {str(self.st)}"
 
@@ -313,6 +313,11 @@ class LLVMBuffer(ExplicitExecAST):
           rets[j].append((shapes[j][i], strides[j][i]))
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
+    if DEBUG >= 2:
+      print(ast)
+      print("old:",shapes)
+      print("old:",strides)
+
     USE_AMX = len(shapes[0]) in [3,5] and len(reduceops) > 0
     if os.getenv("AMX", 0) == 0:
       USE_AMX = False
@@ -382,9 +387,8 @@ class LLVMBuffer(ExplicitExecAST):
       full_shape = full_shape[:-2]
 
     if DEBUG >= 2:
-      print(ast)
-      print(shapes)
-      print(strides)
+      print("new:", shapes)
+      print("new:", strides)
       print(full_shape, "->", output_shape)
     
     # construct the structure of the loops

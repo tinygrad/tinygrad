@@ -1,34 +1,77 @@
 #!/usr/bin/env python3
 import numpy as np
 import time
+import sys
 np.set_printoptions(linewidth=160)
-#np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
+np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
 from tinygrad.llops.ops_llvm import LLVM, LLVMBuffer, int_const, AMX
 from llvmlite import ir  # type: ignore
 
-N = 1024
-an = np.arange(N*N).reshape(N, N) - 43*64
-bn = np.arange(N*N).reshape(N, N)
+N = 4096
+#N = 64
+
+#an = np.arange(N*N).reshape(N, N) - 43*64
+#bn = np.arange(N*N).reshape(N, N)
 #an = np.ones((N, N)).astype(np.float32)
 #bn = np.ones((N, N)).astype(np.float32)
+
+# matrix is 64M, max load bandwidth is 57 GB/s
+# cache line looks like 256 bytes
 
 an = np.random.randn(N, N) - 0.5
 bn = np.random.randn(N, N) - 0.5
 an = an.astype(np.float32)
 bn = bn.astype(np.float32)
 
+sn = an.reshape(-1, 32).sum(axis=0)
+
 
 cn = (an.T @ bn).T
 
 a = LLVMBuffer.fromCPU(an)
 b = LLVMBuffer.fromCPU(bn)
-c = LLVMBuffer.fromCPU(np.zeros((N, N)))
+#c = LLVMBuffer.fromCPU(np.zeros((N, N)))
+c = LLVMBuffer.fromCPU(np.zeros(256))
 bufs = [c,a,b]
 
 module = ir.Module(name=__file__)
 func = ir.Function(module, ir.FunctionType(ir.IntType(64), [ir.FloatType().as_pointer()]*3), name='exec')
 
+# load all 
 entry = ir.IRBuilder(func.append_basic_block(name="entry"))
+zm, xm, ym = [entry.ptrtoint(func.args[i], ir.IntType(64)) for i in range(3)]
+
+loop_1 = ir.IRBuilder(func.append_basic_block(name="loop_y"))
+loop_1_exit = ir.IRBuilder(func.append_basic_block(name="loop_y_exit"))
+exit = ir.IRBuilder(func.append_basic_block(name="exit"))
+
+y = loop_1.phi(ir.IntType(64), name="y")
+y.add_incoming(int_const(0), entry._block)
+yp = loop_1_exit.add(y, int_const(32))
+#yp = loop_1_exit.add(y, int_const(64))
+y.add_incoming(yp, loop_1_exit._block)
+
+xptr = y
+AMX.ldx(loop_1_exit, loop_1_exit.add(int_const(1<<62), loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))))
+#xptr = loop_1_exit.add(xptr, int_const(32))
+#AMX.ldy(loop_1_exit, loop_1_exit.add(int_const(1<<62), loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))))
+
+AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 28))
+AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 28 | 1 << 20 | (16*4)<<10))
+
+AMX.set(entry)
+
+AMX.stz(exit, exit.add(zm, int_const(1 << 62 | (0 << 56) | 0)))
+AMX.clr(exit)
+
+entry.branch(loop_1._block)
+loop_1.branch(loop_1_exit._block)
+loop_1_exit.cbranch(loop_1_exit.icmp_unsigned("==", yp, int_const(N*N)), exit._block, loop_1._block)
+exit.ret(int_const(0))
+
+cfunc = LLVM().exec(module, bufs, N**2)
+
+"""
 loop_1 = ir.IRBuilder(func.append_basic_block(name="loop_y"))
 loop_2 = ir.IRBuilder(func.append_basic_block(name="loop_x"))
 loop_3 = ir.IRBuilder(func.append_basic_block(name="loop_k"))
@@ -36,12 +79,11 @@ loop_3_exit = ir.IRBuilder(func.append_basic_block(name="loop_k_exit"))
 loop_2_exit = ir.IRBuilder(func.append_basic_block(name="loop_x_exit"))
 loop_1_exit = ir.IRBuilder(func.append_basic_block(name="loop_y_exit"))
 
-zm, xm, ym = [entry.ptrtoint(func.args[i], ir.IntType(64)) for i in range(3)]
-exit = ir.IRBuilder(func.append_basic_block(name="exit"))
-
 y = loop_1.phi(ir.IntType(64), name="y")
 x = loop_2.phi(ir.IntType(64), name="x")
 k = loop_3.phi(ir.IntType(64), name="k")
+
+exit = ir.IRBuilder(func.append_basic_block(name="exit"))
 
 AMX.set(loop_2)
 
@@ -93,32 +135,9 @@ loop_2_exit.cbranch(loop_2_exit.icmp_unsigned("==", xp, int_const(N)), loop_1_ex
 loop_1_exit.cbranch(loop_1_exit.icmp_unsigned("==", yp, int_const(N)), exit._block, loop_1._block)
 exit.ret(int_const(0))
 
-print(str(module))
-#exit(0)
-
-# do matmul
-#AMX.ldx(builder, builder.add(yp, int_const(i*16*4)))
-#AMX.ldy(builder, builder.add(xp, int_const(i*16*4)))
-
-"""
-# do matmul
-for i in range(N):
-  # load (reversed for no transpose!)
-  AMX.ldy(builder, builder.add(xp, int_const(i*16*4)))
-  AMX.ldx(builder, builder.add(yp, int_const(i*16*4)))
-
-  # mul
-  AMX.fma32(builder, int_const(0))
-
-# store
-for i in range(N):
-  AMX.stz(builder, builder.add(zp, int_const((i*4 << 56) | i*16*4)))
-"""
-
-# turn amx off
-#AMX.clr(builder)
-
 cfunc = LLVM().exec(module, bufs, N**3 * 2)
+"""
+
 
 times = []
 for i in range(50):
@@ -130,7 +149,10 @@ for i in range(50):
 print(f"{min(times)*1000:.2f} ms min time, {np.median(times)*1000:.2f} ms median time")
 
 print(c.toCPU().astype(np.int64))
-print(cn.astype(np.int64))
+print(sn.astype(np.int64))
 
+"""
+print(cn.astype(np.int64))
 np.testing.assert_allclose(c.toCPU(), cn, atol=1e-4, rtol=1e-5)
+"""
 
