@@ -48,7 +48,7 @@ def helper_test_speed(f1, *args):
 def helper_test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
   torch_a = torch.rand(N, N) - 0.5
-  torch_b = torch.rand(N, N) - 0.
+  torch_b = torch.rand(N, N) - 0.5
   if DEBUG_GEMM:
     torch_a = torch.arange(N*N).reshape(N, N) - 32*48
     torch_b = torch.arange(N*N).reshape(N, N)
@@ -123,8 +123,9 @@ class TestSpeed(unittest.TestCase):
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled', N, f1, f2)
   
+  @unittest.skip
   def test_gemm_packed(self):
-    for PREPARE in [True, False]:
+    for PREPARE in [False, True]:
       N = 1024 if not DEBUG_GEMM else 64
       def f1(a, b):
         if not PREPARE:

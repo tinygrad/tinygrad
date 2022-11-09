@@ -314,17 +314,18 @@ class LLVMBuffer(ExplicitExecAST):
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
     USE_AMX = len(shapes[0]) in [3,5] and len(reduceops) > 0
+    USE_AMX = False
 
-    # TODO: change this independently?
-    AMX_SZ_Y = 2
-    AMX_SZ_X = 2
     USE_4X4 = False
-    #DY, DX = 16, 4
-    #DY, DX = 16, 16
-    DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
 
     if len(shapes[0]) >= 3 and len(reduceops) > 0:
       USE_4X4 = True
+      if USE_AMX:
+        AMX_SZ_Y = 2
+        AMX_SZ_X = 2
+        DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
+      else:
+        DY, DX = 4, 4
 
     # TODO: change the order of the output_shape, and perhaps reshape everything
     # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
