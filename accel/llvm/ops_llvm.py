@@ -74,7 +74,7 @@ class AMX():
   @staticmethod
   def nop_op_imm5(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5}); amx op {op} imm {imm5}", "", tuple(), True)
   @staticmethod
-  def op_gpr(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6)); amx op {op}", "r", (gpr,), True)
+  def op_gpr(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6)); amx op {op} reg $0", "r", (gpr,), True)
   set, clr = partial(nop_op_imm5, 17, 0), partial(nop_op_imm5, 17, 1)
   ldx, ldy, stx, sty = partial(op_gpr, 0), partial(op_gpr, 1), partial(op_gpr, 2), partial(op_gpr, 3)
   ldz, stz, ldzi, stzi = partial(op_gpr, 4), partial(op_gpr, 5), partial(op_gpr, 6), partial(op_gpr, 7)
@@ -314,10 +314,10 @@ class LLVMBuffer(ExplicitExecAST):
     shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
 
     USE_AMX = len(shapes[0]) in [3,5] and len(reduceops) > 0
-    USE_AMX = False
+    if os.getenv("AMX", 0) == 0:
+      USE_AMX = False
 
     USE_4X4 = False
-
     if len(shapes[0]) >= 3 and len(reduceops) > 0:
       USE_4X4 = True
       if USE_AMX:
@@ -421,6 +421,7 @@ class LLVMBuffer(ExplicitExecAST):
       return idxs
 
     # the ast parser
+    prefetch_function = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType()), ir.IntType(32), ir.IntType(32), ir.IntType(32)]), name="llvm.prefetch")
     def ast_parse(builder, x, level, reduce_result=None):
       if not isinstance(x, LazyOp):
         buf_index = bufs.index(x)
@@ -433,7 +434,12 @@ class LLVMBuffer(ExplicitExecAST):
             double = int(AMX_SZ_Y % 2 == 0)
             for i in range(0, AMX_SZ_Y, double+1):
               idx_n = builder.add(idx, int_const(i*16))
-              AMX.ldy(builder, builder.add(fptr, builder.add(int_const(double << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+              addr = builder.mul(idx_n, int_const(4))
+              addr = builder.add(fptr, addr)
+              AMX.ldy(builder, builder.add(int_const(double << 62 | i << 56), addr))
+
+              #prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(1024*4)), ir.PointerType(ir.FloatType()))
+              #builder.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
             return "AMX_Y"
           elif buf_index == 2:
             assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1, f"bad strides for {buf_index}: {strides[buf_index]}"
@@ -441,7 +447,12 @@ class LLVMBuffer(ExplicitExecAST):
             double = int(AMX_SZ_X % 2 == 0)
             for i in range(0, AMX_SZ_X, double+1):
               idx_n = builder.add(idx, int_const(i*16))
-              AMX.ldx(builder, builder.add(fptr, builder.add(int_const(double << 62 | i << 56), builder.mul(idx_n, int_const(4)))))
+              addr = builder.mul(idx_n, int_const(4))
+              addr = builder.add(fptr, addr)
+              AMX.ldx(builder, builder.add(int_const(double << 62 | i << 56), addr))
+
+              #prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(1024*4)), ir.PointerType(ir.FloatType()))
+              #builder.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
             return "AMX_X"
           else:
             assert "AMX only supports two buffers"
