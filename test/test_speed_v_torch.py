@@ -124,18 +124,24 @@ class TestSpeed(unittest.TestCase):
     helper_test_generic_square('gemm_unrolled', N, f1, f2)
   
   def test_gemm_packed(self):
-    N = 1024 if not DEBUG_GEMM else 64
-    def f1(a, b):
-      a = a.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
-      b = b.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
-      return a@b.T
-    def f2(a, b):
-      # N, N//32, 32
-      a = a.reshape(N//32, N, 32).permute(0,2,1)
-      b = b.reshape(N//32, N, 32).permute(0,2,1)
-      return (a.reshape(N//32, 32, 1, 1, N).expand(N//32, 32, N//32, 32, N) *
-              b.reshape(1, 1, N//32, 32, N).expand(N//32, 32, N//32, 32, N)).sum(axis=4).reshape(N, N)
-    helper_test_generic_square('gemm_packed', N, f1, f2)
+    for PREPARE in [True, False]:
+      N = 1024 if not DEBUG_GEMM else 64
+      def f1(a, b):
+        if not PREPARE:
+          a = a.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
+          b = b.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
+        return a@b.T
+      def f2(a, b):
+        if PREPARE:
+          a = a.reshape(N//32, 32, N).permute(0,2,1).contiguous().realize()
+          b = b.reshape(N//32, 32, N).permute(0,2,1).contiguous().realize()
+
+        # N, N//32, 32
+        a = a.reshape(N//32, N, 32).permute(0,2,1)
+        b = b.reshape(N//32, N, 32).permute(0,2,1)
+        return (a.reshape(N//32, 32, 1, 1, N).expand(N//32, 32, N//32, 32, N) *
+                b.reshape(1, 1, N//32, 32, N).expand(N//32, 32, N//32, 32, N)).sum(axis=4).reshape(N, N)
+      helper_test_generic_square('gemm_packed' + ('_prepare' if PREPARE else ''), N, f1, f2)
 
   def test_gemm_unrolled_permute_l(self):
     N = 512
