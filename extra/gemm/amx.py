@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 import numpy as np
-#np.set_printoptions(linewidth=160)
-np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
+np.set_printoptions(linewidth=160)
+#np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
 from tinygrad.llops.ops_llvm import LLVM, LLVMBuffer, int_const, AMX
 from llvmlite import ir  # type: ignore
 
-N = 64
-an = np.arange(N*N).reshape(N, N)
+N = 1024
+an = np.arange(N*N).reshape(N, N) - 43*64
 bn = np.arange(N*N).reshape(N, N)
 #an = np.ones((N, N)).astype(np.float32)
 #bn = np.ones((N, N)).astype(np.float32)
-an = an.astype(np.float32) - 43*64
+
+an = np.random.randn(N, N) - 0.5
+bn = np.random.randn(N, N) - 0.5
+an = an.astype(np.float32)
 bn = bn.astype(np.float32)
+
+
 cn = (an.T @ bn).T
 
 a = LLVMBuffer.fromCPU(an)
@@ -117,4 +122,6 @@ cfunc = LLVM().exec(module, bufs, N**3 * 2)
 
 print(c.toCPU().astype(np.int64))
 print(cn.astype(np.int64))
+
+np.testing.assert_allclose(c.toCPU(), cn, atol=1e-4, rtol=1e-5)
 
