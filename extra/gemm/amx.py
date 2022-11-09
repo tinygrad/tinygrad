@@ -8,6 +8,7 @@ from tinygrad.llops.ops_llvm import LLVM, LLVMBuffer, int_const, AMX
 from llvmlite import ir  # type: ignore
 
 N = 4096
+#N = 1024
 #N = 64
 
 #an = np.arange(N*N).reshape(N, N) - 43*64
@@ -16,10 +17,10 @@ N = 4096
 #bn = np.ones((N, N)).astype(np.float32)
 
 # matrix is 64M, max load bandwidth is 57 GB/s
-# cache line looks like 256 bytes
+# cache line looks like 256 bytes (64 floats)
 
-an = np.random.randn(N, N) - 0.5
-bn = np.random.randn(N, N) - 0.5
+an = np.random.randn(N, N)
+bn = np.random.randn(N, N)
 an = an.astype(np.float32)
 bn = bn.astype(np.float32)
 
@@ -47,17 +48,25 @@ exit = ir.IRBuilder(func.append_basic_block(name="exit"))
 
 y = loop_1.phi(ir.IntType(64), name="y")
 y.add_incoming(int_const(0), entry._block)
-yp = loop_1_exit.add(y, int_const(32))
-#yp = loop_1_exit.add(y, int_const(64))
+yp = loop_1_exit.add(y, int_const(32*2))
 y.add_incoming(yp, loop_1_exit._block)
 
+prefetch_function = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType()), ir.IntType(32), ir.IntType(32), ir.IntType(32)]), name="llvm.prefetch")
+
 xptr = y
-AMX.ldx(loop_1_exit, loop_1_exit.add(int_const(1<<62), loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))))
-#xptr = loop_1_exit.add(xptr, int_const(32))
-#AMX.ldy(loop_1_exit, loop_1_exit.add(int_const(1<<62), loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))))
+addr = loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))
+
+#prefetch_ptr = loop_1_exit.inttoptr(loop_1_exit.add(addr, int_const(128)), ir.PointerType(ir.FloatType()))
+#loop_1_exit.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
+
+AMX.ldx(loop_1_exit, loop_1_exit.add(int_const(1<<62), addr))
+xptr = loop_1_exit.add(xptr, int_const(32))
+AMX.ldy(loop_1_exit, loop_1_exit.add(int_const(1<<62), loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))))
 
 AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 28))
 AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 28 | 1 << 20 | (16*4)<<10))
+AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 29))
+AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 29 | 1 << 20 | (16*4)))
 
 AMX.set(entry)
 
@@ -147,9 +156,12 @@ for i in range(50):
   times.append(et)
 
 print(f"{min(times)*1000:.2f} ms min time, {np.median(times)*1000:.2f} ms median time")
+print("%.2f GB/s" % ((N*N*4*1e-9)/min(times)))
 
-print(c.toCPU().astype(np.int64))
+print(c.toCPU().astype(np.int64)[:sn.shape[0]])
 print(sn.astype(np.int64))
+
+np.testing.assert_allclose(c.toCPU()[:sn.shape[0]], sn, atol=1e-4, rtol=1e-4)
 
 """
 print(cn.astype(np.int64))

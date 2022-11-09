@@ -171,7 +171,7 @@ class LLVM:
     if int(os.getenv("LLVMCACHE", "0")):
       LLVM.engine.set_object_cache(notify_func, getbuffer_func)
 
-  def exec(self, module, bufs, op_estimate=0):
+  def exec(self, module, bufs, op_estimate=0, mem_estimate=0):
     module.triple = llvm.get_process_triple()
     module.data_layout = self.engine.target_data
     llvm_ir = str(module)
@@ -199,7 +199,7 @@ class LLVM:
     cfunc(*[x._buf for x in bufs])
     et = time.monotonic() - st
     if DEBUG >= 1:
-      print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS")
+      print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
 
     # we are done
     LLVM.engine.remove_module(mod)
@@ -319,7 +319,7 @@ class LLVMBuffer(ExplicitExecAST):
       print("old:",strides)
 
     USE_AMX = len(shapes[0]) in [3,5] and len(reduceops) > 0
-    if os.getenv("AMX", 0) == 0:
+    if int(os.getenv("AMX", '0')) == 0:
       USE_AMX = False
 
     USE_4X4 = False
@@ -330,7 +330,8 @@ class LLVMBuffer(ExplicitExecAST):
         AMX_SZ_X = 2
         DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
       else:
-        DY, DX = 4, 4
+        #DY, DX = 4, 4
+        DY, DX = 16, 4
 
     # TODO: change the order of the output_shape, and perhaps reshape everything
     # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
@@ -577,6 +578,5 @@ class LLVMBuffer(ExplicitExecAST):
     if USE_AMX and not set_clr:
       AMX.clr(loop_exit[0])
     loop_exit[0].ret_void()
-
-    LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs, info.flops)
+    LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs, info.flops, sum(len(x._buf) for x in bufs))
     return ret
