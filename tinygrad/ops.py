@@ -2,7 +2,7 @@ import os
 from enum import Enum
 from typing import Union, Type, NamedTuple, Tuple, Any, List
 import functools, operator
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, dedup, all_same
 from tinygrad.shapetracker import ShapeTracker
 
 DEBUG = int(os.getenv("DEBUG", "0"))
@@ -82,3 +82,64 @@ class ExplicitExecAST(DeviceBuffer):
   # universal for shape tracked
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
   def contiguous_op(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
+
+class ASTKernel:
+  def __init__(self, ast:LazyOp):
+    self.info = get_lazyop_info(ast)
+    self.bufs = dedup(get_buffers(ast))
+    self.reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
+    self.earlybufs = dedup(get_buffers(self.reduceops[0])) if len(self.reduceops) > 0 else []
+
+    # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
+    self.ret = type(self.bufs[0])(self.info.shape)
+    self.bufs = [self.ret] + self.bufs
+
+    # check valid AST kernel
+    assert len(self.reduceops) <= 1, "max one reduce op in an ast"
+    assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
+    assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
+    assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
+
+  def process(self):
+    # get shape, strides, and offset
+    # if it's a multiview buffer we take the final view
+    shapes = [x.shape for x in self.bufs]
+    strides = [x.st.views[-1].strides for x in self.bufs]
+
+    # remove places where the shape is all ones
+    # TODO: this should be factored in to multi shape stride
+    all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
+    # keep at least 1 one
+    if all(all_ones):
+      all_ones[-1] = False
+    shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in shapes]
+    strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
+
+    # find first mismatch, don't reduce this
+    first_reduce = -1
+    for i in range(len(shapes[0])):
+      if not all_same([x[i] for x in shapes]):
+        first_reduce = i
+        break
+
+    # merge dimensions if we can, multi get_shape_strides
+    # TODO: does this always preserve the reduce dimension, NO
+    # TODO: move this into shapetracker, with tests!
+    rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
+    for i in range(1, len(shapes[0])):
+      can_merge = []
+      for j in range(len(shapes)):
+        # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
+        can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
+      # more can merge than this
+      can_merge = all(can_merge) and i != first_reduce
+      for j in range(len(shapes)):
+        if can_merge:
+          rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
+        else:
+          rets[j].append((shapes[j][i], strides[j][i]))
+    self.shapes, self.strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
+
+    # include the offsets (as is)
+    self.offsets = [x.st.views[-1].offset for x in self.bufs]
+

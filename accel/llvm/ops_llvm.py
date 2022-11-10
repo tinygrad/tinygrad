@@ -6,7 +6,7 @@ import time
 from typing import Tuple, Union
 from tinygrad.helpers import prod, all_same, dedup
 from tinygrad.shapetracker import ShapeTracker, ZeroView, strides_for_shape
-from tinygrad.ops import LazyOp
+from tinygrad.ops import LazyOp, ASTKernel
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
@@ -252,75 +252,28 @@ class LLVMBuffer(ExplicitExecAST):
   func_cache = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
-    bufs = dedup(get_buffers(ast))
-    info = get_lazyop_info(ast)
-    ret = cls(info.shape)
+    k = ASTKernel(ast)
 
+    # cached kernel
     key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
     if key in LLVMBuffer.func_cache:
-      LLVMBuffer.func_cache[key](ret._buf, *[x._buf for x in bufs])
-      return ret
+      LLVMBuffer.func_cache[key](*[x._buf for x in k.bufs])
+      return k.ret
 
-    # get the real buffers from the ast
-    reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
-    assert len(reduceops) <= 1, "max one reduce op in an ast"
-    earlybufs = dedup(get_buffers(reduceops[0])) if len(reduceops) > 0 else []
-
-    # check buffer sizes
-    assert all_same([x.shape for x in earlybufs]), "all earlybufs must have the same shape"
-    assert all_same([x.shape for x in bufs if x not in earlybufs]), "all latebufs must have the same shape"
-    assert all_same([len(x.shape) for x in bufs]), "all bufs must have the same shape size"
-
-    # include ret in the bufs
-    bufs = [ret] + bufs
-    shapes = [x.shape for x in bufs]
-    strides = [x.st.views[-1].strides for x in bufs]
-    offsets = [x.st.views[-1].offset for x in bufs]
-
-    # remove places where the shape is all ones, this is cheap, easy, and correct
-    all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
-    # keep at least 1 one
-    if all(all_ones):
-      all_ones[-1] = False
-    shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in shapes]
-    strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
-
-    # find first mismatch, don't reduce this
-    first_reduce = -1
-    for i in range(len(shapes[0])):
-      if not all_same([x[i] for x in shapes]):
-        first_reduce = i
-        break
-    
-    # merge dimensions if we can, multi get_shape_strides
-    # TODO: does this always preserve the reduce dimension, NO
-    # TODO: move this into shapetracker, with tests!
-    rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
-    for i in range(1, len(shapes[0])):
-      can_merge = []
-      for j in range(len(shapes)):
-        # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
-        can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
-      # more can merge than this
-      can_merge = all(can_merge) and i != first_reduce
-      for j in range(len(shapes)):
-        if can_merge:
-          rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
-        else:
-          rets[j].append((shapes[j][i], strides[j][i]))
-    shapes, strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
+    # cache miss, we have to process the kernel
+    k.process()
 
     if DEBUG >= 2:
       print(ast)
-      print("old:",shapes)
-      print("old:",strides)
+      print("old:", k.shapes)
+      print("old:", k.strides)
 
-    USE_AMX = len(shapes[0]) in [3,5] and len(reduceops) > 0
+    USE_AMX = len(k.shapes[0]) in [3,5] and len(k.reduceops) > 0
     if int(os.getenv("AMX", '0')) == 0:
       USE_AMX = False
 
     USE_4X4 = False
-    if len(shapes[0]) >= 3 and len(reduceops) > 0:
+    if len(k.shapes[0]) >= 3 and len(k.reduceops) > 0:
       USE_4X4 = True
       if USE_AMX:
         AMX_SZ_Y = 2
@@ -340,7 +293,7 @@ class LLVMBuffer(ExplicitExecAST):
     #CACHE_DIM = 128
     CACHE_L2_DIM = 128  # 128x128x4 = 64 kB
     CACHE_DIM = 32      # 16x16x4   = 1 kB
-    for shape, stride in zip(shapes, strides):
+    for shape, stride in zip(k.shapes, k.strides):
       st = ShapeTracker(tuple(shape))
       st.strided(*zip(shape, stride))
       if len(shape) == 2:
@@ -378,11 +331,11 @@ class LLVMBuffer(ExplicitExecAST):
       assert len(st.views) == 1
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
-    shapes, strides = new_shapes, new_strides
+    k.shapes, k.strides = new_shapes, new_strides
 
     # the 4x4 need to go all the way at the end, even after reduce
-    output_shape = shapes[0]
-    full_shape = [x for x in shapes if x != output_shape]
+    output_shape = k.shapes[0]
+    full_shape = [x for x in k.shapes if x != output_shape]
     full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
     
     # remove the magic 4x4 at 2:4, since we run this as 4x4
@@ -390,15 +343,15 @@ class LLVMBuffer(ExplicitExecAST):
       full_shape = full_shape[:-2]
 
     if DEBUG >= 2:
-      print("new:", shapes)
-      print("new:", strides)
+      print("new:", k.shapes)
+      print("new:", k.strides)
       print(full_shape, "->", output_shape)
     
     # *** llvm specific below this line ***
 
     # create llvm function
     module = ir.Module(name=__file__)
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(1+len(bufs))), name='exec')
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(len(k.bufs))), name='exec')
 
     # force llvmlite to allow us to add function attribute then add the attribute
     func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
@@ -415,13 +368,13 @@ class LLVMBuffer(ExplicitExecAST):
     loop_exit = loop_exit[::-1]
 
     # add the buffer indexing
-    idx_level = [[int_const(o)] for o in offsets]
+    idx_level = [[int_const(o)] for o in k.offsets]
     for i in range(len(full_shape)):
-      for j in range(len(bufs)):
+      for j in range(len(k.bufs)):
         # stride
         si = loop_entry[i+1].phi(ir.IntType(64), name=f"idx_{j}_{i}")
         si.add_incoming(idx_level[j][-1], loop_entry[i]._block)
-        si_ps = loop_exit[i+1].add(si, int_const(strides[j][i]))
+        si_ps = loop_exit[i+1].add(si, int_const(k.strides[j][i]))
         si.add_incoming(si_ps, loop_exit[i+1]._block)
         idx_level[j].append(si)
 
@@ -434,7 +387,7 @@ class LLVMBuffer(ExplicitExecAST):
       idxs = []
       for y in range(DY):
         for x in range(DX):
-          idxs.append(builder.add(idx, int_const(strides[buf_index][-2]*y + strides[buf_index][-1]*x)))
+          idxs.append(builder.add(idx, int_const(k.strides[buf_index][-2]*y + k.strides[buf_index][-1]*x)))
       return idxs
 
     # the ast parser
@@ -442,13 +395,13 @@ class LLVMBuffer(ExplicitExecAST):
 
     def ast_parse(builder, x, level, reduce_result=None):
       if not isinstance(x, LazyOp):
-        buf_index = bufs.index(x)
+        buf_index = k.bufs.index(x)
         idx = idx_level[buf_index][level]
         if USE_AMX:
           fptr = builder.ptrtoint(func.args[buf_index], ir.IntType(64))
           if buf_index == 1:
-            assert strides[buf_index][-2] == 1 and strides[buf_index][-1] == 0, f"bad strides for {buf_index}: {strides[buf_index]}"
-            assert shapes[buf_index][-2] == AMX_SZ_Y*16
+            assert k.strides[buf_index][-2] == 1 and k.strides[buf_index][-1] == 0, f"bad strides for {buf_index}: {k.strides[buf_index]}"
+            assert k.shapes[buf_index][-2] == AMX_SZ_Y*16
             double = int(AMX_SZ_Y % 2 == 0)
             for i in range(0, AMX_SZ_Y, double+1):
               idx_n = builder.add(idx, int_const(i*16))
@@ -457,8 +410,8 @@ class LLVMBuffer(ExplicitExecAST):
               AMX.ldy(builder, builder.add(int_const(double << 62 | i << 56), addr))
             return "AMX_Y"
           elif buf_index == 2:
-            assert strides[buf_index][-2] == 0 and strides[buf_index][-1] == 1, f"bad strides for {buf_index}: {strides[buf_index]}"
-            assert shapes[buf_index][-1] == AMX_SZ_X*16
+            assert k.strides[buf_index][-2] == 0 and k.strides[buf_index][-1] == 1, f"bad strides for {buf_index}: {k.strides[buf_index]}"
+            assert k.shapes[buf_index][-1] == AMX_SZ_X*16
             double = int(AMX_SZ_X % 2 == 0)
             for i in range(0, AMX_SZ_X, double+1):
               idx_n = builder.add(idx, int_const(i*16))
@@ -495,27 +448,27 @@ class LLVMBuffer(ExplicitExecAST):
 
     # do the early ast
     reduce_result = None
-    if len(reduceops) > 0:
-      if USE_AMX and reduceops[0].op == ReduceOps.SUM and isinstance(reduceops[0].src[0], LazyOp) and reduceops[0].src[0].op == BinaryOps.MUL:
-        reduce_input_1 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[1], -1)
-        reduce_input_0 = ast_parse(loop_exit[-1], reduceops[0].src[0].src[0], -1)
+    if len(k.reduceops) > 0:
+      if USE_AMX and k.reduceops[0].op == ReduceOps.SUM and isinstance(k.reduceops[0].src[0], LazyOp) and k.reduceops[0].src[0].op == BinaryOps.MUL:
+        reduce_input_1 = ast_parse(loop_exit[-1], k.reduceops[0].src[0].src[1], -1)
+        reduce_input_0 = ast_parse(loop_exit[-1], k.reduceops[0].src[0].src[0], -1)
         assert reduce_input_0 == "AMX_Y" and reduce_input_1 == "AMX_X"
         fma = True
       else:
-        reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
+        reduce_input = ast_parse(loop_exit[-1], k.reduceops[0].src[0], -1)
         fma = False
 
       if USE_4X4:
-        phis = [val_type([LLVMBuffer.start_for_op[reduceops[0].op]]*(DY*DX))]
+        phis = [val_type([LLVMBuffer.start_for_op[k.reduceops[0].op]]*(DY*DX))]
       else:
-        phis = [LLVMBuffer.start_for_op[reduceops[0].op]]
+        phis = [LLVMBuffer.start_for_op[k.reduceops[0].op]]
       if not USE_AMX:
         for i in range(store_loop+1, len(loop_entry)):
           val = loop_entry[i].phi(val_type, f"reduce_phi_{i}")
           val.add_incoming(phis[-1], loop_entry[i-1]._block)
           phis.append(val)
 
-      if reduceops[0].op == ReduceOps.SUM:
+      if k.reduceops[0].op == ReduceOps.SUM:
         if fma:
           # fused multiply add with the AMX
           for j in range(AMX_SZ_Y):
@@ -527,7 +480,7 @@ class LLVMBuffer(ExplicitExecAST):
           reduce_result = "AMX_Z"
         else:
           reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
-      elif reduceops[0].op == ReduceOps.MAX:
+      elif k.reduceops[0].op == ReduceOps.MAX:
         reduce_result = loop_exit[i].select(loop_exit[-1].fcmp_unordered(">", val, reduce_input, flags=('fast',)), val, reduce_input, flags=('fast',))
 
       for i,phi in enumerate(phis[1:]):
@@ -543,7 +496,7 @@ class LLVMBuffer(ExplicitExecAST):
       if USE_AMX:
         zptr = builder.ptrtoint(func.args[0], ir.IntType(64))
         zptr = builder.add(zptr, builder.mul(idx_level[0][store_loop], int_const(4)))
-        assert strides[0][-1] == 1
+        assert k.strides[0][-1] == 1
         # using all 64 Z registers (4 kB)
         for j in range(AMX_SZ_Y):
           for k in range(16):
@@ -551,7 +504,7 @@ class LLVMBuffer(ExplicitExecAST):
             double = int(AMX_SZ_X % 2 == 0)
             for i in range(0,AMX_SZ_X,double+1):
               z_row = j*AMX_SZ_X + i
-              ptr = ((j*16)+k)*strides[0][-2] + i*16
+              ptr = ((j*16)+k)*k.strides[0][-2] + i*16
               AMX.stz(builder, builder.add(zptr, int_const(double << 62 | ((k*4+z_row) << 56) | ptr*4)))
       else:
         for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
@@ -580,5 +533,5 @@ class LLVMBuffer(ExplicitExecAST):
     if USE_AMX and not set_clr:
       AMX.clr(loop_exit[0])
     loop_exit[0].ret_void()
-    LLVMBuffer.func_cache[key] = LLVM().exec(module, bufs, info.flops, sum(len(x._buf) for x in bufs))
-    return ret
+    LLVMBuffer.func_cache[key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
+    return k.ret
