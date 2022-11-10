@@ -335,7 +335,8 @@ class LLVMBuffer(ExplicitExecAST):
         DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
       else:
         #DY, DX = 4, 4
-        DY, DX = 16, 4
+        #DY, DX = 16, 4
+        DY, DX = 4, 16
 
     # TODO: change the order of the output_shape, and perhaps reshape everything
     # focus on the AMX instructions, that's the way to beat PyTorch on M1, since PyTorch can't use the convs
