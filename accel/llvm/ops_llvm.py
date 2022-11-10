@@ -344,13 +344,19 @@ class LLVMBuffer(ExplicitExecAST):
     new_shapes, new_strides = [], []
     # there's 32 SIMD FP registers
     # track a 4x4 chunk of the matrix at once
-    CACHE_DIM = 128
+    #CACHE_L2_DIM = 1024
+    #CACHE_DIM = 128
+    CACHE_L2_DIM = 128  # 128x128x4 = 64 kB
+    CACHE_DIM = 32      # 16x16x4   = 1 kB
     for shape, stride in zip(shapes, strides):
       st = ShapeTracker(tuple(shape))
       st.strided(*zip(shape, stride))
       if len(shape) == 2:
-        st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
-        st.permute(0,2,1,3)
+        # TODO: something is broken if we do this on 1024x1024 with 1024-128
+        st.reshape(shape[0]//CACHE_L2_DIM, CACHE_L2_DIM//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_L2_DIM, CACHE_L2_DIM//CACHE_DIM, CACHE_DIM)
+        st.permute(0,3,1,4,2,5)
+        #st.reshape(shape[0]//CACHE_DIM, min(shape[0], CACHE_DIM), shape[1]//CACHE_DIM, min(shape[1], CACHE_DIM))
+        #st.permute(0,2,1,3)
       elif len(shape) == 5:
         st.permute(0,2,4,1,3)
       elif len(shape) == 7:
@@ -430,7 +436,7 @@ class LLVMBuffer(ExplicitExecAST):
       return idxs
 
     # the ast parser
-    prefetch_function = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType()), ir.IntType(32), ir.IntType(32), ir.IntType(32)]), name="llvm.prefetch")
+    #prefetch_function = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType()), ir.IntType(32), ir.IntType(32), ir.IntType(32)]), name="llvm.prefetch")
     def ast_parse(builder, x, level, reduce_result=None):
       if not isinstance(x, LazyOp):
         buf_index = bufs.index(x)
