@@ -1,5 +1,5 @@
 from tinygrad.helpers import prod, argsort, reduce_shape, get_conv_args
-from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
 class Contiguous(Function):

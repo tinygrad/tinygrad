@@ -235,9 +235,9 @@ class LazyBuffer:
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False):
       # universal conv, just mul and reduce
-      # TODO: is there any way to replace strided with other movement ops?
+      # TODO: is there any way to replace strided with other movement ops? answer: not really
       if C.sy == 1 and C.sx == 1 and C.H == 1 and C.W == 1:
-        # TODO: this doesn't belong here, but it fixes the GEMM folder
+        # TODO: this doesn't belong here, ShapeTracker or lazy should be able to infer this from STRIDED
         x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.oy, C.ox, 1, C.H, C.W))
         x = x.movement_op(MovementOps.PERMUTE, (0,1,5,3,4,2,6,7))
       else:
