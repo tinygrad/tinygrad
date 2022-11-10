@@ -235,11 +235,16 @@ class LazyBuffer:
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False):
       # universal conv, just mul and reduce
-      # TODO: is there any way to replace strided with other movement ops?
-      x = x.movement_op(MovementOps.STRIDED, (
-        (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
-        (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
-        (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
+      # TODO: is there any way to replace strided with other movement ops? answer: not really
+      if C.sy == 1 and C.sx == 1 and C.H == 1 and C.W == 1:
+        # TODO: this doesn't belong here, ShapeTracker or lazy should be able to infer this from STRIDED
+        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.oy, C.ox, 1, C.H, C.W))
+        x = x.movement_op(MovementOps.PERMUTE, (0,1,5,3,4,2,6,7))
+      else:
+        x = x.movement_op(MovementOps.STRIDED, (
+          (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
+          (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
+          (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
       #if C.H <= 3 and C.W <= 3:  # max 9x the RAM overhead, this is im2col
       #  x = x.contiguous_op()
       x = x.movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
