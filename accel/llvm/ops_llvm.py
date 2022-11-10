@@ -181,6 +181,9 @@ class LLVM:
     mod = llvm.parse_assembly(llvm_ir)
     mod.verify()
     LLVM.optimizer.run(mod)
+    if DEBUG >= 4:
+      print("Optimized IR:")
+      print(str(mod))
     mod.name = hashlib.sha1(llvm_ir.encode('utf-8')).hexdigest()
     if DEBUG >= 3:
       print(LLVM.target_machine.emit_assembly(mod))
