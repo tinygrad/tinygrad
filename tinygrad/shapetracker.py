@@ -113,29 +113,25 @@ class ShapeTracker:
       return self
     
     # check if the new dimensions factorize from the old ones
-    # TODO: is this right? can we write this better?
-    ptr = 0 
-    min_shape_strides = to_shape_strides(self.shape, self.strides)
-    curr_dim = min_shape_strides[ptr][0]
+    # NOTE: if you don't make a copy here, the list is popped in the lrucache
+    min_shape_strides = to_shape_strides(self.shape, self.strides)[:]
+    curr_dim, curr_stride = min_shape_strides.pop(0)
     new_strides = []
     for s in new_shape:
       if curr_dim%s == 0:
         curr_dim //= s
-        new_strides.append(min_shape_strides[ptr][1] * curr_dim)
+        new_strides.append(curr_stride * curr_dim)
         if curr_dim == 1:
-          ptr += 1
-          if ptr == len(min_shape_strides):
-            # there might still be 1s
+          if len(min_shape_strides) == 0:
+            # there might still be 1s in the shape
             while len(new_strides) != len(new_shape):
               assert new_shape[len(new_strides)] == 1
               new_strides.append(1)
-            break
-          curr_dim = min_shape_strides[ptr][0]
+            self.views[-1] = View(new_shape, new_strides, self.offset)
+            return self   # early return, it factorized!
+          curr_dim, curr_stride = min_shape_strides.pop(0)
       else:
-        break
-    if len(new_shape) == len(new_strides):
-      self.views[-1] = View(new_shape, new_strides, self.offset)
-      return self
+        break   # didn't factorize
 
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous:

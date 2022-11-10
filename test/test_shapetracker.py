@@ -73,18 +73,25 @@ class TestComplexShapeTracker(unittest.TestCase):
     # TODO: should also be tested by test_super_complex
     assert len(self.st.views) == 1
 
-  def test_super_complex(self):
+  def test_factorize_split(self):
     self.st = ShapeTracker((4, 4))
     self.st.permute(1,0)
     self.st.reshape(2, 2, 2, 2)
     self.st.permute(2,3,0,1)
     assert self.st.contiguous
 
-  def test_super_complex_2(self):
+  def test_factorize_combine(self):
     self.st = ShapeTracker((4, 4, 4))
     self.st.permute(2, 0, 1)
     self.st.reshape(4, 16)
     self.st.permute(1, 0)
+    assert self.st.contiguous
+
+  def test_factorize_combine_add_ones(self):
+    self.st = ShapeTracker((4, 4, 4))
+    self.st.permute(2, 0, 1)
+    self.st.reshape(4, 16, 1, 1)
+    self.st.permute(1, 0, 2, 3)
     assert self.st.contiguous
 
   def test_super_complex_2_fail(self):
