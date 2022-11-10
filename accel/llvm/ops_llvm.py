@@ -72,9 +72,11 @@ def idx_deref(builder, buf, ptr, idx):
 from functools import partial
 class AMX():
   @staticmethod
-  def nop_op_imm5(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5}); amx op {op} imm {imm5}", "", tuple(), True)
+  def nop_op_imm5_static(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5}); amx op {op} imm {imm5}", "", tuple(), True)
   @staticmethod
-  def op_gpr(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6)); amx op {op} reg $0", "r", (gpr,), True)
+  def op_gpr_static(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6)); amx op {op} reg $0", "r", (gpr,), True)
+  op_gpr = op_gpr_static.__func__
+  nop_op_imm5 = nop_op_imm5_static.__func__
   set, clr = partial(nop_op_imm5, 17, 0), partial(nop_op_imm5, 17, 1)
   ldx, ldy, stx, sty = partial(op_gpr, 0), partial(op_gpr, 1), partial(op_gpr, 2), partial(op_gpr, 3)
   ldz, stz, ldzi, stzi = partial(op_gpr, 4), partial(op_gpr, 5), partial(op_gpr, 6), partial(op_gpr, 7)
