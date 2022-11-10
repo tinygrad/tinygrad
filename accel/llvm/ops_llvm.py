@@ -122,7 +122,6 @@ class LLVM:
   # ldx r3:  0x0000000130248640, 0x0100000130248680, 0x0000000130249640, 0x0100000130249680
   # ldy r11: 0x4000000138491880, 0x4000000138491900
 
-
   # From HN: "On M1, for single-precision, one AMX P-unit is ~1.64 TFLOPs, one P-core is ~102 GFLOPS." which matches this
 
   def __init__(self):
@@ -269,14 +268,6 @@ class LLVMBuffer(ExplicitExecAST):
     assert all_same([x.shape for x in bufs if x not in earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in bufs]), "all bufs must have the same shape size"
 
-    # create llvm function
-    module = ir.Module(name=__file__)
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(1+len(bufs))), name='exec')
-    
-    #Force llvmlite to allow us to add function attribute then add the attribute
-    func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
-    func.attributes.add('"no-nans-fp-math"="true"')
-    
     # include ret in the bufs
     bufs = [ret] + bufs
     shapes = [x.shape for x in bufs]
@@ -297,9 +288,8 @@ class LLVMBuffer(ExplicitExecAST):
       if not all_same([x[i] for x in shapes]):
         first_reduce = i
         break
-    #print("first reduce", first_reduce)
     
-    # merge dimensions if we can
+    # merge dimensions if we can, multi get_shape_strides
     # TODO: does this always preserve the reduce dimension, NO
     # TODO: move this into shapetracker, with tests!
     rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
@@ -334,8 +324,6 @@ class LLVMBuffer(ExplicitExecAST):
         AMX_SZ_X = 2
         DY, DX = 16*AMX_SZ_Y, 16*AMX_SZ_X
       else:
-        #DY, DX = 4, 4
-        #DY, DX = 16, 4
         DY, DX = 4, 16
 
     # TODO: change the order of the output_shape, and perhaps reshape everything
@@ -403,6 +391,16 @@ class LLVMBuffer(ExplicitExecAST):
       print("new:", strides)
       print(full_shape, "->", output_shape)
     
+    # *** llvm specific below this line ***
+
+    # create llvm function
+    module = ir.Module(name=__file__)
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(1+len(bufs))), name='exec')
+
+    # force llvmlite to allow us to add function attribute then add the attribute
+    func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
+    func.attributes.add('"no-nans-fp-math"="true"')
+
     # construct the structure of the loops
     loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
     loop_exit = []
@@ -438,6 +436,7 @@ class LLVMBuffer(ExplicitExecAST):
 
     # the ast parser
     #prefetch_function = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType()), ir.IntType(32), ir.IntType(32), ir.IntType(32)]), name="llvm.prefetch")
+
     def ast_parse(builder, x, level, reduce_result=None):
       if not isinstance(x, LazyOp):
         buf_index = bufs.index(x)
@@ -452,10 +451,6 @@ class LLVMBuffer(ExplicitExecAST):
               idx_n = builder.add(idx, int_const(i*16))
               addr = builder.mul(idx_n, int_const(4))
               addr = builder.add(fptr, addr)
-
-              prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(0)), ir.PointerType(ir.FloatType()))
-              #builder.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
-
               AMX.ldy(builder, builder.add(int_const(double << 62 | i << 56), addr))
             return "AMX_Y"
           elif buf_index == 2:
@@ -466,12 +461,7 @@ class LLVMBuffer(ExplicitExecAST):
               idx_n = builder.add(idx, int_const(i*16))
               addr = builder.mul(idx_n, int_const(4))
               addr = builder.add(fptr, addr)
-
-              prefetch_ptr = builder.inttoptr(builder.add(addr, int_const(0)), ir.PointerType(ir.FloatType()))
-              #builder.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
-
               AMX.ldx(builder, builder.add(int_const(double << 62 | i << 56), addr))
-
             return "AMX_X"
           else:
             assert "AMX only supports two buffers"
@@ -512,7 +502,6 @@ class LLVMBuffer(ExplicitExecAST):
         reduce_input = ast_parse(loop_exit[-1], reduceops[0].src[0], -1)
         fma = False
 
-
       if USE_4X4:
         phis = [val_type([LLVMBuffer.start_for_op[reduceops[0].op]]*(DY*DX))]
       else:
@@ -525,7 +514,7 @@ class LLVMBuffer(ExplicitExecAST):
 
       if reduceops[0].op == ReduceOps.SUM:
         if fma:
-          #reduce_result = loop_exit[-1].call(ir.Function(module, ir.FunctionType(val_type, [val_type, val_type, val_type]), name="llvm.fma"), [reduce_input_0, reduce_input_1, val], fastmath=('fast',))
+          # fused multiply add with the AMX
           for j in range(AMX_SZ_Y):
             for i in range(AMX_SZ_X):
               z_row = j*AMX_SZ_X + i
