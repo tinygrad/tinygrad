@@ -148,9 +148,7 @@ class ShapeTracker:
 
   # TODO: this is a special case of slice with strides, remove it
   # though it's nice that it can't change size
-  def flip(self, *axis):
-    self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
-    return self
+  def flip(self, *axis): return self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
 
   # *** under this line are not invertible ***
 
