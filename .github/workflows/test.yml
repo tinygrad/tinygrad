@@ -63,7 +63,7 @@ jobs:
     - name: Run Pytest (lazy)
       run: LAZY=1 python -m pytest -s -v
 
-  testcpu:
+  testllvm:
     name: LLVM Tests
     runs-on: ubuntu-latest
 
@@ -78,8 +78,8 @@ jobs:
         python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[llvm,testing]'
-    - name: Run Pytest (lazy)
-      run: LLVM=1 LAZY=1 python -m pytest -s -v
+    - name: Run Pytest OPT=2
+      run: OPT=2 LLVM=1 python -m pytest -s -v
 
   testtorch:
     name: Torch Tests
