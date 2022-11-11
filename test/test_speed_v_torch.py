@@ -1,16 +1,10 @@
 import os
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
 import unittest
 import torch
 torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
-DEBUG_GEMM = False
-if DEBUG_GEMM:
-  np.set_printoptions(linewidth=460, threshold=10000000000, suppress=False)
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 try:
@@ -52,9 +46,6 @@ def helper_test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
   torch_a = torch.rand(N, N) - 0.5
   torch_b = torch.rand(N, N) - 0.5
-  if DEBUG_GEMM:
-    torch_a = torch.arange(N*N).reshape(N, N) - 32*48
-    torch_b = torch.arange(N*N).reshape(N, N)
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
@@ -62,10 +53,6 @@ def helper_test_generic_square(name, N, f1, f2):
   with torch.no_grad():
     val_torch, et_torch = helper_test_speed(f1, torch_a, torch_b)
   val_tinygrad, et_tinygrad = helper_test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
-
-  if DEBUG_GEMM:
-    print(val_tinygrad.astype(np.int32))
-    print(val_torch)
 
   print(f"{name:30s} {N:4d}x{N:4d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
@@ -126,27 +113,6 @@ class TestSpeed(unittest.TestCase):
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled', N, f1, f2)
   
-  @unittest.skip
-  def test_gemm_packed(self):
-    for PREPARE in [False, True]:
-      N = 1024 if not DEBUG_GEMM else 64
-      def f1(a, b):
-        if not PREPARE:
-          a = a.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
-          b = b.reshape(N//32, N, 32).permute(0,2,1).reshape(N, N)
-        return a@b.T
-      def f2(a, b):
-        if PREPARE:
-          a = a.reshape(N//32, 32, N).permute(0,2,1).contiguous().realize()
-          b = b.reshape(N//32, 32, N).permute(0,2,1).contiguous().realize()
-
-        # N, N//32, 32
-        a = a.reshape(N//32, N, 32).permute(0,2,1)
-        b = b.reshape(N//32, N, 32).permute(0,2,1)
-        return (a.reshape(N//32, 32, 1, 1, N).expand(N//32, 32, N//32, 32, N) *
-                b.reshape(1, 1, N//32, 32, N).expand(N//32, 32, N//32, 32, N)).sum(axis=4).reshape(N, N)
-      helper_test_generic_square('gemm_packed' + ('_prepare' if PREPARE else ''), N, f1, f2)
-
   def test_gemm_unrolled_permute_l(self):
     N = 512
     def f1(a, b): return a.T@b.T
