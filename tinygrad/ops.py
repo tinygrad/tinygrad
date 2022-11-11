@@ -83,19 +83,21 @@ class ExplicitExecAST(DeviceBuffer):
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
   def contiguous_op(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
+# ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
   def __init__(self, ast:LazyOp):
     self.info = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
-    self.reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
-    self.earlybufs = dedup(get_buffers(self.reduceops[0])) if len(self.reduceops) > 0 else []
+    reduceops = [x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps)]
+    assert len(reduceops) <= 1, "max one reduce op in an ast"
+    self.reduceop = reduceops[0] if reduceops else None
+    self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
     self.ret = type(self.bufs[0])(self.info.shape)
     self.bufs = [self.ret] + self.bufs
 
     # check valid AST kernel
-    assert len(self.reduceops) <= 1, "max one reduce op in an ast"
     assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
     assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
