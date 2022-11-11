@@ -206,7 +206,10 @@ class LLVMBuffer(ExplicitExecAST):
         lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
         (0,2,1,3))
     elif len(k.shapes[0]) == 3:
-      DY, DX = 4, 16
+      if k.strides[1][-1] in [1,0] and k.strides[1][-2] in [1,0]:
+        DY, DX = 4, 16
+      else:
+        DY, DX = 16, 4
       # matmul: YyXxK -> YXKyx
       k.reshape_and_permute(
         lambda shape: (shape[0]//DY, DY, shape[1]//DX, DX, shape[2]),
