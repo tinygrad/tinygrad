@@ -131,8 +131,7 @@ class LLVM:
     st = time.monotonic()
     cfunc(*[x._buf for x in bufs])
     et = time.monotonic() - st
-    if DEBUG >= 1:
-      print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
+    if DEBUG >= 1: print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
 
     # we are done
     LLVM.engine.remove_module(mod)
@@ -198,12 +197,21 @@ class LLVMBuffer(ExplicitExecAST):
       print("old:", k.shapes)
       print("old:", k.strides)
     
-    output_shape = k.shapes[0]
+    shape = k.shapes[0]
+    USE_4X4 = False
     CACHE_DIM = 32
-    if len(output_shape) == 2:
+    DX, DY = 4, 4
+    if len(shape) == 2:
+      # cache tiling, makes permute fast
       k.reshape_and_permute(
-        (output_shape[0]//CACHE_DIM, CACHE_DIM, output_shape[1]//CACHE_DIM, CACHE_DIM),
+        lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
         (0,2,1,3))
+    elif len(shape) == 7:
+      # split chans and X
+      k.reshape_and_permute(
+        lambda shape: (shape[0], shape[1]//DY, DY, shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6]),
+        (0,1,3,4,6,7,8,2,5))
+      USE_4X4 = True
 
     if DEBUG >= 2:
       print("new:", k.shapes)
@@ -213,6 +221,9 @@ class LLVMBuffer(ExplicitExecAST):
     output_shape = k.shapes[0]
     full_shape = [x for x in k.shapes if x != output_shape]
     full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
+  
+    if USE_4X4:
+      full_shape = full_shape[:-2]
     
     # *** llvm specific below this line ***
 
@@ -252,8 +263,7 @@ class LLVMBuffer(ExplicitExecAST):
         idx = idx_level[buf_index][level]
         # load 1x1
         if len(x.st.views) > 1:
-          if DEBUG >= 1:
-            print(f"WARNING: {x} has buffers with more than 1 view, can't optimize")
+          if DEBUG >= 1: print(f"WARNING: {x} has buffers with more than 1 view, can't optimize")
           return idx_deref(builder, x, func.args[buf_index], idx)
         else:
           return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))

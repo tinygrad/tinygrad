@@ -145,13 +145,17 @@ class ASTKernel:
     # include the offsets (as is)
     self.offsets = [x.st.views[-1].offset for x in self.bufs]
 
-  def reshape_and_permute(self, new_shape, axis):
+  # this should be aware of the three parts to the shape
+  #  * the input/output dimensions
+  #  * the reduce dimensions
+  #  * the size outputted by each kernel
+  def reshape_and_permute(self, new_shape_fxn, axis):
     new_shapes, new_strides = [], []
     for shape, stride in zip(self.shapes, self.strides):
       st = ShapeTracker(tuple(shape))
       st.strided(*zip(shape, stride))
       # TODO: handle reduced shape here
-      st.reshape(*new_shape)
+      st.reshape(*new_shape_fxn(shape))
       st.permute(*axis)
       assert len(st.views) == 1
       new_shapes.append(st.shape)
