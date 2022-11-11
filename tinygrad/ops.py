@@ -89,7 +89,7 @@ class ASTKernel:
     self.info = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
     reduceops = [x for x in get_lazyops(ast) if x.op in ReduceOps]
-    assert len(reduceops) <= 1, "max one reduce op in an ast"
+    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
     self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
 
