@@ -1,16 +1,15 @@
 from __future__ import annotations
-import os
 import hashlib
 import math
 import time
-from typing import Tuple, Union
-from tinygrad.helpers import prod, all_same, dedup
-from tinygrad.shapetracker import ShapeTracker, ZeroView, strides_for_shape
+from typing import Tuple, Union, Dict, Any
+from tinygrad.helpers import prod
+from tinygrad.shapetracker import ShapeTracker, ZeroView
 from tinygrad.ops import LazyOp, ASTKernel
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, get_buffers, get_lazyops, ExplicitExecAST, get_lazyop_info
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST
 
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
@@ -180,8 +179,7 @@ class LLVMBuffer(ExplicitExecAST):
   
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
-  # ast can contain one ReduceOp with arbitrary Binary/Unary ops
-  func_cache = {}
+  func_cache : Dict[str, Any] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
     k = ASTKernel(ast)
@@ -262,7 +260,7 @@ class LLVMBuffer(ExplicitExecAST):
     reduce_result = None
     if k.reduceop:
       reduce_input = ast_parse(loop_exit[-1], k.reduceop.src[0], -1)
-      phis = [LLVMBuffer.start_for_op[k.reduceop.op]]
+      phis = [LLVMBuffer.start_for_op[k.reduceop.op]]  # type: ignore
       for i in range(store_loop+1, len(loop_entry)):
         val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
         val.add_incoming(phis[-1], loop_entry[i-1]._block)
