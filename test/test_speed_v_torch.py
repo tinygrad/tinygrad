@@ -32,12 +32,16 @@ def colorize_float(x):
   else:
     return ret
 
+save_ops, save_mem = 0, 0
 CNT = 8
 def helper_test_speed(f1, *args):
+  global save_ops, save_mem
   ets = []
   ret = None
   for _ in range(CNT):
     del ret
+    GlobalCounters.global_ops = 0
+    GlobalCounters.global_mem = 0
     st = time.monotonic()
     ret = f1(*args)
     if CL is not None and ret.device in ["GPU", "OPENCL"]:
@@ -47,6 +51,8 @@ def helper_test_speed(f1, *args):
       torch.zeros(1, device='mps').cpu()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
+    if GlobalCounters.global_ops:
+      save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)
 
 def helper_test_generic_square(name, N, f1, f2):
@@ -66,8 +72,8 @@ def helper_test_generic(name, f1, f2):
     val_torch, et_torch = helper_test_speed(f1)
   val_tinygrad, et_tinygrad = helper_test_speed(lambda: f2().realize())
 
-  flops = GlobalCounters.global_ops*1e-6
-  mem = GlobalCounters.global_mem*4*1e-6
+  flops = save_ops*1e-6
+  mem = save_mem*4*1e-6
   print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:7.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:7.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
@@ -75,8 +81,6 @@ def helper_test_generic(name, f1, f2):
 class TestSpeed(unittest.TestCase):
   def setUp(self):
     global prefix
-    GlobalCounters.global_ops = 0
-    GlobalCounters.global_mem = 0
     prefix = " " if prefix is None else ""
     return super().setUp()
 
