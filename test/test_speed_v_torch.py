@@ -74,7 +74,7 @@ def helper_test_generic(name, f1, f2):
 
   flops = save_ops*1e-6
   mem = save_mem*4*1e-6
-  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:7.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:7.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
+  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:7.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:7.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower {flops:7.2f} MOPS {mem:7.2f} MB")
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
@@ -89,7 +89,7 @@ class TestSpeed(unittest.TestCase):
     helper_test_generic_square('sum', 4096, f, f)
 
   def test_array_packing(self):
-    N = 1024
+    N = 2048
     def f(a, b): return a.reshape(N, N // 32, 32).permute(1,0,2).contiguous()
     helper_test_generic_square('array_packing', N, f, f)
 

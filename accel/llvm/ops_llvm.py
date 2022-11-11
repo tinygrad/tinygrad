@@ -209,15 +209,24 @@ class LLVMBuffer(ExplicitExecAST):
         lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
         (0,2,1,3))
     elif len(k.shapes[0]) == 3:
-      if k.strides[1][-1] in [1,0] and k.strides[1][-2] in [1,0]:
-        DY, DX = 4, 16
+      if k.reduceop:
+        if k.strides[1][-1] == 1 and k.strides[2][-1] == 1:
+          DY, DX = 8, 8
+        elif k.strides[1][-1] in [1,0] and k.strides[1][-2] in [1,0]:
+          DY, DX = 4, 16
+        else:
+          DY, DX = 16, 4
+        # matmul: YyXxK -> YXKyx
+        k.reshape_and_permute(
+          lambda shape: (shape[0]//DY, DY, shape[1]//DX, DX, shape[2]),
+          (0,2,4,1,3))
+        kernel_output_axis = [-2, -1]
       else:
-        DY, DX = 16, 4
-      # matmul: YyXxK -> YXKyx
-      k.reshape_and_permute(
-        lambda shape: (shape[0]//DY, DY, shape[1]//DX, DX, shape[2]),
-        (0,2,4,1,3))
-      kernel_output_axis = [-2, -1]
+        CACHE_L2_DIM = 256
+        k.reshape_and_permute(
+          lambda shape: (shape[0], shape[1]//CACHE_L2_DIM, CACHE_L2_DIM, shape[2]),
+          (1,0,2,3))
+        kernel_output_axis = [-1]
     elif len(k.shapes[0]) == 7:
       # conv: split chans and X
       DY, DX = 4, 16
