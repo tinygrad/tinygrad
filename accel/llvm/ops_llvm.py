@@ -9,7 +9,7 @@ from tinygrad.ops import LazyOp, ASTKernel
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST, GlobalCounters
 
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
@@ -131,7 +131,10 @@ class LLVM:
     st = time.monotonic()
     cfunc(*[x._buf for x in bufs])
     et = time.monotonic() - st
-    if DEBUG >= 1: print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
+    if DEBUG >= 1:
+      print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
+    GlobalCounters.global_ops += op_estimate
+    GlobalCounters.global_mem += mem_estimate
 
     # we are done
     LLVM.engine.remove_module(mod)

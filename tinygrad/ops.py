@@ -55,6 +55,9 @@ class GenericExecAST(DeviceBuffer):
       raise Exception("unknown op")
     return ret
 
+class GlobalCounters:
+  global_ops, global_mem = 0, 0
+
 class GenericShape(GenericExecAST):
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops
   def unary_op(self, op:UnaryOps): return GenericShape(self.shape, self.flops + prod(self.shape))

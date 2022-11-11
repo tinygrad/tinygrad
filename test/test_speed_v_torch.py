@@ -5,6 +5,8 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
+from functools import partial
+from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 try:
@@ -55,14 +57,29 @@ def helper_test_generic_square(name, N, f1, f2):
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
 
-  with torch.no_grad():
-    val_torch, et_torch = helper_test_speed(f1, torch_a, torch_b)
-  val_tinygrad, et_tinygrad = helper_test_speed(lambda *args: f2(*args).realize(), tiny_a, tiny_b)
+  helper_test_generic(f"{name:30s} {N:4d}x{N:4d}", partial(f1, torch_a, torch_b), partial(f2, tiny_a, tiny_b))
 
-  print(f"{name:30s} {N:4d}x{N:4d} {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
+prefix = None
+def helper_test_generic(name, f1, f2):
+  global prefix
+  with torch.no_grad():
+    val_torch, et_torch = helper_test_speed(f1)
+  val_tinygrad, et_tinygrad = helper_test_speed(lambda: f2().realize())
+
+  flops = GlobalCounters.global_ops*1e-6
+  mem = GlobalCounters.global_mem*4*1e-6
+  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:7.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:7.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
+  prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
 class TestSpeed(unittest.TestCase):
+  def setUp(self):
+    global prefix
+    GlobalCounters.global_ops = 0
+    GlobalCounters.global_mem = 0
+    prefix = " " if prefix is None else ""
+    return super().setUp()
+
   def test_sum(self):
     def f(a, b): return a.sum()
     helper_test_generic_square('sum', 4096, f, f)
@@ -151,13 +168,7 @@ class TestSpeed(unittest.TestCase):
 
           def f1(): return torch_conv(torch_dat)
           def f2(): return tiny_conv(tiny_dat).realize()
-
-          with torch.no_grad():
-            val_torch, et_torch = helper_test_speed(f1)
-          val_tinygrad, et_tinygrad = helper_test_speed(f2)
-
-          print(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}             {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
-          np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
+          helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, f2)
 
 if __name__ == '__main__':
   unittest.main()
