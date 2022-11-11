@@ -207,7 +207,7 @@ class LLVMBuffer(ExplicitExecAST):
         (0,2,1,3))
     elif len(k.shapes[0]) == 3:
       DY, DX = 4, 16
-      # YyXxK -> YXKyx
+      # matmul: YyXxK -> YXKyx
       k.reshape_and_permute(
         lambda shape: (shape[0]//DY, DY, shape[1]//DX, DX, shape[2]),
         (0,2,4,1,3))

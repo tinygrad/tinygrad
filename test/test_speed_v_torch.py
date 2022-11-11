@@ -16,6 +16,8 @@ except ImportError:
 
 IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 
+torch_device = torch.device('mps' if int(os.getenv("MPS", "0")) else 'cpu')
+
 def colorize_float(x):
   ret = f"{x:7.2f}x"
   if colored:
@@ -38,14 +40,17 @@ def helper_test_speed(f1, *args):
     ret = f1(*args)
     if CL is not None and ret.device in ["GPU", "OPENCL"]:
       CL.cl_queue.finish()
+    if "mps" in str(ret.device):
+      # TODO: better way to sync?
+      torch.zeros(1, device='mps').cpu()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
-  return ret.numpy(), np.min(ets)
+  return ret.cpu().numpy(), np.min(ets)
 
 def helper_test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
-  torch_a = torch.rand(N, N) - 0.5
-  torch_b = torch.rand(N, N) - 0.5
+  torch_a = (torch.rand(N, N) - 0.5).to(torch_device)
+  torch_b = (torch.rand(N, N) - 0.5).to(torch_device)
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
@@ -137,8 +142,8 @@ class TestSpeed(unittest.TestCase):
       for in_chans in IN_CHANS:
         for out_chans in [32]:
           img_size = 34
-          torch_dat = torch.rand(bs, in_chans, img_size, img_size)
-          torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None)
+          torch_dat = torch.rand(bs, in_chans, img_size, img_size).to(torch_device)
+          torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None).to(torch_device)
 
           tiny_dat = Tensor(torch_dat.cpu().numpy())
           tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None)
