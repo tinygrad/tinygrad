@@ -4,8 +4,26 @@ import time
 import sys
 np.set_printoptions(linewidth=160)
 np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
-from tinygrad.llops.ops_llvm import LLVM, LLVMBuffer, int_const, AMX
+from tinygrad.llops.ops_llvm import LLVM, LLVMBuffer, int_const
 from llvmlite import ir  # type: ignore
+
+
+# https://github.com/corsix/amx/blob/main/Instructions.md
+# 12 lines for AMX support
+from functools import partialmethod
+class AMX():
+  @staticmethod
+  def nop_op_imm5(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5}); amx op {op} imm {imm5}", "", tuple(), True)
+  @staticmethod
+  def op_gpr(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6)); amx op {op} reg $0", "r", (gpr,), True)
+  set, clr = partialmethod(nop_op_imm5, 17, 0), partialmethod(nop_op_imm5, 17, 1)
+  ldx, ldy, stx, sty = partialmethod(op_gpr, 0), partialmethod(op_gpr, 1), partialmethod(op_gpr, 2), partialmethod(op_gpr, 3)
+  ldz, stz, ldzi, stzi = partialmethod(op_gpr, 4), partialmethod(op_gpr, 5), partialmethod(op_gpr, 6), partialmethod(op_gpr, 7)
+  extrx, extry = partialmethod(op_gpr, 8), partialmethod(op_gpr, 9)
+  fma64, fms64, fma32, fms32 = partialmethod(op_gpr, 10), partialmethod(op_gpr, 11), partialmethod(op_gpr, 12), partialmethod(op_gpr, 13)
+  mac16, fma16, fms16 = partialmethod(op_gpr, 14), partialmethod(op_gpr, 15), partialmethod(op_gpr, 16)
+  vecint, vecfp, matint, matfp, genlut = partialmethod(op_gpr, 18), partialmethod(op_gpr, 19), partialmethod(op_gpr, 20), partialmethod(op_gpr, 21), partialmethod(op_gpr, 22)
+
 
 N = 4096
 #N = 1024
