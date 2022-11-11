@@ -231,7 +231,7 @@ class LLVMBuffer(ExplicitExecAST):
 
     full_shape = full_shape if not kernel_output_axis else full_shape[:-len(kernel_output_axis)]
     kernel_output_dim = prod([k.shapes[0][a] for a in kernel_output_axis])
-    kernel_output_type = ir.VectorType(ir.FloatType(), kernel_output_dim)
+    kernel_output_type = ir.FloatType() if kernel_output_dim == 1 else ir.VectorType(ir.FloatType(), kernel_output_dim)
 
     def get_idxs(builder, idx, buf_index):
       idx_offsets = [0]
@@ -283,7 +283,7 @@ class LLVMBuffer(ExplicitExecAST):
             element = idx_deref(builder, x, func.args[buf_index], idx)
           else:
             element = builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
-          m = builder.insert_element(m, element, int_const(i))
+          m = element if kernel_output_dim == 1 else builder.insert_element(m, element, int_const(i))
         return m
       if isinstance(x.op, ReduceOps):
         if reduce_result is None:
@@ -292,11 +292,15 @@ class LLVMBuffer(ExplicitExecAST):
       values = [ast_parse(builder, v, level, reduce_result) for v in x.src]
 
       m = kernel_output_type(ir.Undefined)
-      for i in range(kernel_output_dim):
-        value = [builder.extract_element(v, int_const(i)) for v in values]
-        element = LLVMBuffer.op_lookup[x.op](builder, *value)
-        m = builder.insert_element(m, element, int_const(i))
-      return m
+      if kernel_output_dim == 1:
+        return LLVMBuffer.op_lookup[x.op](builder, *values)
+      else:
+        # TODO: this only has to be done for certain ops
+        for i in range(kernel_output_dim):
+          value = [builder.extract_element(v, int_const(i)) for v in values]
+          element = LLVMBuffer.op_lookup[x.op](builder, *value)
+          m = builder.insert_element(m, element, int_const(i))
+        return m
 
     # add the ast + final store
     store_loop = output_shape.index(1) if 1 in output_shape else -1
@@ -305,7 +309,9 @@ class LLVMBuffer(ExplicitExecAST):
     reduce_result = None
     if k.reduceop:
       reduce_input = ast_parse(loop_exit[-1], k.reduceop.src[0], -1)
-      phis = [kernel_output_type([LLVMBuffer.start_for_op[k.reduceop.op]] * kernel_output_dim)]
+      phis = [LLVMBuffer.start_for_op[k.reduceop.op]]
+      if kernel_output_dim > 1:
+        phis = [kernel_output_type(phis * kernel_output_dim)]
       for i in range(store_loop+1, len(loop_entry)):
         val = loop_entry[i].phi(kernel_output_type, f"reduce_phi_{i}")
         val.add_incoming(phis[-1], loop_entry[i-1]._block)
@@ -325,7 +331,7 @@ class LLVMBuffer(ExplicitExecAST):
     # store result
     builder = loop_exit[store_loop]
     for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
-      element = builder.extract_element(result, int_const(i))
+      element = result if kernel_output_dim == 1 else builder.extract_element(result, int_const(i))
       builder.store(element, builder.gep(func.args[0], [idx], inbounds=True))
     
     # add the looping
