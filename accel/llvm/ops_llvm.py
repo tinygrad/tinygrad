@@ -69,19 +69,19 @@ def idx_deref(builder, buf, ptr, idx):
 
 # https://github.com/corsix/amx/blob/main/Instructions.md
 # 12 lines for AMX support
-from functools import partial
+from functools import partialmethod
 class AMX():
   @staticmethod
   def nop_op_imm5(op, imm5, builder): builder.asm(ir.FunctionType(ir.VoidType(), []), f".word (0x201000 + ({op} << 5) + {imm5}); amx op {op} imm {imm5}", "", tuple(), True)
   @staticmethod
   def op_gpr(op, builder, gpr): builder.asm(ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), f".word (0x201000 + ({op} << 5) + 0$0 - ((0$0 >> 4) * 6)); amx op {op} reg $0", "r", (gpr,), True)
-  set, clr = partial(nop_op_imm5, 17, 0), partial(nop_op_imm5, 17, 1)
-  ldx, ldy, stx, sty = partial(op_gpr, 0), partial(op_gpr, 1), partial(op_gpr, 2), partial(op_gpr, 3)
-  ldz, stz, ldzi, stzi = partial(op_gpr, 4), partial(op_gpr, 5), partial(op_gpr, 6), partial(op_gpr, 7)
-  extrx, extry = partial(op_gpr, 8), partial(op_gpr, 9)
-  fma64, fms64, fma32, fms32 = partial(op_gpr, 10), partial(op_gpr, 11), partial(op_gpr, 12), partial(op_gpr, 13)
-  mac16, fma16, fms16 = partial(op_gpr, 14), partial(op_gpr, 15), partial(op_gpr, 16)
-  vecint, vecfp, matint, matfp, genlut = partial(op_gpr, 18), partial(op_gpr, 19), partial(op_gpr, 20), partial(op_gpr, 21), partial(op_gpr, 22)
+  set, clr = partialmethod(nop_op_imm5, 17, 0), partialmethod(nop_op_imm5, 17, 1)
+  ldx, ldy, stx, sty = partialmethod(op_gpr, 0), partialmethod(op_gpr, 1), partialmethod(op_gpr, 2), partialmethod(op_gpr, 3)
+  ldz, stz, ldzi, stzi = partialmethod(op_gpr, 4), partialmethod(op_gpr, 5), partialmethod(op_gpr, 6), partialmethod(op_gpr, 7)
+  extrx, extry = partialmethod(op_gpr, 8), partialmethod(op_gpr, 9)
+  fma64, fms64, fma32, fms32 = partialmethod(op_gpr, 10), partialmethod(op_gpr, 11), partialmethod(op_gpr, 12), partialmethod(op_gpr, 13)
+  mac16, fma16, fms16 = partialmethod(op_gpr, 14), partialmethod(op_gpr, 15), partialmethod(op_gpr, 16)
+  vecint, vecfp, matint, matfp, genlut = partialmethod(op_gpr, 18), partialmethod(op_gpr, 19), partialmethod(op_gpr, 20), partialmethod(op_gpr, 21), partialmethod(op_gpr, 22)
 
 # https://blog.christianperone.com/2022/09/tutorial-on-using-llvm-to-jit-pytorch-fx-graphs-to-native-code-x86-arm-risc-v-wasm-part-i-scalars/
 class LLVM:
