@@ -3,7 +3,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, Processing
 from tinygrad.tensor import Function
 
 class Contiguous(Function):
-  def forward(self, x): return x.contiguous_op()
+  def forward(self, x): return x.contiguous()
   def backward(self, grad_output): return grad_output
 
 # ************* unary ops *************

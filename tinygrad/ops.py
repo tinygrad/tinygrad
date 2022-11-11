@@ -81,7 +81,7 @@ class ExplicitExecAST(DeviceBuffer):
 
   # universal for shape tracked
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
-  def contiguous_op(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
+  def contiguous(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:

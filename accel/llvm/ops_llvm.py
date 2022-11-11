@@ -177,7 +177,7 @@ class LLVMBuffer(ExplicitExecAST):
     ctypes.memmove(ret._buf, x.ctypes.data, prod(ret.shape)*4)
     return ret
   
-  def toCPU(x): return np.ctypeslib.as_array(x.contiguous_op()._buf)[:prod(x.shape)].reshape(x.shape).copy()
+  def toCPU(x): return np.ctypeslib.as_array(x.contiguous()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   func_cache : Dict[str, Any] = {}
   @classmethod
@@ -195,6 +195,8 @@ class LLVMBuffer(ExplicitExecAST):
 
     if DEBUG >= 2:
       print(ast)
+
+    if DEBUG >= 1:
       print(k.shapes)
       print(k.strides)
 
@@ -272,8 +274,7 @@ class LLVMBuffer(ExplicitExecAST):
         reduce_result = loop_exit[i].select(loop_exit[-1].fcmp_unordered(">", val, reduce_input, flags=('fast',)), val, reduce_input, flags=('fast',))
 
       for i,phi in enumerate(phis[1:]):
-        if reduce_result != "AMX_Z":
-          phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
+        phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
 
     # do the late ast
     result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)

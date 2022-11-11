@@ -111,7 +111,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    CL.enqueue_copy(data, self.contiguous_op().cl, is_blocking=True)
+    CL.enqueue_copy(data, self.contiguous().cl, is_blocking=True)
     return data
 
   def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:

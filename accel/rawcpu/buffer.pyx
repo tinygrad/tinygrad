@@ -19,7 +19,7 @@ cdef class RawCPUBuffer:
   @property
   def shape(self): return self.st.shape
 
-  def contiguous_op(RawCPUBuffer x) -> RawCPUBuffer:
+  def contiguous(RawCPUBuffer x) -> RawCPUBuffer:
     return x if x.st.contiguous else x.unary_op(UnaryOps.NOOP)
 
   @staticmethod
@@ -31,7 +31,7 @@ cdef class RawCPUBuffer:
   def toCPU(RawCPUBuffer self):
     x: RawCPUBuffer
     print("toCPU", self.buf.size, self.st)
-    x = self.contiguous_op()
+    x = self.contiguous()
     buf = memoryview(<float[:prod(x.shape)]> x.buf.buf)
     return np.frombuffer(buf, dtype=np.float32).reshape(x.shape)
 
