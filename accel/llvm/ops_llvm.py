@@ -195,10 +195,19 @@ class LLVMBuffer(ExplicitExecAST):
 
     if DEBUG >= 2:
       print(ast)
+      print("old:", k.shapes)
+      print("old:", k.strides)
+    
+    output_shape = k.shapes[0]
+    CACHE_DIM = 32
+    if len(output_shape) == 2:
+      k.reshape_and_permute(
+        (output_shape[0]//CACHE_DIM, CACHE_DIM, output_shape[1]//CACHE_DIM, CACHE_DIM),
+        (0,2,1,3))
 
-    if DEBUG >= 1:
-      print(k.shapes)
-      print(k.strides)
+    if DEBUG >= 2:
+      print("new:", k.shapes)
+      print("new:", k.strides)
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = k.shapes[0]
