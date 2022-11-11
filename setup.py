@@ -23,6 +23,7 @@ setup(name='tinygrad',
       python_requires='>=3.8',
       extras_require={
         'gpu': ["pyopencl", "six"],
+        'llvm': ["llvmlite"],
         'testing': [
             "pytest",
             "torch~=1.11.0",

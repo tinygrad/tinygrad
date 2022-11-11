@@ -40,7 +40,7 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   elif self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize(self.device)
     ret = real_src.contiguous_op()
-    return ret, [real_src], LoadOps if ret != real_src else None
+    return ret, [real_src], LoadOps if id(ret) != id(real_src) else None
   else:
     raise NotImplementedError(f"unknown LoadOp {self.op.op}")
 

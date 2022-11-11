@@ -4,6 +4,7 @@ import torch
 torch.set_num_threads(1)
 import time
 import numpy as np
+np.set_printoptions(linewidth=160)
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 try:
@@ -18,7 +19,7 @@ IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 def colorize_float(x):
   ret = f"{x:7.2f}x"
   if colored:
-    if x < 0.8:
+    if x < 0.75:
       return colored(ret, 'green')
     elif x > 1.5:
       return colored(ret, 'red')
@@ -45,6 +46,7 @@ def helper_test_generic_square(name, N, f1, f2):
   torch.manual_seed(0)
   torch_a = torch.rand(N, N) - 0.5
   torch_b = torch.rand(N, N) - 0.5
+
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
 
@@ -60,13 +62,17 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.sum()
     helper_test_generic_square('sum', 4096, f, f)
 
+  def test_array_packing(self):
+    N = 1024
+    def f(a, b): return a.reshape(N, N // 32, 32).permute(1,0,2).contiguous()
+    helper_test_generic_square('array_packing', N, f, f)
+
   def test_permute(self):
-    # this is a 64MB tensor, M1 L1 cache is 128kB
-    # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
-    def f1(a, b): return a.permute(1,0).contiguous()
-    # NOTE: this isn't being constant folded
-    def f2(a, b): return a.permute(1,0) + 0
-    helper_test_generic_square('permute', 4096, f1, f2)
+    for N in [1024, 4096]:
+      # this is a 64MB tensor, M1 L1 cache is 128kB
+      # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
+      def f(a, b): return a.permute(1,0).contiguous()
+      helper_test_generic_square('permute', N, f, f)
 
   def test_neg(self):
     def f(a, b): return -a
@@ -106,6 +112,12 @@ class TestSpeed(unittest.TestCase):
     def f1(a, b): return a@b.T
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled', N, f1, f2)
+  
+  def test_gemm_unrolled_permute_l(self):
+    N = 512
+    def f1(a, b): return a.T@b.T
+    def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
+    helper_test_generic_square('gemm_unrolled_permute_l', N, f1, f2)
 
   def test_gemm_unrolled_permute_r(self):
     N = 512
@@ -139,7 +151,7 @@ class TestSpeed(unittest.TestCase):
             val_torch, et_torch = helper_test_speed(f1)
           val_tinygrad, et_tinygrad = helper_test_speed(f2)
 
-          print(f"bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}                   {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
+          print(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}             {et_torch:7.2f} ms in torch, {et_tinygrad:7.2f} ms in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower", val_torch.sum(), val_tinygrad.sum())
           np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4)
 
 if __name__ == '__main__':

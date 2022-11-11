@@ -31,6 +31,7 @@ class CPUBuffer(np.ndarray, GenericExecAST):
   def fromCPU(x): return x.view(CPUBuffer)
   def toCPU(x): return x
 
+  def contiguous_op(x): return x.ravel().reshape(x.shape)
   def unary_op(x, op): return CPUBuffer.fxn_for_op[op](x)
   def binary_op(x, op, y): return CPUBuffer.fxn_for_op[op](x, y)
   def reduce_op(x, op, new_shape): return CPUBuffer.fxn_for_op[op](x, new_shape)

@@ -13,6 +13,8 @@ class TorchBuffer(torch.Tensor, GenericExecAST):
 
   unary_op, binary_op, reduce_op, movement_op = CPUBuffer.unary_op, CPUBuffer.binary_op, CPUBuffer.reduce_op, CPUBuffer.movement_op
 
+  # TODO: rename to contiguous everywhere?
+  def contiguous_op(x): return x.contiguous()
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
     return torch.conv2d(x, w, stride=(C.sy, C.sx), groups=C.groups, dilation=(C.dy, C.dx))
