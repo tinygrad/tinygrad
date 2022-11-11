@@ -197,16 +197,24 @@ class LLVMBuffer(ExplicitExecAST):
       print("old:", k.shapes)
       print("old:", k.strides)
     
+    # this stuff can't be hand coded
     kernel_output_axis = []
     CACHE_DIM = 32
-    DX, DY = 4, 4
     if len(k.shapes[0]) == 2:
       # cache tiling, makes permute fast
       k.reshape_and_permute(
         lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
         (0,2,1,3))
+    elif len(k.shapes[0]) == 3:
+      DY, DX = 4, 16
+      # YyXxK -> YXKyx
+      k.reshape_and_permute(
+        lambda shape: (shape[0]//DY, DY, shape[1]//DX, DX, shape[2]),
+        (0,2,4,1,3))
+      kernel_output_axis = [-2, -1]
     elif len(k.shapes[0]) == 7:
-      # split chans and X
+      # conv: split chans and X
+      DY, DX = 4, 16
       k.reshape_and_permute(
         lambda shape: (shape[0], shape[1]//DY, DY, shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6]),
         (0,1,3,4,6,7,8,2,5))
@@ -282,7 +290,13 @@ class LLVMBuffer(ExplicitExecAST):
           raise Exception("no reduce")
         return reduce_result
       values = [ast_parse(builder, v, level, reduce_result) for v in x.src]
-      return LLVMBuffer.op_lookup[x.op](builder, *values)
+
+      m = kernel_output_type(ir.Undefined)
+      for i in range(kernel_output_dim):
+        value = [builder.extract_element(v, int_const(i)) for v in values]
+        element = LLVMBuffer.op_lookup[x.op](builder, *value)
+        m = builder.insert_element(m, element, int_const(i))
+      return m
 
     # add the ast + final store
     store_loop = output_shape.index(1) if 1 in output_shape else -1
