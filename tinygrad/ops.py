@@ -124,10 +124,10 @@ class ASTKernel:
     strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
 
     # find first mismatch, don't reduce this
-    first_reduce = -1
+    self.first_reduce = -1
     for i in range(len(shapes[0])):
       if not all_same([x[i] for x in shapes]):
-        first_reduce = i
+        self.first_reduce = i
         break
 
     # merge dimensions if we can, multi get_shape_strides
@@ -140,7 +140,7 @@ class ASTKernel:
         # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
         can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
       # more can merge than this
-      can_merge = all(can_merge) and i != first_reduce
+      can_merge = all(can_merge) and i != self.first_reduce
       for j in range(len(shapes)):
         if can_merge:
           rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])

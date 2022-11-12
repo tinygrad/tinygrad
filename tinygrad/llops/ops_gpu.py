@@ -127,11 +127,14 @@ class GPUBuffer(ExplicitExecAST):
       return k.ret
     k.process()
 
-    assert len(k.shapes[0]) <= 3
-    kernel = ["__kernel void exec(",] + [','.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {"]
-    kernel += [f"int idx{i} = get_global_id({i});" for i in range(len(k.shapes[0]))]
+    output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
+    if len(output_shape) == 0: output_shape = [1]
+    assert len(output_shape) <= 3, f"GPU backend only supports 3 output axes: {output_shape}"
 
-    def get_idx(buf_index): return '('+'+'.join(f"idx{i}*{s}" for i,s in enumerate(k.strides[buf_index]))+')'
+    kernel = ["__kernel void exec(",] + [','.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {"]
+    kernel += [f"int idx{i} = get_global_id({i});" for i in range(len(output_shape))]
+
+    def get_idx(buf_index): return '('+'+'.join(["0"]+[f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1])+')'
 
     def ast_parse(x):
       if not isinstance(x, LazyOp):
@@ -150,7 +153,7 @@ class GPUBuffer(ExplicitExecAST):
     kernel.append("}")
     if DEBUG >= 2:
       print(' '.join(kernel))
-    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ' '.join(kernel)), k.shapes[0], None, op_estimate=k.info.flops)
+    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ' '.join(kernel)), output_shape, None, op_estimate=k.info.flops)
 
     GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
     return k.ret
