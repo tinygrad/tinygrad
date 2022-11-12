@@ -128,10 +128,14 @@ class GPUBuffer(ExplicitExecAST):
     k.process()
 
     output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
-    assert len(output_shape) <= 3, f"GPU backend only supports 3 output axes: {output_shape}"
 
     kernel = ["__kernel void exec(",] + [','.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {"]
-    kernel += [f"int idx{i} = get_global_id({i});" for i in range(len(output_shape))]
+    kernel += [f"int idx{i} = get_global_id({i});" for i in range(min(3, len(output_shape)))]
+    if len(output_shape) > 3:
+      # compact all the dimensions into the final one
+      for i in range(len(output_shape)-1, 2, -1):
+        kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};"]
+      output_shape = output_shape[0:2] + [prod(output_shape[2:])]
 
     def get_idx(buf_index): return '('+'+'.join(["0"]+[f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1])+')'
 

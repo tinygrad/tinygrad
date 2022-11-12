@@ -99,6 +99,14 @@ class TestSpeed(unittest.TestCase):
       # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
       def f(a, b): return a.permute(1,0).contiguous()
       helper_test_generic_square('permute', N, f, f)
+    
+  def test_double_permute(self):
+    N = 64
+    torch.manual_seed(0)
+    torch_a = (torch.rand(N, N, N, N) - 0.5).to(torch_device)
+    tiny_a = Tensor(torch_a.cpu().numpy())
+    def f(a): return a.permute(1,0,3,2).contiguous()
+    helper_test_generic(f"double_permute {tiny_a.shape}", partial(f, torch_a), partial(f, tiny_a))
 
   def test_neg(self):
     def f(a, b): return -a
