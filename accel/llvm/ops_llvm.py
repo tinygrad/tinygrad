@@ -201,8 +201,8 @@ class LLVMBuffer(ExplicitExecAST):
       print("old:", k.strides)
     
     # this stuff can't be hand coded
-    """
     kernel_output_axis = []
+    """
     CACHE_DIM = 32
     if len(k.shapes[0]) == 2:
       # cache tiling, makes permute fast
