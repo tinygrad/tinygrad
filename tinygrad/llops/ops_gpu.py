@@ -80,6 +80,78 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
+def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
+  k.process()
+
+  """
+  CACHE_DIM = 32
+  if len(k.shapes[0]) == 2:
+    # cache tiling, makes permute fast
+    k.reshape_and_permute(
+      lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
+      (0,2,1,3))
+  """
+
+  # split for reduce
+  """
+  if len(k.shapes[0]) == 1 and k.reduceop:
+    DIM = 2048
+    k.reshape_and_permute(
+      lambda shape: (DIM, shape[0]//DIM) if shape != [1] else [1,1],
+      (0,1)
+    )
+    k.shapes[0] = (DIM,1)
+    k.strides[0] = (1,1)
+    k.first_reduce = 1
+    print(k.shapes, k.strides)
+  """
+
+  output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
+
+  kernel = ["__kernel void exec(",] + [', '.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {\n"]
+  kernel += [f"int idx{i} = get_global_id({i});\n" for i in range(min(3, len(output_shape)))]
+  if len(output_shape) > 3:
+    # compact all the dimensions into the final one
+    for i in range(len(output_shape)-1, 2, -1):
+      kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
+    output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
+
+  def idx_deref(buf_index):
+    assert len(k.bufs[buf_index].st.views) == 1
+    idx_pieces = [f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0]
+    kernel.append(f"int bufidx{buf_index} = " + '('+' + '.join(idx_pieces if idx_pieces else ["0"])+');\n')
+    return f"buf{buf_index}[bufidx{buf_index}]"
+
+  def ast_parse(x, reduce=False):
+    if not isinstance(x, LazyOp):
+      buf_index = k.bufs.index(x)
+      return idx_deref(buf_index)
+    if isinstance(x.op, ReduceOps) and not reduce:
+      return "acc"
+    values = [ast_parse(v) for v in x.src]
+    code = GPUBuffer.code_for_op[x.op]
+    if len(values) >= 1: code = code.replace("A", values[0])
+    if len(values) >= 2: code = code.replace("B", values[1])
+    return code
+
+  # early ast
+  if k.reduceop:
+    full_shape = [x for x in k.shapes if x != k.shapes[0]]
+    full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
+
+    kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
+    for i in range(k.first_reduce, len(k.shapes[0])):
+      kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
+    kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";")
+    kernel += ["}\n"] * (len(k.shapes[0]) - k.first_reduce)
+  
+  # late ast
+  kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n")
+  kernel.append("}")
+  if DEBUG >= 2:
+    print(' '.join(kernel))
+  return partial(CLProgram("exec", ' '.join(kernel)), output_shape if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
+
 class GPUBuffer(ExplicitExecAST):
   code_for_op : Dict[Op, str] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)",
@@ -122,67 +194,9 @@ class GPUBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> GPUBuffer:
     k = ASTKernel(ast)
-    if k.key in GPUBuffer.func_cache:
-      GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
-      return k.ret
-    k.process()
-
-    """
-    CACHE_DIM = 32
-    if len(k.shapes[0]) == 2:
-      # cache tiling, makes permute fast
-      k.reshape_and_permute(
-        lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
-        (0,2,1,3))
-    """
-
-    output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
-
-    kernel = ["__kernel void exec(",] + [', '.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {\n"]
-    kernel += [f"int idx{i} = get_global_id({i});\n" for i in range(min(3, len(output_shape)))]
-    if len(output_shape) > 3:
-      # compact all the dimensions into the final one
-      for i in range(len(output_shape)-1, 2, -1):
-        kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
-      output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
-
-    def get_idx(buf_index):
-      return '('+' + '.join(["0"]+[f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0])+')'
-
-    def ast_parse(x, reduce=False):
-      if not isinstance(x, LazyOp):
-        buf_index = k.bufs.index(x)
-        return f"buf{buf_index}[{get_idx(buf_index)}]"
-      if isinstance(x.op, ReduceOps) and not reduce:
-        return "acc"
-      values = [ast_parse(v) for v in x.src]
-      code = GPUBuffer.code_for_op[x.op]
-      if len(values) >= 1: code = code.replace("A", values[0])
-      if len(values) >= 2: code = code.replace("B", values[1])
-      return code
-
-    # early ast
-    if k.reduceop:
-      full_shape = [x for x in k.shapes if x != k.shapes[0]]
-      full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
-
-      kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
-      for i in range(k.first_reduce, len(k.shapes[0])):
-        kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";")
-      kernel += ["}\n"] * (len(k.shapes[0]) - k.first_reduce)
-    
-    # late ast
-    kernel.append(f"buf0[{get_idx(0)}] = {ast_parse(ast)};\n")
-    kernel.append("}")
-    if DEBUG >= 2:
-      print(' '.join(kernel))
-    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ' '.join(kernel)), output_shape if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
-
+    if k.key not in GPUBuffer.func_cache: GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
     GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
     return k.ret
-
-
 
   def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
     idx_getter = f"int valid = 1; {'long' if prod(x.shape) >= 2**31 else 'int'} idx = gid; {'idx *= '+str(reduce)+'; idx += subidx;' if reduce is not None else ''} {x.st.expr().replace('//', '/')};"
