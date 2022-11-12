@@ -128,7 +128,6 @@ class GPUBuffer(ExplicitExecAST):
     k.process()
 
     output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
-    if len(output_shape) == 0: output_shape = [1]
     assert len(output_shape) <= 3, f"GPU backend only supports 3 output axes: {output_shape}"
 
     kernel = ["__kernel void exec(",] + [','.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {"]
@@ -136,24 +135,36 @@ class GPUBuffer(ExplicitExecAST):
 
     def get_idx(buf_index): return '('+'+'.join(["0"]+[f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1])+')'
 
-    def ast_parse(x):
+    def ast_parse(x, reduce=False):
       if not isinstance(x, LazyOp):
         buf_index = k.bufs.index(x)
         return f"buf{buf_index}[{get_idx(buf_index)}]"
-      if isinstance(x.op, ReduceOps):
-        return "reduce"
+      if isinstance(x.op, ReduceOps) and not reduce:
+        return "acc"
       values = [ast_parse(v) for v in x.src]
       code = GPUBuffer.code_for_op[x.op]
       if len(values) >= 1: code = code.replace("A", values[0])
       if len(values) >= 2: code = code.replace("B", values[1])
       return code
+
+    # early ast
+    if k.reduceop:
+      full_shape = [x for x in k.shapes if x != k.shapes[0]]
+      full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
+
+      kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};")
+      for i in range(k.first_reduce, len(k.shapes[0])):
+        kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
+        k.shapes[i]
+      kernel.append("acc = " + ast_parse(k.reduceop, reduce=True) + ";")
+      kernel += ["}"] * (len(k.shapes[0]) - k.first_reduce)
     
     # late ast
-    kernel.append(f"buf0[{get_idx(0)}] = {ast_parse(ast)};")
+    kernel.append(f"buf0[{get_idx(0)}] = {ast_parse(ast)};\n")
     kernel.append("}")
     if DEBUG >= 2:
       print(' '.join(kernel))
-    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ' '.join(kernel)), output_shape, None, op_estimate=k.info.flops)
+    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ' '.join(kernel)), output_shape if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
 
     GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
     return k.ret
