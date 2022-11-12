@@ -127,17 +127,27 @@ class GPUBuffer(ExplicitExecAST):
       return k.ret
     k.process()
 
+    """
+    CACHE_DIM = 32
+    if len(k.shapes[0]) == 2:
+      # cache tiling, makes permute fast
+      k.reshape_and_permute(
+        lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
+        (0,2,1,3))
+    """
+
     output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
 
-    kernel = ["__kernel void exec(",] + [','.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {"]
-    kernel += [f"int idx{i} = get_global_id({i});" for i in range(min(3, len(output_shape)))]
+    kernel = ["__kernel void exec(",] + [', '.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {\n"]
+    kernel += [f"int idx{i} = get_global_id({i});\n" for i in range(min(3, len(output_shape)))]
     if len(output_shape) > 3:
       # compact all the dimensions into the final one
       for i in range(len(output_shape)-1, 2, -1):
-        kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};"]
-      output_shape = output_shape[0:2] + [prod(output_shape[2:])]
+        kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
+      output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
 
-    def get_idx(buf_index): return '('+'+'.join(["0"]+[f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1])+')'
+    def get_idx(buf_index):
+      return '('+' + '.join(["0"]+[f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0])+')'
 
     def ast_parse(x, reduce=False):
       if not isinstance(x, LazyOp):
@@ -156,12 +166,11 @@ class GPUBuffer(ExplicitExecAST):
       full_shape = [x for x in k.shapes if x != k.shapes[0]]
       full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-      kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};")
+      kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
       for i in range(k.first_reduce, len(k.shapes[0])):
         kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-        k.shapes[i]
-      kernel.append("acc = " + ast_parse(k.reduceop, reduce=True) + ";")
-      kernel += ["}"] * (len(k.shapes[0]) - k.first_reduce)
+      kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";")
+      kernel += ["}\n"] * (len(k.shapes[0]) - k.first_reduce)
     
     # late ast
     kernel.append(f"buf0[{get_idx(0)}] = {ast_parse(ast)};\n")
