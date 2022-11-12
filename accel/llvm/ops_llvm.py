@@ -201,6 +201,7 @@ class LLVMBuffer(ExplicitExecAST):
       print("old:", k.strides)
     
     # this stuff can't be hand coded
+    """
     kernel_output_axis = []
     CACHE_DIM = 32
     if len(k.shapes[0]) == 2:
@@ -238,6 +239,7 @@ class LLVMBuffer(ExplicitExecAST):
     if DEBUG >= 2:
       print("new:", k.shapes)
       print("new:", k.strides)
+    """
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = k.shapes[0]
