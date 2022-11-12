@@ -55,6 +55,9 @@ class GenericExecAST(DeviceBuffer):
       raise Exception("unknown op")
     return ret
 
+class GlobalCounters:
+  global_ops, global_mem = 0, 0
+
 class GenericShape(GenericExecAST):
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops
   def unary_op(self, op:UnaryOps): return GenericShape(self.shape, self.flops + prod(self.shape))
@@ -144,4 +147,21 @@ class ASTKernel:
 
     # include the offsets (as is)
     self.offsets = [x.st.views[-1].offset for x in self.bufs]
+
+  # this should be aware of the three parts to the shape
+  #  * the input/output dimensions
+  #  * the reduce dimensions
+  #  * the size outputted by each kernel
+  def reshape_and_permute(self, new_shape_fxn, axis):
+    new_shapes, new_strides = [], []
+    for shape, stride in zip(self.shapes, self.strides):
+      st = ShapeTracker(tuple(shape))
+      st.strided(*zip(shape, stride))
+      # TODO: handle reduced shape here
+      st.reshape(*new_shape_fxn(shape))
+      st.permute(*axis)
+      assert len(st.views) == 1
+      new_shapes.append(st.shape)
+      new_strides.append(st.strides)
+    self.shapes, self.strides = new_shapes, new_strides
 

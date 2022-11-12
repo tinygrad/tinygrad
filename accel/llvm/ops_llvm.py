@@ -2,14 +2,14 @@ from __future__ import annotations
 import hashlib
 import math
 import time
-from typing import Tuple, Union, Dict, Any
+from typing import Tuple, Union, Dict, Any, List
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
 from tinygrad.ops import LazyOp, ASTKernel
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST, GlobalCounters
 
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
@@ -133,6 +133,8 @@ class LLVM:
     et = time.monotonic() - st
     if DEBUG >= 1:
       print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
+    GlobalCounters.global_ops += op_estimate
+    GlobalCounters.global_mem += mem_estimate
 
     # we are done
     LLVM.engine.remove_module(mod)
@@ -195,15 +197,68 @@ class LLVMBuffer(ExplicitExecAST):
 
     if DEBUG >= 2:
       print(ast)
-
-    if DEBUG >= 1:
-      print(k.shapes)
-      print(k.strides)
+      print("old:", k.shapes)
+      print("old:", k.strides)
+    
+    # this stuff can't be hand coded
+    kernel_output_axis : List[int] = []
+    """
+    CACHE_DIM = 32
+    if len(k.shapes[0]) == 2:
+      # cache tiling, makes permute fast
+      k.reshape_and_permute(
+        lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
+        (0,2,1,3))
+    elif len(k.shapes[0]) == 3:
+      if k.reduceop:
+        if k.strides[1][-1] == 1 and k.strides[2][-1] == 1:
+          DY, DX = 8, 8
+        elif k.strides[1][-1] in [1,0] and k.strides[1][-2] in [1,0]:
+          DY, DX = 4, 16
+        else:
+          DY, DX = 16, 4
+        # matmul: YyXxK -> YXKyx
+        k.reshape_and_permute(
+          lambda shape: (shape[0]//DY, DY, shape[1]//DX, DX, shape[2]),
+          (0,2,4,1,3))
+        kernel_output_axis = [-2, -1]
+      else:
+        CACHE_L2_DIM = 256
+        k.reshape_and_permute(
+          lambda shape: (shape[0], shape[1]//CACHE_L2_DIM, CACHE_L2_DIM, shape[2]),
+          (1,0,2,3))
+        kernel_output_axis = [-1]
+    elif len(k.shapes[0]) == 7:
+      # conv: split chans and X
+      DY, DX = 4, 16
+      k.reshape_and_permute(
+        lambda shape: (shape[0], shape[1]//DY, DY, shape[2], shape[3]//DX, DX, shape[4], shape[5], shape[6]),
+        (0,1,3,4,6,7,8,2,5))
+      kernel_output_axis = [-2, -1]
+    
+    if DEBUG >= 2:
+      print("new:", k.shapes)
+      print("new:", k.strides)
+    """
 
     # the 4x4 need to go all the way at the end, even after reduce
     output_shape = k.shapes[0]
     full_shape = [x for x in k.shapes if x != output_shape]
     full_shape = output_shape if len(full_shape) == 0 else full_shape[0]
+
+    full_shape = full_shape if not kernel_output_axis else full_shape[:-len(kernel_output_axis)]
+    kernel_output_dim = prod([k.shapes[0][a] for a in kernel_output_axis])
+    kernel_output_type = ir.FloatType() if kernel_output_dim == 1 else ir.VectorType(ir.FloatType(), kernel_output_dim)
+
+    def get_idxs(builder, idx, buf_index):
+      idx_offsets = [0]
+      for axis in kernel_output_axis:
+        new_idx_offsets = []
+        for s in range(k.shapes[buf_index][axis]):
+          for i in idx_offsets:
+            new_idx_offsets.append(i + s * k.strides[buf_index][axis])
+        idx_offsets = new_idx_offsets
+      return [builder.add(idx, int_const(i)) for i in idx_offsets]
     
     # *** llvm specific below this line ***
 
@@ -218,10 +273,8 @@ class LLVMBuffer(ExplicitExecAST):
     # construct the structure of the loops
     loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
     loop_exit = []
-    for i,_ in enumerate(full_shape):
-      loop_entry.append(ir.IRBuilder(func.append_basic_block(name=f"loop_{i}")))
-    for i,_ in enumerate(full_shape):
-      loop_exit.append(ir.IRBuilder(func.append_basic_block(name=f"loopexit_{len(full_shape)-1-i}")))
+    for i,_ in enumerate(full_shape): loop_entry.append(ir.IRBuilder(func.append_basic_block(name=f"loop_{i}")))
+    for i,_ in enumerate(full_shape): loop_exit.append(ir.IRBuilder(func.append_basic_block(name=f"loopexit_{len(full_shape)-1-i}")))
     loop_exit.append(ir.IRBuilder(func.append_basic_block(name="exit")))
     loop_exit = loop_exit[::-1]
 
@@ -239,21 +292,32 @@ class LLVMBuffer(ExplicitExecAST):
     # the ast parser
     def ast_parse(builder, x, level, reduce_result=None):
       if not isinstance(x, LazyOp):
+        m = kernel_output_type(ir.Undefined)
         buf_index = k.bufs.index(x)
-        idx = idx_level[buf_index][level]
-        # load 1x1
-        if len(x.st.views) > 1:
-          if DEBUG >= 1:
-            print(f"WARNING: {x} has buffers with more than 1 view, can't optimize")
-          return idx_deref(builder, x, func.args[buf_index], idx)
-        else:
-          return builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
+        for i, idx in enumerate(get_idxs(builder, idx_level[buf_index][level], buf_index)):
+          if len(x.st.views) > 1:
+            if DEBUG >= 1: print(f"WARNING: {x} has buffers with more than 1 view, can't optimize")
+            element = idx_deref(builder, x, func.args[buf_index], idx)
+          else:
+            element = builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
+          m = element if kernel_output_dim == 1 else builder.insert_element(m, element, int_const(i))
+        return m
       if isinstance(x.op, ReduceOps):
         if reduce_result is None:
           raise Exception("no reduce")
         return reduce_result
       values = [ast_parse(builder, v, level, reduce_result) for v in x.src]
-      return LLVMBuffer.op_lookup[x.op](builder, *values)
+
+      m = kernel_output_type(ir.Undefined)
+      if kernel_output_dim == 1:
+        return LLVMBuffer.op_lookup[x.op](builder, *values)
+      else:
+        # TODO: this only has to be done for certain ops
+        for i in range(kernel_output_dim):
+          value = [builder.extract_element(v, int_const(i)) for v in values]
+          element = LLVMBuffer.op_lookup[x.op](builder, *value)
+          m = builder.insert_element(m, element, int_const(i))
+        return m
 
     # add the ast + final store
     store_loop = output_shape.index(1) if 1 in output_shape else -1
@@ -263,8 +327,10 @@ class LLVMBuffer(ExplicitExecAST):
     if k.reduceop:
       reduce_input = ast_parse(loop_exit[-1], k.reduceop.src[0], -1)
       phis = [LLVMBuffer.start_for_op[k.reduceop.op]]  # type: ignore
+      if kernel_output_dim > 1:
+        phis = [kernel_output_type(phis * kernel_output_dim)]
       for i in range(store_loop+1, len(loop_entry)):
-        val = loop_entry[i].phi(ir.FloatType(), f"reduce_phi_{i}")
+        val = loop_entry[i].phi(kernel_output_type, f"reduce_phi_{i}")
         val.add_incoming(phis[-1], loop_entry[i-1]._block)
         phis.append(val)
 
@@ -280,7 +346,10 @@ class LLVMBuffer(ExplicitExecAST):
     result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
 
     # store result
-    loop_exit[store_loop].store(result, loop_exit[store_loop].gep(func.args[0], [idx_level[0][store_loop]], inbounds=True))
+    builder = loop_exit[store_loop]
+    for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
+      element = result if kernel_output_dim == 1 else builder.extract_element(result, int_const(i))
+      builder.store(element, builder.gep(func.args[0], [idx], inbounds=True))
     
     # add the looping
     for i,s in enumerate(full_shape):
