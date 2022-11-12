@@ -124,11 +124,12 @@ class ASTKernel:
     strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
 
     # find first mismatch, don't reduce this
-    self.first_reduce = -1
-    for i in range(len(shapes[0])):
-      if not all_same([x[i] for x in shapes]):
-        self.first_reduce = i
-        break
+    def get_first_reduce(shapes):
+      for i in range(len(shapes[0])):
+        if not all_same([x[i] for x in shapes]):
+          return i
+      return -1
+    first_reduce = get_first_reduce(shapes)
 
     # merge dimensions if we can, multi get_shape_strides
     # TODO: does this always preserve the reduce dimension, NO
@@ -140,13 +141,14 @@ class ASTKernel:
         # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
         can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
       # more can merge than this
-      can_merge = all(can_merge) and i != self.first_reduce
+      can_merge = all(can_merge) and i != first_reduce
       for j in range(len(shapes)):
         if can_merge:
           rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
         else:
           rets[j].append((shapes[j][i], strides[j][i]))
     self.shapes, self.strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
+    self.first_reduce = get_first_reduce(self.shapes)  # update this if axis merged
 
     # include the offsets (as is)
     self.offsets = [x.st.views[-1].offset for x in self.bufs]

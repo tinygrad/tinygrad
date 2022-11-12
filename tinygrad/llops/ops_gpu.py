@@ -116,11 +116,16 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
     output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
 
+  @functools.lru_cache(None)   # without this cache it'll generate the index twice
   def idx_deref(buf_index):
-    assert len(k.bufs[buf_index].st.views) == 1
-    idx_pieces = [f"idx{i}*{st}" for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0]
+    st = k.bufs[buf_index].st
+    idx_pieces = [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0]
+    if st.needs_valid(): kernel.append(f"bool bufvalid{buf_index} = true;")
     kernel.append(f"int bufidx{buf_index} = " + '('+' + '.join(idx_pieces if idx_pieces else ["0"])+');\n')
-    return f"buf{buf_index}[bufidx{buf_index}]"
+    if len(st.views) > 1:
+      extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
+      kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufidx{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
+    return f"(bufvalid{buf_index} ? buf{buf_index}[bufidx{buf_index}] : 0.0)" if st.needs_valid() else f"buf{buf_index}[bufidx{buf_index}]"
 
   def ast_parse(x, reduce=False):
     if not isinstance(x, LazyOp):
@@ -142,13 +147,14 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
     for i in range(k.first_reduce, len(k.shapes[0])):
       kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-    kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";")
+    kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";\n")
     kernel += ["}\n"] * (len(k.shapes[0]) - k.first_reduce)
   
   # late ast
   kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n")
   kernel.append("}")
   if DEBUG >= 2:
+    print(k.first_reduce, len(k.shapes[0]), ast)
     print(' '.join(kernel))
   return partial(CLProgram("exec", ' '.join(kernel)), output_shape if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
 
