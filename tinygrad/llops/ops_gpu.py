@@ -3,8 +3,9 @@ import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
-from typing import List, Tuple, Optional, Dict, Union, Set
+from typing import List, Tuple, Optional, Dict, Union, Set, Any
 from tinygrad.helpers import prod, ConvArgs, dedup
+from tinygrad.ops import ASTKernel
 from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_info, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
 
@@ -116,6 +117,45 @@ class GPUBuffer(ExplicitExecAST):
     CL.enqueue_copy(data, self.contiguous().cl, is_blocking=True)
     return data
 
+  func_cache : Dict[str, Any] = {}
+  @classmethod
+  def exec_ast(cls, ast:LazyOp) -> GPUBuffer:
+    k = ASTKernel(ast)
+
+    key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
+    if key in GPUBuffer.func_cache:
+      GPUBuffer.func_cache[key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
+      return k.ret
+
+    k.process()
+    buf_names = [f"buf_{i}" for i in range(len(k.bufs))]
+
+    assert len(k.shapes[0]) <= 3
+    kernel = ["__kernel void exec(",] + [','.join(f'__global float4* {name}' for name in buf_names)] + [") {"]
+    kernel.append("int gid0 = get_global_id(0);")
+
+    def ast_parse(x):
+      if not isinstance(x, LazyOp):
+        buf_index = k.bufs.index(x)
+        return buf_names[buf_index] + "[gid0]"
+      if isinstance(x.op, ReduceOps):
+        return "reduce"
+      values = [ast_parse(v) for v in x.src]
+      code = GPUBuffer.code_for_op[x.op]
+      if len(values) >= 1: code = code.replace("A", values[0])
+      if len(values) >= 2: code = code.replace("B", values[1])
+      return code
+    
+    # late ast
+    kernel.append(f"{buf_names[0]}[gid0] = {ast_parse(ast)};")
+    kernel.append("}")
+    GPUBuffer.func_cache[key] = CLProgram("exec", ''.join(kernel))
+
+    GPUBuffer.func_cache[key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
+    return k.ret
+
+
+
   def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
     idx_getter = f"int valid = 1; {'long' if prod(x.shape) >= 2**31 else 'int'} idx = gid; {'idx *= '+str(reduce)+'; idx += subidx;' if reduce is not None else ''} {x.st.expr().replace('//', '/')};"
     constant = x._backing[0] if x._base_shape == (1,) and x._backing is not None else None
@@ -125,7 +165,7 @@ class GPUBuffer(ExplicitExecAST):
       f"get_{name}({name+'_g, ' if constant is None else ''}gid{', subidx' if reduce is not None else ''});"
 
   @classmethod
-  def exec_ast(cls, ast:LazyOp):
+  def old_exec_ast(cls, ast:LazyOp):
     # copied from llvm
     bufs = dedup(get_buffers(ast))
     reduceops = dedup([x for x in get_lazyops(ast) if isinstance(x.op, ReduceOps) or isinstance(x.op, ProcessingOps)])
