@@ -122,9 +122,8 @@ class GPUBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp) -> GPUBuffer:
     k = ASTKernel(ast)
 
-    key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
-    if key in GPUBuffer.func_cache:
-      GPUBuffer.func_cache[key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
+    if k.key in GPUBuffer.func_cache:
+      GPUBuffer.func_cache[k.key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
       return k.ret
 
     k.process()
@@ -149,9 +148,9 @@ class GPUBuffer(ExplicitExecAST):
     # late ast
     kernel.append(f"{buf_names[0]}[gid0] = {ast_parse(ast)};")
     kernel.append("}")
-    GPUBuffer.func_cache[key] = CLProgram("exec", ''.join(kernel))
+    GPUBuffer.func_cache[k.key] = CLProgram("exec", ''.join(kernel))
 
-    GPUBuffer.func_cache[key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
+    GPUBuffer.func_cache[k.key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
     return k.ret
 
 

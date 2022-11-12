@@ -105,6 +105,9 @@ class ASTKernel:
     assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
 
+    # key for lookup in cache (can change, str might not be right)
+    self.key = str(ast)
+
   def process(self):
     # get shape, strides, and offset
     # if it's a multiview buffer we take the final view
