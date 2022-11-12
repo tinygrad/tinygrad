@@ -3,6 +3,7 @@ import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
+from functools import partial
 from typing import List, Tuple, Optional, Dict, Union, Set, Any
 from tinygrad.helpers import prod, ConvArgs, dedup
 from tinygrad.ops import ASTKernel
@@ -123,7 +124,7 @@ class GPUBuffer(ExplicitExecAST):
     k = ASTKernel(ast)
 
     if k.key in GPUBuffer.func_cache:
-      GPUBuffer.func_cache[k.key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
+      GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
       return k.ret
 
     k.process()
@@ -148,9 +149,9 @@ class GPUBuffer(ExplicitExecAST):
     # late ast
     kernel.append(f"{buf_names[0]}[gid0] = {ast_parse(ast)};")
     kernel.append("}")
-    GPUBuffer.func_cache[k.key] = CLProgram("exec", ''.join(kernel))
+    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ''.join(kernel)), [prod(k.ret.shape)//4, 1, 1], None, op_estimate=k.info.flops)
 
-    GPUBuffer.func_cache[k.key]([prod(k.ret.shape)//4, 1, 1], None, *[x.cl for x in k.bufs], op_estimate=k.info.flops)
+    GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
     return k.ret
 
 
