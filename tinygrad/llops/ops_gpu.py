@@ -119,9 +119,9 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   @functools.lru_cache(None)   # without this cache it'll generate the index twice
   def idx_deref(buf_index):
     st = k.bufs[buf_index].st
-    idx_pieces = [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0]
+    idx_pieces = [str(st.offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0]
     if st.needs_valid(): kernel.append(f"bool bufvalid{buf_index} = true;")
-    kernel.append(f"int bufidx{buf_index} = " + '('+' + '.join(idx_pieces if idx_pieces else ["0"])+');\n')
+    kernel.append(f"int bufidx{buf_index} = " + '('+' + '.join(idx_pieces)+');\n')
     if len(st.views) > 1:
       extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
       kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufidx{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
