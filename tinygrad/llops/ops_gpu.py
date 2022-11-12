@@ -122,22 +122,21 @@ class GPUBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> GPUBuffer:
     k = ASTKernel(ast)
-
     if k.key in GPUBuffer.func_cache:
       GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
       return k.ret
-
     k.process()
-    buf_names = [f"buf_{i}" for i in range(len(k.bufs))]
 
     assert len(k.shapes[0]) <= 3
-    kernel = ["__kernel void exec(",] + [','.join(f'__global float4* {name}' for name in buf_names)] + [") {"]
-    kernel.append("int gid0 = get_global_id(0);")
+    kernel = ["__kernel void exec(",] + [','.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {"]
+    kernel += [f"int idx{i} = get_global_id({i});" for i in range(len(k.shapes[0]))]
+
+    def get_idx(buf_index): return '('+'+'.join(f"idx{i}*{s}" for i,s in enumerate(k.strides[buf_index]))+')'
 
     def ast_parse(x):
       if not isinstance(x, LazyOp):
         buf_index = k.bufs.index(x)
-        return buf_names[buf_index] + "[gid0]"
+        return f"buf{buf_index}[{get_idx(buf_index)}]"
       if isinstance(x.op, ReduceOps):
         return "reduce"
       values = [ast_parse(v) for v in x.src]
@@ -147,9 +146,11 @@ class GPUBuffer(ExplicitExecAST):
       return code
     
     # late ast
-    kernel.append(f"{buf_names[0]}[gid0] = {ast_parse(ast)};")
+    kernel.append(f"buf0[{get_idx(0)}] = {ast_parse(ast)};")
     kernel.append("}")
-    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ''.join(kernel)), [prod(k.ret.shape)//4, 1, 1], None, op_estimate=k.info.flops)
+    if DEBUG >= 2:
+      print(' '.join(kernel))
+    GPUBuffer.func_cache[k.key] = partial(CLProgram("exec", ' '.join(kernel)), k.shapes[0], None, op_estimate=k.info.flops)
 
     GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
     return k.ret
