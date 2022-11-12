@@ -2,7 +2,7 @@ from __future__ import annotations
 import hashlib
 import math
 import time
-from typing import Tuple, Union, Dict, Any
+from typing import Tuple, Union, Dict, Any, List
 from tinygrad.helpers import prod
 from tinygrad.shapetracker import ShapeTracker, ZeroView
 from tinygrad.ops import LazyOp, ASTKernel
@@ -201,7 +201,7 @@ class LLVMBuffer(ExplicitExecAST):
       print("old:", k.strides)
     
     # this stuff can't be hand coded
-    kernel_output_axis = []
+    kernel_output_axis : List[int] = []
     """
     CACHE_DIM = 32
     if len(k.shapes[0]) == 2:
@@ -326,7 +326,7 @@ class LLVMBuffer(ExplicitExecAST):
     reduce_result = None
     if k.reduceop:
       reduce_input = ast_parse(loop_exit[-1], k.reduceop.src[0], -1)
-      phis = [LLVMBuffer.start_for_op[k.reduceop.op]]
+      phis = [LLVMBuffer.start_for_op[k.reduceop.op]]  # type: ignore
       if kernel_output_dim > 1:
         phis = [kernel_output_type(phis * kernel_output_dim)]
       for i in range(store_loop+1, len(loop_entry)):

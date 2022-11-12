@@ -10,7 +10,6 @@ from tinygrad.lazy import Device, LazyBuffer
 
 class Tensor:
   training, no_grad = False, False
-  global_ops, global_mem = 0, 0
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad=None):
     if isinstance(data, list):
