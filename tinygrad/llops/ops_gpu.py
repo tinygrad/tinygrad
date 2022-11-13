@@ -146,7 +146,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
 
   kernel = ["__kernel void exec(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)))] + [") {\n"]
-  kernel += [f"int idx{i} = get_global_id({2-i});\n" for i in range(min(3, len(output_shape)))]
+  kernel += [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
   if len(output_shape) > 3:
     # compact all the dimensions into the final one
     for i in range(len(output_shape)-1, 2, -1):
