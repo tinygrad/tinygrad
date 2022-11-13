@@ -250,19 +250,27 @@ class LazyBuffer:
         (C.bs, x.shape[1]*x.shape[2]*C.groups*C.cin),
         (C.oy, C.sy*x.shape[2]*C.groups*C.cin), (C.ox, C.sx*C.groups*C.cin),
         (C.groups, C.cin), (1, 1), (1, 1),
-        (C.H, C.dy*x.shape[2]*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin//4, 4), (4, 1)
+        (C.H, C.dy*x.shape[2]*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin//4 if C.cin >= 4 else 1, 4), (4 if C.cin >= 4 else 1, 1)
       ))
-      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4, 4, C.H, C.W, C.cin//4, 4))
+      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4 if C.rcout >= 4 else 1, 4 if C.rcout >= 4 else 1, C.H, C.W, C.cin//4 if C.cin >= 4 else 1, 4 if C.cin >= 4 else 1))
+      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, C.cin//4 if C.cin >= 4 else 1, 4 if C.cin >= 4 else 1))
 
       # set up the weights
-      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4, C.W, 4, 4))
-      w = w.movement_op(MovementOps.PERMUTE, (0,4,1,3,2,5))
-      w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.groups, C.rcout//4, 4, C.H, C.W, C.cin//4, 4)) \
-           .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4, 4, C.H, C.W, C.cin//4, 4))
+      if C.cin == 1:
+        # depthwise
+        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.W, 4))
+        w = w.movement_op(MovementOps.PERMUTE, (0,3,1,2))
+        w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.cout//4, 4, C.H, C.W, 1, 1)) \
+             .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, 1, 1))
+      else:
+        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4, C.W, 4, 4))
+        w = w.movement_op(MovementOps.PERMUTE, (0,4,1,3,2,5))
+        w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.cout//4, 4, C.H, C.W, C.cin//4, 4)) \
+             .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, C.cin//4, 4))
 
       # now do the conv in this space
-      ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.groups, C.rcout//4, 4, 1, 1, 1, 1))
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.groups*C.rcout//4, 4))
+      ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.cout//4, 4, 1, 1, 1, 1))
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4))
       return postprocessing_op(ret, C, Cold)
 
     # TODO: fixup C?

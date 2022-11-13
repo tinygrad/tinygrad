@@ -46,7 +46,7 @@ class CL:
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
     if CL.CACHE is not None:
-      assert False, "can't copy while caching"
+      assert False, f"can't copy {a} -> {b} while caching"
     if DEBUG >= 1:
       print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
@@ -91,7 +91,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   last_reduce = len(k.shapes[0])
   reduce_dim = 1
 
-  if len(k.shapes[0]) == 8:
+  if len(k.shapes[0]) >= 8 and False:
     # channels
     """
     k.reshape_and_permute(
