@@ -146,7 +146,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
 
   kernel = ["__kernel void exec(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)))] + [") {\n"]
-  kernel += [f"int idx{i} = get_global_id({i});\n" for i in range(min(3, len(output_shape)))]
+  kernel += [f"int idx{i} = get_global_id({2-i});\n" for i in range(min(3, len(output_shape)))]
   if len(output_shape) > 3:
     # compact all the dimensions into the final one
     for i in range(len(output_shape)-1, 2, -1):
@@ -206,7 +206,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   if DEBUG >= 2:
     print(first_reduce, last_reduce, ast)
     print(' '.join(kernel))
-  return partial(CLProgram("exec", ' '.join(kernel)), output_shape if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
+  return partial(CLProgram("exec", ' '.join(kernel)), output_shape[::-1] if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
 
 class GPUBuffer(ExplicitExecAST):
   code_for_op : Dict[Op, str] = {
