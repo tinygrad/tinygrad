@@ -86,6 +86,12 @@ class ExplicitExecAST(DeviceBuffer):
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
   def contiguous(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
+def get_first_reduce(shapes):
+  for i in range(len(shapes[0])):
+    if not all_same([x[i] for x in shapes]):
+      return i
+  return -1
+
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
   def __init__(self, ast:LazyOp):
@@ -124,11 +130,6 @@ class ASTKernel:
     strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
 
     # find first mismatch, don't reduce this
-    def get_first_reduce(shapes):
-      for i in range(len(shapes[0])):
-        if not all_same([x[i] for x in shapes]):
-          return i
-      return -1
     first_reduce = get_first_reduce(shapes)
 
     # merge dimensions if we can, multi get_shape_strides
@@ -169,4 +170,5 @@ class ASTKernel:
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     self.shapes, self.strides = new_shapes, new_strides
+    self.first_reduce = get_first_reduce(self.shapes)  # update this if axis merged
 

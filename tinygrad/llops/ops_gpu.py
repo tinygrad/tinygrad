@@ -85,6 +85,19 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   if DEBUG >= 2:
     print("old:", k.shapes)
     print("old:", k.strides)
+  
+  if False and len(k.shapes[0]) == 8:
+    # pad out ox. this needs to be handled on the store
+    for s in k.shapes:
+      s[1] = (s[1]+3)//4 * 4
+    k.reshape_and_permute(
+      lambda s: (s[0], s[1]//4, 4, s[2], 4, s[4], s[5], s[6], s[7]),
+      (0,1,2,3,4,5,6,7,8))
+      #(0,1,3,5,6,7, 2,4,8))
+
+  if DEBUG >= 2:
+    print("new:", k.shapes)
+    print("new:", k.strides)
 
   """
   CACHE_DIM = 32
