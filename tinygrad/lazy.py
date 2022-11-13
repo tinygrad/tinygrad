@@ -241,16 +241,9 @@ class LazyBuffer:
 
     # TODO: before or after padding?
     if int(os.getenv("IMAGE", "0")) == 1:
-      # put the input in the right way, make it contiguous
-      x = x.movement_op(MovementOps.PERMUTE, (0,2,3,1))
-      x = x.movement_op(MovementOps.RESHAPE, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
-      x = x.contiguous()
-
-      # put the weights in the right way, make it contiguous
-      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.cin//4,4,C.H,C.W))
-      w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
-      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
-      w = w.contiguous()
+      from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
+      Cold = C
+      x,w,C = preprocessing_op(x, w, Cold)
 
       # set up the conv
       x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups, C.cin))
@@ -270,10 +263,8 @@ class LazyBuffer:
 
       # now do the conv in this space
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.groups, C.rcout, 1, 1, 1))
-
-      # now put it back to NCHW
-      return ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.groups*C.rcout)) \
-                .movement_op(MovementOps.PERMUTE, (0,3,1,2))
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.groups*C.cout//4, 4))
+      return postprocessing_op(ret, C, Cold)
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False) or True:
       # universal conv, just mul and reduce
