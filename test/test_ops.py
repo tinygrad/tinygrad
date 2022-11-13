@@ -245,9 +245,14 @@ class TestOps(unittest.TestCase):
       lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4)
 
   def test_simple_conv2d(self):
-    helper_test_op([(1,1,9,9), (1,1,3,3)],
+    helper_test_op([(1,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_nested_conv2d(self):
+    helper_test_op([(1,4,9,9), (4,4,3,3), (4,4,3,3)],
+      lambda x,w1,w2: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w1).relu(), w2).relu(),
+      lambda x,w1,w2: x.conv2d(w1).relu().conv2d(w2).relu(), atol=1e-4, grad_rtol=1e-5)
 
   # expect reduce nodes == 3
   def test_simple_conv2d_nhwc(self):

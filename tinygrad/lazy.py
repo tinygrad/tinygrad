@@ -230,10 +230,32 @@ class LazyBuffer:
   def processing_op(self:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     x = self
     # TODO: fixup C?
-    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False):
+    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False) or True:
       x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
 
-    if NOCONV or not getattr(x.dbuffer, "processing_op", False):
+    # TODO: before or after padding?
+    if int(os.getenv("IMAGE", "0")) == 1:
+      # put the input in the right way, make it contiguous
+      x = x.movement_op(MovementOps.PERMUTE, (0,2,3,1))
+      x = x.movement_op(MovementOps.RESHAPE, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
+      x = x.contiguous()
+
+      # now put it back virtually
+      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups*C.cin))
+      x = x.movement_op(MovementOps.PERMUTE, (0,3,1,2))
+
+      # put the weights in the right way, make it contiguous
+      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.cin//4,4,C.H,C.W))
+      w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
+      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
+      w = w.contiguous()
+
+      # now put it back virtually
+      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4, C.W, 4, 4))
+      w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
+      w = w.movement_op(MovementOps.RESHAPE, (C.cout, C.cin, C.H, C.W))
+
+    if NOCONV or not getattr(x.dbuffer, "processing_op", False) or True:
       # universal conv, just mul and reduce
       # TODO: is there any way to replace strided with other movement ops? answer: not really
       if C.sy == 1 and C.sx == 1 and C.H == 1 and C.W == 1:
