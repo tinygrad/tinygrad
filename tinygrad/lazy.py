@@ -261,7 +261,7 @@ class LazyBuffer:
 
       # now do the conv in this space
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.groups, C.rcout, 1, 1, 1))
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.groups*C.cout//4, 4))
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.groups*C.rcout//4, 4))
       return postprocessing_op(ret, C, Cold)
 
     # TODO: fixup C?
