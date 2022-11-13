@@ -1,8 +1,12 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
+import os
 import functools
 from typing import Tuple, Union, List
 from tinygrad.helpers import prod
+
+# TODO: fix DEBUG import
+DEBUG = int(os.getenv("DEBUG", "0"))
 
 def divmodidx(acc, d, mod=True):
   lr = f"(idx//{acc})" if acc != 1 else "idx"
@@ -137,6 +141,8 @@ class ShapeTracker:
     if self.contiguous:
       self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
     else:
+      if DEBUG >= 2:
+        print(f"WARNING: reshape from {self.shape} w strides {self.strides} -> {new_shape} is creating another view")
       self.views.append(view)
     return self
 

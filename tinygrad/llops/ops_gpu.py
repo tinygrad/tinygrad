@@ -82,6 +82,9 @@ class CLProgram:
 
 def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   k.process()
+  if DEBUG >= 2:
+    print("old:", k.shapes)
+    print("old:", k.strides)
 
   """
   CACHE_DIM = 32

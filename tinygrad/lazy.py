@@ -242,25 +242,26 @@ class LazyBuffer:
       x,w,C = preprocessing_op(x, w, Cold)
 
       # set up the conv
+      # (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4)
       x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups, C.cin))
       # padding
       x = x.slice(((0, x.shape[0]), (-C.py, x.shape[1]+C.py_), (-C.px, x.shape[2]+C.px_), (0, x.shape[3]), (0, x.shape[4])))
       x = x.movement_op(MovementOps.STRIDED, (
         (C.bs, x.shape[1]*x.shape[2]*C.groups*C.cin),
         (C.oy, C.sy*x.shape[2]*C.groups*C.cin), (C.ox, C.sx*C.groups*C.cin),
-        (C.groups, C.cin), (1, 1),
-        (C.H, C.dy*x.shape[2]*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin, 1)
+        (C.groups, C.cin), (1, 1), (1, 1),
+        (C.H, C.dy*x.shape[2]*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin//4, 4), (4, 1)
       ))
-      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout, C.H, C.W, C.cin))
+      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4, 4, C.H, C.W, C.cin//4, 4))
 
       # set up the weights
       w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4, C.W, 4, 4))
       w = w.movement_op(MovementOps.PERMUTE, (0,4,1,3,2,5))
-      w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.groups, C.rcout, C.H, C.W, C.cin)) \
-           .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout, C.H, C.W, C.cin))
+      w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.groups, C.rcout//4, 4, C.H, C.W, C.cin//4, 4)) \
+           .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4, 4, C.H, C.W, C.cin//4, 4))
 
       # now do the conv in this space
-      ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.groups, C.rcout, 1, 1, 1))
+      ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.groups, C.rcout//4, 4, 1, 1, 1, 1))
       ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.groups*C.rcout//4, 4))
       return postprocessing_op(ret, C, Cold)
 
