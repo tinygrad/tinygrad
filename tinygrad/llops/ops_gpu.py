@@ -162,8 +162,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     # constant folding
     if k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
       bufs_to_delete.add(buf_index)
-      return str(k.bufs[buf_index]._backing[0])
-
+      return f"({k.bufs[buf_index]._backing[0]:f}f)", Types.FLOAT
     div = 1
     if reduce_dim == 4 and k.bufs[buf_index] in k.earlybufs:
       div = 4
