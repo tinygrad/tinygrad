@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, functools
+from enum import Enum
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
@@ -86,14 +87,34 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     print("old:", k.shapes)
     print("old:", k.strides)
   
-  if False and len(k.shapes[0]) == 8:
+  first_reduce = k.first_reduce
+  last_reduce = len(k.shapes[0])
+  reduce_dim = 1
+
+  if len(k.shapes[0]) == 8:
+    # channels
+    """
+    k.reshape_and_permute(
+      lambda s: (s[0], s[1], s[2], 4, s[4], s[5], s[6], s[7]),
+      (0,1,2,4,5,6,7,3))
+    first_reduce -= 1
+    last_reduce -= 1
+    """
+
+    reduce_dim = 4
+    last_reduce -= 1
+
+    """
     # pad out ox. this needs to be handled on the store
     for s in k.shapes:
       s[1] = (s[1]+3)//4 * 4
+    # s[4:8] is reduce axis, 
     k.reshape_and_permute(
       lambda s: (s[0], s[1]//4, 4, s[2], 4, s[4], s[5], s[6], s[7]),
       (0,1,2,3,4,5,6,7,8))
-      #(0,1,3,5,6,7, 2,4,8))
+      #(0,1,3,5,6,7, 8, 2,4))
+    """
+
 
   if DEBUG >= 2:
     print("new:", k.shapes)
@@ -124,7 +145,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
 
-  kernel = ["__kernel void exec(",] + [', '.join(f'__global float* buf{i}' for i in range(len(k.bufs)))] + [") {\n"]
+  kernel = ["__kernel void exec(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)))] + [") {\n"]
   kernel += [f"int idx{i} = get_global_id({i});\n" for i in range(min(3, len(output_shape)))]
   if len(output_shape) > 3:
     # compact all the dimensions into the final one
@@ -132,28 +153,42 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
     output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
 
+  Types = Enum("Types", ["FLOAT", "FLOAT4"])
+
   @functools.lru_cache(None)   # without this cache it'll generate the index twice
-  def idx_deref(buf_index):
+  def idx_deref(buf_index) -> Tuple[str, Types]:
+    div = 1
+    if reduce_dim == 4 and k.bufs[buf_index] in k.earlybufs:
+      div = 4
     st = k.bufs[buf_index].st
-    idx_pieces = [str(st.offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index], k.strides[buf_index])) if sh != 1 and st != 0]
+    idx_pieces = [str(st.offset)] + [(f"idx{i}*{st//div}" if st//div != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
     if st.needs_valid(): kernel.append(f"bool bufvalid{buf_index} = true;")
-    kernel.append(f"int bufidx{buf_index} = " + '('+' + '.join(idx_pieces)+');\n')
+    kernel.append(f"int bufi{buf_index} = " + '('+' + '.join(idx_pieces)+');\n')
     if len(st.views) > 1:
       extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
-      kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufidx{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
-    return f"(bufvalid{buf_index} ? buf{buf_index}[bufidx{buf_index}] : 0.0)" if st.needs_valid() else f"buf{buf_index}[bufidx{buf_index}]"
+      kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
+    if reduce_dim == 4 and k.bufs[buf_index] in k.earlybufs:
+      assert not st.needs_valid()
+      return f"vload4(bufi{buf_index}, data{buf_index})", Types.FLOAT4
+    else:
+      return f"(bufvalid{buf_index} ? data{buf_index}[bufi{buf_index}] : 0.0)" if st.needs_valid() else f"data{buf_index}[bufi{buf_index}]", Types.FLOAT
 
-  def ast_parse(x, reduce=False):
+  def ast_parse(x, reduce=False) -> Tuple[str, Types]:
     if not isinstance(x, LazyOp):
       buf_index = k.bufs.index(x)
       return idx_deref(buf_index)
     if isinstance(x.op, ReduceOps) and not reduce:
-      return "acc"
+      return "acc", Types.FLOAT
     values = [ast_parse(v) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]
-    if len(values) >= 1: code = code.replace("A", values[0])
-    if len(values) >= 2: code = code.replace("B", values[1])
-    return code
+    if isinstance(x.op, ReduceOps) and values[0][1] != Types.FLOAT:
+      # reduce produce float
+      kernel.insert(0, "float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+      return code.replace("A", f"clsum({values[0][0]})"), Types.FLOAT
+
+    if len(values) >= 1: code = code.replace("A", values[0][0])
+    if len(values) >= 2: code = code.replace("B", values[1][0])
+    return code, values[0][1]  # pass back type of first value
 
   # early ast
   if k.reduceop:
@@ -161,15 +196,15 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
     kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
-    for i in range(k.first_reduce, len(k.shapes[0])):
+    for i in range(first_reduce, last_reduce):
       kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-    kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";\n")
-    kernel += ["}\n"] * (len(k.shapes[0]) - k.first_reduce)
+    kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True)[0] + ";\n")
+    kernel += ["}\n"] * (last_reduce - first_reduce)
   
   # late ast
-  kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
+  kernel.append(f"{idx_deref(0)[0]} = {ast_parse(ast)[0]};\n}}")
   if DEBUG >= 2:
-    print(k.first_reduce, len(k.shapes[0]), ast)
+    print(first_reduce, last_reduce, ast)
     print(' '.join(kernel))
   return partial(CLProgram("exec", ' '.join(kernel)), output_shape if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
 

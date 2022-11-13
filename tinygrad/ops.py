@@ -170,5 +170,4 @@ class ASTKernel:
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     self.shapes, self.strides = new_shapes, new_strides
-    self.first_reduce = get_first_reduce(self.shapes)  # update this if axis merged
 
