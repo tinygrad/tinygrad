@@ -218,8 +218,8 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   def runner(*bufs):
     fxn = CLProgram("exec", ' '.join(kernel))
-    bufs = [x for i,x in enumerate(bufs) if i not in bufs_to_delete]
-    return fxn(output_shape[::-1] if len(output_shape) > 0 else [1], None, *bufs, op_estimate=k.info.flops)
+    clbufs = [x.cl for i,x in enumerate(bufs) if i not in bufs_to_delete]
+    return fxn(output_shape[::-1] if len(output_shape) > 0 else [1], None, *clbufs, op_estimate=k.info.flops)
   return runner
 
 class GPUBuffer(ExplicitExecAST):
@@ -265,5 +265,5 @@ class GPUBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp) -> GPUBuffer:
     k = ASTKernel(ast)
     if k.key not in GPUBuffer.func_cache: GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
-    GPUBuffer.func_cache[k.key](*[x.cl for x in k.bufs])
+    GPUBuffer.func_cache[k.key](*k.bufs)
     return k.ret
