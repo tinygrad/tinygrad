@@ -235,11 +235,7 @@ class LazyBuffer:
 
   def processing_op(self:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     x = self
-    # TODO: fixup C?
-    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False) or True:
-      x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
 
-    # TODO: before or after padding?
     if int(os.getenv("IMAGE", "0")) == 1:
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       Cold = C
@@ -247,11 +243,13 @@ class LazyBuffer:
 
       # set up the conv
       x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups, C.cin))
+      # padding
+      x = x.slice(((0, x.shape[0]), (-C.py, x.shape[1]+C.py_), (-C.px, x.shape[2]+C.px_), (0, x.shape[3]), (0, x.shape[4])))
       x = x.movement_op(MovementOps.STRIDED, (
-        (C.bs, C.iy*C.ix*C.groups*C.cin),
-        (C.oy, C.sy*C.ix*C.groups*C.cin), (C.ox, C.sx*C.groups*C.cin),
+        (C.bs, x.shape[1]*x.shape[2]*C.groups*C.cin),
+        (C.oy, C.sy*x.shape[2]*C.groups*C.cin), (C.ox, C.sx*C.groups*C.cin),
         (C.groups, C.cin), (1, 1),
-        (C.H, C.dy*C.ix*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin, 1)
+        (C.H, C.dy*x.shape[2]*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin, 1)
       ))
       x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout, C.H, C.W, C.cin))
 
@@ -265,6 +263,10 @@ class LazyBuffer:
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.groups, C.rcout, 1, 1, 1))
       ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.groups*C.cout//4, 4))
       return postprocessing_op(ret, C, Cold)
+
+    # TODO: fixup C?
+    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False):
+      x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False) or True:
       # universal conv, just mul and reduce
