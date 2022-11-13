@@ -145,8 +145,8 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
 
-  kernel = ["__kernel void exec(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)))] + [") {\n"]
-  kernel += [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
+  prekernel = []
+  kernel = [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
   if len(output_shape) > 3:
     # compact all the dimensions into the final one
     for i in range(len(output_shape)-1, 2, -1):
@@ -155,8 +155,15 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   Types = Enum("Types", ["FLOAT", "FLOAT4"])
 
+  bufs_to_delete = set()
+
   @functools.lru_cache(None)   # without this cache it'll generate the index twice
   def idx_deref(buf_index) -> Tuple[str, Types]:
+    # constant folding
+    if k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
+      bufs_to_delete.add(buf_index)
+      return str(k.bufs[buf_index]._backing[0])
+
     div = 1
     if reduce_dim == 4 and k.bufs[buf_index] in k.earlybufs:
       div = 4
@@ -183,7 +190,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     code = GPUBuffer.code_for_op[x.op]
     if isinstance(x.op, ReduceOps) and values[0][1] != Types.FLOAT:
       # reduce produce float
-      kernel.insert(0, "float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+      prekernel.append("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
       return code.replace("A", f"clsum({values[0][0]})"), Types.FLOAT
 
     if len(values) >= 1: code = code.replace("A", values[0][0])
@@ -203,10 +210,18 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   
   # late ast
   kernel.append(f"{idx_deref(0)[0]} = {ast_parse(ast)[0]};\n}}")
+
+  # kernel function definition
+  kernel = prekernel + ["__kernel void exec(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)) if i not in bufs_to_delete)] + [") {\n"] + kernel
   if DEBUG >= 2:
     print(first_reduce, last_reduce, ast)
     print(' '.join(kernel))
-  return partial(CLProgram("exec", ' '.join(kernel)), output_shape[::-1] if len(output_shape) > 0 else [1], None, op_estimate=k.info.flops)
+
+  def runner(*bufs):
+    fxn = CLProgram("exec", ' '.join(kernel))
+    bufs = [x for i,x in enumerate(bufs) if i not in bufs_to_delete]
+    return fxn(output_shape[::-1] if len(output_shape) > 0 else [1], None, *bufs, op_estimate=k.info.flops)
+  return runner
 
 class GPUBuffer(ExplicitExecAST):
   code_for_op : Dict[Op, str] = {
