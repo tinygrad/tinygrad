@@ -159,7 +159,7 @@ class LazyBuffer:
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
-  def contiguous(self:LazyBuffer) -> LazyBuffer: return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)))
+  def contiguous(self:LazyBuffer) -> LazyBuffer: return self if self.st.contiguous else LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)))
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape):
@@ -240,20 +240,34 @@ class LazyBuffer:
       x = x.movement_op(MovementOps.RESHAPE, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
       x = x.contiguous()
 
-      # now put it back virtually
-      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups*C.cin))
-      x = x.movement_op(MovementOps.PERMUTE, (0,3,1,2))
-
       # put the weights in the right way, make it contiguous
       w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.cin//4,4,C.H,C.W))
       w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
       w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
       w = w.contiguous()
 
-      # now put it back virtually
+      # set up the conv
+      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups, C.cin))
+      x = x.movement_op(MovementOps.STRIDED, (
+        (C.bs, C.iy*C.ix*C.groups*C.cin),
+        (C.oy, C.sy*C.ix*C.groups*C.cin), (C.ox, C.sx*C.groups*C.cin),
+        (C.groups, C.cin), (1, 1), (C.cin, 1),
+        (C.H, C.dy*C.ix*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin)
+      ))
+      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout, C.cin, C.H, C.W))
+
+      # set up the weights
       w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4, C.W, 4, 4))
       w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
-      w = w.movement_op(MovementOps.RESHAPE, (C.cout, C.cin, C.H, C.W))
+      w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.groups, C.rcout, C.cin, C.H, C.W)) \
+           .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout, C.cin, C.H, C.W))
+
+      # now do the conv in this space
+      ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.groups, C.rcout, 1, 1, 1))
+
+      # now put it back to NCHW
+      return ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.groups*C.rcout)) \
+                .movement_op(MovementOps.PERMUTE, (0,3,1,2))
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False) or True:
       # universal conv, just mul and reduce
