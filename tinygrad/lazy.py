@@ -40,7 +40,7 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   elif self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize(self.device)
     ret = real_src.contiguous()
-    return ret, [real_src], LoadOps if id(ret) != id(real_src) else None
+    return ret, [real_src], LoadOps
   else:
     raise NotImplementedError(f"unknown LoadOp {self.op.op}")
 
@@ -112,8 +112,8 @@ _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:
 # **** lazy operations ****
 
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
-def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.optype == MovementOps and root.realized is None else root
-def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
+def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(root.op.src[0], allow_contiguous) if root.realized is None and (root.optype == MovementOps or (allow_contiguous and root.op.op == LoadOps.CONTIGUOUS)) else root
+def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x, True) if x.st.contiguous else x
 
 LAZY = int(os.getenv("LAZY", "1"))
 
@@ -168,7 +168,7 @@ class LazyBuffer:
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
-  def contiguous(self:LazyBuffer) -> LazyBuffer: return self if self.st.contiguous else LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)))
+  def contiguous(self:LazyBuffer, arg=None) -> LazyBuffer: return self if self.st.contiguous and not arg else LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), arg))
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape):
@@ -273,7 +273,7 @@ class LazyBuffer:
 
       # now do the conv in this space
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.cout//4, 4, 1, 1, 1, 1))
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4))
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4)).contiguous(True)
       return postprocessing_op(ret, C, Cold)
 
     # TODO: fixup C?

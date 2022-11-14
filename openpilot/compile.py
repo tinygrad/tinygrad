@@ -2,7 +2,8 @@
 import os, time, io, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-os.environ['OPT'] = '99'
+if os.getenv("OPT", None) is None:
+  os.environ['OPT'] = '99'
 if os.getenv("GPU", None) is None:
   os.environ['OPENCL'] = '1'
 

@@ -84,7 +84,7 @@ class ExplicitExecAST(DeviceBuffer):
 
   # universal for shape tracked
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
-  def contiguous(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
+  def contiguous(self): return type(self)(self.shape, hostbuf=self) if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
