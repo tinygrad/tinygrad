@@ -76,9 +76,10 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
         print("\nHIT", k,x)
         for tk in k.children: print("k", tk)
         for tx in x.children: print("x", tx)
-  psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and len(x.children) <= 1 and len(k.children) <= 1]
+  # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergable but requires more thought how 
+  psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape = self.shape
-  if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE and (self.device != "OPENCL" or self.shape[-1] == 4):
+  if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if psrcs[0][1].optype == ProcessingOps:
       real_srcs[psrcs[0][0]] = psrcs[0][1].op
       for x in psrcs[0][1].op.src:
@@ -97,6 +98,8 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     if psrcs[0][0].shape != psrcs[0][1].shape:
       intermediate_shape = psrcs[0][1].shape
       assert psrcs[0][0].shape == self.shape, f"shape mismatch {psrcs[0][0].shape} != {self.shape}"
+
+  # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
   for x in real_srcs.keys():
     if real_srcs[x] is None:
