@@ -160,9 +160,9 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   @functools.lru_cache(None)   # without this cache it'll generate the index twice
   def idx_deref(buf_index) -> Tuple[str, Types]:
     # constant folding
-    if k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
+    if buf_index != 0 and k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing and not k.bufs[buf_index].st.needs_valid():
       bufs_to_delete.add(buf_index)
-      return f"({k.bufs[buf_index]._backing[0]:f}f)", Types.FLOAT
+      return f"({k.bufs[buf_index]._backing[0]})", Types.FLOAT
     div = 1
     if reduce_dim == 4 and k.bufs[buf_index] in k.earlybufs:
       div = 4
@@ -216,8 +216,10 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     print(first_reduce, last_reduce, ast)
     print(' '.join(kernel))
 
+  # compile kernel
+  fxn = CLProgram("exec", ' '.join(kernel))
+
   def runner(*bufs):
-    fxn = CLProgram("exec", ' '.join(kernel))
     clbufs = [x.cl for i,x in enumerate(bufs) if i not in bufs_to_delete]
     return fxn(output_shape[::-1] if len(output_shape) > 0 else [1], None, *clbufs, op_estimate=k.info.flops)
   return runner
@@ -264,6 +266,8 @@ class GPUBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> GPUBuffer:
     k = ASTKernel(ast)
-    if k.key not in GPUBuffer.func_cache: GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
+    # can't cache with constant folding
+    #if k.key not in GPUBuffer.func_cache:
+    GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
     GPUBuffer.func_cache[k.key](*k.bufs)
     return k.ret
