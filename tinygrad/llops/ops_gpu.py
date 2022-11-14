@@ -53,14 +53,15 @@ class CL:
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
-  kernel_cnt = 0
+  kernel_cnt = defaultdict(int)
   def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False):
-    self.name, self.prg, self.options, self.argdtypes = f"{name}{CLProgram.kernel_cnt}" if rename else name, prg.replace(f"{name}(", f"{name}{CLProgram.kernel_cnt}(") if rename else prg, options, argdtypes
+    self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else ''}" if rename else name
+    self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}("), options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
     self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
     if self.argdtypes is not None:
       self.clprg.set_scalar_arg_dtypes(self.argdtypes)
-    CLProgram.kernel_cnt += 1
+    CLProgram.kernel_cnt[name] += 1
   def __call__(self, *args, op_estimate=0):
     CL.kernel_count += 1
     if CL.CACHE is not None:
@@ -202,7 +203,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
 
   # kernel function definition
-  function_name = ("re_S" if k.reduceop else "ew_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1]) + "_N"
+  function_name = ("re_S" if k.reduceop else "ew_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1])
   kernel = [f"__kernel void {function_name}(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)) if i not in bufs_to_delete)] + [") {\n"] + kernel
   if DEBUG >= 2:
     print(first_reduce, last_reduce, ast)
