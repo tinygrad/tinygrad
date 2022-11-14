@@ -266,8 +266,8 @@ class Thneed:
       events.append(prg.clprg(CL().cl_queue, *args))
     mt = time.monotonic()
     CL().cl_queue.finish()
-    et = time.monotonic()
-    print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {(et-st)*1000.0:.2f} ms")
+    et = time.monotonic() - st
+    print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 
     if DEBUGCL:
       total_runtime = 0
@@ -275,7 +275,7 @@ class Thneed:
         runtime = (e.profile.end - e.profile.start)
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
         total_runtime += runtime
-      print(f"total runtime: {total_runtime/1e6:.2f} ms")
+      print(f"total runtime: {total_runtime/1e6:.2f} ms   wall time: {et*1000.0:.2f} ms")
 
   def optimize_local_workgroup(self):
     MAX_WORKGROUP = CL.cl_ctx.devices[0].max_work_group_size

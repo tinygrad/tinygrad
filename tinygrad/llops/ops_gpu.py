@@ -202,7 +202,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
 
   # kernel function definition
-  function_name = ("reduce_S" if k.reduceop else "elementwise_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1]) + "_N"
+  function_name = ("re_S" if k.reduceop else "ew_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1]) + "_N"
   kernel = [f"__kernel void {function_name}(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)) if i not in bufs_to_delete)] + [") {\n"] + kernel
   if DEBUG >= 2:
     print(first_reduce, last_reduce, ast)
