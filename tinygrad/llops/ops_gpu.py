@@ -55,7 +55,7 @@ class CL:
 class CLProgram:
   kernel_cnt = 0
   def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False):
-    self.name, self.prg, self.options, self.argdtypes = f"{name}_{CLProgram.kernel_cnt}" if rename else name, prg.replace(f"{name}(", f"{name}_{CLProgram.kernel_cnt}(") if rename else prg, options, argdtypes
+    self.name, self.prg, self.options, self.argdtypes = f"{name}{CLProgram.kernel_cnt}" if rename else name, prg.replace(f"{name}(", f"{name}{CLProgram.kernel_cnt}(") if rename else prg, options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
     self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
     if self.argdtypes is not None:
@@ -74,7 +74,7 @@ class CLProgram:
     if DEBUG >= 1:
       CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else (e.profile.end - e.profile.start)
       CL.ops_sum += op_estimate
-      print(f"**CL** {CL.kernel_count:6d} {self.name:20s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
+      print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
             ("" if DEBUG <= 1 or CL.CACHE is not None else f"tm {(e.profile.end - e.profile.start)/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({op_estimate/(e.profile.end - e.profile.start):8.2f} GFLOPS)"))
     GlobalCounters.global_ops += op_estimate
     GlobalCounters.global_mem += sum([x.size//4 for x in args[2:] if isinstance(x, cl.Buffer)])
@@ -202,13 +202,14 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
 
   # kernel function definition
-  kernel = ["__kernel void exec(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)) if i not in bufs_to_delete)] + [") {\n"] + kernel
+  function_name = ("reduce_S" if k.reduceop else "elementwise_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1]) + "_N"
+  kernel = [f"__kernel void {function_name}(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)) if i not in bufs_to_delete)] + [") {\n"] + kernel
   if DEBUG >= 2:
     print(first_reduce, last_reduce, ast)
     print(' '.join(kernel))
 
   # compile kernel
-  fxn = CLProgram("exec", ' '.join(kernel))
+  fxn = CLProgram(function_name, ' '.join(kernel))
 
   def runner(*bufs):
     clbufs = [x.cl for i,x in enumerate(bufs) if i not in bufs_to_delete]
