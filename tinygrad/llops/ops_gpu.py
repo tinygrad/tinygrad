@@ -156,25 +156,24 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   @functools.lru_cache(None)   # without this cache it'll generate the index twice
   def idx_deref(buf_index) -> Tuple[str]:
-    # constant folding
-    if buf_index != 0 and k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing and not k.bufs[buf_index].st.needs_valid():
-      bufs_to_delete.add(buf_index)
-      return f"({k.bufs[buf_index]._backing[0]})"
-    div = 1
-    if reduce_dim == 4 and k.bufs[buf_index] in k.earlybufs:
-      div = 4
     st = k.bufs[buf_index].st
-    idx_pieces = [str(st.offset)] + [(f"idx{i}*{st//div}" if st//div != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
+
+    idx_pieces = [str(st.offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
     if st.needs_valid(): kernel.append(f"bool bufvalid{buf_index} = true;")
     kernel.append(f"int bufi{buf_index} = " + '('+' + '.join(idx_pieces)+');\n')
     if len(st.views) > 1:
       extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
       kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
-    if reduce_dim == 4 and k.bufs[buf_index] in k.earlybufs:
-      assert not st.needs_valid()
-      return f"vload4(bufi{buf_index}, data{buf_index})"
-    else:
-      return f"(bufvalid{buf_index} ? data{buf_index}[bufi{buf_index}] : 0.0)" if st.needs_valid() else f"data{buf_index}[bufi{buf_index}]"
+
+    # constant folding
+    if buf_index != 0 and k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
+      bufs_to_delete.add(buf_index)
+      if not st.needs_valid():
+        return f"({k.bufs[buf_index]._backing[0]})"
+      else:
+        return f"(bufvalid{buf_index} ? {k.bufs[buf_index]._backing[0]} : 0.0)"
+
+    return f"(bufvalid{buf_index} ? data{buf_index}[bufi{buf_index}] : 0.0)" if st.needs_valid() else f"data{buf_index}[bufi{buf_index}]"
 
   def ast_parse(x, reduce=False) -> Tuple[str]:
     if not isinstance(x, LazyOp):
