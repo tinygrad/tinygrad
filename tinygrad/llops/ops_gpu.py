@@ -56,7 +56,7 @@ class CLProgram:
   kernel_cnt = defaultdict(int)
   def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False):
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else ''}" if rename else name
-    self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}("), options, argdtypes
+    self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
     self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
     if self.argdtypes is not None:

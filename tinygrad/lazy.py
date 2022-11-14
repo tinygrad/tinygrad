@@ -215,7 +215,7 @@ class LazyBuffer:
       return self.movement_op(MovementOps.RESHAPE, tuple(i for i,_ in arg))
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED, MovementOps.PAD]:
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
       def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
         if isinstance(y, LazyBuffer):
           return y.movement_op(op, arg)
