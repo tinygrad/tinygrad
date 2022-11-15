@@ -8,7 +8,7 @@ from functools import partial
 from typing import List, Tuple, Optional, Dict, Union, Set, Any
 from tinygrad.helpers import prod, ConvArgs, dedup, all_same
 from tinygrad.ops import ASTKernel
-from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_info, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_info, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
 
 FLOAT16 = int(os.getenv("FLOAT16", 0))
@@ -133,13 +133,13 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     lb_valids = [True] * len(k.shapes[0])
     for i in range(len(k.bufs)):
       assert len(k.bufs[i].st.views) == 1 or not isinstance(k.bufs[i]._buf, CLImage)  # images can't have views
-      valids = [k.shapes[i][j]%4 == 0 and (k.strides[i][j] == 1 or not isinstance(k.bufs[i]._buf, CLImage)) for j in range(len(k.shapes[i]))]
+      valids = [k.shapes[i][j]%4 == 0 and (k.strides[i][j] == 1 or not isinstance(k.bufs[i]._buf, CLImage) or k.bufs[i] in k.earlybufs) for j in range(len(k.shapes[i]))]
       print(valids, k.shapes[i], k.strides[i])
       lb_valids = [x and y for x,y in zip(lb_valids, valids)]
     assert any(lb_valids), f"invalid op with images {buftypes}"
     lb_valid = lb_valids.index(True)
     assert lb_valid < first_reduce, f"can't be in the reduce {lb_valid}"
-    k.reshape_and_permute(lambda x: x[0:lb_valid] + [x[lb_valid]//4, 4] + x[lb_valid+1:], [i for i in range(k.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
+    k.reshape_and_permute(lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]), [i for i in range(k.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
     # no change, we added a dimension
     #last_reduce -= 1
     #first_reduce -= 1
@@ -303,7 +303,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   def ast_parse(x, offset=0, reduce=False) -> Token:
     if not isinstance(x, LazyOp):
       buf_index = k.bufs.index(x)
-      return load_store(buf_index)
+      return load_store(buf_index, offset=offset*k.strides[buf_index][-1])
     if isinstance(x.op, ReduceOps) and not reduce:
       return Token(f"acc", Types.FLOAT4 if late_are_float4 else Types.FLOAT)
     values = [ast_parse(v, offset, reduce) for v in x.src]
@@ -395,7 +395,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    CL.enqueue_copy(data, self.contiguous().cl, is_blocking=True)
+    CL.enqueue_copy(data, self.movement_op(MovementOps.RESHAPE, [prod(self.shape)]).unary_op(UnaryOps.NOOP).cl if isinstance(self._buf, CLImage) else self.contiguous().cl, is_blocking=True)
     return data
 
   func_cache : Dict[str, Any] = {}
