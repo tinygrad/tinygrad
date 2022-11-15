@@ -97,7 +97,7 @@ class CLProgram:
 
 def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   k.process()
-  buftypes = ["__global float *" if isinstance(x._buf, CLBuffer) else f"{'read_only' if i > 0 else 'write_only'} image2d_t" for i,x in enumerate(k.bufs)]
+  buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(k.bufs)]
   print(buftypes)
 
   if DEBUG >= 2:
