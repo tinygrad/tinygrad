@@ -46,7 +46,13 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
 
 # TODO: these two are generic, replace them?
 def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  real_src = self.op.src[0].realize(self.device)
+  src = self.op.src[0]
+
+  # fuse RESHAPE and ReduceOps
+  if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
+    return _realize_reduceops(src, output_shape = self.op.arg)
+
+  real_src = src.realize(self.device)
   return real_src.movement_op(self.op.op, self.op.arg), [real_src], MovementOps
 
 def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:

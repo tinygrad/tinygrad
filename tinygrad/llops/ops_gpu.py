@@ -11,7 +11,9 @@ from tinygrad.ops import ASTKernel
 from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_info, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
 
+FLOAT16 = int(os.getenv("FLOAT16", 0))
 CLCACHE = int(os.getenv("CLCACHE", "1"))
+
 class CLBuffer:
   def __init__(self, size):
     if len(CL.BUFFER_CACHE[size]) > 0:
@@ -26,6 +28,19 @@ class CLBuffer:
       CL.BUFFER_CACHE[self.cl.size].append(self.cl)
     else:
       CL.mem_used -= self.cl.size
+
+class CLImage:
+  #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+  fmt = cl.ImageFormat(cl.channel_order.R, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+
+  def __init__(self, shape):
+    #self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]))
+    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]*shape[2]))
+    CL.mem_used += self.cl.row_pitch * self.cl.height
+
+  def __del__(self):
+    if hasattr(self, "cl"):
+      CL.mem_used -= self.cl.row_pitch * self.cl.height
 
 class CL:
   CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
@@ -146,7 +161,8 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
 
-  kernel = [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
+  kernel = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
+  kernel += [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
   if len(output_shape) > 3:
     # compact all the dimensions into the final one
     for i in range(len(output_shape)-1, 2, -1):
@@ -174,7 +190,13 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       else:
         return f"(bufvalid{buf_index} ? {k.bufs[buf_index]._backing[0]} : 0.0)"
 
-    return f"(bufvalid{buf_index} ? data{buf_index}[bufi{buf_index}] : 0.0)" if st.needs_valid() else f"data{buf_index}[bufi{buf_index}]"
+    if isinstance(k.bufs[buf_index]._buf, CLImage):
+      W = k.bufs[buf_index]._base_shape[1] * k.bufs[buf_index]._base_shape[2]
+      ldr = f"read_imagef(data{buf_index}, smp, (int2)(bufi{buf_index}/{W}, bufi{buf_index}%{W})).x"
+    else:
+      ldr = f"data{buf_index}[bufi{buf_index}]"
+
+    return f"(bufvalid{buf_index} ? {ldr} : 0.0)" if st.needs_valid() else ldr
 
   def ast_parse(x, reduce=False) -> Tuple[str]:
     if not isinstance(x, LazyOp):
@@ -200,11 +222,17 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     kernel += ["}\n"] * (last_reduce - first_reduce)
   
   # late ast
-  kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
+  if isinstance(k.bufs[0]._buf, CLImage): 
+    idx_deref(0)
+    W = k.bufs[0]._base_shape[1] * k.bufs[0]._base_shape[2]
+    kernel.append(f"write_imagef(data0, (int2)(bufi0/{W}, bufi0%{W}), {ast_parse(ast)});\n}}")
+  else:
+    kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
 
   # kernel function definition
+  buftypes = ["__global float *" if isinstance(x._buf, CLBuffer) else f"{'read_only' if i > 0 else 'write_only'} image2d_t" for i,x in enumerate(k.bufs)]
   function_name = ("re_S" if k.reduceop else "ew_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1])
-  kernel = [f"__kernel void {function_name}(",] + [', '.join(f'__global float* data{i}' for i in range(len(k.bufs)) if i not in bufs_to_delete)] + [") {\n"] + kernel
+  kernel = [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in bufs_to_delete)] + [") {\n"] + kernel
   if DEBUG >= 2:
     print(first_reduce, last_reduce, ast)
     print(' '.join(kernel))
@@ -227,11 +255,17 @@ class GPUBuffer(ExplicitExecAST):
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, image=False):
     super().__init__(shape, hostbuf)
     self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+
+    # image
+    if image and hostbuf is None:
+      assert self._backing is None
+      self._buf = CLImage(self._base_shape)
+
     # early copy in for large buffers
     if self._backing is not None and self._backing.shape != (1,):
       self.cl

@@ -104,7 +104,8 @@ class ASTKernel:
     self.output_shape = output_shape if output_shape else self.info.shape
 
     # create the buffer we are returning (as the same type as the input buffers)
-    self.ret = type(self.bufs[0])(self.output_shape)
+    # TODO: better way to determine image
+    self.ret = type(self.bufs[0])(self.output_shape, image=len(self.output_shape) == 3 and self.output_shape[2] == 4)
 
     # actually force the creation (change this to image)
     self.ret.cl
