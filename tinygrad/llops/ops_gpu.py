@@ -30,12 +30,10 @@ class CLBuffer:
       CL.mem_used -= self.cl.size
 
 class CLImage:
-  #fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
-  fmt = cl.ImageFormat(cl.channel_order.R, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+  fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
 
   def __init__(self, shape):
-    #self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]))
-    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]*shape[2]))
+    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]))
     CL.mem_used += self.cl.row_pitch * self.cl.height
 
   def __del__(self):
@@ -191,7 +189,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
         return f"(bufvalid{buf_index} ? {k.bufs[buf_index]._backing[0]} : 0.0)"
 
     if isinstance(k.bufs[buf_index]._buf, CLImage):
-      W = k.bufs[buf_index]._base_shape[1] * k.bufs[buf_index]._base_shape[2]
+      W = k.bufs[buf_index]._base_shape[1]
       ldr = f"read_imagef(data{buf_index}, smp, (int2)(bufi{buf_index}/{W}, bufi{buf_index}%{W})).x"
     else:
       ldr = f"data{buf_index}[bufi{buf_index}]"
@@ -224,7 +222,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   # late ast
   if isinstance(k.bufs[0]._buf, CLImage): 
     idx_deref(0)
-    W = k.bufs[0]._base_shape[1] * k.bufs[0]._base_shape[2]
+    W = k.bufs[0]._base_shape[1]
     kernel.append(f"write_imagef(data0, (int2)(bufi0/{W}, bufi0%{W}), {ast_parse(ast)});\n}}")
   else:
     kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
