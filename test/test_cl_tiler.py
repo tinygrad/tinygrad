@@ -37,3 +37,7 @@ class TestCLTiler(unittest.TestCase):
     helper_test_tiler((3, 40_000, 4), get_pts(0, 3, 40_000))
   def test_tall(self):
     helper_test_tiler((40_000, 3, 4), get_pts(0, 3, 40_000))
+    helper_test_tiler((40_000, 3, 4), get_pts(0, 3, 40_000))
+
+ if __name__ == '__main__':
+   unittest.main()
