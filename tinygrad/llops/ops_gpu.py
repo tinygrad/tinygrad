@@ -228,7 +228,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
 
   # kernel function definition
-  buftypes = ["__global float *" if isinstance(x._buf, CLBuffer) else f"{'read_only' if i > 0 else 'write_only'} image2d_t" for i,x in enumerate(k.bufs)]
+  buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(k.bufs)]
   function_name = ("re_S" if k.reduceop else "ew_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1])
   kernel = [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in bufs_to_delete)] + [") {\n"] + kernel
   if DEBUG >= 2:
