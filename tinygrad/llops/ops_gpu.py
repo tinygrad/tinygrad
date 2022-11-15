@@ -118,13 +118,14 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     for i in range(len(k.bufs)):
       if isinstance(k.bufs[i]._buf, CLImage) and k.bufs[i] in k.earlybufs:
         assert len(k.bufs[i].st.views) == 1  # images can't have views
-        valids = [k.shapes[i][j] == 4 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
+        valids = [k.shapes[i][j]%4 == 0 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
         eb_valids = [x and y for x,y in zip(eb_valids, valids)]
     assert any(eb_valids), f"invalid op with images {buftypes}"
     eb_valid = eb_valids.index(True)
     assert eb_valid >= first_reduce, "only support in the reduce for now"
-    k.reshape_and_permute(lambda x: x, [i for i in range(k.shape_len) if i != eb_valid] + [eb_valid])
-    last_reduce -= 1
+    # no change, we added a dimension
+    k.reshape_and_permute(lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]), [i for i in range(k.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
+    #last_reduce -= 1
     early_loads_are_float4 = True
   
   # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
@@ -134,7 +135,6 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     for i in range(len(k.bufs)):
       assert len(k.bufs[i].st.views) == 1 or not isinstance(k.bufs[i]._buf, CLImage)  # images can't have views
       valids = [k.shapes[i][j]%4 == 0 and (k.strides[i][j] == 1 or not isinstance(k.bufs[i]._buf, CLImage) or k.bufs[i] in k.earlybufs) for j in range(len(k.shapes[i]))]
-      print(valids, k.shapes[i], k.strides[i])
       lb_valids = [x and y for x,y in zip(lb_valids, valids)]
     assert any(lb_valids), f"invalid op with images {buftypes}"
     lb_valid = lb_valids.index(True)
@@ -310,7 +310,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
     if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT:
       prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-      return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}"), Types.FLOAT)
+      return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if late_are_float4 else "acc"), Types.FLOAT)
     assert all_same([x.typ for x in values]), f"type mismatch in {values}"
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
@@ -395,7 +395,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    CL.enqueue_copy(data, self.movement_op(MovementOps.RESHAPE, [prod(self.shape)]).unary_op(UnaryOps.NOOP).cl if isinstance(self._buf, CLImage) else self.contiguous().cl, is_blocking=True)
+    CL.enqueue_copy(data, self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP).cl if isinstance(self._buf, CLImage) else self.contiguous().cl, is_blocking=True)
     return data
 
   func_cache : Dict[str, Any] = {}
