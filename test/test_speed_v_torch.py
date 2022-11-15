@@ -112,6 +112,22 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return -a
     helper_test_generic_square('neg', 4096, f, f)
 
+  def test_sub(self):
+    def f(a, b): return a-b
+    helper_test_generic_square('sub', 4096, f, f)
+
+  def test_constant_sub(self):
+    def f(a, b): return 1.0-a
+    helper_test_generic_square('sub', 4096, f, f)
+
+  def test_constant_zero_sub(self):
+    def f(a, b): return 0.0-a
+    helper_test_generic_square('sub', 4096, f, f)
+
+  def test_pow(self):
+    def f(a, b): return a.pow(b)
+    helper_test_generic_square('pow', 2048, f, f)
+
   def test_exp(self):
     def f(a, b): return a.exp()
     helper_test_generic_square('exp', 2048, f, f)
