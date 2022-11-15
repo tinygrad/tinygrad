@@ -90,7 +90,7 @@ def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
     if not all_same([x[i] for x in shapes]):
       return i
-  return -1
+  return len(shapes[0])  # off the end
 
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
@@ -160,6 +160,9 @@ class ASTKernel:
 
     # include the offsets (as is)
     self.offsets = [x.st.views[-1].offset for x in self.bufs]
+
+  @property
+  def shape_len(self): return len(self.shapes[0])
 
   # this should be aware of the three parts to the shape
   #  * the input/output dimensions

@@ -102,7 +102,7 @@ def compile(dat, output_fn):
   from extra.thneed import Thneed
   t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
   CL.CACHE = None
-  t.optimize_local_workgroup()
+  #t.optimize_local_workgroup()
 
   # save thneed (before run)
   t.save(output_fn)

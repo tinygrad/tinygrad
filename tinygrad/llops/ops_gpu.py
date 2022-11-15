@@ -6,7 +6,7 @@ import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from functools import partial
 from typing import List, Tuple, Optional, Dict, Union, Set, Any
-from tinygrad.helpers import prod, ConvArgs, dedup
+from tinygrad.helpers import prod, ConvArgs, dedup, all_same
 from tinygrad.ops import ASTKernel
 from tinygrad.ops import DEBUG, ProcessingOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_info, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
@@ -97,13 +97,81 @@ class CLProgram:
 
 def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   k.process()
+  buftypes = ["__global float *" if isinstance(x._buf, CLBuffer) else f"{'read_only' if i > 0 else 'write_only'} image2d_t" for i,x in enumerate(k.bufs)]
+  print(buftypes)
+
   if DEBUG >= 2:
     print("old:", k.shapes)
     print("old:", k.strides)
   
   first_reduce = k.first_reduce
   last_reduce = len(k.shapes[0])
-  reduce_dim = 1
+
+  early_loads_are_float4 = False
+  late_are_float4 = False
+
+  # if there's images in the earlybufs, we have to make an axis the 4 loading one
+  # shove the axis to the end and remove it
+  any_early_images = any(isinstance(buf._buf, CLImage) for buf in k.earlybufs)
+  if any_early_images:
+    eb_valids = [True] * len(k.shapes[0])
+    for i in range(len(k.bufs)):
+      if isinstance(k.bufs[i]._buf, CLImage) and k.bufs[i] in k.earlybufs:
+        assert len(k.bufs[i].st.views) == 1  # images can't have views
+        valids = [k.shapes[i][j]%4 == 0 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
+        eb_valids = [x and y for x,y in zip(eb_valids, valids)]
+    assert any(eb_valids), f"invalid op with images {buftypes}"
+    eb_valid = eb_valids.index(True)
+    assert eb_valid >= first_reduce, "only support in the reduce for now"
+    k.reshape_and_permute(lambda x: x, [i for i in range(k.shape_len) if i != eb_valid] + [eb_valid])
+    last_reduce -= 1
+    early_loads_are_float4 = True
+  
+  # if there's images in the latebufs, we have to make an axis the 4 storing one
+  any_late_images = any(isinstance(buf._buf, CLImage) for buf in k.bufs if buf not in k.earlybufs)
+  if any_late_images:
+    lb_valids = [True] * len(k.shapes[0])
+    for i in range(len(k.bufs)):
+      if isinstance(k.bufs[i]._buf, CLImage) and k.bufs[i] not in k.earlybufs:
+        assert len(k.bufs[i].st.views) == 1  # images can't have views
+        valids = [k.shapes[i][j]%4 == 0 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
+        lb_valids = [x and y for x,y in zip(lb_valids, valids)]
+    assert any(lb_valids), f"invalid op with images {buftypes}"
+    lb_valid = lb_valids.index(True)
+    assert lb_valid < first_reduce, f"can't be in the reduce {lb_valid}"
+    k.reshape_and_permute(lambda x: x, [i for i in range(k.shape_len) if i != lb_valid] + [lb_valid])
+    last_reduce -= 1
+    first_reduce -= 1
+    late_are_float4 = True
+  print(f"early_loads_are_float4: {early_loads_are_float4} late_are_float4: {late_are_float4}")
+
+  """
+  if any_images:
+    eb_valids = [True] * len(k.shapes[0])
+    lb_valids = [True] * len(k.shapes[0])
+    for i in range(len(k.bufs)):
+      # have to read in order for an image
+      if isinstance(k.bufs[i]._buf, CLImage):
+        assert len(k.bufs[i].st.views) == 1  # images can't have views
+        valids = [k.shapes[i][j]%4 == 0 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
+        if k.bufs[i] in k.earlybufs:
+          eb_valids = [x and y for x,y in zip(eb_valids, valids)]
+        else:
+          lb_valids = [x and y for x,y in zip(lb_valids, valids)]
+        print(f"found image {i} with shape {k.shapes[i]} and strides {k.strides[i]}")
+    print(eb_valids, lb_valids)
+    assert any(eb_valids) and any(lb_valids), f"invalid op with images {buftypes}"
+  """
+
+  # the eb_valids are all loads, the lb_valids could be either
+
+
+  #reduce_dim = 1
+  #if k.earlybufs:
+    #bi = k.bufs.index(k.earlybufs[0])
+    #assert k.shapes[bi][-1] == 4, f"last dim must be 4 {k.shapes[bi]}"
+    #pass
+  #assert k.shapes[0][first_reduce-1], f"last non reduce dim must be 4 {k.shapes[0]}"
 
   if len(k.shapes[0]) >= 8 and False:
     # channels
@@ -159,78 +227,119 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   output_shape = k.shapes[0] if not k.reduceop else k.shapes[0][:k.first_reduce]
 
+  prekernel = set()
   kernel = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
   kernel += [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
   if len(output_shape) > 3:
     # compact all the dimensions into the final one
     for i in range(len(output_shape)-1, 2, -1):
       kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
+    print(output_shape)
     output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
 
   bufs_to_delete = set()
 
-  @functools.lru_cache(None)   # without this cache it'll generate the index twice
-  def idx_deref(buf_index) -> Tuple[str]:
+  Types = Enum("Types", ["FLOAT", "FLOAT4"])
+  class Token:
+    def __init__(self, tok:str, typ:Types):
+      assert isinstance(tok, str)
+      self.tok = tok
+      self.typ = typ
+    def __str__(self): return self.tok
+    def __repr__(self): return f"<{self.typ} {self.tok}>"
+    
+
+  seen_idx = set()
+  def idx_deref(buf_index, offset=0) -> Token:
     st = k.bufs[buf_index].st
 
-    idx_pieces = [str(st.offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
-    if st.needs_valid(): kernel.append(f"bool bufvalid{buf_index} = true;")
-    kernel.append(f"int bufi{buf_index} = " + '('+' + '.join(idx_pieces)+');\n')
-    if len(st.views) > 1:
-      extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
-      kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
+    if buf_index not in seen_idx:
+      idx_pieces = [str(st.offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
+      if st.needs_valid(): kernel.append(f"bool bufvalid{buf_index} = true;")
+      kernel.append(f"int bufi{buf_index} = " + '('+' + '.join(idx_pieces)+');\n')
+      if len(st.views) > 1:
+        extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
+        kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
+      seen_idx.add(buf_index)
 
     # constant folding
     if buf_index != 0 and k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
       bufs_to_delete.add(buf_index)
       if not st.needs_valid():
-        return f"({k.bufs[buf_index]._backing[0]})"
+        return Token(f"({k.bufs[buf_index]._backing[0]})", Types.FLOAT)
       else:
-        return f"(bufvalid{buf_index} ? {k.bufs[buf_index]._backing[0]} : 0.0)"
+        return Token(f"(bufvalid{buf_index} ? {k.bufs[buf_index]._backing[0]} : 0.0)", Types.FLOAT)
 
     if isinstance(k.bufs[buf_index]._buf, CLImage):
       W = k.bufs[buf_index]._base_shape[1]
-      ldr = f"read_imagef(data{buf_index}, smp, (int2)(bufi{buf_index}/{W}, bufi{buf_index}%{W})).x"
+      ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)((bufi{buf_index}+{offset})/{W*4}, ((bufi{buf_index}+{offset})/4)%{W}))", Types.FLOAT4)
     else:
-      ldr = f"data{buf_index}[bufi{buf_index}]"
+      if late_are_float4 and buf_index != 0:
+        mst = []
+        for i in range(4):
+          mst.append(f"data{buf_index}[bufi{buf_index} + {i*k.strides[buf_index][-1]} + {offset}]")
+        ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
+      else:
+        ldr = Token(f"data{buf_index}[bufi{buf_index} + {offset}]", Types.FLOAT)
+    if ldr.typ == Types.FLOAT4: assert not st.needs_valid()
+    return Token(f"(bufvalid{buf_index} ? {ldr.tok} : 0.0)", Types.FLOAT) if st.needs_valid() else ldr
 
-    return f"(bufvalid{buf_index} ? {ldr} : 0.0)" if st.needs_valid() else ldr
-
-  def ast_parse(x, reduce=False) -> Tuple[str]:
+  def ast_parse(x, offset=0, reduce=False) -> Token:
     if not isinstance(x, LazyOp):
       buf_index = k.bufs.index(x)
-      return idx_deref(buf_index)
+      return idx_deref(buf_index, k.strides[buf_index][-1]*offset)
     if isinstance(x.op, ReduceOps) and not reduce:
-      return "acc"
-    values = [ast_parse(v) for v in x.src]
-    code = GPUBuffer.code_for_op[x.op]
-    if len(values) >= 1: code = code.replace("A", values[0])
-    if len(values) >= 2: code = code.replace("B", values[1])
-    return code  # pass back type of first value
+      if late_are_float4:
+        return Token(f"acc.s{offset}", Types.FLOAT)
+      else:
+        return Token(f"acc", Types.FLOAT)
+    values = [ast_parse(v, offset, reduce) for v in x.src]
+    code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
+    if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT:
+      prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+      return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}"), Types.FLOAT)
+    assert all_same([x.typ for x in values]), f"type mismatch in {values}"
+    if len(values) >= 1: code = code.replace("A", values[0].tok)
+    if len(values) >= 2: code = code.replace("B", values[1].tok)
+    return Token(code, values[0].typ)  # pass back type of first value
 
   # early ast
   if k.reduceop:
     full_shape = [x for x in k.shapes if x != k.shapes[0]]
     full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-    kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
+    if late_are_float4:
+      kernel.append(f"float4 acc = (float4)({cls.start_for_op[k.reduceop.op]}, {cls.start_for_op[k.reduceop.op]}, {cls.start_for_op[k.reduceop.op]}, {cls.start_for_op[k.reduceop.op]});\n")
+    else:
+      kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
     for i in range(first_reduce, last_reduce):
       kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-    kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";\n")
+    if late_are_float4:
+      for j in range(4):
+        kernel.append(f"  acc.s{j} = " + ast_parse(k.reduceop, offset=j, reduce=True).tok + ";\n")
+    else:
+      kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True).tok + ";\n")
     kernel += ["}\n"] * (last_reduce - first_reduce)
   
   # late ast
+  process_ast = ast_parse(ast)
   if isinstance(k.bufs[0]._buf, CLImage): 
     idx_deref(0)
     W = k.bufs[0]._base_shape[1]
-    kernel.append(f"write_imagef(data0, (int2)(bufi0/{W}, bufi0%{W}), {ast_parse(ast)});\n}}")
+    #assert process_ast.typ == Types.FLOAT4, f"ast {process_ast} isn't float4"
+    kernel.append(f"write_imagef(data0, (int2)(bufi0/{W*4}, (bufi0/4)%{W}), {process_ast.tok});\n}}")
   else:
-    kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
+    if process_ast.typ == Types.FLOAT4:
+      assert late_are_float4
+      for i in range(4):
+        kernel.append(f"{idx_deref(0, i)} = {ast_parse(ast)}.s{i};\n")
+      kernel.append("}")
+    else:
+      kernel.append(f"{idx_deref(0)} = {ast_parse(ast)};\n}}")
 
   # kernel function definition
-  buftypes = ["__global float *" if isinstance(x._buf, CLBuffer) else f"{'read_only' if i > 0 else 'write_only'} image2d_t" for i,x in enumerate(k.bufs)]
   function_name = ("re_S" if k.reduceop else "ew_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1])
-  kernel = [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in bufs_to_delete)] + [") {\n"] + kernel
+  kernel = list(prekernel) + [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in bufs_to_delete)] + [") {\n"] + kernel
   if DEBUG >= 2:
     print(first_reduce, last_reduce, ast)
     print(' '.join(kernel))
