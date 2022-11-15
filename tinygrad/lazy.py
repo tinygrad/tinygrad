@@ -54,17 +54,18 @@ def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBu
   return real_src_x.processing_op(self.op.op, real_src_w, self.op.arg), [real_src_x, real_src_w], ProcessingOps
 
 # this supports late merging an upstream Elementwise op
-def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
+def _realize_reduceops(self:LazyBuffer, output_shape=None) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
   if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
     # this is the new version, deprecate _processing_op
     real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_buffers(src.op)}
     ast = LazyOp(self.op.op, (realize_buffers(real_srcs, src.op),), self.op.arg)
-    return self.dbuffer.exec_ast(ast), list(real_srcs.values()), ReduceOps
+    return self.dbuffer.exec_ast(ast, output_shape), list(real_srcs.values()), ReduceOps
   else:
     real_src = src.realize(self.device)
-    return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
+    ast = LazyOp(self.op.op, (real_src,), self.op.arg)
+    return self.dbuffer.exec_ast(ast, output_shape), [real_src], ReduceOps
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
@@ -104,8 +105,8 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
   for x in real_srcs.keys():
     if real_srcs[x] is None:
       real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape).realize(self.device)
-  ret = self.dbuffer.exec_ast(realize_buffers(real_srcs, self.op))
-  return ret.movement_op(MovementOps.RESHAPE, self.shape), [x for x in real_srcs.values() if not isinstance(x, LazyOp) and x is not None], op_type
+  ret = self.dbuffer.exec_ast(realize_buffers(real_srcs, self.op), output_shape=self.shape)
+  return ret, [x for x in real_srcs.values() if not isinstance(x, LazyOp) and x is not None], op_type
 
 _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:_realize_movementops, BinaryOps:_realize_binaryops, ProcessingOps:_realize_processingops}
 

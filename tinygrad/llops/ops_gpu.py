@@ -257,8 +257,8 @@ class GPUBuffer(ExplicitExecAST):
 
   func_cache : Dict[str, Any] = {}
   @classmethod
-  def exec_ast(cls, ast:LazyOp) -> GPUBuffer:
-    k = ASTKernel(ast)
+  def exec_ast(cls, ast:LazyOp, output_shape:Optional[Tuple[int, ...]]=None) -> GPUBuffer:
+    k = ASTKernel(ast, output_shape)
     # can't cache with constant folding
     #if k.key not in GPUBuffer.func_cache:
     GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
