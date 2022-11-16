@@ -211,7 +211,7 @@ class OpenCLBuffer(GPUBuffer):
   SUPPORTS_PADDING = True
   def processing_op(x, op:ProcessingOps, w:GPUBuffer, C:ConvArgs):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    return type(x)(C.out_shape)._processing_op([("input", x.contiguous_op()), ("weight", w.contiguous_op())], "acc", C)
+    return type(x)(C.out_shape)._processing_op([("input", x.contiguous()), ("weight", w.contiguous())], "acc", C)
 
   def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
     # this will only be for convs, for reduce we have to fall back to cl
@@ -261,7 +261,7 @@ class OpenCLBuffer(GPUBuffer):
     # fix widths
     replacements["get_image_width(output)"] = f"({ret._image.shape[0]})"
 
-    x, w = x.contiguous_op(), w.contiguous_op()
+    x, w = x.contiguous(), w.contiguous()
     options = []
     if C.bs > 1:
       options.append("-DBATCH")

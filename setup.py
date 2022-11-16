@@ -8,7 +8,7 @@ with open(os.path.join(directory, 'README.md'), encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.3.0',
+      version='0.4.0',
       description='You like pytorch? You like micrograd? You love tinygrad! heart',
       author='George Hotz',
       license='MIT',
@@ -23,6 +23,7 @@ setup(name='tinygrad',
       python_requires='>=3.8',
       extras_require={
         'gpu': ["pyopencl", "six"],
+        'llvm': ["llvmlite"],
         'testing': [
             "pytest",
             "torch~=1.11.0",

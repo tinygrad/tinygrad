@@ -39,8 +39,8 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
     return Device._buffers[self.device].fromCPU(self.op.arg), [], LoadOps
   elif self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize(self.device)
-    ret = real_src.contiguous_op()
-    return ret, [real_src], LoadOps if ret != real_src else None
+    ret = real_src.contiguous()
+    return ret, [real_src], LoadOps if id(ret) != id(real_src) else None
   else:
     raise NotImplementedError(f"unknown LoadOp {self.op.op}")
 
@@ -159,7 +159,7 @@ class LazyBuffer:
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
-  def contiguous_op(self:LazyBuffer) -> LazyBuffer: return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)))
+  def contiguous(self:LazyBuffer) -> LazyBuffer: return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)))
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape):
@@ -235,13 +235,18 @@ class LazyBuffer:
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False):
       # universal conv, just mul and reduce
-      # TODO: is there any way to replace strided with other movement ops?
-      x = x.movement_op(MovementOps.STRIDED, (
-        (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
-        (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
-        (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
+      # TODO: is there any way to replace strided with other movement ops? answer: not really
+      if C.sy == 1 and C.sx == 1 and C.H == 1 and C.W == 1:
+        # TODO: this doesn't belong here, ShapeTracker or lazy should be able to infer this from STRIDED
+        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.oy, C.ox, 1, C.H, C.W))
+        x = x.movement_op(MovementOps.PERMUTE, (0,1,5,3,4,2,6,7))
+      else:
+        x = x.movement_op(MovementOps.STRIDED, (
+          (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
+          (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
+          (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
       #if C.H <= 3 and C.W <= 3:  # max 9x the RAM overhead, this is im2col
-      #  x = x.contiguous_op()
+      #  x = x.contiguous()
       x = x.movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
       w = w.movement_op(MovementOps.RESHAPE, (1, C.groups, C.rcout, 1, 1, C.cin, C.H, C.W)) \
            .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))

@@ -2,6 +2,10 @@ from tinygrad.helpers import prod, argsort, reduce_shape, get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
+class Contiguous(Function):
+  def forward(self, x): return x.contiguous()
+  def backward(self, grad_output): return grad_output
+
 # ************* unary ops *************
 
 class ReLU(Function):
@@ -64,8 +68,7 @@ class Max(Function):
     max_is_1s = x.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.EXPAND, x.shape))
 
     # sum of locations, averaged
-    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape)
-    div = div.movement_op(MovementOps.EXPAND, x.shape)
+    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).movement_op(MovementOps.EXPAND, x.shape)
     max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
 
     grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, x.shape)
