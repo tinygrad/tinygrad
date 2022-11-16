@@ -306,6 +306,15 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
       lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  def test_depthwise_conv2d(self):
+    bs = 1
+    groups = 32
+    rcout = 8
+    cin = 1
+    helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+
   def test_grouped_conv2d(self):
     bs = 4
     groups = 5
