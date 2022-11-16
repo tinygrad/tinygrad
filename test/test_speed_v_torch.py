@@ -9,8 +9,8 @@ from functools import partial
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
+from tinygrad.helpers import colored
 try:
-  from termcolor import colored
   from tinygrad.llops.ops_gpu import CL
 except ImportError:
   colored = None
@@ -22,15 +22,12 @@ torch_device = torch.device('mps' if int(os.getenv("MPS", "0")) else 'cpu')
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
-  if colored:
-    if x < 0.75:
-      return colored(ret, 'green')
-    elif x > 1.5:
-      return colored(ret, 'red')
-    else:
-      return colored(ret, 'yellow')
+  if x < 0.75:
+    return colored(ret, 'green')
+  elif x > 1.5:
+    return colored(ret, 'red')
   else:
-    return ret
+    return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
 CNT = 8
