@@ -33,14 +33,28 @@ class TestImage(unittest.TestCase):
     N = 16
     (r1,r2), (i1,i2) = get_two_images(N)
     ret = (i1*i2).numpy()
-    np.testing.assert_allclose((r1*r2), ret, atol=1e-6)
+    np.testing.assert_allclose((r1*r2), ret, atol=1e-5)
 
   def test_reduce(self):
     N = 16
     (r1,r2), (i1,i2) = get_two_images(N)
     p1 = (i1*i2).sum(2).numpy()
     p2 = (r1*r2).sum(2)
-    np.testing.assert_allclose(p1, p2, atol=1e-6)
+    np.testing.assert_allclose(p1, p2, atol=1e-5)
+
+  def test_mid_reduce(self):
+    N = 32
+    (r1,r2), (i1,i2) = get_two_images(N)
+    p1 = (i1*i2).sum((1,2)).reshape(2,4,4).numpy()
+    p2 = (r1*r2).sum((1,2)).reshape(2,4,4)
+    np.testing.assert_allclose(p1, p2, atol=1e-5)
+
+  def test_mid_reduce_alt(self):
+    N = 32
+    (r1,r2), (i1,i2) = get_two_images(N)
+    p1 = (i1*i2).sum((1,2)).numpy()
+    p2 = (r1*r2).sum((1,2))
+    np.testing.assert_allclose(p1, p2, atol=1e-5)
 
   def test_full_reduce(self):
     N = 16
