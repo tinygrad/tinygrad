@@ -106,7 +106,7 @@ class ShapeTracker:
     return self
 
   def reshape(self, *new_shape):
-    assert all(isinstance(x, int) and x != 0 for x in new_shape), f"shape can't contain 0 {new_shape}"
+    assert all(isinstance(x, int) and x != 0 for x in new_shape), f"shape must be ints and can't contain 0 {new_shape}"
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # check if this is adding or removing 1s (only)
@@ -131,11 +131,14 @@ class ShapeTracker:
             while len(new_strides) != len(new_shape):
               assert new_shape[len(new_strides)] == 1
               new_strides.append(1)
-            self.views[-1] = View(new_shape, new_strides, self.offset)
-            return self   # early return, it factorized!
+            break
           curr_dim, curr_stride = min_shape_strides.pop(0)
       else:
         break   # didn't factorize
+
+    if len(new_shape) == len(new_strides):
+      self.views[-1] = View(new_shape, new_strides, self.offset)
+      return self
 
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous:
