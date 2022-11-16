@@ -274,7 +274,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     constant_fold = None
     if not store and k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
       bufs_to_delete.add(buf_index)
-      constant_fold = str(k.bufs[buf_index]._backing[0])
+      constant_fold = f"({k.bufs[buf_index]._backing[0]})"
 
     if isinstance(k.bufs[buf_index]._buf, CLImage):
       W = k.bufs[buf_index]._base_shape[1]
