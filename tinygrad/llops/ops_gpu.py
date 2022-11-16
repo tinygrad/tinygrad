@@ -285,7 +285,9 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
         kernel.append(f"write_imagef(data{buf_index}, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}), {store.tok});\n")
         return
       else:
+        assert not st.needs_valid()
         ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}))", Types.FLOAT4)
+      return ldr
     else:
       if store:
         if store.typ == Types.FLOAT4:
@@ -304,11 +306,13 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
           for i in range(4):
             lkey = compute_buf_index(st, buf_index, offset+i*k.strides[buf_index][-1])
             mst.append(f"data{buf_index}[bufi{lkey}]")
+            if st.needs_valid():
+              mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
           ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
+          return ldr
         else:
           ldr = Token(f"data{buf_index}[bufi{key} + {offset}]", Types.FLOAT)
-    if ldr.typ == Types.FLOAT4: assert not st.needs_valid()
-    return Token(f"(bufvalid{key} ? {ldr.tok} : 0.0)", Types.FLOAT) if st.needs_valid() else ldr
+          return Token(f"(bufvalid{key} ? {ldr.tok} : 0.0)", Types.FLOAT) if st.needs_valid() else ldr
 
   def ast_parse(x, offset=0, reduce=False) -> Token:
     if not isinstance(x, LazyOp):
