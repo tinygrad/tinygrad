@@ -251,18 +251,24 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     
 
   seen_idx = set()
-  def load_store(buf_index, offset=0, store=None) -> Token:
-    st = k.bufs[buf_index].st
-
+  def compute_buf_index(st, buf_index, offset):
+    key = f"{buf_index}_{offset}"
     # add the index if we don't have it
-    if buf_index not in seen_idx:
-      idx_pieces = [str(st.offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
-      if st.needs_valid(): kernel.append(f"bool bufvalid{buf_index} = true;")
-      kernel.append(f"int bufi{buf_index} = " + '('+' + '.join(idx_pieces)+');\n')
+    if key not in seen_idx:
+      idx_pieces = [str(st.offset + offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
+      if st.needs_valid(): kernel.append(f"bool bufvalid{key} = true;")
+      kernel.append(f"int bufi{key} = " + '('+' + '.join(idx_pieces)+');\n')
       if len(st.views) > 1:
         extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
-        kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{buf_index}").replace("valid", f"bufvalid{buf_index}") + ";\n")
-      seen_idx.add(buf_index)
+        kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{key}").replace("valid", f"bufvalid{key}") + ";\n")
+      seen_idx.add(key)
+    return key
+
+  def load_store(buf_index, offset=0, store=None) -> Token:
+    st = k.bufs[buf_index].st
+    if offset > 0: assert len(st.views) == 1
+
+    key = compute_buf_index(st, buf_index, offset)
 
     # constant folding
     if not store and k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
@@ -270,35 +276,39 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       if not st.needs_valid():
         return Token(f"({k.bufs[buf_index]._backing[0]})", Types.FLOAT)
       else:
-        return Token(f"(bufvalid{buf_index} ? {k.bufs[buf_index]._backing[0]} : 0.0)", Types.FLOAT)
+        return Token(f"(bufvalid{key} ? {k.bufs[buf_index]._backing[0]} : 0.0)", Types.FLOAT)
 
     if isinstance(k.bufs[buf_index]._buf, CLImage):
       W = k.bufs[buf_index]._base_shape[1]
       if store:
         assert store.typ == Types.FLOAT4, f"image can only store float4: {store} isn't"
-        kernel.append(f"write_imagef(data{buf_index}, (int2)((bufi{buf_index}+{offset})/{W*4}, ((bufi{buf_index}+{offset})/4)%{W}), {store.tok});\n")
+        kernel.append(f"write_imagef(data{buf_index}, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}), {store.tok});\n")
         return
       else:
-        ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)((bufi{buf_index}+{offset})/{W*4}, ((bufi{buf_index}+{offset})/4)%{W}))", Types.FLOAT4)
+        ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}))", Types.FLOAT4)
     else:
       if store:
         if store.typ == Types.FLOAT4:
+          #assert len(st.views) == 1
           kernel.append(f"float4 to_store = {store.tok};\n")
           for i in range(4):
-            kernel.append(f"data{buf_index}[bufi{buf_index} + {i*k.strides[buf_index][-1]} + {offset}] = to_store.s{i};\n")
+            lkey = compute_buf_index(st, buf_index, offset+i*k.strides[buf_index][-1])
+            kernel.append(f"data{buf_index}[bufi{lkey}] = to_store.s{i};\n")
         else:
-          kernel.append(f"data{buf_index}[bufi{buf_index} + {offset}] = {store.tok};\n")
+          kernel.append(f"data{buf_index}[bufi{key}] = {store.tok};\n")
         return
       else:
         if late_are_float4:
+          #assert len(st.views) == 1, st.views
           mst = []
           for i in range(4):
-            mst.append(f"data{buf_index}[bufi{buf_index} + {i*k.strides[buf_index][-1]} + {offset}]")
+            lkey = compute_buf_index(st, buf_index, offset+i*k.strides[buf_index][-1])
+            mst.append(f"data{buf_index}[bufi{lkey}]")
           ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
         else:
-          ldr = Token(f"data{buf_index}[bufi{buf_index} + {offset}]", Types.FLOAT)
+          ldr = Token(f"data{buf_index}[bufi{key} + {offset}]", Types.FLOAT)
     if ldr.typ == Types.FLOAT4: assert not st.needs_valid()
-    return Token(f"(bufvalid{buf_index} ? {ldr.tok} : 0.0)", Types.FLOAT) if st.needs_valid() else ldr
+    return Token(f"(bufvalid{key} ? {ldr.tok} : 0.0)", Types.FLOAT) if st.needs_valid() else ldr
 
   def ast_parse(x, offset=0, reduce=False) -> Token:
     if not isinstance(x, LazyOp):
