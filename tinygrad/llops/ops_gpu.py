@@ -117,7 +117,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     eb_valids = [True] * len(k.shapes[0])
     for i in range(len(k.bufs)):
       if isinstance(k.bufs[i]._buf, CLImage) and k.bufs[i] in k.earlybufs:
-        assert len(k.bufs[i].st.views) == 1  # images can't have views
+        assert len(k.bufs[i].st.views) == 1, f"images can't have views {k.bufs[i].st}"
         valids = [k.shapes[i][j]%4 == 0 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
         eb_valids = [x and y for x,y in zip(eb_valids, valids)]
     assert any(eb_valids), f"invalid op with images {buftypes}"
@@ -271,12 +271,10 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     key = compute_buf_index(st, buf_index, offset)
 
     # constant folding
+    constant_fold = None
     if not store and k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
       bufs_to_delete.add(buf_index)
-      if not st.needs_valid():
-        return Token(f"({k.bufs[buf_index]._backing[0]})", Types.FLOAT)
-      else:
-        return Token(f"(bufvalid{key} ? {k.bufs[buf_index]._backing[0]} : 0.0)", Types.FLOAT)
+      constant_fold = str(k.bufs[buf_index]._backing[0])
 
     if isinstance(k.bufs[buf_index]._buf, CLImage):
       W = k.bufs[buf_index]._base_shape[1]
@@ -305,14 +303,13 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
           mst = []
           for i in range(4):
             lkey = compute_buf_index(st, buf_index, offset+i*k.strides[buf_index][-1])
-            mst.append(f"data{buf_index}[bufi{lkey}]")
-            if st.needs_valid():
-              mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
+            mst.append(f"data{buf_index}[bufi{lkey}]" if not constant_fold else constant_fold)
+            if st.needs_valid(): mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
           ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
           return ldr
         else:
-          ldr = Token(f"data{buf_index}[bufi{key} + {offset}]", Types.FLOAT)
-          return Token(f"(bufvalid{key} ? {ldr.tok} : 0.0)", Types.FLOAT) if st.needs_valid() else ldr
+          ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
+          return Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT)
 
   def ast_parse(x, offset=0, reduce=False) -> Token:
     if not isinstance(x, LazyOp):
