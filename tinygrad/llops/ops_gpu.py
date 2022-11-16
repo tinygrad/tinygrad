@@ -237,12 +237,15 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     else:
       if late_are_float4 or (early_loads_are_float4 and k.bufs[buf_index] in k.earlybufs):
         #assert len(st.views) == 1, st.views
-        mst = []
-        for i in range(4):
-          lkey = compute_buf_index(st, buf_index, offset+i*k.strides[buf_index][-1])
-          mst.append(f"data{buf_index}[bufi{lkey}]" if not constant_fold else constant_fold)
-          if st.needs_valid(): mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
-        ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
+        if k.strides[buf_index][-1] == 1 and len(st.views) == 1 and not st.needs_valid():
+          ldr = Token(f"((__global float4*)data{buf_index})[bufi{key}/4]", Types.FLOAT4)
+        else:
+          mst = []
+          for i in range(4):
+            lkey = compute_buf_index(st, buf_index, offset+i*k.strides[buf_index][-1])
+            mst.append(f"data{buf_index}[bufi{lkey}]" if not constant_fold else constant_fold)
+            if st.needs_valid(): mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
+          ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
       else:
         ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
         ldr = Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT)
