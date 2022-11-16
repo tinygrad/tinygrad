@@ -222,7 +222,8 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   def load(buf_index, offset=0):
     st = k.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
-    key = compute_buf_index(st, buf_index, offset)
+    key = f"{buf_index}_{offset}"
+    #key = compute_buf_index(st, buf_index, offset)
 
     # constant folding
     constant_fold = None
@@ -232,9 +233,31 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
     if isinstance(k.bufs[buf_index]._buf, CLImage):
       W = k.bufs[buf_index]._base_shape[1]
-      #assert not st.needs_valid()
+      assert not st.needs_valid()
+      assert len(st.views) == 1
+      
+      c0, c1 = [str(offset//(W*4))], [str(offset//4)]
+      for i, (shape, stride) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])):
+        if shape == 1 or stride == 0: continue
+
+        if stride%(W*4) == 0:
+          if stride//(W*4) != 0:
+            c0.append(f"(idx{i} * {stride//(W*4)})")
+        else:
+          c0.append(f"((idx{i} * {stride})/({W*4}))")
+
+        if stride%4 == 0:
+          if stride//4 < W:
+            c1.append(f"(idx{i} * {stride//4})%{W}")
+        else:
+          c1.append(f"((idx{i} * {stride})/4)%{W}")
+      ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)({'+'.join(c0)}, {'+'.join(c1)}))", Types.FLOAT4)
+      """
+      compute_buf_index(st, buf_index, offset)
       ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}))", Types.FLOAT4)
+      """
     else:
+      compute_buf_index(st, buf_index, offset)
       if late_are_float4 or (early_loads_are_float4 and k.bufs[buf_index] in k.earlybufs):
         #assert len(st.views) == 1, st.views
         if k.strides[buf_index][-1] == 1 and len(st.views) == 1 and not st.needs_valid():
