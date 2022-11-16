@@ -131,11 +131,13 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     # no change, we added a dimension
     k.reshape_and_permute(lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]), [i for i in range(k.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
     #last_reduce -= 1
-    early_loads_are_float4 = True
 
     if eb_valid < first_reduce:
       #assert eb_valid >= first_reduce, f"only support in the reduce for now {eb_valids} and first reduce is {first_reduce}"
       early_loads_are_non_reduce_float4 = True
+      late_are_float4 = True
+    else:
+      early_loads_are_float4 = True
   
   # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
   any_late_images = any(isinstance(buf._buf, CLImage) for buf in k.bufs if buf not in k.earlybufs)
@@ -274,7 +276,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
     for i in range(first_reduce, last_reduce):
       kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-    if late_are_float4:
+    if late_are_float4 and not early_loads_are_non_reduce_float4:
       for j in range(4):
         kernel.append(f"  acc.s{j} = " + ast_parse(k.reduceop, offset=j, reduce=True).tok + ";\n")
     else:
