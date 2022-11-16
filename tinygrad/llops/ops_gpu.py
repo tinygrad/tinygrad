@@ -98,7 +98,7 @@ class CLProgram:
 def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   k.process()
   buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(k.bufs)]
-  print(buftypes)
+  #print(buftypes)
 
   if DEBUG >= 2:
     print("old:", k.shapes)
@@ -144,7 +144,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     #last_reduce -= 1
     #first_reduce -= 1
     late_are_float4 = True
-  print(f"early_loads_are_float4: {early_loads_are_float4} late_are_float4: {late_are_float4} first_reduce: {first_reduce} last_reduce: {last_reduce}")
+  #print(f"early_loads_are_float4: {early_loads_are_float4} late_are_float4: {late_are_float4} first_reduce: {first_reduce} last_reduce: {last_reduce}")
 
   """
   if any_images:
@@ -235,7 +235,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     # compact all the dimensions into the final one
     for i in range(len(output_shape)-1, 2, -1):
       kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
-    print(output_shape)
+    #print(output_shape)
     output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
 
   bufs_to_delete = set()
