@@ -218,7 +218,8 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       else:
         kernel.append(f"data{buf_index}[bufi{key}] = {value.tok};\n")
 
-  def load(buf_index, offset=0) -> Token:
+  @functools.lru_cache(None)
+  def load(buf_index, offset=0):
     st = k.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
     key = compute_buf_index(st, buf_index, offset)
@@ -233,7 +234,6 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       W = k.bufs[buf_index]._base_shape[1]
       #assert not st.needs_valid()
       ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}))", Types.FLOAT4)
-      return ldr
     else:
       if late_are_float4 or (early_loads_are_float4 and k.bufs[buf_index] in k.earlybufs):
         #assert len(st.views) == 1, st.views
@@ -243,10 +243,11 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
           mst.append(f"data{buf_index}[bufi{lkey}]" if not constant_fold else constant_fold)
           if st.needs_valid(): mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
         ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
-        return ldr
       else:
         ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
-        return Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT)
+        ldr = Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT)
+    kernel.append(f"{'float' if ldr.typ == Types.FLOAT else 'float4'} val{key} = {ldr.tok};\n")
+    return Token(f"val{key}", ldr.typ)
 
   def ast_parse(x, offset=0, reduce=False) -> Token:
     if not isinstance(x, LazyOp):
@@ -279,8 +280,10 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     for i in range(first_reduce, last_reduce):
       kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
     if late_are_float4 and not early_loads_are_non_reduce_float4:
+      future_kernel = []
       for j in range(4):
-        kernel.append(f"  acc.s{j} = " + ast_parse(k.reduceop, offset=j, reduce=True).tok + ";\n")
+        future_kernel.append(f"  acc.s{j} = " + ast_parse(k.reduceop, offset=j, reduce=True).tok + ";\n")
+      kernel += future_kernel
     else:
       kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True).tok + ";\n")
     kernel += ["}\n"] * (last_reduce - first_reduce)
