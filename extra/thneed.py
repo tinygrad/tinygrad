@@ -35,9 +35,15 @@ class Thneed:
       if len(nodes[n]['out_edges']) == 0:
         self.outputs.append(n)
   
-    for n in self.inputs.values():
-      assert n in self.buffers_to_save, f"{n} was not an input"
-      self.buffers_to_save.remove(n)
+    fake_inputs = []
+    for k,n in self.inputs.items():
+      if n in self.buffers_to_save:
+        self.buffers_to_save.remove(n)
+      else:
+        print(f"WARNING: {k} was not a used input, removing it")
+        fake_inputs.append(k)
+    for k in fake_inputs:
+      del self.inputs[k]
 
   def load(self, input_fn):
     float32 = not FLOAT16

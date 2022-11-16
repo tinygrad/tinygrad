@@ -7,6 +7,8 @@ from tinygrad.helpers import prod
 from tinygrad.nn import batch_normalize
 from tinygrad.ops import DEBUG
 
+ONNXLIMIT = int(os.getenv("ONNXLIMIT", "-1"))
+
 def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
@@ -76,6 +78,9 @@ def get_run_onnx(onnx_model):
         for _,v in input_tensors.items(): v.realize()
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
+
+    # store outputs
+    output_names = [x.name for x in onnx_model.graph.output]
 
     for num,n in enumerate(onnx_model.graph.node):
       if debug: print(f"{num}: op {n.op_type}")
@@ -173,6 +178,9 @@ def get_run_onnx(onnx_model):
       if debug: print(ret.shape)
       intermediate_tensors[n.output[0]] = ret
       #print(ret.numpy().mean())
+      if num == ONNXLIMIT:
+        output_names = n.output
+        break
 
-    return {outp.name:intermediate_tensors[outp.name] for outp in onnx_model.graph.output}
+    return {outp:intermediate_tensors[outp] for outp in output_names}
   return run_onnx
