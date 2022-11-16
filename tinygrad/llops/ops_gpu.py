@@ -244,14 +244,18 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
           if stride//(W*4) != 0:
             c0.append(f"(idx{i} * {stride//(W*4)})")
         else:
-          c0.append(f"((idx{i} * {stride})/({W*4}))")
+          if shape*stride > W*4:
+            c0.append(f"((idx{i} * {stride})/({W*4}))")
 
         if stride%4 == 0:
           if stride//4 < W:
-            c1.append(f"(idx{i} * {stride//4})%{W}")
+            if (shape * stride//4) <= W: # no mod required
+              c1.append(f"(idx{i} * {stride//4})")
+            else:
+              c1.append(f"(idx{i} * {stride//4})%{W}")
         else:
           c1.append(f"((idx{i} * {stride})/4)%{W}")
-      ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)({'+'.join(c0)}, {'+'.join(c1)}))", Types.FLOAT4)
+      ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)({'+'.join(c0)}, {'+'.join(c1)}))  /* {k.bufs[buf_index]._base_shape} */", Types.FLOAT4)
       """
       compute_buf_index(st, buf_index, offset)
       ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}))", Types.FLOAT4)
