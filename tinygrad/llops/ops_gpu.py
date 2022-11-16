@@ -103,12 +103,17 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
   if DEBUG >= 2:
     print("old:", k.shapes)
     print("old:", k.strides)
+  if DEBUG >= 3:
+    for x in k.bufs:
+      print(x.st)
   
   first_reduce = k.first_reduce
   last_reduce = len(k.shapes[0])
 
   early_loads_are_float4 = False
   late_are_float4 = False
+
+  early_loads_are_non_reduce_float4 = False
 
   # if there's images in the earlybufs, we have to make an axis the 4 loading one
   # shove the axis to the end and remove it
@@ -120,17 +125,21 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
         assert len(k.bufs[i].st.views) == 1, f"images can't have views {k.bufs[i].st}"
         valids = [k.shapes[i][j]%4 == 0 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
         eb_valids = [x and y for x,y in zip(eb_valids, valids)]
-    assert any(eb_valids), f"invalid op with images {buftypes}"
+    assert any(eb_valids), f"invalid op with images {buftypes} {eb_valids}"
     eb_valid = eb_valids.index(True)
-    assert eb_valid >= first_reduce, "only support in the reduce for now"
+
     # no change, we added a dimension
     k.reshape_and_permute(lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]), [i for i in range(k.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
     #last_reduce -= 1
     early_loads_are_float4 = True
+
+    if eb_valid < first_reduce:
+      #assert eb_valid >= first_reduce, f"only support in the reduce for now {eb_valids} and first reduce is {first_reduce}"
+      early_loads_are_non_reduce_float4 = True
   
   # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
   any_late_images = any(isinstance(buf._buf, CLImage) for buf in k.bufs if buf not in k.earlybufs)
-  if any_late_images:
+  if any_late_images and not early_loads_are_non_reduce_float4:
     lb_valids = [True] * len(k.shapes[0])
     for i in range(len(k.bufs)):
       assert len(k.bufs[i].st.views) == 1 or not isinstance(k.bufs[i]._buf, CLImage)  # images can't have views
@@ -146,85 +155,9 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     late_are_float4 = True
   #print(f"early_loads_are_float4: {early_loads_are_float4} late_are_float4: {late_are_float4} first_reduce: {first_reduce} last_reduce: {last_reduce}")
 
-  """
-  if any_images:
-    eb_valids = [True] * len(k.shapes[0])
-    lb_valids = [True] * len(k.shapes[0])
-    for i in range(len(k.bufs)):
-      # have to read in order for an image
-      if isinstance(k.bufs[i]._buf, CLImage):
-        assert len(k.bufs[i].st.views) == 1  # images can't have views
-        valids = [k.shapes[i][j]%4 == 0 and k.strides[i][j] == 1 for j in range(len(k.shapes[i]))]
-        if k.bufs[i] in k.earlybufs:
-          eb_valids = [x and y for x,y in zip(eb_valids, valids)]
-        else:
-          lb_valids = [x and y for x,y in zip(lb_valids, valids)]
-        print(f"found image {i} with shape {k.shapes[i]} and strides {k.strides[i]}")
-    print(eb_valids, lb_valids)
-    assert any(eb_valids) and any(lb_valids), f"invalid op with images {buftypes}"
-  """
-
-  # the eb_valids are all loads, the lb_valids could be either
-
-
-  #reduce_dim = 1
-  #if k.earlybufs:
-    #bi = k.bufs.index(k.earlybufs[0])
-    #assert k.shapes[bi][-1] == 4, f"last dim must be 4 {k.shapes[bi]}"
-    #pass
-  #assert k.shapes[0][first_reduce-1], f"last non reduce dim must be 4 {k.shapes[0]}"
-
-  if len(k.shapes[0]) >= 8 and False:
-    # channels
-    """
-    k.reshape_and_permute(
-      lambda s: (s[0], s[1], s[2], 4, s[4], s[5], s[6], s[7]),
-      (0,1,2,4,5,6,7,3))
-    first_reduce -= 1
-    last_reduce -= 1
-    """
-
-    reduce_dim = 4
-    last_reduce -= 1
-
-    """
-    # pad out ox. this needs to be handled on the store
-    for s in k.shapes:
-      s[1] = (s[1]+3)//4 * 4
-    # s[4:8] is reduce axis, 
-    k.reshape_and_permute(
-      lambda s: (s[0], s[1]//4, 4, s[2], 4, s[4], s[5], s[6], s[7]),
-      (0,1,2,3,4,5,6,7,8))
-      #(0,1,3,5,6,7, 8, 2,4))
-    """
-
-
   if DEBUG >= 2:
     print("new:", k.shapes)
     print("new:", k.strides)
-
-  """
-  CACHE_DIM = 32
-  if len(k.shapes[0]) == 2:
-    # cache tiling, makes permute fast
-    k.reshape_and_permute(
-      lambda shape: (shape[0]//CACHE_DIM, CACHE_DIM, shape[1]//CACHE_DIM, CACHE_DIM),
-      (0,2,1,3))
-  """
-
-  # split for reduce
-  """
-  if len(k.shapes[0]) == 1 and k.reduceop:
-    DIM = 2048
-    k.reshape_and_permute(
-      lambda shape: (DIM, shape[0]//DIM) if shape != [1] else [1,1],
-      (0,1)
-    )
-    k.shapes[0] = (DIM,1)
-    k.strides[0] = (1,1)
-    k.first_reduce = 1
-    print(k.shapes, k.strides)
-  """
 
   output_shape = k.shapes[0][:k.first_reduce]
 
@@ -316,12 +249,15 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       buf_index = k.bufs.index(x)
       return load_store(buf_index, offset=offset*k.strides[buf_index][-1])
     if isinstance(x.op, ReduceOps) and not reduce:
-      return Token(f"acc", Types.FLOAT4 if late_are_float4 else Types.FLOAT)
+      return Token(f"acc", Types.FLOAT4 if late_are_float4 or early_loads_are_non_reduce_float4 else Types.FLOAT)
     values = [ast_parse(v, offset, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
     if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT:
-      prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-      return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if late_are_float4 else "acc"), Types.FLOAT)
+      if early_loads_are_non_reduce_float4:
+        return Token(code.replace("A", values[0].tok), Types.FLOAT4)
+      else:
+        prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+        return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if late_are_float4 else "acc"), Types.FLOAT)
     assert all_same([x.typ for x in values]), f"type mismatch in {values}"
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
@@ -332,7 +268,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     full_shape = [x for x in k.shapes if x != k.shapes[0]]
     full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-    if late_are_float4:
+    if late_are_float4 or early_loads_are_non_reduce_float4:
       kernel.append(f"float4 acc = (float4)({cls.start_for_op[k.reduceop.op]}, {cls.start_for_op[k.reduceop.op]}, {cls.start_for_op[k.reduceop.op]}, {cls.start_for_op[k.reduceop.op]});\n")
     else:
       kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")

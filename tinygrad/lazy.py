@@ -9,6 +9,7 @@ from tinygrad.graph import log_op
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
+sys.tracebacklimit = 20
 
 OPT = int(os.getenv("OPT", "1"))
 NOCONV = int(os.getenv("NOCONV", "0"))
@@ -254,7 +255,8 @@ class LazyBuffer:
       # set up the conv
       # (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4)
       x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups, C.cin))
-      # padding (implict is fine in image)
+
+      # padding (implicit is fine in image)
       #x = x.slice(((0, x.shape[0]), (-C.py, x.shape[1]+C.py_), (-C.px, x.shape[2]+C.px_), (0, x.shape[3]), (0, x.shape[4])))
 
       x = x.movement_op(MovementOps.STRIDED, (
