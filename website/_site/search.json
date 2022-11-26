@@ -1,0 +1,23 @@
+[
+  {
+    "objectID": "index.html#introduction-to-tinygrad",
+    "href": "index.html#introduction-to-tinygrad",
+    "title": "tinygrad",
+    "section": "Introduction to tinygrad",
+    "text": "Introduction to tinygrad\n\n\n\n\n\n\n\n(a) Stable diffusion\n\n\n\n\n\n\n\n(b) GANs\n\n\n\n\n\n\n\n(c) Yolo\n\n\n\n\nFigure 1: tinygrad supports Stable Diffusion, GANs and Yolo.\n\n\nThis may not be the best deep learning framework, but it is a deep learning framework! For something in between pytorch and karpathy/micrograd. tinygrad will always be below 1000 lines. If it isn’t, we will revert commits until it becomes smaller. Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training."
+  },
+  {
+    "objectID": "index.html#get-started-with-tinygrad",
+    "href": "index.html#get-started-with-tinygrad",
+    "title": "tinygrad",
+    "section": "Get started with tinygrad",
+    "text": "Get started with tinygrad\nIn order to install tinygrad run the following:\ngit clone https://github.com/geohot/tinygrad.git\ncd tinygrad\npython3 setup.py develop\nExample:\nfrom tinygrad.tensor import Tensor\n\nx = Tensor.eye(3, requires_grad=True)\ny = Tensor([[2.0,0,-2.0]], requires_grad=True)\nz = y.matmul(x).sum()\nz.backward()\n\nprint(x.grad)  # dz/dx\nprint(y.grad)  # dz/dy\nSame example in PyTorch:\nimport torch\n\nx = torch.eye(3, requires_grad=True)\ny = torch.tensor([[2.0,0,-2.0]], requires_grad=True)\nz = y.matmul(x).sum()\nz.backward()\n\nprint(x.grad)  # dz/dx\nprint(y.grad)  # dz/dy"
+  },
+  {
+    "objectID": "index.html#frequently-asked-questions",
+    "href": "index.html#frequently-asked-questions",
+    "title": "tinygrad",
+    "section": "Frequently asked questions",
+    "text": "Frequently asked questions\nIs tinygrad used anywhere?\ntinygrad is used in openpilot to run the driving model on the Snapdragon 845 GPU. It replaces SNPE. tinygrad is faster, supports loading ONNX files, supports training, and allows for attention (SNPE only allows fixed weights).\nIs tinygrad inference only?\nNo! tinygrad supports full forward and backward passes with autodiff. This is implemented at a level of abstraction higher than the accelerator’s specific code, so a tinygrad port gets you this for free.\nHow can I use tinygrad for my next ML project?\nFollow the installation instructions on the tinygrad repo. It has a similar API to PyTorch, yet simpler and more refined. Alhough, while tinygrad is in alpha, it is less stable. So be warned (even though it’s been fairly stable for a while).\nWhen will tinygrad leave alpha?\nWhen we can reproduce a common set of papers on 1 NVIDIA GPU 2x faster than PyTorch. We also want the speed to be good on the M1. ETA, Q2 next year.\nHow is tinygrad faster than PyTorch?\nFor most use cases it isn’t yet, but it will be. tinygrad has three advantages: It compiles a custom kernel for every operation, allowing extreme shape specialization. All tensors are lazy, so it can aggressively fuse operations. The backend is 10x simpler that PyTorch, meaning optimizing one kernel makes everything fast.\nHow can I work with the tiny corporation?\nEmail me, at geohot@gmail.com. We are looking for contracts and sponsorships to improve various aspects of tinygrad. I would also consider an internship where I work on tinygrad in the context of a company.\nHow can I work for the tiny corporation?\nContribute to tinygrad on GitHub.\nCan I invest in the tiny corporation\nIt’s too tiny to have any equity to sell. We are looking for contracts and sponsorships.\nWhen are you launching your governance token? Will there be an airdrop?\nBruh."
+  }
+]

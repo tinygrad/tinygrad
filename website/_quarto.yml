@@ -1,0 +1,22 @@
+project:
+  type: website
+
+website:
+  title: "tinygrad"
+  description: "You like pytorch? You like micrograd? You love tinygrad!"
+  favicon: images/favicon.ico
+  navbar:
+    right:
+      - icon: github
+        href: https://github.com/geohot/tinygrad
+    pinned: true
+  repo-url: https://github.com/geohot/tinygrad
+  repo-actions: [edit, issue]
+
+format:
+  html:
+    theme: minty
+    toc: true
+
+
+
