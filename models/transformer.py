@@ -8,11 +8,7 @@ class TransformerBlock:
     assert self.head_size * self.num_heads == embed_dim
     self.prenorm, self.act = prenorm, act
 
-    self.query = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-    self.key = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-    self.value = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
-
-    self.out = (Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
+    (self.query, self.key, self.value, self.out) = [(Tensor.uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim)) for _ in range(4)]
 
     self.ff1 = (Tensor.uniform(embed_dim, ff_dim), Tensor.zeros(ff_dim))
     self.ff2 = (Tensor.uniform(ff_dim, embed_dim), Tensor.zeros(embed_dim))
