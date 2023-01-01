@@ -172,6 +172,8 @@ PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
 ### tinygrad supports Stable Diffusion!
 
+You might need to download the [weight](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt) of Stable Diffusion and put it into weights/
+
 Run `TORCH=1 python3 examples/stable_diffusion.py`
 
 (or without torch: `OPT=2 OPENCL=1 python3 examples/stable_diffusion.py`)
