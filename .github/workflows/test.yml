@@ -177,7 +177,9 @@ jobs:
     name: Docker Test
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout Code
+      uses: actions/checkout@v2
     - name: Build Docker
-      run: cd test && docker build -t tinygrad -f Dockerfile .
+      run: docker build -t tinygrad -f test/Dockerfile .
     - name: Test Docker
       run: docker run -it --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
