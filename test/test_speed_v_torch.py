@@ -162,6 +162,20 @@ class TestSpeed(unittest.TestCase):
     def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled_permute_lr', N, f1, f2)
 
+  def test_openpilot_conv2d(self):
+    bs, in_chans, out_chans = 1,12,32
+    torch.manual_seed(0)
+    torch_dat = torch.rand(bs, 64, 128, 12).to(torch_device)
+    torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1).to(torch_device)
+
+    tiny_dat = Tensor(torch_dat.cpu().numpy())
+    tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
+    tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
+
+    def f1(): return torch_conv(torch_dat.permute(0,3,1,2))
+    def f2(): return tiny_conv(tiny_dat.permute(0,3,1,2)).realize()
+    helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, f2)
+
   def test_conv2d(self):
     torch.manual_seed(0)
     for bs in [32]:

@@ -96,6 +96,7 @@ class CLProgram:
 # **** end CL wrappers ****
 
 def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
+  # TODO: make sure it stays split on the image boundary, regardless of stride
   k.process()
   buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(k.bufs)]
   #print(buftypes)
@@ -156,6 +157,25 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     #first_reduce -= 1
     late_are_float4 = True
   #print(f"early_loads_are_float4: {early_loads_are_float4} late_are_float4: {late_are_float4} first_reduce: {first_reduce} last_reduce: {last_reduce}")
+
+  # there might be one more to fold (no stride requirement)
+  # this should really only fold if it reuses the same loads
+  # it also can't be a reduce
+  xb_valids = [True] * len(k.shapes[0])
+  for i in range(len(k.bufs)):
+    valids = [k.shapes[i][j]%4 == 0 for j in range(len(k.shapes[i]))]
+    xb_valids = [x and y for x,y in zip(xb_valids, valids)]
+
+  print(xb_valids)
+  # from the valids, choose an axis
+  for i,j in enumerate(xb_valids[:first_reduce]):
+    if j:
+      shape = [x[i] for x in k.shapes]
+      assert all_same(shape)
+      shape = shape[0]
+      stride = [x[i] for x in k.strides]
+      if 0 in stride:  # must alias load
+        print(i, shape, stride)
 
   if DEBUG >= 2:
     print("new:", k.shapes)
