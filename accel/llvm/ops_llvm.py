@@ -187,9 +187,8 @@ class LLVMBuffer(ExplicitExecAST):
     k = ASTKernel(ast)
 
     # cached kernel
-    key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
-    if key in LLVMBuffer.func_cache:
-      LLVMBuffer.func_cache[key](*[x._buf for x in k.bufs])
+    if k.key in LLVMBuffer.func_cache:
+      LLVMBuffer.func_cache[k.key](*[x._buf for x in k.bufs])
       return k.ret
 
     # cache miss, we have to process the kernel
@@ -362,5 +361,5 @@ class LLVMBuffer(ExplicitExecAST):
 
     loop_entry[-1].branch(loop_exit[-1]._block)
     loop_exit[0].ret_void()
-    LLVMBuffer.func_cache[key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
+    LLVMBuffer.func_cache[k.key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
     return k.ret

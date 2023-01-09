@@ -84,7 +84,13 @@ class ExplicitExecAST(DeviceBuffer):
 
   # universal for shape tracked
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
-  def contiguous(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
+  def contiguous(self): return type(self)(self.shape, hostbuf=self) if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
+
+def get_first_reduce(shapes):
+  for i in range(len(shapes[0])):
+    if not all_same([x[i] for x in shapes]):
+      return i
+  return len(shapes[0])  # off the end
 
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
@@ -105,6 +111,9 @@ class ASTKernel:
     assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
 
+    # key for lookup in cache (can change, str might not be right)
+    self.key = str(ast)
+
   def process(self):
     # get shape, strides, and offset
     # if it's a multiview buffer we take the final view
@@ -121,11 +130,7 @@ class ASTKernel:
     strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
 
     # find first mismatch, don't reduce this
-    first_reduce = -1
-    for i in range(len(shapes[0])):
-      if not all_same([x[i] for x in shapes]):
-        first_reduce = i
-        break
+    first_reduce = get_first_reduce(shapes)
 
     # merge dimensions if we can, multi get_shape_strides
     # TODO: does this always preserve the reduce dimension, NO
@@ -144,9 +149,13 @@ class ASTKernel:
         else:
           rets[j].append((shapes[j][i], strides[j][i]))
     self.shapes, self.strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
+    self.first_reduce = get_first_reduce(self.shapes)  # update this if axis merged
 
     # include the offsets (as is)
     self.offsets = [x.st.views[-1].offset for x in self.bufs]
+
+  @property
+  def shape_len(self): return len(self.shapes[0])
 
   # this should be aware of the three parts to the shape
   #  * the input/output dimensions
