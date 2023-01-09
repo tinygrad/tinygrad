@@ -9,10 +9,7 @@ from functools import partial
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-try:
-  from termcolor import colored
-except ImportError:
-  colored = lambda x, _: x
+from tinygrad.helpers import colored
 try:
   from tinygrad.llops.ops_gpu import CL
 except ImportError:
@@ -24,15 +21,12 @@ torch_device = torch.device('mps' if int(os.getenv("MPS", "0")) else 'cpu')
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
-  if colored:
-    if x < 0.75:
-      return colored(ret, 'green')
-    elif x > 1.5:
-      return colored(ret, 'red')
-    else:
-      return colored(ret, 'yellow')
+  if x < 0.75:
+    return colored(ret, 'green')
+  elif x > 1.5:
+    return colored(ret, 'red')
   else:
-    return ret
+    return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
 CNT = 8
@@ -101,6 +95,14 @@ class TestSpeed(unittest.TestCase):
       # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
       def f(a, b): return a.permute(1,0).contiguous()
       helper_test_generic_square('permute', N, f, f)
+    
+  def test_double_permute(self):
+    N = 64
+    torch.manual_seed(0)
+    torch_a = (torch.rand(N, N, N, N) - 0.5).to(torch_device)
+    tiny_a = Tensor(torch_a.cpu().numpy())
+    def f(a): return a.permute(1,0,3,2).contiguous()
+    helper_test_generic(f"double_permute {tiny_a.shape}", partial(f, torch_a), partial(f, tiny_a))
 
   def test_neg(self):
     def f(a, b): return -a
@@ -158,6 +160,20 @@ class TestSpeed(unittest.TestCase):
     def f1(a, b): return a.T@b
     def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled_permute_lr', N, f1, f2)
+
+  def test_openpilot_conv2d(self):
+    bs, in_chans, out_chans = 1,12,32
+    torch.manual_seed(0)
+    torch_dat = torch.rand(bs, 64, 128, 12).to(torch_device)
+    torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1).to(torch_device)
+
+    tiny_dat = Tensor(torch_dat.cpu().numpy())
+    tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
+    tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
+
+    def f1(): return torch_conv(torch_dat.permute(0,3,1,2))
+    def f2(): return tiny_conv(tiny_dat.permute(0,3,1,2)).realize()
+    helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, f2)
 
   def test_conv2d(self):
     torch.manual_seed(0)
