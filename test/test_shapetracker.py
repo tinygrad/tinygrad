@@ -94,6 +94,12 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st.permute(1, 0, 2, 3)
     assert self.st.contiguous
 
+  def test_fancy_factorize(self):
+    self.st = ShapeTracker((32, 3, 3, 1))
+    self.st.strided(*zip((32, 3, 3, 1), (1, 4096, 32, 1)))
+    self.st.reshape(*(8, 4, 3, 3))
+    assert len(self.st.views) == 1
+
   def test_super_complex_2_fail(self):
     self.st = ShapeTracker((4, 4, 4))
     self.st.permute(2, 0, 1)

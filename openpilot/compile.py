@@ -2,7 +2,8 @@
 import os, time, io, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-os.environ['OPT'] = '99'
+if os.getenv("OPT", None) is None:
+  os.environ['OPT'] = '99'
 if os.getenv("GPU", None) is None:
   os.environ['OPENCL'] = '1'
 
@@ -70,7 +71,7 @@ def compile(dat, output_fn):
   # initial run(s) to load weights
   for _ in range(2):
     st = time.monotonic()
-    tinygrad_out = run_onnx(inputs)['outputs']
+    tinygrad_out = next(iter(run_onnx(inputs).values()))
     mt = time.monotonic()
     tinygrad_out.realize()
     mt2 = time.monotonic()
@@ -87,7 +88,7 @@ def compile(dat, output_fn):
   # real run
   inputs, np_inputs = get_random_input_tensors(input_shapes)
   print("***** REAL RUN *****")
-  tinygrad_out = run_onnx(inputs)['outputs']
+  tinygrad_out = next(iter(run_onnx(inputs).values()))
 
   # note, since CL.CACHE is enabled, it doesn't actually run the kernels
   CL.CACHE = []
@@ -101,7 +102,8 @@ def compile(dat, output_fn):
   from extra.thneed import Thneed
   t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
   CL.CACHE = None
-  t.optimize_local_workgroup()
+  if int(os.getenv("OPTWG", "0")):
+    t.optimize_local_workgroup()
 
   # save thneed (before run)
   t.save(output_fn)

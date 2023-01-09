@@ -1,8 +1,12 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
+import os
 import functools
 from typing import Tuple, Union, List
 from tinygrad.helpers import prod
+
+# TODO: fix DEBUG import
+DEBUG = int(os.getenv("DEBUG", "0"))
 
 def divmodidx(acc, d, mod=True):
   lr = f"(idx//{acc})" if acc != 1 else "idx"
@@ -102,7 +106,7 @@ class ShapeTracker:
     return self
 
   def reshape(self, *new_shape):
-    assert all(isinstance(x, int) for x in new_shape)
+    assert all(isinstance(x, int) and x != 0 for x in new_shape), f"shape must be ints and can't contain 0 {new_shape}"
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # check if this is adding or removing 1s (only)
@@ -127,21 +131,26 @@ class ShapeTracker:
             while len(new_strides) != len(new_shape):
               assert new_shape[len(new_strides)] == 1
               new_strides.append(1)
-            self.views[-1] = View(new_shape, new_strides, self.offset)
-            return self   # early return, it factorized!
+            break
           curr_dim, curr_stride = min_shape_strides.pop(0)
       else:
         break   # didn't factorize
+
+    if len(new_shape) == len(new_strides):
+      self.views[-1] = View(new_shape, new_strides, self.offset)
+      return self
 
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous:
       self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
     else:
+      if DEBUG >= 2:
+        print(f"WARNING: reshape from {self.shape} w strides {self.strides} -> {new_shape} is creating another view")
       self.views.append(view)
     return self
 
   def permute(self, *axis):
-    assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis)
+    assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View([self.shape[a] for a in axis], [self.strides[a] for a in axis], self.offset)
     return self
