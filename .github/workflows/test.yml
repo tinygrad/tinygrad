@@ -182,4 +182,4 @@ jobs:
     - name: Build Docker
       run: docker build -t tinygrad -f test/Dockerfile .
     - name: Test Docker
-      run: docker run -it --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
