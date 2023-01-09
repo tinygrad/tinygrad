@@ -21,13 +21,14 @@ class ReduceView(NamedTuple):
   buf: CUDABuffer
   early: bool
   late: bool
+  is_constant: bool
 
 @functools.lru_cache(maxsize=None)
 class CUDAProgram:
   def __init__(self, source:str):
-    self.kernel = SourceModule(source)
     if DEBUG >= 3: 
       print(source)
+    self.kernel = SourceModule(source)
       
   def __call__(self, *args, **kwargs):
     # TODO make kernel call async
@@ -45,10 +46,10 @@ class CUDACodeBuilder:
 
   def elementwise_kernel_code(self, ret:CUDABuffer, views: List[ReduceView], ast: LazyOp) -> str:
     kernel = f"""
-      __global__ void reduce_kernel(float *dest, {", ".join([f"float *{view.name}_g" for view in views])}) {{
+      __global__ void reduce_kernel(float *dest{", ".join([""]+[f"float *{view.name}_g" for view in views if not view.is_constant])}) {{
         int gid = blockIdx.x * blockDim.x + threadIdx.x;
         if (gid >= {prod(ret.shape)}) return;
-        {chr(10).join([self.view_call_code(view.name) for view in views if view.late])}
+        {chr(10).join([self.view_call_code(view) for view in views if view.late])}
         dest[gid] = {self.ast_code(ast, views, CUDACodeBuilder.code_for_op)};
       }}"""
     return self.program_code(kernel, views)
@@ -56,16 +57,16 @@ class CUDACodeBuilder:
   def reduce_kernel_code(self, views: List[ReduceView], reduce_ast: LazyOp, ast: LazyOp, start:bool, end:bool, elements_per_reduce:int, reduce:int, threads_per_block:int) -> str:
     acc_start = CUDACodeBuilder.start_for_op[reduce_ast.op if isinstance(reduce_ast.op, ReduceOps) else ReduceOps.SUM]
     start_elementwise_code = f"""
-      {chr(10).join([self.view_call_code(view.name, is_reduce=True) for view in views if view.early])}
+      {chr(10).join([self.view_call_code(view, is_reduce=True) for view in views if view.early])}
       float tmp = {self.ast_code(reduce_ast, views, CUDACodeBuilder.code_for_op, allow_reduce=True).replace("acc", acc_start)};"""
     end_elementwise_code = f"""
-      {chr(10).join([self.view_call_code(view.name, gid="blockIdx.y") for view in views if view.late])}
+      {chr(10).join([self.view_call_code(view, gid="blockIdx.y") for view in views if view.late])}
       acc = {self.ast_code(ast, views, CUDACodeBuilder.code_for_op)};"""
 
     # Is a Parallel Prefix Sum kernel: https://www.youtube.com/watch?v=bpbit8SPMxU https://github.com/CoffeeBeforeArch/cuda_programming/tree/master/03_sum_reduction
     # TODO make this kernel faster
     kernel = f"""
-      __global__ void reduce_kernel(float *dest, float *block_reduce, {", ".join([f"float *{view.name}_g" for view in views])}) {{
+      __global__ void reduce_kernel(float *dest, float *block_reduce {", ".join([""]+[f"float *{view.name}_g" for view in views if not view.is_constant])}) {{
         __shared__ float sm[{threads_per_block}];
 
         const int gid = blockIdx.x;
@@ -99,23 +100,23 @@ class CUDACodeBuilder:
 
   def program_code(self, kernel:str, views: List[ReduceView], reduce:Optional[int]=None) -> str:
     return f"""
-      {chr(10).join([self.view_decleration_code(view.buf, view.name, reduce) for view in views if view.early])}
-      {chr(10).join([self.view_decleration_code(view.buf, view.name) for view in views if view.late])}
+      {chr(10).join([self.view_decleration_code(view, reduce) for view in views if view.early])}
+      {chr(10).join([self.view_decleration_code(view) for view in views if view.late])}
       {"__device__ float sign(float x) { int t = x < 0 ? -1 : 0; return x > 0 ? 1 : t;}" if "sign" in kernel else ""}
       {kernel}
       """
 
-  def view_decleration_code(self, buf: CUDABuffer, name:str, reduce:Optional[int]=None) -> str:
-    # TODO inline constants
-    expr = buf.st.expr().replace('//', '/')
-    return f"""__device__ float get_{name}(float *x, int gid{", int subidx" if reduce is not None else "" }) {{ 
-      {"int valid = 1;" if "valid" in expr else ""} {'long' if prod(buf.shape) >= 2**31 else 'int'} idx = gid; 
+  def view_decleration_code(self, view:ReduceView, reduce:Optional[int]=None) -> str:
+    expr = view.buf.st.expr().replace('//', '/')
+    value_getter = "x[idx]" if not view.is_constant else str(view.buf._constant)
+    return f"""__device__ float get_{view.name}({"float *x," if not view.is_constant else ""} int gid{", int subidx" if reduce is not None else "" }) {{ 
+      {"int valid = 1;" if "valid" in expr else ""} {'long' if prod(view.buf.shape) >= 2**31 else 'int'} idx = gid; 
       {'idx *= '+str(reduce)+'; idx += subidx;' if reduce is not None else ''} {expr};
-      {"return valid ? x[idx] : 0.0;" if "valid" in expr else "return x[idx];"}
+      {f"return valid ? {value_getter} : 0.0;" if "valid" in expr else f"return {value_getter};"}
     }}"""
 
-  def view_call_code(self, name:str, is_reduce: bool=False, gid="gid", subidx="subidx") -> str:
-    return f"""float {name} = get_{name}({name}_g, {gid}{f", {subidx}" if is_reduce else ""});"""
+  def view_call_code(self, view:ReduceView, is_reduce: bool=False, gid="gid", subidx="subidx") -> str:
+    return f"""float {view.name} = get_{view.name}({f"{view.name}_g, " if not view.is_constant else ""}{gid}{f", {subidx}" if is_reduce else ""});"""
 
   def ast_code(self, x: Union[CUDABuffer, LazyOp], views: List[ReduceView], code_for_op: Dict[Op, str], allow_reduce=False) -> str:
     if isinstance(x, CUDABuffer):
@@ -131,20 +132,28 @@ class CUDACodeBuilder:
     return code
 
 class CUDABuffer(ExplicitExecAST):
-  def __init__(self, shape, hostbuf=None):
+  def __init__(self, shape, hostbuf:Optional[CUDABuffer]=None, constant:Optional[float]=None):
     super().__init__(shape, hostbuf)
-    self._buf = cuda.mem_alloc(4*prod(self.shape)) if hostbuf is None else hostbuf._buf  
+    self._buf: Optional[cuda.mem_alloc] = hostbuf._buf if hostbuf is not None else cuda.mem_alloc(4*prod(self.shape)) if constant is None else None
+    self._constant: Optional[float] = hostbuf._constant if hostbuf is not None else constant
 
   def __repr__(self): return f"<CUDABuffer with shape {self.shape!r}>"
 
   @staticmethod
   def fromCPU(x):
-    buf = CUDABuffer(x.shape)
+    np_arr = x.view(np.ndarray).astype(np.float32).ravel()
+
+    if np_arr.shape == (1,):
+      return CUDABuffer(x.shape, constant=np_arr.item())
+
     # TODO make this async, use memcpy_htod_async
-    cuda.memcpy_htod(buf._buf, x.view(np.ndarray).astype(np.float32).ravel())
+    buf = CUDABuffer(x.shape)
+    cuda.memcpy_htod_async(buf._buf, np_arr)
     return buf
 
   def toCPU(self):
+    if self._constant is not None:
+      return np.full(self.shape, self._constant, dtype=np.float32)
     np_arr = np.empty(self.shape, dtype=np.float32)
     cuda.memcpy_dtoh(np_arr, self.contiguous()._buf)
     return np_arr
@@ -162,7 +171,7 @@ class CUDABuffer(ExplicitExecAST):
     info = get_lazyop_info(ast)
     ret = CUDABuffer(info.shape)
 
-    views = [ReduceView(f"arg_{i}", buf, buf in earlybufs, buf not in earlybufs) for i, buf in enumerate(bufs)]
+    views = [ReduceView(f"arg_{i}", buf, buf in earlybufs, buf not in earlybufs, buf._constant is not None) for i, buf in enumerate(bufs)]
 
     # get the input/output shape and the reduce amount
     reduce_shape = (views[0].buf.shape, ret.shape) if reduce_shape is None else reduce_shape
@@ -180,17 +189,20 @@ class CUDABuffer(ExplicitExecAST):
     def optimal_threads_per_block(num_kernels:int, only_powers_of_two=False, max_threads_per_block=512):
       return min(min(max(32, (2 ** ceil(log2(num_kernels))) if only_powers_of_two else 32 * ceil(num_kernels / 32)), max_threads_per_block), MAX_THREADS_BLOCK)
 
+    input_bufs = [view.buf._buf for view in views if not view.is_constant]
+
     if reduce_ast is None:
       threads_per_block = optimal_threads_per_block(prod(ret.shape), max_threads_per_block=256)
       grid_x = ceil(prod(ret.shape) / threads_per_block)
       elementwise_kernel = CUDAProgram(cb.elementwise_kernel_code(ret, views, ast))
-      elementwise_kernel(ret._buf, *[view.buf._buf for view in views], block=(threads_per_block, 1, 1), grid=(grid_x, 1))
+      elementwise_kernel(ret._buf, *input_bufs, block=(threads_per_block, 1, 1), grid=(grid_x, 1))
     else:
       num_kernel_count = reduce
       # only 2**n threads_per_block are supported when using this type of sum reduction
       threads_per_block = optimal_threads_per_block(num_kernel_count, only_powers_of_two=True,  max_threads_per_block=512)
 
       reduce_iterations = ceil(log(num_kernel_count, threads_per_block))
+      # TODO alloc momory once for all iterations
       last_buf = cuda.mem_alloc(4) # Will never be used, only a placeholder for the first call
       for i in range(reduce_iterations):
         first, last = i == 0, i == reduce_iterations - 1
@@ -203,7 +215,7 @@ class CUDABuffer(ExplicitExecAST):
         ret_buf = ret._buf if last else cuda.mem_alloc(4 * x_block_count * y_block_count)
 
         reduce_kernel = CUDAProgram(cb.reduce_kernel_code(views, reduce_ast, ast, first, last, num_kernel_count, reduce, threads_per_block))
-        reduce_kernel(ret_buf, last_buf, *[view.buf._buf for view in views], block=(threads_per_block, 1, 1), grid=(x_block_count, y_block_count))
+        reduce_kernel(ret_buf, last_buf, *input_bufs, block=(threads_per_block, 1, 1), grid=(x_block_count, y_block_count))
         last_buf = ret_buf
         num_kernel_count = ceil(num_kernel_count / threads_per_block)
 
