@@ -14,7 +14,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-6, rtol=1e-3, grad_ato
   else:
     ts = [torch.tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=True) for x in shps]
 
-  tst = [Tensor(x.detach().numpy(), requires_grad=True) for x in ts]
+  tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
 
   st = time.monotonic()
   out = torch_fxn(*ts)
@@ -225,6 +225,7 @@ class TestOps(unittest.TestCase):
                     lambda x,w: torch.nn.functional.conv2d(x, w),
                     lambda x,w: x.conv2d(w), atol=1e-2)
 
+  #@unittest.skip("not supported with IMAGE=1")
   def test_large_bs_conv(self):
     # large batch size can cause OpenCL image to exceed max image height on macOS
     # (or cause the conv kernel to overflow short sampling coords)
@@ -232,6 +233,7 @@ class TestOps(unittest.TestCase):
                     lambda x,w: torch.nn.functional.conv2d(x, w),
                     lambda x,w: x.conv2d(w), atol=1e-4, rtol=1e-2)
 
+  #@unittest.skip("not supported with IMAGE=1")
   def test_large_ic_conv(self):
     # large input channel count can cause OpenCL image to exceed max image width on macOS
     helper_test_op([(1,2048,3,3), (1,2048,3,3)],
@@ -245,9 +247,14 @@ class TestOps(unittest.TestCase):
       lambda x,w,b: Tensor.conv2d(x,w,b).relu().conv2d(w,b), atol=1e-4)
 
   def test_simple_conv2d(self):
-    helper_test_op([(1,1,9,9), (1,1,3,3)],
+    helper_test_op([(1,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_nested_conv2d(self):
+    helper_test_op([(1,32,9,9), (32,32,3,3), (32,32,3,3)],
+      lambda x,w1,w2: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w1).relu(), w2).relu(),
+      lambda x,w1,w2: x.conv2d(w1).relu().conv2d(w2).relu(), atol=1e-4, grad_rtol=1e-5)
 
   # expect reduce nodes == 3
   def test_simple_conv2d_nhwc(self):
@@ -298,6 +305,15 @@ class TestOps(unittest.TestCase):
     rcout = 2
     cin = 2
     helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_depthwise_conv2d(self):
+    bs = 1
+    groups = 32
+    rcout = 1
+    cin = 1
+    helper_test_op([(bs,groups*cin,32,32), (groups*rcout,cin,1,1)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
       lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
