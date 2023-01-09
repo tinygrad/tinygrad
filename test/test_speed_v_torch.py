@@ -13,7 +13,6 @@ from tinygrad.helpers import colored
 try:
   from tinygrad.llops.ops_gpu import CL
 except ImportError:
-  colored = None
   CL = None
 
 IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
