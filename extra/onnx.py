@@ -4,10 +4,7 @@ import functools
 from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
-from tinygrad.nn import batch_normalize
 from tinygrad.ops import DEBUG
-
-ONNXLIMIT = int(os.getenv("ONNXLIMIT", "-1"))
 
 def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
@@ -79,9 +76,6 @@ def get_run_onnx(onnx_model):
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
-    # store outputs
-    output_names = [x.name for x in onnx_model.graph.output]
-
     for num,n in enumerate(onnx_model.graph.node):
       if debug: print(f"{num}: op {n.op_type}")
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else input_tensors[x]) for x in n.input]
@@ -119,7 +113,7 @@ def get_run_onnx(onnx_model):
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type == "BatchNormalization":
         invstd = inp[4].add(opt.get('epsilon', 1e-5))**-0.5
-        ret = batch_normalize(inp[0], inp[1], inp[2], inp[3], invstd)
+        ret = inp[0].batchnorm(inp[1], inp[2], inp[3], invstd)
       elif n.op_type == "Gemm": ret = inp[0].linear(inp[1].transpose() if opt.get('transB', 0) == 1 else inp[1], inp[2])
       elif n.op_type == "Conv":
         x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)
@@ -178,9 +172,6 @@ def get_run_onnx(onnx_model):
       if debug: print(ret.shape)
       intermediate_tensors[n.output[0]] = ret
       #print(ret.numpy().mean())
-      if num == ONNXLIMIT:
-        output_names = n.output
-        break
 
-    return {outp:intermediate_tensors[outp] for outp in output_names}
+    return {outp.name:intermediate_tensors[outp.name] for outp in onnx_model.graph.output}
   return run_onnx
