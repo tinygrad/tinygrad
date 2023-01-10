@@ -122,7 +122,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
     # constant folding (broken?)
     constant_fold = None
-    if k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing and False:
+    if k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
       bufs_to_delete.add(buf_index)
       constant_fold = f"({k.bufs[buf_index]._backing[0]})"
 
@@ -213,7 +213,8 @@ class GPUBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     k = ASTKernel(ast)
-    if k.key not in GPUBuffer.func_cache:
-      GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
+    # TODO: can't cache with constant folding
+    #if k.key not in GPUBuffer.func_cache:
+    GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
     GPUBuffer.func_cache[k.key](*k.bufs)
     return k.ret
