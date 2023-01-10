@@ -84,7 +84,6 @@ class CLASTKernel(ASTKernel):
     super().__init__(ast)
     self.ast = ast
 
-
   def compute_buf_index(self, st, buf_index, offset=0):
     key = f"{buf_index}_{offset}"
     # add the index if we don't have it
@@ -133,8 +132,9 @@ class CLASTKernel(ASTKernel):
     return code
 
   def codegen(self):
-    # TODO: fetch from quick cache
+    # TODO: fetch from quick cache before processing
     self.process()
+
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
     self.loaded_keys : Dict[int, str] = {}
