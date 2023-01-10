@@ -41,7 +41,7 @@ class TestTrain(unittest.TestCase):
   def test_transformer(self):
     # this should be small GPT-2, but the param count is wrong
     # (real ff_dim is 768*4)
-    model = Transformer(syms=10, maxlen=6, layers=6, embed_dim=768, num_heads=12, ff_dim=768//4)
+    model = Transformer(syms=10, maxlen=6, layers=12, embed_dim=768, num_heads=12, ff_dim=768//4)
     X = np.zeros((BS,6), dtype=np.float32)
     Y = np.zeros((BS,6), dtype=np.int32)
     train_one_step(model,X,Y)
