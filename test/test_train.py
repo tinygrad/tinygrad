@@ -4,7 +4,6 @@ import time
 import tinygrad.nn.optim as optim
 import numpy as np
 from tinygrad.tensor import Device
-from extra.introspection import print_objects
 from extra.training import train
 from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
@@ -48,6 +47,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
 
     if Device.DEFAULT == Device.GPU:
+      from extra.introspection import print_objects
       assert print_objects() == 0
 
   def test_resnet(self):

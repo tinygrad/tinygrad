@@ -3,7 +3,7 @@ import os, functools
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
-from typing import List, Tuple, Optional, Dict, Union, Set, Any
+from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
@@ -132,9 +132,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     return f"val{key}"
 
   def ast_parse(x, reduce=False) -> str:
-    if not isinstance(x, LazyOp):
-      buf_index = k.bufs.index(x)
-      return load(buf_index)
+    if not isinstance(x, LazyOp): return load(k.bufs.index(x))
     if isinstance(x.op, ReduceOps) and not reduce: return "acc"
     values = [ast_parse(v, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
