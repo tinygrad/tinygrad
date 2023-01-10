@@ -120,7 +120,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
     if offset > 0: assert len(st.views) == 1
     key = compute_buf_index(st, buf_index, offset)
 
-    # constant folding (broken?)
+    # constant folding
     constant_fold = None
     if k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
       bufs_to_delete.add(buf_index)
