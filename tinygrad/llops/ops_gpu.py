@@ -85,7 +85,8 @@ class CLASTKernel(ASTKernel):
 
     self.process()
     self.bufs_to_delete : Set[int] = set()
-    self.seen_idx = set()
+    self.seen_idx : Set[str] = set()
+    self.loaded_keys : Dict[int, str] = {}
     self.ast = ast
 
     self.output_shape = self.shapes[0][:self.first_reduce]
@@ -115,22 +116,23 @@ class CLASTKernel(ASTKernel):
     key = self.compute_buf_index(st, buf_index, offset)
     self.kernel.append(f"data{buf_index}[bufi{key}] = {value};\n")
 
-  @functools.lru_cache(None)
   def load(self, buf_index, offset=0):
-    st = self.bufs[buf_index].st
-    if offset > 0: assert len(st.views) == 1
-    key = self.compute_buf_index(st, buf_index, offset)
+    if buf_index not in self.loaded_keys:
+      st = self.bufs[buf_index].st
+      if offset > 0: assert len(st.views) == 1
+      key = self.compute_buf_index(st, buf_index, offset)
 
-    # constant folding
-    constant_fold = None
-    if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
-      self.bufs_to_delete.add(buf_index)
-      constant_fold = f"({self.bufs[buf_index]._backing[0]})"
+      # constant folding
+      constant_fold = None
+      if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
+        self.bufs_to_delete.add(buf_index)
+        constant_fold = f"({self.bufs[buf_index]._backing[0]})"
 
-    ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
-    ldr = f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr
-    self.kernel.append(f"float val{key} = {ldr};\n")
-    return f"val{key}"
+      ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
+      ldr = f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr
+      self.kernel.append(f"float val{key} = {ldr};\n")
+      self.loaded_keys[buf_index] = f"val{key}"
+    return self.loaded_keys[buf_index]
 
   def ast_parse(self, x, reduce=False) -> str:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
