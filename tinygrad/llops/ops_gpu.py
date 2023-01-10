@@ -209,12 +209,13 @@ class GPUBuffer(ExplicitExecAST):
     CL.enqueue_copy(data, self.contiguous().cl, is_blocking=True)
     return data
 
-  func_cache : Dict[str, Any] = {}
+  #func_cache : Dict[str, Any] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     k = ASTKernel(ast)
     # TODO: can't cache with constant folding
     #if k.key not in GPUBuffer.func_cache:
-    GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
-    GPUBuffer.func_cache[k.key](*k.bufs)
+    #GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
+    #GPUBuffer.func_cache[k.key](*k.bufs)
+    ast_kernel_codegen(cls, ast, k)(*k.bufs)
     return k.ret
