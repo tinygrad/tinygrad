@@ -82,20 +82,8 @@ class CLProgram:
 class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
-
-    self.process()
-    self.bufs_to_delete : Set[int] = set()
-    self.seen_idx : Set[str] = set()
-    self.loaded_keys : Dict[int, str] = {}
     self.ast = ast
 
-    self.output_shape = self.shapes[0][:self.first_reduce]
-    self.kernel : List[str] = [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
-    if len(self.output_shape) > 3:
-      # compact all the dimensions into the final one
-      for i in range(len(self.output_shape)-1, 2, -1):
-        self.kernel += [f"int idx{i} = idx2 % {self.output_shape[i]};", f"idx2 = idx2 / {self.output_shape[i]};\n"]
-      self.output_shape = list(self.output_shape[0:2]) + [prod(self.output_shape[2:])]
 
   def compute_buf_index(self, st, buf_index, offset=0):
     key = f"{buf_index}_{offset}"
@@ -145,6 +133,20 @@ class CLASTKernel(ASTKernel):
     return code
 
   def codegen(self):
+    # TODO: fetch from quick cache
+    self.process()
+    self.bufs_to_delete : Set[int] = set()
+    self.seen_idx : Set[str] = set()
+    self.loaded_keys : Dict[int, str] = {}
+
+    self.output_shape = self.shapes[0][:self.first_reduce]
+    self.kernel : List[str] = [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
+    if len(self.output_shape) > 3:
+      # compact all the dimensions into the final one
+      for i in range(len(self.output_shape)-1, 2, -1):
+        self.kernel += [f"int idx{i} = idx2 % {self.output_shape[i]};", f"idx2 = idx2 / {self.output_shape[i]};\n"]
+      self.output_shape = list(self.output_shape[0:2]) + [prod(self.output_shape[2:])]
+
     # early ast
     if self.reduceop:
       full_shape = [x for x in self.shapes if x != self.shapes[0]]

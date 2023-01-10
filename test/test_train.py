@@ -46,7 +46,7 @@ class TestTrain(unittest.TestCase):
     Y = np.zeros((BS,6), dtype=np.int32)
     train_one_step(model,X,Y)
 
-    if Device.DEFAULT == Device.GPU:
+    if Device.DEFAULT == "GPU":
       from extra.introspection import print_objects
       assert print_objects() == 0
 
