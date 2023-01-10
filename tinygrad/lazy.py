@@ -111,8 +111,8 @@ LAZY = int(os.getenv("LAZY", "1"))
 class LazyBuffer:
   lazycache : weakref.WeakValueDictionary[LazyOp, LazyBuffer] = weakref.WeakValueDictionary()
   def __new__(cls, device, shape, optype, op):
-    # loadops aren't cached
-    if optype == LoadOps:
+    # fromcpu aren't cached
+    if optype == LoadOps and op.op == LoadOps.FROMCPU:
       return super().__new__(cls)
     wop = (device, optype, get_weakop(op))   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
     # NOTE: we need "ret" to prevent the new buffer from being immediately deleted
