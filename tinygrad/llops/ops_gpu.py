@@ -107,7 +107,7 @@ class GPUBuffer(ExplicitExecAST):
       self._backing = None
     return self._buf.cl
 
-  def __repr__(self): return f"<GPUBuffer with shape {self.shape!r}>"
+  def __repr__(self): return f"<GPUBuffer {str(self.st)}>"
 
   @staticmethod
   def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
