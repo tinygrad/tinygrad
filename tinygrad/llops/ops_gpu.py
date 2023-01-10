@@ -79,95 +79,97 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
-def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
-  # TODO: make sure it stays split on the image boundary, regardless of stride
-  k.process()
+class CLASTKernel(ASTKernel):
+  def __init__(self, ast:LazyOp):
+    super().__init__(ast)
 
-  first_reduce, last_reduce = k.first_reduce, len(k.shapes[0])
+    self.process()
+    self.bufs_to_delete : Set[int] = set()
+    self.seen_idx = set()
+    self.ast = ast
 
-  output_shape = k.shapes[0][:k.first_reduce]
-  kernel = [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
-  if len(output_shape) > 3:
-    # compact all the dimensions into the final one
-    for i in range(len(output_shape)-1, 2, -1):
-      kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
-    output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
+    self.output_shape = self.shapes[0][:self.first_reduce]
+    self.kernel : List[str] = [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
+    if len(self.output_shape) > 3:
+      # compact all the dimensions into the final one
+      for i in range(len(self.output_shape)-1, 2, -1):
+        self.kernel += [f"int idx{i} = idx2 % {self.output_shape[i]};", f"idx2 = idx2 / {self.output_shape[i]};\n"]
+      self.output_shape = list(self.output_shape[0:2]) + [prod(self.output_shape[2:])]
 
-  bufs_to_delete : Set[int] = set()
-  seen_idx = set()
-  def compute_buf_index(st, buf_index, offset=0):
+  def compute_buf_index(self, st, buf_index, offset=0):
     key = f"{buf_index}_{offset}"
     # add the index if we don't have it
-    if key not in seen_idx:
-      idx_pieces = [str(st.offset + offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(k.shapes[buf_index][0:last_reduce], k.strides[buf_index][0:last_reduce])) if sh != 1 and st != 0]
-      if st.needs_valid(): kernel.append(f"bool bufvalid{key} = true;")
-      kernel.append(f"int bufi{key} = " + '('+' + '.join(idx_pieces)+');\n')
+    if key not in self.seen_idx:
+      idx_pieces = [str(st.offset + offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce])) if sh != 1 and st != 0]
+      if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = true;")
+      self.kernel.append(f"int bufi{key} = " + '('+' + '.join(idx_pieces)+');\n')
       if len(st.views) > 1:
         extra_idx = ';'.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
-        kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{key}").replace("valid", f"bufvalid{key}") + ";\n")
-      seen_idx.add(key)
+        self.kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{key}").replace("valid", f"bufvalid{key}") + ";\n")
+      self.seen_idx.add(key)
     return key
 
-  def store(buf_index, value, offset=0):
-    st = k.bufs[buf_index].st
+  def store(self, buf_index, value, offset=0):
+    st = self.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
-    key = compute_buf_index(st, buf_index, offset)
-    kernel.append(f"data{buf_index}[bufi{key}] = {value};\n")
+    key = self.compute_buf_index(st, buf_index, offset)
+    self.kernel.append(f"data{buf_index}[bufi{key}] = {value};\n")
 
   @functools.lru_cache(None)
-  def load(buf_index, offset=0):
-    st = k.bufs[buf_index].st
+  def load(self, buf_index, offset=0):
+    st = self.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
-    key = compute_buf_index(st, buf_index, offset)
+    key = self.compute_buf_index(st, buf_index, offset)
 
     # constant folding
     constant_fold = None
-    if k.bufs[buf_index]._base_shape == (1,) and k.bufs[buf_index]._backing:
-      bufs_to_delete.add(buf_index)
-      constant_fold = f"({k.bufs[buf_index]._backing[0]})"
+    if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
+      self.bufs_to_delete.add(buf_index)
+      constant_fold = f"({self.bufs[buf_index]._backing[0]})"
 
     ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
     ldr = f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr
-    kernel.append(f"float val{key} = {ldr};\n")
+    self.kernel.append(f"float val{key} = {ldr};\n")
     return f"val{key}"
 
-  def ast_parse(x, reduce=False) -> str:
-    if not isinstance(x, LazyOp): return load(k.bufs.index(x))
+  def ast_parse(self, x, reduce=False) -> str:
+    if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and not reduce: return "acc"
-    values = [ast_parse(v, reduce) for v in x.src]
+    values = [self.ast_parse(v, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
     if isinstance(x.op, ReduceOps): return code.replace("A", values[0])
     if len(values) >= 1: code = code.replace("A", values[0])
     if len(values) >= 2: code = code.replace("B", values[1])
     return code
 
-  # early ast
-  if k.reduceop:
-    full_shape = [x for x in k.shapes if x != k.shapes[0]]
-    full_shape = k.shapes[0] if len(full_shape) == 0 else full_shape[0]
+  def codegen(self):
+    # early ast
+    if self.reduceop:
+      full_shape = [x for x in self.shapes if x != self.shapes[0]]
+      full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-    kernel.append(f"float acc = {cls.start_for_op[k.reduceop.op]};\n")
-    for i in range(first_reduce, last_reduce):
-      kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-    kernel.append("  acc = " + ast_parse(k.reduceop, reduce=True) + ";\n")
-    kernel += ["}\n"] * (last_reduce - first_reduce)
+      self.kernel.append(f"float acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
+      for i in range(self.first_reduce, self.last_reduce):
+        self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
+      self.kernel.append("  acc = " + self.ast_parse(self.reduceop, reduce=True) + ";\n")
+      self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
-  # late ast
-  process_ast = ast_parse(ast)
-  store(0, process_ast)
-  kernel.append("}")
+    # late ast
+    process_ast = self.ast_parse(self.ast)
+    self.store(0, process_ast)
+    self.kernel.append("}")
 
-  # kernel function definition
-  function_name = ("re_S" if k.reduceop else "ew_S") + '_'.join([str(x) for x in k.bufs[0].shape if x != 1])
-  kernel = [f"__kernel void {function_name}(",] + [', '.join(f'__global float *data{i}' for i in range(len(k.bufs)) if i not in bufs_to_delete)] + [") {\n"] + kernel
+    # kernel function definition
+    function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
+    self.kernel = [f"__kernel void {function_name}(",] + [', '.join(f'__global float *data{i}' for i in range(len(self.bufs)) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
 
-  # compile kernel
-  fxn = CLProgram(function_name, ' '.join(kernel))
+    # compile kernel
+    fxn = CLProgram(function_name, ' '.join(self.kernel))
 
-  def runner(*bufs):
-    clbufs = [x.cl for i,x in enumerate(bufs) if i not in bufs_to_delete]
-    return fxn(output_shape[::-1] if len(output_shape) > 0 else [1], None, *clbufs, op_estimate=k.info.flops)
-  return runner
+    def runner(*bufs):
+      clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
+      return fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs, op_estimate=self.info.flops)
+    return runner
 
 class GPUBuffer(ExplicitExecAST):
   code_for_op : Dict[Op, str] = {
@@ -207,13 +209,8 @@ class GPUBuffer(ExplicitExecAST):
     CL.enqueue_copy(data, self.contiguous().cl, is_blocking=True)
     return data
 
-  #func_cache : Dict[str, Any] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp):
-    k = ASTKernel(ast)
-    # TODO: can't cache with constant folding
-    #if k.key not in GPUBuffer.func_cache:
-    #GPUBuffer.func_cache[k.key] = ast_kernel_codegen(cls, ast, k)
-    #GPUBuffer.func_cache[k.key](*k.bufs)
-    ast_kernel_codegen(cls, ast, k)(*k.bufs)
+    k = CLASTKernel(ast)
+    k.codegen()(*k.bufs)
     return k.ret
