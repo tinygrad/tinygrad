@@ -4,7 +4,6 @@ import functools
 from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
-from tinygrad.nn import batch_normalize
 from tinygrad.ops import DEBUG
 
 def get_run_onnx(onnx_model):
@@ -114,7 +113,7 @@ def get_run_onnx(onnx_model):
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type == "BatchNormalization":
         invstd = inp[4].add(opt.get('epsilon', 1e-5))**-0.5
-        ret = batch_normalize(inp[0], inp[1], inp[2], inp[3], invstd)
+        ret = inp[0].batchnorm(inp[1], inp[2], inp[3], invstd)
       elif n.op_type == "Gemm": ret = inp[0].linear(inp[1].transpose() if opt.get('transB', 0) == 1 else inp[1], inp[2])
       elif n.op_type == "Conv":
         x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)
