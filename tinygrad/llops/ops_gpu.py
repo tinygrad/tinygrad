@@ -4,8 +4,8 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set, Any
-from tinygrad.helpers import prod, ConvArgs, dedup
-from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, LazyOp, get_buffers, get_lazyops, Op, get_lazyop_info, ExplicitExecAST, GlobalCounters
+from tinygrad.helpers import prod
+from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -93,7 +93,7 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
       kernel += [f"int idx{i} = idx2 % {output_shape[i]};", f"idx2 = idx2 / {output_shape[i]};\n"]
     output_shape = list(output_shape[0:2]) + [prod(output_shape[2:])]
 
-  bufs_to_delete = set()
+  bufs_to_delete : Set[int] = set()
   seen_idx = set()
   def compute_buf_index(st, buf_index, offset=0):
     key = f"{buf_index}_{offset}"
