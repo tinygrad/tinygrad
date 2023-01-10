@@ -87,7 +87,6 @@ def ast_kernel_codegen(cls, ast:LazyOp, k:ASTKernel):
 
   output_shape = k.shapes[0][:k.first_reduce]
   kernel = [f"int idx{i} = get_global_id({min(3, len(output_shape))-1-i});\n" for i in range(min(3, len(output_shape)))]
-
   if len(output_shape) > 3:
     # compact all the dimensions into the final one
     for i in range(len(output_shape)-1, 2, -1):
@@ -209,14 +208,6 @@ class GPUBuffer(ExplicitExecAST):
     data = np.empty(self.shape, dtype=np.float32)
     CL.enqueue_copy(data, self.contiguous().cl, is_blocking=True)
     return data
-
-  def contiguous_view_constant_fold(x, name:str, reduce:Optional[int]=None) -> Tuple[str, Optional[str], str]:
-    idx_getter = f"int valid = 1; {'long' if prod(x.shape) >= 2**31 else 'int'} idx = gid; {'idx *= '+str(reduce)+'; idx += subidx;' if reduce is not None else ''} {x.st.expr().replace('//', '/')};"
-    constant = x._backing[0] if x._base_shape == (1,) and x._backing is not None else None
-    args = (["__global const float *x"] if constant is None else []) + ["int gid"] + (["int subidx"] if reduce is not None else []) 
-    return f"inline float get_{name}({','.join(args)}) {{ {idx_getter} return valid ? {constant if constant is not None else 'x[idx]'} : 0.0;}}", \
-      f"__global const float *{name}_g" if constant is None else None, \
-      f"get_{name}({name+'_g, ' if constant is None else ''}gid{', subidx' if reduce is not None else ''});"
 
   func_cache : Dict[str, Any] = {}
   @classmethod
