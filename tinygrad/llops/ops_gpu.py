@@ -66,7 +66,7 @@ class CL:
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
-  kernel_cnt = defaultdict(int)
+  kernel_cnt : Dict[str, int] = defaultdict(int)
   def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False):
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else ''}" if rename else name
     self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes
