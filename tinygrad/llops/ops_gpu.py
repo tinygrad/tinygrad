@@ -1,11 +1,13 @@
 from __future__ import annotations
 import os, functools
+from enum import Enum
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.lazy import IMAGE
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -23,6 +25,17 @@ class CLBuffer:
       CL.BUFFER_CACHE[self.cl.size].append(self.cl)
     else:
       CL.mem_used -= self.cl.size
+
+FLOAT16 = int(os.getenv("FLOAT16", "0"))
+class CLImage:
+  fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+
+  def __init__(self, shape):
+    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]))
+    CL.mem_used += self.cl.row_pitch * self.cl.height
+
+  def __del__(self):
+    CL.mem_used -= self.cl.row_pitch * self.cl.height
 
 class CL:
   CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
@@ -79,6 +92,15 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
+Types = Enum("Types", ["FLOAT", "FLOAT4"])
+class Token:
+  def __init__(self, tok:str, typ:Types):
+    assert isinstance(tok, str)
+    self.tok = tok
+    self.typ = typ
+  def __str__(self): return self.tok
+  def __repr__(self): return f"<{self.typ} {self.tok}>"
+
 class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
@@ -96,13 +118,13 @@ class CLASTKernel(ASTKernel):
       self.seen_idx.add(key)
     return key
 
-  def store(self, buf_index, value, offset=0):
+  def store(self, buf_index, value:Token, offset=0):
     st = self.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
     key = self.compute_buf_index(st, buf_index, offset)
-    self.kernel.append(f"data{buf_index}[bufi{key}] = {value};\n")
+    self.kernel.append(f"data{buf_index}[bufi{key}] = {value.tok};\n")
 
-  def load(self, buf_index, offset=0):
+  def load(self, buf_index, offset=0) -> Token:
     if buf_index not in self.loaded_keys:
       st = self.bufs[buf_index].st
       if offset > 0: assert len(st.views) == 1
@@ -117,26 +139,27 @@ class CLASTKernel(ASTKernel):
       ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
       ldr = f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr
       self.kernel.append(f"float val{key} = {ldr};\n")
-      self.loaded_keys[buf_index] = f"val{key}"
+      self.loaded_keys[buf_index] = Token(f"val{key}", Types.FLOAT)
     return self.loaded_keys[buf_index]
 
-  def ast_parse(self, x, reduce=False) -> str:
+  def ast_parse(self, x, reduce=False) -> Token:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
-    if isinstance(x.op, ReduceOps) and not reduce: return "acc"
+    if isinstance(x.op, ReduceOps) and not reduce: return Token("acc", Types.FLOAT)
     values = [self.ast_parse(v, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
-    if isinstance(x.op, ReduceOps): return code.replace("A", values[0])
-    if len(values) >= 1: code = code.replace("A", values[0])
-    if len(values) >= 2: code = code.replace("B", values[1])
-    return code
+    if isinstance(x.op, ReduceOps): return Token(code.replace("A", values[0].tok), Types.FLOAT)
+    if len(values) >= 1: code = code.replace("A", values[0].tok)
+    if len(values) >= 2: code = code.replace("B", values[1].tok)
+    return Token(code, Types.FLOAT)
 
   def codegen(self):
     # TODO: fetch from quick cache before processing
     self.process()
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(self.bufs)]
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
-    self.loaded_keys : Dict[int, str] = {}
+    self.loaded_keys : Dict[int, Token] = {}
 
     self.output_shape = self.shapes[0][:self.first_reduce]
     self.kernel : List[str] = [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
@@ -154,17 +177,16 @@ class CLASTKernel(ASTKernel):
       self.kernel.append(f"float acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      self.kernel.append("  acc = " + self.ast_parse(self.reduceop, reduce=True) + ";\n")
+      self.kernel.append("  acc = " + self.ast_parse(self.reduceop, reduce=True).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
-    process_ast = self.ast_parse(self.ast)
-    self.store(0, process_ast)
+    self.store(0, self.ast_parse(self.ast))
     self.kernel.append("}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    self.kernel = [f"__kernel void {function_name}(",] + [', '.join(f'__global float *data{i}' for i in range(len(self.bufs)) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
+    self.kernel = [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
 
     # compile kernel
     fxn = CLProgram(function_name, ' '.join(self.kernel))
@@ -186,7 +208,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     super().__init__(shape, hostbuf)
-    self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
+    self._buf : Optional[Union[CLBuffer, CLImage]] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     # early copy in for large buffers
@@ -196,7 +218,10 @@ class GPUBuffer(ExplicitExecAST):
   @property
   def cl(self):
     if self._buf is None:
-      self._buf = CLBuffer(4*prod(self._base_shape))
+      if len(self._base_shape) == 3 and self._base_shape[2] == 4 and False:
+        self._buf = CLImage(self._base_shape)
+      else:
+        self._buf = CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
       CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
       self._backing = None
