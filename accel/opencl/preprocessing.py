@@ -67,7 +67,7 @@ def preprocessing_op(x,w,C):
     bw = bw.op.src[0]
   if bw.realized:
     # weights are static
-    w.realize().image
+    w.realize() #.image
   return x,w,C
 
 def postprocessing_op(ret, C, C_initial):
