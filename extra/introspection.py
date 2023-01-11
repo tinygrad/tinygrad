@@ -7,7 +7,7 @@ from tinygrad.llops.ops_gpu import CL, GPUBuffer
 #from tinygrad.llops.ops_opencl import CLImage, OpenCLBuffer
 
 def print_objects():
-  gc.collect()
+  #gc.collect()
   tensors = [x for x in gc.get_objects() if isinstance(x, Tensor)]
   tensor_ram_used = sum([prod(x.shape)*4 for x in tensors])
   lazybuffers = [x for x in gc.get_objects() if isinstance(x, LazyBuffer)]
@@ -24,7 +24,7 @@ def print_objects():
     bb = gc.get_referrers(tb)
     for b in bb:
       if b is not gpubuffers and b is not gpubuffers_orphaned:
-        print(tb, "reference", type(b),len(b), str(b)[0:150])
+        print(tb, "\nreference", type(b), len(b), str(b)[0:150], "\n\n")
         for x in gc.get_referrers(b):
           print(str(x)[0:100])
     if cnt == 10:
@@ -34,6 +34,8 @@ def print_objects():
   for x in gpubuffers_orphaned:
     if getattr(x, '_buf', None): del x._buf
     if getattr(x, '_image', None): del x._image
+
+  return len(gpubuffers_orphaned)
 
 """
 import gc

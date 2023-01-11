@@ -153,6 +153,7 @@ class ASTKernel:
           rets[j].append((shapes[j][i], strides[j][i]))
     self.shapes, self.strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
     self.first_reduce = get_first_reduce(self.shapes)  # update this if axis merged
+    self.last_reduce = len(self.shapes[0])
 
     # include the offsets (as is)
     self.offsets = [x.st.views[-1].offset for x in self.bufs]
