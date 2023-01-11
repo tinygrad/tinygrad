@@ -5,7 +5,7 @@ import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod
-from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -82,7 +82,6 @@ class CLProgram:
 class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
-    self.ast = ast
 
   def compute_buf_index(self, st, buf_index, offset=0):
     key = f"{buf_index}_{offset}"
