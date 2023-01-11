@@ -5,7 +5,7 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.lazy import IMAGE
 from tinygrad.shapetracker import ShapeTracker
@@ -68,7 +68,11 @@ class CLProgram:
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else ''}" if rename else name
     self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
-    self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+    try:
+      self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+    except cl.RuntimeError as e:
+      print("FAILED TO BUILD", self.prg)
+      raise e
     if self.argdtypes is not None:
       self.clprg.set_scalar_arg_dtypes(self.argdtypes)
     CLProgram.kernel_cnt[name] += 1
@@ -98,7 +102,7 @@ class Token:
     assert isinstance(tok, str)
     self.tok = tok
     self.typ = typ
-  def __str__(self): return self.tok
+  def decltype(self): return 'float' if self.typ == Types.FLOAT else 'float4'
   def __repr__(self): return f"<{self.typ} {self.tok}>"
 
 class CLASTKernel(ASTKernel):
@@ -122,47 +126,112 @@ class CLASTKernel(ASTKernel):
     st = self.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
     key = self.compute_buf_index(st, buf_index, offset)
-    self.kernel.append(f"data{buf_index}[bufi{key}] = {value.tok};\n")
+    if isinstance(self.bufs[buf_index]._buf, CLImage):
+      W = self.bufs[buf_index]._base_shape[1]
+      assert value.typ == Types.FLOAT4, f"image can only store float4: {value} isn't"
+      self.kernel.append(f"write_imagef(data{buf_index}, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+    else:
+      if value.typ == Types.FLOAT4:
+        #assert len(st.views) == 1
+        self.kernel.append(f"float4 to_store = {value.tok};\n")
+        for i in range(4):
+          lkey = self.compute_buf_index(st, buf_index, offset+i*self.strides[buf_index][-1])
+          self.kernel.append(f"data{buf_index}[bufi{lkey}] = to_store.s{i};\n")
+      else:
+        self.kernel.append(f"data{buf_index}[bufi{key}] = {value.tok};\n")
 
   def load(self, buf_index, offset=0) -> Token:
     if buf_index not in self.loaded_keys:
       st = self.bufs[buf_index].st
       if offset > 0: assert len(st.views) == 1
-      key = self.compute_buf_index(st, buf_index, offset)
+      key = f"{buf_index}_{offset}"
 
       # constant folding
       constant_fold = None
       if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
         self.bufs_to_delete.add(buf_index)
         constant_fold = f"({self.bufs[buf_index]._backing[0]})"
+      
+      if isinstance(self.bufs[buf_index]._buf, CLImage):
+        W = self.bufs[buf_index]._base_shape[1]
+        assert not st.needs_valid()
+        assert len(st.views) == 1
 
-      ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
-      ldr = f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr
-      self.kernel.append(f"float val{key} = {ldr};\n")
-      self.loaded_keys[buf_index] = Token(f"val{key}", Types.FLOAT)
+        c0, c1 = [str(offset//(W*4))], [str(offset//4)]
+        for i, (shape, stride) in enumerate(zip(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce])):
+          if shape == 1 or stride == 0: continue
+
+          if stride%(W*4) == 0:
+            if stride//(W*4) != 0:
+              c0.append(f"(idx{i} * {stride//(W*4)})")
+          else:
+            if shape*stride > W*4:
+              c0.append(f"((idx{i} * {stride})/({W*4}))")
+
+          if stride%4 == 0:
+            if stride//4 < W:
+              if (shape * stride//4) <= W: # no mod required
+                c1.append(f"(idx{i} * {stride//4})")
+              else:
+                c1.append(f"(idx{i} * {stride//4})%{W}")
+          else:
+            c1.append(f"((idx{i} * {stride})/4)%{W}")
+        ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)({'+'.join(c0)}, {'+'.join(c1)}))  /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
+      else:
+        self.compute_buf_index(st, buf_index, offset)
+        if (self.bufs[buf_index] in self.earlybufs and self.early_is_float4) or (self.bufs[buf_index] not in self.earlybufs and self.late_is_float4):
+          if self.strides[buf_index][-1] == 1 and len(st.views) == 1 and not st.needs_valid():
+            ldr = Token(f"((__global float4*)data{buf_index})[bufi{key}/4]", Types.FLOAT4)
+          else:
+            mst = []
+            for i in range(4):
+              lkey = self.compute_buf_index(st, buf_index, offset+i*self.strides[buf_index][-1])
+              mst.append(f"data{buf_index}[bufi{lkey}]" if not constant_fold else constant_fold)
+              if st.needs_valid(): mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
+            ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
+        else:
+          ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
+          ldr = Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT)
+      self.kernel.append(f"{ldr.decltype()} val{key} = {ldr.tok};\n")
+      self.loaded_keys[buf_index] = Token(f"val{key}", ldr.typ)
     return self.loaded_keys[buf_index]
 
   def ast_parse(self, x, reduce=False) -> Token:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
-    if isinstance(x.op, ReduceOps) and not reduce: return Token("acc", Types.FLOAT)
+    if isinstance(x.op, ReduceOps) and not reduce: return self.reduce_token
     values = [self.ast_parse(v, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
-    if isinstance(x.op, ReduceOps): return Token(code.replace("A", values[0].tok), Types.FLOAT)
+    if isinstance(x.op, ReduceOps):
+      if self.reduce_token.typ == Types.FLOAT and values[0].typ == Types.FLOAT4:
+        self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+        reduce = Token(f"clsum({values[0].tok})", Types.FLOAT)
+      else:
+        reduce = values[0]
+      return Token(code.replace("A", reduce.tok), self.reduce_token.typ)
+    assert all_same([x.typ for x in values]), f"type mismatch in {values}"
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
-    return Token(code, Types.FLOAT)
+    return Token(code, values[0].typ)
 
   def codegen(self):
     # TODO: fetch from quick cache before processing
     self.process()
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(self.bufs)]
+    self.prekernel = set()
+
+    # three things can be float4
+    self.early_is_float4 = any(isinstance(x._buf, CLImage) for x in self.bufs[1:])
+    self.late_is_float4 = isinstance(self.bufs[0]._buf, CLImage)
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
     self.loaded_keys : Dict[int, Token] = {}
 
+    self.reduce_token = Token("acc", Types.FLOAT4 if self.late_is_float4 else Types.FLOAT)
+
     self.output_shape = self.shapes[0][:self.first_reduce]
-    self.kernel : List[str] = [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
+    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
+    self.kernel += [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
     if len(self.output_shape) > 3:
       # compact all the dimensions into the final one
       for i in range(len(self.output_shape)-1, 2, -1):
@@ -174,10 +243,11 @@ class CLASTKernel(ASTKernel):
       full_shape = [x for x in self.shapes if x != self.shapes[0]]
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-      self.kernel.append(f"float acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
+      self.kernel.append(f"{self.reduce_token.decltype()} {self.reduce_token.tok} = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      self.kernel.append("  acc = " + self.ast_parse(self.reduceop, reduce=True).tok + ";\n")
+      ast_reduced = self.ast_parse(self.reduceop, reduce=True)
+      self.kernel.append(f"  {self.reduce_token.tok} = {ast_reduced.tok};\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
@@ -186,7 +256,7 @@ class CLASTKernel(ASTKernel):
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    self.kernel = [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
+    self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
 
     # compile kernel
     fxn = CLProgram(function_name, ' '.join(self.kernel))
@@ -218,7 +288,7 @@ class GPUBuffer(ExplicitExecAST):
   @property
   def cl(self):
     if self._buf is None:
-      if len(self._base_shape) == 3 and self._base_shape[2] == 4 and False:
+      if len(self._base_shape) == 3 and self._base_shape[2] == 4:
         self._buf = CLImage(self._base_shape)
       else:
         self._buf = CLBuffer(4*prod(self._base_shape))
@@ -234,7 +304,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    CL.enqueue_copy(data, self.contiguous().cl, is_blocking=True)
+    CL.enqueue_copy(data, self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP).cl if isinstance(self._buf, CLImage) else self.contiguous().cl, is_blocking=True)
     return data
 
   @classmethod
