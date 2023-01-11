@@ -98,33 +98,24 @@ def get_first_reduce(shapes):
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
   def __init__(self, ast:LazyOp):
-    # key for lookup in cache (can change, str might not be right)
-    self.key = str(ast)
-
-    # if the AST ends with a RESHAPE, we remove it and create the buffer accordingly
-    if ast.op == MovementOps.RESHAPE:
-      output_shape = ast.arg
-      ast = ast.src[0]
-    else:
-      output_shape = None
-
     self.info = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
     reduceops = [x for x in get_lazyops(ast) if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
     self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
-    self.ast = ast
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
-    self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape)
-    self.ret.cl
-    self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
+    self.ret = type(self.bufs[0])(self.info.shape)
+    self.bufs = [self.ret] + self.bufs
 
     # check valid AST kernel
     assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
     assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
+
+    # key for lookup in cache (can change, str might not be right)
+    self.key = str(ast)
 
   def process(self):
     # get shape, strides, and offset
