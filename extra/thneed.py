@@ -283,6 +283,7 @@ class Thneed:
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
         total_runtime += runtime
       print(f"total runtime: {total_runtime/1e6:.2f} ms   wall time: {et*1000.0:.2f} ms")
+    return et
 
   def optimize_local_workgroup(self):
     MAX_WORKGROUP = CL.cl_ctx.devices[0].max_work_group_size

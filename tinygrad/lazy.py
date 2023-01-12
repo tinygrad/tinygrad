@@ -9,7 +9,6 @@ from tinygrad.graph import log_op
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
-sys.tracebacklimit = 20
 
 OPT = int(os.getenv("OPT", "1"))
 NOCONV = int(os.getenv("NOCONV", "0"))
@@ -250,7 +249,7 @@ class LazyBuffer:
   def processing_op(self:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
     x = self
 
-    if IMAGE == 1:
+    if IMAGE >= 1:
       from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
       Cold = C
       x,w,C = preprocessing_op(x, w, Cold, False)
