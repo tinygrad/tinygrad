@@ -141,10 +141,10 @@ class CLASTKernel(ASTKernel):
         self.kernel.append(f"data{buf_index}[bufi{key}] = {value.tok};\n")
 
   def load(self, buf_index, offset=0) -> Token:
-    if buf_index not in self.loaded_keys:
+    key = f"{buf_index}_{offset}"
+    if key not in self.loaded_keys:
       st = self.bufs[buf_index].st
       if offset > 0: assert len(st.views) == 1
-      key = f"{buf_index}_{offset}"
 
       # constant folding
       constant_fold = None
@@ -206,21 +206,22 @@ class CLASTKernel(ASTKernel):
           ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
           ldr = Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT)
       self.kernel.append(f"{ldr.decltype()} val{key} = {ldr.tok};\n")
-      self.loaded_keys[buf_index] = Token(f"val{key}", ldr.typ)
-    return self.loaded_keys[buf_index]
+      self.loaded_keys[key] = Token(f"val{key}", ldr.typ)
+    return self.loaded_keys[key]
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], reduce:Optional[Token]=None) -> Token:
-    if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], offset=0, reduce:Optional[Token]=None) -> Token:
+    if not isinstance(x, LazyOp):
+      buf_index = self.bufs.index(x)
+      return self.load(buf_index, offset=offset*self.strides[buf_index][-1])
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
-    values = [self.ast_parse(v, reduce) for v in x.src]
+    values = [self.ast_parse(v, offset, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
-    if isinstance(x.op, ReduceOps):
-      if not self.late_are_float4 and values[0].typ == Types.FLOAT4:
-        self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-        reduce = Token(f"clsum({values[0].tok})", Types.FLOAT)
+    if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT:
+      if self.early_loads_are_non_reduce_float4:
+        return Token(code.replace("A", values[0].tok), Types.FLOAT4)
       else:
-        reduce = values[0]
-      return Token(code.replace("A", reduce.tok), reduce.typ)
+        self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+        return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if self.late_are_float4 else "acc"), Types.FLOAT)
     assert all_same([x.typ for x in values]), f"type mismatch in {values}"
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
@@ -298,7 +299,7 @@ class CLASTKernel(ASTKernel):
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
-    self.loaded_keys : Dict[int, Token] = {}
+    self.loaded_keys : Dict[str, Token] = {}
 
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
     self.kernel += [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
@@ -318,11 +319,17 @@ class CLASTKernel(ASTKernel):
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
       self.kernel.append("/* REDUCE AST */\n")
-      self.kernel.append("acc = " + self.ast_parse(self.reduceop).tok + ";\n")
+      if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
+        future_kernel = []
+        for j in range(4):
+          future_kernel.append(f"  acc.s{j} = " + self.ast_parse(self.reduceop, offset=j).tok + ";\n")
+        self.kernel += future_kernel
+      else:
+        self.kernel.append("acc = " + self.ast_parse(self.reduceop).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
-    self.store(0, self.ast_parse(self.ast, accumulator))
+    self.store(0, self.ast_parse(self.ast, reduce=accumulator))
     self.kernel.append("}")
 
     # kernel function definition
