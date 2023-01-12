@@ -229,18 +229,19 @@ class CLASTKernel(ASTKernel):
       self.output_shape = list(self.output_shape[0:2]) + [prod(self.output_shape[2:])]
 
     # early ast
+    accumulator = Token("acc", Types.FLOAT4 if self.late_are_float4 else Types.FLOAT)
     if self.reduceop:
       full_shape = [x for x in self.shapes if x != self.shapes[0]]
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-      self.kernel.append(f"float acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
+      self.kernel.append(f"{accumulator.decltype()} acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
       self.kernel.append("  acc = " + self.ast_parse(self.reduceop).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
-    self.store(0, self.ast_parse(self.ast, Token("acc", Types.FLOAT)))
+    self.store(0, self.ast_parse(self.ast, accumulator))
     self.kernel.append("}")
 
     # kernel function definition
