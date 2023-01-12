@@ -104,6 +104,7 @@ class ASTKernel:
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
     self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
+    self.ast = ast
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
     self.ret = type(self.bufs[0])(self.info.shape)

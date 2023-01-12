@@ -55,7 +55,11 @@ class CLProgram:
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else ''}" if rename else name
     self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
-    self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+    try:
+      self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+    except cl.RuntimeError as e:
+      print("FAILED TO BUILD", self.prg)
+      raise e
     if self.argdtypes is not None:
       self.clprg.set_scalar_arg_dtypes(self.argdtypes)
     CLProgram.kernel_cnt[name] += 1
@@ -82,7 +86,6 @@ class CLProgram:
 class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
-    self.ast = ast
 
   def compute_buf_index(self, st, buf_index, offset=0):
     key = f"{buf_index}_{offset}"
