@@ -155,12 +155,18 @@ class CLASTKernel(ASTKernel):
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
         #assert not st.needs_valid()
-        #assert len(st.views) == 1
 
         # MEGA HACK for image
         if st.needs_valid():
+          assert len(st.views) == 3
+          zv = st.views[1]
+          print("CHECK", self.bufs[buf_index]._base_shape, zv.old_shape, zv.shape)
+          if zv.old_shape[1] != zv.shape[1] and zv.old_shape[0] != 1:
+            assert False, "invalid image views"
           offset += sum(x.offset for x in st.views if hasattr(x, 'offset'))
-          print("ISSUE", st, W)
+          print("ISSUE", self.bufs[buf_index]._base_shape, st, W)
+        else:
+          assert len(st.views) == 1
 
         if offset < 0: c0, c1 = [str(-(-offset//(W*4)))], [str(-((-offset//4)%W))]
         else: c0, c1 = [str(offset//(W*4))], [str((offset//4)%W)]
