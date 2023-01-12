@@ -198,7 +198,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     super().__init__(shape, hostbuf)
-    if hostbuf is not None: hostbuf.cl  # does the allocation, pylint: disable=W0104
+    if hostbuf is not None and hostbuf._backing is None: hostbuf.cl  # does the allocation of unbacked buffer, pylint: disable=W0104
     self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
