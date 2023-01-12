@@ -213,7 +213,7 @@ class CLASTKernel(ASTKernel):
     self.prekernel = set()
 
     self.early_loads_are_float4 = False
-    self.late_are_float4 = True
+    self.late_are_float4 = False
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
@@ -278,7 +278,7 @@ class GPUBuffer(ExplicitExecAST):
   @property
   def cl(self):
     if self._buf is None:
-      if len(self._base_shape) == 3 and self._base_shape[2] == 4:
+      if len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2:
         self._buf = CLImage(self._base_shape)
       else:
         self._buf = CLBuffer(4*prod(self._base_shape))
