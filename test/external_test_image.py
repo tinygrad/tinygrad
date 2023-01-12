@@ -21,7 +21,7 @@ class TestImage(unittest.TestCase):
     assert isinstance(t1.lazydata.realized._buf, CLImage)
     t1 = t1.sum()
     t1.realize()
-    assert t1.numpy()[0] == 16*4*4*4
+    assert t1.numpy()[0] == 16*4*4*4, f"got {t1.numpy()}"
   
   def test_add_image(self):
     t1 = Tensor.ones(16, 16, 1).reshape(16, 4, 4) + 3

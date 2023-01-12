@@ -179,7 +179,7 @@ class CLASTKernel(ASTKernel):
         ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)({'+'.join(c0)}, {'+'.join(c1)}))  /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
       else:
         self.compute_buf_index(st, buf_index, offset)
-        if (self.bufs[buf_index] in self.earlybufs and self.early_is_float4) or (self.bufs[buf_index] not in self.earlybufs and self.late_is_float4):
+        if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
           if self.strides[buf_index][-1] == 1 and len(st.views) == 1 and not st.needs_valid():
             ldr = Token(f"((__global float4*)data{buf_index})[bufi{key}/4]", Types.FLOAT4)
           else:
@@ -220,14 +220,56 @@ class CLASTKernel(ASTKernel):
     self.prekernel = set()
 
     # three things can be float4
-    self.early_is_float4 = any(isinstance(x._buf, CLImage) for x in self.bufs[1:])
-    self.late_is_float4 = isinstance(self.bufs[0]._buf, CLImage)
+    self.early_loads_are_float4 = False
+    self.late_are_float4 = False
+    self.early_loads_are_non_reduce_float4 = False
+
+    # if there's images in the earlybufs, we have to make an axis the 4 loading one
+    # shove the axis to the end and remove it
+    any_early_images = any(isinstance(buf._buf, CLImage) for buf in self.earlybufs)
+    if any_early_images:
+      eb_valids = [True] * len(self.shapes[0])
+      for i in range(len(self.bufs)):
+        if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
+          assert len(self.bufs[i].st.views) == 1, f"images can't have views {self.bufs[i].st}"
+          valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
+          eb_valids = [x and y for x,y in zip(eb_valids, valids)]
+      assert any(eb_valids), f"invalid op with images {buftypes} {eb_valids}"
+      eb_valid = eb_valids.index(True)
+
+      # no change, we added a dimension
+      self.reshape_and_permute(lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]), [i for i in range(self.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
+      #last_reduce -= 1
+
+      if eb_valid < self.first_reduce:
+        #assert eb_valid >= first_reduce, f"only support in the reduce for now {eb_valids} and first reduce is {first_reduce}"
+        self.early_loads_are_non_reduce_float4 = True
+        self.late_are_float4 = True
+      else:
+        self.early_loads_are_float4 = True
+
+    # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
+    any_late_images = any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs)
+    if any_late_images and not self.early_loads_are_non_reduce_float4:
+      lb_valids = [True] * len(self.shapes[0])
+      for i in range(len(self.bufs)):
+        #assert len(k.bufs[i].st.views) == 1 or not isinstance(k.bufs[i]._buf, CLImage)  # images can't have views
+        valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
+        lb_valids = [x and y for x,y in zip(lb_valids, valids)]
+      assert any(lb_valids), f"invalid op with images {buftypes}"
+      lb_valid = lb_valids.index(True)
+      assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
+      self.reshape_and_permute(lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]), [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
+      # no change, we added a dimension
+      #last_reduce -= 1
+      #first_reduce -= 1
+      self.late_are_float4 = True
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
     self.loaded_keys : Dict[int, Token] = {}
 
-    self.reduce_token = Token("acc", Types.FLOAT4 if self.late_is_float4 else Types.FLOAT)
+    self.reduce_token = Token("acc", Types.FLOAT4 if self.late_are_float4 or self.early_loads_are_non_reduce_float4 else Types.FLOAT)
 
     self.output_shape = self.shapes[0][:self.first_reduce]
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
