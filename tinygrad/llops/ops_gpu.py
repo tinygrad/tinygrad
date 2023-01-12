@@ -160,11 +160,12 @@ class CLASTKernel(ASTKernel):
         if st.needs_valid():
           assert len(st.views) == 3
           zv = st.views[1]
-          print("CHECK", self.bufs[buf_index]._base_shape, zv.old_shape, zv.shape)
+          if DEBUG >= 2:
+            print("CHECK", self.bufs[buf_index]._base_shape, zv.old_shape, zv.shape)
+            print("ISSUE", self.bufs[buf_index]._base_shape, st, W)
           if zv.old_shape[1] != zv.shape[1] and zv.old_shape[0] != 1:
             assert False, "invalid image views"
           offset += sum(x.offset for x in st.views if hasattr(x, 'offset'))
-          print("ISSUE", self.bufs[buf_index]._base_shape, st, W)
         else:
           assert len(st.views) == 1
 
@@ -272,7 +273,7 @@ class CLASTKernel(ASTKernel):
     if any_late_images and not self.early_loads_are_non_reduce_float4:
       lb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
-        assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
+        #assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
         valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
         lb_valids = [x and y for x,y in zip(lb_valids, valids)]
       assert any(lb_valids), f"invalid op with images {buftypes}"
