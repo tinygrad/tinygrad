@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.lazy import IMAGE
 from tinygrad.shapetracker import ShapeTracker
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -24,6 +25,17 @@ class CLBuffer:
       CL.BUFFER_CACHE[self.cl.size].append(self.cl)
     else:
       CL.mem_used -= self.cl.size
+
+FLOAT16 = int(os.getenv("FLOAT16", "0"))
+class CLImage:
+  fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+
+  def __init__(self, shape):
+    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]))
+    CL.mem_used += self.cl.row_pitch * self.cl.height
+
+  def __del__(self):
+    CL.mem_used -= self.cl.row_pitch * self.cl.height
 
 class CL:
   CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
@@ -208,7 +220,10 @@ class GPUBuffer(ExplicitExecAST):
   @property
   def cl(self):
     if self._buf is None:
-      self._buf = CLBuffer(4*prod(self._base_shape))
+      if len(self._base_shape) == 3 and self._base_shape[2] == 4:
+        self._buf = CLImage(self._base_shape)
+      else:
+        self._buf = CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
       CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
       self._backing = None
