@@ -118,7 +118,6 @@ class ASTKernel:
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
     self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape)
-    self.ret.cl   # does the allocation
     self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
 
     # check valid AST kernel

@@ -195,7 +195,7 @@ class LLVMBuffer(ExplicitExecAST):
     k.process()
 
     if DEBUG >= 2:
-      print(ast)
+      print(k.ast)
       print("old:", k.shapes)
       print("old:", k.strides)
     
@@ -342,7 +342,7 @@ class LLVMBuffer(ExplicitExecAST):
         phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
 
     # do the late ast
-    result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
+    result = ast_parse(loop_exit[store_loop], k.ast, store_loop, reduce_result=reduce_result)
 
     # store result
     builder = loop_exit[store_loop]
