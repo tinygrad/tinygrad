@@ -41,7 +41,7 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   elif self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize(self.device)
     ret = real_src.contiguous()
-    return ret, [real_src], LoadOps if id(ret) != id(real_src) else None
+    return ret, [real_src], LoadOps
   else:
     raise NotImplementedError(f"unknown LoadOp {self.op.op}")
 
@@ -99,6 +99,8 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     if psrcs[0][0].shape != psrcs[0][1].shape:
       intermediate_shape = psrcs[0][1].shape
       assert psrcs[0][0].shape == self.shape, f"shape mismatch {psrcs[0][0].shape} != {self.shape}"
+
+  # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
   for x in real_srcs.keys():
     if real_srcs[x] is None:
@@ -111,7 +113,7 @@ _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:
 # **** lazy operations ****
 
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
-def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.optype == MovementOps and root.realized is None else root
+def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
 
 LAZY = int(os.getenv("LAZY", "1"))

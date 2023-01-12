@@ -19,6 +19,7 @@ class Thneed:
     self.gobj = 0
 
     # build graph
+    # NOTE: if CLCACHE=1, this is wrong!
     nodes = defaultdict(lambda: {'in_edges': [], 'out_edges': []})
     for _, args in self.cl_cache:
       # output is always the first parameter
