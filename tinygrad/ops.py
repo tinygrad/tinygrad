@@ -118,6 +118,7 @@ class ASTKernel:
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
     self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape)
+    if hasattr(self.ret, "cl"): self.ret.cl  # does the allocation of unbacked buffer, pylint: disable=W0104
     self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
 
     # check valid AST kernel
