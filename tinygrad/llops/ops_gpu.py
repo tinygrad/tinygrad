@@ -201,6 +201,13 @@ class CLASTKernel(ASTKernel):
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
     values = [self.ast_parse(v, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
+    if isinstance(x.op, ReduceOps):
+      if not self.late_are_float4 and values[0].typ == Types.FLOAT4:
+        self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+        reduce = Token(f"clsum({values[0].tok})", Types.FLOAT)
+      else:
+        reduce = values[0]
+      return Token(code.replace("A", reduce.tok), reduce.typ)
     assert all_same([x.typ for x in values]), f"type mismatch in {values}"
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
@@ -212,8 +219,59 @@ class CLASTKernel(ASTKernel):
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(self.bufs)]
     self.prekernel = set()
 
+    # promote to float4 if these hit
+    any_early_images = any(isinstance(buf._buf, CLImage) for buf in self.earlybufs)
+    any_late_images = any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs)
+
+    # three toggles determine the kernel
+    self.early_loads_are_non_reduce_float4 = False
     self.early_loads_are_float4 = False
-    self.late_are_float4 = False
+    self.late_are_float4 = False   # store float4
+
+    # if there's images in the earlybufs, we have to make an axis the 4 loading one
+    # shove the axis to the end and remove 
+    if any_early_images:
+      eb_valids = [True] * len(self.shapes[0])
+      for i in range(len(self.bufs)):
+        if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
+          assert len(self.bufs[i].st.views) == 1, f"images can't have views {self.bufs[i].st}"
+          valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
+          eb_valids = [x and y for x,y in zip(eb_valids, valids)]
+      assert any(eb_valids), f"invalid op with images {buftypes} {eb_valids}"
+      eb_valid = eb_valids.index(True)
+
+      # no change, we added a dimension
+      self.reshape_and_permute(
+        lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]),
+        [i for i in range(self.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
+
+      if eb_valid < self.first_reduce:
+        self.early_loads_are_non_reduce_float4 = True
+        self.late_are_float4 = True
+      else:
+        self.early_loads_are_float4 = True
+
+    # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
+    if any_late_images and not self.early_loads_are_non_reduce_float4:
+      lb_valids = [True] * len(self.shapes[0])
+      for i in range(len(self.bufs)):
+        assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
+        valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
+        lb_valids = [x and y for x,y in zip(lb_valids, valids)]
+      assert any(lb_valids), f"invalid op with images {buftypes}"
+      lb_valid = lb_valids.index(True)
+      assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
+
+      # no change, we added a dimension
+      self.reshape_and_permute(
+        lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
+        [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
+      self.late_are_float4 = True
+
+    if DEBUG >= 2:
+      print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4}")
+      print("new:", self.shapes)
+      print("new:", self.strides)
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()

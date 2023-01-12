@@ -2,10 +2,14 @@
 import os
 import unittest
 import numpy as np
-os.environ['IMAGE'] = '1'
+if 'IMAGE' not in os.environ:
+  os.environ['IMAGE'] = '2'
 os.environ['GPU'] = '1'
+os.environ['OPT'] = '2'
 from tinygrad.tensor import Tensor
 from tinygrad.llops.ops_gpu import CLImage
+from tinygrad.nn import Conv2d
+Tensor.no_grad = True
 
 class TestImage(unittest.TestCase):
   def test_create_image(self):
@@ -32,6 +36,14 @@ class TestImage(unittest.TestCase):
     t3.realize()
     assert isinstance(t3.lazydata.realized._buf, CLImage)
     np.testing.assert_array_equal(t3.numpy(), np.ones((16,4,4))*9)
+  
+  def test_op_conv(self):
+    bs, in_chans, out_chans = 1,12,32
+    tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=0)
+    tiny_dconv = Conv2d(out_chans, out_chans, 1, bias=None, padding=0)
+    tiny_dat = Tensor.ones(bs, 12, 64, 128)
+    p2 = tiny_dconv(tiny_conv(tiny_dat).relu())
+    p2.realize()
 
 if __name__ == '__main__':
   unittest.main()
