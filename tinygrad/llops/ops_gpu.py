@@ -199,7 +199,7 @@ class CLASTKernel(ASTKernel):
             for i in range(4):
               lkey = self.compute_buf_index(st, buf_index, offset+i*self.strides[buf_index][-1])
               mst.append(f"data{buf_index}[bufi{lkey}]" if not constant_fold else constant_fold)
-              if st.needs_valid(): mst[-1] = f"(bufvalid{key} ? {mst[-1]} : 0.0)"
+              if st.needs_valid(): mst[-1] = f"(bufvalid{lkey} ? {mst[-1]} : 0.0)"
             ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
         else:
           ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
@@ -286,17 +286,19 @@ class CLASTKernel(ASTKernel):
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
       self.late_are_float4 = True
 
+    self.output_shape = self.shapes[0][:self.first_reduce]
+
     if DEBUG >= 2:
       print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4}")
       print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
       print("new:", self.shapes)
       print("new:", self.strides)
+      print("output shape", self.output_shape)
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
     self.loaded_keys : Dict[int, Token] = {}
 
-    self.output_shape = self.shapes[0][:self.first_reduce]
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
     self.kernel += [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
     if len(self.output_shape) > 3:
