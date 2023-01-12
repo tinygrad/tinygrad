@@ -133,12 +133,11 @@ class CLASTKernel(ASTKernel):
       self.loaded_keys[buf_index] = Token(f"val{key}", Types.FLOAT)
     return self.loaded_keys[buf_index]
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], reduce=False) -> Token:
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], reduce:Optional[Token]=None) -> Token:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
-    if isinstance(x.op, ReduceOps) and not reduce: return Token("acc", Types.FLOAT)
+    if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
     values = [self.ast_parse(v, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
-    if isinstance(x.op, ReduceOps): return Token(code.replace("A", values[0].tok), Types.FLOAT)
     assert all_same([x.typ for x in values]), f"type mismatch in {values}"
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
@@ -168,11 +167,11 @@ class CLASTKernel(ASTKernel):
       self.kernel.append(f"float acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      self.kernel.append("  acc = " + self.ast_parse(self.reduceop, reduce=True).tok + ";\n")
+      self.kernel.append("  acc = " + self.ast_parse(self.reduceop).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
-    self.store(0, self.ast_parse(self.ast))
+    self.store(0, self.ast_parse(self.ast, Token("acc", Types.FLOAT)))
     self.kernel.append("}")
 
     # kernel function definition
