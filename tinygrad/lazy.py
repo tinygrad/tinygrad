@@ -27,7 +27,7 @@ class Device:
     vars()[name] = name
 
 # **** realize helpers ****
-def realize_buffers(real_srcs, x):
+def realize_buffers(real_srcs, x) -> LazyOp:
   if x in real_srcs:
     return realize_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple(realize_buffers(real_srcs, y) for y in x.src), x.arg)
@@ -41,7 +41,7 @@ def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer],
   elif self.op.op == LoadOps.CONTIGUOUS:
     real_src = self.op.src[0].realize(self.device)
     ret = real_src.contiguous()
-    return ret, [real_src], LoadOps if id(ret) != id(real_src) else None
+    return ret, [real_src], LoadOps
   else:
     raise NotImplementedError(f"unknown LoadOp {self.op.op}")
 
@@ -65,7 +65,8 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     return self.dbuffer.exec_ast(ast), list(real_srcs.values()), ReduceOps
   else:
     real_src = src.realize(self.device)
-    return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
+    ast = LazyOp(self.op.op, (real_src,), self.op.arg)
+    return self.dbuffer.exec_ast(ast), [real_src], ReduceOps
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
@@ -99,6 +100,8 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     if psrcs[0][0].shape != psrcs[0][1].shape:
       intermediate_shape = psrcs[0][1].shape
       assert psrcs[0][0].shape == self.shape, f"shape mismatch {psrcs[0][0].shape} != {self.shape}"
+
+  # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
   for x in real_srcs.keys():
     if real_srcs[x] is None:
@@ -111,7 +114,7 @@ _realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:
 # **** lazy operations ****
 
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
-def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.optype == MovementOps and root.realized is None else root
+def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
 
 LAZY = int(os.getenv("LAZY", "1"))

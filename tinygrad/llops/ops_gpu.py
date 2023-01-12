@@ -1,10 +1,11 @@
 from __future__ import annotations
 import os, functools
+from enum import Enum
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.shapetracker import ShapeTracker
 
@@ -55,7 +56,11 @@ class CLProgram:
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else ''}" if rename else name
     self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
-    self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+    try:
+      self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+    except cl.RuntimeError as e:
+      print("FAILED TO BUILD", self.prg)
+      raise e
     if self.argdtypes is not None:
       self.clprg.set_scalar_arg_dtypes(self.argdtypes)
     CLProgram.kernel_cnt[name] += 1
@@ -79,10 +84,17 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
+Types = Enum("Types", ["FLOAT", "FLOAT4"])
+class Token:
+  def __init__(self, tok:str, typ:Types):
+    assert isinstance(tok, str)
+    self.tok = tok
+    self.typ = typ
+  def __repr__(self): return f"<{self.typ} {self.tok}>"
+
 class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
-    self.ast = ast
 
   def compute_buf_index(self, st, buf_index, offset=0):
     key = f"{buf_index}_{offset}"
@@ -97,13 +109,13 @@ class CLASTKernel(ASTKernel):
       self.seen_idx.add(key)
     return key
 
-  def store(self, buf_index, value, offset=0):
+  def store(self, buf_index, value:Token, offset=0):
     st = self.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
     key = self.compute_buf_index(st, buf_index, offset)
-    self.kernel.append(f"data{buf_index}[bufi{key}] = {value};\n")
+    self.kernel.append(f"data{buf_index}[bufi{key}] = {value.tok};\n")
 
-  def load(self, buf_index, offset=0):
+  def load(self, buf_index, offset=0) -> Token:
     if buf_index not in self.loaded_keys:
       st = self.bufs[buf_index].st
       if offset > 0: assert len(st.views) == 1
@@ -118,18 +130,18 @@ class CLASTKernel(ASTKernel):
       ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
       ldr = f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr
       self.kernel.append(f"float val{key} = {ldr};\n")
-      self.loaded_keys[buf_index] = f"val{key}"
+      self.loaded_keys[buf_index] = Token(f"val{key}", Types.FLOAT)
     return self.loaded_keys[buf_index]
 
-  def ast_parse(self, x, reduce=False) -> str:
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], reduce:Optional[Token]=None) -> Token:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
-    if isinstance(x.op, ReduceOps) and not reduce: return "acc"
+    if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
     values = [self.ast_parse(v, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
-    if isinstance(x.op, ReduceOps): return code.replace("A", values[0])
-    if len(values) >= 1: code = code.replace("A", values[0])
-    if len(values) >= 2: code = code.replace("B", values[1])
-    return code
+    assert all_same([x.typ for x in values]), f"type mismatch in {values}"
+    if len(values) >= 1: code = code.replace("A", values[0].tok)
+    if len(values) >= 2: code = code.replace("B", values[1].tok)
+    return Token(code, values[0].typ)
 
   def codegen(self):
     # TODO: fetch from quick cache before processing
@@ -137,7 +149,7 @@ class CLASTKernel(ASTKernel):
 
     self.bufs_to_delete : Set[int] = set()
     self.seen_idx : Set[str] = set()
-    self.loaded_keys : Dict[int, str] = {}
+    self.loaded_keys : Dict[int, Token] = {}
 
     self.output_shape = self.shapes[0][:self.first_reduce]
     self.kernel : List[str] = [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
@@ -155,12 +167,11 @@ class CLASTKernel(ASTKernel):
       self.kernel.append(f"float acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      self.kernel.append("  acc = " + self.ast_parse(self.reduceop, reduce=True) + ";\n")
+      self.kernel.append("  acc = " + self.ast_parse(self.reduceop).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
-    process_ast = self.ast_parse(self.ast)
-    self.store(0, process_ast)
+    self.store(0, self.ast_parse(self.ast, Token("acc", Types.FLOAT)))
     self.kernel.append("}")
 
     # kernel function definition
