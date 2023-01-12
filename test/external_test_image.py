@@ -42,7 +42,8 @@ class TestImage(unittest.TestCase):
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=0)
     tiny_dconv = Conv2d(out_chans, out_chans, 1, bias=None, padding=0)
     tiny_dat = Tensor.ones(bs, 12, 64, 128)
-    p2 = tiny_dconv(tiny_conv(tiny_dat).relu())
+    p2 = tiny_conv(tiny_dat).relu()
+    p2 = tiny_dconv(p2)
     p2.realize()
 
 if __name__ == '__main__':

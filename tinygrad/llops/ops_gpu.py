@@ -144,7 +144,7 @@ class CLASTKernel(ASTKernel):
     if buf_index not in self.loaded_keys:
       st = self.bufs[buf_index].st
       if offset > 0: assert len(st.views) == 1
-      key = self.compute_buf_index(st, buf_index, offset)
+      key = f"{buf_index}_{offset}"
 
       # constant folding
       constant_fold = None
@@ -216,6 +216,10 @@ class CLASTKernel(ASTKernel):
   def codegen(self):
     # TODO: fetch from quick cache before processing
     self.process()
+    if DEBUG >= 2:
+      print("old:", self.shapes)
+      print("old:", self.strides)
+
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(self.bufs)]
     self.prekernel = set()
 
@@ -241,6 +245,7 @@ class CLASTKernel(ASTKernel):
       eb_valid = eb_valids.index(True)
 
       # no change, we added a dimension
+      if DEBUG >= 2: print("early image reshape")
       self.reshape_and_permute(
         lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
@@ -263,6 +268,7 @@ class CLASTKernel(ASTKernel):
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
 
       # no change, we added a dimension
+      if DEBUG >= 2: print("late image reshape")
       self.reshape_and_permute(
         lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
@@ -270,6 +276,7 @@ class CLASTKernel(ASTKernel):
 
     if DEBUG >= 2:
       print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4}")
+      print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
       print("new:", self.shapes)
       print("new:", self.strides)
 
@@ -295,7 +302,8 @@ class CLASTKernel(ASTKernel):
       self.kernel.append(f"{accumulator.decltype()} acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      self.kernel.append("  acc = " + self.ast_parse(self.reduceop).tok + ";\n")
+      self.kernel.append("/* REDUCE AST */\n")
+      self.kernel.append("acc = " + self.ast_parse(self.reduceop).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
