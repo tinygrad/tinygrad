@@ -154,10 +154,16 @@ class CLASTKernel(ASTKernel):
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
-        assert not st.needs_valid()
-        assert len(st.views) == 1
+        #assert not st.needs_valid()
+        #assert len(st.views) == 1
 
-        c0, c1 = [str(offset//(W*4))], [str(offset//4)]
+        # MEGA HACK for image
+        if st.needs_valid():
+          offset += sum(x.offset for x in st.views if hasattr(x, 'offset'))
+          print("ISSUE", st, W)
+
+        if offset < 0: c0, c1 = [str(-(-offset//(W*4)))], [str(-((-offset//4)%W))]
+        else: c0, c1 = [str(offset//(W*4))], [str((offset//4)%W)]
         for i, (shape, stride) in enumerate(zip(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce])):
           if shape == 1 or stride == 0: continue
 
@@ -238,7 +244,7 @@ class CLASTKernel(ASTKernel):
       eb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
         if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
-          assert len(self.bufs[i].st.views) == 1, f"images can't have views {self.bufs[i].st}"
+          #assert len(self.bufs[i].st.views) == 1, f"images can't have views {self.bufs[i].st}"
           valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {buftypes} {eb_valids}"

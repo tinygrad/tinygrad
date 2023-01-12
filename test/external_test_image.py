@@ -36,6 +36,12 @@ class TestImage(unittest.TestCase):
     t3.realize()
     assert isinstance(t3.lazydata.realized._buf, CLImage)
     np.testing.assert_array_equal(t3.numpy(), np.ones((16,4,4))*9)
+
+  def test_padded_conv(self):
+    bs, in_chans, out_chans = 1,12,32
+    tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
+    tiny_dat = Tensor.ones(bs, 12, 64, 128)
+    tiny_conv(tiny_dat).realize()
   
   def test_op_conv(self):
     bs, in_chans, out_chans = 1,12,32
