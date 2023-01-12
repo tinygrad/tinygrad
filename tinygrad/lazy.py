@@ -27,7 +27,7 @@ class Device:
     vars()[name] = name
 
 # **** realize helpers ****
-def realize_buffers(real_srcs, x):
+def realize_buffers(real_srcs, x) -> LazyOp:
   if x in real_srcs:
     return realize_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple(realize_buffers(real_srcs, y) for y in x.src), x.arg)
@@ -65,7 +65,8 @@ def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
     return self.dbuffer.exec_ast(ast), list(real_srcs.values()), ReduceOps
   else:
     real_src = src.realize(self.device)
-    return real_src.reduce_op(self.op.op, self.op.arg), [real_src], ReduceOps
+    ast = LazyOp(self.op.op, (real_src,), self.op.arg)
+    return self.dbuffer.exec_ast(ast), [real_src], ReduceOps
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
