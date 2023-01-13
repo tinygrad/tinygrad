@@ -31,7 +31,7 @@ class CLImage:
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
 
   def __init__(self, shape):
-    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[0], shape[1]))
+    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
     CL.mem_used += self.cl.row_pitch * self.cl.height
 
   def __del__(self):
@@ -129,7 +129,7 @@ class CLASTKernel(ASTKernel):
     if isinstance(self.bufs[buf_index]._buf, CLImage):
       W = self.bufs[buf_index]._base_shape[1]
       assert value.typ == Types.FLOAT4, f"image can only store float4: {value} isn't"
-      self.kernel.append(f"write_imagef(data{buf_index}, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+      self.kernel.append(f"write_imagef(data{buf_index}, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
     else:
       if value.typ == Types.FLOAT4:
         #assert len(st.views) == 1
@@ -155,7 +155,7 @@ class CLASTKernel(ASTKernel):
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
-        ldrt = f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W})) /* {self.bufs[buf_index]._base_shape} */"
+        ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
         ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
