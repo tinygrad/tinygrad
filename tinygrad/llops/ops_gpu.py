@@ -155,8 +155,8 @@ class CLASTKernel(ASTKernel):
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
         key = self.compute_buf_index(st, buf_index, offset)
-        ldr = f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W})) /* {self.bufs[buf_index]._base_shape} */"
-        ldr = Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT4)
+        ldrt = f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W})) /* {self.bufs[buf_index]._base_shape} */"
+        ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
         self.compute_buf_index(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
@@ -170,8 +170,8 @@ class CLASTKernel(ASTKernel):
               if st.needs_valid(): mst[-1] = f"(bufvalid{lkey} ? {mst[-1]} : 0.0)"
             ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
         else:
-          ldr = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
-          ldr = Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT)
+          ldrt = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
+          ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT)
       self.kernel.append(f"{ldr.decltype()} val{key} = {ldr.tok};\n")
       self.loaded_keys[key] = Token(f"val{key}", ldr.typ)
     return self.loaded_keys[key]
