@@ -292,7 +292,7 @@ class CLASTKernel(ASTKernel):
           future_kernel.append(f"  acc.s{j} = " + self.ast_parse(self.reduceop, offset=j).tok + ";\n")
         self.kernel += future_kernel
       else:
-        self.kernel.append("acc = " + self.ast_parse(self.reduceop).tok + ";\n")
+        self.kernel.append("  acc = " + self.ast_parse(self.reduceop).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast

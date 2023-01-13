@@ -280,7 +280,7 @@ class Thneed:
       total_runtime = 0
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
         runtime = (e.profile.end - e.profile.start)
-        print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options}")
+        print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us  {prg.options} -> {args[2].shape if hasattr(args[2], 'shape') else args[2].size}")
         total_runtime += runtime
       print(f"total runtime: {total_runtime/1e6:.2f} ms   wall time: {et*1000.0:.2f} ms")
     return et
