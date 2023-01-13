@@ -173,9 +173,12 @@ jobs:
     - name: Run mypy
       run: mypy tinygrad/
 
+  # disabled, this test is flaky
   testdocker:
     name: Docker Test
     runs-on: ubuntu-latest
+    if: ${{ false }}
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v2

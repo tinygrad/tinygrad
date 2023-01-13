@@ -145,6 +145,7 @@ class CLASTKernel(ASTKernel):
     if key not in self.loaded_keys:
       st = self.bufs[buf_index].st
       if offset > 0: assert len(st.views) == 1
+      key = self.compute_buf_index(st, buf_index, offset)
 
       # constant folding
       constant_fold = None
@@ -154,11 +155,9 @@ class CLASTKernel(ASTKernel):
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
-        key = self.compute_buf_index(st, buf_index, offset)
         ldrt = f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W})) /* {self.bufs[buf_index]._base_shape} */"
         ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
-        self.compute_buf_index(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
           if self.strides[buf_index][-1] == 1 and len(st.views) == 1 and not st.needs_valid():
             ldr = Token(f"((__global float4*)data{buf_index})[bufi{key}/4]", Types.FLOAT4)
@@ -283,10 +282,7 @@ class CLASTKernel(ASTKernel):
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
       if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
-        future_kernel = []
-        for j in range(4):
-          future_kernel.append(f"  acc.s{j} = " + self.ast_parse(self.reduceop, offset=j).tok + ";\n")
-        self.kernel += future_kernel
+        self.kernel += [f"  acc.s{j} = " + self.ast_parse(self.reduceop, offset=j).tok + ";\n" for j in range(4)]
       else:
         self.kernel.append("  acc = " + self.ast_parse(self.reduceop).tok + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
@@ -329,10 +325,7 @@ class GPUBuffer(ExplicitExecAST):
   @property
   def cl(self):
     if self._buf is None:
-      if len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2:
-        self._buf = CLImage(self._base_shape)
-      else:
-        self._buf = CLBuffer(4*prod(self._base_shape))
+      self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
       CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
       self._backing = None
