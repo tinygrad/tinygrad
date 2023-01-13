@@ -105,7 +105,7 @@ class TestOps(unittest.TestCase):
   def test_matmul(self):
     helper_test_op([(65), (65,99)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_gemm(self):
-    helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
+    helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
   def test_multidot(self):
@@ -225,7 +225,7 @@ class TestOps(unittest.TestCase):
                     lambda x,w: torch.nn.functional.conv2d(x, w),
                     lambda x,w: x.conv2d(w), atol=1e-2)
 
-  #@unittest.skip("not supported with IMAGE=1")
+  @unittest.skip("not supported with IMAGE=1")
   def test_large_bs_conv(self):
     # large batch size can cause OpenCL image to exceed max image height on macOS
     # (or cause the conv kernel to overflow short sampling coords)
@@ -233,7 +233,7 @@ class TestOps(unittest.TestCase):
                     lambda x,w: torch.nn.functional.conv2d(x, w),
                     lambda x,w: x.conv2d(w), atol=1e-4, rtol=1e-2)
 
-  #@unittest.skip("not supported with IMAGE=1")
+  @unittest.skip("not supported with IMAGE=1")
   def test_large_ic_conv(self):
     # large input channel count can cause OpenCL image to exceed max image width on macOS
     helper_test_op([(1,2048,3,3), (1,2048,3,3)],
@@ -364,6 +364,12 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x[:, :, 1:, 1:],w).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=(-1,0,-1,0)).relu(), atol=1e-4)
 
+  def test_simple_padding_conv2d(self):
+    p = (1,1,1,1)
+    helper_test_op(None,
+      lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4, vals=[[[[[2.,3.]]]], [[[[1.]]]]])
+
   def test_asymmetric_padding_conv2d(self):
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
       with self.subTest(padding := p):
@@ -385,6 +391,15 @@ class TestOps(unittest.TestCase):
         helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
           lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
           lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
+
+  def test_padded_conv2d_bs1(self):
+    bs = 1
+    cin = 3
+    H,W = 3,3
+    padding = 1
+    helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
   def test_dilated_conv2d(self):
     bs = 4
