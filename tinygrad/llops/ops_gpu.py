@@ -183,12 +183,9 @@ class CLASTKernel(ASTKernel):
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
     values = [self.ast_parse(v, offset, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
-    if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT:
-      if self.early_loads_are_non_reduce_float4:
-        return Token(code.replace("A", values[0].tok), Types.FLOAT4)
-      else:
-        self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-        return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if self.late_are_float4 else "acc"), Types.FLOAT)
+    if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT and not self.early_loads_are_non_reduce_float4:
+      self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+      return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if self.late_are_float4 else "acc"), Types.FLOAT)
     assert all_same([x.typ for x in values]), f"type mismatch in {values}"
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
@@ -285,7 +282,6 @@ class CLASTKernel(ASTKernel):
       self.kernel.append(f"{accumulator.decltype()} acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      self.kernel.append("/* REDUCE AST */\n")
       if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
         future_kernel = []
         for j in range(4):
