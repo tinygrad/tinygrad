@@ -154,50 +154,6 @@ class CLASTKernel(ASTKernel):
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
-        #assert not st.needs_valid()
-        """
-        c0, c1 = [str(offset//(W*4))], [str((offset//4)%W)]
-
-        # MEGA HACK for image
-        if st.needs_valid():
-          assert len(st.views) == 3
-          zv = st.views[1]
-          if DEBUG >= 2:
-            print("CHECK", self.bufs[buf_index]._base_shape, zv.old_shape, zv.shape)
-            print("ISSUE", self.bufs[buf_index]._base_shape, st, W)
-          if zv.old_shape[1] != zv.shape[1] and zv.old_shape[0] != 1:
-            assert False, "invalid image views"
-          c0.append(str(zv.arg[1][0]))
-          c1.append(str(zv.arg[2][0]))
-          #W -= zv.arg[1][0] + zv.arg[2][0]
-          #print(zv.arg)
-          #exit(0)
-          #zoffset = sum(x.offset for x in st.views if hasattr(x, 'offset'))
-          #W += (-zoffset//4)%W
-          #offset += zoffset
-        else:
-          assert len(st.views) == 1
-
-        for i, (shape, stride) in enumerate(zip(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce])):
-          if shape == 1 or stride == 0: continue
-
-          if stride%(W*4) == 0:
-            if stride//(W*4) != 0:
-              c0.append(f"(idx{i} * {stride//(W*4)})")
-          else:
-            if shape*stride > W*4:
-              c0.append(f"((idx{i} * {stride})/({W*4}))")
-
-          if stride%4 == 0:
-            if stride//4 < W:
-              if (shape * stride//4) <= W: # no mod required
-                c1.append(f"(idx{i} * {stride//4})")
-              else:
-                c1.append(f"(idx{i} * {stride//4})%{W}")
-          else:
-            c1.append(f"((idx{i} * {stride})/4)%{W}")
-        ldr = Token(f"read_imagef(data{buf_index}, smp, (int2)({'+'.join(c0)}, {'+'.join(c1)}))  /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
-        """
         key = self.compute_buf_index(st, buf_index, offset)
         ldr = f"read_imagef(data{buf_index}, smp, (int2)((bufi{key})/{W*4}, ((bufi{key})/4)%{W})) /* {self.bufs[buf_index]._base_shape} */"
         ldr = Token(f"(bufvalid{key} ? {ldr} : 0.0)" if st.needs_valid() else ldr, Types.FLOAT4)
