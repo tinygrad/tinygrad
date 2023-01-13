@@ -365,10 +365,10 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv2d(x,w,padding=(-1,0,-1,0)).relu(), atol=1e-4)
 
   def test_simple_padding_conv2d(self):
-    p = (1,1,0,0)
+    p = (1,1,1,1)
     helper_test_op(None,
       lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4, vals=[[[[[1.,1.]]]], [[[[1.]]]]])
+      lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4, vals=[[[[[2.,3.]]]], [[[[1.]]]]])
 
   def test_asymmetric_padding_conv2d(self):
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
