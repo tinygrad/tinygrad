@@ -251,6 +251,7 @@ class CLASTKernel(ASTKernel):
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
       self.late_are_float4 = True
 
+    self.simplify_ones()
     self.output_shape = self.shapes[0][:self.first_reduce]
 
     if DEBUG >= 2:

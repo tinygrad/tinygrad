@@ -129,20 +129,28 @@ class ASTKernel:
   def process(self):
     # get shape, strides, and offset
     # if it's a multiview buffer we take the final view
-    shapes = [x.shape for x in self.bufs]
-    strides = [x.st.views[-1].strides for x in self.bufs]
+    self.shapes = [x.shape for x in self.bufs]
+    self.strides = [x.st.views[-1].strides for x in self.bufs]
+    self.offsets = [x.st.views[-1].offset for x in self.bufs]  # include the offsets (as is)
+    self.last_reduce = len(self.shapes[0])
+    self.simplify_ones()
+    self.simplify_merge_adjacent()
 
+  def simplify_ones(self):
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
-    all_ones = [all(s[i]==1 for s in shapes) for i in range(len(shapes[0]))]
+    all_ones = [all(s[i]==1 for s in self.shapes) for i in range(len(self.shapes[0]))]
     # keep at least 1 one
     if all(all_ones):
       all_ones[-1] = False
-    shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in shapes]
-    strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in strides]
-
+    self.shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in self.shapes]
+    self.strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in self.strides]
+    self.last_reduce -= sum(all_ones)
     # find first mismatch, don't reduce this
-    first_reduce = get_first_reduce(shapes)
+    self.first_reduce = get_first_reduce(self.shapes)
+
+  def simplify_merge_adjacent(self):
+    shapes, strides = self.shapes, self.strides
 
     # merge dimensions if we can, multi get_shape_strides
     # TODO: does this always preserve the reduce dimension, NO
@@ -154,18 +162,16 @@ class ASTKernel:
         # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
         can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
       # more can merge than this
-      can_merge = all(can_merge) and i != first_reduce
+      can_merge = all(can_merge) and i != self.first_reduce
+      if can_merge:
+        self.last_reduce -= 1
       for j in range(len(shapes)):
         if can_merge:
           rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
         else:
           rets[j].append((shapes[j][i], strides[j][i]))
     self.shapes, self.strides = [[y[0] for y in x] for x in rets], [[y[1] for y in x] for x in rets]
-    self.first_reduce = get_first_reduce(self.shapes)  # update this if axis merged
-    self.last_reduce = len(self.shapes[0])
-
-    # include the offsets (as is)
-    self.offsets = [x.st.views[-1].offset for x in self.bufs]
+    self.first_reduce = get_first_reduce(self.shapes)
 
   @property
   def shape_len(self): return len(self.shapes[0])
@@ -186,4 +192,3 @@ class ASTKernel:
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     self.shapes, self.strides = new_shapes, new_strides
-
