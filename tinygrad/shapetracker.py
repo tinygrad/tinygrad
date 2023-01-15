@@ -49,8 +49,8 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, div=1, mod=None):
-    idx_pieces = [NumNode(self.offset)] + [MulNode(VariableNode(idxs[i], 0, sh), st) for i,(sh,st) in enumerate(zip(self.shape, self.strides))]
-    idx_pieces = DivNode(SumNode(idx_pieces), div) if div != 1 else SumNode(idx_pieces)
+    idx_pieces = [NumNode(self.offset)] + [MulNode(VariableNode(idxs[i], 0, sh), st) for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
+    idx_pieces = DivNode(SumNode(idx_pieces), div)
     idx_pieces = ModNode(idx_pieces, mod) if mod is not None else idx_pieces
     return str(idx_pieces)
 
