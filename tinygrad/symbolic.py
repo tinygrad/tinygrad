@@ -3,65 +3,74 @@ from typing import List, Optional
 class Node:
   pass
 
-class NumNode(Node):
-  def __init__(self, num:int):
-    self.num = num
-  def __str__(self):
-    return str(self.num)
-
-class VariableNode(Node):
-  def __init__(self, expr:str, min:int=None, max:int=None):
+class Variable(Node):
+  def __init__(self, expr:str, min:int, max:int):
     self.expr, self.min, self.max = expr, min, max
+  @staticmethod
+  def num(num:int):
+    return Variable(str(num), num, num)
+  def __add__(self, num:int):
+    return AddNode(self, num)
+  def __mul__(self, num:int):
+    return MulNode(self, num)
+  def __floordiv__(self, num:int):
+    return DivNode(self, num)
+  def __mod__(self, num:int):
+    return ModNode(self, num)
+  def __ge__(self, num:int):
+    return GeNode(self, num)
+  def __lt__(self, num:int):
+    return LtNode(self, num)
   def __str__(self):
     return self.expr
 
-class SumNode(Node):
-  def __init__(self, nodes:List[Node]):
-    self.nodes = nodes
-  def __str__(self):
-    return f"({'+'.join(['0']+[str(x) for x in self.nodes if str(x) != '0'])})"
-
-class AddNode(Node):
-  def __init__(self, a:Node, b:int):
+class AddNode(Variable):
+  def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
   def __str__(self):
     return f"({self.a}+{self.b})" if self.b != 0 else str(self.a)
 
-class MulNode(Node):
-  def __init__(self, a:Node, b:int):
+class MulNode(Variable):
+  def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
   def __str__(self):
     return f"({self.a}*{self.b})" if self.b != 0 else "0"
 
-class DivNode(Node):
-  def __init__(self, a:Node, b:int):
+class DivNode(Variable):
+  def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
   def __str__(self):
     return f"({self.a}//{self.b})" if self.b != 1 else str(self.a)
 
-class ModNode(Node):
-  def __init__(self, a:Node, b:int):
+class ModNode(Variable):
+  def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
   def __str__(self):
     return f"({self.a}%{self.b})"
 
-# boolean
-
-class AndNode(Node):
-  def __init__(self, nodes:List[Node]):
-    self.nodes = nodes
-  def __str__(self):
-    return f"({'&&'.join([str(x) for x in self.nodes])})"
-
-class GteNode(Node):
-  def __init__(self, a:Node, b:int):
+class GeNode(Variable):
+  def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
   def __str__(self):
     return f"({self.a} >= {self.b})"
 
-class LtNode(Node):
-  def __init__(self, a:Node, b:int):
+class LtNode(Variable):
+  def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
   def __str__(self):
     return f"({self.a} < {self.b})"
+
+# reduce nodes
+
+class SumNode(Variable):
+  def __init__(self, nodes:List[Variable]):
+    self.nodes = nodes
+  def __str__(self):
+    return f"({'+'.join(['0']+[str(x) for x in self.nodes if str(x) != '0'])})"
+
+class AndNode(Variable):
+  def __init__(self, nodes:List[Variable]):
+    self.nodes = nodes
+  def __str__(self):
+    return f"({'&&'.join([str(x) for x in self.nodes])})"
 
