@@ -27,36 +27,42 @@ class Variable(Node):
 class AddNode(Variable):
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
+    self.min, self.max = a.min+b, a.max+b
   def __str__(self):
     return f"({self.a}+{self.b})" if self.b != 0 else str(self.a)
 
 class MulNode(Variable):
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
+    self.min, self.max = a.min*b, a.max*b
   def __str__(self):
     return f"({self.a}*{self.b})" if self.b != 0 else "0"
 
 class DivNode(Variable):
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
+    self.min, self.max = a.min//b, a.max//b
   def __str__(self):
     return f"({self.a}//{self.b})" if self.b != 1 else str(self.a)
 
 class ModNode(Variable):
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
+    self.min, self.max = a.min%b, a.max%b
   def __str__(self):
     return f"({self.a}%{self.b})"
 
 class GeNode(Variable):
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
+    self.min, self.max = 0, 1
   def __str__(self):
     return f"({self.a} >= {self.b})"
 
 class LtNode(Variable):
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
+    self.min, self.max = 0, 1
   def __str__(self):
     return f"({self.a} < {self.b})"
 
@@ -65,12 +71,14 @@ class LtNode(Variable):
 class SumNode(Variable):
   def __init__(self, nodes:List[Variable]):
     self.nodes = nodes
+    self.min, self.max = sum([x.min for x in nodes]), sum([x.max for x in nodes])
   def __str__(self):
     return f"({'+'.join(['0']+[str(x) for x in self.nodes if str(x) != '0'])})"
 
 class AndNode(Variable):
   def __init__(self, nodes:List[Variable]):
     self.nodes = nodes
+    self.min, self.max = min([x.min for x in nodes]), max([x.max for x in nodes])
   def __str__(self):
     return f"({'&&'.join([str(x) for x in self.nodes])})"
 
