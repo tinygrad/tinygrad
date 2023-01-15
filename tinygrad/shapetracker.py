@@ -9,10 +9,6 @@ from tinygrad.indexer import *
 # TODO: fix DEBUG import
 DEBUG = int(os.getenv("DEBUG", "0"))
 
-def divmodidx(acc, d, mod=True):
-  lr = f"(idx//{acc})" if acc != 1 else "idx"
-  return f"({lr}%{d})" if mod else lr  # don't mod the top shape dimension
-
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
   assert len(shape) == len(strides)
@@ -37,15 +33,13 @@ class View:
 
   @functools.cached_property
   def expr(self):
-    ret = [f"{self.offset}"] if self.offset != 0 else []
+    ret = [NumNode(self.offset)]
     acc = 1
     for i,(d,s) in enumerate(self.shape_strides[::-1]):
       if d != 1 and s != 0:
-        lr = divmodidx(acc, d, i != len(self.shape_strides)-1 and d != prod(self.shape))
-        lr = f"({lr}*{s})" if s != 1 else lr
-        ret.append(lr)
+        ret.append(MulNode(ModNode(DivNode(VariableNode('idx'), acc), d), s))
       acc *= d
-    return 'idx=' + ('+'.join(ret) if len(ret) > 0 else "0")
+    return 'idx=' + str(SumNode(ret))
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, div=1, mod=None):
@@ -60,8 +54,9 @@ class ZeroView:
     expr, acc = ['valid'], 1
     for s,(x,y) in list(zip(old_shape, arg))[::-1]:
       self.shape = [y-x] + self.shape
-      base = divmodidx(acc, self.shape[0], len(self.shape) != len(old_shape)) + f"+{x}"
-      expr += ([f"(({base}) >= 0)"] if x < 0 else []) + ([f"(({base}) < {s})"] if y > s else [])
+      base = DivNode(VariableNode('idx'), acc)
+      base = AddNode(ModNode(base, self.shape[0]) if len(self.shape) != len(old_shape) else base, x)
+      expr += ([f"(({str(base)}) >= 0)"] if x < 0 else []) + ([f"(({str(base)}) < {s})"] if y > s else [])
       acc *= self.shape[0]
     self.expr = 'valid=' + ' && '.join(expr)
 

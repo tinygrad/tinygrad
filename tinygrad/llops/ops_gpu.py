@@ -114,7 +114,7 @@ class CLASTKernel(ASTKernel):
     # add the index if we don't have it
     if key not in self.seen_idx:
       view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
-      self.kernel.append(f"int bufi{key} = " + view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)], div, mod) + ";\n")
+      self.kernel.append(f"int bufi{key} = " + view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)], div, mod).replace("//", "/") + ";\n")
       if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = true;")
       if len(st.views) > 1:
         extra_idx = ';\n '.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
