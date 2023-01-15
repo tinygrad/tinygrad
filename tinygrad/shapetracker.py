@@ -4,6 +4,7 @@ import os
 import functools
 from typing import Tuple, Union, List
 from tinygrad.helpers import prod
+from tinygrad.indexer import *
 
 # TODO: fix DEBUG import
 DEBUG = int(os.getenv("DEBUG", "0"))
@@ -48,9 +49,10 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, div=1, mod=None):
-    idx_pieces = [str(self.offset)] + [(f"{idxs[i]}*{st}" if st != 1 else idxs[i]) for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
-    # TODO: do the div and mod in a smarter way
-    return '(('+' + '.join(idx_pieces)+f')/{div})' + (f'%{mod};\n' if mod is not None else ';\n')
+    idx_pieces = [NumNode(self.offset)] + [MulNode(VariableNode(idxs[i], 0, sh), st) for i,(sh,st) in enumerate(zip(self.shape, self.strides))]
+    idx_pieces = DivNode(SumNode(idx_pieces), div) if div != 1 else SumNode(idx_pieces)
+    idx_pieces = ModNode(idx_pieces, mod) if mod is not None else idx_pieces
+    return str(idx_pieces)
 
 class ZeroView:
   def __init__(self, old_shape, arg):
