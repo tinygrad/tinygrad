@@ -9,20 +9,14 @@ class Variable(Node):
   @staticmethod
   def num(num:int):
     return Variable(str(num), num, num)
-  def __add__(self, num:int):
-    return AddNode(self, num)
-  def __mul__(self, num:int):
-    return MulNode(self, num)
-  def __floordiv__(self, num:int):
-    return DivNode(self, num)
-  def __mod__(self, num:int):
-    return ModNode(self, num)
-  def __ge__(self, num:int):
-    return GeNode(self, num)
-  def __lt__(self, num:int):
-    return LtNode(self, num)
   def __str__(self):
     return self.expr
+  def __add__(self, num:int): return AddNode(self, num)
+  def __mul__(self, num:int): return MulNode(self, num)
+  def __floordiv__(self, num:int): return DivNode(self, num)
+  def __mod__(self, num:int): return ModNode(self, num)
+  def __ge__(self, num:int): return GeNode(self, num)
+  def __lt__(self, num:int): return LtNode(self, num)
 
 class AddNode(Variable):
   def __init__(self, a:Variable, b:int):
@@ -36,7 +30,7 @@ class MulNode(Variable):
     self.a, self.b = a, b
     self.min, self.max = a.min*b, a.max*b
   def __str__(self):
-    return f"({self.a}*{self.b})" if self.b != 0 else "0"
+    return str(self.a) if self.b == 1 else (f"({self.a}*{self.b})" if self.b != 0 else "0")
 
 class DivNode(Variable):
   def __init__(self, a:Variable, b:int):
