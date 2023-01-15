@@ -8,7 +8,7 @@ from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.lazy import IMAGE
-from tinygrad.shapetracker import ShapeTracker
+from tinygrad.shapetracker import ShapeTracker, View
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:
@@ -113,9 +113,8 @@ class CLASTKernel(ASTKernel):
     key = f"{buf_index}_{offset}" + (f"_d{div}" if div != 1 else "") + (f"_m{mod}" if mod is not None else "")
     # add the index if we don't have it
     if key not in self.seen_idx:
-      # TODO: do the div and mod in a smarter way
-      idx_pieces = [str(self.offsets[buf_index] + offset)] + [(f"idx{i}*{st}" if st != 1 else f"idx{i}") for i,(sh,st) in enumerate(zip(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce])) if sh != 1 and st != 0]
-      self.kernel.append(f"int bufi{key} = " + '(('+' + '.join(idx_pieces)+f')/{div})' + (f'%{mod};\n' if mod is not None else ';\n'))
+      view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
+      self.kernel.append(f"int bufi{key} = " + view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)], div, mod))
       if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = true;")
       if len(st.views) > 1:
         extra_idx = ';\n '.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
