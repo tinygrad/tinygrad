@@ -4,7 +4,7 @@ import os
 import functools
 from typing import Tuple, Union, List
 from tinygrad.helpers import prod
-from tinygrad.indexer import *
+from tinygrad.symbolic import *
 
 # TODO: fix DEBUG import
 DEBUG = int(os.getenv("DEBUG", "0"))
