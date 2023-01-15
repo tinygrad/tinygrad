@@ -10,7 +10,7 @@ class NumNode(Node):
     return str(self.num)
 
 class VariableNode(Node):
-  def __init__(self, expr:str, min:Optional[int]=None, max:Optional[int]=None):
+  def __init__(self, expr:str, min:int=None, max:int=None):
     self.expr, self.min, self.max = expr, min, max
   def __str__(self):
     return self.expr
@@ -44,4 +44,24 @@ class ModNode(Node):
     self.a, self.b = a, b
   def __str__(self):
     return f"({self.a}%{self.b})"
+
+# boolean
+
+class AndNode(Node):
+  def __init__(self, nodes:List[Node]):
+    self.nodes = nodes
+  def __str__(self):
+    return f"({'&&'.join([str(x) for x in self.nodes])})"
+
+class GteNode(Node):
+  def __init__(self, a:Node, b:int):
+    self.a, self.b = a, b
+  def __str__(self):
+    return f"({self.a} >= {self.b})"
+
+class LtNode(Node):
+  def __init__(self, a:Node, b:int):
+    self.a, self.b = a, b
+  def __str__(self):
+    return f"({self.a} < {self.b})"
 

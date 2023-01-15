@@ -35,9 +35,10 @@ class View:
   def expr(self):
     ret = [NumNode(self.offset)]
     acc = 1
+    max_idx = prod([x[0] for x in self.shape_strides])
     for i,(d,s) in enumerate(self.shape_strides[::-1]):
       if d != 1 and s != 0:
-        ret.append(MulNode(ModNode(DivNode(VariableNode('idx'), acc), d), s))
+        ret.append(MulNode(ModNode(DivNode(VariableNode('idx', 0, max_idx), acc), d), s))
       acc *= d
     return 'idx=' + str(SumNode(ret))
 
@@ -51,14 +52,15 @@ class View:
 class ZeroView:
   def __init__(self, old_shape, arg):
     self.old_shape, self.arg, self.shape = old_shape, arg, []
-    expr, acc = ['valid'], 1
+    expr, acc = [VariableNode('valid', 0, 1)], 1
+    max_idx = prod(self.old_shape) # it is old shape here, right?
     for s,(x,y) in list(zip(old_shape, arg))[::-1]:
       self.shape = [y-x] + self.shape
-      base = DivNode(VariableNode('idx'), acc)
+      base = DivNode(VariableNode('idx', 0, max_idx), acc)
       base = AddNode(ModNode(base, self.shape[0]) if len(self.shape) != len(old_shape) else base, x)
-      expr += ([f"(({str(base)}) >= 0)"] if x < 0 else []) + ([f"(({str(base)}) < {s})"] if y > s else [])
+      expr += ([GteNode(base, 0)] if x < 0 else []) + ([LtNode(base, s)] if y > s else [])
       acc *= self.shape[0]
-    self.expr = 'valid=' + ' && '.join(expr)
+    self.expr = 'valid=' + str(AndNode(expr))
 
   def __repr__(self): return f"ZeroView<{self.old_shape}, {self.arg}>"
 
