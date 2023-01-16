@@ -40,8 +40,19 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_div_factor(self):
     ret = SumNode([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) // 2
-    print(ret)
+    assert str(ret) == "((a*2)+(b*2))"
 
+  def test_sum_div_some_factor(self):
+    ret = SumNode([Variable("a", 0, 7)*5, Variable("b", 0, 3)*4]) // 2
+    assert str(ret) == "((b*2)+(((a*5))//2))"
+
+  def test_sum_div_no_factor(self):
+    ret = SumNode([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2
+    assert str(ret) == "(((a*5)+(b*5))//2)"
+  
+  def test_mod_factor(self):
+    ret = SumNode([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100
+    assert str(ret) == "(((b*50))%100)"
 
 if __name__ == '__main__':
   unittest.main()

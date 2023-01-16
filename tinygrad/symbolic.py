@@ -45,6 +45,7 @@ class DivNode(Variable):
   def __new__(cls, a:Variable, b:int):
     assert b != 0
     if b == 1: return a
+    #if isinstance(a, MulNode) and a.b%b == 0: return MulNode(a.a, a.b//b)
     if isinstance(a, SumNode) and all((isinstance(x, MulNode) or isinstance(x, NumNode)) for x in a.nodes):
       factors, nofactor = partition(a.nodes, lambda x: x.b%b == 0)
       if len(factors) > 0: return SumNode([MulNode(x.a, x.b//b) if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors] + [SumNode(nofactor)//b])
@@ -60,9 +61,14 @@ class ModNode(Variable):
   # TODO: why is this broken?
   def __new__(cls, a:Variable, b:int):
     if b == 1: return NumNode(0)
+    # TODO: unduplicate this
+    if isinstance(a, SumNode):
+      a = SumNode([x for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
     if a.min >= 0 and a.max < b: return a
     return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
+    if isinstance(a, SumNode):
+      a = SumNode([x for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
     self.a, self.b = a, b
     self.min, self.max = min(a.min, 0), max(a.max, b)
   @property
