@@ -9,7 +9,6 @@ from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.lazy import IMAGE
 from tinygrad.shapetracker import ShapeTracker, View, ZeroView
-from tinygrad.symbolic import Variable, NumNode
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:

@@ -4,7 +4,7 @@ import os
 import functools
 from typing import Tuple, Union, List
 from tinygrad.helpers import prod
-from tinygrad.symbolic import *
+from tinygrad.symbolic import Variable
 
 # TODO: fix DEBUG import
 DEBUG = int(os.getenv("DEBUG", "0"))
@@ -32,13 +32,13 @@ class View:
     return self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
 
   def expr_node(self, idx):
-    ret = [NumNode(self.offset)]
+    ret = [Variable.num(self.offset)]
     acc = 1
     for d,s in self.shape_strides[::-1]:
       if d != 1 and s != 0:
         ret.append(((idx//acc)%d)*s)
       acc *= d
-    return SumNode(ret)
+    return Variable.sum(ret)
 
   @functools.cached_property
   def expr(self):
@@ -46,8 +46,8 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, div=1, mod=None):
-    idx_pieces = [NumNode(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
-    idx_pieces = SumNode(idx_pieces)//div
+    idx_pieces = [Variable.num(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
+    idx_pieces = Variable.sum(idx_pieces)//div
     return (idx_pieces%mod) if mod is not None else idx_pieces
 
 class ZeroView:
@@ -62,7 +62,7 @@ class ZeroView:
       base = (base % self.shape[0]) + x
       expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
       acc *= self.shape[0]
-    return AndNode(expr)
+    return Variable.ands(expr)
 
   @functools.cached_property
   def expr(self):

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import List
 from tinygrad.helpers import partition
 
@@ -7,12 +8,45 @@ class Variable:
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
-  def __add__(self, num:int): return AddNode(self, num)
-  def __mul__(self, num:int): return MulNode(self, num)
-  def __floordiv__(self, num:int): return DivNode(self, num)
-  def __mod__(self, num:int): return ModNode(self, num)
-  def __ge__(self, num:int): return GeNode(self, num)
-  def __lt__(self, num:int): return LtNode(self, num)
+  def __add__(self, b:int): return AddNode(self, b)
+  def __mul__(self, b:int):
+    if b == 0: return NumNode(0)
+    elif b == 1: return self
+    return MulNode(self, b)
+  def __floordiv__(self, b:int):
+    assert b != 0
+    if b == 1: return self
+    if isinstance(self, SumNode) and all((isinstance(x, MulNode) or isinstance(x, NumNode)) for x in self.nodes):
+      factors, nofactor = partition(self.nodes, lambda x: x.b%b == 0)
+      if len(factors) > 0: return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [Variable.sum(nofactor)//b])
+    return DivNode(self, b)
+  def __mod__(self, b:int):
+    if b == 1: return NumNode(0)
+    if isinstance(self, SumNode):
+      a = Variable.sum([x for x in self.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
+    else:
+      a = self
+    if a.min >= 0 and a.max < b: return a
+    return ModNode(a, b)
+  def __ge__(self, b:int): return GeNode(self, b)
+  def __lt__(self, b:int): return LtNode(self, b)
+
+  @staticmethod
+  def num(num:int) -> Variable:
+    return NumNode(num)
+
+  @staticmethod
+  def sum(nodes:List[Variable]) -> Variable:
+    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
+    if len(nodes) == 0: return NumNode(0)
+    elif len(nodes) == 1: return nodes[0]
+    return SumNode(nodes)
+
+  @staticmethod
+  def ands(nodes:List[Variable]) -> Variable:
+    if len(nodes) == 0: return NumNode(1)
+    elif len(nodes) == 1: return nodes[0]
+    return AndNode(nodes)
 
 class NumNode(Variable):
   def __init__(self, num:int):
@@ -27,10 +61,6 @@ class AddNode(Variable):
     return f"({self.a}+{self.b})" if self.b != 0 else str(self.a)
 
 class MulNode(Variable):
-  def __new__(cls, a:Variable, b:int):
-    if b == 0: return NumNode(0)
-    elif b == 1: return a
-    return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
     self.min, self.max = a.min*b, a.max*b
@@ -39,14 +69,6 @@ class MulNode(Variable):
     return f"({self.a}*{self.b})"
 
 class DivNode(Variable):
-  def __new__(cls, a:Variable, b:int):
-    assert b != 0
-    if b == 1: return a
-    #if isinstance(a, MulNode) and a.b%b == 0: return MulNode(a.a, a.b//b)
-    if isinstance(a, SumNode) and all((isinstance(x, MulNode) or isinstance(x, NumNode)) for x in a.nodes):
-      factors, nofactor = partition(a.nodes, lambda x: x.b%b == 0)
-      if len(factors) > 0: return SumNode([MulNode(x.a, x.b//b) if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors] + [SumNode(nofactor)//b])
-    return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
     self.min, self.max = a.min//b, a.max//b
@@ -55,22 +77,15 @@ class DivNode(Variable):
     return f"({self.a}//{self.b})"
 
 class ModNode(Variable):
-  def __new__(cls, a:Variable, b:int):
-    if b == 1: return NumNode(0)
-    # TODO: unduplicate this
-    if isinstance(a, SumNode):
-      a = SumNode([x for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
-    # infinite recursion!
-    #if a.min >= 0 and a.max < b: return a
-    return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     if isinstance(a, SumNode):
-      a = SumNode([x for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
+      a = Variable.sum([x for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
     self.a, self.b = a, b
     self.min, self.max = min(a.min, 0), max(a.max, b)
   @property
   def expr(self):
-    return str(self.a) if self.a.min >= 0 and self.a.max < self.b else f"({self.a}%{self.b})"
+    assert self.a != self
+    return f"({self.a}%{self.b})"
 
 class GeNode(Variable):
   def __init__(self, a:Variable, b:int):
@@ -91,20 +106,12 @@ class LtNode(Variable):
 # reduce nodes
 
 class SumNode(Variable):
-  def __new__(cls, nodes:List[Variable]):
-    # TODO: unduplicate this
-    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
-    if len(nodes) == 0: return NumNode(0)
-    # TODO: enabling this triggers infinite recursion?!?
-    #elif len(nodes) == 1: return nodes[0]
-    return super().__new__(cls)
-
   def __init__(self, nodes:List[Variable]):
-    self.nodes = [x for x in nodes if x.min != 0 or x.max != 0]
+    self.nodes = nodes
     self.min, self.max = sum([x.min for x in nodes]), sum([x.max for x in nodes])
   @property
   def expr(self):
-    return f"({'+'.join([str(x) for x in self.nodes])})" if len(self.nodes) > 1 else str(self.nodes[0])
+    return f"({'+'.join([str(x) for x in self.nodes])})"
 
 class AndNode(Variable):
   def __init__(self, nodes:List[Variable]):
@@ -112,4 +119,4 @@ class AndNode(Variable):
     self.min, self.max = min([x.min for x in nodes]), max([x.max for x in nodes])
   @property
   def expr(self):
-    return f"({'&&'.join([str(x) for x in self.nodes])})" if len(self.nodes) > 1 else str(self.nodes[0])
+    return f"({'&&'.join([str(x) for x in self.nodes])})"

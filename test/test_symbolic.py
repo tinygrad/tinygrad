@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.symbolic import Variable, SumNode, NumNode
+from tinygrad.symbolic import Variable
 
 class TestSymbolic(unittest.TestCase):
   def test_mul_0(self):
@@ -34,28 +34,32 @@ class TestSymbolic(unittest.TestCase):
     assert ret.max == 3
 
   def test_sum_div_min_max(self):
-    ret = SumNode([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2
+    ret = Variable.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2
     assert ret.min == 0
     assert ret.max == 5
 
   def test_sum_div_factor(self):
-    ret = SumNode([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) // 2
+    ret = Variable.sum([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) // 2
     self.assertEqual(str(ret), "((a*2)+(b*2))")
 
   def test_sum_div_some_factor(self):
-    ret = SumNode([Variable("a", 0, 7)*5, Variable("b", 0, 3)*4]) // 2
+    ret = Variable.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*4]) // 2
     self.assertEqual(str(ret), "((b*2)+((a*5)//2))")
 
   def test_sum_div_no_factor(self):
-    ret = SumNode([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2
+    ret = Variable.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2
     self.assertEqual(str(ret), "(((a*5)+(b*5))//2)")
   
   def test_mod_factor(self):
-    ret = SumNode([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100
+    ret = Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100
     self.assertEqual(str(ret), "((b*50)%100)")
   
   def test_sum_0(self):
-    ret = SumNode([Variable("a", 0, 7)])
+    ret = Variable.sum([Variable("a", 0, 7)])
+    self.assertEqual(str(ret), "a")
+  
+  def test_mod_remove(self):
+    ret = Variable("a", 0, 6)%100
     self.assertEqual(str(ret), "a")
 
 if __name__ == '__main__':
