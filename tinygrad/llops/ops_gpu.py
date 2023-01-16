@@ -114,13 +114,14 @@ class CLASTKernel(ASTKernel):
     # add the index if we don't have it
     if key not in self.seen_idx:
       view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
-      idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)], div, mod)  # TODO: div and mod can go here
+      idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)])
       valid = None
       for v in st.views[0:-1][::-1]:
         if isinstance(v, ZeroView):
           valid = v.expr_node(valid, idx)
         else:
           idx = v.expr_node(idx)
+      idx = (idx//div) if mod is None else ((idx//div)%mod)
       if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {str(valid).replace('//', '/')};\n")
       self.kernel.append(f"int bufi{key} = {str(idx).replace('//', '/')};\n")
       self.seen_idx.add(key)
@@ -170,7 +171,11 @@ class CLASTKernel(ASTKernel):
         else:
           self.kernel.append(f"/* computing {st} */\n")
           key = self.compute_buf_index(st, buf_index, offset)
+          #idx = self.compute_buf_index(st, buf_index, offset, 4, W)
+          #idy = self.compute_buf_index(st, buf_index, offset, W*4, None) #self.bufs[buf_index]._base_shape[0])
+          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
           ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
+          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
         ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
         key = self.compute_buf_index(st, buf_index, offset)

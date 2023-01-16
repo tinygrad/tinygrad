@@ -45,10 +45,8 @@ class View:
     return 'idx=' + str(self.expr_node(Variable('idx', 0, prod([x[0] for x in self.shape_strides])-1)))
 
   # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs, div=1, mod=None):
-    idx_pieces = [Variable.num(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
-    idx_pieces = Variable.sum(idx_pieces)//div
-    return (idx_pieces%mod) if mod is not None else idx_pieces
+  def expr_idxs(self, idxs):
+    return Variable.sum([Variable.num(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
 
 class ZeroView:
   def __init__(self, old_shape, arg):
