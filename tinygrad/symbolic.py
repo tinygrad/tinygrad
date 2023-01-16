@@ -94,12 +94,19 @@ class LtNode(Variable):
 # reduce nodes
 
 class SumNode(Variable):
+  def __new__(cls, nodes:List[Variable]):
+    # TODO: unduplicate this
+    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
+    if len(nodes) == 0: return NumNode(0)
+    elif len(nodes) == 1: return nodes[0]
+    return super().__new__(cls)
+
   def __init__(self, nodes:List[Variable]):
-    self.nodes = nodes
+    self.nodes = [x for x in nodes if x.min != 0 or x.max != 0]
     self.min, self.max = sum([x.min for x in nodes]), sum([x.max for x in nodes])
   @property
   def expr(self):
-    return f"({'+'.join([str(x) for x in self.nodes if str(x) != '0'])})"
+    return f"({'+'.join([str(x) for x in self.nodes])})"
 
 class AndNode(Variable):
   def __init__(self, nodes:List[Variable]):
@@ -108,4 +115,3 @@ class AndNode(Variable):
   @property
   def expr(self):
     return f"({'&&'.join([str(x) for x in self.nodes])})"
-
