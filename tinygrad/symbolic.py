@@ -60,7 +60,8 @@ class ModNode(Variable):
     # TODO: unduplicate this
     if isinstance(a, SumNode):
       a = SumNode([x for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
-    if a.min >= 0 and a.max < b: return a
+    # infinite recursion!
+    #if a.min >= 0 and a.max < b: return a
     return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     if isinstance(a, SumNode):
@@ -69,7 +70,7 @@ class ModNode(Variable):
     self.min, self.max = min(a.min, 0), max(a.max, b)
   @property
   def expr(self):
-    return f"({self.a}%{self.b})"
+    return str(self.a) if self.a.min >= 0 and self.a.max < self.b else f"({self.a}%{self.b})"
 
 class GeNode(Variable):
   def __init__(self, a:Variable, b:int):
@@ -103,7 +104,7 @@ class SumNode(Variable):
     self.min, self.max = sum([x.min for x in nodes]), sum([x.max for x in nodes])
   @property
   def expr(self):
-    return f"({'+'.join([str(x) for x in self.nodes])})"
+    return f"({'+'.join([str(x) for x in self.nodes])})" if len(self.nodes) > 1 else str(self.nodes[0])
 
 class AndNode(Variable):
   def __init__(self, nodes:List[Variable]):

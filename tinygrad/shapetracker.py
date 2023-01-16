@@ -54,8 +54,8 @@ class ZeroView:
   def __init__(self, old_shape, arg):
     self.old_shape, self.arg, self.shape = old_shape, arg, []
 
-  def expr_node(self, valid, idx=None):
-    expr, acc = [valid], 1
+  def expr_node(self, valid, idx):
+    expr, acc = [valid] if valid is not None else [], 1
     for s,(x,y) in list(zip(self.old_shape, self.arg))[::-1]:
       self.shape = [y-x] + self.shape
       base = idx//acc
@@ -104,7 +104,7 @@ class ShapeTracker:
 
   def expr_node(self):
     idx = Variable('idx', 0, prod(self.shape)-1)
-    valid = NumNode(1)
+    valid = None
     for v in self.views[::-1]:
       if isinstance(v, ZeroView):
         valid = v.expr_node(valid, idx)
@@ -114,7 +114,7 @@ class ShapeTracker:
   
   def expr(self):
     idx, valid = self.expr_node()
-    if str(valid) != "valid": return f"valid={valid};idx={idx}"
+    if valid is not None and str(valid) != "valid": return f"valid={valid};idx={idx}"
     else: return f"idx={idx}"
 
   #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
