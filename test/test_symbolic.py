@@ -38,6 +38,11 @@ class TestSymbolic(unittest.TestCase):
     assert ret.min == 0
     assert ret.max == 5
 
+  def test_sum_div_factor(self):
+    ret = SumNode([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) // 2
+    print(ret)
+
+
 if __name__ == '__main__':
   unittest.main()
 

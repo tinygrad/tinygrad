@@ -33,7 +33,7 @@ class View:
 
   @functools.cached_property
   def expr(self):
-    ret = [Variable.num(self.offset)]
+    ret = [NumNode(self.offset)]
     acc = 1
     max_idx = prod([x[0] for x in self.shape_strides])
     for i,(d,s) in enumerate(self.shape_strides[::-1]):
@@ -44,7 +44,7 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, div=1, mod=None):
-    idx_pieces = [Variable.num(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
+    idx_pieces = [NumNode(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
     idx_pieces = SumNode(idx_pieces)//div
     idx_pieces = (idx_pieces%mod) if mod is not None else idx_pieces
     return str(idx_pieces)

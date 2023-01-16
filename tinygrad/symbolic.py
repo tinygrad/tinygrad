@@ -6,9 +6,6 @@ class Node:
 class Variable(Node):
   def __init__(self, expr:str, min:int, max:int):
     self.expr, self.min, self.max = expr, min, max
-  @staticmethod
-  def num(num:int):
-    return Variable(str(num), num, num)
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
@@ -18,6 +15,10 @@ class Variable(Node):
   def __mod__(self, num:int): return ModNode(self, num)
   def __ge__(self, num:int): return GeNode(self, num)
   def __lt__(self, num:int): return LtNode(self, num)
+
+class NumNode(Variable):
+  def __init__(self, num:int):
+    self.expr, self.num, self.min, self.max = str(num), num, num, num
 
 class AddNode(Variable):
   def __init__(self, a:Variable, b:int):
@@ -29,7 +30,7 @@ class AddNode(Variable):
 
 class MulNode(Variable):
   def __new__(cls, a:Variable, b:int):
-    if b == 0: return Variable.num(0)
+    if b == 0: return NumNode(0)
     elif b == 1: return a
     return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
@@ -43,6 +44,9 @@ class DivNode(Variable):
   def __new__(cls, a:Variable, b:int):
     assert b != 0
     if b == 1: return a
+    if isinstance(a, SumNode):
+      if all((isinstance(x, MulNode) and x.b%b == 0) or (isinstance(x, NumNode) and x.num%b == 0) for x in a.nodes):
+        return SumNode([MulNode(x.a, x.b//b) if isinstance(x, MulNode) else NumNode(x.num//b) for x in a.nodes])
     return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
@@ -54,7 +58,7 @@ class DivNode(Variable):
 class ModNode(Variable):
   # TODO: why is this broken?
   def __new__(cls, a:Variable, b:int):
-    if b == 1: return Variable.num(0)
+    if b == 1: return NumNode(0)
     if a.min >= 0 and a.max < b: return a
     return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
