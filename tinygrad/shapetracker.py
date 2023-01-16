@@ -42,26 +42,23 @@ class View:
 
   @functools.cached_property
   def expr(self):
-    max_idx = prod([x[0] for x in self.shape_strides])
-    return 'idx=' + str(self.expr_node(Variable('idx', 0, max_idx-1)))
+    return 'idx=' + str(self.expr_node(Variable('idx', 0, prod([x[0] for x in self.shape_strides])-1)))
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, div=1, mod=None):
     idx_pieces = [NumNode(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
     idx_pieces = SumNode(idx_pieces)//div
-    idx_pieces = (idx_pieces%mod) if mod is not None else idx_pieces
-    return str(idx_pieces)
+    return (idx_pieces%mod) if mod is not None else idx_pieces
 
 class ZeroView:
   def __init__(self, old_shape, arg):
     self.old_shape, self.arg, self.shape = old_shape, arg, []
 
-  def expr_node(self, valid):
+  def expr_node(self, valid, idx=None):
     expr, acc = [valid], 1
-    max_idx = prod([y-x for x,y in self.arg])
     for s,(x,y) in list(zip(self.old_shape, self.arg))[::-1]:
       self.shape = [y-x] + self.shape
-      base = Variable('idx', 0, max_idx-1)//acc
+      base = idx//acc
       base = (base % self.shape[0]) + x
       expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
       acc *= self.shape[0]
@@ -69,7 +66,8 @@ class ZeroView:
 
   @functools.cached_property
   def expr(self):
-    return 'valid=' + str(self.expr_node(Variable('valid', 0, 1)))
+    max_idx = prod([y-x for x,y in self.arg])
+    return 'valid=' + str(self.expr_node(Variable('valid', 0, 1), Variable('idx', 0, max_idx-1)))
 
   def __repr__(self): return f"ZeroView<{self.old_shape}, {self.arg}>"
 
@@ -104,7 +102,22 @@ class ShapeTracker:
   @property
   def offset(self): return self.views[-1].offset
 
-  def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
+  def expr_node(self):
+    idx = Variable('idx', 0, prod(self.shape)-1)
+    valid = NumNode(1)
+    for v in self.views[::-1]:
+      if isinstance(v, ZeroView):
+        valid = v.expr_node(valid, idx)
+      else:
+        idx = v.expr_node(idx)
+    return idx, valid
+  
+  def expr(self):
+    idx, valid = self.expr_node()
+    if str(valid) != "valid": return f"valid={valid};idx={idx}"
+    else: return f"idx={idx}"
+
+  #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
   def movement_op(self, op, arg): return getattr(self, str(op).split(".")[1].lower())(*arg)
   def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
 

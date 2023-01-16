@@ -94,7 +94,8 @@ class SumNode(Variable):
     # TODO: unduplicate this
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]
     if len(nodes) == 0: return NumNode(0)
-    elif len(nodes) == 1: return nodes[0]
+    # TODO: enabling this triggers infinite recursion?!?
+    #elif len(nodes) == 1: return nodes[0]
     return super().__new__(cls)
 
   def __init__(self, nodes:List[Variable]):

@@ -8,7 +8,8 @@ from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.lazy import IMAGE
-from tinygrad.shapetracker import ShapeTracker, View
+from tinygrad.shapetracker import ShapeTracker, View, ZeroView
+from tinygrad.symbolic import Variable, NumNode
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:
@@ -114,12 +115,26 @@ class CLASTKernel(ASTKernel):
     # add the index if we don't have it
     if key not in self.seen_idx:
       view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
+      idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)], div, mod)
+      valid = NumNode(1)
+      for v in st.views[0:-1][::-1]:
+        if isinstance(v, ZeroView):
+          valid = v.expr_node(valid, idx)
+        else:
+          idx = v.expr_node(idx)
+      if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {str(valid).replace('//', '/')};\n")
+      self.kernel.append(f"int bufi{key} = {str(idx).replace('//', '/')};\n")
+
+
+      """
       self.kernel.append(f"int bufi{key} = " + view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)], div, mod).replace("//", "/") + ";\n")
       if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = true;")
       if len(st.views) > 1:
         extra_idx = ';\n '.join([v.expr for v in st.views[0:-1][::-1] if v.expr not in ['', 'idx=idx', 'valid=valid']])
         self.kernel.append(extra_idx.replace("//", "/").replace("idx", f"bufi{key}").replace("valid", f"bufvalid{key}") + ";\n")
+      """
       self.seen_idx.add(key)
+
     return key
 
   def store(self, buf_index, value:Token, offset=0):

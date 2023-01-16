@@ -9,6 +9,7 @@ from tinygrad.graph import log_op
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
+#sys.tracebacklimit = 200
 
 OPT = int(os.getenv("OPT", "1"))
 NOCONV = int(os.getenv("NOCONV", "0"))

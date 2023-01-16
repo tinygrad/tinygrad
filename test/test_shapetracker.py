@@ -36,6 +36,14 @@ class DumbShapeTracker:
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
 
+class TestZeroViewShapeTracker(unittest.TestCase):
+  def test_pad(self):
+    self.st = ShapeTracker((4, 4))
+    self.st.pad((1, 1), (1, 1))
+    assert self.st.shape == (6,6)
+    print(self.st)
+    print(self.st.expr())
+
 class TestComplexShapeTracker(unittest.TestCase):
   def test_add_1s(self):
     self.st = ShapeTracker((4, 4))
