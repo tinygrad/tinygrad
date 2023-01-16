@@ -114,4 +114,4 @@ class AndNode(Variable):
     self.min, self.max = min([x.min for x in nodes]), max([x.max for x in nodes])
   @property
   def expr(self):
-    return f"({'&&'.join([str(x) for x in self.nodes])})"
+    return f"({'&&'.join([str(x) for x in self.nodes])})" if len(self.nodes) > 1 else str(self.nodes[0])
