@@ -49,9 +49,10 @@ class DivNode(Variable):
 
 class ModNode(Variable):
   # TODO: why is this broken?
-  #def __new__(cls, a:Variable, b:int):
-  #  if a.min >= 0 and a.max < b: return a 
-  #  return super().__new__(cls)
+  def __new__(cls, a:Variable, b:int):
+    if b == 1: return Variable.num(0)
+    if a.min >= 0 and a.max < b: return a
+    return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
     self.min, self.max = min(a.min, 0), max(a.max, b)

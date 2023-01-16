@@ -19,6 +19,10 @@ class TestSymbolic(unittest.TestCase):
     ret = Variable("a", 0, 8)//1
     assert str(ret) == "a"
 
+  def test_mod_1(self):
+    ret = Variable("a", 0, 8)%1
+    assert str(ret) == "0"
+
   def test_add_min_max(self):
     ret = Variable("a", 0, 8) * 2 + 12
     assert ret.min == 12

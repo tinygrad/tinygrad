@@ -53,11 +53,11 @@ class ZeroView:
   def __init__(self, old_shape, arg):
     self.old_shape, self.arg, self.shape = old_shape, arg, []
     expr, acc = [Variable('valid', 0, 1)], 1
-    max_idx = prod(self.old_shape) # it is old shape here, right?
+    max_idx = prod([y-x for x,y in self.arg])
     for s,(x,y) in list(zip(old_shape, arg))[::-1]:
       self.shape = [y-x] + self.shape
       base = Variable('idx', 0, max_idx-1)//acc
-      base = ((base % self.shape[0]) if len(self.shape) != len(old_shape) else base) + x
+      base = (base % self.shape[0]) + x
       expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
       acc *= self.shape[0]
     self.expr = 'valid=' + str(AndNode(expr))
