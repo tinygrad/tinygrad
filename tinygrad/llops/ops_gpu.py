@@ -159,10 +159,19 @@ class CLASTKernel(ASTKernel):
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
-        idx = self.compute_buf_index(st, buf_index, offset, 4, W)
-        idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
-        ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
-        ldr = Token(f"((bufvalid{idx} && bufvalid{idy}) ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
+        #idx = self.compute_buf_index(st, buf_index, offset, 4, W)
+        #idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
+        #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
+        #ldr = Token(f"((bufvalid{idx} && bufvalid{idy}) ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
+        if len(st.views) == 1:
+          idx = self.compute_buf_index(st, buf_index, offset, 4, W)
+          idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
+          ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
+        else:
+          self.kernel.append(f"/* computing {st} */\n")
+          key = self.compute_buf_index(st, buf_index, offset)
+          ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
+        ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
         key = self.compute_buf_index(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
