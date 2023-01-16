@@ -26,23 +26,35 @@ class AddNode(Variable):
     return f"({self.a}+{self.b})" if self.b != 0 else str(self.a)
 
 class MulNode(Variable):
+  def __new__(cls, a:Variable, b:int):
+    if b == 0: return Variable.num(0)
+    elif b == 1: return a
+    return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
     self.min, self.max = a.min*b, a.max*b
   def __str__(self):
-    return str(self.a) if self.b == 1 else (f"({self.a}*{self.b})" if self.b != 0 else "0")
+    return f"({self.a}*{self.b})"
 
 class DivNode(Variable):
+  def __new__(cls, a:Variable, b:int):
+    assert b != 0
+    if b == 1: return a
+    return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
     self.min, self.max = a.min//b, a.max//b
   def __str__(self):
-    return f"({self.a}//{self.b})" if self.b != 1 else str(self.a)
+    return f"({self.a}//{self.b})"
 
 class ModNode(Variable):
+  # TODO: why is this broken?
+  #def __new__(cls, a:Variable, b:int):
+  #  if a.min >= 0 and a.max < b: return a 
+  #  return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
-    self.min, self.max = a.min%b, a.max%b
+    self.min, self.max = min(a.min, 0), max(a.max, b)
   def __str__(self):
     return f"({self.a}%{self.b})"
 
