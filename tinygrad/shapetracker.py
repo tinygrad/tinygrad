@@ -31,16 +31,19 @@ class View:
   def contiguous(self):
     return self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
 
-  @functools.cached_property
-  def expr(self):
+  def expr_node(self, idx):
     ret = [NumNode(self.offset)]
     acc = 1
-    max_idx = prod([x[0] for x in self.shape_strides])
-    for i,(d,s) in enumerate(self.shape_strides[::-1]):
+    for d,s in self.shape_strides[::-1]:
       if d != 1 and s != 0:
-        ret.append(((Variable('idx', 0, max_idx-1)//acc)%d)*s)
+        ret.append(((idx//acc)%d)*s)
       acc *= d
-    return 'idx=' + str(SumNode(ret))
+    return SumNode(ret)
+
+  @functools.cached_property
+  def expr(self):
+    max_idx = prod([x[0] for x in self.shape_strides])
+    return 'idx=' + str(self.expr_node(Variable('idx', 0, max_idx-1)))
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, div=1, mod=None):
@@ -52,15 +55,21 @@ class View:
 class ZeroView:
   def __init__(self, old_shape, arg):
     self.old_shape, self.arg, self.shape = old_shape, arg, []
-    expr, acc = [Variable('valid', 0, 1)], 1
+
+  def expr_node(self, valid):
+    expr, acc = [valid], 1
     max_idx = prod([y-x for x,y in self.arg])
-    for s,(x,y) in list(zip(old_shape, arg))[::-1]:
+    for s,(x,y) in list(zip(self.old_shape, self.arg))[::-1]:
       self.shape = [y-x] + self.shape
       base = Variable('idx', 0, max_idx-1)//acc
       base = (base % self.shape[0]) + x
       expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
       acc *= self.shape[0]
-    self.expr = 'valid=' + str(AndNode(expr))
+    return AndNode(expr)
+
+  @functools.cached_property
+  def expr(self):
+    return 'valid=' + str(self.expr_node(Variable('valid', 0, 1)))
 
   def __repr__(self): return f"ZeroView<{self.old_shape}, {self.arg}>"
 
