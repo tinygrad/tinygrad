@@ -28,8 +28,14 @@ class Variable:
       a = self
     if a.min >= 0 and a.max < b: return a
     return ModNode(a, b)
-  def __ge__(self, b:int): return GeNode(self, b)
-  def __lt__(self, b:int): return LtNode(self, b)
+  def __ge__(self, b:int):
+    if self.max < b: return Variable.num(0)
+    if self.min >= b: return Variable.num(1)
+    return GeNode(self, b)
+  def __lt__(self, b:int):
+    if self.max < b: return Variable.num(1)
+    if self.min >= b: return Variable.num(0)
+    return LtNode(self, b)
 
   @staticmethod
   def num(num:int) -> Variable:
@@ -44,6 +50,8 @@ class Variable:
 
   @staticmethod
   def ands(nodes:List[Variable]) -> Variable:
+    if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
+    nodes = [x for x in nodes if x.min != x.max]
     if len(nodes) == 0: return NumNode(1)
     elif len(nodes) == 1: return nodes[0]
     return AndNode(nodes)

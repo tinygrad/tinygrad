@@ -62,6 +62,26 @@ class TestSymbolic(unittest.TestCase):
     ret = Variable("a", 0, 6)%100
     self.assertEqual(str(ret), "a")
 
+  def test_gt_remove(self):
+    ret = Variable("a", 0, 6) >= 25
+    self.assertEqual(str(ret), "0")
+
+  def test_lt_remove(self):
+    ret = Variable("a", 0, 6) < -3
+    self.assertEqual(str(ret), "0")
+    ret = Variable("a", 0, 6) < 3
+    self.assertEqual(str(ret), "(a<3)")
+    ret = Variable("a", 0, 6) < 8
+    self.assertEqual(str(ret), "1")
+
+  def test_and_fold(self):
+    ret = Variable.ands([Variable.num(0), Variable("a", 0, 1)])
+    self.assertEqual(str(ret), "0")
+
+  def test_and_remove(self):
+    ret = Variable.ands([Variable.num(1), Variable("a", 0, 1)])
+    self.assertEqual(str(ret), "a")
+
 if __name__ == '__main__':
   unittest.main()
 
