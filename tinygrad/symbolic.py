@@ -1,10 +1,7 @@
-from typing import List, Optional
+from typing import List
 from tinygrad.helpers import partition
 
-class Node:
-  pass
-
-class Variable(Node):
+class Variable:
   def __init__(self, expr:str, min:int, max:int):
     self.expr, self.min, self.max = expr, min, max
   def __str__(self):
@@ -58,7 +55,6 @@ class DivNode(Variable):
     return f"({self.a}//{self.b})"
 
 class ModNode(Variable):
-  # TODO: why is this broken?
   def __new__(cls, a:Variable, b:int):
     if b == 1: return NumNode(0)
     # TODO: unduplicate this
