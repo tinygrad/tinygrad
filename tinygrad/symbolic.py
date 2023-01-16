@@ -1,4 +1,5 @@
 from typing import List, Optional
+from tinygrad.helpers import partition
 
 class Node:
   pass
@@ -18,7 +19,7 @@ class Variable(Node):
 
 class NumNode(Variable):
   def __init__(self, num:int):
-    self.expr, self.num, self.min, self.max = str(num), num, num, num
+    self.expr, self.b, self.min, self.max = str(num), num, num, num
 
 class AddNode(Variable):
   def __init__(self, a:Variable, b:int):
@@ -44,9 +45,9 @@ class DivNode(Variable):
   def __new__(cls, a:Variable, b:int):
     assert b != 0
     if b == 1: return a
-    if isinstance(a, SumNode):
-      if all((isinstance(x, MulNode) and x.b%b == 0) or (isinstance(x, NumNode) and x.num%b == 0) for x in a.nodes):
-        return SumNode([MulNode(x.a, x.b//b) if isinstance(x, MulNode) else NumNode(x.num//b) for x in a.nodes])
+    if isinstance(a, SumNode) and all((isinstance(x, MulNode) or isinstance(x, NumNode)) for x in a.nodes):
+      factors, nofactor = partition(a.nodes, lambda x: x.b%b == 0)
+      if len(factors) > 0: return SumNode([MulNode(x.a, x.b//b) if isinstance(x, MulNode) else NumNode(x.b//b) for x in factors] + [SumNode(nofactor)//b])
     return super().__new__(cls)
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
