@@ -88,7 +88,7 @@ class MulNode(Variable):
 class DivNode(Variable):
   def __init__(self, a:Variable, b:int):
     self.a, self.b = a, b
-    self.min, self.max = a.min//b, a.max//b
+    self.min, self.max = int(a.min/b), int(a.max/b)
   @property
   def expr(self):
     return f"({self.a}//{self.b})"

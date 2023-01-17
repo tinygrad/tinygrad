@@ -91,7 +91,7 @@ class TestSymbolic(unittest.TestCase):
     # err, that *2 shouldn't be needed
     ret = Variable.sum([Variable.num(-44), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40
     # TODO: this isn't right
-    self.assertEqual(str(ret), "(b+-1+((-4+(a*2))//40))")
+    self.assertEqual(str(ret), "(b+-1)")
 
 
 if __name__ == '__main__':

@@ -122,8 +122,8 @@ class CLASTKernel(ASTKernel):
         else:
           idx = v.expr_node(idx)
       idx = (idx//div) if mod is None else ((idx//div)%mod)
-      if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {str(valid).replace('//', '/')};\n")
       self.kernel.append(f"int bufi{key} = {str(idx).replace('//', '/')};\n")
+      if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {str(valid).replace('//', '/')};\n")
       self.seen_idx.add(key)
 
     return key
