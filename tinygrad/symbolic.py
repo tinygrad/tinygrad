@@ -77,7 +77,7 @@ class Variable:
 
 class NumNode(Variable):
   def __init__(self, num:int):
-    self.expr, self.b, self.min, self.max = str(num), num, num, num
+    self.b, self.min, self.max = num, num, num
 
 class AddNode(Variable):
   def __init__(self, a:Variable, b:int):

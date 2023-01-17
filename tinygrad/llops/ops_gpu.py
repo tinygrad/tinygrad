@@ -9,6 +9,7 @@ from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.lazy import IMAGE
 from tinygrad.shapetracker import ShapeTracker, View, ZeroView
+from tinygrad.symbolic import ModNode
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:
@@ -109,23 +110,26 @@ class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
 
+  def compute_buf_index_symbolic(self, st, buf_index, offset=0, div=1, mod=None):
+    view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
+    idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)])
+    valid = None
+    for v in st.views[0:-1][::-1]:
+      if isinstance(v, ZeroView):
+        valid = v.expr_node(valid, idx)
+      else:
+        idx = v.expr_node(idx)
+    idx = (idx//div) if mod is None else ((idx//div)%mod)
+    return idx, valid
+
   def compute_buf_index(self, st, buf_index, offset=0, div=1, mod=None):
     key = f"{buf_index}_{offset}" + (f"_d{div}" if div != 1 else "") + (f"_m{mod}" if mod is not None else "")
     # add the index if we don't have it
     if key not in self.seen_idx:
-      view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
-      idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)])
-      valid = None
-      for v in st.views[0:-1][::-1]:
-        if isinstance(v, ZeroView):
-          valid = v.expr_node(valid, idx)
-        else:
-          idx = v.expr_node(idx)
-      idx = (idx//div) if mod is None else ((idx//div)%mod)
+      idx, valid = self.compute_buf_index_symbolic(st, buf_index, offset, div, mod)
       self.kernel.append(f"int bufi{key} = {str(idx).replace('//', '/')};\n")
       if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {str(valid).replace('//', '/')};\n")
       self.seen_idx.add(key)
-
     return key
 
   def store(self, buf_index, value:Token, offset=0):
@@ -160,29 +164,13 @@ class CLASTKernel(ASTKernel):
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
-        #idx = self.compute_buf_index(st, buf_index, offset, 4, W)
-        #idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
-        #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
-        #ldr = Token(f"((bufvalid{idx} && bufvalid{idy}) ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
-        if len(st.views) == 1:
-          idx = self.compute_buf_index(st, buf_index, offset, 4, W)
-          idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
-          ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
-        else:
-          # this fails
-          # FORWARD_ONLY=1 DEBUG=4 IMAGE=2 OPT=2 GPU=1 python3 test/test_ops.py TestOps.test_padded_conv2d_bs1
-          # FORWARD_ONLY=1 DEBUG=4 IMAGE=2 OPT=2 GPU=1 python3 test/test_ops.py TestOps.test_negative_padding_conv2d
-          self.kernel.append(f"/* computing {st} */\n")
-          key = self.compute_buf_index(st, buf_index, offset)
-          idx = self.compute_buf_index(st, buf_index, offset, 4, W)
-          idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
-          #self.kernel.append(f"printf(\"%d %d\\n\", (bufi{key}/4)%{W}, bufi{idx});\n")
-          #self.kernel.append(f"printf(\"%d %d\\n\", (bufi{key}/{W*4})%{self.bufs[buf_index]._base_shape[0]}, bufi{idy});\n")
-          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
-          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, ((bufi{key})/{W*4})%{self.bufs[buf_index]._base_shape[0]})) /* {self.bufs[buf_index]._base_shape} */"
-          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
-          ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
-        ldr = Token(f"(bufvalid{key} ? {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() else ldrt, Types.FLOAT4)
+        idx, validx = self.compute_buf_index_symbolic(st, buf_index, offset, 4, W)
+        idy, validy = self.compute_buf_index_symbolic(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
+        #if isinstance(idx, ModNode): idx = idx.a
+        #if isinstance(idy, ModNode): idy = idy.a
+        ldrt = f"read_imagef(data{buf_index}, smp, (int2)({str(idx).replace('//', '/')}, {str(idy).replace('//', '/')})) /* {self.bufs[buf_index]._base_shape} */"
+        #ldr = Token(ldrt, Types.FLOAT4)
+        ldr = Token(f"({str(validx).replace('//', '/')} ? {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
         key = self.compute_buf_index(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
