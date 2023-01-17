@@ -171,15 +171,18 @@ class CLASTKernel(ASTKernel):
         else:
           # this fails
           # FORWARD_ONLY=1 DEBUG=4 IMAGE=2 OPT=2 GPU=1 python3 test/test_ops.py TestOps.test_padded_conv2d_bs1
+          # FORWARD_ONLY=1 DEBUG=4 IMAGE=2 OPT=2 GPU=1 python3 test/test_ops.py TestOps.test_negative_padding_conv2d
           self.kernel.append(f"/* computing {st} */\n")
           key = self.compute_buf_index(st, buf_index, offset)
           idx = self.compute_buf_index(st, buf_index, offset, 4, W)
           idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
-          ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
-          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
+          #self.kernel.append(f"printf(\"%d %d\\n\", (bufi{key}/4)%{W}, bufi{idx});\n")
+          #self.kernel.append(f"printf(\"%d %d\\n\", (bufi{key}/{W*4})%{self.bufs[buf_index]._base_shape[0]}, bufi{idy});\n")
+          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
+          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, ((bufi{key})/{W*4})%{self.bufs[buf_index]._base_shape[0]})) /* {self.bufs[buf_index]._base_shape} */"
           #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
-          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
-        ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
+          ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
+        ldr = Token(f"(bufvalid{key} ? {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
         key = self.compute_buf_index(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):

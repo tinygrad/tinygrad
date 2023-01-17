@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, modn
 
 class Variable:
   def __init__(self, expr:str, min:int, max:int):
@@ -17,7 +17,16 @@ class Variable:
     assert b != 0
     if b == 1: return self
     if isinstance(self, SumNode) and all((isinstance(x, MulNode) or isinstance(x, NumNode)) for x in self.nodes):
-      factors, nofactor = partition(self.nodes, lambda x: x.b%b == 0)
+      factors, tmp_nofactor = partition(self.nodes, lambda x: x.b%b == 0)
+      nofactor = []
+      # ugh, i doubt this is universally right
+      for x in tmp_nofactor:
+        if isinstance(x, NumNode):
+          if modn(x.b, b) != x.b:
+            factors.append(Variable.num(x.b - modn(x.b, b)))  # python does floor division
+          nofactor.append(Variable.num(modn(x.b, b)))
+        else:
+          nofactor.append(x)
       if len(factors) > 0: return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [Variable.sum(nofactor)//b])
     return DivNode(self, b)
   def __mod__(self, b:int):
@@ -87,7 +96,7 @@ class DivNode(Variable):
 class ModNode(Variable):
   def __init__(self, a:Variable, b:int):
     if isinstance(a, SumNode):
-      a = Variable.sum([x for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
+      a = Variable.sum([(x if not isinstance(x, NumNode) else Variable.num(modn(x.b, b)))  for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
     self.a, self.b = a, b
     self.min, self.max = min(a.min, 0), max(a.max, b)
   @property

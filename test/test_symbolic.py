@@ -83,8 +83,16 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(str(ret), "a")
 
   def test_mod_factor(self):
+    # this is technically wrong, if b is 0 the output will be negative
     ret = Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28
-    self.assertEqual(str(ret), "((-29+a)%28)")
+    self.assertEqual(str(ret), "((-1+a)%28)")
+
+  def test_div_factor(self):
+    # err, that *2 shouldn't be needed
+    ret = Variable.sum([Variable.num(-44), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40
+    # TODO: this isn't right
+    self.assertEqual(str(ret), "(b+-1+((-4+(a*2))//40))")
+
 
 if __name__ == '__main__':
   unittest.main()
