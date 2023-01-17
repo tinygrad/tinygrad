@@ -3,8 +3,8 @@ from typing import List
 from tinygrad.helpers import partition, modn
 
 class Variable:
-  def __init__(self, expr:str, min:int, max:int):
-    self.expr, self.min, self.max = expr, min, max
+  def __init__(self, expr:str, nmin:int, nmax:int):
+    self.expr, self.min, self.max = expr, nmin, nmax
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
