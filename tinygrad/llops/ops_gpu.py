@@ -169,13 +169,16 @@ class CLASTKernel(ASTKernel):
           idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
           ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
         else:
+          # this fails
+          # FORWARD_ONLY=1 DEBUG=4 IMAGE=2 OPT=2 GPU=1 python3 test/test_ops.py TestOps.test_padded_conv2d_bs1
           self.kernel.append(f"/* computing {st} */\n")
           key = self.compute_buf_index(st, buf_index, offset)
-          #idx = self.compute_buf_index(st, buf_index, offset, 4, W)
-          #idy = self.compute_buf_index(st, buf_index, offset, W*4, None) #self.bufs[buf_index]._base_shape[0])
-          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
+          idx = self.compute_buf_index(st, buf_index, offset, 4, W)
+          idy = self.compute_buf_index(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
           ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
+          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, (bufi{key})/{W*4})) /* {self.bufs[buf_index]._base_shape} */"
           #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(((bufi{key})/4)%{W}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
+          #ldrt = f"read_imagef(data{buf_index}, smp, (int2)(bufi{idx}, bufi{idy})) /* {self.bufs[buf_index]._base_shape} */"
         ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT4)
       else:
         key = self.compute_buf_index(st, buf_index, offset)
