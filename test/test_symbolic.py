@@ -82,6 +82,10 @@ class TestSymbolic(unittest.TestCase):
     ret = Variable.ands([Variable.num(1), Variable("a", 0, 1)])
     self.assertEqual(str(ret), "a")
 
+  def test_mod_factor(self):
+    ret = Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28
+    self.assertEqual(str(ret), "((-29+a)%28)")
+
 if __name__ == '__main__':
   unittest.main()
 
