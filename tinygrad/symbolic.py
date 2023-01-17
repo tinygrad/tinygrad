@@ -1,6 +1,7 @@
 from __future__ import annotations
+import math
 from typing import List
-from tinygrad.helpers import partition, modn
+from tinygrad.helpers import partition, modn, all_same
 
 class Variable:
   def __init__(self, expr:str, nmin:int, nmax:int):
@@ -27,7 +28,14 @@ class Variable:
           nofactor.append(Variable.num(modn(x.b, b)))
         else:
           nofactor.append(x)
-      if len(factors) > 0: return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [Variable.sum(nofactor)//b])
+      gcd = [math.gcd(x.b, b) for x in nofactor]
+      if len(factors) > 0:
+        # these don't have to be the same, just having a common factor
+        if len(gcd) > 0 and all_same(gcd) and gcd[0] > 1:
+          nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
+        else:
+          nofactor_term = Variable.sum(nofactor)//b
+        return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
     return DivNode(self, b)
   def __mod__(self, b:int):
     if b == 1: return NumNode(0)
@@ -52,6 +60,8 @@ class Variable:
 
   @staticmethod
   def sum(nodes:List[Variable]) -> Variable:
+    nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
+    for x in sum_nodes: nodes += x.nodes
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]
     if len(nodes) == 0: return NumNode(0)
     elif len(nodes) == 1: return nodes[0]

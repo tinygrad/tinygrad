@@ -293,7 +293,7 @@ class CLASTKernel(ASTKernel):
     self.loaded_keys : Dict[str, Token] = {}
 
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
-    self.kernel += [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i});\n" for i in range(min(3, len(self.output_shape)))]
+    self.kernel += [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i}); /* {self.output_shape[i]} */\n" for i in range(min(3, len(self.output_shape)))]
     if len(self.output_shape) > 3:
       # compact all the dimensions into the final one
       for i in range(len(self.output_shape)-1, 2, -1):
