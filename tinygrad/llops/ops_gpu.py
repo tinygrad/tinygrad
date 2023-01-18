@@ -178,8 +178,8 @@ class CLASTKernel(ASTKernel):
         # TODO: apply the validity assumptions to the indexes
 
         if VALIDHACKS:
-          if isinstance(idx, ModNode): idx = idx.a
-          if isinstance(idy, ModNode): idy = idy.a
+          if isinstance(idx, ModNode) and idx.max < idx.b*2: idx = idx.a
+          if isinstance(idy, ModNode) and idy.max < idy.b*2: idy = idy.a
           valid = None
 
         ldrt = f"read_imagef(data{buf_index}, smp, (int2)({str(idx).replace('//', '/')}, {str(idy).replace('//', '/')})) /* {self.bufs[buf_index]._base_shape} */"
