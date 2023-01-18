@@ -9,6 +9,9 @@ class Variable:
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
+  @property
+  def cl(self):
+    return str(self).replace('//', '/')
   def __add__(self, b:int): return Variable.sum([self, Variable.num(b)])
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)

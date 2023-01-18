@@ -129,8 +129,8 @@ class CLASTKernel(ASTKernel):
     if key not in self.seen_idx:
       idx, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
       idx = (idx//div) if mod is None else ((idx//div)%mod)
-      self.kernel.append(f"int bufi{key} = {str(idx).replace('//', '/')};\n")
-      if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {str(valid).replace('//', '/')};\n")
+      self.kernel.append(f"int bufi{key} = {idx.cl};\n")
+      if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {valid.cl};\n")
       self.seen_idx.add(key)
     return key
 
@@ -142,12 +142,11 @@ class CLASTKernel(ASTKernel):
       W = self.bufs[buf_index]._base_shape[1]
       assert value.typ == Types.FLOAT4, f"image can only store float4: {value} isn't"
 
+      # TODO: can this have a valid?
       idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
       idx = (idxy//4)%W
       idy = (idxy//(W*4))%self.bufs[buf_index]._base_shape[0]
-      self.kernel.append(f"write_imagef(data{buf_index}, (int2)({str(idx).replace('//', '/')}, {str(idy).replace('//', '/')}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
-
-      #self.kernel.append(f"write_imagef(data{buf_index}, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+      self.kernel.append(f"write_imagef(data{buf_index}, (int2)({idx.cl}, {idy.cl}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
     else:
       if value.typ == Types.FLOAT4:
         #assert len(st.views) == 1
@@ -182,8 +181,8 @@ class CLASTKernel(ASTKernel):
           if isinstance(idy, ModNode) and idy.max < idy.b*2: idy = idy.a
           valid = None
 
-        ldrt = f"read_imagef(data{buf_index}, smp, (int2)({str(idx).replace('//', '/')}, {str(idy).replace('//', '/')})) /* {self.bufs[buf_index]._base_shape} */"
-        ldr = Token(f"({str(valid).replace('//', '/')} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() and valid is not None else ldrt, Types.FLOAT4)
+        ldrt = f"read_imagef(data{buf_index}, smp, (int2)({idx.cl}, {idy.cl})) /* {self.bufs[buf_index]._base_shape} */"
+        ldr = Token(f"({valid.cl} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() and valid is not None else ldrt, Types.FLOAT4)
       else:
         key = self.compute_buf_index(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
