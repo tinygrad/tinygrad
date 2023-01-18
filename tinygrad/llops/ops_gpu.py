@@ -284,8 +284,13 @@ class CLASTKernel(ASTKernel):
     # split to 4 float4s
     self.four_float4 = False
     if int(os.getenv("ALLOW_4FLOAT4", "0")) and (self.early_loads_are_float4 or self.early_loads_are_non_reduce_float4) and self.late_are_float4:
-      xb_choice = 1
-      if all(x[xb_choice]%4 == 0 for x in self.shapes):
+      xb_choices = []
+      for i in range(self.first_reduce):
+        if all(x[i]%4 == 0 for x in self.shapes):
+          xb_choices.append(i)
+
+      if len(xb_choices) >= 2:
+        xb_choice = xb_choices[-2]  # ugh, not good
         # this leaves the last axis in place
         self.reshape_and_permute(
           lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
