@@ -288,7 +288,7 @@ class CLASTKernel(ASTKernel):
         self.first_reduce += 1
         self.last_reduce += 1
 
-    self.output_shape = self.shapes[0][:self.first_reduce]
+    self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
 
     if DEBUG >= 2:
       print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4}")
