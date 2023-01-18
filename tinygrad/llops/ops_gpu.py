@@ -336,12 +336,14 @@ class CLASTKernel(ASTKernel):
 
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
+
+      tmp_kernel = []
       for accnum, accumulator in enumerate(accumulators):
         if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
-          self.kernel += [f"  {accumulator.tok}.s{j} = " + self.ast_parse(self.reduceop, offset=j, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n" for j in range(4)]
+          tmp_kernel += [f"  {accumulator.tok}.s{j} = " + self.ast_parse(self.reduceop, offset=j, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n" for j in range(4)]
         else:
-          self.kernel.append(f"  {accumulator.tok} = " + self.ast_parse(self.reduceop, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n")
-      self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
+          tmp_kernel.append(f"  {accumulator.tok} = " + self.ast_parse(self.reduceop, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n")
+      self.kernel += tmp_kernel + ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
     outs = []
