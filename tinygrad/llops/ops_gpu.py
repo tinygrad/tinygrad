@@ -345,7 +345,7 @@ class CLASTKernel(ASTKernel):
 
     # late ast
     for accnum, accumulator in enumerate(accumulators):
-      self.store(0, self.ast_parse(self.ast, reduce=accumulator), offset=accnum*self.strides[0][-2] if accnum != 0 else 0)
+      self.store(0, self.ast_parse(self.ast, reduce=accumulator, alt_offset=accnum), offset=accnum*self.strides[0][-2] if accnum != 0 else 0)
     self.kernel.append("}")
 
     # kernel function definition
