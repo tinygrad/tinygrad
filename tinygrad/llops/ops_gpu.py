@@ -11,6 +11,8 @@ from tinygrad.lazy import IMAGE
 from tinygrad.shapetracker import ShapeTracker, View, ZeroView
 from tinygrad.symbolic import ModNode
 
+VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))
+
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:
   def __init__(self, size):
@@ -110,7 +112,7 @@ class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
 
-  def compute_buf_index_symbolic(self, st, buf_index, offset=0, div=1, mod=None):
+  def compute_buf_index_symbolic(self, st, buf_index, offset=0):
     view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
     idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)])
     valid = None
@@ -119,14 +121,14 @@ class CLASTKernel(ASTKernel):
         valid = v.expr_node(valid, idx)
       else:
         idx = v.expr_node(idx)
-    idx = (idx//div) if mod is None else ((idx//div)%mod)
     return idx, valid
 
   def compute_buf_index(self, st, buf_index, offset=0, div=1, mod=None):
     key = f"{buf_index}_{offset}" + (f"_d{div}" if div != 1 else "") + (f"_m{mod}" if mod is not None else "")
     # add the index if we don't have it
     if key not in self.seen_idx:
-      idx, valid = self.compute_buf_index_symbolic(st, buf_index, offset, div, mod)
+      idx, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
+      idx = (idx//div) if mod is None else ((idx//div)%mod)
       self.kernel.append(f"int bufi{key} = {str(idx).replace('//', '/')};\n")
       if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {str(valid).replace('//', '/')};\n")
       self.seen_idx.add(key)
@@ -139,7 +141,13 @@ class CLASTKernel(ASTKernel):
     if isinstance(self.bufs[buf_index]._buf, CLImage):
       W = self.bufs[buf_index]._base_shape[1]
       assert value.typ == Types.FLOAT4, f"image can only store float4: {value} isn't"
-      self.kernel.append(f"write_imagef(data{buf_index}, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+
+      idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
+      idx = (idxy//4)%W
+      idy = (idxy//(W*4))%self.bufs[buf_index]._base_shape[0]
+      self.kernel.append(f"write_imagef(data{buf_index}, (int2)({str(idx).replace('//', '/')}, {str(idy).replace('//', '/')}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+
+      #self.kernel.append(f"write_imagef(data{buf_index}, (int2)(((bufi{key})/4)%{W}, (bufi{key})/{W*4}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
     else:
       if value.typ == Types.FLOAT4:
         #assert len(st.views) == 1
@@ -164,13 +172,18 @@ class CLASTKernel(ASTKernel):
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         W = self.bufs[buf_index]._base_shape[1]
-        idx, validx = self.compute_buf_index_symbolic(st, buf_index, offset, 4, W)
-        idy, validy = self.compute_buf_index_symbolic(st, buf_index, offset, W*4, self.bufs[buf_index]._base_shape[0])
-        #if isinstance(idx, ModNode): idx = idx.a
-        #if isinstance(idy, ModNode): idy = idy.a
+        idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
+        idx = (idxy//4)%W
+        idy = (idxy//(W*4))%self.bufs[buf_index]._base_shape[0]
+        # TODO: apply the validity assumptions to the indexes
+
+        if VALIDHACKS:
+          if isinstance(idx, ModNode): idx = idx.a
+          if isinstance(idy, ModNode): idy = idy.a
+          valid = None
+
         ldrt = f"read_imagef(data{buf_index}, smp, (int2)({str(idx).replace('//', '/')}, {str(idy).replace('//', '/')})) /* {self.bufs[buf_index]._base_shape} */"
-        #ldr = Token(ldrt, Types.FLOAT4)
-        ldr = Token(f"({str(validx).replace('//', '/')} ? {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() else ldrt, Types.FLOAT4)
+        ldr = Token(f"({str(valid).replace('//', '/')} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() and valid is not None else ldrt, Types.FLOAT4)
       else:
         key = self.compute_buf_index(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):

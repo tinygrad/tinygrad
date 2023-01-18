@@ -9,7 +9,7 @@ class Variable:
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
-  def __add__(self, b:int): return AddNode(self, b)
+  def __add__(self, b:int): return Variable.sum([self, Variable.num(b)])
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
@@ -60,8 +60,10 @@ class Variable:
 
   @staticmethod
   def sum(nodes:List[Variable]) -> Variable:
-    nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
-    for x in sum_nodes: nodes += x.nodes
+    if any([isinstance(x, SumNode) for x in nodes]):
+      nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
+      for x in sum_nodes: nodes += x.nodes
+      return Variable.sum(nodes)
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]
     if len(nodes) == 0: return NumNode(0)
     elif len(nodes) == 1: return nodes[0]
@@ -78,14 +80,6 @@ class Variable:
 class NumNode(Variable):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
-
-class AddNode(Variable):
-  def __init__(self, a:Variable, b:int):
-    self.a, self.b = a, b
-    self.min, self.max = a.min+b, a.max+b
-  @property
-  def expr(self):
-    return f"({self.a}+{self.b})" if self.b != 0 else str(self.a)
 
 class MulNode(Variable):
   def __init__(self, a:Variable, b:int):
