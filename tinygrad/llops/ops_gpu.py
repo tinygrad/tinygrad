@@ -344,8 +344,13 @@ class CLASTKernel(ASTKernel):
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
+    outs = []
     for accnum, accumulator in enumerate(accumulators):
-      self.store(0, self.ast_parse(self.ast, reduce=accumulator, alt_offset=accnum), offset=accnum*self.strides[0][-2] if accnum != 0 else 0)
+      out = self.ast_parse(self.ast, reduce=accumulator, alt_offset=accnum)
+      self.kernel.append(f"{out.decltype()} outs{accnum} = {out.tok};\n")
+      outs.append(Token(f"outs{accnum}", out.typ))
+    for accnum, accumulator in enumerate(accumulators):
+      self.store(0, outs[accnum], offset=accnum*self.strides[0][-2] if accnum != 0 else 0)
     self.kernel.append("}")
 
     # kernel function definition
