@@ -286,11 +286,11 @@ class CLASTKernel(ASTKernel):
     if int(os.getenv("ALLOW_4FLOAT4", "0")) and (self.early_loads_are_float4 or self.early_loads_are_non_reduce_float4) and self.late_are_float4:
       xb_choices = []
       for i in range(self.first_reduce):
-        if all(x[i]%4 == 0 for x in self.shapes):
-          xb_choices.append(i)
+        if all(x[i]%4 == 0 for x in self.shapes) and any([(x[i] != 0 and x[-1] == 0) or (x[i] == 0 and x[-1] != 0) for x in self.strides]):
+          xb_choices.append((sum(x[i] for x in self.strides), i))
 
-      if len(xb_choices) >= 2:
-        xb_choice = xb_choices[-2]  # ugh, not good
+      if len(xb_choices):
+        xb_choice = sorted(xb_choices)[0][1]
         # this leaves the last axis in place
         self.reshape_and_permute(
           lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
