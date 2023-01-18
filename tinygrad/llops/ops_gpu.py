@@ -150,10 +150,10 @@ class CLASTKernel(ASTKernel):
     else:
       if value.typ == Types.FLOAT4:
         #assert len(st.views) == 1
-        self.kernel.append(f"float4 to_store = {value.tok};\n")
+        #self.kernel.append(f"float4 to_store = {value.tok};\n")
         for i in range(4):
           lidxy, lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][-1])
-          self.kernel.append(f"data{buf_index}[{lidxy.cl}] = to_store.s{i};\n")
+          self.kernel.append(f"data{buf_index}[{lidxy.cl}] = {value.tok}.s{i};\n")
       else:
         self.kernel.append(f"data{buf_index}[{idxy.cl}] = {value.tok};\n")
 
@@ -283,7 +283,7 @@ class CLASTKernel(ASTKernel):
   
     # split to 4 float4s
     self.four_float4 = False
-    if int(os.getenv("ALLOW_4FLOAT4", "0")) and self.early_loads_are_float4 and self.late_are_float4:
+    if int(os.getenv("ALLOW_4FLOAT4", "0")) and (self.early_loads_are_float4 or self.early_loads_are_non_reduce_float4) and self.late_are_float4:
       xb_choice = 1
       if all(x[xb_choice]%4 == 0 for x in self.shapes):
         # this leaves the last axis in place
