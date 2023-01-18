@@ -277,8 +277,17 @@ class CLASTKernel(ASTKernel):
         lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
       self.late_are_float4 = True
-
     self.simplify_ones()
+    
+    # use more opencl indexing
+    if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
+      base_shape = self.bufs[0]._base_shape
+      if all([x[0] == base_shape[0]*base_shape[1] for x in self.shapes]):
+        #print("split here", base_shape, self.shapes[0])
+        self.reshape_and_permute(lambda x: list(base_shape[0:2])+list(x[1:]), None)
+        self.first_reduce += 1
+        self.last_reduce += 1
+
     self.output_shape = self.shapes[0][:self.first_reduce]
 
     if DEBUG >= 2:
