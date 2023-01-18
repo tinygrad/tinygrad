@@ -161,7 +161,9 @@ class CLASTKernel(ASTKernel):
     key = f"{buf_index}_{offset}"
     if key not in self.loaded_keys:
       st = self.bufs[buf_index].st
-      if offset > 0: assert len(st.views) == 1
+
+      # i don't think this is relevant anymore
+      #if offset > 0: assert len(st.views) == 1
 
       # constant folding
       constant_fold = None
@@ -202,12 +204,12 @@ class CLASTKernel(ASTKernel):
       self.loaded_keys[key] = Token(f"val{key}", ldr.typ)
     return self.loaded_keys[key]
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], offset=0, reduce:Optional[Token]=None) -> Token:
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], offset=0, alt_offset=0, reduce:Optional[Token]=None) -> Token:
     if not isinstance(x, LazyOp):
       buf_index = self.bufs.index(x)
-      return self.load(buf_index, offset=offset*self.strides[buf_index][-1])
+      return self.load(buf_index, offset=(offset*self.strides[buf_index][-1] if offset != 0 else 0) + (alt_offset*self.strides[buf_index][-2] if alt_offset != 0 else 0))
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
-    values = [self.ast_parse(v, offset, reduce) for v in x.src]
+    values = [self.ast_parse(v, offset, alt_offset, reduce) for v in x.src]
     code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
     if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT and not self.early_loads_are_non_reduce_float4:
       self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
@@ -278,6 +280,19 @@ class CLASTKernel(ASTKernel):
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
       self.late_are_float4 = True
     self.simplify_ones()
+  
+    # split to 4 float4s
+    self.four_float4 = False
+    if False and self.early_loads_are_float4 and self.late_are_float4:
+      xb_choice = 1
+      if all(x[xb_choice]%4 == 0 for x in self.shapes):
+        # this leaves the last axis in place
+        self.reshape_and_permute(
+          lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
+          [i for i in range(self.shape_len) if i != xb_choice+1] + [xb_choice+1, self.shape_len])
+        # no change, we added a dimension
+        if DEBUG >= 2: print("4x float4")
+        self.four_float4 = True
     
     # use more opencl indexing
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
@@ -292,7 +307,7 @@ class CLASTKernel(ASTKernel):
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
 
     if DEBUG >= 2:
-      print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4}")
+      print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4} four_float4: {self.four_float4}")
       print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
       print("new:", self.shapes)
       print("new:", self.strides)
@@ -311,22 +326,26 @@ class CLASTKernel(ASTKernel):
       self.output_shape = list(self.output_shape[0:2]) + [prod(self.output_shape[2:])]
 
     # early ast
-    accumulator = Token("acc", Types.FLOAT4 if self.late_are_float4 else Types.FLOAT)
+    accumulators = [Token("acc%d" % i, Types.FLOAT4 if self.late_are_float4 else Types.FLOAT) for i in range(4 if self.four_float4 else 1)]
     if self.reduceop:
       full_shape = [x for x in self.shapes if x != self.shapes[0]]
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-      self.kernel.append(f"{accumulator.decltype()} acc = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
+      for accumulator in accumulators:
+        self.kernel.append(f"{accumulator.decltype()} {accumulator.tok} = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
+
       for i in range(self.first_reduce, self.last_reduce):
         self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
-      if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
-        self.kernel += [f"  acc.s{j} = " + self.ast_parse(self.reduceop, offset=j).tok + ";\n" for j in range(4)]
-      else:
-        self.kernel.append("  acc = " + self.ast_parse(self.reduceop).tok + ";\n")
+      for accnum, accumulator in enumerate(accumulators):
+        if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
+          self.kernel += [f"  {accumulator.tok}.s{j} = " + self.ast_parse(self.reduceop, offset=j, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n" for j in range(4)]
+        else:
+          self.kernel.append(f"  {accumulator.tok} = " + self.ast_parse(self.reduceop, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n")
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
-    self.store(0, self.ast_parse(self.ast, reduce=accumulator))
+    for accumulator in accumulators:
+      self.store(0, self.ast_parse(self.ast, reduce=accumulator))
     self.kernel.append("}")
 
     # kernel function definition
