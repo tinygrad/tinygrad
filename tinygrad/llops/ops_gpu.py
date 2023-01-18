@@ -137,13 +137,12 @@ class CLASTKernel(ASTKernel):
   def store(self, buf_index, value:Token, offset=0):
     st = self.bufs[buf_index].st
     if offset > 0: assert len(st.views) == 1
-    key = self.compute_buf_index(st, buf_index, offset)
+    idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
+    # TODO: can this have a valid?
     if isinstance(self.bufs[buf_index]._buf, CLImage):
       W = self.bufs[buf_index]._base_shape[1]
       assert value.typ == Types.FLOAT4, f"image can only store float4: {value} isn't"
 
-      # TODO: can this have a valid?
-      idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
       idx = (idxy//4)%W
       idy = (idxy//(W*4))%self.bufs[buf_index]._base_shape[0]
       self.kernel.append(f"write_imagef(data{buf_index}, (int2)({idx.cl}, {idy.cl}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
@@ -152,10 +151,10 @@ class CLASTKernel(ASTKernel):
         #assert len(st.views) == 1
         self.kernel.append(f"float4 to_store = {value.tok};\n")
         for i in range(4):
-          lkey = self.compute_buf_index(st, buf_index, offset+i*self.strides[buf_index][-1])
-          self.kernel.append(f"data{buf_index}[bufi{lkey}] = to_store.s{i};\n")
+          lidxy, lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][-1])
+          self.kernel.append(f"data{buf_index}[{lidxy.cl}] = to_store.s{i};\n")
       else:
-        self.kernel.append(f"data{buf_index}[bufi{key}] = {value.tok};\n")
+        self.kernel.append(f"data{buf_index}[{idxy.cl}] = {value.tok};\n")
 
   def load(self, buf_index, offset=0) -> Token:
     key = f"{buf_index}_{offset}"
@@ -184,20 +183,20 @@ class CLASTKernel(ASTKernel):
         ldrt = f"read_imagef(data{buf_index}, smp, (int2)({idx.cl}, {idy.cl})) /* {self.bufs[buf_index]._base_shape} */"
         ldr = Token(f"({valid.cl} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() and valid is not None else ldrt, Types.FLOAT4)
       else:
-        key = self.compute_buf_index(st, buf_index, offset)
+        idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
           if self.strides[buf_index][-1] == 1 and len(st.views) == 1 and not st.needs_valid():
-            ldr = Token(f"((__global float4*)data{buf_index})[bufi{key}/4]", Types.FLOAT4)
+            ldr = Token(f"((__global float4*)data{buf_index})[{(idxy//4).cl}]", Types.FLOAT4)
           else:
             mst = []
             for i in range(4):
-              lkey = self.compute_buf_index(st, buf_index, offset+i*self.strides[buf_index][-1])
-              mst.append(f"data{buf_index}[bufi{lkey}]" if not constant_fold else constant_fold)
-              if st.needs_valid(): mst[-1] = f"(bufvalid{lkey} ? {mst[-1]} : 0.0)"
+              lidxy,lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][-1])
+              mst.append(f"data{buf_index}[{lidxy.cl}]" if not constant_fold else constant_fold)
+              if st.needs_valid(): mst[-1] = f"({lvalid.cl} ? {mst[-1]} : 0.0)"
             ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
         else:
-          ldrt = f"data{buf_index}[bufi{key}]" if not constant_fold else constant_fold
-          ldr = Token(f"(bufvalid{key} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT)
+          ldrt = f"data{buf_index}[{idxy.cl}]" if not constant_fold else constant_fold
+          ldr = Token(f"({valid.cl} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT)
       self.kernel.append(f"{ldr.decltype()} val{key} = {ldr.tok};\n")
       self.loaded_keys[key] = Token(f"val{key}", ldr.typ)
     return self.loaded_keys[key]
