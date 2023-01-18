@@ -287,6 +287,7 @@ class CLASTKernel(ASTKernel):
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.first_reduce += 1
         self.last_reduce += 1
+        self.simplify_ones()
 
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
 
