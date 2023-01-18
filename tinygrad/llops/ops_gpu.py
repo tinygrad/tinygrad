@@ -12,6 +12,7 @@ from tinygrad.shapetracker import ShapeTracker, View, ZeroView
 from tinygrad.symbolic import ModNode
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))
+NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))  # this is needed as a switch for the tests to pass
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 class CLBuffer:
@@ -332,8 +333,10 @@ class CLASTKernel(ASTKernel):
 
 class GPUBuffer(ExplicitExecAST):
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)",
-    UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.SIGN: "sign(A)", UnaryOps.RECIPROCAL: "((float)1.0/A)",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
+    UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
+    UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
+    UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
     ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"

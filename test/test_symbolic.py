@@ -92,7 +92,10 @@ class TestSymbolic(unittest.TestCase):
     ret = Variable.sum([Variable.num(-44), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40
     # TODO: this isn't right
     self.assertEqual(str(ret), "(b+-1)")
-
+  
+  def test_mul_div(self):
+    ret = (Variable("a", 0, 10)*4)//4
+    self.assertEqual(str(ret), "a")
 
 if __name__ == '__main__':
   unittest.main()
