@@ -283,7 +283,7 @@ class CLASTKernel(ASTKernel):
   
     # split to 4 float4s
     self.four_float4 = False
-    if False and self.early_loads_are_float4 and self.late_are_float4:
+    if int(os.getenv("ALLOW_4FLOAT4", "0")) and self.early_loads_are_float4 and self.late_are_float4:
       xb_choice = 1
       if all(x[xb_choice]%4 == 0 for x in self.shapes):
         # this leaves the last axis in place
@@ -344,8 +344,8 @@ class CLASTKernel(ASTKernel):
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
-    for accumulator in accumulators:
-      self.store(0, self.ast_parse(self.ast, reduce=accumulator))
+    for accnum, accumulator in enumerate(accumulators):
+      self.store(0, self.ast_parse(self.ast, reduce=accumulator), offset=accnum*self.strides[0][-2] if accnum != 0 else 0)
     self.kernel.append("}")
 
     # kernel function definition
