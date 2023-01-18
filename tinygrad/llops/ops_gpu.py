@@ -68,9 +68,9 @@ class CL:
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   kernel_cnt : Dict[str, int] = defaultdict(int)
-  def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False):
+  def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False, op_estimate=0):
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else ''}" if rename else name
-    self.prg, self.options, self.argdtypes = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes
+    self.prg, self.options, self.argdtypes, self.op_estimate = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes, op_estimate
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
     try:
       self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
@@ -80,7 +80,7 @@ class CLProgram:
     if self.argdtypes is not None:
       self.clprg.set_scalar_arg_dtypes(self.argdtypes)
     CLProgram.kernel_cnt[name] += 1
-  def __call__(self, *args, op_estimate=0):
+  def __call__(self, *args):
     CL.kernel_count += 1
     if CL.CACHE is not None:
       CL.CACHE.append((self, args))
@@ -92,10 +92,10 @@ class CLProgram:
       CL.cl_queue.finish()
     if DEBUG >= 1:
       CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else (e.profile.end - e.profile.start)
-      CL.ops_sum += op_estimate
-      print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
-            ("" if DEBUG <= 1 or CL.CACHE is not None else f"tm {(e.profile.end - e.profile.start)/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({op_estimate/(e.profile.end - e.profile.start):8.2f} GFLOPS)"))
-    GlobalCounters.global_ops += op_estimate
+      CL.ops_sum += self.op_estimate
+      print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
+            ("" if DEBUG <= 1 or CL.CACHE is not None else f"tm {(e.profile.end - e.profile.start)/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/(e.profile.end - e.profile.start):8.2f} GFLOPS)"))
+    GlobalCounters.global_ops += self.op_estimate
     GlobalCounters.global_mem += sum([x.size//4 for x in args[2:] if isinstance(x, cl.Buffer)])
 
 # **** end CL wrappers ****
@@ -333,11 +333,11 @@ class CLASTKernel(ASTKernel):
     self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
 
     # compile kernel
-    fxn = CLProgram(function_name, ' '.join(self.kernel))
+    fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
 
     def runner(*bufs):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
-      return fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs, op_estimate=self.info.flops)
+      return fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs)
     return runner
 
 class GPUBuffer(ExplicitExecAST):
