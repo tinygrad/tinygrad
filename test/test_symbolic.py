@@ -97,6 +97,14 @@ class TestSymbolic(unittest.TestCase):
     ret = (Variable("a", 0, 10)*4)//4
     self.assertEqual(str(ret), "a")
 
+  def test_mul_div_factor_mul(self):
+    ret = (Variable("a", 0, 10)*8)//4
+    self.assertEqual(str(ret), "(a*2)")
+
+  def test_mul_div_factor_div(self):
+    ret = (Variable("a", 0, 10)*4)//8
+    self.assertEqual(str(ret), "(a//2)")
+
 if __name__ == '__main__':
   unittest.main()
 

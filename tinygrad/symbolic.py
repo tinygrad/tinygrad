@@ -21,6 +21,7 @@ class Variable:
     assert b != 0
     if b == 1: return self
     if isinstance(self, MulNode) and self.b%b == 0: return self.a*(self.b//b)
+    if isinstance(self, MulNode) and b%self.b == 0: return self.a//(b//self.b)
     if isinstance(self, SumNode) and all((isinstance(x, MulNode) or isinstance(x, NumNode)) for x in self.nodes):
       factors, tmp_nofactor = partition(self.nodes, lambda x: x.b%b == 0)
       nofactor = []
