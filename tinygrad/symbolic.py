@@ -4,6 +4,7 @@ from typing import List
 from tinygrad.helpers import partition, modn, all_same
 
 class Node:
+  b, min, max = 0, -math.inf, math.inf   # make mypy happy
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
@@ -63,11 +64,11 @@ class Variable(Node):
     self.expr, self.min, self.max = expr, nmin, nmax
 
   @staticmethod
-  def num(num:int) -> Variable:
+  def num(num:int) -> Node:
     return NumNode(num)
 
   @staticmethod
-  def sum(nodes:List[Variable]) -> Variable:
+  def sum(nodes:List[Node]) -> Node:
     if any([isinstance(x, SumNode) for x in nodes]):
       nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
       for x in sum_nodes: nodes += x.nodes
@@ -78,7 +79,7 @@ class Variable(Node):
     return SumNode(nodes)
 
   @staticmethod
-  def ands(nodes:List[Variable]) -> Variable:
+  def ands(nodes:List[Node]) -> Node:
     if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
     nodes = [x for x in nodes if x.min != x.max]
     if len(nodes) == 0: return NumNode(1)
