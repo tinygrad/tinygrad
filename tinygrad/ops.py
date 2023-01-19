@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Union, Type, NamedTuple, Tuple, Any, List
 import functools, operator
 from tinygrad.helpers import prod, dedup, all_same
-from tinygrad.shapetracker import ShapeTracker
+from tinygrad.shape import ShapeTracker
 
 DEBUG = int(os.getenv("DEBUG", "0"))
 

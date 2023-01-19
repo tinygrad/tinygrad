@@ -8,8 +8,8 @@ from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.lazy import IMAGE
-from tinygrad.shapetracker import ShapeTracker, View, ZeroView
-from tinygrad.symbolic import Variable, ModNode
+from tinygrad.shape import ShapeTracker, View, ZeroView
+from tinygrad.shape.symbolic import Variable, ModNode
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))  # this is needed as a switch for the tests to pass

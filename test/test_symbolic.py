@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.symbolic import Variable
+from tinygrad.shape.symbolic import Variable
 
 class TestSymbolic(unittest.TestCase):
   def test_mul_0(self):
