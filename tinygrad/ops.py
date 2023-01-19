@@ -187,7 +187,7 @@ class ASTKernel:
       st.strided(*zip(shape, stride))
       # TODO: handle reduced shape here
       st.reshape(*new_shape_fxn(shape))
-      st.permute(*axis)
+      if axis is not None: st.permute(*axis)
       assert len(st.views) == 1
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
