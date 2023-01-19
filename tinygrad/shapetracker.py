@@ -4,13 +4,10 @@ import os
 import functools
 from typing import Tuple, Union, List
 from tinygrad.helpers import prod
+from tinygrad.symbolic import Variable
 
 # TODO: fix DEBUG import
 DEBUG = int(os.getenv("DEBUG", "0"))
-
-def divmodidx(acc, d, mod=True):
-  lr = f"(idx//{acc})" if acc != 1 else "idx"
-  return f"({lr}%{d})" if mod else lr  # don't mod the top shape dimension
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
@@ -34,34 +31,41 @@ class View:
   def contiguous(self):
     return self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
 
+  def expr_node(self, idx):
+    ret = [Variable.num(self.offset)]
+    acc = 1
+    for d,s in self.shape_strides[::-1]:
+      if d != 1 and s != 0:
+        ret.append(((idx//acc)%d)*s)
+      acc *= d
+    return Variable.sum(ret)
+
   @functools.cached_property
   def expr(self):
-    ret = [f"{self.offset}"] if self.offset != 0 else []
-    acc = 1
-    for i,(d,s) in enumerate(self.shape_strides[::-1]):
-      if d != 1 and s != 0:
-        lr = divmodidx(acc, d, i != len(self.shape_strides)-1 and d != prod(self.shape))
-        lr = f"({lr}*{s})" if s != 1 else lr
-        ret.append(lr)
-      acc *= d
-    return 'idx=' + ('+'.join(ret) if len(ret) > 0 else "0")
+    return 'idx=' + str(self.expr_node(Variable('idx', 0, prod([x[0] for x in self.shape_strides])-1)))
 
   # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs, div=1, mod=None):
-    idx_pieces = [str(self.offset)] + [(f"{idxs[i]}*{st}" if st != 1 else idxs[i]) for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0]
-    # TODO: do the div and mod in a smarter way
-    return '(('+' + '.join(idx_pieces)+f')/{div})' + (f'%{mod};\n' if mod is not None else ';\n')
+  def expr_idxs(self, idxs):
+    return Variable.sum([Variable.num(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
 
 class ZeroView:
   def __init__(self, old_shape, arg):
     self.old_shape, self.arg, self.shape = old_shape, arg, []
-    expr, acc = ['valid'], 1
-    for s,(x,y) in list(zip(old_shape, arg))[::-1]:
+
+  def expr_node(self, valid, idx):
+    expr, acc = [valid] if valid is not None else [], 1
+    for s,(x,y) in list(zip(self.old_shape, self.arg))[::-1]:
       self.shape = [y-x] + self.shape
-      base = divmodidx(acc, self.shape[0], len(self.shape) != len(old_shape)) + f"+{x}"
-      expr += ([f"(({base}) >= 0)"] if x < 0 else []) + ([f"(({base}) < {s})"] if y > s else [])
+      base = idx//acc
+      base = (base % self.shape[0]) + x
+      expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
       acc *= self.shape[0]
-    self.expr = 'valid=' + ' && '.join(expr)
+    return Variable.ands(expr)
+
+  @functools.cached_property
+  def expr(self):
+    max_idx = prod([y-x for x,y in self.arg])
+    return 'valid=' + str(self.expr_node(Variable('valid', 0, 1), Variable('idx', 0, max_idx-1)))
 
   def __repr__(self): return f"ZeroView<{self.old_shape}, {self.arg}>"
 
@@ -96,7 +100,20 @@ class ShapeTracker:
   @property
   def offset(self): return self.views[-1].offset
 
-  def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
+  def expr_node(self):
+    idx = Variable('idx', 0, prod(self.shape)-1)
+    valid = None #Variable.num(1)
+    for v in self.views[::-1]:
+      if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
+      else: idx = v.expr_node(idx)
+    return idx, valid
+  
+  def expr(self):
+    idx, valid = self.expr_node()
+    if valid is not None and str(valid) != "valid": return f"valid={valid};idx={idx}"
+    else: return f"idx={idx}"
+
+  #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
   def movement_op(self, op, arg): return getattr(self, str(op).split(".")[1].lower())(*arg)
   def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
 
