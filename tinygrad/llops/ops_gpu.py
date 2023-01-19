@@ -304,7 +304,17 @@ class CLASTKernel(ASTKernel):
         self.last_reduce += 1
         self.simplify_ones()
 
+    # group for reduce
+    self.group_for_reduce = 16 if self.first_reduce == 1 else None
+    if self.group_for_reduce:
+      self.reshape_and_permute(lambda x: [x[0], min(x[1], self.group_for_reduce), max(1, x[1]//self.group_for_reduce)]+list(x[2:]), None)
+      self.first_reduce += 1
+      self.last_reduce += 1
+
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
+
+    if self.group_for_reduce:
+      self.output_shape = list(self.output_shape[:-1]) + [self.group_for_reduce]
 
     if DEBUG >= 2:
       print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4} four_float4: {self.four_float4}")
