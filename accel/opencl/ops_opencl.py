@@ -317,9 +317,9 @@ class OpenCLBuffer(GPUBuffer):
 {chr(10).join([f'        float {name} = ' + late_views[name][2] for name in late_views])}
         output[gid] = {code};
       }}
-    }}""")
+    }}""", op_estimate=op_estimate)
 
-    conv_prg([prod(ret.shape), inter_red, 1], [1, inter_red, 1] if inter_red > 1 else None, ret.cl, *buf_cl, op_estimate=op_estimate)
+    conv_prg([prod(ret.shape), inter_red, 1], [1, inter_red, 1] if inter_red > 1 else None, ret.cl, *buf_cl)
     return ret
 
   def _processing_op(ret, bufs: List[Tuple[str, OpenCLBuffer]]=[], code:str="acc", C=None, op=ReduceOps.SUM, reduce_shape=None, earlybufs:Set[str]=set(), earlycode:str="acc", op_estimate=0):
