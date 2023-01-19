@@ -305,7 +305,7 @@ class CLASTKernel(ASTKernel):
         self.simplify_ones()
 
     # group for reduce
-    self.group_for_reduce = 16 if (self.first_reduce == 1 and self.last_reduce >= 2 and all(x[1] == 1 or x[1]%16 == 0 for x in self.shapes)) else None
+    self.group_for_reduce = 16 if (self.reduceop and self.first_reduce == 1 and self.last_reduce >= 2 and all(x[1] == 1 or x[1]%16 == 0 for x in self.shapes)) else None
     if self.group_for_reduce:
       self.reshape_and_permute(lambda x: [x[0], min(x[1], self.group_for_reduce), max(1, x[1]//self.group_for_reduce)]+list(x[2:]), None)
       self.first_reduce += 1
@@ -383,7 +383,7 @@ class CLASTKernel(ASTKernel):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
       if self.group_for_reduce:
         clbufs.append(cl.LocalMemory(self.group_for_reduce*4*(4 if self.late_are_float4 else 1)))
-      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs)
+      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], [self.group_for_reduce, 1] if self.group_for_reduce else None, *clbufs)
     return runner
 
 class GPUBuffer(ExplicitExecAST):
