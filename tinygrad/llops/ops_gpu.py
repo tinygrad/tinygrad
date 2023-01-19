@@ -6,7 +6,8 @@ import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, all_same
-from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ast import ASTKernel
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode

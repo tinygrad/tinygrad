@@ -5,7 +5,8 @@ import time
 from typing import Tuple, Union, Dict, Any, List
 from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker, ZeroView
-from tinygrad.ops import LazyOp, ASTKernel
+from tinygrad.ops import LazyOp
+from tinygrad.ast import ASTKernel
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
