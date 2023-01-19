@@ -102,7 +102,7 @@ class ShapeTracker:
 
   def expr_node(self):
     idx = Variable('idx', 0, prod(self.shape)-1)
-    valid = Variable.num(1)
+    valid = None #Variable.num(1)
     for v in self.views[::-1]:
       if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
       else: idx = v.expr_node(idx)
