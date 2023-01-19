@@ -17,6 +17,7 @@ NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))  # this is needed as a switch
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
+PRINT_AST = int(os.getenv("PRINT_AST", "0"))
 
 class CLBuffer:
   def __init__(self, size):
@@ -37,7 +38,7 @@ class CLImage:
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
 
   def __init__(self, shape):
-    self.cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
+    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
     CL.mem_used += self.cl.row_pitch * self.cl.height
 
   def __del__(self):
@@ -357,21 +358,21 @@ class CLASTKernel(ASTKernel):
     self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
 
     # compile kernel
-    fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
+    self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
 
     def runner(*bufs):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
-      return fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs)
+      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs)
     return runner
 
 class GPUBuffer(ExplicitExecAST):
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
     super().__init__(shape, hostbuf)
     self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     # early copy in for large buffers
-    if self._backing is not None and self._backing.shape != (1,):
+    if (self._backing is not None and self._backing.shape != (1,)) or force_create:
       self.cl
   
   @property
@@ -383,7 +384,7 @@ class GPUBuffer(ExplicitExecAST):
       self._backing = None
     return self._buf.cl
 
-  def __repr__(self): return f"<GPUBuffer {str(self.st)}>"
+  def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
 
   @staticmethod
   def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
@@ -397,4 +398,7 @@ class GPUBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp):
     k = CLASTKernel(ast)
     k.codegen()(*k.bufs)
+    if PRINT_AST:
+      print(k.fxn.name)
+      k.print()
     return k.ret

@@ -12,6 +12,7 @@ def get_first_reduce(shapes):
 class ASTKernel:
   def __init__(self, ast:LazyOp):
     # key for lookup in cache (can change, str might not be right)
+    self.input_ast = ast
     self.key = str(ast)
 
     # if the AST ends with a RESHAPE, we remove it and create the buffer accordingly
@@ -38,6 +39,29 @@ class ASTKernel:
     assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
     assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
+
+  def print(self):
+    buf_count = -1
+    op_count = -1
+    cache = {}
+    def print_ast(x, name=None):
+      nonlocal buf_count, op_count
+      if x not in cache:
+        if not isinstance(x, LazyOp):
+          if name is None:
+            buf_count += 1
+            name = f"buf{buf_count}"
+          print(f"buf{buf_count} = {x}")
+          cache[x] = name
+        else:
+          srcs = [print_ast(y) for y in x.src]
+          if name is None:
+            op_count += 1
+            name = f"op{op_count}"
+          print(f"{name} = LazyOp({str(x.op)}, ({','.join(srcs)},), {x.arg})")
+          cache[x] = name
+      return cache[x]
+    print_ast(self.input_ast, "ast")
 
   def process(self):
     # get shape, strides, and offset

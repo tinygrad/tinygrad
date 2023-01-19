@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import functools
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod
 from tinygrad.shape.symbolic import Variable
 
@@ -25,7 +25,7 @@ class View:
     self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
     self.shape_strides = to_shape_strides(self.shape, self.strides)
 
-  def __repr__(self): return f"View<{self.shape}, {self.strides}, {self.offset}>"
+  def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
 
   @functools.cached_property
   def contiguous(self):
@@ -67,7 +67,7 @@ class ZeroView:
     max_idx = prod([y-x for x,y in self.arg])
     return 'valid=' + str(self.expr_node(Variable('valid', 0, 1), Variable('idx', 0, max_idx-1)))
 
-  def __repr__(self): return f"ZeroView<{self.old_shape}, {self.arg}>"
+  def __repr__(self): return f"ZeroView({self.old_shape}, {self.arg})"
 
 ViewTypes = Union[View, ZeroView]
 
@@ -84,9 +84,9 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
   return View(tuple(shape), strides_for_shape(shape))
 
 class ShapeTracker:
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]]):
-    self.views : List[ViewTypes] = shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)]
-  def __repr__(self): return f"{'Complex' if len(self.views) > 1 else ''}ShapeTracker<{self.shape}, {self.views}>"
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
+    self.views : List[ViewTypes] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
+  def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
 
   @property
   def contiguous(self): return len(self.views) == 1 and self.views[-1].contiguous
