@@ -64,7 +64,8 @@ class GenericShape(GenericExecAST):
   def binary_op(self, op:BinaryOps, y): return GenericShape(self.shape, self.flops + y.flops + prod(self.shape))
   def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return GenericShape(new_shape, self.flops + prod(self.shape))
   def movement_op(self, op:MovementOps, arg): return GenericShape(ShapeTracker(self.shape).movement_op(op, arg).shape, self.flops)
-  def processing_op(self, op:ProcessingOps, w, C): return GenericShape(C.out_shape, float("nan"))  # TODO: add flops for this
+  # https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html
+  def processing_op(self, op:ProcessingOps, w, C): return GenericShape(C.out_shape, 2 * (C.bs * C.cout * C.oy * C.ox) * (C.cin * C.H * C.W))
 def get_lazyop_info(ast:LazyOp): return GenericShape.exec_ast(ast, lambda x: GenericShape(x.shape))
 
 # assumes you are using ShapeTracker
