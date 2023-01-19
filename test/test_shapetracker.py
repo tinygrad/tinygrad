@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod
-from tinygrad.shapetracker import ShapeTracker
+from tinygrad.shape import ShapeTracker
 
 class DumbShapeTracker:
   def __init__(self, shape):

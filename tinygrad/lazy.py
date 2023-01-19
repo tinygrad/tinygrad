@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union, List, Dict
 from copy import copy
 import os, sys, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
-from tinygrad.shapetracker import ShapeTracker
+from tinygrad.shape import ShapeTracker
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, DEBUG
 from tinygrad.graph import log_op
 

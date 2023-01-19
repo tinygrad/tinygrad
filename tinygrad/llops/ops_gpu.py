@@ -6,15 +6,18 @@ import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, all_same
-from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ast import ASTKernel
 from tinygrad.lazy import IMAGE
-from tinygrad.shapetracker import ShapeTracker, View, ZeroView
-from tinygrad.symbolic import Variable, ModNode
+from tinygrad.shape import ShapeTracker, View, ZeroView
+from tinygrad.shape.symbolic import Variable, ModNode
 
-VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))
+VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))  # this is needed as a switch for the tests to pass
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
+FLOAT16 = int(os.getenv("FLOAT16", "0"))
+
 class CLBuffer:
   def __init__(self, size):
     if len(CL.BUFFER_CACHE[size]) > 0:
@@ -30,7 +33,6 @@ class CLBuffer:
     else:
       CL.mem_used -= self.cl.size
 
-FLOAT16 = int(os.getenv("FLOAT16", "0"))
 class CLImage:
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
 
@@ -109,6 +111,17 @@ class Token:
   def __repr__(self): return f"<{self.typ} {self.tok}>"
 
 class CLASTKernel(ASTKernel):
+  code_for_op : Dict[Op, str] = {
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
+    UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
+    UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
+    UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
+    BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
+    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
+    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
+  }
+  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
+
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
 
@@ -197,7 +210,7 @@ class CLASTKernel(ASTKernel):
       return self.load(buf_index, offset=(offset*self.strides[buf_index][-1] if offset != 0 else 0) + (alt_offset*self.strides[buf_index][-2] if alt_offset != 0 else 0))
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
     values = [self.ast_parse(v, offset, alt_offset, reduce) for v in x.src]
-    code = GPUBuffer.code_for_op[x.op]  # TODO: replace this with a function
+    code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
     if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT and not self.early_loads_are_non_reduce_float4:
       self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
       return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if self.late_are_float4 else "acc"), Types.FLOAT)
@@ -216,10 +229,6 @@ class CLASTKernel(ASTKernel):
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(self.bufs)]
     self.prekernel = set()
 
-    # promote to float4 if these hit
-    any_early_images = any(isinstance(buf._buf, CLImage) for buf in self.earlybufs)
-    any_late_images = any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs)
-
     # four toggles determine the kernel
     self.early_loads_are_non_reduce_float4 = False
     self.early_loads_are_float4 = False
@@ -228,7 +237,7 @@ class CLASTKernel(ASTKernel):
 
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
-    if any_early_images:
+    if any(isinstance(buf._buf, CLImage) for buf in self.earlybufs):
       eb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
         if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
@@ -250,7 +259,7 @@ class CLASTKernel(ASTKernel):
         self.early_loads_are_float4 = True
 
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    if any_late_images and not self.early_loads_are_non_reduce_float4:
+    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and not self.early_loads_are_non_reduce_float4:
       lb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
         #assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
@@ -281,6 +290,8 @@ class CLASTKernel(ASTKernel):
           [i for i in range(self.shape_len) if i != xb_choice+1] + [xb_choice+1, self.shape_len])
         # no change, we added a dimension
         self.four_float4 = True
+
+    # first simplify
     self.simplify_ones()
     
     # use more opencl indexing
@@ -289,7 +300,6 @@ class CLASTKernel(ASTKernel):
       if all([(base_shape[0]*base_shape[1])%x[0] == 0 for x in self.shapes]):
         #print("split here", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
-        self.first_reduce += 1
         self.last_reduce += 1
         self.simplify_ones()
 
@@ -320,11 +330,8 @@ class CLASTKernel(ASTKernel):
       full_shape = [x for x in self.shapes if x != self.shapes[0]]
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
-      for accumulator in accumulators:
-        self.kernel.append(f"{accumulator.decltype()} {accumulator.tok} = {GPUBuffer.start_for_op[self.reduceop.op]};\n")
-
-      for i in range(self.first_reduce, self.last_reduce):
-        self.kernel.append(f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n")
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce, self.last_reduce)]
 
       tmp_kernel = []
       for accnum, accumulator in enumerate(accumulators):
@@ -332,6 +339,7 @@ class CLASTKernel(ASTKernel):
           tmp_kernel += [f"  {accumulator.tok}.s{j} = " + self.ast_parse(self.reduceop, offset=j, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n" for j in range(4)]
         else:
           tmp_kernel.append(f"  {accumulator.tok} = " + self.ast_parse(self.reduceop, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n")
+
       self.kernel += tmp_kernel + ["}\n"] * (self.last_reduce - self.first_reduce)
 
     # late ast
@@ -357,17 +365,6 @@ class CLASTKernel(ASTKernel):
     return runner
 
 class GPUBuffer(ExplicitExecAST):
-  code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
-    UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
-    UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
-    UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
-    BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
-    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
-  }
-  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
-
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None):
     super().__init__(shape, hostbuf)
     self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
