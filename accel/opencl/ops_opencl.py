@@ -380,7 +380,8 @@ class OpenCLBuffer(GPUBuffer):
       #print(conv_src)
       conv_prg = CLProgram("matmul", conv_src,
         options=tuple(options),
-        argdtypes=tuple([None, None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
+        argdtypes=tuple([None, None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs)),
+        op_estimate=op_estimate
       )
       global_work_size = [4, 16, C.cout//4]
 
@@ -420,7 +421,8 @@ class OpenCLBuffer(GPUBuffer):
     #print(conv_src)
     conv_prg = CLProgram("image_conv", conv_src,
       options=tuple(options),
-      argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs))
+      argdtypes=tuple([None, None, None] + [np.int16]*len(conv_args) + [None]*len(ewbufs)),
+      op_estimate=op_estimate
     )
     global_work_size = [C.cout//4, (C.ox+NUM_OUTPUTS-1)//NUM_OUTPUTS, C.bs*C.oy]
     conv_prg(global_work_size, None, ret.image, x.image, w.image, *conv_args, *[buf.image if 'image2d_t' in typ else buf.cl for typ, (_, buf) in zip(ewtypes, ewbufs)])
