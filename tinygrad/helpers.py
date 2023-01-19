@@ -7,6 +7,8 @@ def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0
 def argsort(x): return sorted(range(len(x)), key=x.__getitem__) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items) if len(items) > 0 else True
 def colored(st, color): return f"\u001b[{30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color)}m{st}\u001b[0m"  # replace the termcolor library with one line
+def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
+def modn(x, a): return -((-x)%a) if x < 0 else x%a
 
 def reduce_shape(shape, axis): return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 def shape_to_axis(old_shape, new_shape):
