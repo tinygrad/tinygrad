@@ -305,11 +305,12 @@ class CLASTKernel(ASTKernel):
         self.simplify_ones()
 
     # group for reduce
-    self.group_for_reduce = 16 if self.first_reduce == 1 else None
+    self.group_for_reduce = 16 if (self.first_reduce == 1 and self.last_reduce >= 2 and all(x[1] == 1 or x[1]%16 == 0 for x in self.shapes)) else None
     if self.group_for_reduce:
       self.reshape_and_permute(lambda x: [x[0], min(x[1], self.group_for_reduce), max(1, x[1]//self.group_for_reduce)]+list(x[2:]), None)
       self.first_reduce += 1
       self.last_reduce += 1
+      buftypes.append("__local float4 *" if self.late_are_float4 else "__local float *")
 
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
 
@@ -352,6 +353,13 @@ class CLASTKernel(ASTKernel):
           tmp_kernel.append(f"  {accumulator.tok} = " + self.ast_parse(self.reduceop, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n")
 
       self.kernel += tmp_kernel + ["}\n"] * (self.last_reduce - self.first_reduce)
+    
+    # middle
+    if self.group_for_reduce:
+      assert len(accumulators) == 1
+      self.kernel.append(f"temp[idx{self.first_reduce-1}] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      self.kernel.append(f"if (idx{self.first_reduce-1} == 0) {{\n")
+      self.kernel.append(f"for (int mid = 1; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += temp[mid]; }}\n")
 
     # late ast
     outs = []
@@ -361,17 +369,20 @@ class CLASTKernel(ASTKernel):
       outs.append(Token(f"outs{accnum}", out.typ))
     for accnum, accumulator in enumerate(accumulators):
       self.store(0, outs[accnum], offset=accnum*self.strides[0][-2] if accnum != 0 else 0)
+    if self.group_for_reduce: self.kernel.append("}")
     self.kernel.append("}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
+    self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + [', '.join((f'{t} data{i}' if f'local' not in t else f'{t} temp') for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
 
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
 
     def runner(*bufs):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
+      if self.group_for_reduce:
+        clbufs.append(cl.LocalMemory(self.group_for_reduce*4*(4 if self.late_are_float4 else 1)))
       return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs)
     return runner
 
