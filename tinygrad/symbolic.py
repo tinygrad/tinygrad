@@ -3,9 +3,7 @@ import math
 from typing import List
 from tinygrad.helpers import partition, modn, all_same
 
-class Variable:
-  def __init__(self, expr:str, nmin:int, nmax:int):
-    self.expr, self.min, self.max = expr, nmin, nmax
+class Node:
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
@@ -59,6 +57,11 @@ class Variable:
     if self.min >= b: return Variable.num(0)
     return LtNode(self, b)
 
+# constructors
+class Variable(Node):
+  def __init__(self, expr:str, nmin:int, nmax:int):
+    self.expr, self.min, self.max = expr, nmin, nmax
+
   @staticmethod
   def num(num:int) -> Variable:
     return NumNode(num)
@@ -82,28 +85,28 @@ class Variable:
     elif len(nodes) == 1: return nodes[0]
     return AndNode(nodes)
 
-class NumNode(Variable):
+class NumNode(Node):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
 
-class MulNode(Variable):
-  def __init__(self, a:Variable, b:int):
+class MulNode(Node):
+  def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = a.min*b, a.max*b
   @property
   def expr(self):
     return f"({self.a}*{self.b})"
 
-class DivNode(Variable):
-  def __init__(self, a:Variable, b:int):
+class DivNode(Node):
+  def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = int(a.min/b), int(a.max/b)
   @property
   def expr(self):
     return f"({self.a}//{self.b})"
 
-class ModNode(Variable):
-  def __init__(self, a:Variable, b:int):
+class ModNode(Node):
+  def __init__(self, a:Node, b:int):
     if isinstance(a, SumNode):
       a = Variable.sum([(x if not isinstance(x, NumNode) else Variable.num(modn(x.b, b)))  for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
     self.a, self.b = a, b
@@ -113,16 +116,16 @@ class ModNode(Variable):
     assert self.a != self
     return f"({self.a}%{self.b})"
 
-class GeNode(Variable):
-  def __init__(self, a:Variable, b:int):
+class GeNode(Node):
+  def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = 0, 1
   @property
   def expr(self):
     return f"({self.a}>={self.b})"
 
-class LtNode(Variable):
-  def __init__(self, a:Variable, b:int):
+class LtNode(Node):
+  def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = 0, 1
   @property
@@ -131,16 +134,16 @@ class LtNode(Variable):
 
 # reduce nodes
 
-class SumNode(Variable):
-  def __init__(self, nodes:List[Variable]):
+class SumNode(Node):
+  def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = sum([x.min for x in nodes]), sum([x.max for x in nodes])
   @property
   def expr(self):
     return f"({'+'.join([str(x) for x in self.nodes])})"
 
-class AndNode(Variable):
-  def __init__(self, nodes:List[Variable]):
+class AndNode(Node):
+  def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = min([x.min for x in nodes]), max([x.max for x in nodes])
   @property
