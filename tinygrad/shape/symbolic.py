@@ -44,7 +44,7 @@ class Node:
   def __mod__(self, b:int):
     if b == 1: return NumNode(0)
     if isinstance(self, SumNode):
-      a = Variable.sum([x for x in self.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
+      a = Variable.sum([(x if not isinstance(x, NumNode) else Variable.num(modn(x.b, b))) for x in self.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
     else:
       a = self
     if a.min >= 0 and a.max < b: return a
@@ -108,10 +108,8 @@ class DivNode(Node):
 
 class ModNode(Node):
   def __init__(self, a:Node, b:int):
-    if isinstance(a, SumNode):
-      a = Variable.sum([(x if not isinstance(x, NumNode) else Variable.num(modn(x.b, b)))  for x in a.nodes if not (isinstance(x, MulNode) or isinstance(x, NumNode)) or (x.b%b != 0)])
     self.a, self.b = a, b
-    self.min, self.max = min(a.min, 0), max(a.max, b)
+    self.min, self.max = min(a.min, 0), max(a.max, b-1)
   @property
   def expr(self):
     assert self.a != self
