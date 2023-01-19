@@ -9,7 +9,7 @@ from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, ASTKernel, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.lazy import IMAGE
 from tinygrad.shapetracker import ShapeTracker, View, ZeroView
-from tinygrad.symbolic import ModNode
+from tinygrad.symbolic import Variable, ModNode
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))  # this is needed as a switch for the tests to pass
@@ -104,8 +104,7 @@ Types = Enum("Types", ["FLOAT", "FLOAT4"])
 class Token:
   def __init__(self, tok:str, typ:Types):
     assert isinstance(tok, str)
-    self.tok = tok
-    self.typ = typ
+    self.tok, self.typ = tok, typ
   def decltype(self): return 'float' if self.typ == Types.FLOAT else 'float4'
   def __repr__(self): return f"<{self.typ} {self.tok}>"
 
@@ -113,33 +112,20 @@ class CLASTKernel(ASTKernel):
   def __init__(self, ast:LazyOp):
     super().__init__(ast)
 
+  # TODO: move to shapetracker
   def compute_buf_index_symbolic(self, st, buf_index, offset=0):
     view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
     idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)])
-    valid = None
+    valid = Variable.num(1)
     for v in st.views[0:-1][::-1]:
-      if isinstance(v, ZeroView):
-        valid = v.expr_node(valid, idx)
-      else:
-        idx = v.expr_node(idx)
+      if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
+      else: idx = v.expr_node(idx)
     return idx, valid
-
-  def compute_buf_index(self, st, buf_index, offset=0, div=1, mod=None):
-    key = f"{buf_index}_{offset}" + (f"_d{div}" if div != 1 else "") + (f"_m{mod}" if mod is not None else "")
-    # add the index if we don't have it
-    if key not in self.seen_idx:
-      idx, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
-      idx = (idx//div) if mod is None else ((idx//div)%mod)
-      self.kernel.append(f"int bufi{key} = {idx.cl};\n")
-      if st.needs_valid(): self.kernel.append(f"bool bufvalid{key} = {valid.cl};\n")
-      self.seen_idx.add(key)
-    return key
 
   def store(self, buf_index, value:Token, offset=0):
     st = self.bufs[buf_index].st
-    if offset > 0: assert len(st.views) == 1
     idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
-    # TODO: can this have a valid?
+    assert str(valid) == "1"
     if isinstance(self.bufs[buf_index]._buf, CLImage):
       W = self.bufs[buf_index]._base_shape[1]
       assert value.typ == Types.FLOAT4, f"image can only store float4: {value} isn't"
@@ -149,10 +135,10 @@ class CLASTKernel(ASTKernel):
       self.kernel.append(f"write_imagef(data{buf_index}, (int2)({idx.cl}, {idy.cl}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
     else:
       if value.typ == Types.FLOAT4:
-        #assert len(st.views) == 1
-        #self.kernel.append(f"float4 to_store = {value.tok};\n")
         for i in range(4):
+          # TODO: this isn't tested
           lidxy, lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][-1])
+          assert str(lvalid) == "1"
           self.kernel.append(f"data{buf_index}[{lidxy.cl}] = {value.tok}.s{i};\n")
       else:
         self.kernel.append(f"data{buf_index}[{idxy.cl}] = {value.tok};\n")
@@ -161,9 +147,6 @@ class CLASTKernel(ASTKernel):
     key = f"{buf_index}_{offset}"
     if key not in self.loaded_keys:
       st = self.bufs[buf_index].st
-
-      # i don't think this is relevant anymore
-      #if offset > 0: assert len(st.views) == 1
 
       # constant folding
       constant_fold = None
@@ -256,7 +239,6 @@ class CLASTKernel(ASTKernel):
       eb_valid = eb_valids.index(True)
 
       # no change, we added a dimension
-      if DEBUG >= 2: print("early image reshape")
       self.reshape_and_permute(
         lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
@@ -279,12 +261,10 @@ class CLASTKernel(ASTKernel):
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
 
       # no change, we added a dimension
-      if DEBUG >= 2: print("late image reshape")
       self.reshape_and_permute(
         lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
       self.late_are_float4 = True
-    self.simplify_ones()
   
     # split to 4 float4s
     if (self.early_loads_are_float4 or self.early_loads_are_non_reduce_float4) and self.late_are_float4:
@@ -300,8 +280,8 @@ class CLASTKernel(ASTKernel):
           lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
           [i for i in range(self.shape_len) if i != xb_choice+1] + [xb_choice+1, self.shape_len])
         # no change, we added a dimension
-        if DEBUG >= 2: print("4x float4")
         self.four_float4 = True
+    self.simplify_ones()
     
     # use more opencl indexing
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
