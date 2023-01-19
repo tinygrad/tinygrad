@@ -171,7 +171,11 @@ class CLASTKernel(ASTKernel):
         self.bufs_to_delete.add(buf_index)
         constant_fold = f"({self.bufs[buf_index]._backing[0]})"
 
+      offset_index = -2 if self.late_are_float4 and self.bufs[buf_index] in self.earlybufs else -1
+
       if isinstance(self.bufs[buf_index]._buf, CLImage):
+        # TODO: why isn't this always right? it should be
+        #assert self.strides[buf_index][offset_index] == 1
         W = self.bufs[buf_index]._base_shape[1]
         idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
         idx = (idxy//4)%W
@@ -188,12 +192,12 @@ class CLASTKernel(ASTKernel):
       else:
         idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
         if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
-          if self.strides[buf_index][-1] == 1 and len(st.views) == 1 and not st.needs_valid():
+          if self.strides[buf_index][offset_index] == 1 and len(st.views) == 1 and not st.needs_valid():
             ldr = Token(f"((__global float4*)data{buf_index})[{(idxy//4).cl}]", Types.FLOAT4)
           else:
             mst = []
             for i in range(4):
-              lidxy,lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][-1])
+              lidxy,lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][offset_index])
               mst.append(f"data{buf_index}[{lidxy.cl}]" if not constant_fold else constant_fold)
               if st.needs_valid(): mst[-1] = f"({lvalid.cl} ? {mst[-1]} : 0.0)"
             ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
@@ -233,10 +237,11 @@ class CLASTKernel(ASTKernel):
     any_early_images = any(isinstance(buf._buf, CLImage) for buf in self.earlybufs)
     any_late_images = any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs)
 
-    # three toggles determine the kernel
+    # four toggles determine the kernel
     self.early_loads_are_non_reduce_float4 = False
     self.early_loads_are_float4 = False
     self.late_are_float4 = False   # store float4
+    self.four_float4 = False
 
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
@@ -282,8 +287,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
   
     # split to 4 float4s
-    self.four_float4 = False
-    if int(os.getenv("ALLOW_4FLOAT4", "0")) and (self.early_loads_are_float4 or self.early_loads_are_non_reduce_float4) and self.late_are_float4:
+    if (self.early_loads_are_float4 or self.early_loads_are_non_reduce_float4) and self.late_are_float4:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(x[i]%4 == 0 for x in self.shapes) and any([(x[i] != 0 and x[-1] == 0) or (x[i] == 0 and x[-1] != 0) for x in self.strides]):
