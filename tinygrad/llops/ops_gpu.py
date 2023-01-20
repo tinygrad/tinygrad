@@ -102,7 +102,6 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
-
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
@@ -128,7 +127,21 @@ class CLASTKernel(ASTKernel):
       else: idx = v.expr_node(idx)
     return idx, valid
 
-  def store(self, buf_index, value:Token, offset=0):
+  def store(self, buf_index, value:List[Token]):
+    assert len(value) == self.buftokens[buf_index].size()
+    for v, o in zip(value, self.buftokens[buf_index].offsets()):
+      idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+      assert str(valid) == "1"
+      if isinstance(self.bufs[buf_index]._buf, CLImage):
+        assert self.buftokens[buf_index].typ == Types.FLOAT4, "image must be FLOAT4"
+        idx = (idxy//4)%self.bufs[buf_index]._base_shape[1]
+        idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
+        self.kernel.append(f"write_imagef(data{buf_index}, (int2)({idx.cl}, {idy.cl}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+      else:
+        assert self.buftokens[buf_index].typ == Types.FLOAT, "buf must be FLOAT"
+        self.kernel.append(f"data{buf_index}[{idxy.cl}] = {v.tok};\n")
+
+    """
     st = self.bufs[buf_index].st
     idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
     assert str(valid) == "1"
@@ -148,8 +161,42 @@ class CLASTKernel(ASTKernel):
           self.kernel.append(f"data{buf_index}[{lidxy.cl}] = {value.tok}.s{i};\n")
       else:
         self.kernel.append(f"data{buf_index}[{idxy.cl}] = {value.tok};\n")
+    """
 
-  def load(self, buf_index, offset=0) -> Token:
+  def load(self, buf_index:int) -> List[Token]:
+    # constant folding
+    constant_fold = None
+    if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
+      self.bufs_to_delete.add(buf_index)
+      constant_fold = f"({self.bufs[buf_index]._backing[0]})" if self.buftokens[buf_index].typ == Types.FLOAT else f"({self.bufs[buf_index]._backing[0]}, {self.bufs[buf_index]._backing[0]}, {self.bufs[buf_index]._backing[0]}, {self.bufs[buf_index]._backing[0]})"
+      return [Token(constant_fold, self.buftokens[buf_index].typ) for _ in range(self.buftokens[buf_index].size())]
+
+    # not constant folded
+    tokens = []
+    for o in self.buftokens[buf_index].offsets():
+      if (buf_index, o) not in self.loaded_keys:
+        idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+        if isinstance(self.bufs[buf_index]._buf, CLImage):
+          assert self.buftokens[buf_index].typ == Types.FLOAT4, "image must be FLOAT4"
+          idx = (idxy//4)%self.bufs[buf_index]._base_shape[1]
+          idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
+
+          if VALIDHACKS:
+            if isinstance(idx, ModNode) and idx.max < idx.b*2: idx = idx.a
+            if isinstance(idy, ModNode) and idy.max < idy.b*2: idy = idy.a
+            valid = None
+
+          ldrt = f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.cl}, {idy.cl})) /* {self.bufs[buf_index]._base_shape} */"
+          ldr = Token(f"({valid.cl} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if str(valid) != "1" and valid is not None else ldrt, Types.FLOAT4)
+        else:
+          ldr = Token(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if self.buftokens[buf_index].typ == Types.FLOAT4 else 1)).cl}]", self.buftokens[buf_index].typ)
+        self.kernel.append(f"{ldr.decltype()} val{buf_index}_{o} = {ldr.tok};\n")
+        self.loaded_keys[(buf_index,o)] = Token(f"val{buf_index}_{o}", ldr.typ)
+      tokens.append(self.loaded_keys[(buf_index,o)])
+    return tokens
+
+
+
     key = f"{buf_index}_{offset}"
     if key not in self.loaded_keys:
       st = self.bufs[buf_index].st
@@ -197,17 +244,26 @@ class CLASTKernel(ASTKernel):
       self.loaded_keys[key] = Token(f"val{key}", ldr.typ)
     return self.loaded_keys[key]
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], offset=0, alt_offset=0, reduce:Optional[Token]=None) -> Token:
-    if not isinstance(x, LazyOp):
-      buf_index = self.bufs.index(x)
-      return self.load(buf_index, offset=(offset*self.strides[buf_index][-1] if offset != 0 else 0) + (alt_offset*self.strides[buf_index][-2] if alt_offset != 0 else 0))
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], offset=0, alt_offset=0, reduce:Optional[List[Token]]=None) -> List[Token]:
+    if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
     values = [self.ast_parse(v, offset, alt_offset, reduce) for v in x.src]
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
-    if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT and not self.early_loads_are_non_reduce_float4:
-      self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-      return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if self.late_are_float4 else "acc"), Types.FLOAT)
-    assert all_same([x.typ for x in values]), f"type mismatch in {values}"
+    if len(values) == 2:
+      if values[0][0].typ != values[1][0].typ:
+        def group_float4(x): return [Token(f"(float4)({','.join([x[i+j].tok for j in range(4)])})", Types.FLOAT4) for i in range(0, len(x), 4)]
+        if values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
+        if values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
+
+      return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
+    else:
+      return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
+
+    #if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT and not self.early_loads_are_non_reduce_float4:
+    #  self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+    #  return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if self.late_are_float4 else "acc"), Types.FLOAT)
+    #assert all_same([x.typ for x in values]), f"type mismatch in {values}"
+    print(code, values)
     if len(values) >= 1: code = code.replace("A", values[0].tok)
     if len(values) >= 2: code = code.replace("B", values[1].tok)
     return Token(code, values[0].typ)
@@ -219,7 +275,6 @@ class CLASTKernel(ASTKernel):
       print("old:", self.shapes)
       print("old:", self.strides)
 
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else "__global float *" for i,x in enumerate(self.bufs)]
     self.prekernel = set()
 
     # four toggles determine the kernel
@@ -237,7 +292,7 @@ class CLASTKernel(ASTKernel):
           #assert len(self.bufs[i].st.views) == 1, f"images can't have views {self.bufs[i].st}"
           valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
-      assert any(eb_valids), f"invalid op with images {buftypes} {eb_valids}"
+      assert any(eb_valids), f"invalid op with images {eb_valids}"
       eb_valid = eb_valids.index(True)
       if DEBUG >= 2: print(f"early merging axis {eb_valid}")
 
@@ -256,7 +311,7 @@ class CLASTKernel(ASTKernel):
         #assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
         valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
         lb_valids = [x and y for x,y in zip(lb_valids, valids)]
-      assert any(lb_valids), f"invalid op with images {buftypes}"
+      assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
       if DEBUG >= 2: print(f"late merging axis {lb_valid}")
@@ -291,9 +346,6 @@ class CLASTKernel(ASTKernel):
     # first simplify
     self.simplify_ones()
 
-    for i in range(len(self.bufs)):
-      print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.shapes[i], self.strides[i])
-    
     # use more opencl indexing
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
@@ -308,13 +360,12 @@ class CLASTKernel(ASTKernel):
     if DEBUG >= 2:
       print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4} four_float4: {self.four_float4}")
       print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
-      print("new:", self.shapes)
-      print("new:", self.strides)
       print("output shape", self.output_shape)
+      for i in range(len(self.bufs)):
+        print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.shapes[i], self.strides[i])
 
     self.bufs_to_delete : Set[int] = set()
-    self.seen_idx : Set[str] = set()
-    self.loaded_keys : Dict[str, Token] = {}
+    self.loaded_keys : Dict[Tuple[int,int], Token] = {}
 
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
     self.kernel += [f"int idx{i} = get_global_id({min(3, len(self.output_shape))-1-i}); /* {self.output_shape[i]} */\n" for i in range(min(3, len(self.output_shape)))]
@@ -325,7 +376,7 @@ class CLASTKernel(ASTKernel):
       self.output_shape = list(self.output_shape[0:2]) + [prod(self.output_shape[2:])]
 
     # early ast
-    accumulators = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].length)]
+    accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop:
       full_shape = [x for x in self.shapes if x != self.shapes[0]]
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
@@ -333,27 +384,52 @@ class CLASTKernel(ASTKernel):
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce, self.last_reduce)]
 
+      asts = self.ast_parse(self.reduceop.src[0])
+      assert self.reduceop.op == ReduceOps.SUM
+
+      if len(accumulators) != len(asts):
+        assert len(accumulators)*4 == len(asts)
+        new_accumulators = []
+        for acc in accumulators:
+          for s in range(4):
+            new_accumulators.append(Token(acc.tok+f".s{s}", Types.FLOAT))
+      else:
+        new_accumulators = accumulators
+
+      for ast, accumulator in zip(asts, new_accumulators):
+        if ast.typ != accumulator.typ:
+          assert ast.typ == Types.FLOAT4 and accumulator.typ == Types.FLOAT
+          self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+          self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + clsum(" + ast.tok.replace("acc", accumulator.tok) + ");\n")
+        else:
+          self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + " + ast.tok.replace("acc", accumulator.tok) + ";\n")
+
+      #for accnum, accumulator in enumerate(accumulators):
+      """
+      print(ast)
       tmp_kernel = []
       for accnum, accumulator in enumerate(accumulators):
         if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
           tmp_kernel += [f"  {accumulator.tok}.s{j} = " + self.ast_parse(self.reduceop, offset=j, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n" for j in range(4)]
         else:
           tmp_kernel.append(f"  {accumulator.tok} = " + self.ast_parse(self.reduceop, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n")
+      """
 
-      self.kernel += tmp_kernel + ["}\n"] * (self.last_reduce - self.first_reduce)
-
+      self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
+    
     # late ast
-    outs = []
-    for accnum, accumulator in enumerate(accumulators):
-      out = self.ast_parse(self.ast, reduce=accumulator, alt_offset=accnum)
-      self.kernel.append(f"{out.decltype()} outs{accnum} = {out.tok};\n")
-      outs.append(Token(f"outs{accnum}", out.typ))
-    for accnum, accumulator in enumerate(accumulators):
-      self.store(0, outs[accnum], offset=accnum*self.strides[0][-2] if accnum != 0 else 0)
+    outs : List[Token] = []
+    out : List[Token] = self.ast_parse(self.ast, reduce=accumulators)
+    for i, out in enumerate(out):
+      self.kernel.append(f"{out.decltype()} outs{i} = {out.tok};\n")
+      outs.append(Token(f"outs{i}", out.typ))
+
+    self.store(0, outs)
     self.kernel.append("}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else ("__global "+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
 
     # compile kernel
