@@ -105,6 +105,10 @@ class TestSymbolic(unittest.TestCase):
     ret = (Variable("a", 0, 10)*4)//8
     self.assertEqual(str(ret), "(a//2)")
 
+  def test_div_remove(self):
+    ret = Variable.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4
+    self.assertEqual(str(ret), "idx0")
+
 if __name__ == '__main__':
   unittest.main()
 
