@@ -102,6 +102,9 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
+def group_float4(x): return [Token(f"(float4)({','.join([x[i+j].tok for j in range(4)])})", Types.FLOAT4) for i in range(0, len(x), 4)]
+def split_float4(x): return sum([Token(acc.tok+f".s{s}", Types.FLOAT) for s in range(4)] for acc in x)
+
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
@@ -128,7 +131,9 @@ class CLASTKernel(ASTKernel):
     return idx, valid
 
   def store(self, buf_index, value:List[Token]):
-    assert len(value) == self.buftokens[buf_index].size()
+    if len(value) == self.buftokens[buf_index].size()*4: value = group_float4(value)
+    if len(value)*4 == self.buftokens[buf_index].size(): value = split_float4(value)
+    assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     for v, o in zip(value, self.buftokens[buf_index].offsets()):
       idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
       assert str(valid) == "1"
@@ -167,9 +172,9 @@ class CLASTKernel(ASTKernel):
     # constant folding
     constant_fold = None
     if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
+      assert self.buftokens[buf_index].typ == Types.FLOAT
       self.bufs_to_delete.add(buf_index)
-      constant_fold = f"({self.bufs[buf_index]._backing[0]})" if self.buftokens[buf_index].typ == Types.FLOAT else f"({self.bufs[buf_index]._backing[0]}, {self.bufs[buf_index]._backing[0]}, {self.bufs[buf_index]._backing[0]}, {self.bufs[buf_index]._backing[0]})"
-      return [Token(constant_fold, self.buftokens[buf_index].typ) for _ in range(self.buftokens[buf_index].size())]
+      return [Token(f"({self.bufs[buf_index]._backing[0]})", self.buftokens[buf_index].typ)] * self.buftokens[buf_index].size()
 
     # not constant folded
     tokens = []
@@ -190,6 +195,7 @@ class CLASTKernel(ASTKernel):
           ldr = Token(f"({valid.cl} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if str(valid) != "1" and valid is not None else ldrt, Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if self.buftokens[buf_index].typ == Types.FLOAT4 else 1)).cl}]", self.buftokens[buf_index].typ)
+          ldr = Token(f"({valid.cl} ? {ldr.tok} : 0.0)", ldr.typ) if str(valid) != "1" else ldr
         self.kernel.append(f"{ldr.decltype()} val{buf_index}_{o} = {ldr.tok};\n")
         self.loaded_keys[(buf_index,o)] = Token(f"val{buf_index}_{o}", ldr.typ)
       tokens.append(self.loaded_keys[(buf_index,o)])
@@ -251,7 +257,6 @@ class CLASTKernel(ASTKernel):
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 2:
       if values[0][0].typ != values[1][0].typ:
-        def group_float4(x): return [Token(f"(float4)({','.join([x[i+j].tok for j in range(4)])})", Types.FLOAT4) for i in range(0, len(x), 4)]
         if values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
         if values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
 
@@ -325,6 +330,7 @@ class CLASTKernel(ASTKernel):
       self.upcast()
 
     # split to 4 float4s
+    """
     if self.buftokens[0].typ == Types.FLOAT4:
       xb_choices = []
       for i in range(self.first_reduce):
@@ -342,6 +348,7 @@ class CLASTKernel(ASTKernel):
 
         # drop the last dimension
         self.upcast()
+    """
 
     # first simplify
     self.simplify_ones()
@@ -385,24 +392,19 @@ class CLASTKernel(ASTKernel):
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce, self.last_reduce)]
 
       asts = self.ast_parse(self.reduceop.src[0])
-      assert self.reduceop.op == ReduceOps.SUM
 
-      if len(accumulators) != len(asts):
-        assert len(accumulators)*4 == len(asts)
-        new_accumulators = []
-        for acc in accumulators:
-          for s in range(4):
-            new_accumulators.append(Token(acc.tok+f".s{s}", Types.FLOAT))
-      else:
-        new_accumulators = accumulators
-
+      new_accumulators = split_float4(accumulators) if len(accumulators) != len(asts) else accumulators
       for ast, accumulator in zip(asts, new_accumulators):
         if ast.typ != accumulator.typ:
+          assert self.reduceop.op == ReduceOps.SUM
           assert ast.typ == Types.FLOAT4 and accumulator.typ == Types.FLOAT
           self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
           self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + clsum(" + ast.tok.replace("acc", accumulator.tok) + ");\n")
         else:
-          self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + " + ast.tok.replace("acc", accumulator.tok) + ";\n")
+          if self.reduceop.op == ReduceOps.MAX:
+            self.kernel.append(f"  {accumulator.tok} = max({accumulator.tok}, " + ast.tok.replace("acc", accumulator.tok) + ");\n")
+          else:
+            self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + " + ast.tok.replace("acc", accumulator.tok) + ";\n")
 
       #for accnum, accumulator in enumerate(accumulators):
       """
