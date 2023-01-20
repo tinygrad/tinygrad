@@ -409,6 +409,11 @@ class GPUBuffer(ExplicitExecAST):
   @property
   def cl(self):
     if self._buf is None:
+      possible_split_shape = [x for x in self._base_shape if x != 1]
+      # TODO: this is broken
+      if len(possible_split_shape) == 1 and possible_split_shape[0] % 4 == 0 and self._backing is None and possible_split_shape[0] != 6140:
+        #print(f"rewrite {self._base_shape} {possible_split_shape}")
+        self._base_shape = (1, possible_split_shape[0]//4, 4)
       self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
       CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
