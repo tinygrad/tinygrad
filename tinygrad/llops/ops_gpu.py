@@ -169,6 +169,7 @@ class CLASTKernel(ASTKernel):
         constant_fold = f"({self.bufs[buf_index]._backing[0]})"
 
       offset_index = -2 if self.late_are_float4 and self.bufs[buf_index] in self.earlybufs else -1
+      if self.mid_arent_float4: offset_index = 2
 
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         # TODO: why isn't this always right? it should be
@@ -235,6 +236,7 @@ class CLASTKernel(ASTKernel):
     self.early_loads_are_float4 = False
     self.late_are_float4 = False   # store float4
     self.four_float4 = False
+    self.mid_arent_float4 = False
 
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
@@ -307,15 +309,18 @@ class CLASTKernel(ASTKernel):
     # group for reduce
     self.group_for_reduce = 16 if (self.reduceop and self.first_reduce == 1 and self.last_reduce >= 2 and all(x[1] == 1 or x[1]%16 == 0 for x in self.shapes)) else None
     if self.group_for_reduce:
-      self.reshape_and_permute(lambda x: [x[0], min(x[1], self.group_for_reduce), max(1, x[1]//self.group_for_reduce)]+list(x[2:]), None)
-      self.first_reduce += 1
-      self.last_reduce += 1
-      buftypes.append("__local float4 *" if self.late_are_float4 else "__local float *")
+      self.reshape_and_permute(lambda x: [x[0], min(x[1], self.group_for_reduce), max(1, x[1]//self.group_for_reduce)]+list(x[2:]),
+        [0,1,self.shape_len] + list(range(2, self.shape_len)))
+      self.first_reduce += 2
+      self.last_reduce += 2
+      self.late_are_float4 = False
+      buftypes.append("__local float *")
+      #buftypes.append("__local float4 *" if self.late_are_float4 else "__local float *")
 
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
 
     if self.group_for_reduce:
-      self.output_shape = list(self.output_shape[:-1]) + [self.group_for_reduce]
+      self.output_shape = [self.output_shape[0], self.group_for_reduce, self.output_shape[2]]
 
     if DEBUG >= 2:
       print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4} four_float4: {self.four_float4}")
@@ -357,9 +362,14 @@ class CLASTKernel(ASTKernel):
     # middle
     if self.group_for_reduce:
       assert len(accumulators) == 1
-      self.kernel.append(f"temp[idx{self.first_reduce-1}] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
-      self.kernel.append(f"if (idx{self.first_reduce-1} == 0) {{\n")
-      self.kernel.append(f"for (int mid = 1; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += temp[mid]; }}\n")
+      mid_accumulators = accumulators
+      self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      self.kernel.append(f"if (mid_idx == 0) {{\n")
+      self.late_are_float4 = True
+      self.mid_arent_float4 = True
+      accumulators = [Token("output", Types.FLOAT4)]
+      self.kernel.append(f"float4 {accumulators[0].tok} = 0.0;\n")
+      self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")
 
     # late ast
     outs = []
@@ -383,7 +393,7 @@ class CLASTKernel(ASTKernel):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
       if self.group_for_reduce:
         clbufs.append(cl.LocalMemory(self.group_for_reduce*4*(4 if self.late_are_float4 else 1)))
-      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], [self.group_for_reduce, 1] if self.group_for_reduce else None, *clbufs)
+      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], [4, self.group_for_reduce, 1] if self.group_for_reduce else None, *clbufs)
     return runner
 
 class GPUBuffer(ExplicitExecAST):
