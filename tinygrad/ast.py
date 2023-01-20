@@ -1,3 +1,4 @@
+from enum import Enum
 from tinygrad.helpers import dedup, all_same
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
 from tinygrad.shape import ShapeTracker
@@ -7,6 +8,15 @@ def get_first_reduce(shapes):
     if not all_same([x[i] for x in shapes]):
       return i
   return len(shapes[0])  # off the end
+
+Types = Enum("Types", ["FLOAT", "FLOAT4"])
+class Token:
+  def __init__(self, tok:str, typ:Types, ptr:bool=False, length:int=1, stride:int=1):
+    assert isinstance(tok, str)
+    self.tok, self.typ, self.ptr = tok, typ, ptr
+    self.length, self.stride = length, stride
+  def decltype(self): return ('float' if self.typ == Types.FLOAT else 'float4') + ('*' if self.ptr else '')
+  def __repr__(self): return f"<{self.typ}{'*' if self.ptr else ''} {self.tok}{f'[{self.length}]({self.stride})' if self.length > 1 else ''}>"
 
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
@@ -34,6 +44,7 @@ class ASTKernel:
     self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape)
     if hasattr(self.ret, "cl"): self.ret.cl  # does the allocation of unbacked buffer, pylint: disable=W0104
     self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
+    self.buftokens = [Token(f"buf{i}", Types.FLOAT, ptr=True) for i in range(len(self.bufs))]
 
     # check valid AST kernel
     assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
@@ -129,3 +140,25 @@ class ASTKernel:
       new_shapes.append(st.shape)
       new_strides.append(st.strides)
     self.shapes, self.strides = new_shapes, new_strides
+
+  # drops the final dimension
+  def upcast(self):
+    upcasted = [x[-1] for x in self.shapes if x[-1] != 1]
+    assert len(upcasted) >= 1 and all_same(upcasted), f"can't upcast mismatch {upcasted}"
+    for i in range(len(self.bufs)):
+      if self.shapes[i][-1] == upcasted[0] and self.strides[i][-1] != 0:
+        if self.shapes[i][-1] == 4 and self.buftokens[i].typ == Types.FLOAT and self.strides[i][-1] == 1:
+          # this is an upcast to FLOAT4
+          self.buftokens[i].typ = Types.FLOAT4
+          assert all(x%upcasted[0] == 0 for x in self.strides[i][0:-1])
+          assert self.offsets[i]%upcasted[0] == 0
+          self.strides[i] = [x//upcasted[0] for x in self.strides[i]]
+          self.offsets[i] = self.offsets[i]//upcasted[0]
+        else:
+          assert self.buftokens[i].length == 1
+          self.buftokens[i].length = upcasted[0]
+          self.buftokens[i].stride = self.strides[i][-1]
+
+    # remove the last dimension
+    self.shapes = [x[:-1] for x in self.shapes]
+    self.strides = [x[:-1] for x in self.strides]

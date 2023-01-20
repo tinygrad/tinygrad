@@ -1,13 +1,12 @@
 from __future__ import annotations
 import os, functools
-from enum import Enum
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod, all_same
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
-from tinygrad.ast import ASTKernel
+from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
@@ -103,13 +102,6 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
-Types = Enum("Types", ["FLOAT", "FLOAT4"])
-class Token:
-  def __init__(self, tok:str, typ:Types):
-    assert isinstance(tok, str)
-    self.tok, self.typ = tok, typ
-  def decltype(self): return 'float' if self.typ == Types.FLOAT else 'float4'
-  def __repr__(self): return f"<{self.typ} {self.tok}>"
 
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
@@ -247,20 +239,18 @@ class CLASTKernel(ASTKernel):
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {buftypes} {eb_valids}"
       eb_valid = eb_valids.index(True)
+      if DEBUG >= 2: print(f"early merging axis {eb_valid}")
 
       # no change, we added a dimension
       self.reshape_and_permute(
         lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
 
-      if eb_valid < self.first_reduce:
-        self.early_loads_are_non_reduce_float4 = True
-        self.late_are_float4 = True
-      else:
-        self.early_loads_are_float4 = True
-
+      # drop the last dimension
+      self.upcast()
+    
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and not self.early_loads_are_non_reduce_float4:
+    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
       lb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
         #assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
@@ -269,15 +259,18 @@ class CLASTKernel(ASTKernel):
       assert any(lb_valids), f"invalid op with images {buftypes}"
       lb_valid = lb_valids.index(True)
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
+      if DEBUG >= 2: print(f"late merging axis {lb_valid}")
 
       # no change, we added a dimension
       self.reshape_and_permute(
         lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
-      self.late_are_float4 = True
-  
+
+      # drop the last dimension
+      self.upcast()
+
     # split to 4 float4s
-    if (self.early_loads_are_float4 or self.early_loads_are_non_reduce_float4) and self.late_are_float4:
+    if self.buftokens[0].typ == Types.FLOAT4:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(x[i]%4 == 0 for x in self.shapes) and any([(x[i] != 0 and x[-1] == 0) or (x[i] == 0 and x[-1] != 0) for x in self.strides]):
@@ -285,15 +278,21 @@ class CLASTKernel(ASTKernel):
 
       if len(xb_choices):
         xb_choice = sorted(xb_choices)[0][1]
+        if DEBUG >= 2: print(f"float4 merging axis {xb_choice}")
+
         # this leaves the last axis in place
         self.reshape_and_permute(
           lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
-          [i for i in range(self.shape_len) if i != xb_choice+1] + [xb_choice+1, self.shape_len])
-        # no change, we added a dimension
-        self.four_float4 = True
+          [i for i in range(self.shape_len+1) if i != xb_choice+1] + [xb_choice+1])
+
+        # drop the last dimension
+        self.upcast()
 
     # first simplify
     self.simplify_ones()
+
+    for i in range(len(self.bufs)):
+      print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.shapes[i], self.strides[i])
     
     # use more opencl indexing
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
@@ -326,7 +325,7 @@ class CLASTKernel(ASTKernel):
       self.output_shape = list(self.output_shape[0:2]) + [prod(self.output_shape[2:])]
 
     # early ast
-    accumulators = [Token("acc%d" % i, Types.FLOAT4 if self.late_are_float4 else Types.FLOAT) for i in range(4 if self.four_float4 else 1)]
+    accumulators = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].length)]
     if self.reduceop:
       full_shape = [x for x in self.shapes if x != self.shapes[0]]
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
