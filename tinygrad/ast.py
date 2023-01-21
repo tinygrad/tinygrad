@@ -174,7 +174,7 @@ class ASTKernel:
     for i in range(len(self.bufs)):
       if self.shapes[i][-1] == upcasted[0]:
         # multiview shapetrackers can slice through a float4, so don't allow them
-        can_merge = (not self.bufs[i].st.needs_valid() and len(self.bufs[i].st.views) == 1) or "Image" in str(type(self.bufs[i].cl))  # TODO: terrible hack
+        can_merge = (not self.bufs[i].st.needs_valid() and len(self.bufs[i].st.views) == 1) or "Image" in str(type(self.bufs[i]._buf))  # TODO: terrible hack
         if self.shapes[i][-1] == 4 and self.buftokens[i].typ == Types.FLOAT and self.strides[i][-1] == 1 and can_merge:
           # this is an upcast to FLOAT4
           self.buftokens[i].typ = Types.FLOAT4

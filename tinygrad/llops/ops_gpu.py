@@ -148,15 +148,22 @@ class CLASTKernel(ASTKernel):
         self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).cl}] = {v.tok};\n")
 
   def load(self, buf_index:int) -> List[Token]:
+    tokens = []
+
     # constant folding
-    constant_fold = None
     if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
       assert self.buftokens[buf_index].typ == Types.FLOAT
       self.bufs_to_delete.add(buf_index)
-      return [Token(f"({self.bufs[buf_index]._backing[0]})", self.buftokens[buf_index].typ)] * self.buftokens[buf_index].size()
+      const = Token(f"({self.bufs[buf_index]._backing[0]})", self.buftokens[buf_index].typ)
+      if self.bufs[buf_index].st.needs_valid():
+        for o in self.buftokens[buf_index].offsets():
+          _, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+          tokens.append(Token(f"({valid.cl} ? {const.tok} : 0.0)", const.typ) if str(valid) != "1" else const)
+        return tokens
+      else:
+        return [const]*self.buftokens[buf_index].size()
 
     # not constant folded
-    tokens = []
     for o in self.buftokens[buf_index].offsets():
       if (buf_index, o) not in self.loaded_keys:
         idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
