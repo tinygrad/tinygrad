@@ -4,7 +4,7 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
 from typing import List, Tuple, Optional, Dict, Union, Set
-from tinygrad.helpers import prod, all_same
+from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
@@ -147,28 +147,6 @@ class CLASTKernel(ASTKernel):
         assert self.buftokens[buf_index].typ == v.typ, f"buf must be {v.typ}"
         self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).cl}] = {v.tok};\n")
 
-    """
-    st = self.bufs[buf_index].st
-    idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
-    assert str(valid) == "1"
-    if isinstance(self.bufs[buf_index]._buf, CLImage):
-      W = self.bufs[buf_index]._base_shape[1]
-      assert value.typ == Types.FLOAT4, f"image can only store float4: {value} isn't"
-
-      idx = (idxy//4)%W
-      idy = (idxy//(W*4))%self.bufs[buf_index]._base_shape[0]
-      self.kernel.append(f"write_imagef(data{buf_index}, (int2)({idx.cl}, {idy.cl}), {value.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
-    else:
-      if value.typ == Types.FLOAT4:
-        for i in range(4):
-          # TODO: this isn't tested
-          lidxy, lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][-1])
-          assert str(lvalid) == "1"
-          self.kernel.append(f"data{buf_index}[{lidxy.cl}] = {value.tok}.s{i};\n")
-      else:
-        self.kernel.append(f"data{buf_index}[{idxy.cl}] = {value.tok};\n")
-    """
-
   def load(self, buf_index:int) -> List[Token]:
     # constant folding
     constant_fold = None
@@ -202,55 +180,6 @@ class CLASTKernel(ASTKernel):
       tokens.append(self.loaded_keys[(buf_index,o)])
     return tokens
 
-
-
-    key = f"{buf_index}_{offset}"
-    if key not in self.loaded_keys:
-      st = self.bufs[buf_index].st
-
-      # constant folding
-      constant_fold = None
-      if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
-        self.bufs_to_delete.add(buf_index)
-        constant_fold = f"({self.bufs[buf_index]._backing[0]})"
-
-      offset_index = -2 if self.late_are_float4 and self.bufs[buf_index] in self.earlybufs else -1
-
-      if isinstance(self.bufs[buf_index]._buf, CLImage):
-        # TODO: why isn't this always right? it should be
-        #assert self.strides[buf_index][offset_index] == 1
-        W = self.bufs[buf_index]._base_shape[1]
-        idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
-        idx = (idxy//4)%W
-        idy = (idxy//(W*4))%self.bufs[buf_index]._base_shape[0]
-        # TODO: apply the validity assumptions to the indexes
-
-        if VALIDHACKS:
-          if isinstance(idx, ModNode) and idx.max < idx.b*2: idx = idx.a
-          if isinstance(idy, ModNode) and idy.max < idy.b*2: idy = idy.a
-          valid = None
-
-        ldrt = f"read_imagef(data{buf_index}, smp, (int2)({idx.cl}, {idy.cl})) /* {self.bufs[buf_index]._base_shape} */"
-        ldr = Token(f"({valid.cl} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if st.needs_valid() and valid is not None else ldrt, Types.FLOAT4)
-      else:
-        idxy, valid = self.compute_buf_index_symbolic(st, buf_index, offset)
-        if self.late_are_float4 or (self.early_loads_are_float4 and self.bufs[buf_index] in self.earlybufs):
-          if self.strides[buf_index][offset_index] == 1 and len(st.views) == 1 and not st.needs_valid():
-            ldr = Token(f"((__global float4*)data{buf_index})[{(idxy//4).cl}]", Types.FLOAT4)
-          else:
-            mst = []
-            for i in range(4):
-              lidxy,lvalid = self.compute_buf_index_symbolic(st, buf_index, offset+i*self.strides[buf_index][offset_index])
-              mst.append(f"data{buf_index}[{lidxy.cl}]" if not constant_fold else constant_fold)
-              if st.needs_valid(): mst[-1] = f"({lvalid.cl} ? {mst[-1]} : 0.0)"
-            ldr = Token(f"(float4)({','.join(mst)})", Types.FLOAT4)
-        else:
-          ldrt = f"data{buf_index}[{idxy.cl}]" if not constant_fold else constant_fold
-          ldr = Token(f"({valid.cl} ? {ldrt} : 0.0)" if st.needs_valid() else ldrt, Types.FLOAT)
-      self.kernel.append(f"{ldr.decltype()} val{key} = {ldr.tok};\n")
-      self.loaded_keys[key] = Token(f"val{key}", ldr.typ)
-    return self.loaded_keys[key]
-
   def ast_parse(self, x:Union[GPUBuffer, LazyOp], reduce:Optional[List[Token]]=None) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
@@ -265,15 +194,6 @@ class CLASTKernel(ASTKernel):
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
 
-    #if isinstance(x.op, ReduceOps) and values[0].typ != Types.FLOAT and not self.early_loads_are_non_reduce_float4:
-    #  self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-    #  return Token(code.replace("A", f"clsum({values[0].tok})").replace("acc", f"acc.s{offset}" if self.late_are_float4 else "acc"), Types.FLOAT)
-    #assert all_same([x.typ for x in values]), f"type mismatch in {values}"
-    print(code, values)
-    if len(values) >= 1: code = code.replace("A", values[0].tok)
-    if len(values) >= 2: code = code.replace("B", values[1].tok)
-    return Token(code, values[0].typ)
-
   def codegen(self):
     # TODO: fetch from quick cache before processing
     self.process()
@@ -282,12 +202,6 @@ class CLASTKernel(ASTKernel):
       print("old:", self.strides)
 
     self.prekernel = set()
-
-    # four toggles determine the kernel
-    self.early_loads_are_non_reduce_float4 = False
-    self.early_loads_are_float4 = False
-    self.late_are_float4 = False   # store float4
-    self.four_float4 = False
 
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
@@ -329,27 +243,6 @@ class CLASTKernel(ASTKernel):
 
       # drop the last dimension
       self.upcast()
-
-    # split to 4 float4s
-    """
-    if self.buftokens[0].typ == Types.FLOAT4:
-      xb_choices = []
-      for i in range(self.first_reduce):
-        if all(x[i]%4 == 0 for x in self.shapes) and any([(x[i] != 0 and x[-1] == 0) or (x[i] == 0 and x[-1] != 0) for x in self.strides]):
-          xb_choices.append((sum(x[i] for x in self.strides), i))
-
-      if len(xb_choices):
-        xb_choice = sorted(xb_choices)[0][1]
-        if DEBUG >= 2: print(f"float4 merging axis {xb_choice}")
-
-        # this leaves the last axis in place
-        self.reshape_and_permute(
-          lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
-          [i for i in range(self.shape_len+1) if i != xb_choice+1] + [xb_choice+1])
-
-        # drop the last dimension
-        self.upcast()
-    """
 
     # first simplify
     self.simplify_ones()
@@ -406,17 +299,6 @@ class CLASTKernel(ASTKernel):
             self.kernel.append(f"  {accumulator.tok} = max({accumulator.tok}, " + ast.tok.replace("acc", accumulator.tok) + ");\n")
           else:
             self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + " + ast.tok.replace("acc", accumulator.tok) + ";\n")
-
-      #for accnum, accumulator in enumerate(accumulators):
-      """
-      print(ast)
-      tmp_kernel = []
-      for accnum, accumulator in enumerate(accumulators):
-        if self.late_are_float4 and not self.early_loads_are_non_reduce_float4:
-          tmp_kernel += [f"  {accumulator.tok}.s{j} = " + self.ast_parse(self.reduceop, offset=j, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n" for j in range(4)]
-        else:
-          tmp_kernel.append(f"  {accumulator.tok} = " + self.ast_parse(self.reduceop, alt_offset=accnum).tok.replace("acc", f"acc{accnum}") + ";\n")
-      """
 
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
     
