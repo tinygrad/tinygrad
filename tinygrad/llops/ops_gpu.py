@@ -154,7 +154,7 @@ class CLASTKernel(ASTKernel):
     if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
       assert self.buftokens[buf_index].typ == Types.FLOAT
       self.bufs_to_delete.add(buf_index)
-      const = Token(f"({self.bufs[buf_index]._backing[0]})", self.buftokens[buf_index].typ)
+      const = Token(f"({self.bufs[buf_index]._backing[0]}f)", self.buftokens[buf_index].typ)
       if self.bufs[buf_index].st.needs_valid():
         for o in self.buftokens[buf_index].offsets():
           _, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
