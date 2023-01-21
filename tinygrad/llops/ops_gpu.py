@@ -103,7 +103,7 @@ class CLProgram:
 # **** end CL wrappers ****
 
 def group_float4(x): return [Token(f"(float4)({','.join([x[i+j].tok for j in range(4)])})", Types.FLOAT4) for i in range(0, len(x), 4)]
-def split_float4(x): return sum([Token(acc.tok+f".s{s}", Types.FLOAT) for s in range(4)] for acc in x)
+def split_float4(x): return sum([[Token(acc.tok+f".s{s}", Types.FLOAT) for s in range(4)] for acc in x], [])
 
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
@@ -143,8 +143,8 @@ class CLASTKernel(ASTKernel):
         idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
         self.kernel.append(f"write_imagef(data{buf_index}, (int2)({idx.cl}, {idy.cl}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       else:
-        assert self.buftokens[buf_index].typ == Types.FLOAT, "buf must be FLOAT"
-        self.kernel.append(f"data{buf_index}[{idxy.cl}] = {v.tok};\n")
+        assert self.buftokens[buf_index].typ == v.typ, f"buf must be {v.typ}"
+        self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).cl}] = {v.tok};\n")
 
     """
     st = self.bufs[buf_index].st
@@ -182,7 +182,7 @@ class CLASTKernel(ASTKernel):
       if (buf_index, o) not in self.loaded_keys:
         idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
         if isinstance(self.bufs[buf_index]._buf, CLImage):
-          assert self.buftokens[buf_index].typ == Types.FLOAT4, "image must be FLOAT4"
+          assert self.buftokens[buf_index].typ == Types.FLOAT4, f"image must be FLOAT4 {self.buftokens[buf_index]} {self.bufs[buf_index].st}"
           idx = (idxy//4)%self.bufs[buf_index]._base_shape[1]
           idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
 

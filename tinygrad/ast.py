@@ -2,7 +2,7 @@ from enum import Enum
 import itertools
 from tinygrad.helpers import prod, dedup, all_same
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
-from tinygrad.shape import ShapeTracker
+from tinygrad.shape import ShapeTracker, ZeroView
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -152,7 +152,9 @@ class ASTKernel:
     assert len(upcasted) >= 1 and all_same(upcasted), f"can't upcast mismatch {upcasted}"
     for i in range(len(self.bufs)):
       if self.shapes[i][-1] == upcasted[0]:
-        if self.shapes[i][-1] == 4 and self.buftokens[i].typ == Types.FLOAT and self.strides[i][-1] == 1:
+        # multiview shapetrackers can slice through a float4, so don't allow them
+        can_merge = len(self.bufs[i].st.views) == 1 or "Image" in str(type(self.bufs[i].cl))  # TODO: terrible hack
+        if self.shapes[i][-1] == 4 and self.buftokens[i].typ == Types.FLOAT and self.strides[i][-1] == 1 and can_merge:
           # this is an upcast to FLOAT4
           self.buftokens[i].typ = Types.FLOAT4
           assert all(x%upcasted[0] == 0 for x in self.strides[i][0:-1])
