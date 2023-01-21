@@ -350,7 +350,7 @@ class CLASTKernel(ASTKernel):
       self.reshape_and_permute(lambda x: x, [0,1] + list(range(3, self.shape_len)) + [2])
       self.upcast()
       self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
-      self.kernel.append(f"if (mid_idx == 0) {{\n")
+      self.kernel.append("if (mid_idx == 0) {\n")
       accumulators = [Token("output", Types.FLOAT4)]
       self.kernel.append(f"float4 {accumulators[0].tok} = 0.0;\n")
       self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")

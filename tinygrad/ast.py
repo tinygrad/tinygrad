@@ -1,10 +1,10 @@
 from enum import Enum
 import sys
 import itertools
-from typing import Dict
+from typing import Dict, List, Tuple
 from tinygrad.helpers import prod, dedup, all_same
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
-from tinygrad.shape import ShapeTracker, ZeroView
+from tinygrad.shape import ShapeTracker
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -17,9 +17,8 @@ class Token:
   def __init__(self, tok:str, typ:Types, ptr:bool=False):
     assert isinstance(tok, str)
     self.tok, self.typ, self.ptr = tok, typ, ptr
-    self.axis = []
-  def array(self, length, stride):
-    self.axis.append((length, stride))
+    self.axis : List[Tuple[int, int]] = []
+  def array(self, length, stride): self.axis.append((length, stride))
   def size(self): return prod(x[0] for x in self.axis)
   def offsets(self): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.axis[::-1]])] if len(self.axis) else [0]
   def decltype(self): return ('float' if self.typ == Types.FLOAT else 'float4') + ('*' if self.ptr else '')
