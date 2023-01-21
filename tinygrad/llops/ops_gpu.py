@@ -251,13 +251,35 @@ class CLASTKernel(ASTKernel):
       # drop the last dimension
       self.upcast()
 
-    # first simplify
+    # simplify (sets first_reduce)
     self.simplify_ones()
+
+    # split to 4 float4s
+    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs):
+      xb_choices = []
+      for i in range(self.first_reduce):
+        if all(x[i]%4 == 0 for x in self.shapes):
+          xb_choices.append((sum(x[i]>0 for x in self.strides), sum(x[i] for x in self.strides), i))
+
+      if len(xb_choices):
+        xb_choice = sorted(xb_choices)[0][2]
+        if DEBUG >= 2: print(f"float4 merging axis {xb_choice} : {xb_choices}")
+
+        # this leaves the last axis in place
+        self.reshape_and_permute(
+          lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
+          [i for i in range(self.shape_len+1) if i != xb_choice+1] + [xb_choice+1])
+
+        # drop the last dimension
+        self.upcast()
+
+        # re-simplify
+        self.simplify_ones()
 
     # use more opencl indexing
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
-      if all([(base_shape[0]*base_shape[1])%x[0] == 0 for x in self.shapes]):
+      if all([(base_shape[0]*base_shape[1])%x[0] == 0 and x[0]//base_shape[0] != 0 for x in self.shapes]):
         #print("split here", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.last_reduce += 1
@@ -266,7 +288,6 @@ class CLASTKernel(ASTKernel):
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
 
     if DEBUG >= 2:
-      print(f"early_loads_are_non_reduce_float4: {self.early_loads_are_non_reduce_float4} early_loads_are_float4: {self.early_loads_are_float4} late_are_float4: {self.late_are_float4} four_float4: {self.four_float4}")
       print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
       print("output shape", self.output_shape)
       for i in range(len(self.bufs)):
@@ -333,6 +354,8 @@ class CLASTKernel(ASTKernel):
     return runner
   def print(self):
     super().print()
+    for i in range(len(self.bufs)):
+      print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.shapes[i], self.strides[i])
     print(self.fxn.prg)
 
 class GPUBuffer(ExplicitExecAST):
