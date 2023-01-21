@@ -17,6 +17,7 @@ NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))  # this is needed as a switch
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
 PRINT_AST = int(os.getenv("PRINT_AST", "0"))
+TEST_AST = int(os.getenv("TEST_AST", "0"))
 
 class CLBuffer:
   def __init__(self, size):
@@ -250,16 +251,16 @@ class CLASTKernel(ASTKernel):
       self.loaded_keys[key] = Token(f"val{key}", ldr.typ)
     return self.loaded_keys[key]
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], offset=0, alt_offset=0, reduce:Optional[List[Token]]=None) -> List[Token]:
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], reduce:Optional[List[Token]]=None) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
-    values = [self.ast_parse(v, offset, alt_offset, reduce) for v in x.src]
+    values = [self.ast_parse(v, reduce) for v in x.src]
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 2:
       if values[0][0].typ != values[1][0].typ:
         if values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
         if values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
-
+      assert len(values[0]) == len(values[1])
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
@@ -441,6 +442,9 @@ class CLASTKernel(ASTKernel):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
       return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs)
     return runner
+  def print(self):
+    super().print()
+    print(self.fxn.prg)
 
 class GPUBuffer(ExplicitExecAST):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
@@ -457,7 +461,7 @@ class GPUBuffer(ExplicitExecAST):
     if self._buf is None:
       self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
-      CL.enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
+      CL().enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
       self._backing = None
     return self._buf.cl
 
@@ -468,7 +472,9 @@ class GPUBuffer(ExplicitExecAST):
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    CL.enqueue_copy(data, self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP).cl if isinstance(self._buf, CLImage) else self.contiguous().cl, is_blocking=True)
+    cl_buf = self.contiguous()
+    cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
+    CL().enqueue_copy(data, cl_buf.cl, is_blocking=True)
     return data
 
   @classmethod
@@ -478,4 +484,6 @@ class GPUBuffer(ExplicitExecAST):
     if PRINT_AST:
       print(k.fxn.name)
       k.print()
+    if TEST_AST:
+      k.test()
     return k.ret
