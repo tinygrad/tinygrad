@@ -255,7 +255,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs):
+    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) >= 2048:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(x[i]%4 == 0 for x in self.shapes):
