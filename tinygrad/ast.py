@@ -1,7 +1,6 @@
 from enum import Enum
-import sys
 import itertools
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
 from tinygrad.shape import ShapeTracker
@@ -80,24 +79,6 @@ class ASTKernel:
       return cache[x]
     print_ast(self.input_ast, "ast")
 
-  in_test = False
-  def test(self):
-    if ASTKernel.in_test: return
-    import numpy as np
-    from tinygrad.llops.ops_cpu import CPUBuffer
-    from tinygrad.ops import DeviceBuffer
-    from tinygrad.lazy import realize_buffers
-    ASTKernel.in_test = True
-    print("testing AST")
-    cpubufs : Dict[DeviceBuffer, CPUBuffer] = {x:CPUBuffer.fromCPU(x.toCPU()) for x in self.bufs}
-    real_out = cpubufs[self.bufs[0]]
-    test_out = CPUBuffer.exec_ast(realize_buffers(cpubufs, self.ast))
-    if not np.allclose(real_out, test_out, atol=1e-4):
-      print("MISMATCH")
-      print(self.print())
-      sys.tracebacklimit = 0
-      np.testing.assert_allclose(real_out, test_out)
-    ASTKernel.in_test = False
 
   def process(self):
     # get shape, strides, and offset
@@ -159,7 +140,7 @@ class ASTKernel:
       st = ShapeTracker(tuple(shape))
       st.strided(*zip(shape, stride))
       # TODO: handle reduced shape here
-      st.reshape(*new_shape_fxn(shape))
+      if new_shape_fxn is not None: st.reshape(*new_shape_fxn(shape))
       if axis is not None: st.permute(*axis)
       assert len(st.views) == 1
       new_shapes.append(st.shape)

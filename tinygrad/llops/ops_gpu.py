@@ -296,11 +296,9 @@ class CLASTKernel(ASTKernel):
       self.reshape_and_permute(lambda x: [x[0], x[1], min(x[2], self.group_for_reduce), max(1, x[2]//self.group_for_reduce)]+list(x[3:]), [0,2,1] + list(range(3, self.shape_len+1)))
       self.first_reduce += 1
       self.last_reduce += 1
-
-    self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
-
-    if self.group_for_reduce:
-      self.output_shape = [self.output_shape[0], self.group_for_reduce, self.output_shape[2]]
+      self.output_shape = [self.shapes[0][0], self.group_for_reduce] + list(self.shapes[0][2:min(self.first_reduce, self.last_reduce)])
+    else:
+      self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
 
     if DEBUG >= 2:
       print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
@@ -347,7 +345,7 @@ class CLASTKernel(ASTKernel):
     
     # middle
     if self.group_for_reduce:
-      self.reshape_and_permute(lambda x: x, [0,1] + list(range(3, self.shape_len)) + [2])
+      self.reshape_and_permute(None, [0,1] + list(range(3, self.shape_len)) + [2])
       self.upcast()
       self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
       self.kernel.append("if (mid_idx == 0) {\n")
@@ -429,5 +427,6 @@ class GPUBuffer(ExplicitExecAST):
       print(k.fxn.name)
       k.print()
     if TEST_AST:
-      k.test()
+      from extra.test_ast import test_ast  # type: ignore
+      test_ast(k)
     return k.ret
