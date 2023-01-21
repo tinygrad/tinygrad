@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG
-TENSOR_TYPE_TO_NP_TYPE = {1:np.float32, 10:np.float16, 7:np.int64}  # from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 
 ONNXLIMIT = int(os.getenv("ONNXLIMIT", "-1"))
 
