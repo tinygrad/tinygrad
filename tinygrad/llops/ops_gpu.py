@@ -230,9 +230,15 @@ class CLASTKernel(ASTKernel):
 
       # drop the last dimension
       self.upcast()
+
+    # simplify (sets first_reduce)
+    self.simplify_ones()
+
+    # are we grouping?
+    self.group_for_reduce = 16 if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce == 2 and self.last_reduce == 3 and isinstance(self.bufs[0]._buf, CLImage) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 2048 else None
     
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
+    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4 and not self.group_for_reduce:
       lb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
         #assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
@@ -255,7 +261,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) >= 2048:
+    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(x[i]%4 == 0 for x in self.shapes):
@@ -280,12 +286,21 @@ class CLASTKernel(ASTKernel):
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%x[0] == 0 and x[0]//base_shape[0] != 0 for x in self.shapes]):
-        #print("split here", base_shape, self.shapes[0])
+        if DEBUG >= 2: print("split opencl", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.last_reduce += 1
         self.simplify_ones()
 
+    # group for reduce
+    if self.group_for_reduce:
+      self.reshape_and_permute(lambda x: [x[0], x[1], min(x[2], self.group_for_reduce), max(1, x[2]//self.group_for_reduce)]+list(x[3:]), [0,2,1] + list(range(3, self.shape_len+1)))
+      self.first_reduce += 1
+      self.last_reduce += 1
+
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
+
+    if self.group_for_reduce:
+      self.output_shape = [self.output_shape[0], self.group_for_reduce, self.output_shape[2]]
 
     if DEBUG >= 2:
       print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
@@ -330,6 +345,16 @@ class CLASTKernel(ASTKernel):
 
       self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
     
+    # middle
+    if self.group_for_reduce:
+      self.reshape_and_permute(lambda x: x, [0,1] + list(range(3, self.shape_len)) + [2])
+      self.upcast()
+      self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      self.kernel.append(f"if (mid_idx == 0) {{\n")
+      accumulators = [Token("output", Types.FLOAT4)]
+      self.kernel.append(f"float4 {accumulators[0].tok} = 0.0;\n")
+      self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")
+    
     # late ast
     outs : List[Token] = []
     out : List[Token] = self.ast_parse(self.ast, reduce=accumulators)
@@ -338,19 +363,22 @@ class CLASTKernel(ASTKernel):
       outs.append(Token(f"outs{i}", out.typ))
 
     self.store(0, outs)
+    if self.group_for_reduce: self.kernel.append("}")
     self.kernel.append("}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else ("__global "+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
-    self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + [', '.join(f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete)] + [") {\n"] + self.kernel
+    self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + (["__local float* temp"] if self.group_for_reduce else []))] + \
+      [") {\n"] + self.kernel
 
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
 
     def runner(*bufs):
-      clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
-      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], None, *clbufs)
+      clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete] + ([cl.LocalMemory(self.group_for_reduce*4*4)] if self.group_for_reduce else [])
+      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], [4, self.group_for_reduce, 1] if self.group_for_reduce else None, *clbufs)
     return runner
   def print(self):
     super().print()
@@ -372,7 +400,7 @@ class GPUBuffer(ExplicitExecAST):
   def cl(self):
     if self._buf is None:
       possible_split_shape = [x for x in self._base_shape if x != 1]
-      # TODO: this is broken, and a hack
+      # TODO: this is broken, and a hack. I suspect the issue is unaligned float4 accesses, would be caught by the Image valid thing if it worked.
       if IMAGE >= 3 and len(possible_split_shape) == 1 and possible_split_shape[0] % 4 == 0 and self._backing is None and possible_split_shape[0] != 6140:
          self._base_shape = (1, possible_split_shape[0]//4, 4)
       self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
