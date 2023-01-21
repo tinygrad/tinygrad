@@ -354,13 +354,7 @@ class CLASTKernel(ASTKernel):
       self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")
     
     # late ast
-    outs : List[Token] = []
-    out : List[Token] = self.ast_parse(self.ast, reduce=accumulators)
-    for i, out in enumerate(out):
-      self.kernel.append(f"{out.decltype()} outs{i} = {out.tok};\n")
-      outs.append(Token(f"outs{i}", out.typ))
-
-    self.store(0, outs)
+    self.store(0, self.ast_parse(self.ast, reduce=accumulators))
     if self.group_for_reduce: self.kernel.append("}")
     self.kernel.append("}")
 
