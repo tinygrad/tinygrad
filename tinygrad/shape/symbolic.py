@@ -21,8 +21,8 @@ class Node:
     if b == 1: return self
     if isinstance(self, MulNode) and self.b%b == 0: return self.a*(self.b//b)
     if isinstance(self, MulNode) and b%self.b == 0: return self.a//(b//self.b)
-    if isinstance(self, SumNode) and all((isinstance(x, MulNode) or isinstance(x, NumNode)) for x in self.nodes):
-      factors, tmp_nofactor = partition(self.nodes, lambda x: x.b%b == 0)
+    if isinstance(self, SumNode):
+      factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, MulNode) or isinstance(x, NumNode)) and x.b%b == 0)
       nofactor = []
       # ugh, i doubt this is universally right
       for x in tmp_nofactor:
@@ -32,10 +32,10 @@ class Node:
           nofactor.append(Variable.num(modn(x.b, b)))
         else:
           nofactor.append(x)
-      gcd = [math.gcd(x.b, b) for x in nofactor]
+      gcd = [math.gcd(x.b, b) if isinstance(x, MulNode) or isinstance(x, NumNode) else None for x in nofactor]
       if len(factors) > 0:
         # these don't have to be the same, just having a common factor
-        if len(gcd) > 0 and all_same(gcd) and gcd[0] > 1:
+        if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
           nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
         else:
           nofactor_term = Variable.sum(nofactor)//b
