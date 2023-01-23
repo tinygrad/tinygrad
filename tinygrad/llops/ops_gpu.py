@@ -155,7 +155,7 @@ class CLASTKernel(ASTKernel):
     tokens = []
 
     # constant folding
-    if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
+    if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
       assert self.buftokens[buf_index].typ == Types.FLOAT
       self.bufs_to_delete.add(buf_index)
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", self.buftokens[buf_index].typ)
@@ -398,6 +398,7 @@ class CLASTKernel(ASTKernel):
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
 
+    if DEBUG >= 3: print(f"deleting buffers {self.bufs_to_delete}")
     def runner(*bufs):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
       return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None, *clbufs)
