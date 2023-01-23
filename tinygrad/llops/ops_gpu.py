@@ -206,7 +206,6 @@ class CLASTKernel(ASTKernel):
           values[1] = [Token(f"clreduce({x.tok})", Types.FLOAT) for x in values[1]]
         elif values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
         elif values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
-      #if isinstance(x.op, ReduceOps) and values[0][0].typ == values[1][0].typ and len(values[0]) < len(values[1]): values[0] = values[0]*(len(values[1])//len(values[0]))
       assert len(values[0]) == len(values[1]), f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
@@ -227,7 +226,6 @@ class CLASTKernel(ASTKernel):
       eb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
         if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
-          #assert len(self.bufs[i].st.views) == 1, f"images can't have views {self.bufs[i].st}"
           valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
@@ -255,10 +253,9 @@ class CLASTKernel(ASTKernel):
 
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
     self.upcast_in_mid_reduce = False
-    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4: # and not self.group_for_reduce:
+    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
       lb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
-        #assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
         valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
         lb_valids = [x and y for x,y in zip(lb_valids, valids)]
       assert any(lb_valids), f"invalid op with images {lb_valids}"
@@ -357,7 +354,7 @@ class CLASTKernel(ASTKernel):
 
       if self.upcast_in_mid_reduce:
         # it should be the last dimension
-        self.kernel.append(f"int mid_idx = idx{self.first_reduce-2}*4 + idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+        self.kernel.append(f"int mid_idx = idx{self.first_reduce-2}*{self.group_for_reduce[1]} + idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
         self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce-1] + [self.first_reduce-1])
         self.upcast()
       else:
