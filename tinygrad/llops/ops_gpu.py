@@ -249,9 +249,11 @@ class CLASTKernel(ASTKernel):
     #self.group_for_reduce = 16 if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce == 2 and self.last_reduce == 3 and isinstance(self.bufs[0]._buf, CLImage) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 2048 else None
     self.group_for_reduce = []
     if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.last_reduce and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)] + self.group_for_reduce) <= 2048:
-      if all([x[self.first_reduce] % 16 == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
-        self.group_for_reduce.append(16)
-      #self.group_for_reduce.append(256)
+      for sz in ([256, 16] if prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 32 else [16]):
+        if all([x[self.first_reduce] % sz == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
+          self.group_for_reduce.append(sz)
+          break
+        #self.group_for_reduce.append(16)
       #self.group_for_reduce.append(32)
     #if self.buftokens[0].typ != Types.FLOAT4 and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)] + self.group_for_reduce) <= 2048:
     #  self.group_for_reduce.append(32)
@@ -318,11 +320,11 @@ class CLASTKernel(ASTKernel):
     if len(self.group_for_reduce):
       for gfr in self.group_for_reduce:
         # no permute
-        self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [min(x[self.first_reduce], gfr), max(1, x[self.first_reduce]//gfr)] + list(x[self.first_reduce+1:]), None)
+        #self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [min(x[self.first_reduce], gfr), max(1, x[self.first_reduce]//gfr)] + list(x[self.first_reduce+1:]), None)
 
         # with permute for memory coalesing
-        #permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len+1))
-        #self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [max(1, x[self.first_reduce]//gfr), min(x[self.first_reduce], gfr)] + list(x[self.first_reduce+1:]), permute_axis)
+        permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len+1))
+        self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [max(1, x[self.first_reduce]//gfr), min(x[self.first_reduce], gfr)] + list(x[self.first_reduce+1:]), permute_axis)
 
         self.first_reduce += 1
         self.last_reduce += 1
@@ -362,7 +364,7 @@ class CLASTKernel(ASTKernel):
       accumulators = [Token("output", self.buftokens[0].typ)]
       self.kernel.append("if (mid_idx == 0) {\n")
       self.kernel.append(f"{accumulators[0].decltype()} {accumulators[0].tok} = 0.0;\n")
-      self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {accumulators[0].tok} = {accumulators[0].tok} + temp[mid]; }}\n")
+      self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', accumulators[0].tok).replace('B', 'temp[mid]')}; }}\n")
 
       #self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = " + (accumulators[0].tok if accumulators[0].typ == Types.FLOAT else f"clreduce({accumulators[0].tok})") + "; barrier(CLK_LOCAL_MEM_FENCE);\n")
       #if self.buftokens[0].typ == Types.FLOAT:
