@@ -103,8 +103,12 @@ class CLProgram:
 
 # **** end CL wrappers ****
 
-def group_float4(x): return [Token(f"(float4)({','.join([x[i+j].tok for j in range(4)])})", Types.FLOAT4) for i in range(0, len(x), 4)]
-def split_float4(x): return sum([[Token(acc.tok+f".s{s}", Types.FLOAT) for s in range(4)] for acc in x], [])
+def group_float4(x):
+  assert all(y.typ == Types.FLOAT for y in x) and len(x)%4 == 0
+  return [Token(f"(float4)({','.join([x[i+j].tok for j in range(4)])})", Types.FLOAT4) for i in range(0, len(x), 4)]
+def split_float4(x):
+  assert all(y.typ == Types.FLOAT4 for y in x)
+  return sum([[Token(acc.tok+f".s{s}", Types.FLOAT) for s in range(4)] for acc in x], [])
 
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
@@ -114,7 +118,7 @@ class CLASTKernel(ASTKernel):
     UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "(acc + A)", ReduceOps.MAX: "max(A, acc)"
+    ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)"
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
@@ -123,8 +127,8 @@ class CLASTKernel(ASTKernel):
 
   # TODO: move to shapetracker
   def compute_buf_index_symbolic(self, st, buf_index, offset=0):
-    view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
-    idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)])
+    view = View(self.shapes[buf_index], self.strides[buf_index], self.offsets[buf_index] + offset)
+    idx = view.expr_idxs([f"idx{i}" for i in range(self.shape_len)])
     valid = Variable.num(1)
     for v in st.views[0:-1][::-1]:
       if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
@@ -151,7 +155,7 @@ class CLASTKernel(ASTKernel):
     tokens = []
 
     # constant folding
-    if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing:
+    if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
       assert self.buftokens[buf_index].typ == Types.FLOAT
       self.bufs_to_delete.add(buf_index)
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", self.buftokens[buf_index].typ)
@@ -187,16 +191,22 @@ class CLASTKernel(ASTKernel):
       tokens.append(self.loaded_keys[(buf_index,o)])
     return tokens
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], reduce:Optional[List[Token]]=None) -> List[Token]:
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:List[Token], do_reduce=False) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
-    if isinstance(x.op, ReduceOps) and reduce is not None: return reduce
-    values = [self.ast_parse(v, reduce) for v in x.src]
+    if isinstance(x.op, ReduceOps) and not do_reduce: return acc
+    values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 2:
+      # TODO: sometimes this is split, sometimes it's multiply
+      if isinstance(x.op, ReduceOps) and values[0][0].typ == Types.FLOAT4 and len(values[0])*4 == len(values[1]): values[0] = split_float4(values[0])
       if values[0][0].typ != values[1][0].typ:
-        if values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
-        if values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
-      assert len(values[0]) == len(values[1])
+        if isinstance(x.op, ReduceOps):
+          if x.op == ReduceOps.SUM: self.prekernel.add("float clreduce(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+          elif x.op == ReduceOps.MAX: self.prekernel.add("float clreduce(float4 x) { return max(max(x.x, x.y), max(x.z, x.w)); }\n")
+          values[1] = [Token(f"clreduce({x.tok})", Types.FLOAT) for x in values[1]]
+        elif values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
+        elif values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
+      assert len(values[0]) == len(values[1]), f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
@@ -204,7 +214,7 @@ class CLASTKernel(ASTKernel):
   def codegen(self):
     # TODO: fetch from quick cache before processing
     self.process()
-    if DEBUG >= 2:
+    if DEBUG >= 3:
       print("old:", self.shapes)
       print("old:", self.strides)
 
@@ -216,12 +226,11 @@ class CLASTKernel(ASTKernel):
       eb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
         if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
-          #assert len(self.bufs[i].st.views) == 1, f"images can't have views {self.bufs[i].st}"
           valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
       eb_valid = eb_valids.index(True)
-      if DEBUG >= 2: print(f"early merging axis {eb_valid}")
+      if DEBUG >= 3: print(f"early merging axis {eb_valid} from {eb_valids}")
 
       # no change, we added a dimension
       self.reshape_and_permute(
@@ -235,33 +244,42 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    self.group_for_reduce = 16 if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce == 2 and self.last_reduce == 3 and isinstance(self.bufs[0]._buf, CLImage) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 2048 else None
-    
+    self.group_for_reduce = []
+    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.shapes[0][:self.first_reduce]) <= 2048:
+      for sz in ([256, 16] if prod(self.shapes[0][:self.first_reduce]) <= 32 else [16]):
+        if all([x[self.first_reduce] % sz == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
+          self.group_for_reduce.append(sz)
+          break
+
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4 and not self.group_for_reduce:
+    self.upcast_in_mid_reduce = False
+    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
       lb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
-        #assert len(self.bufs[i].st.views) == 1 or not isinstance(self.bufs[i]._buf, CLImage)  # images can't have views
         valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
         lb_valids = [x and y for x,y in zip(lb_valids, valids)]
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
-      if DEBUG >= 2: print(f"late merging axis {lb_valid}")
+      if DEBUG >= 3: print(f"late merging axis {lb_valid} from {lb_valids}")
 
       # no change, we added a dimension
       self.reshape_and_permute(
         lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
 
-      # drop the last dimension
-      self.upcast()
+      if self.group_for_reduce and self.first_reduce <= 2:
+        self.upcast_in_mid_reduce = True
+        self.group_for_reduce.append(4)
+      else:
+        # drop the last dimension
+        self.upcast()
 
     # simplify (sets first_reduce)
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) >= 2048 and not self.group_for_reduce:
+    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(x[i]%4 == 0 for x in self.shapes):
@@ -269,7 +287,7 @@ class CLASTKernel(ASTKernel):
 
       if len(xb_choices):
         xb_choice = sorted(xb_choices)[0][2]
-        if DEBUG >= 2: print(f"float4 merging axis {xb_choice} : {xb_choices}")
+        if DEBUG >= 3: print(f"float4 merging axis {xb_choice} : {xb_choices}")
 
         # this leaves the last axis in place
         self.reshape_and_permute(
@@ -286,22 +304,25 @@ class CLASTKernel(ASTKernel):
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%x[0] == 0 and x[0]//base_shape[0] != 0 for x in self.shapes]):
-        if DEBUG >= 2: print("split opencl", base_shape, self.shapes[0])
+        if DEBUG >= 3: print("split opencl", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
-        self.last_reduce += 1
         self.simplify_ones()
 
     # group for reduce
-    if self.group_for_reduce:
-      self.reshape_and_permute(lambda x: [x[0], x[1], min(x[2], self.group_for_reduce), max(1, x[2]//self.group_for_reduce)]+list(x[3:]), [0,2,1] + list(range(3, self.shape_len+1)))
-      self.first_reduce += 1
-      self.last_reduce += 1
-      self.output_shape = [self.shapes[0][0], self.group_for_reduce] + list(self.shapes[0][2:min(self.first_reduce, self.last_reduce)])
-    else:
-      self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
+    self.output_shape = self.shapes[0][:self.first_reduce]
+    if len(self.group_for_reduce):
+      # with permute for memory coalesing
+      if len(self.group_for_reduce) == 2:
+        permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.shape_len, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len))
+      else:
+        permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len+1))
+      self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [max(1, x[self.first_reduce]//self.group_for_reduce[0]), min(x[self.first_reduce], self.group_for_reduce[0])] + list(x[self.first_reduce+1:]), permute_axis)
 
-    if DEBUG >= 2:
-      print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
+      self.first_reduce += len(self.group_for_reduce)
+      self.output_shape += self.group_for_reduce
+
+    if DEBUG >= 3:
+      print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len}")
       print("output shape", self.output_shape)
       for i in range(len(self.bufs)):
         print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.shapes[i], self.strides[i])
@@ -324,37 +345,31 @@ class CLASTKernel(ASTKernel):
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
-      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce, self.last_reduce)]
-
-      asts = self.ast_parse(self.reduceop.src[0])
-
-      new_accumulators = split_float4(accumulators) if len(accumulators) != len(asts) else accumulators
-      for ast, accumulator in zip(asts, new_accumulators):
-        if ast.typ != accumulator.typ:
-          assert self.reduceop.op == ReduceOps.SUM
-          assert ast.typ == Types.FLOAT4 and accumulator.typ == Types.FLOAT
-          self.prekernel.add("float clsum(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-          self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + clsum(" + ast.tok.replace("acc", accumulator.tok) + ");\n")
-        else:
-          if self.reduceop.op == ReduceOps.MAX:
-            self.kernel.append(f"  {accumulator.tok} = max({accumulator.tok}, " + ast.tok.replace("acc", accumulator.tok) + ");\n")
-          else:
-            self.kernel.append(f"  {accumulator.tok} = {accumulator.tok} + " + ast.tok.replace("acc", accumulator.tok) + ";\n")
-
-      self.kernel += ["}\n"] * (self.last_reduce - self.first_reduce)
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce, self.shape_len)]
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, accumulators, do_reduce=True)] + ["}\n"] * (self.shape_len - self.first_reduce)
     
     # middle
     if self.group_for_reduce:
-      self.reshape_and_permute(None, [0,1] + list(range(3, self.shape_len)) + [2])
-      self.upcast()
-      self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      self.kernel.append(f"__local {accumulators[0].decltype()} temp[{prod(self.group_for_reduce)}];  // second stage\n")
+
+      if self.upcast_in_mid_reduce:
+        # it should be the last dimension
+        self.kernel.append(f"int mid_idx = idx{self.first_reduce-2}*{self.group_for_reduce[1]} + idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+        self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce-1] + [self.first_reduce-1])
+        self.upcast()
+      else:
+        self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+
       self.kernel.append("if (mid_idx == 0) {\n")
-      accumulators = [Token("output", Types.FLOAT4)]
-      self.kernel.append(f"float4 {accumulators[0].tok} = 0.0;\n")
-      self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")
+      accumulators = [Token("output", self.buftokens[0].typ)]
+      self.kernel.append(f"{accumulators[0].decltype()} {accumulators[0].tok} = 0.0;\n")
+      if self.upcast_in_mid_reduce:
+        self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', accumulators[0].tok).replace('B', 'vload4(0, &temp[mid*4])')}; }}\n")
+      else:
+        self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', accumulators[0].tok).replace('B', 'temp[mid]')}; }}\n")
     
     # late ast
-    self.store(0, self.ast_parse(self.ast, reduce=accumulators))
+    self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
     self.kernel.append("}")
 
@@ -362,15 +377,16 @@ class CLASTKernel(ASTKernel):
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else ("__global "+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + (["__local float* temp"] if self.group_for_reduce else []))] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete])] + \
       [") {\n"] + self.kernel
 
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
 
+    if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
     def runner(*bufs):
-      clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete] + ([cl.LocalMemory(self.group_for_reduce*4*4)] if self.group_for_reduce else [])
-      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], [4, self.group_for_reduce, 1] if self.group_for_reduce else None, *clbufs)
+      clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
+      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None, *clbufs)
     return runner
   def print(self):
     super().print()
