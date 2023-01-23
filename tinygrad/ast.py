@@ -86,7 +86,6 @@ class ASTKernel:
     self.shapes = [x.shape for x in self.bufs]
     self.strides = [x.st.views[-1].strides for x in self.bufs]
     self.offsets = [x.st.views[-1].offset for x in self.bufs]  # include the offsets (as is)
-    self.last_reduce = len(self.shapes[0])
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
@@ -99,7 +98,6 @@ class ASTKernel:
       all_ones[-1] = False
     self.shapes = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in self.shapes]
     self.strides = [[s[i] for i in range(len(s)) if not all_ones[i]] for s in self.strides]
-    self.last_reduce -= sum(all_ones)
     # find first mismatch, don't reduce this
     self.first_reduce = get_first_reduce(self.shapes)
 
@@ -117,8 +115,6 @@ class ASTKernel:
         can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
       # more can merge than this
       can_merge = all(can_merge) and i != self.first_reduce
-      if can_merge:
-        self.last_reduce -= 1
       for j in range(len(shapes)):
         if can_merge:
           rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])

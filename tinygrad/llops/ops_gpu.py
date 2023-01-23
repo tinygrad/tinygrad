@@ -127,8 +127,8 @@ class CLASTKernel(ASTKernel):
 
   # TODO: move to shapetracker
   def compute_buf_index_symbolic(self, st, buf_index, offset=0):
-    view = View(self.shapes[buf_index][0:self.last_reduce], self.strides[buf_index][0:self.last_reduce], self.offsets[buf_index] + offset)
-    idx = view.expr_idxs([f"idx{i}" for i in range(self.last_reduce)])
+    view = View(self.shapes[buf_index], self.strides[buf_index], self.offsets[buf_index] + offset)
+    idx = view.expr_idxs([f"idx{i}" for i in range(self.shape_len)])
     valid = Variable.num(1)
     for v in st.views[0:-1][::-1]:
       if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
@@ -246,21 +246,13 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    #self.group_for_reduce = 16 if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce == 2 and self.last_reduce == 3 and isinstance(self.bufs[0]._buf, CLImage) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 2048 else None
     self.group_for_reduce = []
-    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.last_reduce and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)] + self.group_for_reduce) <= 2048:
-      for sz in ([256, 16] if prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 32 else [16]):
+    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.shapes[0][:self.first_reduce]) <= 2048:
+      for sz in ([256, 16] if prod(self.shapes[0][:self.first_reduce]) <= 32 else [16]):
         if all([x[self.first_reduce] % sz == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
           self.group_for_reduce.append(sz)
           break
-        #self.group_for_reduce.append(16)
-      #self.group_for_reduce.append(32)
-    #if self.buftokens[0].typ != Types.FLOAT4 and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)] + self.group_for_reduce) <= 2048:
-    #  self.group_for_reduce.append(32)
 
-    #self.group_for_reduce = 256 if self.buftokens[0].typ != Types.FLOAT4 and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 2048 else None
-    #print(self.first_reduce, self.last_reduce)
-    
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
     self.upcast_in_mid_reduce = False
     if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4: # and not self.group_for_reduce:
@@ -279,7 +271,7 @@ class CLASTKernel(ASTKernel):
         lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
 
-      if self.group_for_reduce and self.first_reduce <= 2: # and False:
+      if self.group_for_reduce and self.first_reduce <= 2:
         self.upcast_in_mid_reduce = True
         self.group_for_reduce.append(4)
       else:
@@ -290,7 +282,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) >= 2048 and not self.group_for_reduce:
+    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(x[i]%4 == 0 for x in self.shapes):
@@ -317,11 +309,10 @@ class CLASTKernel(ASTKernel):
       if all([(base_shape[0]*base_shape[1])%x[0] == 0 and x[0]//base_shape[0] != 0 for x in self.shapes]):
         if DEBUG >= 3: print("split opencl", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
-        self.last_reduce += 1
         self.simplify_ones()
 
     # group for reduce
-    self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
+    self.output_shape = self.shapes[0][:self.first_reduce]
     if len(self.group_for_reduce):
       # with permute for memory coalesing
       if len(self.group_for_reduce) == 2:
@@ -331,11 +322,10 @@ class CLASTKernel(ASTKernel):
       self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [max(1, x[self.first_reduce]//self.group_for_reduce[0]), min(x[self.first_reduce], self.group_for_reduce[0])] + list(x[self.first_reduce+1:]), permute_axis)
 
       self.first_reduce += len(self.group_for_reduce)
-      self.last_reduce += len(self.group_for_reduce)
       self.output_shape += self.group_for_reduce
 
     if DEBUG >= 3:
-      print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
+      print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len}")
       print("output shape", self.output_shape)
       for i in range(len(self.bufs)):
         print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.shapes[i], self.strides[i])
@@ -358,8 +348,8 @@ class CLASTKernel(ASTKernel):
       full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
 
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
-      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce, self.last_reduce)]
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, accumulators, do_reduce=True)] + ["}\n"] * (self.last_reduce - self.first_reduce)
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce, self.shape_len)]
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, accumulators, do_reduce=True)] + ["}\n"] * (self.shape_len - self.first_reduce)
     
     # middle
     if self.group_for_reduce:
