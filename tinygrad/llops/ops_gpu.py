@@ -262,6 +262,7 @@ class CLASTKernel(ASTKernel):
     #print(self.first_reduce, self.last_reduce)
     
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
+    self.upcast_in_mid_reduce = False
     if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4: # and not self.group_for_reduce:
       lb_valids = [True] * len(self.shapes[0])
       for i in range(len(self.bufs)):
@@ -271,15 +272,19 @@ class CLASTKernel(ASTKernel):
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
-      if DEBUG >= 3: print(f"late merging axis {lb_valid}")
+      if DEBUG >= 3: print(f"late merging axis {lb_valid} from {lb_valids}")
 
       # no change, we added a dimension
       self.reshape_and_permute(
         lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
         [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
 
-      # drop the last dimension
-      self.upcast()
+      if self.group_for_reduce and self.first_reduce <= 2: # and False:
+        self.upcast_in_mid_reduce = True
+        self.group_for_reduce.append(4)
+      else:
+        # drop the last dimension
+        self.upcast()
 
     # simplify (sets first_reduce)
     self.simplify_ones()
@@ -318,16 +323,15 @@ class CLASTKernel(ASTKernel):
     # group for reduce
     self.output_shape = self.shapes[0][:min(self.first_reduce, self.last_reduce)]
     if len(self.group_for_reduce):
-      for gfr in self.group_for_reduce:
-        # no permute
-        #self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [min(x[self.first_reduce], gfr), max(1, x[self.first_reduce]//gfr)] + list(x[self.first_reduce+1:]), None)
-
-        # with permute for memory coalesing
+      # with permute for memory coalesing
+      if len(self.group_for_reduce) == 2:
+        permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.shape_len, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len))
+      else:
         permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len+1))
-        self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [max(1, x[self.first_reduce]//gfr), min(x[self.first_reduce], gfr)] + list(x[self.first_reduce+1:]), permute_axis)
+      self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [max(1, x[self.first_reduce]//self.group_for_reduce[0]), min(x[self.first_reduce], self.group_for_reduce[0])] + list(x[self.first_reduce+1:]), permute_axis)
 
-        self.first_reduce += 1
-        self.last_reduce += 1
+      self.first_reduce += len(self.group_for_reduce)
+      self.last_reduce += len(self.group_for_reduce)
       self.output_shape += self.group_for_reduce
 
     if DEBUG >= 3:
@@ -360,31 +364,25 @@ class CLASTKernel(ASTKernel):
     # middle
     if self.group_for_reduce:
       self.kernel.append(f"__local {accumulators[0].decltype()} temp[{prod(self.group_for_reduce)}];  // second stage\n")
-      self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
-      accumulators = [Token("output", self.buftokens[0].typ)]
-      self.kernel.append("if (mid_idx == 0) {\n")
-      self.kernel.append(f"{accumulators[0].decltype()} {accumulators[0].tok} = 0.0;\n")
-      self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', accumulators[0].tok).replace('B', 'temp[mid]')}; }}\n")
 
-      #self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = " + (accumulators[0].tok if accumulators[0].typ == Types.FLOAT else f"clreduce({accumulators[0].tok})") + "; barrier(CLK_LOCAL_MEM_FENCE);\n")
-      #if self.buftokens[0].typ == Types.FLOAT:
-      """
-      self.reshape_and_permute(None, [0,1] + list(range(3, self.shape_len)) + [2])
-      self.upcast()
-      self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
-      local_types.append("__local float* temp")
-      local_size = [4, self.group_for_reduce, 1]
+      if self.upcast_in_mid_reduce:
+        # it should be the last dimension
+        self.kernel.append(f"int mid_idx = idx{self.first_reduce-2}*4 + idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+        self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce-1] + [self.first_reduce-1])
+        self.upcast()
+      else:
+        self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+
       self.kernel.append("if (mid_idx == 0) {\n")
-      accumulators = [Token("output", Types.FLOAT4)]
-      self.kernel.append(f"float4 {accumulators[0].tok} = 0.0;\n")
-      self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")
-      """
-      #else:
-      #  self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {accumulators[0].tok} = {accumulators[0].tok} + vload4(0, &temp[mid*4]); }}\n")
+      accumulators = [Token("output", self.buftokens[0].typ)]
+      self.kernel.append(f"{accumulators[0].decltype()} {accumulators[0].tok} = 0.0;\n")
+      if self.upcast_in_mid_reduce:
+        self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', accumulators[0].tok).replace('B', 'vload4(0, &temp[mid*4])')}; }}\n")
+      else:
+        self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', accumulators[0].tok).replace('B', 'temp[mid]')}; }}\n")
     
     # late ast
-    out = self.ast_parse(self.ast, accumulators)
-    self.store(0, out)
+    self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
     self.kernel.append("}")
 
@@ -398,10 +396,10 @@ class CLASTKernel(ASTKernel):
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
 
-    if DEBUG >= 3: print(f"deleting buffers {self.bufs_to_delete}")
+    if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
     def runner(*bufs):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
-      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None, *clbufs)
+      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None, *clbufs)
     return runner
   def print(self):
     super().print()
