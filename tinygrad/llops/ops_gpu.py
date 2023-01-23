@@ -248,8 +248,9 @@ class CLASTKernel(ASTKernel):
     # are we grouping?
     #self.group_for_reduce = 16 if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce == 2 and self.last_reduce == 3 and isinstance(self.bufs[0]._buf, CLImage) and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)]) <= 2048 else None
     self.group_for_reduce = []
-    if False and self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.last_reduce and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)] + self.group_for_reduce) <= 2048:
-      self.group_for_reduce.append(16)
+    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.last_reduce and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)] + self.group_for_reduce) <= 2048:
+      if all([x[self.first_reduce] % 16 == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
+        self.group_for_reduce.append(16)
       #self.group_for_reduce.append(256)
       #self.group_for_reduce.append(32)
     #if self.buftokens[0].typ != Types.FLOAT4 and prod(self.shapes[0][:min(self.first_reduce, self.last_reduce)] + self.group_for_reduce) <= 2048:
@@ -356,29 +357,28 @@ class CLASTKernel(ASTKernel):
     
     # middle
     if self.group_for_reduce:
-      if accumulators[0].typ == Types.FLOAT and False:
-        self.reshape_and_permute(None, [0,1] + list(range(3, self.shape_len)) + [2])
-        self.upcast()
-        self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
-        local_types.append("__local float* temp")
-        local_size = [4, self.group_for_reduce, 1]
-        self.kernel.append("if (mid_idx == 0) {\n")
-        accumulators = [Token("output", Types.FLOAT4)]
-        self.kernel.append(f"float4 {accumulators[0].tok} = 0.0;\n")
-        self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")
-      else:
-        self.kernel.append(f"__local float temp[{prod(self.group_for_reduce)}];")
-        #self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = clsum({accumulators[0].tok}); barrier(CLK_LOCAL_MEM_FENCE);\n")
-        self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = clsum({accumulators[0].tok}); barrier(CLK_LOCAL_MEM_FENCE);\n")
+      self.kernel.append(f"__local {accumulators[0].decltype()} temp[{prod(self.group_for_reduce)}];  // second stage\n")
+      self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      accumulators = [Token("output", self.buftokens[0].typ)]
+      self.kernel.append("if (mid_idx == 0) {\n")
+      self.kernel.append(f"{accumulators[0].decltype()} {accumulators[0].tok} = 0.0;\n")
+      self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {accumulators[0].tok} = {accumulators[0].tok} + temp[mid]; }}\n")
 
-        accumulators = [Token("output", Types.FLOAT4)]
-        #accumulators = [Token("output", Types.FLOAT)]
-
-        self.kernel.append("if (mid_idx == 0) {\n")
-        self.kernel.append(f"{accumulators[0].decltype()} {accumulators[0].tok} = 0.0;\n")
-        self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {accumulators[0].tok} = {accumulators[0].tok}, vload4(0, &temp[mid*4]); }}\n")
-        #self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {accumulators[0].tok} = clreduce({accumulators[0].tok}, vload4(0, &temp[mid*4])); }}\n")
-        #self.kernel.append(f"{accumulators[0].tok} += temp[0];\n")
+      #self.kernel.append(f"int mid_idx = idx{self.first_reduce-1}; temp[mid_idx] = " + (accumulators[0].tok if accumulators[0].typ == Types.FLOAT else f"clreduce({accumulators[0].tok})") + "; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      #if self.buftokens[0].typ == Types.FLOAT:
+      """
+      self.reshape_and_permute(None, [0,1] + list(range(3, self.shape_len)) + [2])
+      self.upcast()
+      self.kernel.append(f"int mid_idx = idx1*4+idx2; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      local_types.append("__local float* temp")
+      local_size = [4, self.group_for_reduce, 1]
+      self.kernel.append("if (mid_idx == 0) {\n")
+      accumulators = [Token("output", Types.FLOAT4)]
+      self.kernel.append(f"float4 {accumulators[0].tok} = 0.0;\n")
+      self.kernel.append(f"for (int mid = 0; mid < {self.group_for_reduce}; mid++) {{ {accumulators[0].tok} += vload4(0, &temp[mid*4]); }}\n")
+      """
+      #else:
+      #  self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {accumulators[0].tok} = {accumulators[0].tok} + vload4(0, &temp[mid*4]); }}\n")
     
     # late ast
     out = self.ast_parse(self.ast, accumulators)
