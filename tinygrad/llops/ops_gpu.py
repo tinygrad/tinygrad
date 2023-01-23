@@ -191,7 +191,7 @@ class CLASTKernel(ASTKernel):
       tokens.append(self.loaded_keys[(buf_index,o)])
     return tokens
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:Optional[List[Token]]=None, do_reduce=False) -> List[Token]:
+  def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:List[Token], do_reduce=False) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
@@ -201,8 +201,8 @@ class CLASTKernel(ASTKernel):
       if isinstance(x.op, ReduceOps) and values[0][0].typ == Types.FLOAT4 and len(values[0])*4 == len(values[1]): values[0] = split_float4(values[0])
       if values[0][0].typ != values[1][0].typ:
         if isinstance(x.op, ReduceOps):
-          if self.reduceop.op == ReduceOps.SUM: self.prekernel.add("float clreduce(float4 x) { return x.x + x.y + x.z + x.w; }\n")
-          elif self.reduceop.op == ReduceOps.MAX: self.prekernel.add("float clreduce(float4 x) { return max(max(x.x, x.y), max(x.z, x.w)); }\n")
+          if x.op == ReduceOps.SUM: self.prekernel.add("float clreduce(float4 x) { return x.x + x.y + x.z + x.w; }\n")
+          elif x.op == ReduceOps.MAX: self.prekernel.add("float clreduce(float4 x) { return max(max(x.x, x.y), max(x.z, x.w)); }\n")
           values[1] = [Token(f"clreduce({x.tok})", Types.FLOAT) for x in values[1]]
         elif values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
         elif values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
