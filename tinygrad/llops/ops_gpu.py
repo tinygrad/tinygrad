@@ -215,7 +215,7 @@ class CLASTKernel(ASTKernel):
   def codegen(self):
     # TODO: fetch from quick cache before processing
     self.process()
-    if DEBUG >= 2:
+    if DEBUG >= 3:
       print("old:", self.shapes)
       print("old:", self.strides)
 
@@ -232,7 +232,7 @@ class CLASTKernel(ASTKernel):
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
       eb_valid = eb_valids.index(True)
-      if DEBUG >= 2: print(f"early merging axis {eb_valid} from {eb_valids}")
+      if DEBUG >= 3: print(f"early merging axis {eb_valid} from {eb_valids}")
 
       # no change, we added a dimension
       self.reshape_and_permute(
@@ -271,7 +271,7 @@ class CLASTKernel(ASTKernel):
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
-      if DEBUG >= 2: print(f"late merging axis {lb_valid}")
+      if DEBUG >= 3: print(f"late merging axis {lb_valid}")
 
       # no change, we added a dimension
       self.reshape_and_permute(
@@ -293,7 +293,7 @@ class CLASTKernel(ASTKernel):
 
       if len(xb_choices):
         xb_choice = sorted(xb_choices)[0][2]
-        if DEBUG >= 2: print(f"float4 merging axis {xb_choice} : {xb_choices}")
+        if DEBUG >= 3: print(f"float4 merging axis {xb_choice} : {xb_choices}")
 
         # this leaves the last axis in place
         self.reshape_and_permute(
@@ -310,7 +310,7 @@ class CLASTKernel(ASTKernel):
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%x[0] == 0 and x[0]//base_shape[0] != 0 for x in self.shapes]):
-        if DEBUG >= 2: print("split opencl", base_shape, self.shapes[0])
+        if DEBUG >= 3: print("split opencl", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.last_reduce += 1
         self.simplify_ones()
@@ -330,7 +330,7 @@ class CLASTKernel(ASTKernel):
         self.last_reduce += 1
       self.output_shape += self.group_for_reduce
 
-    if DEBUG >= 2:
+    if DEBUG >= 3:
       print(f"first_reduce: {self.first_reduce} last_reduce: {self.last_reduce} shape_len: {len(self.bufs[0].shape)}")
       print("output shape", self.output_shape)
       for i in range(len(self.bufs)):
