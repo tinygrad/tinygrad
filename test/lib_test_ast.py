@@ -7,11 +7,13 @@ from tinygrad.ops import DeviceBuffer
 from tinygrad.lazy import realize_buffers
 
 in_test = False
+test_cnt = 0
 def test_ast(k:ASTKernel):
-  global in_test
+  global in_test, test_cnt
   if in_test: return
   in_test = True
-  print("testing AST")
+  print("testing AST", test_cnt)
+  test_cnt += 1
   cpubufs : Dict[DeviceBuffer, CPUBuffer] = {x:CPUBuffer.fromCPU(x.toCPU()) for x in k.bufs}
   real_out = cpubufs[k.bufs[0]]
   test_out = CPUBuffer.exec_ast(realize_buffers(cpubufs, k.ast))
