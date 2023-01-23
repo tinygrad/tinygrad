@@ -84,6 +84,11 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.sum()
     helper_test_generic_square('sum', 4096, f, f)
 
+  def test_partial_sum(self):
+    R = 256
+    def f(a, b): return a.reshape(int(4096//R), int(4096*R)).sum(axis=1)
+    helper_test_generic_square('partial_sum', 4096, f, f)
+
   def test_array_packing(self):
     N = 2048
     def f(a, b): return a.reshape(N, N // 32, 32).permute(1,0,2).contiguous()
