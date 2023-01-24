@@ -5,7 +5,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 if os.getenv("OPT", None) is None:
   os.environ['OPT'] = '99'
 if os.getenv("GPU", None) is None:
-  os.environ['OPENCL'] = '1'
+  os.environ['GPU'] = '1'
 
 ALLOWED_KERNEL_COUNT = int(os.getenv("ALLOWED_KERNEL_COUNT", 0))
 DEBUGCL = int(os.getenv("DEBUGCL", 0))
