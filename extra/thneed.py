@@ -294,34 +294,44 @@ class Thneed:
     MAX_WORKGROUP = CL.cl_ctx.devices[0].max_work_group_size
     local_cl_cache = []
     for prg, args in self.cl_cache:
+      potential_locals = [tuple(args[1])] if args[1] is not None else []
+      runtimes = []
       args = list(args)
+
+      if args[1] is None and len(args[0]) == 1:
+        for l1 in [args[0][0], 1, 4, 16, MAX_WORKGROUP//4, MAX_WORKGROUP]:
+          potential_locals.append((l1,))
+
       if args[1] is None and len(args[0]) == 2:
-        args[1] = [min(MAX_WORKGROUP, args[0][0]), 1]
-        try:
-          e = prg.clprg(CL().cl_queue, *args)
-        except cl.LogicError:
-          # INVALID_WORK_GROUP_SIZE
-          args[1] = None
+        for l2 in [1, 4, 16, MAX_WORKGROUP//4, MAX_WORKGROUP]:
+          potential_locals.append((min(MAX_WORKGROUP, args[0][0]), l2))
 
       if args[1] is None and len(args[0]) == 3:
-        runtimes = []
         for l2 in [16,args[0][1],MAX_WORKGROUP]:
           for l3 in [4,16,args[0][2],MAX_WORKGROUP]:
             for l1 in [max(1, MAX_WORKGROUP//(l2*l3)), args[0][0], 4, 16, MAX_WORKGROUP]:
               if l1 > args[0][0] or l2 > args[0][1] or l3 > args[0][2]: continue
-              local_args = (l1, l2, l3)
-              if prod(local_args) > MAX_WORKGROUP: continue
-              args[1] = local_args
-              try:
-                e = prg.clprg(CL().cl_queue, *args)
-              except (cl.LogicError, cl.RuntimeError):
-                # INVALID_WORK_GROUP_SIZE
-                continue
-              CL().cl_queue.finish()
-              runtime = e.profile.end - e.profile.start
-              #print(runtime, args[0], args[1])
-              runtimes.append((runtime, local_args))
-        #print(sorted(runtimes)[0:5])
+              potential_locals.append((l1, l2, l3))
+
+      if args[1] is not None and len(args[0]) == 3:
+        for l3 in [4,16,args[0][2],MAX_WORKGROUP]:
+          potential_locals.append((args[1][0], args[1][1], l3))
+
+      for local_args in potential_locals:
+        if prod(local_args) > MAX_WORKGROUP: continue
+        args[1] = local_args
+        # 3 runs just in case
+        for i in range(3):
+          try:
+            e = prg.clprg(CL().cl_queue, *args)
+          except (cl.LogicError, cl.RuntimeError):
+            # INVALID_WORK_GROUP_SIZE
+            continue
+          CL().cl_queue.finish()
+          runtime = e.profile.end - e.profile.start
+          #print(runtime, args[0], args[1])
+          runtimes.append((runtime, local_args))
+
         if len(runtimes) > 0:
           args[1] = sorted(runtimes)[0][1]
         else:
