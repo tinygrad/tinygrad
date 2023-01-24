@@ -41,7 +41,7 @@ def helper_test_speed(f1, *args):
     GlobalCounters.global_mem = 0
     st = time.monotonic()
     ret = f1(*args)
-    if CL is not None and ret.device in ["GPU", "OPENCL"]:
+    if CL is not None and ret.device in ["GPU"]:
       CL.cl_queue.finish()
     if torch_device != "cpu":
       # TODO: better way to sync?

@@ -633,7 +633,6 @@ if __name__ == "__main__":
   parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
   args = parser.parse_args()
 
-  # WTF!! no_grad breaks it (only with OPENCL, now fixed)
   Tensor.no_grad = True
   model = StableDiffusion()
 

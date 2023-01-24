@@ -88,7 +88,7 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape = self.shape
-  if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE and (self.device != "OPENCL" or self.shape[-1] == 4):
+  if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if psrcs[0][1].optype == ProcessingOps:
       real_srcs[psrcs[0][0]] = psrcs[0][1].op
       for x in psrcs[0][1].op.src:
@@ -250,9 +250,67 @@ class LazyBuffer:
     x = self
 
     if IMAGE >= 1:
-      from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
-      Cold = C
-      x,w,C = preprocessing_op(x, w, Cold, False)
+      w = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W))
+
+      if C.bs > 1 and C.py > 0:
+        # explicitly add y-padding for batched inputs
+        # N C H W
+        xs = [(0, 0) for _ in x.shape]
+        xs[2] = (C.py, C.py)
+        x = x.movement_op(MovementOps.PAD, xs)
+        C = C._replace(iy=C.iy + C.py*2, py=0)
+
+      # hack for non multiples of 4 on C.cin
+      if C.cin % 4 != 0 and not (C.cin == 1 and C.groups%4 == 0):
+        to_add = 4 - (C.cin % 4)
+        ws = [(0, 0) for _ in w.shape]
+        ws[2] = (0, to_add)
+        w = w.movement_op(MovementOps.PAD, ws)
+
+        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix))
+        xs = [(0, 0) for _ in x.shape]
+        xs[2] = (0, to_add)
+        x = x.movement_op(MovementOps.PAD, xs)
+        C = C._replace(cin = C.cin + to_add)
+        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups*C.cin, C.iy, C.ix))
+
+      # hack for non multiples of 4 on C.rcout
+      if C.rcout % 4 != 0 and not (C.rcout == 1 and C.groups%4 == 0):
+        added_output_channels = 4 - (C.rcout % 4)
+        ws = [(0, 0) for _ in w.shape]
+        ws[1] = (0, added_output_channels)
+        w = w.movement_op(MovementOps.PAD, ws)
+        C = C._replace(rcout = C.rcout + added_output_channels, cout = C.groups * (C.rcout + added_output_channels))
+      else:
+        added_output_channels = 0
+
+      # packed
+      assert (C.groups*C.cin) % 4 == 0
+      x = x.movement_op(MovementOps.PERMUTE, (0,2,3,1))
+      x = x.movement_op(MovementOps.RESHAPE, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
+
+      assert C.cout % 4 == 0
+      if C.cin == 1:
+        # depthwise
+        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.H*C.W))
+        w = w.movement_op(MovementOps.PERMUTE, (0,2,1))
+      else:
+        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.cin//4,4,C.H,C.W))
+        w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
+        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
+
+      C = C._replace(out_shape = (C.bs*C.oy, C.ox*C.cout//4, 4))
+
+      # contiguous before image, always
+      x = x.contiguous()
+      w = w.contiguous()
+
+      # early realize on the weights
+      bw = w
+      while getattr(bw, 'op', None) and len(bw.op.src) == 1:
+        bw = bw.op.src[0]
+      if bw.realized:
+        w.realize()
 
       # set up the conv
       # (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4)
@@ -284,8 +342,19 @@ class LazyBuffer:
 
       # now do the conv in this space
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.cout//4, 4, 1, 1, 1, 1))
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4)).contiguous() #True)
-      return postprocessing_op(ret, C, Cold)
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4)).contiguous()
+
+      # undo hack for non multiples of 4 on C.rcout
+      if added_output_channels != 0:
+        ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.groups, C.rcout))
+        xs = [(0, s) for s in ret.shape]
+        xs[4] = (0, ret.shape[4]-added_output_channels)
+        ret = ret.movement_op(MovementOps.SHRINK, xs)
+        C = C._replace(rcout = C.rcout - added_output_channels, cout = C.groups * (C.rcout - added_output_channels))
+
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout))
+      ret = ret.movement_op(MovementOps.PERMUTE, (0,3,1,2))
+      return ret
 
     # TODO: fixup C?
     if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False):
@@ -311,12 +380,6 @@ class LazyBuffer:
            .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
       return x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
                                           .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))
-    elif x.device == "OPENCL":
-      # TODO: these can be properties on the device buffer
-      from accel.opencl.preprocessing import preprocessing_op, postprocessing_op  # type: ignore
-      x,w,Cn = preprocessing_op(x, w, C)
-      ret = LazyBuffer(x.device, Cn.out_shape, ProcessingOps, LazyOp(op, (x, w), Cn))
-      return postprocessing_op(ret, Cn, C)
     else:
       return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 

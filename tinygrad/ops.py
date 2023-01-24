@@ -69,7 +69,7 @@ class GenericShape(GenericExecAST):
 def get_lazyop_info(ast:LazyOp): return GenericShape.exec_ast(ast, lambda x: GenericShape(x.shape))
 
 # assumes you are using ShapeTracker
-# used in GPUBuffer, OpenCLBuffer, and LLVMBuffer
+# used in GPUBuffer and LLVMBuffer
 class ExplicitExecAST(DeviceBuffer):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
