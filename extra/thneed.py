@@ -314,8 +314,9 @@ class Thneed:
               potential_locals.append((l1, l2, l3))
 
       if args[1] is not None and len(args[0]) == 3:
-        for l3 in [4,16,args[0][2],MAX_WORKGROUP]:
-          potential_locals.append((args[1][0], args[1][1], l3))
+        for l2 in [args[1][1], args[0][1]]:  # might be required, whole thing is always safe
+          for l3 in [4,16,args[0][2],MAX_WORKGROUP,args[1][2]]:
+            potential_locals.append((args[1][0], l2, l3))
 
       for local_args in potential_locals:
         if prod(local_args) > MAX_WORKGROUP: continue
