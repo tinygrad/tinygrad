@@ -10,7 +10,7 @@ from tinygrad.graph import log_op
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
-OPT = int(os.getenv("OPT", "1"))
+OPT = int(os.getenv("OPT", "2"))
 NOCONV = int(os.getenv("NOCONV", "0"))
 IMAGE = int(os.getenv("IMAGE", "0"))
 
