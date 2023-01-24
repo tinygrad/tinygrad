@@ -12,7 +12,7 @@ from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
-NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "1"))  # this is needed as a switch for the tests to pass on QCOM
+NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a switch for the tests to pass
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
