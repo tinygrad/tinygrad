@@ -12,7 +12,7 @@ from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
-NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", 0))  # this is needed as a switch for the tests to pass
+NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "1"))  # this is needed as a switch for the tests to pass on QCOM
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
@@ -50,22 +50,18 @@ class CL:
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
-    if CL.cl_queue is not None:  # already initted
-      return
+    if CL.cl_queue is not None: return   # already initted
     devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
     CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
-    if len(devices) > 1 or DEBUG >= 1:
-      print(f"using {CL.cl_ctx.devices}")
+    if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
-    if CL.CACHE is not None:
-      assert False, f"can't copy {a} -> {b} while caching"
-    if DEBUG >= 1:
-      print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
+    if CL.CACHE is not None: assert False, f"can't copy {a} -> {b} while caching"
+    if DEBUG >= 1: print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
 @functools.lru_cache(maxsize=None)
@@ -85,14 +81,10 @@ class CLProgram:
     CLProgram.kernel_cnt[name] += 1
   def __call__(self, *args):
     CL.kernel_count += 1
-    if CL.CACHE is not None:
-      CL.CACHE.append((self, args))
-    else:
-      e = self.clprg(CL().cl_queue, *args)
-    if DEBUG >= 4:
-      print(self.prg)
-    if DEBUG >= 2:
-      CL.cl_queue.finish()
+    if CL.CACHE is not None: CL.CACHE.append((self, args))
+    else: e = self.clprg(CL().cl_queue, *args)
+    if DEBUG >= 4: print(self.prg)
+    if DEBUG >= 2: CL.cl_queue.finish()
     if DEBUG >= 1:
       CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else (e.profile.end - e.profile.start)
       CL.ops_sum += self.op_estimate
@@ -121,9 +113,6 @@ class CLASTKernel(ASTKernel):
     ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)"
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
-
-  def __init__(self, ast:LazyOp):
-    super().__init__(ast)
 
   # TODO: move to shapetracker
   def compute_buf_index_symbolic(self, st, buf_index, offset=0):
@@ -388,6 +377,7 @@ class CLASTKernel(ASTKernel):
       clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
       return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None, *clbufs)
     return runner
+
   def print(self):
     super().print()
     for i in range(len(self.bufs)):
