@@ -13,6 +13,8 @@ class TorchBuffer(torch.Tensor, GenericExecAST):
 
   unary_op, binary_op, reduce_op, movement_op = CPUBuffer.unary_op, CPUBuffer.binary_op, CPUBuffer.reduce_op, CPUBuffer.movement_op
 
+  SUPPORTS_SIMPLE_PADDING = True
   def processing_op(x,op,w,C):
     assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    return torch.conv2d(x, w, stride=(C.sy, C.sx), groups=C.groups, dilation=(C.dy, C.dx))
+    assert C.px == C.px_ and C.py == C.py_, "asymmetric padding in conv is not supported"
+    return torch.conv2d(x, w, stride=(C.sy, C.sx), groups=C.groups, dilation=(C.dy, C.dx), padding=(C.py, C.px))

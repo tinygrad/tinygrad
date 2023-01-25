@@ -250,37 +250,26 @@ class LazyBuffer:
     x = self
 
     if IMAGE >= 1:
+      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix))
       w = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W))
-
-      if C.bs > 1 and C.py > 0:
-        # explicitly add y-padding for batched inputs
-        # N C H W
-        xs = [(0, 0) for _ in x.shape]
-        xs[2] = (C.py, C.py)
-        x = x.movement_op(MovementOps.PAD, xs)
-        C = C._replace(iy=C.iy + C.py*2, py=0)
+      added_output_channels = 0
 
       # hack for non multiples of 4 on C.cin
       if C.cin % 4 != 0 and not (C.cin == 1 and C.groups%4 == 0):
         to_add = 4 - (C.cin % 4)
         w = w.movement_op(MovementOps.PAD, [(0, to_add) if i == 2 else (0, 0) for i in range(len(w.shape))])
-
-        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix))
         x = x.movement_op(MovementOps.PAD, [(0, to_add) if i == 2 else (0, 0) for i in range(len(x.shape))])
         C = C._replace(cin = C.cin + to_add)
-        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups*C.cin, C.iy, C.ix))
 
       # hack for non multiples of 4 on C.rcout
       if C.rcout % 4 != 0 and not (C.rcout == 1 and C.groups%4 == 0):
         added_output_channels = 4 - (C.rcout % 4)
         w = w.movement_op(MovementOps.PAD, [(0, added_output_channels) if i == 1 else (0, 0) for i in range(len(w.shape))])
         C = C._replace(rcout = C.rcout + added_output_channels, cout = C.groups * (C.rcout + added_output_channels))
-      else:
-        added_output_channels = 0
 
       # packed
       assert (C.groups*C.cin) % 4 == 0
-      x = x.movement_op(MovementOps.PERMUTE, (0,2,3,1))
+      x = x.movement_op(MovementOps.PERMUTE, (0,3,4,1,2))
       x = x.movement_op(MovementOps.RESHAPE, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
 
       assert C.cout % 4 == 0
@@ -348,9 +337,10 @@ class LazyBuffer:
       ret = ret.movement_op(MovementOps.PERMUTE, (0,3,1,2))
       return ret
 
-    # TODO: fixup C?
-    if NOCONV or not getattr(x.dbuffer, "SUPPORTS_PADDING", False):
+    # add padding if the backend can't handle it
+    if NOCONV or (not getattr(x.dbuffer, "SUPPORTS_PADDING", False) and not (getattr(x.dbuffer, "SUPPORTS_SIMPLE_PADDING", False) and C.px == C.px_ and C.py == C.py_ and C.px >= 0 and C.py >= 0)):
       x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
+      C = C._replace(px=0, px_=0, py=0, py_=0)
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False):
       # universal conv, just mul and reduce
