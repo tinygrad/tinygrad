@@ -75,7 +75,7 @@ class CLProgram:
     try:
       self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
     except cl.RuntimeError as e:
-      print("FAILED TO BUILD", self.prg)
+      if DEBUG >= 3: print("FAILED TO BUILD", self.prg)
       raise e
     if self.argdtypes is not None:
       self.clprg.set_scalar_arg_dtypes(self.argdtypes)
