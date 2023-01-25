@@ -80,6 +80,22 @@ class TestSpeed(unittest.TestCase):
     global prefix
     prefix = " " if prefix is None else ""
     return super().setUp()
+  
+  def test_sub(self):
+    def f(a, b): return a-b
+    helper_test_generic_square('sub', 4096, f, f)
+
+  def test_constant_sub(self):
+    def f(a, b): return 1.0-a
+    helper_test_generic_square('sub', 4096, f, f)
+
+  def test_constant_zero_sub(self):
+    def f(a, b): return 0.0-a
+    helper_test_generic_square('sub', 4096, f, f)
+
+  def test_pow(self):
+    def f(a, b): return a.pow(b)
+    helper_test_generic_square('pow', 2048, f, f)
 
   def test_sum(self):
     def f(a, b): return a.sum()
