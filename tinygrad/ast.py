@@ -56,6 +56,10 @@ class ASTKernel:
     assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
 
+    # process
+    # TODO: fetch from quick cache before processing
+    self.process()
+
   def print(self):
     buf_count = -1
     op_count = -1

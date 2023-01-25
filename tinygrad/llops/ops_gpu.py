@@ -206,9 +206,9 @@ class CLASTKernel(ASTKernel):
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
 
+  # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
+  # group_for_reduce will have to be better first
   def codegen(self):
-    # TODO: fetch from quick cache before processing
-    self.process()
     if DEBUG >= 3:
       print("old:", self.shapes)
       print("old:", self.strides)
@@ -338,6 +338,7 @@ class CLASTKernel(ASTKernel):
 
     if len(self.output_shape) > 3:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
+      # TODO: these compactions should be searchable
       final_dimension = len(self.output_shape)-3
       for i in range(len(self.output_shape)-4, -1, -1):
         self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
