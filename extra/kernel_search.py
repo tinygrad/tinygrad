@@ -1,44 +1,62 @@
 #!/usr/bin/env python
-import random
+import random, traceback
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CL
 from test.lib_test_ast import test_ast
 
-def search(ast):
-
-  # get baseline
-  k = CLASTKernel(ast)
-  order = list(range(0, k.shape_len))
-  CL.time_sum = 0
-  k.codegen()(*k.bufs)
-  best_time = CL.time_sum
-
-  for i in range(200):
-    k = CLASTKernel(ast)
-
+def get_pair(k):
+  while 1:
     a1 = random.randint(0, k.shape_len-1)
     a2 = random.randint(0, k.shape_len-1)
     if a1 == a2: continue
+    if a1 < k.first_reduce and a2 >= k.first_reduce: continue
+    if a1 >= k.first_reduce and a2 < k.first_reduce: continue
+    return a1, a2
 
+def search(ast):
+  # get baseline
+  k = CLASTKernel(ast)
+  CL.time_sum = 0
+  k.codegen()(*k.bufs)
+
+  order = list(range(0, k.shape_len))
+  best_time = CL.time_sum
+  def test():
+    nonlocal order, best_time
+    k = CLASTKernel(ast)
+
+    a1, a2 = get_pair(k)
     new_order = order[:]
     new_order[a1], new_order[a2] = new_order[a2], new_order[a1] 
     k.reshape_and_permute(None, new_order)
 
-    # TODO: support upcasting, splitting, and local grouping
-    CL.time_sum = 0
-    try:
-      k.codegen()(*k.bufs)
-    except Exception:
-      # reject
-      continue
+    """
+    up_axis = random.randint(0, k.shape_len-1)
+    # no change, we added a dimension
+    k.reshape_and_permute(
+      lambda x: list(x[0:up_axis]) + ([x[up_axis]//4, 4] if x[up_axis] > 1 else [1,1]) + list(x[up_axis+1:]),
+      [i for i in range(k.shape_len+1) if i != up_axis+1] + [up_axis+1])
+    # drop the last dimension
+    k.upcast()
+    """
 
+    # TODO: support upcasting, splitting, and local grouping for reduce
+    CL.time_sum = 0
+    k.codegen()(*k.bufs)
     if CL.time_sum < best_time:
-      print(f"accepting {order} -> {new_order}")
+      print(f"accepting {order} -> {new_order} with time {best_time} -> {CL.time_sum}")
       best_time = CL.time_sum
       order = new_order
 
     #print(CL.time_sum)
+
+  for i in range(100):
+    try:
+      test()
+    except Exception:
+      #traceback.print_exc()
+      continue
 
   # run best
   print(f"best order {order}")
