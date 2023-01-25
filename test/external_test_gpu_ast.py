@@ -100,5 +100,14 @@ class TestAST(unittest.TestCase):
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (1, 1, 1, 1, 4956))
     compile_and_test_ast(ast)
 
+  def test_enet_reduce_bs32(self):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(3, 1, 32, 3, 3, 32, 112, 112), views=[View((3, 32, 225, 225), (50176, 150528, 224, 1), 0), ZeroView((3, 32, 224, 224), ((0, 3), (0, 32), (0, 225), (0, 225))), View((3, 1, 32, 3, 3, 32, 112, 112), (1620000, 1620000, 0, 225, 1, 50625, 450, 2), 0)]), hostbuf=GPUBuffer(shape=(32, 3, 224, 224), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(3, 1, 32, 3, 3, 32, 112, 112), views=[View((3, 1, 32, 3, 3, 32, 112, 112), (0, 12845056, 401408, 0, 0, 12544, 112, 1), 0)]), hostbuf=GPUBuffer(shape=(1, 1, 32, 1, 1, 32, 112, 112), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (3, 1, 32, 3, 3, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (3, 32, 3, 3))
+    compile_and_test_ast(ast)
+
+
 if __name__ == '__main__':
   unittest.main()

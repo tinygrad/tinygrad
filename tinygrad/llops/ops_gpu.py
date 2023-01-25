@@ -17,7 +17,7 @@ NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a swit
 
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
-PRINT_AST = int(os.getenv("PRINT_AST", "0"))
+PRINT_AST = os.getenv("PRINT_AST", "0")
 TEST_AST = int(os.getenv("TEST_AST", "0"))
 
 class CLBuffer:
@@ -425,7 +425,7 @@ class GPUBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp):
     k = CLASTKernel(ast)
     k.codegen()(*k.bufs)
-    if PRINT_AST:
+    if PRINT_AST == "1" or PRINT_AST == k.fxn.name:
       print(k.fxn.name)
       k.print()
     if TEST_AST:
