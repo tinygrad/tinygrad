@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools
+import os, functools, time, platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from collections import defaultdict
@@ -11,6 +11,7 @@ from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
 
+OSX = platform.system() == "Darwin"
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a switch for the tests to pass
 
@@ -81,15 +82,20 @@ class CLProgram:
     CLProgram.kernel_cnt[name] += 1
   def __call__(self, *args):
     CL.kernel_count += 1
+    if OSX and DEBUG >= 2: st = time.monotonic_ns()
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
+    if DEBUG >= 2:
+      CL.cl_queue.finish()
+      # NOTE: Profiling is (sadly) broken in OS X, so we take the real kernel time
+      # BOUNTY: will paypal $50 to anyone who fixes this
+      et = (time.monotonic_ns() - st) if OSX else (e.profile.end - e.profile.start)
     if DEBUG >= 4: print(self.prg)
-    if DEBUG >= 2: CL.cl_queue.finish()
     if DEBUG >= 1:
-      CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else (e.profile.end - e.profile.start)
+      CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else et
       CL.ops_sum += self.op_estimate
       print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
-            (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {(e.profile.end - e.profile.start)/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/(e.profile.end - e.profile.start):8.2f} GFLOPS)"))
+            (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
     GlobalCounters.global_ops += self.op_estimate
     GlobalCounters.global_mem += sum([x.size//4 for x in args[2:] if isinstance(x, cl.Buffer)])
 
