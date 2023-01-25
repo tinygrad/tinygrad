@@ -2,9 +2,10 @@
 import os, time, io, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-os.environ['OPT'] = '99'
+if os.getenv("OPT", None) is None:
+  os.environ['OPT'] = '99'
 if os.getenv("GPU", None) is None:
-  os.environ['OPENCL'] = '1'
+  os.environ['GPU'] = '1'
 
 ALLOWED_KERNEL_COUNT = int(os.getenv("ALLOWED_KERNEL_COUNT", 0))
 DEBUGCL = int(os.getenv("DEBUGCL", 0))
@@ -13,6 +14,7 @@ import onnx
 import numpy as np
 
 import tinygrad.graph as graph
+from tinygrad.ops import GlobalCounters
 
 from tinygrad.llops.ops_gpu import CL
 from extra.utils import fetch
@@ -70,7 +72,7 @@ def compile(dat, output_fn):
   # initial run(s) to load weights
   for _ in range(2):
     st = time.monotonic()
-    tinygrad_out = run_onnx(inputs)['outputs']
+    tinygrad_out = next(iter(run_onnx(inputs).values()))
     mt = time.monotonic()
     tinygrad_out.realize()
     mt2 = time.monotonic()
@@ -87,9 +89,10 @@ def compile(dat, output_fn):
   # real run
   inputs, np_inputs = get_random_input_tensors(input_shapes)
   print("***** REAL RUN *****")
-  tinygrad_out = run_onnx(inputs)['outputs']
+  tinygrad_out = next(iter(run_onnx(inputs).values()))
 
   # note, since CL.CACHE is enabled, it doesn't actually run the kernels
+  start_ops = GlobalCounters.global_ops
   CL.CACHE = []
   if using_graph: graph.GRAPH = True
   CL.kernel_count = -1
@@ -97,17 +100,20 @@ def compile(dat, output_fn):
   graph.GRAPH = False
   print("kernel count:", len(CL.CACHE))
   assert len(CL.CACHE) <= ALLOWED_KERNEL_COUNT or ALLOWED_KERNEL_COUNT == 0, "too many kernels!"
+  used_ops = GlobalCounters.global_ops - start_ops
 
   from extra.thneed import Thneed
   t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
   CL.CACHE = None
-  t.optimize_local_workgroup()
+  if int(os.getenv("OPTWG", "0")):
+    t.optimize_local_workgroup()
 
   # save thneed (before run)
   t.save(output_fn)
 
   print(f"buffers to save: {len(t.buffers_to_save)}, outputs: {t.outputs}")
-  t.run()
+  runtime = t.run()
+  print(f"network using {used_ops/1e9:.2f} GOPS with runtime {runtime*1e3:.2f} ms that's {used_ops/runtime*1e-9:.2f} GFLOPS")
 
   # confirm thneed found the right output
   thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)

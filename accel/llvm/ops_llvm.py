@@ -4,8 +4,9 @@ import math
 import time
 from typing import Tuple, Union, Dict, Any, List
 from tinygrad.helpers import prod
-from tinygrad.shapetracker import ShapeTracker, ZeroView
-from tinygrad.ops import LazyOp, ASTKernel
+from tinygrad.shape import ShapeTracker, ZeroView
+from tinygrad.ops import LazyOp
+from tinygrad.ast import ASTKernel
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
@@ -187,16 +188,15 @@ class LLVMBuffer(ExplicitExecAST):
     k = ASTKernel(ast)
 
     # cached kernel
-    key = str(ast)  # TODO: does this uniquely determine the AST? No! The shapetracker can change. Do this better.
-    if key in LLVMBuffer.func_cache:
-      LLVMBuffer.func_cache[key](*[x._buf for x in k.bufs])
+    if k.key in LLVMBuffer.func_cache:
+      LLVMBuffer.func_cache[k.key](*[x._buf for x in k.bufs])
       return k.ret
 
     # cache miss, we have to process the kernel
     k.process()
 
     if DEBUG >= 2:
-      print(ast)
+      print(k.ast)
       print("old:", k.shapes)
       print("old:", k.strides)
     
@@ -343,7 +343,7 @@ class LLVMBuffer(ExplicitExecAST):
         phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
 
     # do the late ast
-    result = ast_parse(loop_exit[store_loop], ast, store_loop, reduce_result=reduce_result)
+    result = ast_parse(loop_exit[store_loop], k.ast, store_loop, reduce_result=reduce_result)
 
     # store result
     builder = loop_exit[store_loop]
@@ -362,5 +362,5 @@ class LLVMBuffer(ExplicitExecAST):
 
     loop_entry[-1].branch(loop_exit[-1]._block)
     loop_exit[0].ret_void()
-    LLVMBuffer.func_cache[key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
+    LLVMBuffer.func_cache[k.key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
     return k.ret

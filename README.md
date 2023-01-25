@@ -44,8 +44,8 @@ y = Tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
-print(x.grad)  # dz/dx
-print(y.grad)  # dz/dy
+print(x.grad.numpy())  # dz/dx
+print(y.grad.numpy())  # dz/dy
 ```
 
 ### Same example in torch
@@ -172,9 +172,9 @@ PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
 ### tinygrad supports Stable Diffusion!
 
-Run `TORCH=1 python3 examples/stable_diffusion.py`
+You might need to download the [weight](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt) of Stable Diffusion and put it into weights/
 
-(or without torch: `OPT=2 OPENCL=1 python3 examples/stable_diffusion.py`)
+Run `GPU=1 python3 examples/stable_diffusion.py`
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg">

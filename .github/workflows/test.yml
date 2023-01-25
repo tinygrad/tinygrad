@@ -148,12 +148,12 @@ jobs:
         python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
-    - name: Test OPENCL ops
-      run: OPT=2 OPENCL=1 python3 test/test_ops.py
+    - name: Test GPU IMAGE ops
+      run: GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model
       run: |
-        ALLOWED_KERNEL_COUNT=206 FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
-        UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
+        ALLOWED_KERNEL_COUNT=200 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        UNSAFE_FLOAT4=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
 
   testmypy:
     name: Mypy Tests
@@ -172,3 +172,17 @@ jobs:
       run: pip install -e '.[testing]'
     - name: Run mypy
       run: mypy tinygrad/
+
+  # disabled, this test is flaky
+  testdocker:
+    name: Docker Test
+    runs-on: ubuntu-latest
+    if: ${{ false }}
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v2
+    - name: Build Docker
+      run: docker build -t tinygrad -f test/Dockerfile .
+    - name: Test Docker
+      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"

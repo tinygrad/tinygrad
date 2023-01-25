@@ -287,7 +287,6 @@ class UNetModel:
     ]
     self.input_blocks = [
       [Conv2d(4, 320, kernel_size=3, padding=1)],
-      # TODO: my head sizes and counts are a guess
       [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
       [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
       [Downsample(320)],
@@ -611,7 +610,6 @@ if __name__ == "__main__":
   parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
   args = parser.parse_args()
 
-  # WTF!! no_grad breaks it (only with OPENCL, now fixed)
   Tensor.no_grad = True
   model = StableDiffusion()
 

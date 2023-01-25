@@ -1,4 +1,5 @@
 import os
+os.environ["NVIDIA_TF32_OVERRIDE"] = "0"
 import unittest
 import torch
 torch.set_num_threads(1)
@@ -9,10 +10,7 @@ from functools import partial
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-try:
-  from termcolor import colored
-except ImportError:
-  colored = lambda x, _: x
+from tinygrad.helpers import colored
 try:
   from tinygrad.llops.ops_gpu import CL
 except ImportError:
@@ -20,19 +18,16 @@ except ImportError:
 
 IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
 
-torch_device = torch.device('mps' if int(os.getenv("MPS", "0")) else 'cpu')
+torch_device = torch.device('mps' if int(os.getenv("MPS", "0")) else ('cuda' if int(os.getenv("CUDA", "0")) else 'cpu'))
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
-  if colored:
-    if x < 0.75:
-      return colored(ret, 'green')
-    elif x > 1.5:
-      return colored(ret, 'red')
-    else:
-      return colored(ret, 'yellow')
+  if x < 0.75:
+    return colored(ret, 'green')
+  elif x > 1.5:
+    return colored(ret, 'red')
   else:
-    return ret
+    return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
 CNT = 8
@@ -46,11 +41,11 @@ def helper_test_speed(f1, *args):
     GlobalCounters.global_mem = 0
     st = time.monotonic()
     ret = f1(*args)
-    if CL is not None and ret.device in ["GPU", "OPENCL"]:
+    if CL is not None and ret.device in ["GPU"]:
       CL.cl_queue.finish()
-    if "mps" in str(ret.device):
+    if torch_device != "cpu":
       # TODO: better way to sync?
-      torch.zeros(1, device='mps').cpu()
+      torch.zeros(1, device=torch_device).cpu()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
     if GlobalCounters.global_ops:
@@ -76,7 +71,7 @@ def helper_test_generic(name, f1, f2):
 
   flops = save_ops*1e-6
   mem = save_mem*4*1e-6
-  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:7.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:7.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower {flops:7.2f} MOPS {mem:7.2f} MB")
+  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower {flops:7.2f} MOPS {mem:7.2f} MB")
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
@@ -90,6 +85,11 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.sum()
     helper_test_generic_square('sum', 4096, f, f)
 
+  def test_partial_sum(self):
+    R = 256
+    def f(a, b): return a.reshape(int(4096//R), int(4096*R)).sum(axis=1)
+    helper_test_generic_square('partial_sum', 4096, f, f)
+
   def test_array_packing(self):
     N = 2048
     def f(a, b): return a.reshape(N, N // 32, 32).permute(1,0,2).contiguous()
@@ -101,6 +101,14 @@ class TestSpeed(unittest.TestCase):
       # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
       def f(a, b): return a.permute(1,0).contiguous()
       helper_test_generic_square('permute', N, f, f)
+    
+  def test_double_permute(self):
+    N = 64
+    torch.manual_seed(0)
+    torch_a = (torch.rand(N, N, N, N) - 0.5).to(torch_device)
+    tiny_a = Tensor(torch_a.cpu().numpy())
+    def f(a): return a.permute(1,0,3,2).contiguous()
+    helper_test_generic(f"double_permute {tiny_a.shape}", partial(f, torch_a), partial(f, tiny_a))
 
   def test_neg(self):
     def f(a, b): return -a
@@ -158,6 +166,20 @@ class TestSpeed(unittest.TestCase):
     def f1(a, b): return a.T@b
     def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled_permute_lr', N, f1, f2)
+
+  def test_openpilot_conv2d(self):
+    bs, in_chans, out_chans = 1,12,32
+    torch.manual_seed(0)
+    torch_dat = torch.rand(bs, 64, 128, 12).to(torch_device)
+    torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1).to(torch_device)
+
+    tiny_dat = Tensor(torch_dat.cpu().numpy())
+    tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
+    tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
+
+    def f1(): return torch_conv(torch_dat.permute(0,3,1,2))
+    def f2(): return tiny_conv(tiny_dat.permute(0,3,1,2)).realize()
+    helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, f2)
 
   def test_conv2d(self):
     torch.manual_seed(0)

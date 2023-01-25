@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod
-from tinygrad.shapetracker import ShapeTracker
+from tinygrad.shape import ShapeTracker
 
 class DumbShapeTracker:
   def __init__(self, shape):
@@ -35,6 +35,14 @@ class DumbShapeTracker:
 
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
+
+class TestZeroViewShapeTracker(unittest.TestCase):
+  def test_pad(self):
+    self.st = ShapeTracker((4, 4))
+    self.st.pad((1, 1), (1, 1))
+    assert self.st.shape == (6,6)
+    print(self.st)
+    print(self.st.expr())
 
 class TestComplexShapeTracker(unittest.TestCase):
   def test_add_1s(self):
@@ -93,6 +101,12 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st.reshape(4, 16, 1, 1)
     self.st.permute(1, 0, 2, 3)
     assert self.st.contiguous
+
+  def test_fancy_factorize(self):
+    self.st = ShapeTracker((32, 3, 3, 1))
+    self.st.strided(*zip((32, 3, 3, 1), (1, 4096, 32, 1)))
+    self.st.reshape(*(8, 4, 3, 3))
+    assert len(self.st.views) == 1
 
   def test_super_complex_2_fail(self):
     self.st = ShapeTracker((4, 4, 4))
