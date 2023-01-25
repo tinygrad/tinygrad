@@ -29,6 +29,7 @@ if __name__ == "__main__":
   Tensor.training = TRAINING
   Tensor.no_grad = not BACKWARD
   for i in trange(CNT):
+    CL.time_sum = 0
     cpy = time.monotonic()
     x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
     y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
