@@ -64,9 +64,9 @@ class ZeroView:
 
   def expr_node(self, valid, idx):
     expr, acc = [valid] if valid is not None else [], 1
-    for os,ns,(x,y) in list(zip(self.old_shape, self.shape, self.arg))[::-1]:
+    for s,ns,(x,y) in list(zip(self.old_shape, self.shape, self.arg))[::-1]:
       base = ((idx//acc) % ns) + x
-      expr += ([base >= 0] if x < 0 else []) + ([base < os] if y > os else [])
+      expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
       acc *= ns
     return Variable.ands(expr)
 
