@@ -1,4 +1,6 @@
+from __future__ import annotations
 import os
+import numpy as np
 from enum import Enum
 from typing import Union, Type, NamedTuple, Tuple, Any, List
 import functools, operator
@@ -32,10 +34,15 @@ def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add
 # a placeholder class to extend by the exec classes
 class DeviceBuffer:
   shape: Any   # should be Tuple[int, ...] but ndarray and torch.tensor have incompatible types
+  @staticmethod
+  def fromCPU(x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")
+  def toCPU(self:DeviceBuffer) -> np.ndarray: raise NotImplementedError("must be implemented")
+  @classmethod
+  def exec_ast(cls, ast:LazyOp): raise NotImplementedError("must be implemented")
 
 # extend this if you don't have an exec_ast function
 # used in CPUBuffer and TorchBuffer
-class GenericExecAST(DeviceBuffer):
+class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   @classmethod
   def exec_ast(cls, ast:LazyOp, preprocess=lambda x: x):
     srcs = [cls.exec_ast(x, preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
@@ -58,7 +65,7 @@ class GenericExecAST(DeviceBuffer):
 class GlobalCounters:
   global_ops, global_mem = 0, 0
 
-class GenericShape(GenericExecAST):
+class GenericShape(GenericExecAST):  # pylint: disable=abstract-method
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops
   def unary_op(self, op:UnaryOps): return GenericShape(self.shape, self.flops + prod(self.shape))
   def binary_op(self, op:BinaryOps, y): return GenericShape(self.shape, self.flops + y.flops + prod(self.shape))
@@ -70,13 +77,10 @@ def get_lazyop_info(ast:LazyOp): return GenericShape.exec_ast(ast, lambda x: Gen
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
-class ExplicitExecAST(DeviceBuffer):
+class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
-
-  @classmethod
-  def exec_ast(cls, ast:LazyOp): raise NotImplementedError("must be implemented")
 
   # universal
   def unary_op(self, op:UnaryOps): return type(self)(self.shape).exec_ast(LazyOp(op=op, src=(self,)))
