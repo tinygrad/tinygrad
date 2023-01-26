@@ -206,15 +206,7 @@ class CLASTKernel(ASTKernel):
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
 
-  # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
-  # group_for_reduce will have to be better first
-  def codegen(self):
-    if DEBUG >= 3:
-      print("old:", self.shapes)
-      print("old:", self.strides)
-
-    self.prekernel = set()
-
+  def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
     if any(isinstance(buf._buf, CLImage) for buf in self.earlybufs):
@@ -239,7 +231,6 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    self.group_for_reduce = []
     if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.shapes[0][:self.first_reduce]) <= 2048:
       for sz in ([256, 16] if prod(self.shapes[0][:self.first_reduce]) <= 32 else [16]):
         if all([x[self.first_reduce] % sz == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
@@ -309,7 +300,17 @@ class CLASTKernel(ASTKernel):
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
+  # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
+  # group_for_reduce will have to be better first
+  def codegen(self):
+    if DEBUG >= 3:
+      print("old:", self.shapes)
+      print("old:", self.strides)
+
+    self.hand_coded_optimizations()
+
     # group for reduce
+    # TODO: clean this up to be in optimizations
     self.output_shape = self.shapes[0][:self.first_reduce]
     if len(self.group_for_reduce):
       # with permute for memory coalesing
@@ -331,6 +332,7 @@ class CLASTKernel(ASTKernel):
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
 
+    self.prekernel : Set[str] = set()
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
 
     # output_shape[-1] is get_global_id(0)
@@ -342,7 +344,7 @@ class CLASTKernel(ASTKernel):
       final_dimension = len(self.output_shape)-3
       for i in range(len(self.output_shape)-4, -1, -1):
         self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
-      self.output_shape = [prod(self.output_shape[0:-2])] + self.output_shape[-2:]
+      self.output_shape = [prod(self.output_shape[0:-2])] + list(self.output_shape[-2:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # early ast

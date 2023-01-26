@@ -45,6 +45,7 @@ def search(ast):
   # get baseline
   k = CLASTKernel(ast)
   CL.time_sum = 0
+  #k.hand_coded_optimizations()
   k.codegen()(*k.bufs)
 
   winning_interventions = []
@@ -57,6 +58,7 @@ def search(ast):
 
     inter = get_random_intervention(k)
     apply_intervention(k, *inter)
+    k.simplify_ones()
 
     # TODO: support upcasting, splitting, and local grouping for reduce
     CL.time_sum = 0
@@ -83,7 +85,7 @@ def search(ast):
   print(f"improved from {baseline/1e6:.2f} ms to {best_time/1e6:.2f} ms, a {baseline/best_time:.2f}x speedup")
 
 if __name__ == "__main__":
-  if int(os.getenv("OP", "0")):
+  if int(os.getenv("OP", "0")) == 1:
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 3, 3, 3, 4), views=[View((1, 130, 258, 1, 12), (393216, 3072, 12, 12, 1), -3084), ZeroView((1, 128, 256, 1, 12), ((0, 1), (-1, 129), (-1, 257), (0, 1), (0, 12))), View((1, 64, 128, 8, 4, 3, 3, 3, 4), (0, 6192, 24, 0, 0, 3096, 12, 4, 1), 0)]), hostbuf=GPUBuffer(shape=(128, 768, 4), force_create=True))
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 3, 3, 3, 4), views=[View((1, 64, 128, 8, 4, 3, 3, 3, 4), (0, 0, 0, 432, 4, 144, 16, 48, 1), 0)]), hostbuf=GPUBuffer(shape=(8, 108, 4), force_create=True))
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
@@ -99,6 +101,30 @@ if __name__ == "__main__":
     op7 = LazyOp(BinaryOps.MUL, (buf3,op6,), None)
     op8 = LazyOp(BinaryOps.SUB, (op3,op7,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op8,), (64, 1024, 4))
+  elif int(os.getenv("OP", "0")) == 2:
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 1, 1, 3, 3), views=[View((1, 66, 130, 32, 1), (262144, 4096, 32, 1, 1), -4128), ZeroView((1, 64, 128, 32, 1), ((0, 1), (-1, 65), (-1, 129), (0, 32), (0, 1))), View((1, 64, 128, 8, 4, 1, 1, 3, 3), (266240, 4160, 32, 4, 1, 12480, 12480, 4160, 32), 0)]), hostbuf=GPUBuffer(shape=(64, 1024, 4), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 1, 1, 3, 3), views=[View((1, 64, 128, 8, 4, 1, 1, 3, 3), (0, 0, 0, 36, 1, 0, 0, 12, 4), 0)]), hostbuf=GPUBuffer(shape=(8, 9, 4), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 64, 128, 8, 4, 1, 1, 1, 1))
+    buf2 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 1, 1, 1, 1), views=[View((1, 64, 128, 8, 4, 1, 1, 1, 1), (0, 0, 0, 4, 1, 1, 1, 1, 1), 0)]), hostbuf=GPUBuffer(shape=(32,), force_create=True))
+    op2 = LazyOp(BinaryOps.ADD, (op1,buf2,), None)
+    op3 = LazyOp(UnaryOps.RELU, (op2,), None)
+    buf3 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 1, 1, 1, 1), views=[View((1, 64, 128, 8, 4, 1, 1, 1, 1), (0, 0, 0, 0, 0, 1, 1, 1, 1), 0)]), hostbuf=GPUBuffer(shape=(1,), backing=np.array([1.], dtype=np.float32)))
+    buf4 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 1, 1, 1, 1), views=[View((1, 64, 128, 8, 4, 1, 1, 1, 1), (0, 0, 0, 0, 0, 1, 1, 1, 1), 0)]), hostbuf=GPUBuffer(shape=(1,), backing=np.array([1.], dtype=np.float32)))
+    op4 = LazyOp(UnaryOps.EXP, (op2,), None)
+    op5 = LazyOp(BinaryOps.SUB, (buf4,op4,), None)
+    op6 = LazyOp(UnaryOps.RELU, (op5,), None)
+    op7 = LazyOp(BinaryOps.MUL, (buf3,op6,), None)
+    op8 = LazyOp(BinaryOps.SUB, (op3,op7,), None)
+    ast = LazyOp(MovementOps.RESHAPE, (op8,), (64, 1024, 4))
+  elif int(os.getenv("OP", "0")) == 3:
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 8, 4), views=[View((1, 64, 128, 4, 4, 1, 1, 8, 4), (0, 4096, 32, 0, 0, 0, 0, 4, 1), 0)]), hostbuf=GPUBuffer(shape=(64, 1024, 4), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 8, 4), views=[View((1, 64, 128, 4, 4, 1, 1, 8, 4), (0, 0, 0, 128, 4, 0, 0, 16, 1), 0)]), hostbuf=GPUBuffer(shape=(4, 32, 4), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 64, 128, 4, 4, 1, 1, 1, 1))
+    buf2 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 1, 1), views=[View((1, 64, 128, 4, 4, 1, 1, 1, 1), (0, 0, 0, 4, 1, 1, 1, 1, 1), 0)]), hostbuf=GPUBuffer(shape=(16,), force_create=True))
+    op2 = LazyOp(BinaryOps.ADD, (op1,buf2,), None)
+    ast = LazyOp(MovementOps.RESHAPE, (op2,), (64, 512, 4))
   elif int(os.getenv("BC", "0")):
     # big conv
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(8, 1, 32, 112, 112, 3, 3, 3), views=[View((8, 3, 225, 225), (150528, 50176, 224, 1), 0), ZeroView((8, 3, 224, 224), ((0, 8), (0, 3), (0, 225), (0, 225))), View((8, 1, 32, 112, 112, 3, 3, 3), (151875, 151875, 0, 450, 2, 50625, 225, 1), 0)]), hostbuf=GPUBuffer(shape=(8, 3, 224, 224), force_create=True))
