@@ -349,7 +349,7 @@ for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
 
 # register all the mlops "math" operations
 def register(name:str, fxn:Function):
-  setattr(Tensor, "_"+name if hasattr(Tensor, name) else name, functools.partialmethod(fxn.apply))
+  setattr(Tensor, "_"+name if hasattr(Tensor, name) else name, lambda *args, **kwargs: fxn.apply(*args, **kwargs))
 for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
   if name[0] != "_" and name != "Function" and not name.endswith("Ops"):
     register(name.lower(), cls)
