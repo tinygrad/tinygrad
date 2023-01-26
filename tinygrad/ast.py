@@ -59,7 +59,7 @@ class ASTKernel:
     # process
     # TODO: fetch from quick cache before processing
     self.process()
-    self.group_for_reduce = []
+    self.group_for_reduce : List[int] = []
 
   def print(self):
     buf_count = -1
