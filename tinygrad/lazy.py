@@ -128,8 +128,8 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 LAZY = int(os.getenv("LAZY", "1"))
 
 class LazyBuffer:
-  lazycache : weakref.WeakValueDictionary[LazyOp, LazyBuffer] = weakref.WeakValueDictionary()
-  def __new__(cls, device, shape, optype, op):
+  lazycache : weakref.WeakValueDictionary[Tuple[str, OpType, LazyOp], LazyBuffer] = weakref.WeakValueDictionary()
+  def __new__(cls, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
     # fromcpu aren't cached
     if optype == LoadOps and op.op == LoadOps.FROMCPU:
       return super().__new__(cls)
@@ -139,7 +139,7 @@ class LazyBuffer:
       LazyBuffer.lazycache[wop] = ret = super().__new__(cls) # noqa: F841, pylint: disable=W0612
     return LazyBuffer.lazycache[wop]
 
-  def __init__(self, device, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
+  def __init__(self, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
     if hasattr(self, 'device'):
       return  # cache hit, we return and don't reinit
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))

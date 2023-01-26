@@ -21,14 +21,14 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
   return ret
 
 class View:
-  def __init__(self, shape, strides, offset:int=0):
+  def __init__(self, shape:Tuple[int, ...], strides:Tuple[int, ...], offset:int=0):
     self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
     self.shape_strides = to_shape_strides(self.shape, self.strides)
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
 
   @functools.cached_property
-  def contiguous(self):
+  def contiguous(self) -> bool:
     return self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
 
   def expr_node(self, idx):
@@ -49,17 +49,25 @@ class View:
     return Variable.sum([Variable.num(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
 
 class ZeroView:
-  def __init__(self, old_shape, arg):
-    self.old_shape, self.arg, self.shape = old_shape, arg, []
+  def __init__(self, old_shape:Tuple[int, ...], arg):
+    self.old_shape, self.arg = old_shape, arg
+    self.shape : Tuple[int, ...] = tuple([y-x for x,y in self.arg])
+
+  @property
+  def strides(self): raise Exception("ZeroView doesn't have strides")
+
+  @property
+  def offset(self): raise Exception("ZeroView doesn't have offset")
+
+  @property
+  def contiguous(self): return False
 
   def expr_node(self, valid, idx):
     expr, acc = [valid] if valid is not None else [], 1
-    for s,(x,y) in list(zip(self.old_shape, self.arg))[::-1]:
-      self.shape = [y-x] + self.shape
-      base = idx//acc
-      base = (base % self.shape[0]) + x
-      expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
-      acc *= self.shape[0]
+    for os,ns,(x,y) in list(zip(self.old_shape, self.shape, self.arg))[::-1]:
+      base = ((idx//acc) % ns) + x
+      expr += ([base >= 0] if x < 0 else []) + ([base < os] if y > os else [])
+      acc *= ns
     return Variable.ands(expr)
 
   @functools.cached_property
@@ -89,16 +97,16 @@ class ShapeTracker:
   def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
 
   @property
-  def contiguous(self): return len(self.views) == 1 and self.views[-1].contiguous
+  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous
 
   @property
-  def shape(self): return self.views[-1].shape
+  def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
 
   @property
-  def strides(self): return self.views[-1].strides
+  def strides(self) -> Tuple[int, ...]: return self.views[-1].strides
 
   @property
-  def offset(self): return self.views[-1].offset
+  def offset(self) -> int: return self.views[-1].offset
 
   def expr_node(self):
     idx = Variable('idx', 0, prod(self.shape)-1)

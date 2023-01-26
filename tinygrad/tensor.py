@@ -11,7 +11,7 @@ from tinygrad.lazy import Device, LazyBuffer
 class Tensor:
   training, no_grad = False, False
 
-  def __init__(self, data, device=Device.DEFAULT, requires_grad=None):
+  def __init__(self, data, device=Device.DEFAULT, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
       data = np.array(data, dtype=np.float32)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -326,7 +326,7 @@ class Function:
     self.device, self.parents = device, tensors
     self.needs_input_grad = [t.requires_grad for t in self.parents]
     self.requires_grad = True if any(self.needs_input_grad) else (None if any(x is None for x in self.needs_input_grad) else False)
-    self.saved_tensors : List[Tensor] = []
+    self.saved_tensors : List[LazyBuffer] = []
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")

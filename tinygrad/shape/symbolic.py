@@ -5,6 +5,7 @@ from tinygrad.helpers import partition, modn, all_same
 
 class Node:
   b, min, max = 0, -math.inf, math.inf   # make mypy happy
+  expr: str
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
     return self.expr
