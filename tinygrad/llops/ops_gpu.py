@@ -98,6 +98,7 @@ class CLProgram:
             (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
     GlobalCounters.global_ops += self.op_estimate
     GlobalCounters.global_mem += sum([x.size//4 for x in args[2:] if isinstance(x, cl.Buffer)])
+    return e if CL.CACHE is None else None
 
 # **** end CL wrappers ****
 
