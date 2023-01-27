@@ -116,12 +116,12 @@ class ASTKernel:
     for i in range(1, len(shapes[0])):
       can_merge = []
       for j in range(len(shapes)):
-        # TODO: added the always mergability of 1s, is this right? if so, add to shapetracker in the 1 case
+        # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
         can_merge.append((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*strides[j][i]) or (strides[j][i] == 0 and rets[j][-1][1] == 0))
       # more can merge than this
-      can_merge = all(can_merge) and i != self.first_reduce
+      mergeable = all(can_merge) and i != self.first_reduce
       for j in range(len(shapes)):
-        if can_merge:
+        if mergeable:
           rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
         else:
           rets[j].append((shapes[j][i], strides[j][i]))
