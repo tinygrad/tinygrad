@@ -10,8 +10,8 @@ from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
 
 CUDA = int(os.getenv("CUDA", "0"))
-if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram
-else: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL   # NOTE: using CL will not work for the CUDA runtime
+if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL   # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+else: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a switch for the tests to pass
