@@ -8,7 +8,10 @@ from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
-from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram
+
+CUDA = int(os.getenv("CUDA", "0"))
+if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram
+else: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a switch for the tests to pass
@@ -244,10 +247,11 @@ class CLASTKernel(ASTKernel):
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
 
     self.prekernel : Set[str] = set()
-    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"]
+    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(isinstance(buf._buf, CLImage) for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    self.kernel += [f"int idx{len(self.output_shape)-1-i} = get_global_id({i}); /* {self.output_shape[-1-i]} */\n" for i in range(min(3, len(self.output_shape)))]
+    if CUDA: self.kernel += [f"int idx{len(self.output_shape)-1-i} = blockIdx.{'xyz'[i]} * blockDim.{'xyz'[i]} + threadIdx.{'xyz'[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(3, len(self.output_shape)))]
+    else: self.kernel += [f"int idx{len(self.output_shape)-1-i} = get_global_id({i}); /* {self.output_shape[-1-i]} */\n" for i in range(min(3, len(self.output_shape)))]
 
     if len(self.output_shape) > 3:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
@@ -297,8 +301,9 @@ class CLASTKernel(ASTKernel):
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else ("__global "+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
-    self.kernel = list(self.prekernel) + [f"__kernel void {function_name}(",] + \
+    if CUDA: buftypes = [self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
+    else: buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else ("__global "+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
+    self.kernel = list(self.prekernel) + [f"{'__global__' if CUDA else '__kernel'} void {function_name}(",] + \
       [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete])] + \
       [") {\n"] + self.kernel
 

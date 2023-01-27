@@ -24,6 +24,7 @@ setup(name='tinygrad',
       extras_require={
         'gpu': ["pyopencl", "six"],
         'llvm': ["llvmlite"],
+        'cuda': ["pycuda"],
         'testing': [
             "pytest",
             "torch~=1.11.0",
