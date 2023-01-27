@@ -8,7 +8,7 @@ from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
-from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL
+from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram
 
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a switch for the tests to pass
@@ -332,7 +332,7 @@ class GPUBuffer(ExplicitExecAST):
     if self._buf is None:
       self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
     if self._backing is not None:
-      CL().enqueue_copy(self._buf.cl, self._backing, is_blocking=False)
+      self._buf.copyin(self._backing)
       self._backing = None
     return self._buf.cl
 
@@ -345,7 +345,7 @@ class GPUBuffer(ExplicitExecAST):
     data = np.empty(self.shape, dtype=np.float32)
     cl_buf = self.contiguous()
     cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
-    CL().enqueue_copy(data, cl_buf.cl, is_blocking=True)
+    cl_buf._buf.copyout(data)
     return data
 
   @classmethod

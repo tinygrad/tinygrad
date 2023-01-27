@@ -9,31 +9,6 @@ OSX = platform.system() == "Darwin"
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
 
-class CLBuffer:
-  def __init__(self, size):
-    if len(CL.BUFFER_CACHE[size]) > 0:
-      self.cl = CL.BUFFER_CACHE[size].pop()
-    else:
-      # TODO: on GPU OOM, clear the cache
-      self.cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
-      CL.mem_used += self.cl.size
-
-  def __del__(self):
-    if CLCACHE:
-      CL.BUFFER_CACHE[self.cl.size].append(self.cl)
-    else:
-      CL.mem_used -= self.cl.size
-
-class CLImage:
-  fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
-
-  def __init__(self, shape):
-    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
-    CL.mem_used += self.cl.row_pitch * self.cl.height
-
-  def __del__(self):
-    CL.mem_used -= self.cl.row_pitch * self.cl.height
-
 class CL:
   CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
   BUFFER_CACHE : Dict[int, List[cl.Buffer]] = defaultdict(list)
@@ -48,11 +23,38 @@ class CL:
     if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
-  @staticmethod
-  def enqueue_copy(a, b, is_blocking=False):
-    if CL.CACHE is not None: assert False, f"can't copy {a} -> {b} while caching"
-    if DEBUG >= 1: print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
-    cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
+class CLBuffer:
+  def __init__(self, size):
+    if len(CL.BUFFER_CACHE[size]) > 0:
+      self.cl = CL.BUFFER_CACHE[size].pop()
+    else:
+      # TODO: on GPU OOM, clear the cache
+      self.cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
+      CL.mem_used += self.cl.size
+
+  def __del__(self):
+    if CLCACHE: CL.BUFFER_CACHE[self.cl.size].append(self.cl)
+    else: CL.mem_used -= self.cl.size
+
+  def copyin(self, b:np.ndarray):
+    assert CL.CACHE is None, f"can't copy in {b} -> {self.cl} while caching"
+    if DEBUG >= 1: print(f"**CL**        copy in {b.shape}")
+    cl.enqueue_copy(CL().cl_queue, self.cl, b, is_blocking=False)
+
+  def copyout(self, a:np.ndarray):
+    assert CL.CACHE is None, f"can't copy out {self.cl} -> {a} while caching"
+    if DEBUG >= 1: print(f"**CL**        copy out {a.shape}")
+    cl.enqueue_copy(CL().cl_queue, a, self.cl, is_blocking=True)
+
+class CLImage:
+  fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+
+  def __init__(self, shape):
+    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
+    CL.mem_used += self.cl.row_pitch * self.cl.height
+
+  def __del__(self):
+    CL.mem_used -= self.cl.row_pitch * self.cl.height
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
