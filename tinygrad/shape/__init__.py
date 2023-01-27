@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import functools
-from typing import Tuple, Union, List, Optional
+from typing import Tuple, Union, List, Optional, Any
 from tinygrad.helpers import prod
 from tinygrad.shape.symbolic import Variable
 
@@ -21,7 +21,7 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
   return ret
 
 class View:
-  def __init__(self, shape:Tuple[int, ...], strides:Tuple[int, ...], offset:int=0):
+  def __init__(self, shape:Union[Tuple[int, ...],List[Any]], strides:Union[Tuple[int, ...],List[Any]], offset:int=0):
     self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
     self.shape_strides = to_shape_strides(self.shape, self.strides)
 
