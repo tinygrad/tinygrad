@@ -2,7 +2,7 @@ import pycuda.autoinit # type: ignore # pylint: disable=unused-import # noqa: F4
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import SourceModule # type: ignore
 import numpy as np
-from tinygrad.ops import DEBUG
+from tinygrad.ops import DEBUG, GlobalCounters
 
 class CLImage:
   def __init__(self, shape): raise NotImplementedError("CUDA runtime doesn't support images")
@@ -14,11 +14,13 @@ class CLBuffer:
 
 class CLProgram:
   def __init__(self, name:str, prg:str, op_estimate:int=0):
-    self.name = name
+    self.name, self.op_estimate = name, op_estimate
     if DEBUG >= 4: print("CUDA compile", prg)
     self.prg = SourceModule(prg).get_function(name)
 
   def __call__(self, global_size, local_size, *args):
-    global_size = tuple(global_size + [1] * (2 - len(global_size)))
+    global_size = global_size + [1] * (2 - len(global_size))
     if DEBUG >= 2: print("CUDA launch", global_size, local_size)
-    self.prg(*args, block=(1,1,1), grid=global_size)
+    self.prg(*args, block=(1,1,1), grid=tuple(global_size))
+    GlobalCounters.global_ops += self.op_estimate
+    # TODO: GlobalCounters.global_mem
