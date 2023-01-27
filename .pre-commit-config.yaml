@@ -7,6 +7,12 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      - id: flake8
+        name: flake8
+        entry: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: mypy
         name: mypy
         entry: mypy tinygrad/ --ignore-missing-imports

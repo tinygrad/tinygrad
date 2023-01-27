@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import functools
-from typing import Tuple, Union, List, Optional, Any
+from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod
 from tinygrad.shape.symbolic import Variable
 
