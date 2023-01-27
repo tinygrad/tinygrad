@@ -23,6 +23,12 @@ class CL:
     if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
+  @staticmethod
+  def enqueue_copy(a, b, is_blocking=False):
+    if CL.CACHE is not None: assert False, f"can't copy {a} -> {b} while caching"
+    if DEBUG >= 1: print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
+    cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
+
 class CLBuffer:
   def __init__(self, size):
     if len(CL.BUFFER_CACHE[size]) > 0:
@@ -36,15 +42,8 @@ class CLBuffer:
     if CLCACHE: CL.BUFFER_CACHE[self.cl.size].append(self.cl)
     else: CL.mem_used -= self.cl.size
 
-  def copyin(self, b:np.ndarray):
-    assert CL.CACHE is None, f"can't copy in {b} -> {self.cl} while caching"
-    if DEBUG >= 1: print(f"**CL**        copy in {b.shape}")
-    cl.enqueue_copy(CL().cl_queue, self.cl, b, is_blocking=False)
-
-  def copyout(self, a:np.ndarray):
-    assert CL.CACHE is None, f"can't copy out {self.cl} -> {a} while caching"
-    if DEBUG >= 1: print(f"**CL**        copy out {a.shape}")
-    cl.enqueue_copy(CL().cl_queue, a, self.cl, is_blocking=True)
+  def copyin(self, b:np.ndarray): CL.enqueue_copy(self.cl, b, False)
+  def copyout(self, a:np.ndarray): CL.enqueue_copy(a, self.cl, True)
 
 class CLImage:
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
