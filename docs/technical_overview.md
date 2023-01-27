@@ -15,7 +15,7 @@ The computation of the Tensors are deferd until the result is needed. This defer
 * llops: Low level operations, what the computational accelerator(GPU,or other accelerator) deals with.
 
 ## Accelerators
-An accelerator extends the ExplicitExecAST class, If you have a accelerator named Nuralacel it should be named something like NuralacelBuffer as it representing the backing buffer of a Tensor object. The NuralacelBuffer should have 3 methods
+An accelerator extends the ExplicitExecAST class. If you have a accelerator named Nuralacel it should be named something like NuralacelBuffer as it representing the backing buffer of a Tensor object. The NuralacelBuffer should have 3 methods
 * fromCPU (takes data and "moves" the data from python)
 * toCPU (moves data back to python)
 * exec_ast (Executes a tree structure of Tensor Operations)
