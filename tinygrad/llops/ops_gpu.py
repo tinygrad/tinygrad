@@ -253,13 +253,14 @@ class CLASTKernel(ASTKernel):
     if CUDA: self.kernel += [f"int idx{len(self.output_shape)-1-i} = blockIdx.{'xyz'[i]} * blockDim.{'xyz'[i]} + threadIdx.{'xyz'[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(3, len(self.output_shape)))]
     else: self.kernel += [f"int idx{len(self.output_shape)-1-i} = get_global_id({i}); /* {self.output_shape[-1-i]} */\n" for i in range(min(3, len(self.output_shape)))]
 
-    if len(self.output_shape) > 3:
+    MAX_OUTPUT_SHAPE = 3 if not CUDA else 2
+    if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
       # TODO: these compactions should be searchable
-      final_dimension = len(self.output_shape)-3
-      for i in range(len(self.output_shape)-4, -1, -1):
+      final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
+      for i in range(final_dimension-1, -1, -1):
         self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
-      self.output_shape = [prod(self.output_shape[0:-2])] + list(self.output_shape[-2:])
+      self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
