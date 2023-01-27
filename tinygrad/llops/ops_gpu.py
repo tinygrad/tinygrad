@@ -109,6 +109,7 @@ class CLASTKernel(ASTKernel):
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
+    if CUDA and x.op == UnaryOps.SIGN: self.prekernel.add("inline __device__ float sign(float x) { float val = (signbit(x) == 0.0f) ? 1.0f : -1.0f; return (x == 0.0f) ? 0.0f : val; }")
     if len(values) == 2:
       # TODO: sometimes this is split, sometimes it's multiply
       if isinstance(x.op, ReduceOps) and values[0][0].typ == Types.FLOAT4 and len(values[0])*4 == len(values[1]): values[0] = split_float4(values[0])
@@ -234,7 +235,7 @@ class CLASTKernel(ASTKernel):
       print("old:", self.shapes)
       print("old:", self.strides)
 
-    self.hand_coded_optimizations()
+    if not CUDA: self.hand_coded_optimizations()
 
     self.output_shape = list(self.shapes[0][:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 3:
@@ -250,10 +251,9 @@ class CLASTKernel(ASTKernel):
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(isinstance(buf._buf, CLImage) for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    if CUDA: self.kernel += [f"int idx{len(self.output_shape)-1-i} = blockIdx.{'xyz'[i]} * blockDim.{'xyz'[i]} + threadIdx.{'xyz'[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(3, len(self.output_shape)))]
-    else: self.kernel += [f"int idx{len(self.output_shape)-1-i} = get_global_id({i}); /* {self.output_shape[-1-i]} */\n" for i in range(min(3, len(self.output_shape)))]
-
     MAX_OUTPUT_SHAPE = 3 if not CUDA else 2
+    if CUDA: self.kernel += [f"int idx{len(self.output_shape)-1-i} = blockIdx.{'xyz'[i]} * blockDim.{'xyz'[i]} + threadIdx.{'xyz'[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+    else: self.kernel += [f"int idx{len(self.output_shape)-1-i} = get_global_id({i}); /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
       # TODO: these compactions should be searchable
