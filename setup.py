@@ -32,6 +32,8 @@ setup(name='tinygrad',
             "onnx",
             "onnx2torch",
             "mypy",
+            "pylint",
+            "pre-commit",
         ],
       },
       include_package_data=True)

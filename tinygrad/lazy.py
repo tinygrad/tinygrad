@@ -136,7 +136,7 @@ class LazyBuffer:
     wop = (device, optype, get_weakop(op))   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
     # NOTE: we need "ret" to prevent the new buffer from being immediately deleted
     if wop not in LazyBuffer.lazycache:
-      LazyBuffer.lazycache[wop] = ret = super().__new__(cls) # noqa: F841, pylint: disable=W0612
+      LazyBuffer.lazycache[wop] = super().__new__(cls) # noqa: F841, pylint: disable=W0612
     return LazyBuffer.lazycache[wop]
 
   def __init__(self, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
