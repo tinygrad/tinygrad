@@ -66,7 +66,6 @@ jobs:
   testllvm:
     name: LLVM Tests
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
