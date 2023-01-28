@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import unittest
 import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
@@ -9,7 +10,7 @@ from test.lib_test_ast import test_ast
 def compile_and_test_ast(ast):
   k = CLASTKernel(ast)
   k.codegen()(*k.bufs)
-  test_ast(k)
+  if not int(os.getenv("NOTEST", "0")): test_ast(k)
 
 class TestAST(unittest.TestCase):
   def test_conv_zeroview_ast(self):
