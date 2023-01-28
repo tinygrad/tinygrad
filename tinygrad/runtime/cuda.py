@@ -2,7 +2,7 @@ import pycuda.autoinit # type: ignore # pylint: disable=unused-import # noqa: F4
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import SourceModule # type: ignore
 import numpy as np
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.ops import DEBUG
 
 class CLImage:
   def __init__(self, shape): raise NotImplementedError("CUDA runtime doesn't support images")
