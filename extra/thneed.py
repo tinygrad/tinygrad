@@ -277,12 +277,9 @@ class Thneed:
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 
     if DEBUGCL >= 1:
-      scale_total_runtime = sum([(e.profile.end - e.profile.start) for e in events])/1e9
-      # TODO: Mac OS has a scaling issue, this hack fixes it
-      scale = 1 if (et/scale_total_runtime) < 10 else (et/scale_total_runtime)
       total_runtime = 0
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
-        runtime = (e.profile.end - e.profile.start)*scale
+        runtime = (e.profile.end - e.profile.start)
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us {(prg.op_estimate)/runtime:9.2f} GFLOPS {prg.options} -> {args[2].shape if hasattr(args[2], 'shape') else args[2].size}")
         if (DEBUGCL >= 2 and int(os.getenv("PRINT_KERNEL", "-1")) == i) or DEBUGCL >= 3:
           print(prg.prg)
@@ -298,6 +295,7 @@ class Thneed:
       runtimes = []
       args = list(args)
 
+      # NOTE: if args[1] is not None, it may use local variables and you shouldn't change this
       if args[1] is None and len(args[0]) == 1:
         for l1 in [args[0][0], 1, 4, 16, MAX_WORKGROUP//4, MAX_WORKGROUP]:
           potential_locals.append((l1,))
@@ -312,12 +310,6 @@ class Thneed:
             for l1 in [max(1, MAX_WORKGROUP//(l2*l3)), args[0][0], 4, 16, MAX_WORKGROUP]:
               if l1 > args[0][0] or l2 > args[0][1] or l3 > args[0][2]: continue
               potential_locals.append((l1, l2, l3))
-
-      # TODO: why does this introduce a bug?
-      #if args[1] is not None and len(args[0]) == 3:
-      #  for l2 in [args[1][1], args[0][1]]:  # might be required, whole thing is always safe
-      #    for l3 in [4,16,args[0][2],MAX_WORKGROUP,args[1][2]]:
-      #      potential_locals.append((args[1][0], l2, l3))
 
       for local_args in potential_locals:
         if prod(local_args) > MAX_WORKGROUP: continue

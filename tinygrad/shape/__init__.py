@@ -175,8 +175,7 @@ class ShapeTracker:
     if self.contiguous:
       self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
     else:
-      if DEBUG >= 2:
-        print(f"WARNING: reshape from {self.shape} w strides {self.strides} -> {new_shape} is creating another view")
+      if DEBUG >= 3: print(f"WARNING: reshape from {self.shape} w strides {self.strides} -> {new_shape} is creating another view")
       self.views.append(view)
     return self
 
