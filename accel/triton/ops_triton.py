@@ -14,11 +14,11 @@ from tinygrad.shape.symbolic import Variable
 
 class TritonASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
-    UnaryOps.EXP: "exp(A)", UnaryOps.LOG: "log(A)", UnaryOps.RECIPROCAL: "((float)1.0/A)",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.max(A, 0.)", UnaryOps.SIGN: "tl.where(A>0,-1,1)",
+    UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
-    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)"
+    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "(A**B)", BinaryOps.CMPEQ: "(A==B)",
+    ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = max(A,B)"
   }
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
@@ -39,9 +39,10 @@ class TritonASTKernel(ASTKernel):
       if buf_index not in self.loaded:
         # TODO: valid
         idx, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index)
-        self.kernel.append(f"  val{buf_index} = tl.load(data{buf_index} + {idx})")
+        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.load(data{buf_index} + {idx})")
         self.loaded.add(buf_index)
       return f"val{buf_index}"
+    if isinstance(x.op, ReduceOps) and not do_reduce: return acc
 
     values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
 
@@ -52,6 +53,7 @@ class TritonASTKernel(ASTKernel):
 
   def codegen(self):
     self.process()
+    self.kernel_prefix = ""
     self.loaded = set()
     self.kernel = ["import triton", "import triton.language as tl", "@triton.jit"]
     self.kernel.append("def fxn("+','.join(f"data{i}" for i in range(len(self.bufs)))+"):")
@@ -67,8 +69,18 @@ class TritonASTKernel(ASTKernel):
         self.kernel += [f"  idx{i} = idx{final_dimension} % {self.output_shape[i]}", f"  idx{final_dimension} = idx{final_dimension} // {self.output_shape[i]}"]
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
+    elif len(self.output_shape) == 0: self.output_shape = [1]
+    
+    if self.reduceop:
+      full_shape = [x for x in self.shapes if x != self.shapes[0]]
+      full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
+      self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
+      self.kernel += [("  "*(i-self.first_reduce)+f"  for idx{i} in range(0, {full_shape[i]}):") for i in range(self.first_reduce, self.shape_len)]
+      self.kernel_prefix =  "  "*(self.shape_len - self.first_reduce)
+      self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.ast, "acc", True))
+      self.kernel_prefix =  ""
 
-    code = self.ast_parse(self.ast, "<acc>")
+    code = self.ast_parse(self.ast, "acc")
 
     # store
     idx, valid = self.compute_buf_index_symbolic(self.bufs[0].st, 0)
