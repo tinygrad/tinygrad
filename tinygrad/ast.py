@@ -145,7 +145,7 @@ class ASTKernel:
           assert all(st.views[-1].strides[i]%upcasted[0] == 0 or st.views[-1].shape[i] == 1 for i in range(len(st.shape)-1))
           assert self.sts[i].offset % upcasted[0] == 0
         else:
-          self.buftokens[i].array(upcasted[0], st.views[-1].strides[i])
+          self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1])
 
     # remove the last dimension
-    for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].stride[0:-1], st.views[-1].offset)
+    for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset)

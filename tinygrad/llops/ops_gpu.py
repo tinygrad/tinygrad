@@ -124,10 +124,10 @@ class CLASTKernel(ASTKernel):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
     if any(isinstance(buf._buf, CLImage) for buf in self.earlybufs):
-      eb_valids = [True] * len(self.shapes[0])
+      eb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
         if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
-          valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
+          valids = [self.sts[i].shape[j]%4 == 0 and self.sts[i].views[-1].strides[j] == 1 for j in range(self.shape_len)]
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
       eb_valid = eb_valids.index(True)
@@ -145,9 +145,9 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.shapes[0][:self.first_reduce]) <= 2048:
-      for sz in ([256, 16] if prod(self.shapes[0][:self.first_reduce]) <= 32 else [16]):
-        if all([x[self.first_reduce] % sz == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
+    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+      for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+        if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
           self.group_for_reduce.append(sz)
           break
 
@@ -160,9 +160,9 @@ class CLASTKernel(ASTKernel):
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
     self.upcast_in_mid_reduce = False
     if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
-      lb_valids = [True] * len(self.shapes[0])
+      lb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
-        valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
+        valids = [self.sts[i].shape[j]%4 == 0 and (self.sts[i].views[-1].strides[j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(self.shape_len)]
         lb_valids = [x and y for x,y in zip(lb_valids, valids)]
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
@@ -185,11 +185,11 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:self.first_reduce]) >= 2048 and not self.group_for_reduce:
+    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
-        if all(x[i]%4 == 0 for x in self.shapes):
-          xb_choices.append((sum(x[i]>0 for x in self.strides), sum(x[i] for x in self.strides), i))
+        if all(st.shape[i]%4 == 0 for st in self.sts):
+          xb_choices.append((sum(st.views[-1].strides[i]>0 for st in self.sts), sum(st.views[-1].strides[i] for st in self.sts), i))
 
       if len(xb_choices):
         xb_choice = sorted(xb_choices)[0][2]
@@ -209,7 +209,7 @@ class CLASTKernel(ASTKernel):
     # use more opencl indexing
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
-      if all([(base_shape[0]*base_shape[1])%x[0] == 0 and x[0]//base_shape[0] != 0 for x in self.shapes]):
+      if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
         if DEBUG >= 3: print("split opencl", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
@@ -230,7 +230,7 @@ class CLASTKernel(ASTKernel):
       print("old:", [x.shape for x in self.sts])
       print("old:", [x.views[-1].strides for x in self.sts])
     
-    #if not CUDA: self.hand_coded_optimizations()
+    if not CUDA: self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
