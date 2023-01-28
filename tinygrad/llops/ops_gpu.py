@@ -224,8 +224,8 @@ class CLASTKernel(ASTKernel):
     if DEBUG >= 3:
       print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
       print("output shape", self.output_shape)
-      for i in range(len(self.bufs)):
-        print(self.buftokens[i], f"early:{'T' if self.bufs[i] in self.earlybufs else 'F'} image:{'T' if isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.sts[i])
+      for i in range(len(self.sts)):
+        print(self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'} image:{'T' if i < len(self.bufs) and isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.sts[i])
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
