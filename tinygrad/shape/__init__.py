@@ -109,6 +109,15 @@ class ShapeTracker:
   @property
   def offset(self) -> int: return self.views[-1].offset
 
+  # TODO: pass in the idxs?
+  def expr_idxs(self, offset=0):
+    idx = self.views[-1].expr_idxs([f"idx{i}" for i in range(len(self.shape))], offset)
+    valid = Variable.num(1)
+    for v in self.views[0:-1][::-1]:
+      if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
+      else: idx = v.expr_node(idx)
+    return idx, valid
+
   def expr_node(self):
     idx = Variable('idx', 0, prod(self.shape)-1)
     valid = None #Variable.num(1)
