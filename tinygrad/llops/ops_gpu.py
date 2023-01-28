@@ -6,7 +6,7 @@ from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
-from tinygrad.shape import ShapeTracker, View, ZeroView
+from tinygrad.shape import ShapeTracker, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
 
 CUDA = int(os.getenv("CUDA", "0"))
@@ -39,9 +39,8 @@ class CLASTKernel(ASTKernel):
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
   # TODO: move to shapetracker
-  def compute_buf_index_symbolic(self, st, buf_index, offset=0):
-    view = View(self.shapes[buf_index], self.strides[buf_index], self.offsets[buf_index] + offset)
-    idx = view.expr_idxs([f"idx{i}" for i in range(self.shape_len)])
+  def compute_buf_index_symbolic(self, st, offset=0):
+    idx = st.views[-1].expr_idxs([f"idx{i}" for i in range(self.shape_len)], offset)
     valid = Variable.num(1)
     for v in st.views[0:-1][::-1]:
       if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
@@ -62,7 +61,7 @@ class CLASTKernel(ASTKernel):
     if len(value)*4 == self.buftokens[buf_index].size(): value = split_float4(value)
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     for v, o in zip(value, self.buftokens[buf_index].offsets()):
-      idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+      idxy, valid = self.compute_buf_index_symbolic(self.sts[buf_index], o)
       assert str(valid) == "1", "store must always be valid"
       assert self.buftokens[buf_index].typ == v.typ, f"buf must be {v.typ}"
       if isinstance(self.bufs[buf_index]._buf, CLImage):
@@ -80,7 +79,7 @@ class CLASTKernel(ASTKernel):
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", self.buftokens[buf_index].typ)
       if self.bufs[buf_index].st.needs_valid():
         for o in self.buftokens[buf_index].offsets():
-          _, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+          _, valid = self.compute_buf_index_symbolic(self.sts[buf_index], o)
           tokens.append(Token(f"({valid.cl} ? {const.tok} : 0.0f)", const.typ) if str(valid) != "1" else const)
         return tokens
       else:
@@ -89,7 +88,7 @@ class CLASTKernel(ASTKernel):
     # not constant folded
     for o in self.buftokens[buf_index].offsets():
       if (buf_index, o) not in self.loaded_keys:
-        idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+        idxy, valid = self.compute_buf_index_symbolic(self.sts[buf_index], o)
         if isinstance(self.bufs[buf_index]._buf, CLImage):
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         else:
@@ -125,10 +124,10 @@ class CLASTKernel(ASTKernel):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
     if any(isinstance(buf._buf, CLImage) for buf in self.earlybufs):
-      eb_valids = [True] * len(self.shapes[0])
+      eb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
         if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
-          valids = [self.shapes[i][j]%4 == 0 and self.strides[i][j] == 1 for j in range(len(self.shapes[i]))]
+          valids = [self.sts[i].shape[j]%4 == 0 and self.sts[i].views[-1].strides[j] == 1 for j in range(self.shape_len)]
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
       eb_valid = eb_valids.index(True)
@@ -146,9 +145,9 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.shapes[0][:self.first_reduce]) <= 2048:
-      for sz in ([256, 16] if prod(self.shapes[0][:self.first_reduce]) <= 32 else [16]):
-        if all([x[self.first_reduce] % sz == 0 or x[self.first_reduce] == 1 for x in self.shapes]):
+    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+      for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+        if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
           self.group_for_reduce.append(sz)
           break
 
@@ -161,9 +160,9 @@ class CLASTKernel(ASTKernel):
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
     self.upcast_in_mid_reduce = False
     if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
-      lb_valids = [True] * len(self.shapes[0])
+      lb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
-        valids = [self.shapes[i][j]%4 == 0 and (self.strides[i][j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(len(self.shapes[i]))]
+        valids = [self.sts[i].shape[j]%4 == 0 and (self.sts[i].views[-1].strides[j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(self.shape_len)]
         lb_valids = [x and y for x,y in zip(lb_valids, valids)]
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
@@ -186,11 +185,11 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.shapes[0][:self.first_reduce]) >= 2048 and not self.group_for_reduce:
+    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
-        if all(x[i]%4 == 0 for x in self.shapes):
-          xb_choices.append((sum(x[i]>0 for x in self.strides), sum(x[i] for x in self.strides), i))
+        if all(st.shape[i]%4 == 0 for st in self.sts):
+          xb_choices.append((sum(st.views[-1].strides[i]>0 for st in self.sts), sum(st.views[-1].strides[i] for st in self.sts), i))
 
       if len(xb_choices):
         xb_choice = sorted(xb_choices)[0][2]
@@ -210,7 +209,7 @@ class CLASTKernel(ASTKernel):
     # use more opencl indexing
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
-      if all([(base_shape[0]*base_shape[1])%x[0] == 0 and x[0]//base_shape[0] != 0 for x in self.shapes]):
+      if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
         if DEBUG >= 3: print("split opencl", base_shape, self.shapes[0])
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
@@ -228,17 +227,24 @@ class CLASTKernel(ASTKernel):
   # group_for_reduce will have to be better first
   def codegen(self):
     if DEBUG >= 3:
-      print("old:", self.shapes)
-      print("old:", self.strides)
-
+      print("old:", [x.shape for x in self.sts])
+      print("old:", [x.views[-1].strides for x in self.sts])
+    
     if not CUDA: self.hand_coded_optimizations()
 
-    self.output_shape = list(self.shapes[0][:self.first_reduce]) + self.group_for_reduce
+    # add a local buffer for multistage reduce
+    if len(self.group_for_reduce):
+      local_buffer = GPUBuffer([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))
+      self.bufs.append(local_buffer)
+      self.sts.append(local_buffer.st.copy())
+      self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
+
+    self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 3:
       print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
       print("output shape", self.output_shape)
       for i in range(len(self.bufs)):
-        print(self.buftokens[i], f"early:{'T' if self.bufs[i] in self.earlybufs else 'F'} image:{'T' if isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.shapes[i], self.strides[i])
+        print(self.buftokens[i], f"early:{'T' if self.bufs[i] in self.earlybufs else 'F'} image:{'T' if isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.sts[i])
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
@@ -261,8 +267,8 @@ class CLASTKernel(ASTKernel):
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop:
-      full_shape = [x for x in self.shapes if x != self.shapes[0]]
-      full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
+      full_shape = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
+      full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
 
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
@@ -270,17 +276,17 @@ class CLASTKernel(ASTKernel):
     
     # middle
     if self.group_for_reduce:
-      self.kernel.append(f"__local {accumulators[0].decltype()} temp[{prod(self.group_for_reduce)}];  // second stage\n")
+      lidx, lvalid = self.compute_buf_index_symbolic(local_buffer.st)
+      assert str(lvalid) == "1", "local buffer must be valid"
+
+      self.kernel.append(f"__local {accumulators[0].decltype()} {self.buftokens[-1].tok}[{prod(self.group_for_reduce)}];  // second stage\n")
+      self.kernel.append(f"int mid_idx = {lidx.cl}; {self.buftokens[-1].tok}[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
 
       if self.upcast_in_mid_reduce:
         assert len(self.group_for_reduce) == 2
         # it should be the last dimension
-        self.kernel.append(f"int mid_idx = idx{self.first_reduce}*{self.group_for_reduce[1]} + idx{self.first_reduce+1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
         self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce+1] + [self.first_reduce+1])
         self.upcast()
-      else:
-        assert len(self.group_for_reduce) == 1
-        self.kernel.append(f"int mid_idx = idx{self.first_reduce}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
 
       self.kernel.append("if (mid_idx == 0) {\n")
       accumulators = [Token("output", self.buftokens[0].typ)]
@@ -304,7 +310,7 @@ class CLASTKernel(ASTKernel):
 
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
-    mem_estimate = sum(prod(x) for x in self.shapes)
+    mem_estimate = sum(prod(x.shape) for x in self.sts)
 
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
     def runner(*bufs):
