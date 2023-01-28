@@ -22,5 +22,3 @@ class CLProgram:
     global_size = global_size + [1] * (2 - len(global_size))
     if DEBUG >= 2: print("CUDA launch", global_size, local_size)
     self.prg(*args, block=(1,1,1), grid=tuple(global_size))
-    GlobalCounters.global_ops += self.op_estimate
-    # TODO: GlobalCounters.global_mem

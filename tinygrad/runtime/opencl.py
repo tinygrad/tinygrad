@@ -3,7 +3,7 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List
 from collections import defaultdict
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.ops import DEBUG
 
 OSX = platform.system() == "Darwin"
 CLCACHE = int(os.getenv("CLCACHE", "1"))
@@ -86,6 +86,4 @@ class CLProgram:
       CL.ops_sum += self.op_estimate
       print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
             (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
-    GlobalCounters.global_ops += self.op_estimate
-    GlobalCounters.global_mem += sum([x.size//4 for x in args[2:] if isinstance(x, cl.Buffer)])
     return e if CL.CACHE is None else None
