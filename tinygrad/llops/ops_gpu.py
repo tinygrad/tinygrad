@@ -230,8 +230,18 @@ class CLASTKernel(ASTKernel):
     if DEBUG >= 3:
       print("old:", self.shapes)
       print("old:", self.strides)
-
+    
     if not CUDA: self.hand_coded_optimizations()
+
+    # add a local buffer for multistage reduce
+    local_shape = [1] * self.first_reduce + self.group_for_reduce
+    local_shape += [1] * (self.shape_len - len(local_shape))
+    local_buffer = GPUBuffer(local_shape)
+    self.bufs.append(local_buffer)
+    self.shapes.append(self.bufs[-1].shape)
+    self.strides.append(self.bufs[-1].st.strides)
+    self.offsets.append(self.bufs[-1].st.offset)
+    self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
 
     self.output_shape = list(self.shapes[0][:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 3:
@@ -270,17 +280,17 @@ class CLASTKernel(ASTKernel):
     
     # middle
     if self.group_for_reduce:
-      self.kernel.append(f"__local {accumulators[0].decltype()} temp[{prod(self.group_for_reduce)}];  // second stage\n")
+      lidx, lvalid = self.compute_buf_index_symbolic(local_buffer.st, -1)
+      assert str(lvalid) == "1", "local buffer must be valid"
+
+      self.kernel.append(f"__local {accumulators[0].decltype()} {self.buftokens[-1].tok}[{prod(self.group_for_reduce)}];  // second stage\n")
+      self.kernel.append(f"int mid_idx = {lidx.cl}; {self.buftokens[-1].tok}[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
 
       if self.upcast_in_mid_reduce:
         assert len(self.group_for_reduce) == 2
         # it should be the last dimension
-        self.kernel.append(f"int mid_idx = idx{self.first_reduce}*{self.group_for_reduce[1]} + idx{self.first_reduce+1}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
         self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce+1] + [self.first_reduce+1])
         self.upcast()
-      else:
-        assert len(self.group_for_reduce) == 1
-        self.kernel.append(f"int mid_idx = idx{self.first_reduce}; temp[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
 
       self.kernel.append("if (mid_idx == 0) {\n")
       accumulators = [Token("output", self.buftokens[0].typ)]

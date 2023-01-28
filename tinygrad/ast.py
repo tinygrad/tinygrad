@@ -159,7 +159,7 @@ class ASTKernel:
         if self.shapes[i][-1] == 4 and self.buftokens[i].typ == Types.FLOAT and self.strides[i][-1] == 1 and can_merge:
           # this is an upcast to FLOAT4
           self.buftokens[i].typ = Types.FLOAT4
-          assert all(x%upcasted[0] == 0 for x in self.strides[i][0:-1])
+          assert all(x%upcasted[0] == 0 or s == 1 for s,x in zip(self.shapes[i][0:-1], self.strides[i][0:-1]))
           assert self.offsets[i]%upcasted[0] == 0
         else:
           self.buftokens[i].array(upcasted[0], self.strides[i][-1])
