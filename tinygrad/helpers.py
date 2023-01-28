@@ -20,11 +20,7 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   cout,cin,H,W = w_shape
   sy,sx = (stride, stride) if isinstance(stride, int) else stride
-  if not isinstance(padding, int) and len(padding) == 4:
-    px,px_,py,py_ = padding
-  else:
-    py,px = (padding, padding) if isinstance(padding, int) else padding
-    py_, px_ = py, px
+  px,px_,py,py_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
   dy,dx = (dilation, dilation) if isinstance(dilation, int) else dilation
   bs,cin_,iy,ix = x_shape
 
