@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod
-from tinygrad.shape import ShapeTracker
+from tinygrad.shape import ShapeTracker, ZeroView
 
 class DumbShapeTracker:
   def __init__(self, shape):
@@ -38,11 +38,10 @@ class DumbShapeTracker:
 
 class TestZeroViewShapeTracker(unittest.TestCase):
   def test_pad(self):
-    self.st = ShapeTracker((4, 4))
-    self.st.pad((1, 1), (1, 1))
-    assert self.st.shape == (6,6)
-    print(self.st)
-    print(self.st.expr())
+    testst = ShapeTracker((4, 4))
+    testst.pad((1, 1), (1, 1))
+    compareZv = ZeroView((4,4), ((-1,5), (-1,5)))
+    assert testst.views[1].expr == compareZv.expr
 
 class TestComplexShapeTracker(unittest.TestCase):
   def test_add_1s(self):
