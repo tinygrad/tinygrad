@@ -213,7 +213,7 @@ class CLASTKernel(ASTKernel):
       print("old:", [x.shape for x in self.sts])
       print("old:", [x.views[-1].strides for x in self.sts])
     
-    if not CUDA: self.hand_coded_optimizations()
+    self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -260,8 +260,9 @@ class CLASTKernel(ASTKernel):
       lidx, lvalid = self.sts[-1].expr_idxs()
       assert str(lvalid) == "1", "local buffer must be valid"
 
-      self.kernel.append(f"__local {accumulators[0].decltype()} {self.buftokens[-1].tok}[{prod(self.group_for_reduce)}];  // second stage\n")
-      self.kernel.append(f"int mid_idx = {lidx.cl}; {self.buftokens[-1].tok}[mid_idx] = {accumulators[0].tok}; barrier(CLK_LOCAL_MEM_FENCE);\n")
+      self.kernel.append(("__shared__ " if CUDA else "__local ") + f"{accumulators[0].decltype()} temp[{prod(self.group_for_reduce)}];  // second stage\n")
+      self.kernel.append(f"int mid_idx = {lidx.cl}; {self.buftokens[-1].tok}[mid_idx] = {accumulators[0].tok};\n")
+      self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n" if not CUDA else "__syncthreads();\n")
 
       if self.upcast_in_mid_reduce:
         assert len(self.group_for_reduce) == 2
