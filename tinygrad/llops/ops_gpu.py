@@ -251,8 +251,8 @@ class CLASTKernel(ASTKernel):
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(isinstance(buf._buf, CLImage) for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    MAX_OUTPUT_SHAPE = [3,2][CUDA]
-    self.kernel += [f"int idx{len(self.output_shape)-1-i} = {f'blockIdx.{chr(120+i)}' if CUDA else f'get_global_id({i})'}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+    MAX_OUTPUT_SHAPE = 3
+    self.kernel += [f"int idx{len(self.output_shape)-1-i} = {f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' if CUDA else f'get_global_id({i})'}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
       # TODO: these compactions should be searchable
