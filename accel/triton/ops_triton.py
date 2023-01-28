@@ -3,8 +3,11 @@ import torch
 import hashlib
 import numpy as np
 
-from typing import Union, Tuple, Optional, Dict
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG
+import triton # noqa: F401
+import triton.language as tl # noqa: F401
+
+from typing import Union, Tuple, Optional, Dict, Any
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import prod
 from tinygrad.ast import ASTKernel
@@ -51,11 +54,14 @@ class TritonASTKernel(ASTKernel):
     if len(values) == 2: code = code.replace("B", values[1])
     return code
 
+  func_cache : Dict[Any, Any] = {}
   def codegen(self):
+    if self.key in self.func_cache: return self.func_cache[self.key]
+
     self.process()
     self.kernel_prefix = ""
     self.loaded = set()
-    self.kernel = ["import triton", "import triton.language as tl", "@triton.jit"]
+    self.kernel = ["@triton.jit"]
     self.kernel.append("def fxn("+','.join(f"data{i}" for i in range(len(self.bufs)))+"):")
 
     self.output_shape = list(self.shapes[0][:self.first_reduce])
@@ -90,13 +96,18 @@ class TritonASTKernel(ASTKernel):
     hash = hashlib.md5(self.key.encode('utf-8')).hexdigest()
     fn = f"/tmp/{hash}.py"
     kernel = '\n'.join(self.kernel)
-    print(kernel)
+    if DEBUG >= 4: print(kernel)
     with open(fn, "w") as f: f.write(kernel)
     codeObject = compile(kernel, fn, "exec")
     exec(codeObject, globals())
     program = globals()['fxn']
 
-    def runner(*bufs): return program[tuple(self.output_shape[::-1])](*[x.torch for x in bufs])
+    mem_estimate = sum(prod(x) for x in self.shapes)
+    def runner(*bufs):
+      GlobalCounters.global_ops += self.info.flops
+      GlobalCounters.global_mem += mem_estimate
+      return program[tuple(self.output_shape[::-1])](*[x.torch for x in bufs])
+    self.func_cache[self.key] = runner
     return runner
 
 class TritonBuffer(ExplicitExecAST):
