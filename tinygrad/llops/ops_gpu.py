@@ -68,6 +68,7 @@ class CLASTKernel(ASTKernel):
 
     tokens = []
     for o in self.buftokens[buf_index].offsets():
+      key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
       if (buf_index, o) not in self.loaded_keys:
         idxy, valid = self.sts[buf_index].expr_idxs(o)
         if const is not None:
@@ -80,8 +81,8 @@ class CLASTKernel(ASTKernel):
         if const is not None:
           self.loaded_keys[(buf_index,o)] = ldr
         else:
-          self.kernel.append(f"{ldr.decltype()} val{buf_index}_{o} = {ldr.tok};\n")
-          self.loaded_keys[(buf_index,o)] = Token(f"val{buf_index}_{o}", ldr.typ)
+          self.kernel.append(f"{ldr.decltype()} {key} = {ldr.tok};\n")
+          self.loaded_keys[(buf_index,o)] = Token(key, ldr.typ)
       tokens.append(self.loaded_keys[(buf_index,o)])
     return tokens
 
@@ -101,7 +102,11 @@ class CLASTKernel(ASTKernel):
           values[1] = [Token(f"clreduce({x.tok})", Types.FLOAT) for x in values[1]]
         elif values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
         elif values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
-      assert len(values[0]) == len(values[1]), f"values mismatch {values}"
+      #assert len(values[0]) == len(values[1]), f"values mismatch {values}"
+      # TODO: this is likely wrong
+      if len(values[0]) < len(values[1]):
+        assert len(values[1]) % len(values[0]) == 0
+        values[0] = values[0] * (len(values[1]) // len(values[0]))
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
@@ -256,13 +261,12 @@ class CLASTKernel(ASTKernel):
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop:
-      broadcast = self.buftokens[self.bufs.index(self.earlybufs[0])].size() // self.buftokens[0].size()
       full_shape = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
       full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
 
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, accumulators*broadcast, do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, accumulators, do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
     if self.group_for_reduce:
