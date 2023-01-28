@@ -91,11 +91,10 @@ class CLASTKernel(ASTKernel):
       if (buf_index, o) not in self.loaded_keys:
         idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
         if isinstance(self.bufs[buf_index]._buf, CLImage):
-          ldrt = f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */"
-          ldr = Token(f"({valid.cl} ? \\ \n   {ldrt} : (float4)(0.0, 0.0, 0.0, 0.0))" if str(valid) != "1" and not VALIDHACKS else ldrt, Types.FLOAT4)
+          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if self.buftokens[buf_index].typ == Types.FLOAT4 else 1)).cl}]", self.buftokens[buf_index].typ)
-          ldr = Token(f"({valid.cl} ? {ldr.tok} : 0.0f)", ldr.typ) if str(valid) != "1" else ldr
+        ldr = ldr if str(valid) == "1" or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else Token(f"({valid.cl} ? {ldr.tok} : 0.0f)", ldr.typ)
         self.kernel.append(f"{ldr.decltype()} val{buf_index}_{o} = {ldr.tok};\n")
         self.loaded_keys[(buf_index,o)] = Token(f"val{buf_index}_{o}", ldr.typ)
       tokens.append(self.loaded_keys[(buf_index,o)])
