@@ -6,7 +6,7 @@ from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
-from tinygrad.shape import ShapeTracker, View, ZeroView
+from tinygrad.shape import ShapeTracker, ZeroView
 from tinygrad.shape.symbolic import Variable, ModNode
 
 CUDA = int(os.getenv("CUDA", "0"))
@@ -39,9 +39,8 @@ class CLASTKernel(ASTKernel):
   start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
   # TODO: move to shapetracker
-  def compute_buf_index_symbolic(self, st, buf_index, offset=0):
-    view = View(self.shapes[buf_index], self.strides[buf_index], self.offsets[buf_index] + offset)
-    idx = view.expr_idxs([f"idx{i}" for i in range(self.shape_len)])
+  def compute_buf_index_symbolic(self, st, offset=0):
+    idx = st.views[-1].expr_idxs([f"idx{i}" for i in range(self.shape_len)], offset)
     valid = Variable.num(1)
     for v in st.views[0:-1][::-1]:
       if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
@@ -62,7 +61,7 @@ class CLASTKernel(ASTKernel):
     if len(value)*4 == self.buftokens[buf_index].size(): value = split_float4(value)
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     for v, o in zip(value, self.buftokens[buf_index].offsets()):
-      idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+      idxy, valid = self.compute_buf_index_symbolic(self.sts[buf_index], o)
       assert str(valid) == "1", "store must always be valid"
       assert self.buftokens[buf_index].typ == v.typ, f"buf must be {v.typ}"
       if isinstance(self.bufs[buf_index]._buf, CLImage):
@@ -80,7 +79,7 @@ class CLASTKernel(ASTKernel):
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", self.buftokens[buf_index].typ)
       if self.bufs[buf_index].st.needs_valid():
         for o in self.buftokens[buf_index].offsets():
-          _, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+          _, valid = self.compute_buf_index_symbolic(self.sts[buf_index], o)
           tokens.append(Token(f"({valid.cl} ? {const.tok} : 0.0f)", const.typ) if str(valid) != "1" else const)
         return tokens
       else:
@@ -89,7 +88,7 @@ class CLASTKernel(ASTKernel):
     # not constant folded
     for o in self.buftokens[buf_index].offsets():
       if (buf_index, o) not in self.loaded_keys:
-        idxy, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index, o)
+        idxy, valid = self.compute_buf_index_symbolic(self.sts[buf_index], o)
         if isinstance(self.bufs[buf_index]._buf, CLImage):
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         else:
@@ -228,27 +227,24 @@ class CLASTKernel(ASTKernel):
   # group_for_reduce will have to be better first
   def codegen(self):
     if DEBUG >= 3:
-      print("old:", self.shapes)
-      print("old:", self.strides)
+      print("old:", [x.shape for x in self.sts])
+      print("old:", [x.views[-1].strides for x in self.sts])
     
-    if not CUDA: self.hand_coded_optimizations()
+    #if not CUDA: self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
-    local_shape = [1] * self.first_reduce + self.group_for_reduce
-    local_shape += [1] * (self.shape_len - len(local_shape))
-    local_buffer = GPUBuffer(local_shape)
-    self.bufs.append(local_buffer)
-    self.shapes.append(self.bufs[-1].shape)
-    self.strides.append(self.bufs[-1].st.strides)
-    self.offsets.append(self.bufs[-1].st.offset)
-    self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
+    if len(self.group_for_reduce):
+      local_buffer = GPUBuffer([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))
+      self.bufs.append(local_buffer)
+      self.sts.append(local_buffer.st.copy())
+      self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
 
-    self.output_shape = list(self.shapes[0][:self.first_reduce]) + self.group_for_reduce
+    self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 3:
       print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
       print("output shape", self.output_shape)
       for i in range(len(self.bufs)):
-        print(self.buftokens[i], f"early:{'T' if self.bufs[i] in self.earlybufs else 'F'} image:{'T' if isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.shapes[i], self.strides[i])
+        print(self.buftokens[i], f"early:{'T' if self.bufs[i] in self.earlybufs else 'F'} image:{'T' if isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.sts[i])
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
@@ -271,8 +267,8 @@ class CLASTKernel(ASTKernel):
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop:
-      full_shape = [x for x in self.shapes if x != self.shapes[0]]
-      full_shape = self.shapes[0] if len(full_shape) == 0 else full_shape[0]
+      full_shape = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
+      full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
 
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
@@ -280,7 +276,7 @@ class CLASTKernel(ASTKernel):
     
     # middle
     if self.group_for_reduce:
-      lidx, lvalid = self.compute_buf_index_symbolic(local_buffer.st, -1)
+      lidx, lvalid = self.compute_buf_index_symbolic(local_buffer.st)
       assert str(lvalid) == "1", "local buffer must be valid"
 
       self.kernel.append(f"__local {accumulators[0].decltype()} {self.buftokens[-1].tok}[{prod(self.group_for_reduce)}];  // second stage\n")
@@ -314,7 +310,7 @@ class CLASTKernel(ASTKernel):
 
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
-    mem_estimate = sum(prod(x) for x in self.shapes)
+    mem_estimate = sum(prod(x.shape) for x in self.sts)
 
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
     def runner(*bufs):
