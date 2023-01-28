@@ -6,6 +6,8 @@
 
 ![Unit Tests](https://github.com/geohot/tinygrad/workflows/Unit%20Tests/badge.svg)
 
+![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)
+
 For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
 This may not be the best deep learning framework, but it is a deep learning framework.
