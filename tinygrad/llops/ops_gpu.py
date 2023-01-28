@@ -211,7 +211,8 @@ class CLASTKernel(ASTKernel):
 
     # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling)
     end_dimension = max([st.shape[-1] for st in self.sts])
-    if self.first_reduce < self.shape_len and end_dimension > 1 and end_dimension <= 3: self.upcast()
+    if self.first_reduce < self.shape_len and end_dimension > 1 and end_dimension <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
+      self.upcast()
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
