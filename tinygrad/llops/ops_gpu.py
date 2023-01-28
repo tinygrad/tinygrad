@@ -193,7 +193,7 @@ class CLASTKernel(ASTKernel):
     if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
-        if DEBUG >= 3: print("split opencl", base_shape, self.shapes[0])
+        if DEBUG >= 3: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
@@ -305,7 +305,7 @@ class CLASTKernel(ASTKernel):
   def print(self):
     super().print()
     for i in range(len(self.bufs)):
-      print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.shapes[i], self.strides[i])
+      print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.sts[i])
     print(self.fxn.prg)
 
 class GPUBuffer(ExplicitExecAST):

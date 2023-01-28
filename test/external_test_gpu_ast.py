@@ -55,6 +55,16 @@ class TestAST(unittest.TestCase):
     ast = LazyOp(MovementOps.RESHAPE, (op8,), (64, 1024, 4))
     compile_and_test_ast(ast)
 
+  def test_third_op_conv(self):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 8, 4), views=[View((1, 64, 128, 4, 4, 1, 1, 8, 4), (0, 4096, 32, 0, 0, 0, 0, 4, 1), 0)]), hostbuf=GPUBuffer(shape=(64, 1024, 4), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 8, 4), views=[View((1, 64, 128, 4, 4, 1, 1, 8, 4), (0, 0, 0, 128, 4, 0, 0, 16, 1), 0)]), hostbuf=GPUBuffer(shape=(4, 32, 4), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 64, 128, 4, 4, 1, 1, 1, 1))
+    buf2 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 1, 1), views=[View((1, 64, 128, 4, 4, 1, 1, 1, 1), (0, 0, 0, 4, 1, 1, 1, 1, 1), 0)]), hostbuf=GPUBuffer(shape=(16,), force_create=True))
+    op2 = LazyOp(BinaryOps.ADD, (op1,buf2,), None)
+    ast = LazyOp(MovementOps.RESHAPE, (op2,), (64, 512, 4))
+    compile_and_test_ast(ast)
+
   # VALIDHACKS=1 IMAGE=2 DEBUG=4 PYTHONPATH="." GPU=1 OPT=2 python3 test/external_test_gpu_ast.py TestAST.test_reduce_op
   # 164 time 27.75 ms running re_S128_4            with [128]           None            count  4 runtime 1016.06 us      2.07 GFLOPS () -> (128, 1)
   # 169 time 22.51 ms running matmul               with [4, 16, 128]    [4, 16, 16]     count  5 runtime  110.08 us     19.06 GFLOPS ('-DMATMUL',) -> (128, 1)
