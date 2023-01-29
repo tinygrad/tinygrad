@@ -17,13 +17,13 @@ from tinygrad.shape.symbolic import Variable
 
 class TritonASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.max(A, 0.)", UnaryOps.SIGN: "tl.where(A>0,-1,1)",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.maximum(A, 0.0)", UnaryOps.SIGN: "tl.where(A>0,1,0)",
     UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
-    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "(A**B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = max(A,B)"
+    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "tl.exp(tl.log(A)*B)", BinaryOps.CMPEQ: "(A==B)",
+    ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = tl.maximum(A,B)"
   }
-  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
+  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "float('-inf')"}
 
   # TODO: move to shapetracker
   def compute_buf_index_symbolic(self, st, buf_index, offset=0):
