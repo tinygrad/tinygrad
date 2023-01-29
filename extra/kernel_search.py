@@ -96,7 +96,7 @@ def search_one(ast, winning_interventions=[]):
   baseline = options[0]
   options = sorted(options, key=lambda x: x[0]*x[2])
   best = options[0]
-  print(f"{name:30s} {baseline[0]/1e3:8.2f} ms -> {best[0]/1e3:8.2f} ms *with* {winning_interventions} + {best[1]}")
+  print(f"{name:30s} {baseline[0]/1e3:8.2f} ms -> {best[0]/1e3:8.2f} ms {baseline[0]/best[0]:7.2f}x *with* {winning_interventions} + {best[1]}")
   return best
 
 def search(ast):
