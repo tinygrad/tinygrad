@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel
-from test.lib_test_ast import test_ast
+from extra.lib_test_ast import test_ast
 
 def compile_and_test_ast(ast):
   k = CLASTKernel(ast)

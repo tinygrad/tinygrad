@@ -364,7 +364,7 @@ class GPUBuffer(ExplicitExecAST):
       from extra.kernel_search import search_one, apply_intervention
       if k.key not in intervention_cache:
         winning_interventions : List[Any] = []
-        for i in range(10):
+        for i in range(1):   # NOTE: multiple interventions is breaking the ASTs
           oo = search_one(ast, winning_interventions)
           if oo[1] is None: break
           winning_interventions.append(oo[1])
@@ -377,6 +377,6 @@ class GPUBuffer(ExplicitExecAST):
       print(k.fxn.name)
       k.print()
     if TEST_AST:
-      from test.lib_test_ast import test_ast  # type: ignore
+      from extra.lib_test_ast import test_ast  # type: ignore
       test_ast(k)
     return k.ret
