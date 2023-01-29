@@ -20,7 +20,7 @@ def get_random_intervention(k):
     while 1:
       up_axis = random.randint(0, k.shape_len-1)
       amount = random.choice([4, 8])
-      if not all(x[up_axis] == 1 or x[up_axis]%amount == 0 for x in k.shapes): continue
+      if not all(st.shape[up_axis] == 1 or st.shape[up_axis]%amount == 0 for st in k.sts): continue
       return 1, up_axis, amount
 
 def apply_intervention(k, typ, *dat):
@@ -63,16 +63,16 @@ def search(ast):
     # TODO: support upcasting, splitting, and local grouping for reduce
     CL.time_sum = 0
     k.codegen()(*k.bufs)
-    if CL.time_sum < best_time:
-      print(f"accepting {inter} with time {best_time} -> {CL.time_sum}")
+    if CL.time_sum < best_time * 0.95:
+      print(f"accepting {inter} with time {best_time:.2f} -> {CL.time_sum:.2f} ratio {best_time/CL.time_sum:.2f}x")
       best_time = CL.time_sum
       winning_interventions.append(inter)
 
-  for i in range(200):
+  for i in range(100):
     try:
       test()
     except Exception as e:
-      #traceback.print_exc()
+      traceback.print_exc()
       pass
 
   # run best
@@ -138,6 +138,12 @@ if __name__ == "__main__":
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
     op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 1, 512, 512, 1, 1, 1, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (512, 512))
+  elif int(os.getenv("FASTCONV", "0")):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(32, 1, 32, 32, 32, 64, 3, 3), views=[View((32, 1, 32, 32, 32, 64, 3, 3), (73984, 73984, 0, 34, 1, 1156, 34, 1), 0)]), hostbuf=GPUBuffer(shape=(32, 64, 34, 34), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(32, 1, 32, 32, 32, 64, 3, 3), views=[View((32, 1, 32, 32, 32, 64, 3, 3), (0, 0, 576, 0, 0, 9, 3, 1), 0)]), hostbuf=GPUBuffer(shape=(32, 64, 3, 3), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (32, 1, 32, 32, 32, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (32, 32, 32, 32))
   else:
     # reduce
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(3, 1, 32, 3, 3, 32, 112, 112), views=[View((3, 32, 225, 225), (50176, 150528, 224, 1), 0), ZeroView((3, 32, 224, 224), ((0, 3), (0, 32), (0, 225), (0, 225))), View((3, 1, 32, 3, 3, 32, 112, 112), (1620000, 1620000, 0, 225, 1, 50625, 450, 2), 0)]), hostbuf=GPUBuffer(shape=(32, 3, 224, 224), force_create=True))

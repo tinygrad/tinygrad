@@ -356,7 +356,7 @@ class GPUBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp):
     k = CLASTKernel(ast)
     k.codegen()(*k.bufs)
-    if PRINT_AST == "1" or PRINT_AST == k.fxn.name:
+    if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
       print(k.fxn.name)
       k.print()
     if TEST_AST:
