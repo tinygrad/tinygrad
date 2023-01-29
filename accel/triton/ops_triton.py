@@ -1,12 +1,15 @@
 from __future__ import annotations
-import torch
 import hashlib
+from torch import float32
 import numpy as np
+# import pycuda.autoinit # type: ignore # pylint: disable=unused-import # noqa: F401
+import pycuda.autoprimaryctx # type: ignore # noqa: F401
+import pycuda.driver as cuda # type: ignore
 
 import triton # type: ignore # noqa: F401
 
 from typing import Union, Tuple, Optional, Dict, Any
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
+from tinygrad.ops import MovementOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import prod
 from tinygrad.ast import ASTKernel
@@ -105,7 +108,8 @@ class TritonASTKernel(ASTKernel):
     def runner(*bufs):
       GlobalCounters.global_ops += self.info.flops
       GlobalCounters.global_mem += mem_estimate
-      return program[tuple(self.output_shape[::-1])](*[x.torch for x in bufs])
+      # TODO add this to stream
+      return program[tuple(self.output_shape[::-1])](*[TritonWrapper(x.torch) for x in bufs])
     self.func_cache[self.key] = runner
     return runner
 
@@ -120,16 +124,31 @@ class TritonBuffer(ExplicitExecAST):
   @property
   def torch(self):
     if self._buf is None:
-      if self._backing is not None: self._buf = torch.from_numpy(self._backing).cuda()
-      else: self._buf = torch.empty(prod(self._base_shape), dtype=torch.float32, device='cuda')
+      self._buf = cuda.mem_alloc(4*prod(self._base_shape))
+      # TODO add this to stream
+      if self._backing is not None: cuda.memcpy_htod_async(self._buf, self._backing)
     return self._buf
 
   @staticmethod
   def fromCPU(x): return TritonBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
-  def toCPU(x): return x.contiguous().torch.cpu().numpy().reshape(x.shape)
+
+  def toCPU(self):
+    data = np.empty(self.shape, dtype=np.float32)
+    buf = self.contiguous() if self._buf is not None else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
+    # TODO add this to stream?
+    cuda.memcpy_dtoh(data, buf._buf)
+    return data
 
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     k = TritonASTKernel(ast)
     k.codegen()(*k.bufs)
     return k.ret
+
+class TritonWrapper:
+  def __init__(self, ptr):
+    self.ptr = ptr
+    self.dtype = float32
+
+  def data_ptr(self):
+    return int(self.ptr)
