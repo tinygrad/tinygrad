@@ -46,8 +46,7 @@ class ASTKernel:
     self.ast = ast
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
-    self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape)
-    if hasattr(self.ret, "cl"): self.ret.cl  # does the allocation of unbacked buffer, pylint: disable=W0104
+    self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True)
     self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
     self.buftokens = [Token(f"data{i}", Types.FLOAT, ptr=True) for i in range(len(self.bufs))]
     self.group_for_reduce : List[int] = []
