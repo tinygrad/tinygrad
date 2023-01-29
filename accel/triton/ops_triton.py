@@ -17,13 +17,13 @@ from tinygrad.shape.symbolic import Variable
 
 class TritonASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.max(A, 0.)", UnaryOps.SIGN: "tl.where(A>0,-1,1)",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.maximum(A, 0.0)", UnaryOps.SIGN: "tl.where(A>0,1,0)",
     UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
-    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "(A**B)", BinaryOps.CMPEQ: "(A==B)",
-    ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = max(A,B)"
+    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "tl.exp(tl.log(A)*B)", BinaryOps.CMPEQ: "(A==B)",
+    ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = tl.maximum(A,B)"
   }
-  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
+  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "float('-inf')"}
 
   # TODO: move to shapetracker
   def compute_buf_index_symbolic(self, st, buf_index, offset=0):
@@ -40,9 +40,9 @@ class TritonASTKernel(ASTKernel):
       # this is a load
       buf_index = self.bufs.index(x)
       if buf_index not in self.loaded:
-        # TODO: valid
         idx, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index)
-        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.load(data{buf_index} + {idx})")
+        valid_expr = str(valid).replace("&&", "*1*")
+        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx}), 0.0)")
         self.loaded.add(buf_index)
       return f"val{buf_index}"
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
@@ -83,7 +83,7 @@ class TritonASTKernel(ASTKernel):
       self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
       self.kernel += [("  "*(i-self.first_reduce)+f"  for idx{i} in range(0, {full_shape[i]}):") for i in range(self.first_reduce, self.shape_len)]
       self.kernel_prefix =  "  "*(self.shape_len - self.first_reduce)
-      self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.ast, "acc", True))
+      self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.reduceop, "acc", True))
       self.kernel_prefix =  ""
 
     code = self.ast_parse(self.ast, "acc")
@@ -113,6 +113,7 @@ class TritonASTKernel(ASTKernel):
 class TritonBuffer(ExplicitExecAST):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[TritonBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
     super().__init__(shape, hostbuf)
+    if hostbuf is not None and hostbuf._buf is None: hostbuf.torch
     self._buf : Optional[TritonBuffer] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
