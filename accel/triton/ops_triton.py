@@ -113,6 +113,7 @@ class TritonASTKernel(ASTKernel):
 class TritonBuffer(ExplicitExecAST):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[TritonBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
     super().__init__(shape, hostbuf)
+    if hostbuf is not None and hostbuf._buf is None: hostbuf.torch
     self._buf : Optional[TritonBuffer] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
