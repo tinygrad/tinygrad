@@ -3,7 +3,7 @@ import torch
 import hashlib
 import numpy as np
 
-import triton # noqa: F401
+import triton # type: ignore # noqa: F401
 
 from typing import Union, Tuple, Optional, Dict, Any
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
