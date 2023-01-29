@@ -83,7 +83,7 @@ class TritonASTKernel(ASTKernel):
       self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
       self.kernel += [("  "*(i-self.first_reduce)+f"  for idx{i} in range(0, {full_shape[i]}):") for i in range(self.first_reduce, self.shape_len)]
       self.kernel_prefix =  "  "*(self.shape_len - self.first_reduce)
-      self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.ast, "acc", True))
+      self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.reduceop, "acc", True))
       self.kernel_prefix =  ""
 
     code = self.ast_parse(self.ast, "acc")
