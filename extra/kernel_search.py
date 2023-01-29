@@ -28,8 +28,8 @@ def get_interventions(k):
       if k.sts[0].shape[up_axis] % amount == 0:
         p4.append((Interventions.SHIFT, (up_axis, amount, True)))
         p4.append((Interventions.SHIFT, (up_axis, amount, False)))
-  max_up = max(st.shape[k.first_reduce] for st in k.sts)
   p5 = []
+  #max_up = max(st.shape[k.first_reduce] for st in k.sts)
   #p5 = [(Interventions.REDUCE, (max_up,))]
   return p1+p2+p3+p4+p5
 
@@ -63,7 +63,7 @@ def apply_intervention(k, typ, dat):
 def run_and_time(k):
   prog = k.codegen()
   ret = []
-  for i in range(5):
+  for i in range(3):
     t1 = time.monotonic_ns()
     e = prog(*k.bufs)
     e.wait()
@@ -71,11 +71,11 @@ def run_and_time(k):
     t2, t3 = e.profile.start * OSX_TIMING_RATIO, e.profile.end * OSX_TIMING_RATIO
     #print(*[f"{(x-t1)*1e-3:7.2f} us" for x in [t1, t2, t3, t4]])  # TODO: this may be wrong on non OS X
     #assert t1 < t2 < t3 < t4, "timings not in order"
-    ret.append(t3-t2)
-    #ret.append(t4-t1)
+    #ret.append(t3-t2)
+    ret.append(t4-t1)
   return min(ret)
 
-def search_one(ast, winning_interventions):
+def search_one(ast, winning_interventions=[]):
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
   ints = get_interventions(k)
