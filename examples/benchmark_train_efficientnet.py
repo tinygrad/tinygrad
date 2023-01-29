@@ -37,12 +37,12 @@ if __name__ == "__main__":
     x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
     y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
 
-    if i < 2 or not CLCACHE:
+    if i < 3 or not CLCACHE:
       st = time.monotonic()
       out = model.forward(x_train)
       loss = out.logsoftmax().mul(y_train).mean()
       if ADAM: optimizer.t = 0    # TODO: fixing this requires optional constant folding
-      if i == 1 and CLCACHE: CL.CACHE = []
+      if i == 2 and CLCACHE: CL.CACHE = []
       if BACKWARD:
         optimizer.zero_grad()
         loss.backward()
@@ -61,7 +61,7 @@ if __name__ == "__main__":
         ops += prg.op_estimate
       et = time.monotonic()
 
-    if i == 1 and CLCACHE:
+    if i == 2 and CLCACHE:
       cl_cache = CL.CACHE
       CL.CACHE = None
 
