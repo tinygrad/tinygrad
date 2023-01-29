@@ -1,4 +1,4 @@
-import os, functools, time, platform
+import os, functools, platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List
@@ -6,6 +6,8 @@ from collections import defaultdict
 from tinygrad.ops import DEBUG
 
 OSX = platform.system() == "Darwin"
+OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
+
 CLCACHE = int(os.getenv("CLCACHE", "1"))
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
 
@@ -73,14 +75,12 @@ class CLProgram:
   def __call__(self, *args):
     CL.kernel_count += 1
     if DEBUG >= 4: print(args[0], args[1], self.prg)
-    if OSX and DEBUG >= 2: st = time.monotonic_ns()
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2:
       CL.cl_queue.finish()
-      # NOTE: Profiling is (sadly) broken in OS X, so we take the real kernel time
-      # BOUNTY: will paypal $50 to anyone who fixes this
-      et = (time.monotonic_ns() - st) if OSX else (e.profile.end - e.profile.start)
+      # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
+      et = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
     if DEBUG >= 1:
       CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else et
       CL.ops_sum += self.op_estimate
