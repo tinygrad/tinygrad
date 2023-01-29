@@ -1,36 +1,34 @@
 #!/usr/bin/env python
 import os, random, traceback
+import itertools
+from enum import Enum
 import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CL
+from tinygrad.runtime.opencl import OSX_TIMING_RATIO
 from test.lib_test_ast import test_ast
 
-def get_random_intervention(k):
-  typ = random.randint(0, 1)
-  if typ == 0:
-    while 1:
-      a1 = random.randint(0, k.shape_len-1)
-      a2 = random.randint(0, k.shape_len-1)
-      if a1 == a2: continue
-      if a1 < k.first_reduce and a2 >= k.first_reduce: continue
-      if a1 >= k.first_reduce and a2 < k.first_reduce: continue
-      return 0, a1, a2
-  elif typ == 1:
-    while 1:
-      up_axis = random.randint(0, k.shape_len-1)
-      amount = random.choice([4, 8])
+Interventions = Enum("Interventions", ["SWAP", "UPCAST"])
+def get_interventions(k):
+  p1 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce), 2)]
+  p2 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce, k.shape_len), 2)]
+  p3 = []
+  for up_axis in range(k.shape_len):
+    for amount in [2,4,8]:
+      if all(st.shape[up_axis] == 1 for st in k.sts): continue
       if not all(st.shape[up_axis] == 1 or st.shape[up_axis]%amount == 0 for st in k.sts): continue
-      return 1, up_axis, amount
+      p3.append((Interventions.UPCAST, (up_axis, amount)))
+  return p1+p2+p3
 
-def apply_intervention(k, typ, *dat):
-  if typ == 0:
+def apply_intervention(k, typ, dat):
+  if typ == Interventions.SWAP:
     # swap axes
     a1, a2 = dat
     new_order = list(range(0, k.shape_len))
     new_order[a1], new_order[a2] = new_order[a2], new_order[a1] 
     k.reshape_and_permute(None, new_order)
-  elif typ == 1:
+  elif typ == Interventions.UPCAST:
     # upcast
     up_axis, amount = dat[0], dat[1]
     # no change, we added a dimension
@@ -40,40 +38,45 @@ def apply_intervention(k, typ, *dat):
     # drop the last dimension
     k.upcast()
 
+def run_and_time(k):
+  try:
+    prog = k.codegen()
+    ret = []
+    for i in range(3):
+      e = prog(*k.bufs)
+      CL.cl_queue.finish()
+      ret.append((e.profile.end - e.profile.start) * OSX_TIMING_RATIO)
+    return min(ret)
+  except Exception:
+    return float('inf')
 
-def search(ast):
-  # get baseline
+def search_one(ast, winning_interventions):
   k = CLASTKernel(ast)
-  for i in range(3):
-    CL.time_sum = 0
-    k.codegen()(*k.bufs)
-
-  winning_interventions = []
-  best_time = baseline = CL.time_sum
-
-  def test():
-    nonlocal winning_interventions, best_time
+  for w in winning_interventions: apply_intervention(k, *w)
+  ints = get_interventions(k)
+  options = [(run_and_time(k), None, 0.9)]
+  print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
+  for int in ints:
     k = CLASTKernel(ast)
     for w in winning_interventions: apply_intervention(k, *w)
+    apply_intervention(k, *int)
+    options.append((run_and_time(k), int, 1.0))
+    print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
+  options = sorted(options, key=lambda x: x[0]*x[2])
+  return options[0]
 
-    inter = get_random_intervention(k)
-    apply_intervention(k, *inter)
-    k.simplify_ones()
+def search(ast):
+  k = CLASTKernel(ast)
+  best_time = baseline = run_and_time(k)
 
-    # TODO: support upcasting, splitting, and local grouping for reduce
-    CL.time_sum = 0
-    k.codegen()(*k.bufs)
-    if CL.time_sum < best_time * 0.95:
-      print(f"accepting {inter} with time {best_time:.2f} -> {CL.time_sum:.2f} ratio {best_time/CL.time_sum:.2f}x")
-      best_time = CL.time_sum
-      winning_interventions.append(inter)
-
-  for i in range(100):
-    try:
-      test()
-    except Exception as e:
-      traceback.print_exc()
-      pass
+  winning_interventions = []
+  for i in range(10):
+    print(winning_interventions)
+    oo = search_one(ast, winning_interventions)
+    print(oo)
+    if oo[1] is None: break
+    winning_interventions.append(oo[1])
+    best_time = oo[0]
 
   # run best
   print(f"winning interventions {winning_interventions}")
