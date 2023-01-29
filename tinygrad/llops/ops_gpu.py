@@ -305,7 +305,7 @@ class CLASTKernel(ASTKernel):
 
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
-    mem_estimate = sum(prod(x.shape) for x in self.sts)
+    mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
 
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
     def runner(*bufs):

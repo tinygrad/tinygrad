@@ -44,9 +44,9 @@ def apply_intervention(k, typ, *dat):
 def search(ast):
   # get baseline
   k = CLASTKernel(ast)
-  CL.time_sum = 0
-  #k.hand_coded_optimizations()
-  k.codegen()(*k.bufs)
+  for i in range(3):
+    CL.time_sum = 0
+    k.codegen()(*k.bufs)
 
   winning_interventions = []
   best_time = baseline = CL.time_sum
@@ -68,7 +68,7 @@ def search(ast):
       best_time = CL.time_sum
       winning_interventions.append(inter)
 
-  for i in range(100):
+  for i in range(200):
     try:
       test()
     except Exception as e:
