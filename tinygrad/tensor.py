@@ -2,7 +2,7 @@
 from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
-from tinygrad.helpers import prod, argfix, make_pair
+from tinygrad.helpers import prod, argfix, make_pair, idxfix
 from typing import List, Tuple, Callable, Optional
 from tinygrad.lazy import Device, LazyBuffer
 
@@ -154,15 +154,16 @@ class Tensor:
   # ***** non first class ops (hlops) *****
 
   def __getitem__(self, val):
-    arg, new_shape = [], []
-    for i, rs in enumerate(val if isinstance(val, (list, tuple)) else [val]) if val is not None else []:
-      s = slice(rs, rs+1, None) if isinstance(rs, int) else rs
-      arg.append((s.start if s.start is not None else 0, (s.stop if s.stop>=0 else self.shape[i]+s.stop) if s.stop is not None else self.shape[i]))
-      assert s.step is None or s.step == 1
-      if not isinstance(rs, int):  # don't include in shape if it's an int
-        new_shape.append(arg[-1][1] - arg[-1][0])
-    new_shape += [self.shape[i] for i in range(len(arg), len(self.shape))]
-    return self.slice(arg = arg + [(0,self.shape[i]) for i in range(len(arg), len(self.shape))]).reshape(new_shape if len(new_shape) else (1,))
+    new_slice, new_shape = [], []
+    val = [val] if not isinstance(val, (list, tuple)) else val
+    assert all(s.step is None or s.step == 1 for s in val if isinstance(val, slice))
+    for sz,s in zip(self.shape, (v for v in val if v is not None)):
+      new_slice.append((idxfix(s, sz), idxfix(s, sz)+1) if isinstance(s, int) else (idxfix(s.start, sz, 0), idxfix(s.stop, sz, sz)))
+    for sz, s in zip(self.shape, (v for v in val if not isinstance(v, int))):
+      new_shape.append(1 if s is None else idxfix(s.stop, sz, sz) - idxfix(s.start, sz, 0))
+    new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
+    new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
+    return self.slice(arg = new_slice).reshape(new_shape if len(new_shape) else (1,))
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim

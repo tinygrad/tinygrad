@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import unittest
+import itertools
 from tinygrad.tensor import Tensor, Device
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
@@ -19,6 +20,13 @@ class TestTinygrad(unittest.TestCase):
     a += b
     val2 = a.numpy()
     np.testing.assert_allclose(val1, val2)
+
+  def test_slicing(self):
+    x = Tensor.randn(10,10)
+    slices = [0,1,-1,None] + [np.s_[s:e] for s,e in itertools.combinations([0,1,-1,None], r=2)]
+    fmt = lambda s: f'{s.start}:{s.stop}' if isinstance(s, slice) else s
+    for a, b in itertools.product(slices, slices):
+      np.testing.assert_equal(x.numpy()[a,b], x[a,b].numpy(), f'Test failed for slice x[{fmt(a)},{fmt(b)}]')
 
   def test_backward_pass(self):
     def test_tinygrad():
