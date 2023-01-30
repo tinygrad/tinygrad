@@ -7,6 +7,7 @@ import pycuda.autoprimaryctx # type: ignore # noqa: F401
 import pycuda.driver as cuda # type: ignore
 
 import triton # type: ignore # noqa: F401
+import triton.language as tl  # type: ignore # noqa: F401
 
 from typing import Union, Tuple, Optional, Dict, Any
 from tinygrad.ops import MovementOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
@@ -16,6 +17,8 @@ from tinygrad.ast import ASTKernel
 
 from tinygrad.shape import View, ZeroView
 from tinygrad.shape.symbolic import Variable
+
+stream = cuda.Stream()
 
 class TritonASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
@@ -108,8 +111,7 @@ class TritonASTKernel(ASTKernel):
     def runner(*bufs):
       GlobalCounters.global_ops += self.info.flops
       GlobalCounters.global_mem += mem_estimate
-      # TODO add this to stream
-      return program[tuple(self.output_shape[::-1])](*[TritonWrapper(x.torch) for x in bufs])
+      return program[tuple(self.output_shape[::-1])](*[TritonWrapper(x.torch) for x in bufs], stream=stream.handle)
     self.func_cache[self.key] = runner
     return runner
 
@@ -125,8 +127,7 @@ class TritonBuffer(ExplicitExecAST):
   def torch(self):
     if self._buf is None:
       self._buf = cuda.mem_alloc(4*prod(self._base_shape))
-      # TODO add this to stream
-      if self._backing is not None: cuda.memcpy_htod_async(self._buf, self._backing)
+      if self._backing is not None: cuda.memcpy_htod_async(self._buf, self._backing, stream=stream)
     return self._buf
 
   @staticmethod
@@ -135,8 +136,8 @@ class TritonBuffer(ExplicitExecAST):
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
     buf = self.contiguous() if self._buf is not None else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
-    # TODO add this to stream?
-    cuda.memcpy_dtoh(data, buf._buf)
+    # TODO should this be sync?
+    cuda.memcpy_dtoh_async(data, buf._buf, stream=stream)
     return data
 
   @classmethod
