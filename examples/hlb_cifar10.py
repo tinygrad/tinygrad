@@ -13,6 +13,7 @@ from tinygrad.tensor import Tensor
 from extra.training import train, evaluate
 from extra.utils import get_parameters
 from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import get_prop
 
 num_classes = 10
 
@@ -86,7 +87,8 @@ def fetch_batch(X_train, Y_train, BS):
   Y = Tensor(Y.reshape(BS, num_classes))
   return X.realize(), Y.realize()
 
-CLCACHE = int(os.getenv("CLCACHE", "0"))
+CLCACHE = int(get_prop("CLCACHE", 0))
+
 def train_cifar():
   Tensor.training = True
   X_train,Y_train = fetch_cifar(train=True)

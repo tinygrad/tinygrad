@@ -7,7 +7,7 @@ import tinygrad.nn.optim as optim
 from tinygrad.tensor import Tensor
 from tinygrad.llops.ops_gpu import CL
 from tinygrad.ops import GlobalCounters
-
+from tinygrad.helpers import get_prop
 import gc
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
@@ -18,7 +18,7 @@ CNT = int(os.getenv("CNT", 10))
 BACKWARD = int(os.getenv("BACKWARD", 0))
 TRAINING = int(os.getenv("TRAINING", 1))
 ADAM = int(os.getenv("ADAM", 0))
-CLCACHE = int(os.getenv("CLCACHE", "0"))
+CLCACHE = int(get_prop("CLCACHE", "0"))
 
 if __name__ == "__main__":
   print(f"NUM:{NUM} BS:{BS} CNT:{CNT}")
