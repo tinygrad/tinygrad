@@ -83,7 +83,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(ret.min, 0)
     self.assertEqual(ret.max, 0)
     ret = Variable("a", 0, 6) < 3
-    self.assertEqual(ret.min, 0)  # TODO: is this right?
+    self.assertEqual(ret.min, 0)
     self.assertEqual(ret.max, 1)
     ret = Variable("a", 0, 6) < 8
     self.assertEqual(ret.min, 1)
