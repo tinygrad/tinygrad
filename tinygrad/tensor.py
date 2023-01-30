@@ -2,7 +2,7 @@
 from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
-from tinygrad.helpers import prod, argfix, make_pair, idxfix
+from tinygrad.helpers import prod, argfix, make_pair, idxfix, slcfix
 from typing import List, Callable, Optional
 from tinygrad.lazy import Device, LazyBuffer
 
@@ -157,10 +157,12 @@ class Tensor:
     new_slice, new_shape = [], []
     val = [val] if not isinstance(val, (list, tuple)) else val
     assert all(s.step is None or s.step == 1 for s in val if isinstance(val, slice))
-    for sz,s in zip(self.shape, (v for v in val if v is not None)):
-      new_slice.append((idxfix(s, sz), idxfix(s, sz)+1) if isinstance(s, int) else (idxfix(s.start, sz, 0), idxfix(s.stop, sz, sz)))
+    for i,(sz,s) in enumerate(zip(self.shape, (v for v in val if v is not None))):
+      if isinstance(s, int) and not (-sz <= s < sz):
+        raise IndexError(f"Index {s} is out of bounds for dimension {i} with size {sz}")
+      new_slice.append((idxfix(s, sz), idxfix(s, sz)+1) if isinstance(s, int) else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
     for sz, s in zip(self.shape, (v for v in val if not isinstance(v, int))):
-      new_shape.append(1 if s is None else idxfix(s.stop, sz, sz) - idxfix(s.start, sz, 0))
+      new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
     new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
     return self.slice(arg = new_slice).reshape(new_shape if len(new_shape) else (1,))

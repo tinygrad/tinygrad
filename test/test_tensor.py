@@ -23,10 +23,13 @@ class TestTinygrad(unittest.TestCase):
 
   def test_slicing(self):
     x = Tensor.randn(10,10)
-    slices = [0,1,-1,None] + [np.s_[s:e] for s,e in itertools.combinations([0,1,-1,None], r=2)]
+    slices = [0,1,9,-1,-10,None] + [slice(s,e) for s,e in itertools.combinations([0,1,-1,None], r=2)] + [slice(9,11), slice(-11,-9)]
     fmt = lambda s: f'{s.start}:{s.stop}' if isinstance(s, slice) else s
     for a, b in itertools.product(slices, slices):
       np.testing.assert_equal(x.numpy()[a,b], x[a,b].numpy(), f'Test failed for slice x[{fmt(a)},{fmt(b)}]')
+    for s in [-11,10]:
+      with self.assertRaises(IndexError):
+        x[s]
 
   def test_backward_pass(self):
     def test_tinygrad():
