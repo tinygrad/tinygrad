@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict
 from copy import copy
 import os, sys, weakref
-from tinygrad.helpers import ConvArgs, get_available_llops, prod
+from tinygrad.helpers import ConvArgs, env_numeric, get_available_llops, prod
 from tinygrad.shape import ShapeTracker
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, DEBUG
 from tinygrad.graph import log_op
@@ -10,9 +10,9 @@ from tinygrad.graph import log_op
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
-OPT = int(os.getenv("OPT", "2"))
-NOCONV = int(os.getenv("NOCONV", "0"))
-IMAGE = int(os.getenv("IMAGE", "0"))
+OPT = env_numeric("OPT", "2")
+NOCONV = env_numeric("NOCONV", "0")
+IMAGE = env_numeric("IMAGE", "0")
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
@@ -125,7 +125,7 @@ def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if
 def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
 
-LAZY = int(os.getenv("LAZY", "1"))
+LAZY = env_numeric("LAZY", "1")
 
 class LazyBuffer:
   lazycache : weakref.WeakValueDictionary[Tuple[str, OpType, LazyOp], LazyBuffer] = weakref.WeakValueDictionary()
