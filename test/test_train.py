@@ -1,6 +1,7 @@
 import os
 import unittest
 import time
+from tinygrad.helpers import get_prop
 import tinygrad.nn.optim as optim
 import numpy as np
 from tinygrad.tensor import Device
@@ -11,7 +12,7 @@ from models.transformer import Transformer
 from models.vit import ViT
 from models.resnet import ResNet18
 
-BS = int(os.getenv("BS", "2"))
+BS = get_prop("BS", 2)
 
 def train_one_step(model,X,Y):
   params = get_parameters(model)

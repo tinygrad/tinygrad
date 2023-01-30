@@ -10,6 +10,7 @@ def colored(st, color): return f"\u001b[{30+['black', 'red', 'green', 'yellow', 
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def modn(x, a): return -((-x)%a) if x < 0 else x%a
 def make_pair(x): return (x,x) if isinstance(x, int) else x
+def get_prop(name, default=None): return type(default)(os.getenv(name, default)) if default is not None else os.getenv(name)
 
 def reduce_shape(shape, axis): return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 def shape_to_axis(old_shape, new_shape):

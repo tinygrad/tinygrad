@@ -1,5 +1,6 @@
 
 import numpy as np
+from tinygrad.helpers import get_prop
 """
 fn = "gs://vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0.npz"
 import tensorflow as tf
@@ -15,7 +16,7 @@ from models.vit import ViT
 import os
 
 Tensor.training = False
-if int(os.getenv("LARGE", "0")) == 1:
+if get_prop("LARGE", 0) == 1:
   m = ViT(embed_dim=768, num_heads=12)
 else:
   # tiny

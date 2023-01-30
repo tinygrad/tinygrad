@@ -3,12 +3,13 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List
 from collections import defaultdict
+from tinygrad.helpers import get_prop
 from tinygrad.ops import DEBUG
 
 OSX = platform.system() == "Darwin"
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
-CLCACHE = int(os.getenv("CLCACHE", "1"))
+CLCACHE = get_prop("CLCACHE", 1)
 FLOAT16 = int(os.getenv("FLOAT16", "0"))
 
 class CL:

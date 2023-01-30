@@ -3,6 +3,7 @@ import traceback
 import time
 import numpy as np
 from models.efficientnet import EfficientNet
+from tinygrad.helpers import get_prop
 from tinygrad.tensor import Tensor
 from extra.utils import get_parameters
 from tqdm import trange
@@ -37,16 +38,16 @@ if __name__ == "__main__":
   if TINY:
     model = TinyConvNet(classes)
   elif TRANSFER:
-    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
+    model = EfficientNet(get_prop("NUM", 0), classes, has_se=True)
     model.load_from_pretrained()
   else:
-    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=False)
+    model = EfficientNet(get_prop("NUM", 0), classes, has_se=False)
 
   parameters = get_parameters(model)
   print("parameter count", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 
-  BS, steps = int(os.getenv("BS", "64" if TINY else "16")), int(os.getenv("STEPS", "2048"))
+  BS, steps = get_prop("BS", "64" if TINY else "16"), get_prop("STEPS", "2048")
   print("training with batch size %d for %d steps" % (BS, steps))
 
   if IMAGENET:

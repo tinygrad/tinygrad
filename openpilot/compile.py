@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 import os, time, io, pathlib, sys
+
+from tinygrad.helpers import get_prop
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-if os.getenv("OPT", None) is None:
+if get_prop("OPT", None) is None:
   os.environ['OPT'] = '99'
-if os.getenv("GPU", None) is None:
+if get_prop("GPU", None) is None:
   os.environ['GPU'] = '1'
 
-ALLOWED_KERNEL_COUNT = int(os.getenv("ALLOWED_KERNEL_COUNT", 0))
-DEBUGCL = int(os.getenv("DEBUGCL", 0))
+ALLOWED_KERNEL_COUNT = get_prop("ALLOWED_KERNEL_COUNT", 0)
+DEBUGCL = get_prop("DEBUGCL", 0)
 
 import onnx
 import numpy as np
@@ -105,7 +107,7 @@ def compile(dat, output_fn):
   from extra.thneed import Thneed
   t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
   CL.CACHE = None
-  if int(os.getenv("OPTWG", "0")):
+  if get_prop("OPTWG", 0):
     t.optimize_local_workgroup()
 
   # save thneed (before run)

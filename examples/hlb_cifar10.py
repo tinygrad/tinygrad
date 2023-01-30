@@ -87,7 +87,7 @@ def fetch_batch(X_train, Y_train, BS):
   Y = Tensor(Y.reshape(BS, num_classes))
   return X.realize(), Y.realize()
 
-CLCACHE = int(get_prop("CLCACHE", 0))
+CLCACHE = get_prop("CLCACHE", 0)
 
 def train_cifar():
   Tensor.training = True

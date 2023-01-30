@@ -3,9 +3,10 @@ import atexit
 import itertools
 from collections import defaultdict
 from typing import Dict, List
+from tinygrad.helpers import get_prop
 from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType
 
-GRAPH = int(os.getenv("GRAPH", "0"))
+GRAPH = get_prop("GRAPH", 0)
 
 # **** debugging and graphing ****
 
@@ -16,7 +17,7 @@ if GRAPH:
   def save_graph_exit():
     for k,v in cnts.items():
       print(k, v)
-    if int(os.getenv("PRUNEGRAPH", "0")):
+    if get_prop("PRUNEGRAPH", 0):
       dead_nodes = []
       for n in G.nodes:
         # prune movementops and loadops

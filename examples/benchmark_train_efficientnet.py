@@ -18,7 +18,7 @@ CNT = int(os.getenv("CNT", 10))
 BACKWARD = int(os.getenv("BACKWARD", 0))
 TRAINING = int(os.getenv("TRAINING", 1))
 ADAM = int(os.getenv("ADAM", 0))
-CLCACHE = int(get_prop("CLCACHE", "0"))
+CLCACHE = get_prop("CLCACHE", "0")
 
 if __name__ == "__main__":
   print(f"NUM:{NUM} BS:{BS} CNT:{CNT}")
