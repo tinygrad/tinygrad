@@ -8,7 +8,11 @@ from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CL
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
+from tinygrad.ops import DEBUG
 from extra.lib_test_ast import test_ast
+
+import pickle, dbm
+intervention_cache = dbm.open('/tmp/kopt.db', 'c')
 
 Interventions = Enum("Interventions", ["SWAP", "UPCAST", "SHIFT", "REDUCE"])
 def get_interventions(k):
@@ -96,8 +100,21 @@ def search_one(ast, winning_interventions=[]):
   baseline = options[0]
   options = sorted(options, key=lambda x: x[0]*x[2])
   best = options[0]
-  print(f"{name:30s} {baseline[0]/1e3:8.2f} ms -> {best[0]/1e3:8.2f} ms {baseline[0]/best[0]:7.2f}x *with* {winning_interventions} + {best[1]}")
+  print(f"{name:30s} {baseline[0]/1e3:8.2f} us -> {best[0]/1e3:8.2f} us {baseline[0]/best[0]:7.2f}x *with* {winning_interventions} + {best[1]}")
   return best
+
+def apply_optimization(k, ast, max_interventions=1, cache=True):
+  from extra.kernel_search import search_one, apply_intervention
+  if k.key not in intervention_cache or cache == False:
+    winning_interventions = []
+    for i in range(max_interventions):   # NOTE: multiple interventions is breaking the ASTs
+      oo = search_one(ast, winning_interventions)
+      if oo[1] is None: break
+      winning_interventions.append(oo[1])
+    intervention_cache[k.key] = pickle.dumps(winning_interventions)
+  ic = pickle.loads(intervention_cache[k.key])
+  if DEBUG >= 3: print("intervention", ic)
+  for w in ic: apply_intervention(k, *w)
 
 def search(ast):
   k = CLASTKernel(ast)

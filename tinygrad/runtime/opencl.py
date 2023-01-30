@@ -75,6 +75,8 @@ class CLProgram:
   def __call__(self, *args):
     CL.kernel_count += 1
     if DEBUG >= 4: print(args[0], args[1], self.prg)
+    # print the PTX for NVIDIA. TODO: probably broken for everything else
+    if DEBUG >= 5: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2 and CL.CACHE is None:

@@ -14,9 +14,13 @@ def fetch_mnist():
   Y_test = parse(os.path.dirname(__file__)+"/mnist/t10k-labels-idx1-ubyte.gz")[8:]
   return X_train, Y_train, X_test, Y_test
 
-def fetch_cifar():
+def fetch_cifar(train=True):
   tt = tarfile.open(fileobj=io.BytesIO(fetch('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz')), mode='r:gz')
-  db = pickle.load(tt.extractfile('cifar-10-batches-py/data_batch_1'), encoding="bytes")
+  if train:
+    # TODO: data_batch 2-5
+    db = pickle.load(tt.extractfile('cifar-10-batches-py/data_batch_1'), encoding="bytes")
+  else:
+    db = pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")
   X = db[b'data'].reshape((-1, 3, 32, 32))
   Y = np.array(db[b'labels'])
   return X, Y

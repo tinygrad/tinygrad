@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Union, Set, Any
+from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
@@ -19,10 +19,6 @@ NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a swit
 KOPT = int(os.getenv("KOPT", "0"))
 PRINT_AST = os.getenv("PRINT_AST", "0")
 TEST_AST = int(os.getenv("TEST_AST", "0"))
-
-if KOPT:
-  import pickle, dbm
-  intervention_cache = dbm.open('/tmp/kopt.db', 'c')
 
 def group_float4(x):
   assert all(y.typ == Types.FLOAT for y in x) and len(x)%4 == 0
@@ -361,17 +357,8 @@ class GPUBuffer(ExplicitExecAST):
   def exec_ast(cls, ast:LazyOp):
     k = CLASTKernel(ast)
     if KOPT:
-      from extra.kernel_search import search_one, apply_intervention
-      if k.key not in intervention_cache:
-        winning_interventions : List[Any] = []
-        for i in range(1):   # NOTE: multiple interventions is breaking the ASTs
-          oo = search_one(ast, winning_interventions)
-          if oo[1] is None: break
-          winning_interventions.append(oo[1])
-        intervention_cache[k.key] = pickle.dumps(winning_interventions)
-      ic = pickle.loads(intervention_cache[k.key])
-      if DEBUG >= 3: print(ic)
-      for w in ic: apply_intervention(k, *w)
+      from extra.kernel_search import apply_optimization
+      apply_optimization(k, ast)
     k.codegen()(*k.bufs)
     if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
       print(k.fxn.name)

@@ -50,7 +50,8 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
     for i in trange((len(Y_test)-1)//BS+1, disable=os.getenv('CI') is not None):
       x = Tensor(transform(X_test[i*BS:(i+1)*BS]))
-      Y_test_preds_out[i*BS:(i+1)*BS] = model.forward(x).cpu().data
+      out = model.forward(x) if hasattr(model, 'forward') else model(x)
+      Y_test_preds_out[i*BS:(i+1)*BS] = out.cpu().data
     Y_test_preds = np.argmax(Y_test_preds_out, axis=-1)
     Y_test = target_transform(Y_test)
     return (Y_test == Y_test_preds).mean(), Y_test_preds
