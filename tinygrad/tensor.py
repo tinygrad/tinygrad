@@ -205,7 +205,7 @@ class Tensor:
   dot = matmul
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Tuple[int, ...]): return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
+  def pad2d(self, padding:Tuple[int, ...]): return self.slice(arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])
   # TODO: this is totally not transpose
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
