@@ -92,7 +92,7 @@ class TestSymbolic(unittest.TestCase):
   def test_and_fold(self):
     ret = Variable.ands([Variable.num(0), Variable("a", 0, 1)])
     self.assertEqual(ret.min, 0)
-    self.assertEqual(ret.max, 1)
+    self.assertEqual(ret.max, 0)
 
   def test_and_remove(self):
     ret = Variable.ands([Variable.num(1), Variable("a", 0, 1)])
