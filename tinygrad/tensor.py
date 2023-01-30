@@ -2,7 +2,7 @@
 from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
-from tinygrad.helpers import prod, argfix
+from tinygrad.helpers import prod, argfix, make_pair
 from typing import List, Tuple, Callable, Optional
 from tinygrad.lazy import Device, LazyBuffer
 
@@ -251,8 +251,8 @@ class Tensor:
     xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px] if (self.shape[2]%py != 0) or (self.shape[3]%px != 0) else self
     return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
 
-  def avg_pool2d(self, kernel_size=(2,2)): return self._pool2d(*kernel_size).mean(axis=(3,5))
-  def max_pool2d(self, kernel_size=(2,2)): return self._pool2d(*kernel_size).max(axis=(3,5))
+  def avg_pool2d(self, kernel_size=(2,2)): return self._pool2d(*make_pair(kernel_size)).mean(axis=(3,5))
+  def max_pool2d(self, kernel_size=(2,2)): return self._pool2d(*make_pair(kernel_size)).max(axis=(3,5))
 
   def conv2d(self, weight, bias=None, **kwargs):
     ret = self._conv2d(weight, **kwargs)

@@ -24,7 +24,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
     y = target_transform(Y_train[samp])
 
     # network
-    out = model.forward(x)
+    out = model.forward(x) if hasattr(model, 'forward') else model(x)
 
     loss = lossfn(out, y)
     optim.zero_grad()
