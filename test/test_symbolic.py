@@ -1,4 +1,4 @@
-i#!/usr/bin/env python
+#!/usr/bin/env python
 import unittest
 from tinygrad.shape.symbolic import Variable
 
