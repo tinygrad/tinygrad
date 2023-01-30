@@ -2,6 +2,7 @@ from tinygrad.tensor import Tensor
 import pickle
 import numpy as np
 from tinygrad.helpers import prod
+from tqdm import tqdm
 
 def fetch(url):
   if url.startswith("/"):
@@ -15,11 +16,16 @@ def fetch(url):
       dat = f.read()
   else:
     print("fetching %s" % url)
-    r = requests.get(url)
+    r = requests.get(url, stream=True)
+    total_size = int(r.headers.get('content-length', 0))
+    block_size = 1024
+    progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True)
+    with open(fp+".tmp", "wb") as file:
+        for data in r.iter_content(block_size):
+            progress_bar.update(len(data))
+            file.write(data)
+    progress_bar.close()
     assert r.status_code == 200
-    dat = r.content
-    with open(fp+".tmp", "wb") as f:
-      f.write(dat)
     os.rename(fp+".tmp", fp)
   return dat
 
