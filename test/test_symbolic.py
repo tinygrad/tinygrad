@@ -102,30 +102,36 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_factor(self):
     # this is technically wrong, if b is 0 the output will be negative
     ret = Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28
-    self.assertEqual(ret.min, 27)
-    self.assertEqual(ret.max, 9)
+    self.assertEqual(ret.min, -1)
+    self.assertEqual(ret.max, 27)
 
   def test_div_factor(self):
     # err, that *2 shouldn't be needed
     ret = Variable.sum([Variable.num(-44), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40
     # TODO: this isn't right
     self.assertEqual(str(ret), "(b+-1)")
+    self.assertEqual(ret.min, -1)
+    self.assertEqual(ret.max, 9)
   
   def test_mul_div(self):
     ret = (Variable("a", 0, 10)*4)//4
-    self.assertEqual(str(ret), "a")
+    self.assertEqual(ret.min, 0)
+    self.assertEqual(ret.max, 10)
 
   def test_mul_div_factor_mul(self):
     ret = (Variable("a", 0, 10)*8)//4
-    self.assertEqual(str(ret), "(a*2)")
+    self.assertEqual(ret.min, 0)
+    self.assertEqual(ret.max, 20)
 
   def test_mul_div_factor_div(self):
     ret = (Variable("a", 0, 10)*4)//8
-    self.assertEqual(str(ret), "(a//2)")
+    self.assertEqual(ret.min, 0)
+    self.assertEqual(ret.max, 5)
 
   def test_div_remove(self):
     ret = Variable.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4
-    self.assertEqual(str(ret), "idx0")
+    self.assertEqual(ret.min, 0)
+    self.assertEqual(ret.max, 127)
 
 if __name__ == '__main__':
   unittest.main()
