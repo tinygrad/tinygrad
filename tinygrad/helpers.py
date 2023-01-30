@@ -20,9 +20,9 @@ ConvArgs = namedtuple('ConvArgs', ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox
 def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, out_shape=None):
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout
   cout,cin,H,W = w_shape
-  sy,sx = (stride, stride) if isinstance(stride, int) else stride
+  sy,sx = make_pair(stride)
   px,px_,py,py_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
-  dy,dx = (dilation, dilation) if isinstance(dilation, int) else dilation
+  dy,dx = make_pair(dilation)
   bs,cin_,iy,ix = x_shape
 
   # this can change px_ and py_ to make the out_shape right
