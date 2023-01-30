@@ -165,7 +165,7 @@ class LLVMBuffer(ExplicitExecAST):
     ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
   }
 
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, force_create=False):
     super().__init__(shape, hostbuf)
     # TODO: force alignment?
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
