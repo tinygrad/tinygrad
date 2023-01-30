@@ -18,12 +18,13 @@ def fetch(url):
     print("fetching %s" % url)
     r = requests.get(url, stream=True)
     assert r.status_code == 200
-    dat = b''
+    chunks = []
     total_size = int(r.headers.get('content-length', 0))
     with open(fp+".tmp", "wb") as f:
       for chunk in tqdm(r.iter_content(chunk_size=1024), total=total_size, unit='B', unit_scale=True, desc=url):
         f.write(chunk)
-        dat += chunk
+        chunks.append(chunk)
+    dat = b''.join(chunks)
     os.rename(fp+".tmp", fp)
   return dat
 
