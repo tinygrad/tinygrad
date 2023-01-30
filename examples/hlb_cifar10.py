@@ -3,6 +3,7 @@
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
 # TODO: gelu is causing nans!
+import os
 import numpy as np
 import time
 from datasets import fetch_cifar
@@ -16,7 +17,7 @@ from tinygrad.ops import GlobalCounters
 num_classes = 10
 
 class ConvGroup:
-  def __init__(self, channels_in, channels_out, short, se=False):
+  def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
     self.norm = [nn.BatchNorm2D(channels_out) for _ in range(1 if short else 3)]
@@ -56,6 +57,7 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
   global cl_cache, first, loss
 
   if not cl_cache:
+    GlobalCounters.global_ops = 0
     if not first:
       CL.CACHE = []
     if enable_jit: first = False
@@ -69,6 +71,7 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
       CL.CACHE = None
 
   if cl_cache:
+    GlobalCounters.global_ops = 0
     for prg, args in cl_cache:
       prg.clprg(CL().cl_queue, *args)
       GlobalCounters.global_ops += prg.op_estimate
@@ -83,6 +86,7 @@ def fetch_batch(X_train, Y_train, BS):
   Y = Tensor(Y.reshape(BS, num_classes))
   return X.realize(), Y.realize()
 
+CLCACHE = int(os.getenv("CLCACHE", "0"))
 def train_cifar():
   Tensor.training = True
   X_train,Y_train = fetch_cifar(train=True)
@@ -103,9 +107,8 @@ def train_cifar():
     X, Y = fetch_batch(X_train, Y_train, BS=512)
     CL.time_sum, CL.kernel_count = 0, -1
     CL.ops_sum = 0  # TODO: this should be GlobalCounters.global_ops
-    GlobalCounters.global_ops = 0
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, X, Y)
+    loss = train_step_jitted(model, optimizer, X, Y, enable_jit=CLCACHE)
     et = time.monotonic()
     loss_cpu = loss.detach().cpu().data[0]
     cl = time.monotonic()
