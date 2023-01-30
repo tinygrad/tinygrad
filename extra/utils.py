@@ -18,19 +18,12 @@ def fetch(url):
     print("fetching %s" % url)
     r = requests.get(url, stream=True)
     assert r.status_code == 200
-    total = int(r.headers.get('content-length', 0))
-    with open(fp+".tmp", 'wb') as file, tqdm(
-        desc=fp+".tmp",
-        total=total,
-        unit='iB',
-        unit_scale=True,
-        unit_divisor=1024,
-    ) as bar:
-        for data in r.iter_content(chunk_size=1024):
-            size = file.write(data)
-            bar.update(size)
+    total_size = int(r.headers.get('content-length', 0))
+    with open(fp + ".tmp", "wb") as f:
+      for chunk in tqdm(r.iter_content(chunk_size=1024), total=total_size, unit='B', unit_scale=True, desc=url):
+        f.write(chunk)
+    os.rename(fp + ".tmp", fp)
     dat = r.content
-    os.rename(fp+".tmp", fp)
   return dat
 
 from tinygrad.nn.optim import get_parameters
