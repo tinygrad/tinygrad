@@ -18,7 +18,7 @@ def fetch(url):
     r = requests.get(url, stream=True)
     assert r.status_code == 200
     progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-    dat = b''.join(x for x in r.iter_content(chunk_size=16384) if progress_bar.update(len(x)) or True)
+    dat = b''.join((x,progress_bar.update(len(x)))[0] for x in r.iter_content(chunk_size=16384))
     with open(fp+".tmp", "wb") as f:
       f.write(dat)
     os.rename(fp+".tmp", fp)
