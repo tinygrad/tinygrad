@@ -15,13 +15,23 @@ def fetch(url):
       dat = f.read()
   else:
     print("fetching %s" % url)
-    r = requests.get(url)
+    r = requests.get(url, stream=True)
     assert r.status_code == 200
-    dat = r.content
+    total_size = int(r.headers.get("Content-Length", 0))
+    chunk_size = 1024
+
     with open(fp+".tmp", "wb") as f:
-      f.write(dat)
+        for data in tqdm.tqdm(iterable=r.iter_content(chunk_size=chunk_size),
+                              total=total_size//chunk_size,
+                              unit="KB"):
+            f.write(data)
     os.rename(fp+".tmp", fp)
   return dat
+
+  import requests
+import tqdm
+
+
 
 from tinygrad.nn.optim import get_parameters
 
