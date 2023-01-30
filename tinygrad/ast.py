@@ -39,15 +39,21 @@ class ASTKernel:
 
     self.info = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
-    reduceops = [x for x in get_lazyops(ast) if x.op in ReduceOps]
-    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
-    self.reduceop = reduceops[0] if reduceops else None
-    self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
     self.ast = ast
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
     self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True)
     self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
+
+    # TODO: should be optional if it's hitting a function cache
+    self.process()
+
+  def process(self):
+    reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]
+    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
+    self.reduceop = reduceops[0] if reduceops else None
+    self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
+
     self.buftokens = [Token(f"data{i}", Types.FLOAT, ptr=True) for i in range(len(self.bufs))]
     self.group_for_reduce : List[int] = []
 

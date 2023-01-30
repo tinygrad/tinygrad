@@ -77,12 +77,12 @@ class CLProgram:
     if DEBUG >= 4: print(args[0], args[1], self.prg)
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
-    if DEBUG >= 2:
+    if DEBUG >= 2 and CL.CACHE is None:
       CL.cl_queue.finish()
       # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
       et = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
+      CL.time_sum += et
     if DEBUG >= 1:
-      CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else et
       CL.ops_sum += self.op_estimate
       print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
             (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Union, Set
+from typing import List, Tuple, Optional, Dict, Union, Set, Any
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
@@ -16,8 +16,13 @@ else: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ig
 VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
 NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a switch for the tests to pass
 
+KOPT = int(os.getenv("KOPT", "0"))
 PRINT_AST = os.getenv("PRINT_AST", "0")
 TEST_AST = int(os.getenv("TEST_AST", "0"))
+
+if KOPT:
+  import pickle, dbm
+  intervention_cache = dbm.open('/tmp/kopt.db', 'c')
 
 def group_float4(x):
   assert all(y.typ == Types.FLOAT for y in x) and len(x)%4 == 0
@@ -355,11 +360,23 @@ class GPUBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     k = CLASTKernel(ast)
+    if KOPT:
+      from extra.kernel_search import search_one, apply_intervention
+      if k.key not in intervention_cache:
+        winning_interventions : List[Any] = []
+        for i in range(1):   # NOTE: multiple interventions is breaking the ASTs
+          oo = search_one(ast, winning_interventions)
+          if oo[1] is None: break
+          winning_interventions.append(oo[1])
+        intervention_cache[k.key] = pickle.dumps(winning_interventions)
+      ic = pickle.loads(intervention_cache[k.key])
+      if DEBUG >= 3: print(ic)
+      for w in ic: apply_intervention(k, *w)
     k.codegen()(*k.bufs)
     if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
       print(k.fxn.name)
       k.print()
     if TEST_AST:
-      from test.lib_test_ast import test_ast  # type: ignore
+      from extra.lib_test_ast import test_ast  # type: ignore
       test_ast(k)
     return k.ret

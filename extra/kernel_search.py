@@ -8,12 +8,13 @@ from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CL
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
-from test.lib_test_ast import test_ast
+from extra.lib_test_ast import test_ast
 
 Interventions = Enum("Interventions", ["SWAP", "UPCAST", "SHIFT", "REDUCE"])
 def get_interventions(k):
-  p1 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce), 2)]
-  p2 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce, k.shape_len), 2)]
+  p1, p2, p3, p4, p5 = [], [], [], [], []
+  #p1 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce), 2)]
+  #p2 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce, k.shape_len), 2)]
   p3 = [(Interventions.UPCAST, None)] if max(st.shape[-1] for st in k.sts) < 32 else []
   for up_axis in range(k.shape_len):
     max_up = max(st.shape[up_axis] for st in k.sts)
@@ -22,14 +23,14 @@ def get_interventions(k):
       if amount >= 32: continue
       if not all(st.shape[up_axis] == 1 or st.shape[up_axis]%amount == 0 for st in k.sts): continue
       p3.append((Interventions.UPCAST, (up_axis, amount)))
-  p4 = []
+  """
   for up_axis in range(1,k.first_reduce):
     for amount in [4,8,16,32]:
       if k.sts[0].shape[up_axis] % amount == 0:
         p4.append((Interventions.SHIFT, (up_axis, amount, True)))
         p4.append((Interventions.SHIFT, (up_axis, amount, False)))
-  max_up = max(st.shape[k.first_reduce] for st in k.sts)
-  p5 = []
+  """
+  #max_up = max(st.shape[k.first_reduce] for st in k.sts)
   #p5 = [(Interventions.REDUCE, (max_up,))]
   return p1+p2+p3+p4+p5
 
@@ -63,7 +64,7 @@ def apply_intervention(k, typ, dat):
 def run_and_time(k):
   prog = k.codegen()
   ret = []
-  for i in range(5):
+  for i in range(3):
     t1 = time.monotonic_ns()
     e = prog(*k.bufs)
     e.wait()
@@ -71,27 +72,32 @@ def run_and_time(k):
     t2, t3 = e.profile.start * OSX_TIMING_RATIO, e.profile.end * OSX_TIMING_RATIO
     #print(*[f"{(x-t1)*1e-3:7.2f} us" for x in [t1, t2, t3, t4]])  # TODO: this may be wrong on non OS X
     #assert t1 < t2 < t3 < t4, "timings not in order"
-    ret.append(t3-t2)
-    #ret.append(t4-t1)
+    #ret.append(t3-t2)
+    ret.append(t4-t1)
   return min(ret)
 
-def search_one(ast, winning_interventions):
+def search_one(ast, winning_interventions=[]):
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
   ints = get_interventions(k)
   options = [(run_and_time(k), None, 0.9)]
-  print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
+  name = k.fxn.name
+  #print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
   for int in ints:
     try:
       k = CLASTKernel(ast)
       for w in winning_interventions: apply_intervention(k, *w)
       apply_intervention(k, *int)
       options.append((run_and_time(k), int, 1.0))
-      print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
+      #print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
     except Exception:
-      print(int, "FAILED")
+      #print(int, "FAILED")
+      pass
+  baseline = options[0]
   options = sorted(options, key=lambda x: x[0]*x[2])
-  return options[0]
+  best = options[0]
+  print(f"{name:30s} {baseline[0]/1e3:8.2f} ms -> {best[0]/1e3:8.2f} ms {baseline[0]/best[0]:7.2f}x *with* {winning_interventions} + {best[1]}")
+  return best
 
 def search(ast):
   k = CLASTKernel(ast)
