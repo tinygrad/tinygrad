@@ -9,7 +9,7 @@ from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CL
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
 from tinygrad.ops import DEBUG
-from extra.lib_test_ast import test_ast
+from extra.lib_test_ast import test_ast_kernel
 
 import pickle, dbm
 intervention_cache = dbm.open('/tmp/kopt.db', 'c')
@@ -136,7 +136,7 @@ def search(ast):
     for w in winning_interventions: apply_intervention(k, *w)
     k.codegen()(*k.bufs)
   #k.print()
-  test_ast(k)
+  test_ast_kernel(k)
   print(f"improved from {baseline/1e6:.2f} ms to {best_time/1e6:.2f} ms, a {baseline/best_time:.2f}x speedup @ {k.info.flops/best_time:.2f} GFLOPS")
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from tinygrad.lazy import realize_buffers
 
 in_test = False
 test_cnt = 0
-def test_ast(k:ASTKernel, device:Type[DeviceBuffer]=CPUBuffer):
+def test_ast_kernel(k:ASTKernel, device:Type[DeviceBuffer]=CPUBuffer):
   global in_test, test_cnt
   if in_test: return
   in_test = True

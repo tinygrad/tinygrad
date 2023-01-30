@@ -364,6 +364,6 @@ class GPUBuffer(ExplicitExecAST):
       print(k.fxn.name)
       k.print()
     if TEST_AST:
-      from extra.lib_test_ast import test_ast  # type: ignore
-      test_ast(k)
+      from extra.lib_test_ast import test_ast_kernel  # type: ignore
+      test_ast_kernel(k)
     return k.ret

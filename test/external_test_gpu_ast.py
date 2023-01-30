@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel
-from extra.lib_test_ast import test_ast
+from extra.lib_test_ast import test_ast_kernel
 
 def compile_and_test_ast(ast):
   k = CLASTKernel(ast)
@@ -13,7 +13,7 @@ def compile_and_test_ast(ast):
     from extra.kernel_search import apply_optimization
     apply_optimization(k, ast, 10, int(os.getenv("KCACHE", "0")))
   k.codegen()(*k.bufs)
-  if not int(os.getenv("NOTEST", "0")): test_ast(k)
+  if not int(os.getenv("NOTEST", "0")): test_ast_kernel(k)
 
 class TestAST(unittest.TestCase):
   def test_conv_zeroview_ast(self):
