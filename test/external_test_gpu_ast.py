@@ -30,6 +30,14 @@ class TestAST(unittest.TestCase):
     ast = LazyOp(ReduceOps.SUM, (op0,), (512, 1, 128, 32, 32, 1, 1, 1))
     compile_and_test_ast(ast)
 
+  def test_cifar_conv_backward(self):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(256, 1, 512, 3, 3, 512, 8, 8), views=[View((256, 512, 10, 10), (64, 16384, 8, 1), -9), ZeroView((256, 512, 8, 8), ((0, 256), (0, 512), (-1, 9), (-1, 9))), View((256, 1, 512, 3, 3, 512, 8, 8), (51200, 51200, 0, 10, 1, 100, 10, 1), 0)]), hostbuf=GPUBuffer(shape=(512, 256, 8, 8), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(256, 1, 512, 3, 3, 512, 8, 8), views=[View((256, 1, 512, 3, 3, 512, 8, 8), (0, 0, 64, 0, 0, 32768, 8, 1), 0)]), hostbuf=GPUBuffer(shape=(512, 512, 8, 8), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (256, 1, 512, 3, 3, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (256, 512, 3, 3))
+    compile_and_test_ast(ast)
+
   def test_first_op_conv(self):
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 3, 3, 3, 4), views=[View((1, 130, 258, 1, 12), (393216, 3072, 12, 12, 1), -3084), ZeroView((1, 128, 256, 1, 12), ((0, 1), (-1, 129), (-1, 257), (0, 1), (0, 12))), View((1, 64, 128, 8, 4, 3, 3, 3, 4), (0, 6192, 24, 0, 0, 3096, 12, 4, 1), 0)]), hostbuf=GPUBuffer(shape=(128, 768, 4), force_create=True))
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 3, 3, 3, 4), views=[View((1, 64, 128, 8, 4, 3, 3, 3, 4), (0, 0, 0, 432, 4, 144, 16, 48, 1), 0)]), hostbuf=GPUBuffer(shape=(8, 108, 4), force_create=True))

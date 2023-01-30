@@ -358,7 +358,7 @@ class GPUBuffer(ExplicitExecAST):
     k = CLASTKernel(ast)
     if KOPT:
       from extra.kernel_search import apply_optimization
-      apply_optimization(k, ast)
+      apply_optimization(k, ast, max_interventions=KOPT)
     k.codegen()(*k.bufs)
     if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
       print(k.fxn.name)
