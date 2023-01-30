@@ -54,7 +54,7 @@ def apply_intervention(k, typ, dat):
         lambda x: list(x[0:up_axis]) + ([x[up_axis]//amount, amount] if x[up_axis] > 1 else [1,1]) + list(x[up_axis+1:]),
         [i for i in range(k.shape_len+1) if i != up_axis+1] + [up_axis+1])
     # drop the last dimension
-    k.upcast()
+    k.upcast(allow_float4=False)
   elif typ == Interventions.SHIFT:
     up_axis, amount, flip = dat[0], dat[1], dat[2]
     k.reshape_and_permute(
@@ -139,6 +139,29 @@ def search(ast):
   test_ast(k)
   print(f"improved from {baseline/1e6:.2f} ms to {best_time/1e6:.2f} ms, a {baseline/best_time:.2f}x speedup @ {k.info.flops/best_time:.2f} GFLOPS")
 
+from tinygrad.ops import get_buffers
+def test_correctness(ast):
+  # before testing, we need to fill the buffers with randomness
+  bufs = get_buffers(ast)
+  for b in bufs:
+    randomness = np.random.default_rng().standard_normal(size=b._base_shape, dtype=np.float32)
+    if b._buf is not None: b._buf.copyin(randomness)
+  from extra.lib_test_ast import test_ast
+  k = CLASTKernel(ast)
+  ints = get_interventions(k)
+  k.codegen()(*k.bufs)
+  test_ast(k)
+  print("correct at baseline")
+  for int in ints:
+    print("***** APPLYING INTERVENTION", int)
+    k = CLASTKernel(ast)
+    k.printbufs("old:")
+    apply_intervention(k, *int)
+    k.printbufs("new:")
+    k.codegen()(*k.bufs)
+    print("***** TESTING INTERVENTION", int)
+    test_ast(k)
+
 if __name__ == "__main__":
   if int(os.getenv("OP", "0")) == 1:
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 3, 3, 3, 4), views=[View((1, 130, 258, 1, 12), (393216, 3072, 12, 12, 1), -3084), ZeroView((1, 128, 256, 1, 12), ((0, 1), (-1, 129), (-1, 257), (0, 1), (0, 12))), View((1, 64, 128, 8, 4, 3, 3, 3, 4), (0, 6192, 24, 0, 0, 3096, 12, 4, 1), 0)]), hostbuf=GPUBuffer(shape=(128, 768, 4), force_create=True))
@@ -212,4 +235,5 @@ if __name__ == "__main__":
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
     op1 = LazyOp(ReduceOps.SUM, (op0,), (3, 1, 32, 3, 3, 1, 1, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (3, 32, 3, 3))
-  search(ast)
+  #search(ast)
+  test_correctness(ast)

@@ -220,13 +220,14 @@ class CLASTKernel(ASTKernel):
     if self.first_reduce < self.shape_len and end_dimension > 1 and end_dimension <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
       self.upcast()
 
+  def printbufs(self, prefix=""):
+    print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
+    for i in range(len(self.sts)):
+      print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'} image:{'T' if i < len(self.bufs) and isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides)
+
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
   def codegen(self):
-    if DEBUG >= 3:
-      print("old:", [x.shape for x in self.sts])
-      print("old:", [x.views[-1].strides for x in self.sts])
-    
     self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
@@ -236,10 +237,8 @@ class CLASTKernel(ASTKernel):
 
     self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 3:
-      print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
       print("output shape", self.output_shape)
-      for i in range(len(self.sts)):
-        print(self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'} image:{'T' if i < len(self.bufs) and isinstance(self.bufs[i]._buf, CLImage) else 'F'}", self.sts[i])
+      self.printbufs("new:")
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
