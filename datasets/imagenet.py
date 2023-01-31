@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
 
-BASEDIR = "/home/batman/imagenet"
+BASEDIR = "/Users/kafka/fun/imagenet"
 train_files = open(os.path.join(BASEDIR, "train_files")).read().strip().split("\n")
 val_files = open(os.path.join(BASEDIR, "val_files")).read().strip().split("\n")
 ci = json.load(open(os.path.join(BASEDIR, "imagenet_class_index.json")))
