@@ -18,9 +18,9 @@ def fetch_cifar(train=True):
   tt = tarfile.open(fileobj=io.BytesIO(fetch('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz')), mode='r:gz')
   if train:
     # TODO: data_batch 2-5
-    db = pickle.load(tt.extractfile('cifar-10-batches-py/data_batch_1'), encoding="bytes")
+    db = [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)]
   else:
-    db = pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")
-  X = db[b'data'].reshape((-1, 3, 32, 32))
-  Y = np.array(db[b'labels'])
+    db = [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")]
+  X = np.concatenate([x[b'data'].reshape((-1, 3, 32, 32)) for x in db], axis=0)
+  Y = np.concatenate([np.array(x[b'labels']) for x in db], axis=0)
   return X, Y
