@@ -48,7 +48,7 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
   Tensor.training = False
   def numpy_eval(Y_test, num_classes):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
-    for i in trange((len(Y_test)-1)//BS+1, disable=getenv('CI')):
+    for i in trange((len(Y_test)-1)//BS+1, disable=getenv('CI', False)):
       x = Tensor(transform(X_test[i*BS:(i+1)*BS]))
       out = model.forward(x) if hasattr(model, 'forward') else model(x)
       Y_test_preds_out[i*BS:(i+1)*BS] = out.cpu().data
