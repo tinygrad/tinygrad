@@ -9,7 +9,7 @@ if not getenv("GPU", ""):
   os.environ['GPU'] = '1'
 
 ALLOWED_KERNEL_COUNT = getenv("ALLOWED_KERNEL_COUNT", 0)
-DEBUGCL = getenv("DEBUGCL", 0))
+DEBUGCL = getenv("DEBUGCL", 0)
 
 import onnx
 import numpy as np
