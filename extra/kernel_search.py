@@ -40,6 +40,7 @@ def get_interventions(k):
   return p1+p2+p3+p4+p5
 
 def apply_intervention(k, typ, dat):
+  k.process()
   if typ == Interventions.SWAP:
     # swap axes
     a1, a2 = dat

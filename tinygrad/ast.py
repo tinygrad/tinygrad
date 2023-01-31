@@ -51,9 +51,11 @@ class ASTKernel:
     self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
 
     # TODO: should be optional if it's hitting a function cache
-    self.process()
+    self.processed = False
 
   def process(self):
+    if self.processed: return
+    self.processed = True
     reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None

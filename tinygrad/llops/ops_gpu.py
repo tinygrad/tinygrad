@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Union, Set
+from typing import List, Tuple, Optional, Dict, Union, Set, Any
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
@@ -224,6 +224,7 @@ class CLASTKernel(ASTKernel):
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
   def codegen(self):
+    self.process()
     self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
@@ -353,13 +354,16 @@ class GPUBuffer(ExplicitExecAST):
     cl_buf._buf.copyout(data)
     return data
 
+  KernelCache : Dict[str, Any] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     k = CLASTKernel(ast)
-    if KOPT:
-      from extra.kernel_search import apply_optimization
-      apply_optimization(k, ast, max_interventions=KOPT)
-    k.codegen()(*k.bufs)
+    if k.key not in cls.KernelCache:
+      if KOPT:
+        from extra.kernel_search import apply_optimization
+        apply_optimization(k, ast, max_interventions=KOPT)
+      cls.KernelCache[k.key] = k.codegen()
+    cls.KernelCache[k.key](*k.bufs)
     if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
       print(k.fxn.name)
       k.print()
