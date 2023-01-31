@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import os
 import sys
 from hexdump import hexdump
 from macholib import MachO
+from tinygrad.helpers import getenv
 def get_macho(fn):
   # mod to make the header okay
   # MH_CIGAM_64 is good
@@ -124,7 +124,7 @@ for i in range(0, len(f2), 0x300):
     c1, c2 = f1[i:i+0x300], f2[i:i+0x300]
   dbg1 = ane.debug(c1, 16)
   dbg2 = ane.debug(c2, 16)
-  if os.getenv("PRINTALL"):
+  if getenv("PRINTALL"):
     for k in dbg2:
       if k in aneregs:
         rr = aneregs[k] if k in aneregs else (-1,-1,-1)

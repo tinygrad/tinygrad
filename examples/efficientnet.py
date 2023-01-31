@@ -9,6 +9,7 @@ import time
 import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 from extra.utils import fetch, get_parameters
 from models.efficientnet import EfficientNet
 
@@ -48,7 +49,7 @@ def infer(model, img):
 
 if __name__ == "__main__":
   # instantiate my net
-  model = EfficientNet(int(os.getenv("NUM", "0")))
+  model = EfficientNet(getenv("NUM", 0))
   model.load_from_pretrained()
 
   # category labels

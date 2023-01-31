@@ -4,12 +4,13 @@ import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List
 from collections import defaultdict
 from tinygrad.ops import DEBUG
+from tinygrad.helpers import getenv
 
 OSX = platform.system() == "Darwin"
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
-CLCACHE = int(os.getenv("CLCACHE", "1"))
-FLOAT16 = int(os.getenv("FLOAT16", "0"))
+CLCACHE = getenv("CLCACHE", 1)
+FLOAT16 = getenv("FLOAT16", 0)
 
 class CL:
   CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
@@ -21,7 +22,7 @@ class CL:
     devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
-    CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
+    CL.cl_ctx = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
     if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
