@@ -3,24 +3,25 @@
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
 # TODO: gelu is causing nans!
-import os
 import numpy as np
 import time
 from datasets import fetch_cifar
 from tinygrad import nn
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 from extra.training import train, evaluate
 from extra.utils import get_parameters
 from tinygrad.ops import GlobalCounters
 
 num_classes = 10
 
+# TODO: eval won't work with track_running_stats=False
 class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
-    self.norm = [nn.BatchNorm2D(channels_out) for _ in range(1 if short else 3)]
+    self.norm = [nn.BatchNorm2D(channels_out, track_running_stats=False) for _ in range(1 if short else 3)]
     if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
 
   def __call__(self, x):
@@ -38,7 +39,7 @@ class SpeedyResNet:
     # TODO: add whitening
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
-      nn.BatchNorm2D(64),
+      nn.BatchNorm2D(64, track_running_stats=False),
       lambda x: x.relu(),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
@@ -63,9 +64,10 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
     if enable_jit: first = False
     out = model(X)
     loss = out.mul(Y).mean()
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+    if not getenv("DISABLE_BACKWARD"):
+      optimizer.zero_grad()
+      loss.backward()
+      optimizer.step()
     if not first:
       cl_cache = CL.CACHE
       CL.CACHE = None
@@ -86,7 +88,6 @@ def fetch_batch(X_train, Y_train, BS):
   Y = Tensor(Y.reshape(BS, num_classes))
   return X.realize(), Y.realize()
 
-CLCACHE = int(os.getenv("CLCACHE", "0"))
 def train_cifar():
   Tensor.training = True
   X_train,Y_train = fetch_cifar(train=True)
@@ -103,17 +104,17 @@ def train_cifar():
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
 
-  BS = int(os.getenv("BS", "512"))
-  for i in range(10):
-    X, Y = fetch_batch(X_train, Y_train, BS=BS)
+  for i in range(1 if getenv("GRAPH") else 10):
+    # TODO: the real batch size is 512
+    X, Y = fetch_batch(X_train, Y_train, BS=getenv("BS", 512))
     CL.time_sum, CL.kernel_count = 0, -1
     CL.ops_sum = 0  # TODO: this should be GlobalCounters.global_ops
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, X, Y, enable_jit=CLCACHE)
+    loss = train_step_jitted(model, optimizer, X, Y, enable_jit=getenv("CLCACHE"))
     et = time.monotonic()
     loss_cpu = loss.detach().cpu().data[0]
     cl = time.monotonic()
-    print(f"{(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {CL.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {CL.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
 
   #train(model, X, Y, optimizer, steps=X.shape[0]//BS, BS=BS)
   #evaluate(model, X_test, Y_test)

@@ -23,7 +23,7 @@ class BatchNorm2D:
       self.batch_invstd = None
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
-      if self.track_running_stats:
+      if self.track_running_stats and False:
         self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
         self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
         self.num_batches_tracked += 1

@@ -1,5 +1,5 @@
 from collections import namedtuple
-import os, math
+import os, math, functools
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x): return math.prod(x)
@@ -10,6 +10,9 @@ def colored(st, color): return f"\u001b[{30+['black', 'red', 'green', 'yellow', 
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def modn(x, a): return -((-x)%a) if x < 0 else x%a
 def make_pair(x): return (x,x) if isinstance(x, int) else x
+
+@functools.lru_cache(maxsize=None)
+def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 def reduce_shape(shape, axis): return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 def shape_to_axis(old_shape, new_shape):
