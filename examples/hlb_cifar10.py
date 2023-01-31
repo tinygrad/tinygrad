@@ -98,8 +98,8 @@ def train_cifar():
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
   def make_lr(x): return Tensor([x]).realize()
-  #optimizer = optim.SGD(get_parameters(model), lr=0.001)
-  optimizer = optim.Adam(get_parameters(model), lr=3e-4)
+  optimizer = optim.SGD(get_parameters(model), lr=0.001)
+  #optimizer = optim.Adam(get_parameters(model), lr=3e-4)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
