@@ -94,6 +94,7 @@ def search_one(ast, winning_interventions=[], debug=False):
       for w in winning_interventions: apply_intervention(k, *w)
       apply_intervention(k, *int)
       options.append((run_and_time(k), int, 1.0))
+      #test_ast(k)
       if debug: print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
     except Exception:
       if debug: print(int, "FAILED")
@@ -117,7 +118,16 @@ def apply_optimization(k, ast, max_interventions=1, cache=True):
   if DEBUG >= 3: print("intervention", ic)
   for w in ic: apply_intervention(k, *w)
 
+
+def randomize_buffers(ast):
+  # before testing, we need to fill the buffers with randomness
+  bufs = get_buffers(ast)
+  for b in bufs:
+    randomness = np.random.default_rng().standard_normal(size=b._base_shape, dtype=np.float32)
+    if b._buf is not None: b._buf.copyin(randomness)
+
 def search(ast):
+  randomize_buffers(ast)
   k = CLASTKernel(ast)
   best_time = baseline = run_and_time(k)
 
@@ -142,11 +152,7 @@ def search(ast):
 
 from tinygrad.ops import get_buffers
 def test_correctness(ast):
-  # before testing, we need to fill the buffers with randomness
-  bufs = get_buffers(ast)
-  for b in bufs:
-    randomness = np.random.default_rng().standard_normal(size=b._base_shape, dtype=np.float32)
-    if b._buf is not None: b._buf.copyin(randomness)
+  randomize_buffers(ast)
   from extra.lib_test_ast import test_ast
   k = CLASTKernel(ast)
   ints = get_interventions(k)
@@ -243,6 +249,12 @@ if __name__ == "__main__":
     op1 = LazyOp(BinaryOps.MUL, (op0,buf2,), None)
     op2 = LazyOp(BinaryOps.SUB, (buf0,op1,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op2,), (64,))
+  elif int(os.getenv("BROKEN3", "0")):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(5, 1, 128, 16, 16, 128, 3, 3), views=[View((5, 128, 18, 18), (32768, 256, 16, 1), -17), ZeroView((5, 128, 16, 16), ((0, 5), (0, 128), (-1, 17), (-1, 17))), View((5, 1, 128, 16, 16, 128, 3, 3), (41472, 41472, 0, 18, 1, 324, 18, 1), 0)]), hostbuf=GPUBuffer(shape=(5, 128, 16, 16), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(5, 1, 128, 16, 16, 128, 3, 3), views=[View((5, 1, 128, 16, 16, 128, 3, 3), (0, 0, 1152, 0, 0, 9, 3, 1), 0)]), hostbuf=GPUBuffer(shape=(128, 128, 3, 3), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (5, 1, 128, 16, 16, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (5, 128, 16, 16))
   else:
     # reduce
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(3, 1, 32, 3, 3, 32, 112, 112), views=[View((3, 32, 225, 225), (50176, 150528, 224, 1), 0), ZeroView((3, 32, 224, 224), ((0, 3), (0, 32), (0, 225), (0, 225))), View((3, 1, 32, 3, 3, 32, 112, 112), (1620000, 1620000, 0, 225, 1, 50625, 450, 2), 0)]), hostbuf=GPUBuffer(shape=(32, 3, 224, 224), force_create=True))
@@ -250,5 +262,5 @@ if __name__ == "__main__":
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
     op1 = LazyOp(ReduceOps.SUM, (op0,), (3, 1, 32, 3, 3, 1, 1, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (3, 32, 3, 3))
-  #search(ast)
-  test_correctness(ast)
+  search(ast)
+  #test_correctness(ast)

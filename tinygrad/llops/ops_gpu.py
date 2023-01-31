@@ -103,11 +103,7 @@ class CLASTKernel(ASTKernel):
           values[1] = [Token(f"clreduce({x.tok})", Types.FLOAT) for x in values[1]]
         elif values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
         elif values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
-      #assert len(values[0]) == len(values[1]), f"values mismatch {values}"
-      # TODO: this is likely wrong
-      if len(values[0]) < len(values[1]):
-        assert len(values[1]) % len(values[0]) == 0
-        values[0] = values[0] * (len(values[1]) // len(values[0]))
+      assert len(values[0]) == len(values[1]), f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
@@ -264,9 +260,10 @@ class CLASTKernel(ASTKernel):
       full_shape = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
       full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
 
+      acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, accumulators, do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
     if self.group_for_reduce:
