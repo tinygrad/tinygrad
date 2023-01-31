@@ -1,8 +1,6 @@
 # https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg
 # running 
 
-import os
-GPU = os.getenv("GPU", None) is not None
 import sys
 import io
 import time
@@ -12,9 +10,12 @@ from tinygrad.tensor import Tensor
 from extra.utils import fetch, get_parameters
 from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
 from tinygrad.nn import BatchNorm2D, Conv2d
+from tinygrad.helpers import getenv
 
 import cv2
 from PIL import Image
+
+GPU = getenv("GPU")
 
 def show_labels(prediction, confidence = 0.5, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')

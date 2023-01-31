@@ -5,14 +5,15 @@ import numpy as np
 from tqdm import tqdm
 sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
-
+from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from extra.utils import get_parameters
 import tinygrad.nn.optim as optim
 from datasets import fetch_mnist
 from torchvision.utils import make_grid, save_image
 import torch
-GPU = os.getenv("GPU") is not None
+
+GPU = getenv("GPU")
 class LinearGen:
   def __init__(self):
     lv = 128

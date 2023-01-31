@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 import time
 from tqdm import trange
 from models.efficientnet import EfficientNet
@@ -7,18 +6,18 @@ import tinygrad.nn.optim as optim
 from tinygrad.tensor import Tensor
 from tinygrad.llops.ops_gpu import CL
 from tinygrad.ops import GlobalCounters
-
+from tinygrad.helpers import getenv
 import gc
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
 
-NUM = int(os.getenv("NUM", 2))
-BS = int(os.getenv("BS", 8))
-CNT = int(os.getenv("CNT", 10))
-BACKWARD = int(os.getenv("BACKWARD", 0))
-TRAINING = int(os.getenv("TRAINING", 1))
-ADAM = int(os.getenv("ADAM", 0))
-CLCACHE = int(os.getenv("CLCACHE", "0"))
+NUM = getenv("NUM", 2)
+BS = getenv("BS", 8)
+CNT = getenv("CNT", 10)
+BACKWARD = getenv("BACKWARD")
+TRAINING = getenv("TRAINING", 1)
+ADAM = getenv("ADAM")
+CLCACHE = getenv("CLCACHE")
 
 if __name__ == "__main__":
   print(f"NUM:{NUM} BS:{BS} CNT:{CNT}")

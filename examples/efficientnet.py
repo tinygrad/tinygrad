@@ -2,13 +2,13 @@
 # https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth
 # a rough copy of
 # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/model.py
-import os
 import sys
 import io
 import time
 import numpy as np
 np.set_printoptions(suppress=True)
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 from extra.utils import fetch, get_parameters
 from models.efficientnet import EfficientNet
 
@@ -48,7 +48,7 @@ def infer(model, img):
 
 if __name__ == "__main__":
   # instantiate my net
-  model = EfficientNet(int(os.getenv("NUM", "0")))
+  model = EfficientNet(getenv("NUM"))
   model.load_from_pretrained()
 
   # category labels

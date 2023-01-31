@@ -4,8 +4,9 @@ import itertools
 from collections import defaultdict
 from typing import Dict, List
 from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType
+from tinygrad.helpers import getenv
 
-GRAPH = int(os.getenv("GRAPH", "0"))
+GRAPH = getenv("GRAPH")
 
 # **** debugging and graphing ****
 
@@ -16,7 +17,7 @@ if GRAPH:
   def save_graph_exit():
     for k,v in cnts.items():
       print(k, v)
-    if int(os.getenv("PRUNEGRAPH", "0")):
+    if getenv("PRUNEGRAPH"):
       dead_nodes = []
       for n in G.nodes:
         # prune movementops and loadops

@@ -1,19 +1,19 @@
 #!/usr/bin/env python
-import os
 import unittest
 import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel
+from tinygrad.helpers import getenv
 from extra.lib_test_ast import test_ast
 
 def compile_and_test_ast(ast):
   k = CLASTKernel(ast)
-  if int(os.getenv("KOPT", "0")):
+  if getenv("KOPT"):
     from extra.kernel_search import apply_optimization
-    apply_optimization(k, ast, 10, int(os.getenv("KCACHE", "0")))
+    apply_optimization(k, ast, 10, getenv("KCACHE"))
   k.codegen()(*k.bufs)
-  if not int(os.getenv("NOTEST", "0")): test_ast(k)
+  if not getenv("NOTEST"): test_ast(k)
 
 class TestAST(unittest.TestCase):
   def test_conv_zeroview_ast(self):

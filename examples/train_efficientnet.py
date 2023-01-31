@@ -9,6 +9,7 @@ from tqdm import trange
 from tinygrad.nn import BatchNorm2D
 import tinygrad.nn.optim as optim
 from datasets import fetch_cifar
+from tinygrad.helpers import getenv
 
 class TinyConvNet:
   def __init__(self, classes=10):
@@ -29,24 +30,24 @@ class TinyConvNet:
     return x.dot(self.l1)
 
 if __name__ == "__main__":
-  IMAGENET = os.getenv("IMAGENET") is not None
+  IMAGENET = getenv("IMAGENET")
   classes = 1000 if IMAGENET else 10
 
-  TINY = os.getenv("TINY") is not None
-  TRANSFER = os.getenv("TRANSFER") is not None
+  TINY = getenv("TINY")
+  TRANSFER = getenv("TRANSFER")
   if TINY:
     model = TinyConvNet(classes)
   elif TRANSFER:
-    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
+    model = EfficientNet(getenv("NUM"), classes, has_se=True)
     model.load_from_pretrained()
   else:
-    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=False)
+    model = EfficientNet(getenv("NUM"), classes, has_se=False)
 
   parameters = get_parameters(model)
   print("parameter count", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 
-  BS, steps = int(os.getenv("BS", "64" if TINY else "16")), int(os.getenv("STEPS", "2048"))
+  BS, steps = getenv("BS", 64 if TINY else 16), getenv("STEPS", 2048)
   print("training with batch size %d for %d steps" % (BS, steps))
 
   if IMAGENET:

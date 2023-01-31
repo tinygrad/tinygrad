@@ -1,11 +1,10 @@
-import os
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.ops import DEBUG
 from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 
-ONNXLIMIT = int(os.getenv("ONNXLIMIT", "-1"))
+ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)

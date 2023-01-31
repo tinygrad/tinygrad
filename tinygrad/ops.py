@@ -1,13 +1,12 @@
 from __future__ import annotations
-import os
 import numpy as np
 from enum import Enum
 from typing import Union, Type, NamedTuple, Tuple, Any, List
 import functools, operator
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.shape import ShapeTracker
 
-DEBUG = int(os.getenv("DEBUG", "0"))
+DEBUG = getenv("DEBUG")
 
 # these are the llops your accelerator must implement, along with toCpu
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN", "RECIPROCAL"])

@@ -1,13 +1,12 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import os
 import functools
 from typing import Tuple, Union, List, Optional
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.shape.symbolic import Variable
 
 # TODO: fix DEBUG import
-DEBUG = int(os.getenv("DEBUG", "0"))
+DEBUG = getenv("DEBUG")
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:

@@ -10,7 +10,7 @@ from extra.training import train, evaluate
 from models.resnet import ResNet
 from tinygrad.nn.optim import Adam
 from datasets import fetch_mnist
-
+from tinygrad.helpers import getenv
 from tinygrad.nn.optim import Adam
 
 class ComposeTransforms:
@@ -28,8 +28,8 @@ if __name__ == "__main__":
   X_test = X_test.reshape(-1, 28, 28).astype(np.uint8)
   classes = 10
 
-  TRANSFER = os.getenv('TRANSFER') is not None
-  NUM = int(os.getenv('NUM', '18'))
+  TRANSFER = getenv('TRANSFER')
+  NUM = getenv('NUM', 18)
   model = ResNet(NUM, num_classes=classes)
   if TRANSFER:
     model.load_from_pretrained()
