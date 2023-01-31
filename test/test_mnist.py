@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import os
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device

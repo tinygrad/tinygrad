@@ -14,7 +14,6 @@
 #   189 Mb embedded RAM, aka 9M 19-bit elements
 #   2560 MLP blocks, 2 fp24 MULACC each
 
-import os
 import functools
 import numpy as np
 from collections import defaultdict
@@ -183,7 +182,7 @@ binops = {BinaryOps.ADD: riski_add,
 reduceops = {ReduceOps.SUM: riski_reduce_sum,
              ReduceOps.MAX: riski_reduce_max}
 
-SLOW_MATMUL = os.getenv("SLOW_MATMUL", False)
+SLOW_MATMUL = getenv("SLOW_MATMUL", False)
 @count
 def riski_matmul(slow=SLOW_MATMUL):
   #print("LLL:\n",regfile[Reg.MATMUL_INPUT],"\n",regfile[Reg.MATMUL_WEIGHTS])
@@ -205,7 +204,7 @@ def riski_mov(tout, tin):
 def riski_zero(tout):
   regfile[tout][:, :] = 0
 
-load_log = open("/tmp/risk_load_log", "w") if os.getenv("LOAD_LOG") else None
+load_log = open("/tmp/risk_load_log", "w") if getenv("LOAD_LOG") else None
 
 @count
 def riski_load(target, address, stride_y=SZ, stride_x=1, len_y=SZ, len_x=SZ, zero=True, skip_first=False):

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import os
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod
@@ -8,17 +7,18 @@ from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker
 from tinygrad.shape.symbolic import ModNode   # this will go away when VALIDHACKS does
+from tinygrad.helpers import getenv
 
-CUDA = int(os.getenv("CUDA", "0"))
+CUDA = getenv("CUDA", 0)
 if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL   # NOTE: using CL will not work for the CUDA runtime # noqa: F401
 else: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
 
-VALIDHACKS = int(os.getenv("VALIDHACKS", "0"))    # TODO: remove the need for this
-NATIVE_EXPLOG = int(os.getenv("NATIVE_EXPLOG", "0"))  # this is needed as a switch for the tests to pass
+VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
+NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
-KOPT = int(os.getenv("KOPT", "0"))
-PRINT_AST = os.getenv("PRINT_AST", "0")
-TEST_AST = int(os.getenv("TEST_AST", "0"))
+KOPT = getenv("KOPT", 0)
+PRINT_AST = getenv("PRINT_AST", "0")
+TEST_AST = getenv("TEST_AST", 0)
 
 def group_float4(x):
   assert all(y.typ == Types.FLOAT for y in x) and len(x)%4 == 0

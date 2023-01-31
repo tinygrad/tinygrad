@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 import numpy as np
 import random
 from PIL import Image
@@ -9,9 +8,9 @@ from extra.utils import get_parameters
 from extra.training import train, evaluate
 from models.resnet import ResNet
 from tinygrad.nn.optim import Adam
+from tinygrad.helpers import getenv
 from datasets import fetch_mnist
 
-from tinygrad.nn.optim import Adam
 
 class ComposeTransforms:
   def __init__(self, trans):
@@ -28,9 +27,8 @@ if __name__ == "__main__":
   X_test = X_test.reshape(-1, 28, 28).astype(np.uint8)
   classes = 10
 
-  TRANSFER = os.getenv('TRANSFER') is not None
-  NUM = int(os.getenv('NUM', '18'))
-  model = ResNet(NUM, num_classes=classes)
+  TRANSFER = getenv('TRANSFER')
+  model = ResNet(getenv('NUM', 18), num_classes=classes)
   if TRANSFER:
     model.load_from_pretrained()
 

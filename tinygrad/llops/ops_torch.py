@@ -1,8 +1,9 @@
-import os, torch
+import torch
 from tinygrad.llops.ops_cpu import CPUBuffer  # type: ignore
 from tinygrad.ops import ProcessingOps, GenericExecAST
+from tinygrad.helpers import getenv
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if int(os.getenv("MPS", "0")) else "cpu"))
+device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
 class TorchBuffer(torch.Tensor, GenericExecAST):
   def pad(x, padding): return torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist])
   def strided(x, arg): return x.contiguous().as_strided([y[0] for y in arg], [y[1] for y in arg])

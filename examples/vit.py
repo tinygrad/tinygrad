@@ -11,11 +11,11 @@ with tf.io.gfile.GFile(fn, "rb") as f:
 
 
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 from models.vit import ViT
-import os
 
 Tensor.training = False
-if int(os.getenv("LARGE", "0")) == 1:
+if getenv("LARGE", 0) == 1:
   m = ViT(embed_dim=768, num_heads=12)
 else:
   # tiny

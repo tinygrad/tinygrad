@@ -10,15 +10,15 @@ from functools import partial
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored
+from tinygrad.helpers import colored, getenv
 try:
   from tinygrad.llops.ops_gpu import CL
 except ImportError:
   CL = None
 
-IN_CHANS = [int(x) for x in os.getenv("IN_CHANS", "4,16,64").split(",")]
+IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
-torch_device = torch.device('mps' if int(os.getenv("MPS", "0")) else ('cuda' if int(os.getenv("TORCHCUDA", "0")) else 'cpu'))
+torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
