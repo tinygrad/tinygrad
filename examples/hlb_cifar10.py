@@ -101,11 +101,11 @@ def train_cifar():
   # 4.7 seconds for float32 w/o channels last. 24 TFLOPS. we get 50ms then i'll be happy. only 64x off
 
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
-  # 136 TFLOPS is the theoretical max w float16 on 3080TI
+  # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
 
+  BS = int(os.getenv("BS", "512"))
   for i in range(10):
-    # TODO: the real batch size is 512
-    X, Y = fetch_batch(X_train, Y_train, BS=5)
+    X, Y = fetch_batch(X_train, Y_train, BS=BS)
     CL.time_sum, CL.kernel_count = 0, -1
     CL.ops_sum = 0  # TODO: this should be GlobalCounters.global_ops
     st = time.monotonic()

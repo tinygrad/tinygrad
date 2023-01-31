@@ -17,8 +17,8 @@ intervention_cache = dbm.open('/tmp/kopt.db', 'c')
 Interventions = Enum("Interventions", ["SWAP", "UPCAST", "SHIFT", "REDUCE"])
 def get_interventions(k):
   p1, p2, p3, p4, p5 = [], [], [], [], []
-  #p1 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce), 2)]
-  #p2 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce, k.shape_len), 2)]
+  p1 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce), 2)]
+  p2 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce, k.shape_len), 2)]
   p3 = [(Interventions.UPCAST, None)] if max(st.shape[-1] for st in k.sts) < 32 else []
   for up_axis in range(k.shape_len):
     max_up = max(st.shape[up_axis] for st in k.sts)
@@ -80,27 +80,27 @@ def run_and_time(k):
     ret.append(t4-t1)
   return min(ret)
 
-def search_one(ast, winning_interventions=[]):
+def search_one(ast, winning_interventions=[], debug=False):
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
   ints = get_interventions(k)
   options = [(run_and_time(k), None, 0.9)]
   name = k.fxn.name
-  #print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
+  if debug: print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
   for int in ints:
     try:
       k = CLASTKernel(ast)
       for w in winning_interventions: apply_intervention(k, *w)
       apply_intervention(k, *int)
       options.append((run_and_time(k), int, 1.0))
-      #print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
+      if debug: print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
     except Exception:
-      #print(int, "FAILED")
+      if debug: print(int, "FAILED")
       pass
   baseline = options[0]
   options = sorted(options, key=lambda x: x[0]*x[2])
   best = options[0]
-  print(f"{name:30s} {baseline[0]/1e3:8.2f} us -> {best[0]/1e3:8.2f} us {baseline[0]/best[0]:7.2f}x *with* {winning_interventions} + {best[1]}")
+  print(f"{name:30s} {baseline[0]/1e3:9.2f} us -> {best[0]/1e3:9.2f} us {baseline[0]/best[0]:7.2f}x *with* {winning_interventions} + {best[1]}")
   return best
 
 def apply_optimization(k, ast, max_interventions=1, cache=True):
@@ -123,7 +123,7 @@ def search(ast):
   winning_interventions = []
   for i in range(10):
     print(winning_interventions)
-    oo = search_one(ast, winning_interventions)
+    oo = search_one(ast, winning_interventions, True)
     print(oo)
     if oo[1] is None: break
     winning_interventions.append(oo[1])
@@ -209,6 +209,12 @@ if __name__ == "__main__":
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(32, 1, 1, 1), views=[View((32, 1, 1, 1), (0, 0, 0, 0), 0)]), hostbuf=GPUBuffer(shape=(1,), backing=np.array([9.964923e-06], dtype=np.float32)))
     op1 = LazyOp(BinaryOps.MUL, (op0,buf1,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (1, 32, 1, 1))
+  elif int(os.getenv("CONVW", "0")):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(64, 1, 128, 3, 3, 512, 32, 32), views=[View((64, 512, 34, 34), (1024, 65536, 32, 1), -33), ZeroView((64, 512, 32, 32), ((0, 64), (0, 512), (-1, 33), (-1, 33))), View((64, 1, 128, 3, 3, 512, 32, 32), (591872, 591872, 0, 34, 1, 1156, 34, 1), 0)]), hostbuf=GPUBuffer(shape=(512, 64, 32, 32), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(64, 1, 128, 3, 3, 512, 32, 32), views=[View((64, 1, 128, 3, 3, 512, 32, 32), (0, 0, 1024, 0, 0, 131072, 32, 1), 0)]), hostbuf=GPUBuffer(shape=(512, 128, 32, 32), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (64, 1, 128, 3, 3, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (64, 128, 3, 3))
   elif int(os.getenv("BC", "0")):
     # big conv
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(8, 1, 32, 112, 112, 3, 3, 3), views=[View((8, 3, 225, 225), (150528, 50176, 224, 1), 0), ZeroView((8, 3, 224, 224), ((0, 8), (0, 3), (0, 225), (0, 225))), View((8, 1, 32, 112, 112, 3, 3, 3), (151875, 151875, 0, 450, 2, 50625, 225, 1), 0)]), hostbuf=GPUBuffer(shape=(8, 3, 224, 224), force_create=True))
