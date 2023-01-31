@@ -3,9 +3,9 @@ import os, time, io, pathlib, sys
 from tinygrad.helpers import getenv
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-if getenv("OPT", 1):
+if os.getenv("OPT", None) is None:
   os.environ['OPT'] = '99'
-if getenv("GPU", 1):
+if os.getenv("GPU", None) is None:
   os.environ['GPU'] = '1'
 
 ALLOWED_KERNEL_COUNT = getenv("ALLOWED_KERNEL_COUNT")

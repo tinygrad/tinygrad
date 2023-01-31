@@ -12,7 +12,7 @@ CUDA = getenv("CUDA")
 if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL   # NOTE: using CL will not work for the CUDA runtime # noqa: F401
 else: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
 
-VALIDHACKS = getenv("VALIDHACKS")    # TODO: remove the need for this
+VALIDHACKS = getenv("VALIDHACKS", False)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG")  # this is needed as a switch for the tests to pass
 
 KOPT = getenv("KOPT")

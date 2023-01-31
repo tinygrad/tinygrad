@@ -12,7 +12,7 @@ def modn(x, a): return -((-x)%a) if x < 0 else x%a
 def make_pair(x): return (x,x) if isinstance(x, int) else x
 
 @functools.lru_cache(maxsize=None)
-def getenv(key, default=0): return type(default)(os.getenv(key, default))
+def getenv(key, default=0): return type(default)(os.getenv(key, default)) if type(default) is not bool else os.getenv(key, str(default)).lower() in ['true', 't', '1', 'y', 'yes']
 
 def reduce_shape(shape, axis): return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 def shape_to_axis(old_shape, new_shape):

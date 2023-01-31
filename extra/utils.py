@@ -11,7 +11,7 @@ def fetch(url):
     return dat
   import requests, os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
-  if os.path.isfile(fp) and os.stat(fp).st_size > 0 and getenv("NOCACHE", 1):
+  if os.path.isfile(fp) and os.stat(fp).st_size > 0 and getenv("NOCACHE", True):
     with open(fp, "rb") as f:
       dat = f.read()
   else:
