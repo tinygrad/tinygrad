@@ -345,10 +345,11 @@ class GPUBuffer(ExplicitExecAST):
   @staticmethod
   def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
 
-  def toCPU(self):
-    data = np.empty(self.shape, dtype=np.float32)
+  def toCPU(self) -> np.ndarray:
     cl_buf = self.contiguous()
     cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
+    assert prod(cl_buf._base_shape) == prod(self.shape)
+    data = np.empty(self.shape, dtype=np.float32)
     cl_buf._buf.copyout(data)
     return data
 

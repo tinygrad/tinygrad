@@ -104,7 +104,8 @@ def train_cifar():
   # 136 TFLOPS is the theoretical max w float16 on 3080TI
 
   for i in range(10):
-    X, Y = fetch_batch(X_train, Y_train, BS=512)
+    # TODO: the real batch size is 512
+    X, Y = fetch_batch(X_train, Y_train, BS=5)
     CL.time_sum, CL.kernel_count = 0, -1
     CL.ops_sum = 0  # TODO: this should be GlobalCounters.global_ops
     st = time.monotonic()
