@@ -1,6 +1,5 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import os
 import functools
 from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod, getenv

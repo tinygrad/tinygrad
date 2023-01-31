@@ -1,5 +1,4 @@
 from __future__ import annotations
-import os
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Union, Set
 from tinygrad.helpers import prod

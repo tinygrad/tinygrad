@@ -1,4 +1,4 @@
-import os, torch
+import torch
 from tinygrad.llops.ops_cpu import CPUBuffer  # type: ignore
 from tinygrad.ops import ProcessingOps, GenericExecAST
 from tinygrad.helpers import getenv

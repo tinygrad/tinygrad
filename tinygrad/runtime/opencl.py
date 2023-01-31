@@ -1,4 +1,4 @@
-import os, functools, platform
+import functools, platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List
