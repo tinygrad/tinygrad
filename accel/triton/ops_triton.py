@@ -73,7 +73,8 @@ class TritonASTKernel(ASTKernel):
     self.output_shape = list(self.shapes[0][:self.first_reduce])
 
     # copied from ops_gpu
-    MAX_OUTPUT_SHAPE = 3
+    # TODO CUDA only supports a grid of (2^31-1, 65535, 65535), that results in invalid kernel launches for some shapes, so flattern the grid for now.
+    MAX_OUTPUT_SHAPE = 1
     self.kernel += [f"  idx{len(self.output_shape)-1-i} = tl.program_id({i})" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape)))]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
