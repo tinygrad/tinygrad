@@ -15,7 +15,7 @@ class ReLU(Function):
     return ret
 
   def backward(self, grad_output):
-    return self.saved_tensors[0].unary_op(UnaryOps.SIGN).binary_op(BinaryOps.MUL, grad_output)
+    return self.saved_tensors[0].unary_op(UnaryOps.GT0).binary_op(BinaryOps.MUL, grad_output)
 
 class Log(Function):
   def forward(self, x):
