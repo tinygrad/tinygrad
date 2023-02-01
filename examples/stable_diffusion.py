@@ -274,7 +274,7 @@ class Upsample:
 def timestep_embedding(timesteps, dim, max_period=10000):
   half = dim // 2
   freqs = np.exp(-math.log(max_period) * np.arange(0, half, dtype=np.float32) / half)
-  args = timesteps.numpy() * freqs
+  args = timesteps * freqs
   embedding = np.concatenate([np.cos(args), np.sin(args)])
   return Tensor(embedding).reshape(1, -1)
 
@@ -640,9 +640,8 @@ if __name__ == "__main__":
   # done with clip model
   del model.cond_stage_model
 
-  def get_model_output(latent, t):
+  def get_model_output(latent, timesteps):
     # put into diffuser
-    timesteps = Tensor([t])
     unconditional_latent = model.model.diffusion_model(latent, timesteps, unconditional_context).realize()
     latent = model.model.diffusion_model(latent, timesteps, context).realize()
 
@@ -660,6 +659,7 @@ if __name__ == "__main__":
     a_t, a_prev = alphas[index], alphas_prev[index]
     sigma_t = 0
     sqrt_one_minus_at = math.sqrt(1-a_t)
+    sqrt_one_minus_at = Tensor([sqrt_one_minus_at]).realize()  # don't constant fold this
     #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
 
     pred_x0 = (x - sqrt_one_minus_at * e_t) / math.sqrt(a_t)
