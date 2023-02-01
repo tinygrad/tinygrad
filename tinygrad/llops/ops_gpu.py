@@ -28,7 +28,7 @@ def split_float4(x):
 
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.GT0: "((float)(A>0.0))",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.GT0: "((float)1.-step((float)0.,(-A))",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
