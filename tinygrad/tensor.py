@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
 from tinygrad.helpers import prod, argfix, make_pair, idxfix, slcfix
-from typing import List, Callable, Optional
+from typing import List, Tuple, Callable, Optional
 from tinygrad.lazy import Device, LazyBuffer
 
 # **** start with two base classes, Tensor and Function ****
@@ -207,7 +207,7 @@ class Tensor:
   dot = matmul
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding): return self.slice(arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])
+  def pad2d(self, padding:Tuple[int, ...]): return self.slice(arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])  # type: ignore
   # TODO: this is totally not transpose
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
