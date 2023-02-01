@@ -29,7 +29,7 @@ def split_float4(x):
 
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.GT0: "(A > 0)",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
@@ -92,7 +92,6 @@ class CLASTKernel(ASTKernel):
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
-    if CUDA and x.op == UnaryOps.SIGN: self.prekernel.add("inline __device__ float sign(float x) { float val = (signbit(x) == 0.0f) ? 1.0f : -1.0f; return (x == 0.0f) ? 0.0f : val; }")
     if len(values) == 2:
       # TODO: sometimes this is split, sometimes it's multiply
       if isinstance(x.op, ReduceOps) and values[0][0].typ == Types.FLOAT4 and len(values[0])*4 == len(values[1]): values[0] = split_float4(values[0])
