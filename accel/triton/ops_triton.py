@@ -95,10 +95,10 @@ class TritonASTKernel(ASTKernel):
     codeObject = compile(kernel, fn, "exec")
     exec(codeObject, globals())
     program = globals()['fxn']
-
+    mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):
       GlobalCounters.global_ops += self.info.flops
-      GlobalCounters.global_mem += sum(prod(x.shape) for x in self.bufs)
+      GlobalCounters.global_mem += mem_estimate
       return program[tuple(self.output_shape[::-1])](*[TritonWrapper(x.torch) for x in bufs], stream=stream.handle)
     self.func_cache[self.key] = runner
     return runner
