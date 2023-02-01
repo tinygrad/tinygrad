@@ -117,11 +117,11 @@ class TestNN(unittest.TestCase):
     N, C, H, W = 20, 5, 10, 10
 
     # create in tinygrad
-    layer = LayerNorm(W)
+    layer = LayerNorm([H, W])
 
     # create in torch
     with torch.no_grad():
-      torch_layer = torch.nn.LayerNorm(W).eval()
+      torch_layer = torch.nn.LayerNorm([H, W]).eval()
       torch_layer.weight[:] = torch.tensor(layer.weight.data, dtype=torch.float32)
       torch_layer.bias[:] = torch.tensor(layer.bias.data, dtype=torch.float32)
 

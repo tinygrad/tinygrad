@@ -66,16 +66,17 @@ class GroupNorm:
     # subtract mean and divide stddev
     x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
 
-    if not self.weight or not self.bias: return x
+    if not self.affine: return x
     # elementwise_affine on channels
     return x * self.weight.reshape(1, -1, 1, 1) + self.bias.reshape(1, -1, 1, 1)
 
 class LayerNorm:
   def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
-    self.normalized_shape, self.eps = normalized_shape, eps
-    self.weight, self.bias = (Tensor.ones(normalized_shape), Tensor.zeros(normalized_shape)) if elementwise_affine else (None, None)
+    normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+    self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(normalized_shape))), eps, elementwise_affine
+    self.weight, self.bias = (Tensor.ones(*normalized_shape), Tensor.zeros(*normalized_shape)) if elementwise_affine else (None, None)
 
   def __call__(self, x):
-    x = x.layernorm(eps=self.eps)
-    if not self.weight or not self.bias: return x
-    return x.linear(self.weight, self.bias)
+    x = x.layernorm(eps=self.eps, axis=self.axis)
+    if not self.elementwise_affine: return x
+    return x * self.weight + self.bias
