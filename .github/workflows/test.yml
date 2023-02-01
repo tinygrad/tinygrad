@@ -189,12 +189,13 @@ jobs:
   testdocker:
     name: Docker Test
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
     - name: Build Docker
-      run: docker build -t tinygrad -f test/Dockerfile .
-    - name: Test Docker
-      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+      run: docker build -t tinygrad/testing --target=testing -f test/Dockerfile .
+    - name: Run Docker Pytest
+      run: docker run -e LAZY=0 --rm tinygrad/testing python3 -m pytest -s -v
+    - name: Run Docker Pytest (lazy)
+      run: docker run -e LAZY=1 --rm tinygrad/testing python3 -m pytest -s -v
