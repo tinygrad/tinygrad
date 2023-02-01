@@ -1,17 +1,17 @@
 # this can be constructed from a cl_cache or loaded from a thneed file 
-import os
 import time
 import struct
 import json
 import traceback
 import numpy as np
 from tinygrad.llops.ops_gpu import CL, CLProgram
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from collections import defaultdict
 import pyopencl as cl
+from tinygrad.runtime.opencl import OSX_TIMING_RATIO
 
-DEBUGCL = int(os.getenv("DEBUGCL", 0))
-FLOAT16 = int(os.getenv("FLOAT16", 0))
+DEBUGCL = getenv("DEBUGCL", 0)
+FLOAT16 = getenv("FLOAT16", 0)
 
 class Thneed:
   def __init__(self, cl_cache=[], inputs={}):
@@ -276,12 +276,14 @@ class Thneed:
     et = time.monotonic() - st
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 
+    #for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
+    #  print(f"{i:3d} {prg.name:20s} " + "queued @ %5.2f ms, submit @ %5.2fms, start @ %5.2f ms, end @ %5.2f ms" % tuple((x*OSX_TIMING_RATIO - st*1e9)/1e6 for x in [e.profile.queued, e.profile.submit, e.profile.start, e.profile.end]))
     if DEBUGCL >= 1:
       total_runtime = 0
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
-        runtime = (e.profile.end - e.profile.start)
+        runtime = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
         print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us {(prg.op_estimate)/runtime:9.2f} GFLOPS {prg.options} -> {args[2].shape if hasattr(args[2], 'shape') else args[2].size}")
-        if (DEBUGCL >= 2 and int(os.getenv("PRINT_KERNEL", "-1")) == i) or DEBUGCL >= 3:
+        if (DEBUGCL >= 2 and getenv("PRINT_KERNEL", -1) == i) or DEBUGCL >= 3:
           print(prg.prg)
         total_runtime += runtime
       print(f"total runtime: {total_runtime/1e6:.2f} ms   wall time: {et*1000.0:.2f} ms")

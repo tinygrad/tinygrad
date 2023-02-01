@@ -1,11 +1,11 @@
-import os
 import torch
 import time
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor, Device
+from tinygrad.helpers import getenv
 
-FORWARD_ONLY = bool(int(os.getenv("FORWARD_ONLY", "0")))
+FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   torch.manual_seed(0)
@@ -421,7 +421,7 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
   def test_maxpool2d(self):
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
+    for ksz in [(2,2), (3,3), 2, 3, (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),

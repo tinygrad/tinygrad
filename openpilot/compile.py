@@ -7,8 +7,9 @@ if os.getenv("OPT", None) is None:
 if os.getenv("GPU", None) is None:
   os.environ['GPU'] = '1'
 
-ALLOWED_KERNEL_COUNT = int(os.getenv("ALLOWED_KERNEL_COUNT", 0))
-DEBUGCL = int(os.getenv("DEBUGCL", 0))
+from tinygrad.helpers import getenv
+ALLOWED_KERNEL_COUNT = getenv("ALLOWED_KERNEL_COUNT", 0)
+DEBUGCL = getenv("DEBUGCL", 0)
 
 import onnx
 import numpy as np
@@ -34,7 +35,7 @@ def get_random_input_tensors(input_shapes):
     "features_buffer": np.random.randn(*input_shapes['features_buffer'])
     #"initial_state": np.zeros((1, 768))
   }
-  if int(os.getenv("ZERO_OUT", "0")):
+  if getenv("ZERO_OUT", 0):
     np_inputs = {k:v*0 for k,v in np_inputs.items()}
 
   for k,v in np_inputs.items():
@@ -105,7 +106,7 @@ def compile(dat, output_fn):
   from extra.thneed import Thneed
   t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
   CL.CACHE = None
-  if int(os.getenv("OPTWG", "0")):
+  if getenv("OPTWG", 0):
     t.optimize_local_workgroup()
 
   # save thneed (before run)
@@ -121,7 +122,7 @@ def compile(dat, output_fn):
   np.testing.assert_allclose(thneed_out, tinygrad_out.numpy())
 
   # float32 only (fix this)
-  FLOAT16 = int(os.getenv("FLOAT16", 0))
+  FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
     try:
       from test.test_onnx import run_onnx_torch

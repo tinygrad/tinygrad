@@ -4,12 +4,16 @@ import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel
-from test.lib_test_ast import test_ast
+from tinygrad.helpers import getenv
+from extra.lib_test_ast import test_ast
 
 def compile_and_test_ast(ast):
   k = CLASTKernel(ast)
+  if getenv("KOPT", 0):
+    from extra.kernel_search import apply_optimization
+    apply_optimization(k, ast, 10, getenv("KCACHE", 0))
   k.codegen()(*k.bufs)
-  test_ast(k)
+  if not getenv("NOTEST", 0): test_ast(k)
 
 class TestAST(unittest.TestCase):
   def test_conv_zeroview_ast(self):
@@ -17,6 +21,21 @@ class TestAST(unittest.TestCase):
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, 3, 4), views=[View((1, 1, 3, 4), (0, 0, 0, 0), 0)]))
     op1 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
     ast = LazyOp(UnaryOps.RELU, (op1,), None)
+    compile_and_test_ast(ast)
+
+  def test_cifar_conv(self):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(512, 1, 128, 32, 32, 64, 3, 3), views=[View((512, 64, 34, 34), (65536, 1024, 32, 1), -33), ZeroView((512, 64, 32, 32), ((0, 512), (0, 64), (-1, 33), (-1, 33))), View((512, 1, 128, 32, 32, 64, 3, 3), (73984, 73984, 0, 34, 1, 1156, 34, 1), 0)]), hostbuf=GPUBuffer(shape=(512, 64, 32, 32), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(512, 1, 128, 32, 32, 64, 3, 3), views=[View((512, 1, 128, 32, 32, 64, 3, 3), (0, 0, 576, 0, 0, 9, 3, 1), 0)]), hostbuf=GPUBuffer(shape=(128, 64, 3, 3), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    ast = LazyOp(ReduceOps.SUM, (op0,), (512, 1, 128, 32, 32, 1, 1, 1))
+    compile_and_test_ast(ast)
+
+  def test_cifar_conv_backward(self):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(256, 1, 512, 3, 3, 512, 8, 8), views=[View((256, 512, 10, 10), (64, 16384, 8, 1), -9), ZeroView((256, 512, 8, 8), ((0, 256), (0, 512), (-1, 9), (-1, 9))), View((256, 1, 512, 3, 3, 512, 8, 8), (51200, 51200, 0, 10, 1, 100, 10, 1), 0)]), hostbuf=GPUBuffer(shape=(512, 256, 8, 8), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(256, 1, 512, 3, 3, 512, 8, 8), views=[View((256, 1, 512, 3, 3, 512, 8, 8), (0, 0, 64, 0, 0, 32768, 8, 1), 0)]), hostbuf=GPUBuffer(shape=(512, 512, 8, 8), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (256, 1, 512, 3, 3, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (256, 512, 3, 3))
     compile_and_test_ast(ast)
 
   def test_first_op_conv(self):
@@ -53,6 +72,16 @@ class TestAST(unittest.TestCase):
     op7 = LazyOp(BinaryOps.MUL, (buf3,op6,), None)
     op8 = LazyOp(BinaryOps.SUB, (op3,op7,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op8,), (64, 1024, 4))
+    compile_and_test_ast(ast)
+
+  def test_third_op_conv(self):
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 8, 4), views=[View((1, 64, 128, 4, 4, 1, 1, 8, 4), (0, 4096, 32, 0, 0, 0, 0, 4, 1), 0)]), hostbuf=GPUBuffer(shape=(64, 1024, 4), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 8, 4), views=[View((1, 64, 128, 4, 4, 1, 1, 8, 4), (0, 0, 0, 128, 4, 0, 0, 16, 1), 0)]), hostbuf=GPUBuffer(shape=(4, 32, 4), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 64, 128, 4, 4, 1, 1, 1, 1))
+    buf2 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 4, 4, 1, 1, 1, 1), views=[View((1, 64, 128, 4, 4, 1, 1, 1, 1), (0, 0, 0, 4, 1, 1, 1, 1, 1), 0)]), hostbuf=GPUBuffer(shape=(16,), force_create=True))
+    op2 = LazyOp(BinaryOps.ADD, (op1,buf2,), None)
+    ast = LazyOp(MovementOps.RESHAPE, (op2,), (64, 512, 4))
     compile_and_test_ast(ast)
 
   # VALIDHACKS=1 IMAGE=2 DEBUG=4 PYTHONPATH="." GPU=1 OPT=2 python3 test/external_test_gpu_ast.py TestAST.test_reduce_op

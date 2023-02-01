@@ -1,13 +1,16 @@
-import os, functools, time, platform
+import functools, platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List
 from collections import defaultdict
 from tinygrad.ops import DEBUG
+from tinygrad.helpers import getenv
 
 OSX = platform.system() == "Darwin"
-CLCACHE = int(os.getenv("CLCACHE", "1"))
-FLOAT16 = int(os.getenv("FLOAT16", "0"))
+OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
+
+CLCACHE = getenv("CLCACHE", 1)
+FLOAT16 = getenv("FLOAT16", 0)
 
 class CL:
   CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
@@ -19,7 +22,7 @@ class CL:
     devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
-    CL.cl_ctx = cl.Context(devices=[devices[int(os.getenv("CL_DEVICE", "0"))]])
+    CL.cl_ctx = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
     if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
@@ -73,16 +76,16 @@ class CLProgram:
   def __call__(self, *args):
     CL.kernel_count += 1
     if DEBUG >= 4: print(args[0], args[1], self.prg)
-    if OSX and DEBUG >= 2: st = time.monotonic_ns()
+    # print the PTX for NVIDIA. TODO: probably broken for everything else
+    if DEBUG >= 5: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
-    if DEBUG >= 2:
+    if DEBUG >= 2 and CL.CACHE is None:
       CL.cl_queue.finish()
-      # NOTE: Profiling is (sadly) broken in OS X, so we take the real kernel time
-      # BOUNTY: will paypal $50 to anyone who fixes this
-      et = (time.monotonic_ns() - st) if OSX else (e.profile.end - e.profile.start)
+      # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
+      et = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
+      CL.time_sum += et
     if DEBUG >= 1:
-      CL.time_sum += 0 if DEBUG <= 1 or CL.CACHE is not None else et
       CL.ops_sum += self.op_estimate
       print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
             (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))

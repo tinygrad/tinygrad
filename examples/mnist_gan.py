@@ -6,13 +6,14 @@ from tqdm import tqdm
 sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'test'))
 
-from tinygrad.tensor import Tensor, Function, register
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 from extra.utils import get_parameters
 import tinygrad.nn.optim as optim
-from test_mnist import X_train
+from datasets import fetch_mnist
 from torchvision.utils import make_grid, save_image
 import torch
-GPU = os.getenv("GPU") is not None
+GPU = getenv("GPU")
 class LinearGen:
   def __init__(self):
     lv = 128
@@ -61,6 +62,7 @@ if __name__ == "__main__":
   disc_loss = []
   output_folder = "outputs"
   os.makedirs(output_folder, exist_ok=True)
+  X_train = fetch_mnist()[0]
   train_data_size = len(X_train)
   ds_noise = Tensor(np.random.randn(64,128).astype(np.float32), requires_grad=False)
   n_steps = int(train_data_size/batch_size)

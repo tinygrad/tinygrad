@@ -1,13 +1,12 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import os
 import functools
 from typing import Tuple, Union, List, Optional
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.shape.symbolic import Variable
 
 # TODO: fix DEBUG import
-DEBUG = int(os.getenv("DEBUG", "0"))
+DEBUG = getenv("DEBUG", 0)
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
@@ -45,8 +44,8 @@ class View:
     return 'idx=' + str(self.expr_node(Variable('idx', 0, prod([x[0] for x in self.shape_strides])-1)))
 
   # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs):
-    return Variable.sum([Variable.num(self.offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
+  def expr_idxs(self, idxs, offset=0):
+    return Variable.sum([Variable.num(self.offset+offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
 
 class ZeroView:
   def __init__(self, old_shape:Tuple[int, ...], arg):
@@ -95,6 +94,7 @@ class ShapeTracker:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
     self.views : List[ViewTypes] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
+  def copy(self): return ShapeTracker(self.shape, self.views[:])
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous
@@ -107,6 +107,15 @@ class ShapeTracker:
 
   @property
   def offset(self) -> int: return self.views[-1].offset
+
+  # TODO: pass in the idxs?
+  def expr_idxs(self, offset=0):
+    idx = self.views[-1].expr_idxs([f"idx{i}" for i in range(len(self.shape))], offset)
+    valid = Variable.num(1)
+    for v in self.views[0:-1][::-1]:
+      if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
+      else: idx = v.expr_node(idx)
+    return idx, valid
 
   def expr_node(self):
     idx = Variable('idx', 0, prod(self.shape)-1)

@@ -12,10 +12,11 @@ from extra.utils import get_parameters
 from datasets import fetch_mnist
 from extra.training import train, evaluate, sparse_categorical_crossentropy
 import tinygrad.nn.optim as optim
+from tinygrad.helpers import getenv
 from extra.augment import augment_img
-GPU = os.getenv("GPU", None) is not None
-QUICK = os.getenv("QUICK", None) is not None
-DEBUG = os.getenv("DEBUG", None) is not None
+GPU = getenv("GPU")
+QUICK = getenv("QUICK")
+DEBUG = getenv("DEBUG")
 
 class SqueezeExciteBlock2D:
   def __init__(self, filters):
