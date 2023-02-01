@@ -48,7 +48,7 @@ class TritonASTKernel(ASTKernel):
       if buf_index not in self.loaded:
         idx, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index)
         valid_expr = str(valid).replace("&&", "*1*")
-        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx}), 0.0)")
+        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx}, mask={valid_expr}), 0.0)")
         self.loaded.add(buf_index)
       return f"val{buf_index}"
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
