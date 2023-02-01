@@ -107,7 +107,8 @@ def train_cifar():
   for i in range(1 if getenv("GRAPH") else 10):
     # TODO: the real batch size is 512
     X, Y = fetch_batch(X_train, Y_train, BS=getenv("BS", 512))
-    CL.time_sum, CL.kernel_count = 0, -1
+    GlobalCounters.time_sum = 0
+    CL.kernel_count = -1
     CL.ops_sum = 0  # TODO: this should be GlobalCounters.global_ops
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, X, Y, enable_jit=getenv("CLCACHE"))
