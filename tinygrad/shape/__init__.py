@@ -53,10 +53,10 @@ class ZeroView:
     self.shape : Tuple[int, ...] = tuple([y-x for x,y in self.arg])
 
   @property
-  def strides(self): raise Exception("ZeroView doesn't have strides")
+  def strides(self): raise NotImplementedError("ZeroView doesn't have strides")
 
   @property
-  def offset(self): raise Exception("ZeroView doesn't have offset")
+  def offset(self): raise NotImplementedError("ZeroView doesn't have offset")
 
   @property
   def contiguous(self): return False

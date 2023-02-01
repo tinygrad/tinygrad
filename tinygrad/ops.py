@@ -59,7 +59,7 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     elif ast.op in ProcessingOps:
       ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
     else:
-      raise Exception("unknown op")
+      raise TypeError("unknown op")
     return ret
 
 class GlobalCounters:

@@ -24,7 +24,7 @@ class Tensor:
     elif isinstance(data, LazyBuffer):
       self.lazydata = data
     else:
-      raise Exception(f"can't create Tensor from {data}")
+      raise RuntimeError(f"can't create Tensor from {data}")
 
     # tensors have gradients, buffers do not
     self.grad : Optional[Tensor] = None

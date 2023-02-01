@@ -39,7 +39,7 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
   oy = (iy + py + py_ - dy * (H-1) - 1)//sy + 1
   ox = (ix + px + px_ - dx * (W-1) - 1)//sx + 1
   if cin*groups != cin_:
-    raise Exception(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
+    raise TypeError(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0 and (out_shape is None or out_shape == (bs, cout, oy, ox))
   return ConvArgs(H, W, groups, cout//groups, cin, oy, ox, iy, ix, sy, sx, bs, cout, py, py_, px, px_, dy, dx, (bs, cout, oy, ox))
 
