@@ -55,3 +55,28 @@ class Linear:
 
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
+
+class GroupNorm:
+  def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
+    self.num_groups, self.num_channels, self.eps, self.affine = num_groups, num_channels, eps, affine
+    self.weight, self.bias = (Tensor.ones(num_channels), Tensor.zeros(num_channels)) if affine else (None, None)
+
+  def __call__(self, x):
+    # reshape for layernorm to work as group norm
+    # subtract mean and divide stddev
+    x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
+
+    if not self.affine: return x
+    # elementwise_affine on channels
+    return x * self.weight.reshape(1, -1, 1, 1) + self.bias.reshape(1, -1, 1, 1)
+
+class LayerNorm:
+  def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
+    normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+    self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(normalized_shape))), eps, elementwise_affine
+    self.weight, self.bias = (Tensor.ones(*normalized_shape), Tensor.zeros(*normalized_shape)) if elementwise_affine else (None, None)
+
+  def __call__(self, x):
+    x = x.layernorm(eps=self.eps, axis=self.axis)
+    if not self.elementwise_affine: return x
+    return x * self.weight + self.bias
