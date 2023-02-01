@@ -1,5 +1,6 @@
 from __future__ import annotations
 import hashlib
+from weakref import WeakValueDictionary
 from torch import float32
 import numpy as np
 # import pycuda.autoinit # type: ignore # pylint: disable=unused-import # noqa: F401
@@ -9,7 +10,7 @@ import pycuda.driver as cuda # type: ignore
 import triton # type: ignore # noqa: F401
 import triton.language as tl  # type: ignore # noqa: F401
 
-from typing import Union, Tuple, Optional, Dict, Any
+from typing import Union, Tuple, Optional, Dict
 from tinygrad.ops import MovementOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import prod
@@ -59,7 +60,7 @@ class TritonASTKernel(ASTKernel):
     if len(values) == 2: code = code.replace("B", values[1])
     return code
 
-  func_cache : Dict[Any, Any] = {}
+  func_cache: WeakValueDictionary = WeakValueDictionary()
   def codegen(self):
     if self.key in self.func_cache: return self.func_cache[self.key]
 
