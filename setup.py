@@ -25,6 +25,7 @@ setup(name='tinygrad',
         'gpu': ["pyopencl", "six"],
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
+        'triton': ["triton>=2.0.0.dev20221202"],
         'testing': [
             "pytest",
             "torch~=1.11.0",

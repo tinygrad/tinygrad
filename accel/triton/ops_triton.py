@@ -1,19 +1,25 @@
 from __future__ import annotations
-import torch
 import hashlib
+from weakref import WeakValueDictionary
+from torch import float32
 import numpy as np
+# import pycuda.autoinit # type: ignore # pylint: disable=unused-import # noqa: F401
+import pycuda.autoprimaryctx # type: ignore # noqa: F401
+import pycuda.driver as cuda # type: ignore
 
-import triton # noqa: F401
-import triton.language as tl # noqa: F401
+import triton # type: ignore # noqa: F401
+import triton.language as tl  # type: ignore # noqa: F401
 
-from typing import Union, Tuple, Optional, Dict, Any
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
+from typing import Union, Tuple, Optional, Dict
+from tinygrad.ops import MovementOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import prod
 from tinygrad.ast import ASTKernel
 
 from tinygrad.shape import View, ZeroView
 from tinygrad.shape.symbolic import Variable
+
+stream = cuda.Stream()
 
 class TritonASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
@@ -42,7 +48,7 @@ class TritonASTKernel(ASTKernel):
       if buf_index not in self.loaded:
         idx, valid = self.compute_buf_index_symbolic(self.bufs[buf_index].st, buf_index)
         valid_expr = str(valid).replace("&&", "*1*")
-        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx}), 0.0)")
+        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx}, mask={valid_expr}), 0.0)")
         self.loaded.add(buf_index)
       return f"val{buf_index}"
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
@@ -54,7 +60,7 @@ class TritonASTKernel(ASTKernel):
     if len(values) == 2: code = code.replace("B", values[1])
     return code
 
-  func_cache : Dict[Any, Any] = {}
+  func_cache: WeakValueDictionary = WeakValueDictionary()
   def codegen(self):
     if self.key in self.func_cache: return self.func_cache[self.key]
 
@@ -106,7 +112,7 @@ class TritonASTKernel(ASTKernel):
     def runner(*bufs):
       GlobalCounters.global_ops += self.info.flops
       GlobalCounters.global_mem += mem_estimate
-      return program[tuple(self.output_shape[::-1])](*[x.torch for x in bufs])
+      return program[tuple(self.output_shape[::-1])](*[TritonWrapper(x.torch) for x in bufs], stream=stream.handle)
     self.func_cache[self.key] = runner
     return runner
 
@@ -121,16 +127,30 @@ class TritonBuffer(ExplicitExecAST):
   @property
   def torch(self):
     if self._buf is None:
-      if self._backing is not None: self._buf = torch.from_numpy(self._backing).cuda()
-      else: self._buf = torch.empty(prod(self._base_shape), dtype=torch.float32, device='cuda')
+      self._buf = cuda.mem_alloc(4*prod(self._base_shape))
+      if self._backing is not None: cuda.memcpy_htod_async(self._buf, self._backing, stream=stream)
     return self._buf
 
   @staticmethod
   def fromCPU(x): return TritonBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
-  def toCPU(x): return x.contiguous().torch.cpu().numpy().reshape(x.shape)
+
+  def toCPU(self):
+    data = np.empty(self.shape, dtype=np.float32)
+    buf = self.contiguous() if self._buf is not None else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
+    # TODO should this be sync?
+    cuda.memcpy_dtoh_async(data, buf._buf, stream=stream)
+    return data
 
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     k = TritonASTKernel(ast)
     k.codegen()(*k.bufs)
     return k.ret
+
+class TritonWrapper:
+  def __init__(self, ptr):
+    self.ptr = ptr
+    self.dtype = float32
+
+  def data_ptr(self):
+    return int(self.ptr)
