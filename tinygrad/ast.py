@@ -26,9 +26,7 @@ class Token:
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
   def __init__(self, ast:LazyOp):
-    # key for lookup in cache (can change, str might not be right)
     self.input_ast = ast
-    self.key = str(ast)
 
     # if the AST ends with a RESHAPE, we remove it and create the buffer accordingly
     if ast.op == MovementOps.RESHAPE:
@@ -40,6 +38,9 @@ class ASTKernel:
     self.info = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
     self.ast = ast
+
+    # key for lookup in cache, AST BUFFER pair (can change, str might not be right)
+    self.key = str(self.input_ast) + str(self.bufs)
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
     self.ret = type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True)
