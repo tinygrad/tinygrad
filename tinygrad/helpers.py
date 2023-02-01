@@ -3,8 +3,7 @@ import os, math, functools
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x): return math.prod(x)
-def idxfix(i, sz): return sz+i if i < 0 else i
-def slcfix(i, sz, default=None): return default if i is None else max(0, min(sz, idxfix(i, sz)))
+def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))
 def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0], tuple) or isinstance(x[0], list) else tuple(x)
 def argsort(x): return sorted(range(len(x)), key=x.__getitem__) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items) if len(items) > 0 else True
