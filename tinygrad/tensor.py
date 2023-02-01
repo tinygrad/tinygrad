@@ -153,6 +153,7 @@ class Tensor:
 
   # ***** non first class ops (hlops) *****
 
+  # supports positive and negative indices / slices, as well as None to add a new axis
   def __getitem__(self, val):
     new_slice, new_shape = [], []
     val = [val] if not isinstance(val, (list, tuple)) else val
