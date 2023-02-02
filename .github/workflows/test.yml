@@ -32,7 +32,6 @@ jobs:
       with:
         python-version: 3.8
         cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -59,7 +58,6 @@ jobs:
       with:
         python-version: 3.8
         cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
@@ -81,7 +79,6 @@ jobs:
       with:
         python-version: 3.8
         cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[llvm,testing]'
     - name: Run Pytest OPT=2
@@ -101,7 +98,6 @@ jobs:
       with:
         python-version: 3.8
         cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
@@ -129,7 +125,6 @@ jobs:
       with:
         python-version: 3.8
         cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Run Optimizer Test
@@ -157,7 +152,6 @@ jobs:
       with:
         python-version: 3.8
         cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Test GPU IMAGE ops
@@ -181,7 +175,6 @@ jobs:
       with:
         python-version: 3.8
         cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run mypy
