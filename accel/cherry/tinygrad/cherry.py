@@ -17,6 +17,7 @@
 import functools
 import numpy as np
 from collections import defaultdict
+from tinygrad.helpers import getenv
 
 # 32x32 * 32x32 -> 32x32 matmul = 65536 FLOPS @ 1 GHz = 64 TOPS
 # mulacc is 2048 FLOPS, 32x less
