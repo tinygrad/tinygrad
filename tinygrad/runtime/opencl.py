@@ -3,7 +3,7 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List
 from collections import defaultdict
-from tinygrad.ops import DEBUG
+from tinygrad.ops import DEBUG, GlobalCounters
 from tinygrad.helpers import getenv
 
 OSX = platform.system() == "Darwin"
@@ -13,7 +13,7 @@ CLCACHE = getenv("CLCACHE", 1)
 FLOAT16 = getenv("FLOAT16", 0)
 
 class CL:
-  CACHE, kernel_count, mem_used, time_sum, ops_sum = None, -1, 0, 0.0, 0.0
+  CACHE, kernel_count, mem_used, ops_sum = None, -1, 0, 0.0
   BUFFER_CACHE : Dict[int, List[cl.Buffer]] = defaultdict(list)
   cl_ctx : Optional[cl.Context] = None
   cl_queue : Optional[cl.CommandQueue] = None
@@ -84,9 +84,9 @@ class CLProgram:
       CL.cl_queue.finish()
       # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
       et = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
-      CL.time_sum += et
+      GlobalCounters.time_sum += et
     if DEBUG >= 1:
       CL.ops_sum += self.op_estimate
       print(f"**CL** {CL.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{CL.ops_sum/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
-            (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{CL.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
+            (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
     return e if CL.CACHE is None else None

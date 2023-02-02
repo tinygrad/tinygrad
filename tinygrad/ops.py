@@ -63,7 +63,7 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     return ret
 
 class GlobalCounters:
-  global_ops, global_mem = 0, 0
+  global_ops, global_mem, time_sum = 0, 0, 0
 
 class GenericShape(GenericExecAST):  # pylint: disable=abstract-method
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops
