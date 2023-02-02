@@ -3,7 +3,16 @@ FROM ubuntu:20.04 AS base
 RUN apt-get update && apt-get upgrade -y
 RUN apt-get install -y python3-pip git wget
 
-RUN pip3 install --no-cache-dir "tinygrad @ git+https://github.com/dc-dc-dc/tinygrad.git@fix/docker"
+WORKDIR /tinygrad
+
+COPY accel /tinygrad/accel
+COPY tinygrad /tinygrad/tinygrad
+COPY README.md /tinygrad/
+COPY setup.py /tinygrad/
+
+RUN pip3 install --no-cache-dir /tinygrad
+
+WORKDIR /src
 
 CMD ["/usr/bin/env", "python3"]
 
