@@ -8,6 +8,7 @@ from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import getenv
 
 DEBUG = getenv("DEBUG", 0)
+LLVM_CACHE_DEBUG = getenv("LLVM_CACHE_DEBUG", 0)
 
 # these are the llops your accelerator must implement, along with toCpu
 UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN", "RECIPROCAL"])
