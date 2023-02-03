@@ -149,7 +149,7 @@ class TestOps(unittest.TestCase):
   def test_tanh(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
   def test_topo_sort(self):
-    helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x*(x+x), lambda x: x.mul(x.add(x)), atol=1e-6, grad_atol=1e-6)
 
   def test_scalar_mul(self):
     helper_test_op([(45,65)], lambda x: x*2, lambda x: x*2)
