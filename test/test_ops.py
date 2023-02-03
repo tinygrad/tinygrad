@@ -92,7 +92,9 @@ class TestOps(unittest.TestCase):
   def test_softplus(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
   def test_gelu(self):
-    helper_test_op([(45,65)], lambda x: 0.5 * x * (1.0 + torch.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x))), Tensor.gelu)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu)
+  def test_quick_gelu(self):
+    helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
   def test_elu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x), Tensor.elu)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x, alpha=0.1), lambda x: Tensor.elu(x, alpha=0.1))
