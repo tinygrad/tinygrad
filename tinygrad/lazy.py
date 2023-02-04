@@ -374,6 +374,5 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffe
 
   if LLVM_CACHE_DEBUG:
     print("")
-    out = LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs))
     print("OP: " + str(op) + " | SRC: " + str(srcs))
   return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs))

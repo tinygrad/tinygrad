@@ -174,7 +174,7 @@ class LLVMBuffer(ExplicitExecAST):
     self._const = self._buf[0] if self._base_shape == (1,) else None
     #assert ctypes.addressof(self._buf) & 0x1F == 0
 
-  def __repr__(self): return f"LLVMBuffer ({str(self.st)}, hostbuf=LLVMBuffer(shape={self._base_shape}" + (f", const={str(self._const)})" if not self._const == None else f")")
+  def __repr__(self): return f"LLVMBuffer ({str(self.st)}, hostbuf=LLVMBuffer(shape={self._base_shape}" + (f", const={str(self._const)})" if self._const is not None else ")")
 
   @staticmethod
   def fromCPU(x):
