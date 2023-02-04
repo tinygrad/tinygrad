@@ -1,4 +1,5 @@
-import pycuda.autoinit # type: ignore # pylint: disable=unused-import # noqa: F401
+from typing import Optional
+import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import SourceModule # type: ignore
 import numpy as np
@@ -9,7 +10,7 @@ class CLImage:
 
 class CLBuffer:
   def __init__(self, size): self.cl = cuda.mem_alloc(size)
-  def copyin(self, b:np.ndarray): cuda.memcpy_htod_async(self.cl, b)
+  def copyin(self, b:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self.cl, b, stream)
   def copyout(self, a:np.ndarray): cuda.memcpy_dtoh(a, self.cl)
 
 class CLProgram:
