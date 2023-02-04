@@ -14,7 +14,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Install SLOCCount
       run: sudo apt-get install sloccount
     - name: Check <1000 lines
@@ -26,9 +26,9 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
     - name: Install dependencies
@@ -49,13 +49,15 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: sudo apt-get update
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
@@ -69,13 +71,15 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: sudo apt-get update
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[llvm,testing]'
     - name: Run Pytest OPT=2
@@ -87,13 +91,15 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: sudo apt-get update
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run Pytest
@@ -107,7 +113,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: |
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -117,9 +123,11 @@ jobs:
       #run: sudo apt-get install -y pocl-opencl-icd
       run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Run Optimizer Test
@@ -133,7 +141,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: |
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -143,9 +151,11 @@ jobs:
       #run: sudo apt-get install -y pocl-opencl-icd
       run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]'
     - name: Test GPU IMAGE ops
@@ -161,13 +171,15 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: sudo apt-get update
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: setup.py
     - name: Install Dependencies
       run: pip install -e '.[testing]'
     - name: Run mypy
@@ -181,7 +193,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Build Docker
       run: docker build -t tinygrad -f test/Dockerfile .
     - name: Test Docker
