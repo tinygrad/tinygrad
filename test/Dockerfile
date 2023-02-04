@@ -1,8 +1,7 @@
 FROM ubuntu:20.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get upgrade -y
-RUN apt-get install -y python3-pip git wget
+RUN apt-get update && apt-get install -y python3-pip git wget
 
 WORKDIR /tinygrad
 
@@ -30,9 +29,12 @@ COPY datasets ./datasets/
 
 FROM base AS llvm
 
+ENV LLVM 1
 RUN pip3 install --no-cache-dir "tinygrad[llvm]"
 
 FROM base AS opencl
+
+ENV GPU 1
 
 RUN wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
 RUN echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list
@@ -42,6 +44,7 @@ RUN pip3 install --no-cache-dir "tinygrad[gpu]"
 
 FROM opencl AS cuda
 
+ENV CUDA 1
 RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb -O /tmp/cuda-keyring_1.0-1_all.deb && dpkg -i /tmp/cuda-keyring_1.0-1_all.deb
 RUN apt-get update && apt-get install -y nvidia-cuda-toolkit cuda
 
