@@ -359,7 +359,7 @@ class GPUBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp):
     k = CLASTKernel(ast)
-    if k.key not in cls.KernelCache:
+    if k.key not in cls.KernelCache or True:  # TODO: fix why this breaks things with OPT=1
       if KOPT:
         from extra.kernel_search import apply_optimization
         apply_optimization(k, ast, max_interventions=KOPT)
