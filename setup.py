@@ -28,7 +28,7 @@ setup(name='tinygrad',
         'triton': ["triton>=2.0.0.dev20221202"],
         'testing': [
             "pytest",
-            "torch~=1.11.0",
+            "torch~=1.13.0",
             "tqdm",
             "protobuf~=3.19.0",
             "onnx",
