@@ -264,6 +264,7 @@ class CLASTKernel(ASTKernel):
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
+      if len(accumulators)*4 == len(acc_offsets): accumulators = split_float4(accumulators)
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
