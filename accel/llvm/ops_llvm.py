@@ -191,6 +191,9 @@ class LLVMBuffer(ExplicitExecAST):
       LLVMBuffer.func_cache[k.key](*[x._buf for x in k.bufs])
       return k.ret
 
+    # process if uncached
+    k.process()
+
     if DEBUG >= 2:
       print(k.ast)
       print("old:", [x.shape for x in k.sts])
