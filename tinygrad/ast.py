@@ -3,7 +3,7 @@ import itertools
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
-from tinygrad.shape import ShapeTracker, View
+from tinygrad.shape import ShapeTracker, View, strides_for_shape
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -16,10 +16,15 @@ class Token:
   def __init__(self, tok:str, typ:Types, ptr:bool=False):
     assert isinstance(tok, str)
     self.tok, self.typ, self.ptr = tok, typ, ptr
-    self.axis : List[Tuple[int, int]] = []
-  def array(self, length, stride): self.axis.append((length, stride))
+    self.axis : List[Tuple[int, int, bool]] = []
+  def array(self, length, stride, reduce): self.axis.append((length, stride, reduce))
   def size(self): return prod(x[0] for x in self.axis)
   def offsets(self): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.axis[::-1]])] if len(self.axis) else [0]
+  # TODO: this is sort of a hack, it gets the accumulator indices
+  def acc_offsets(self):
+    if len(self.axis) == 0: return [0]
+    acc_strides = [x*(1-self.axis[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.axis[::-1])))]
+    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.axis[::-1])])]
   def decltype(self): return ('float' if self.typ == Types.FLOAT else 'float4') + ('*' if self.ptr else '')
   def __repr__(self): return f"<{self.typ}{'*' if self.ptr else ''} {self.tok}{f'[{self.axis}]' if len(self.axis) else ''}>"
 
@@ -46,9 +51,11 @@ class ASTKernel:
     self.bufs = [type(self.ret)(self.info.shape, hostbuf=self.ret)] + self.bufs
 
     # TODO: should be optional if it's hitting a function cache
-    self.process()
+    self.processed = False
 
   def process(self):
+    if self.processed: return
+    self.processed = True
     reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
@@ -150,7 +157,7 @@ class ASTKernel:
           assert all(st.views[-1].strides[i]%upcasted[0] == 0 or st.views[-1].shape[i] == 1 for i in range(len(st.shape)-1))
           assert self.sts[i].offset % upcasted[0] == 0
         else:
-          self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1])
+          self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
 
     # remove the last dimension
     for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset)

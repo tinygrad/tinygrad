@@ -83,6 +83,7 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   strides = [1]
   for d in shape[::-1][:-1]:
     strides = [d*strides[0]] + strides
+  # TODO: should we 0 out all the strides where the shape is 1?
   return tuple(strides)
 
 @functools.lru_cache(maxsize=None)
