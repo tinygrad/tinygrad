@@ -21,7 +21,7 @@ jobs:
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
   linter:
-    name: Linter
+    name: Linters
     runs-on: ubuntu-latest
 
     steps:
@@ -34,7 +34,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install pylint flake8
+        python -m pip install pylint flake8 mypy
         pip install -e .
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
@@ -42,6 +42,8 @@ jobs:
       run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
     - name: Lint tinygrad with pylint
       run: pylint tinygrad/
+    - name: Run mypy
+      run: mypy tinygrad/
 
   testcpu:
     name: CPU Tests
@@ -50,8 +52,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Update packages
-      run: sudo apt-get update
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -72,8 +72,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Update packages
-      run: sudo apt-get update
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -92,8 +90,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    - name: Update packages
-      run: sudo apt-get update
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -164,26 +160,6 @@ jobs:
       run: |
         ALLOWED_KERNEL_COUNT=200 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
         UNSAFE_FLOAT4=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-
-  testmypy:
-    name: Mypy Tests
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Update packages
-      run: sudo apt-get update
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
-    - name: Install Dependencies
-      run: pip install -e '.[testing]'
-    - name: Run mypy
-      run: mypy tinygrad/
 
   # disabled, this test is flaky
   testdocker:
