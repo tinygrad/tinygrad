@@ -68,6 +68,7 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()
+      loss.realize()
     if not first:
       cl_cache = CL.CACHE
       CL.CACHE = None
@@ -82,18 +83,23 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
 def fetch_batch(X_train, Y_train, BS):
   # fetch a batch
   samp = np.random.randint(0, X_train.shape[0], size=(BS))
-  X = Tensor(X_train[samp])
   Y = np.zeros((BS, num_classes), np.float32)
   Y[range(BS),Y_train[samp]] = -1.0*num_classes
+  X = Tensor(X_train[samp])
   Y = Tensor(Y.reshape(BS, num_classes))
   return X.realize(), Y.realize()
 
 def train_cifar():
   Tensor.training = True
+  BS = getenv("BS", 512)
   X_train,Y_train = fetch_cifar(train=True)
-  #X_test,Y_test = fetch_cifar(train=False)
+  print(X_train.shape, Y_train.shape)
+  X_test,Y_test = fetch_cifar(train=False)
+  Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
+  def make_lr(x): return Tensor([x]).realize()
   optimizer = optim.SGD(get_parameters(model), lr=0.001)
+  #optimizer = optim.Adam(get_parameters(model), lr=3e-4)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -104,15 +110,24 @@ def train_cifar():
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
 
-  for i in range(1 if getenv("GRAPH") else 10):
-    # TODO: the real batch size is 512
-    X, Y = fetch_batch(X_train, Y_train, BS=getenv("BS", 512))
-    CL.time_sum, CL.kernel_count = 0, -1
+  X, Y = fetch_batch(X_train, Y_train, BS=BS)
+  for i in range(getenv("STEPS", 10)):
+    #new_lr = (0.003 * i/300) if i < 300 else min(0.00001, 0.003 - 0.003 * i/300)
+    #optimizer.lr = Tensor([new_lr]).realize()
+
+    if i%10 == 0:
+      # use training batchnorm (and no_grad would change the kernels)
+      outs = model(Xt).numpy().argmax(axis=1)
+      correct = outs == Yt.numpy().argmin(axis=1)
+      print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%")
+    GlobalCounters.time_sum = 0
+    CL.kernel_count = -1
     CL.ops_sum = 0  # TODO: this should be GlobalCounters.global_ops
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, X, Y, enable_jit=getenv("CLCACHE"))
     et = time.monotonic()
-    loss_cpu = loss.detach().cpu().data[0]
+    X, Y = fetch_batch(X_train, Y_train, BS=BS)  # do this here
+    loss_cpu = loss.numpy()[0]
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {CL.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
 

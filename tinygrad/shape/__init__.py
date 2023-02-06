@@ -53,10 +53,10 @@ class ZeroView:
     self.shape : Tuple[int, ...] = tuple([y-x for x,y in self.arg])
 
   @property
-  def strides(self): raise Exception("ZeroView doesn't have strides")
+  def strides(self): raise NotImplementedError("ZeroView doesn't have strides")
 
   @property
-  def offset(self): raise Exception("ZeroView doesn't have offset")
+  def offset(self): raise NotImplementedError("ZeroView doesn't have offset")
 
   @property
   def contiguous(self): return False
@@ -83,6 +83,7 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   strides = [1]
   for d in shape[::-1][:-1]:
     strides = [d*strides[0]] + strides
+  # TODO: should we 0 out all the strides where the shape is 1?
   return tuple(strides)
 
 @functools.lru_cache(maxsize=None)

@@ -11,7 +11,7 @@ DEBUG = getenv("DEBUG", 0)
 LLVM_CACHE_DEBUG = getenv("LLVM_CACHE_DEBUG", 0)
 
 # these are the llops your accelerator must implement, along with toCpu
-UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "SIGN", "RECIPROCAL"])
+UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "GT0", "RECIPROCAL"])
 BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
 ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
 MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "EXPAND", "FLIP", "STRIDED", "PAD", "SHRINK"])
@@ -60,11 +60,11 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     elif ast.op in ProcessingOps:
       ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
     else:
-      raise Exception("unknown op")
+      raise TypeError("unknown op")
     return ret
 
 class GlobalCounters:
-  global_ops, global_mem = 0, 0
+  global_ops, global_mem, time_sum = 0, 0, 0
 
 class GenericShape(GenericExecAST):  # pylint: disable=abstract-method
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops

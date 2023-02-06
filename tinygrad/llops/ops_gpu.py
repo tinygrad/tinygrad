@@ -29,7 +29,8 @@ def split_float4(x):
 
 class CLASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)", UnaryOps.SIGN: "sign(A)",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)",
+    UnaryOps.GT0:  "(A > 0.)" if CUDA else "((float)1.-step((float)0.,(-A)))",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
@@ -92,7 +93,6 @@ class CLASTKernel(ASTKernel):
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
-    if CUDA and x.op == UnaryOps.SIGN: self.prekernel.add("inline __device__ float sign(float x) { float val = (signbit(x) == 0.0f) ? 1.0f : -1.0f; return (x == 0.0f) ? 0.0f : val; }")
     if len(values) == 2:
       # TODO: sometimes this is split, sometimes it's multiply
       if isinstance(x.op, ReduceOps) and values[0][0].typ == Types.FLOAT4 and len(values[0])*4 == len(values[1]): values[0] = split_float4(values[0])
@@ -103,11 +103,7 @@ class CLASTKernel(ASTKernel):
           values[1] = [Token(f"clreduce({x.tok})", Types.FLOAT) for x in values[1]]
         elif values[0][0].typ == Types.FLOAT: values[0] = group_float4(values[0])
         elif values[1][0].typ == Types.FLOAT: values[1] = group_float4(values[1])
-      #assert len(values[0]) == len(values[1]), f"values mismatch {values}"
-      # TODO: this is likely wrong
-      if len(values[0]) < len(values[1]):
-        assert len(values[1]) % len(values[0]) == 0
-        values[0] = values[0] * (len(values[1]) // len(values[0]))
+      assert len(values[0]) == len(values[1]), f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
@@ -228,6 +224,7 @@ class CLASTKernel(ASTKernel):
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
   def codegen(self):
+    self.process()
     self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
@@ -264,9 +261,11 @@ class CLASTKernel(ASTKernel):
       full_shape = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
       full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
 
+      acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, accumulators, do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
+      expanded_accumulators = split_float4(accumulators) if len(accumulators)*4 == len(acc_offsets) else accumulators
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
     if self.group_for_reduce:
