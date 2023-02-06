@@ -18,7 +18,7 @@ def train_one_step(model,X,Y):
   pcount = 0
   for p in params:
     pcount += np.prod(p.shape)
-  optimizer = optim.Adam(params, lr=0.001)
+  optimizer = optim.SGD(params, lr=0.001)
   print("stepping %r with %.1fM params bs %d" % (type(model), pcount/1e6, BS))
   st = time.time()
   train(model, X, Y, optimizer, steps=1, BS=BS)
