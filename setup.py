@@ -19,23 +19,25 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=['numpy', 'requests', 'pillow', 'networkx'],
+      install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx'],
       python_requires='>=3.8',
       extras_require={
         'gpu': ["pyopencl", "six"],
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
         'triton': ["triton>=2.0.0.dev20221202"],
-        'testing': [
+        'linting': [
+            "flake8",
             "pytest",
+            "pylint",
+            "mypy",
+            "pre-commit",
+        ],
+        'testing': [
             "torch~=1.13.0",
-            "tqdm",
             "protobuf~=3.19.0",
             "onnx",
             "onnx2torch",
-            "mypy",
-            "pylint",
-            "pre-commit",
         ],
       },
       include_package_data=True)
