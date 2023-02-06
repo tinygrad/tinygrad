@@ -3,7 +3,7 @@ import hashlib
 import math
 import time
 from typing import Tuple, Union, Dict, Any, List
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.shape import ShapeTracker, ZeroView
 from tinygrad.ops import LazyOp
 from tinygrad.ast import ASTKernel
@@ -84,18 +84,20 @@ class LLVM:
     LLVM.target_machine = target.create_target_machine(opt=2)  # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
-    llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
-    if DEBUG >= 4:
-      llvm.set_option('', '--debug-only=loop-vectorize')
-    #llvm.set_option('', '--debug')
+    # TODO: this makes compile times so much faster
+    if getenv("LLVMOPT"):
+      llvm.set_option('', '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
+      if DEBUG >= 4:
+        llvm.set_option('', '--debug-only=loop-vectorize')
+      #llvm.set_option('', '--debug')
 
-    # does this do anything?
-    builder = llvm.create_pass_manager_builder()
-    builder.opt_level = 3
-    builder.size_level = 0
-    builder.loop_vectorize = True
-    builder.slp_vectorize = True
-    builder.populate(LLVM.optimizer)
+      # does this do anything?
+      builder = llvm.create_pass_manager_builder()
+      builder.opt_level = 3
+      builder.size_level = 0
+      builder.loop_vectorize = True
+      builder.slp_vectorize = True
+      builder.populate(LLVM.optimizer)
 
     LLVM.target_machine.set_asm_verbosity(True)
     backing_mod = llvm.parse_assembly("")
