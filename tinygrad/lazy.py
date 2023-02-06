@@ -4,7 +4,7 @@ from copy import copy
 import sys, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shape import ShapeTracker
-from tinygrad.ops import LLVM_CACHE_DEBUG, DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, DEBUG
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, DEBUG
 from tinygrad.graph import log_op
 from tinygrad.helpers import getenv
 
@@ -372,7 +372,6 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffe
     # remove the buffers from any (childless) BinaryOps that feed into this
     srcs = tuple(x.op if x.optype == BinaryOps and len(x.children) == 0 and x.realized is None else x for x in srcs)  # type: ignore
 
-  if LLVM_CACHE_DEBUG:
-    print("")
-    print("OP: " + str(op) + " | SRC: " + str(srcs))
+  #print("")
+  #print("OP: " + str(op) + " | SRC: " + str(srcs))
   return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs))

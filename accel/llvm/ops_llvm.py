@@ -10,7 +10,7 @@ from tinygrad.ast import ASTKernel
 import ctypes
 import numpy as np
 from ctypes import CFUNCTYPE
-from tinygrad.ops import LLVM_CACHE_DEBUG, DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST, GlobalCounters
 
 from llvmlite import ir  # type: ignore
 import llvmlite.binding as llvm  # type: ignore
@@ -170,7 +170,7 @@ class LLVMBuffer(ExplicitExecAST):
     super().__init__(shape, hostbuf)
     # TODO: force alignment?
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
-    # TODO: Check with geohot if this makes sense . . . got from GPUBuffer structure
+    #TODO: check with George if this method of constant tracking is okay . . . got from GPUBuffer structure
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._const = self._buf[0] if self._base_shape == (1,) else None
     #assert ctypes.addressof(self._buf) & 0x1F == 0
@@ -187,24 +187,12 @@ class LLVMBuffer(ExplicitExecAST):
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   func_cache : Dict[str, Any] = {}
-  bufs_cache : Dict[str, Any] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
     k = ASTKernel(ast)
 
-    if LLVM_CACHE_DEBUG:
-      print("")
-      print("AST")
-      print(k.ast)
-
     # cached kernel
     if k.key in LLVMBuffer.func_cache:
-      if LLVM_CACHE_DEBUG:
-        print ("")
-        print("CACHE KEY:   " + str(k.key))
-        print("CURRENT BUF: " + str(k.bufs))
-        print("CACHED BUF:  " + str(LLVMBuffer.bufs_cache[k.key]))
-        print("ERROR: " + str(len(k.bufs) != len(LLVMBuffer.bufs_cache[k.key])))
       LLVMBuffer.func_cache[k.key](*[x._buf for x in k.bufs])
       return k.ret
 
@@ -379,5 +367,4 @@ class LLVMBuffer(ExplicitExecAST):
     loop_entry[-1].branch(loop_exit[-1]._block)
     loop_exit[0].ret_void()
     LLVMBuffer.func_cache[k.key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
-    LLVMBuffer.bufs_cache[k.key] = k.bufs
     return k.ret
