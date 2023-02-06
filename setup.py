@@ -40,7 +40,4 @@ setup(name='tinygrad',
             "onnx2torch",
         ],
       },
-      dependency_links=[
-        "https://download.pytorch.org/whl/cpu"
-      ],
       include_package_data=True)
