@@ -32,7 +32,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install dependencies
-      run: pip install -e '.[linting,testing]'
+      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
@@ -53,10 +53,8 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
       run: LAZY=0 python -m pytest -s -v
     - name: Run Pytest (lazy)
@@ -73,10 +71,8 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
-      run: pip install -e '.[llvm,testing]'
+      run: pip install -e '.[llvm,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest OPT=2
       run: OPT=2 LLVM=1 python -m pytest -s -v
 
@@ -91,10 +87,8 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
       run: LAZY=0 TORCH=1 python -m pytest -s -v
     - name: Run Pytest (lazy)
@@ -119,10 +113,8 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]'
+      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Optimizer Test
       run: OPT=2 GPU=1 python test/external_test_opt.py
     - name: Run Pytest (default)
@@ -147,10 +139,8 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-        cache: 'pip'
-        cache-dependency-path: setup.py
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]'
+      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test GPU IMAGE ops
       run: GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model
