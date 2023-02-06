@@ -23,7 +23,7 @@ We are working on support for the Apple Neural Engine and the Google TPU in the 
 ```bash
 git clone https://github.com/geohot/tinygrad.git
 cd tinygrad
-python3 setup.py develop
+python3 -m pip install -e .
 ```
 
 ### Contributing
