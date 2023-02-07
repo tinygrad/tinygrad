@@ -47,7 +47,7 @@ if __name__ == "__main__":
   print("parameter count", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 
-  BS, steps = getenv("BS", 64 if TINY else 16)), getenv("STEPS", 2048))
+  BS, steps = getenv("BS", 64 if TINY else 16), getenv("STEPS", 2048)
   print("training with batch size %d for %d steps" % (BS, steps))
 
   if IMAGENET:

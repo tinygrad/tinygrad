@@ -13,7 +13,9 @@ import tinygrad.nn.optim as optim
 from datasets import fetch_mnist
 from torchvision.utils import make_grid, save_image
 import torch
+
 GPU = getenv("GPU")
+
 class LinearGen:
   def __init__(self):
     lv = 128

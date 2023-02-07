@@ -315,7 +315,6 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   prediction_cpu[:,:,2:4] = np.exp(prediction_cpu[:,:,2:4])*anchors
   prediction_cpu[:,:,5: 5 + num_classes] = dsigmoid((prediction_cpu[:,:, 5 : 5 + num_classes]))
   prediction_cpu[:,:,:4] *= stride
-  prediction.gpu_()
 
   return Tensor(prediction_cpu)
 
