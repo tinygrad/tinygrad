@@ -20,15 +20,14 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
   return ret
 
 class View:
+  __slots__ = ('shape', 'strides', 'offset', 'shape_strides', 'contiguous')
+
   def __init__(self, shape:Tuple[int, ...], strides:Tuple[int, ...], offset:int=0):
     self.shape, self.strides, self.offset = shape, strides, offset
     self.shape_strides = to_shape_strides(self.shape, self.strides)
+    self.contiguous : bool = self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
-
-  @functools.cached_property
-  def contiguous(self) -> bool:
-    return self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
 
   def expr_node(self, idx):
     ret = [Variable.num(self.offset)]
@@ -39,7 +38,7 @@ class View:
       acc *= d
     return Variable.sum(ret)
 
-  @functools.cached_property
+  @property
   def expr(self):
     return 'idx=' + str(self.expr_node(Variable('idx', 0, prod([x[0] for x in self.shape_strides])-1)))
 
@@ -48,6 +47,8 @@ class View:
     return Variable.sum([Variable.num(self.offset+offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
 
 class ZeroView:
+  __slots__ = ('old_shape', 'arg', 'shape')
+
   def __init__(self, old_shape:Tuple[int, ...], arg):
     self.old_shape, self.arg = old_shape, arg
     self.shape : Tuple[int, ...] = tuple([y-x for x,y in self.arg])
@@ -71,7 +72,7 @@ class ZeroView:
       acc *= ns
     return Variable.ands(expr)
 
-  @functools.cached_property
+  @property
   def expr(self):
     max_idx = prod([y-x for x,y in self.arg])
     return 'valid=' + str(self.expr_node(Variable('valid', 0, 1), Variable('idx', 0, max_idx-1)))
@@ -94,6 +95,8 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
   return View(tuple(shape), strides_for_shape(shape))
 
 class ShapeTracker:
+  __slots__ = ('views')
+
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
     self.views : List[ViewTypes] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
