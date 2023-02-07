@@ -17,6 +17,7 @@ intervention_cache = dbm.open('/tmp/kopt.db', 'c')
 
 Interventions = Enum("Interventions", ["SWAP", "UPCAST", "SHIFT", "REDUCE"])
 def get_interventions(k):
+  k.process()
   p1, p2, p3, p4, p5 = [], [], [], [], []
   p1 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce), 2)]
   p2 = [(Interventions.SWAP, x) for x in itertools.combinations(range(k.first_reduce, k.shape_len), 2)]
