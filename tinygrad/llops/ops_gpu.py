@@ -349,7 +349,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def toCPU(self) -> np.ndarray:
     cl_buf = self.unary_op(UnaryOps.NOOP) if not self.st.contiguous or prod(self._base_shape) != prod(self.shape) else self
-    cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
+    cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else self.movement_op(MovementOps.RESHAPE, tuple(list(self.shape)+[1])).unary_op(UnaryOps.NOOP)
     assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
     data = np.empty(self.shape, dtype=np.float32)
     cl_buf._buf.copyout(data)
