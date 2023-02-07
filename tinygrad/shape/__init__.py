@@ -20,8 +20,8 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
   return ret
 
 class View:
-  def __init__(self, shape:Union[Tuple[int, ...],List[int]], strides:Union[Tuple[int, ...],List[int]], offset:int=0):
-    self.shape, self.strides, self.offset = tuple(shape), tuple(strides), offset
+  def __init__(self, shape:Tuple[int, ...], strides:Tuple[int, ...], offset:int=0):
+    self.shape, self.strides, self.offset = shape, strides, offset
     self.shape_strides = to_shape_strides(self.shape, self.strides)
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
@@ -61,6 +61,8 @@ class ZeroView:
   @property
   def contiguous(self): return False
 
+  def expr_idxs(self, idxs, offset=0): raise NotImplementedError("ZeroView doesn't have expr_idxs")
+
   def expr_node(self, valid, idx):
     expr, acc = [valid] if valid is not None else [], 1
     for s,ns,(x,y) in list(zip(self.old_shape, self.shape, self.arg))[::-1]:
@@ -95,7 +97,7 @@ class ShapeTracker:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
     self.views : List[ViewTypes] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
-  def copy(self): return ShapeTracker(self.shape, self.views[:])
+  def copy(self) -> ShapeTracker: return ShapeTracker(self.shape, self.views[:])
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous
@@ -132,13 +134,16 @@ class ShapeTracker:
     else: return f"idx={idx}"
 
   #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
-  def movement_op(self, op, arg): return getattr(self, str(op).split(".")[1].lower())(*arg)
-  def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
+  def movement_op(self, op, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
+    return getattr(self, str(op).split(".")[1].lower())(arg)
+  def needs_valid(self) -> bool:
+    return any(isinstance(v, ZeroView) for v in self.views)
 
   # TODO: do we really need this for conv?
   # if we replace, confirm the ops taken fold into one view
-  def strided(self, *arg):
-    view = View([x[0] for x in arg], [x[1] for x in arg])
+  def strided(self, arg : Tuple[Tuple[int, int], ...]) -> ShapeTracker:
+    assert isinstance(arg, tuple)
+    view = View(tuple(x[0] for x in arg), tuple(x[1] for x in arg))
     # TODO: this does not always require a new view if non contiguous
     if self.views[-1].contiguous:
       self.views[-1] = view
@@ -146,22 +151,24 @@ class ShapeTracker:
       self.views.append(view)
     return self
 
-  def reshape(self, *new_shape):
+  def reshape(self, new_shape : Tuple[int, ...]) -> ShapeTracker:
+    assert isinstance(new_shape, tuple)
+    if self.shape == new_shape: return self
     assert all(isinstance(x, int) and x != 0 for x in new_shape), f"shape must be ints and can't contain 0 {new_shape}"
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # check if this is adding or removing 1s (only)
-    if tuple([x for x in self.shape if x != 1]) == tuple([x for x in new_shape if x != 1]):
+    if tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
       old_strides = [y for x,y in zip(self.shape, self.strides) if x != 1]
-      new_strides = [0 if x == 1 else old_strides.pop(0) for x in new_shape]
-      self.views[-1] = View(new_shape, new_strides, self.offset)
+      new_strides_tuple = tuple(0 if x == 1 else old_strides.pop(0) for x in new_shape)
+      self.views[-1] = View(new_shape, new_strides_tuple, self.offset)
       return self
     
     # check if the new dimensions factorize from the old ones
     # NOTE: if you don't make a copy here, the list is popped in the lrucache
     min_shape_strides = to_shape_strides(self.shape, self.strides)[:]
     curr_dim, curr_stride = min_shape_strides.pop(0)
-    new_strides = []
+    new_strides : List[int] = []
     for s in new_shape:
       if curr_dim%s == 0:
         curr_dim //= s
@@ -178,7 +185,7 @@ class ShapeTracker:
         break   # didn't factorize
 
     if len(new_shape) == len(new_strides):
-      self.views[-1] = View(new_shape, new_strides, self.offset)
+      self.views[-1] = View(new_shape, tuple(new_strides), self.offset)
       return self
 
     view = View(new_shape, strides_for_shape(new_shape))
@@ -189,46 +196,52 @@ class ShapeTracker:
       self.views.append(view)
     return self
 
-  def permute(self, *axis):
+  def permute(self, axis : Tuple[int, ...]) -> ShapeTracker:
+    assert isinstance(axis, tuple)
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
-    self.views[-1] = View([self.shape[a] for a in axis], [self.strides[a] for a in axis], self.offset)
+    self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset)
     return self
 
   # TODO: this is a special case of slice with strides, remove it
   # though it's nice that it can't change size
-  def flip(self, *axis): return self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
+  def flip(self, axis : Tuple[int, ...]) -> ShapeTracker:
+    return self.stride(tuple(-1 if i in axis else 1 for i in range(len((self.shape)))))
 
   # *** under this line are not invertible ***
 
   # TODO: take this functionality out of slice
-  def pad(self, *arg):
+  def pad(self, arg : Tuple[Tuple[int, int], ...]) -> ShapeTracker:
+    assert isinstance(arg, tuple)
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
-    return self.shrink(*[(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
+    return self.shrink(tuple((-b,s+e) for s,(b,e) in zip(self.shape, arg)))
 
   # TODO: take the pad functionality out of shrink
-  def shrink(self, *arg):
+  def shrink(self, arg : Tuple[Tuple[int, int], ...]) -> ShapeTracker:
+    assert isinstance(arg, tuple)
     assert len(arg) == len(self.shape)
     offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
     zeroview = ZeroView(self.shape, arg)
-    self.views[-1] = View([y-x for x,y in arg], self.strides, self.offset+offset)
+    self.views[-1] = View(tuple(y-x for x,y in arg), self.strides, self.offset+offset)
     if zeroview.expr != "valid=valid":
       # if we add a ZeroView, we add another (stock) view also for modding
       self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
     return self
 
-  def expand(self, *new_shape):
+  def expand(self, new_shape : Tuple[int, ...]) -> ShapeTracker:
+    assert isinstance(new_shape, tuple)
     assert all(isinstance(x, int) for x in new_shape)
     assert all(x == y or x == 1 for x,y in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
-    strides = [s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape))]
+    strides : Tuple[int, ...] = tuple(s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape)))
     self.views[-1] = View(new_shape, strides, self.offset)
     return self
 
   # TODO: combine with slice? this doesn't require a ZeroView, though slice shouldn't always either
-  def stride(self, *mul):
+  def stride(self, mul : Tuple[int, ...]) -> ShapeTracker:
+    assert isinstance(mul, tuple)
     assert all(isinstance(x, int) for x in mul)
-    strides = [z*m for z,m in zip(self.strides, mul)]
-    new_shape = [(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)]
+    strides = tuple(z*m for z,m in zip(self.strides, mul))
+    new_shape = tuple((s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul))
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
     self.views[-1] = View(new_shape, strides, self.offset + offset)
     return self
