@@ -55,12 +55,11 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   intermediate_shape : Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if psrcs[0][1].optype == ProcessingOps:
-      real_srcs[psrcs[0][0]] = psrcs[0][1].op  # _ast_processingops
+      top = psrcs[0][1].op  # _ast_processingops
     elif psrcs[0][1].optype == ReduceOps:
-      real_srcs[psrcs[0][0]] = _ast_reduceops(psrcs[0][1])
-
-    for x in get_buffers(real_srcs[psrcs[0][0]]):  # type: ignore
-      real_srcs[x] = x
+      top = _ast_reduceops(psrcs[0][1])
+    real_srcs[psrcs[0][0]] = top
+    real_srcs.update({x:x for x in get_buffers(top)})  # the reduce op buffers are not modified
 
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrcs[0][0].shape != psrcs[0][1].shape:
