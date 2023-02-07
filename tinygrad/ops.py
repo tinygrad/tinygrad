@@ -33,7 +33,7 @@ def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
   if x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
-  return LazyOp(x.op, tuple(map_buffers(real_srcs, y) for y in x.src), x.arg)
+  return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
 # a placeholder class to extend by the exec classes
 class DeviceBuffer:

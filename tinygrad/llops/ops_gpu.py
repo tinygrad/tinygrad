@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Union, Set, Final
+from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
@@ -223,7 +223,7 @@ class CLASTKernel(ASTKernel):
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
-  def codegen(self):
+  def codegen(self) -> Callable:
     self.process()
     self.hand_coded_optimizations()
 
