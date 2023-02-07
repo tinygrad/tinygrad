@@ -1,7 +1,7 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 import functools
-from typing import Tuple, Union, List, Optional, Any
+from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod, getenv
 from tinygrad.shape.symbolic import Variable
 
@@ -134,7 +134,7 @@ class ShapeTracker:
     else: return f"idx={idx}"
 
   #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
-  def movement_op(self, op, arg:Tuple[Any, ...]) -> ShapeTracker:
+  def movement_op(self, op, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     return getattr(self, str(op).split(".")[1].lower())(arg)
   def needs_valid(self) -> bool:
     return any(isinstance(v, ZeroView) for v in self.views)

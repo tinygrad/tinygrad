@@ -1,6 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Union, List, Dict
-from copy import copy
+from typing import Optional, Tuple, Union, List, Dict, Any
 import sys, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shape import ShapeTracker
@@ -161,7 +160,7 @@ class LazyBuffer:
       return self
     reduce = list(enumerate(zip(self.shape, new_shape)))
     # move the reduce axes to the end
-    x = self.movement_op(MovementOps.PERMUTE, [i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
+    x = self.movement_op(MovementOps.PERMUTE, tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n]))
     new_tmp_shape = tuple([n for _,(s,n) in reduce if s == n] + [n for _,(s,n) in reduce if s != n])
     # NOTE: this reshape can only move around 1s
     return LazyBuffer(x.device, new_tmp_shape, ReduceOps, LazyOp(op, (x,), new_tmp_shape)).movement_op(MovementOps.RESHAPE, new_shape)
@@ -169,12 +168,11 @@ class LazyBuffer:
   # syntactic sugar around PAD and SHRINK
   # TODO: turn RESHAPE into EXPAND and CONTRACT (current EXPAND should be REPEAT)
   def slice(self:LazyBuffer, arg):
-    padding = [(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg)]
+    padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg))
     return self.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
 
-  def movement_op(self:LazyBuffer, op:MovementOps, arg) -> LazyBuffer:
+  def movement_op(self:LazyBuffer, op:MovementOps, arg : Tuple[Any, ...]) -> LazyBuffer:
     # TODO: look into why that copy is needed
-    arg = tuple(copy(arg))
     local_st = ShapeTracker(self.shape).movement_op(op, arg)
 
     # instant nops
@@ -232,16 +230,16 @@ class LazyBuffer:
       # hack for non multiples of 4 on C.cin
       if C.cin % 4 != 0 and not (C.cin == 1 and C.groups%4 == 0):
         to_add = 4 - (C.cin % 4)
-        w = w.movement_op(MovementOps.PAD, [(0, to_add) if i == 2 else (0, 0) for i in range(len(w.shape))])
+        w = w.movement_op(MovementOps.PAD, tuple((0, to_add) if i == 2 else (0, 0) for i in range(len(w.shape))))
         x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix))
-        x = x.movement_op(MovementOps.PAD, [(0, to_add) if i == 2 else (0, 0) for i in range(len(x.shape))])
+        x = x.movement_op(MovementOps.PAD, tuple((0, to_add) if i == 2 else (0, 0) for i in range(len(x.shape))))
         C = C._replace(cin = C.cin + to_add)
         x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups*C.cin, C.iy, C.ix))
 
       # hack for non multiples of 4 on C.rcout
       if C.rcout % 4 != 0 and not (C.rcout == 1 and C.groups%4 == 0):
         added_output_channels = 4 - (C.rcout % 4)
-        w = w.movement_op(MovementOps.PAD, [(0, added_output_channels) if i == 1 else (0, 0) for i in range(len(w.shape))])
+        w = w.movement_op(MovementOps.PAD, tuple((0, added_output_channels) if i == 1 else (0, 0) for i in range(len(w.shape))))
         C = C._replace(rcout = C.rcout + added_output_channels, cout = C.groups * (C.rcout + added_output_channels))
 
       # packed
@@ -307,7 +305,7 @@ class LazyBuffer:
       # undo hack for non multiples of 4 on C.rcout
       if added_output_channels != 0:
         ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.groups, C.rcout))
-        ret = ret.movement_op(MovementOps.SHRINK, [(0, s-added_output_channels) if i == 4 else (0, s) for i,s in enumerate(ret.shape)])
+        ret = ret.movement_op(MovementOps.SHRINK, tuple((0, s-added_output_channels) if i == 4 else (0, s) for i,s in enumerate(ret.shape)))
         C = C._replace(rcout = C.rcout - added_output_channels, cout = C.groups * (C.rcout - added_output_channels))
 
       ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout))
