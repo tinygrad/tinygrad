@@ -5,7 +5,7 @@ import sys, weakref
 from tinygrad.helpers import ConvArgs, get_available_llops, prod
 from tinygrad.shape import ShapeTracker
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, DEBUG
-from tinygrad.graph import log_op
+from tinygrad.graph import log_op, GRAPH
 from tinygrad.helpers import getenv
 
 # lazy can recurse a lot
@@ -135,8 +135,7 @@ class LazyBuffer:
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
         self.realized = real_src.contiguous()
-        if id(self.realized) != id(real_src):
-          log_op([LoadOps.CONTIGUOUS], self.realized, [real_src])
+        if GRAPH and id(self.realized) != id(real_src): log_op([LoadOps.CONTIGUOUS], self.realized, [real_src])
       elif self.optype == MovementOps:
         src = self.op.src[0]
 
@@ -145,17 +144,17 @@ class LazyBuffer:
           ast = _realize_reduceops_w_shape(src, output_shape = self.op.arg)
           # TODO: lines are copied below
           self.realized = self.dbuffer.exec_ast(ast)
-          log_op([x.op for x in get_lazyops(ast)], self.realized, get_buffers(ast))
+          if GRAPH: log_op([x.op for x in get_lazyops(ast)], self.realized, get_buffers(ast))
         else:
           # movement ops aren't an AST, just run them
           real_src = src.realize(self.device)
           self.realized = real_src.movement_op(self.op.op, self.op.arg)
-          log_op([self.op.op], self.realized, [real_src])
+          if GRAPH: log_op([self.op.op], self.realized, [real_src])
       else:
         # everything else is an AST
         ast = _realize[self.optype](self)
         self.realized = self.dbuffer.exec_ast(ast)
-        log_op([x.op for x in get_lazyops(ast)], self.realized, get_buffers(ast))
+        if GRAPH: log_op([x.op for x in get_lazyops(ast)], self.realized, get_buffers(ast))
 
       # no need to keep the op after realization
       del self.op
