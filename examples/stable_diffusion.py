@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
-from extra.utils import fake_torch_load_zipped, get_child
+from extra.utils import fake_torch_load_zipped, get_child, download_file_if_not_exists
 
 # TODO: refactor AttnBlock, CrossAttention, CLIPAttention to share code
 
@@ -600,7 +600,7 @@ class StableDiffusion:
 # this is sd-v1-4.ckpt
 #FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
 #FILENAME = "/home/kafka/model.ckpt"
-FILENAME = "weights/sd-v1-4.ckpt"
+FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/sd-v1-4.ckpt")
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -613,6 +613,10 @@ if __name__ == "__main__":
   model = StableDiffusion()
 
   # load in weights
+  download_file_if_not_exists(
+    'https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt',
+    FILENAME
+  )
   dat = fake_torch_load_zipped(open(FILENAME, "rb"))
   for k,v in tqdm(dat['state_dict'].items()):
     try:

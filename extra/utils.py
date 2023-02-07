@@ -24,6 +24,19 @@ def fetch(url):
     os.rename(fp+".tmp", fp)
   return dat
 
+def download_file_if_not_exists(url, outfp):
+  import requests, os
+  if os.path.isfile(outfp) and os.stat(outfp).st_size > 0:
+    return
+  fp = outfp+".tmp"
+  r = requests.get(url, stream=True)
+  assert r.status_code == 200
+  progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
+  with open(fp, "wb") as f:
+    for chunk in r.iter_content(chunk_size=16384):
+      progress_bar.update(f.write(chunk))
+  os.rename(fp, outfp)
+
 from tinygrad.nn.optim import get_parameters
 
 def my_unpickle(fb0):
