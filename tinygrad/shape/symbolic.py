@@ -96,6 +96,7 @@ class NumNode(Node):
     self.b, self.min, self.max = num, num, num
 
 class OpNode(Node):
+  op : str
   def __init__(self, a:Node, b:int):
     self.a, self.b = a,b
     self.min, self.max = self.minmax(a,b)
@@ -105,6 +106,7 @@ class OpNode(Node):
     return f"({self.a}{self.op}{self.b})"
 
 class RedNode(Node):
+  op : str
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = self.minmax(nodes)

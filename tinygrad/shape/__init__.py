@@ -61,6 +61,8 @@ class ZeroView:
   @property
   def contiguous(self): return False
 
+  def expr_idxs(self, idxs, offset=0): raise NotImplementedError("ZeroView doesn't have expr_idxs")
+
   def expr_node(self, valid, idx):
     expr, acc = [valid] if valid is not None else [], 1
     for s,ns,(x,y) in list(zip(self.old_shape, self.shape, self.arg))[::-1]:

@@ -168,12 +168,12 @@ class Tensor:
     dim = (dim + len(self.shape)) if dim < 0 else dim
     for y in args:
       assert len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim)
-    args = [self] + list(args)
-    shape_cumsum = [0, *itertools.accumulate(y.shape[dim] for y in args)]
-    slc = [[(0, s) for s in self.shape] for _ in args]
+    catargs = [self] + list(args)
+    shape_cumsum = [0, *itertools.accumulate(y.shape[dim] for y in catargs)]
+    slc = [[(0, s) for s in self.shape] for _ in catargs]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
-    return functools.reduce(Tensor.__iadd__, [arg.slice(arg=s) for arg,s in zip(args, slc)])
+    return functools.reduce(Tensor.__iadd__, [arg.slice(arg=s) for arg,s in zip(catargs, slc)])
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):

@@ -258,8 +258,8 @@ class CLASTKernel(ASTKernel):
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop:
-      full_shape = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
-      full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
+      full_shape_candidates = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
+      full_shape : Tuple[int, ...] = self.sts[0].shape if len(full_shape_candidates) == 0 else full_shape_candidates[0]
 
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]

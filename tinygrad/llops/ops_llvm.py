@@ -249,12 +249,14 @@ class LLVMBuffer(ExplicitExecAST):
 
     def get_idxs(builder, idx, buf_index):
       idx_offsets = [0]
+      """
       for axis in kernel_output_axis:
         new_idx_offsets = []
         for s in range(k.shapes[buf_index][axis]):
           for i in idx_offsets:
             new_idx_offsets.append(i + s * k.strides[buf_index][axis])
         idx_offsets = new_idx_offsets
+      """
       return [builder.add(idx, int_const(i)) for i in idx_offsets]
     
     # *** llvm specific below this line ***

@@ -19,7 +19,7 @@ class CL:
   cl_queue : Optional[cl.CommandQueue] = None
   def __init__(self):
     if CL.cl_queue is not None: return   # already initted
-    devices = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
+    devices : List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0:  # settle for CPU
       devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
     CL.cl_ctx = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
