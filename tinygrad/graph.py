@@ -38,6 +38,7 @@ def log_op(ret : DeviceBuffer, ast : LazyOp):
   if not DEBUG and not GRAPH: return
   op : List[Op] = [x.op for x in get_lazyops(ast)]
   inp : List[DeviceBuffer] = get_buffers(ast)
+  if len(inp) == 1 and inp[0] == ret: return   # don't log self loops
   oporder = [LoadOps, ProcessingOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1

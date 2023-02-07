@@ -62,7 +62,7 @@ def _realize_binaryops(self:LazyBuffer) -> LazyOp:
         for tx in x.children: print("x", tx)
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
-  intermediate_shape = self.shape
+  intermediate_shape : Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if psrcs[0][1].optype == ProcessingOps:
       real_srcs[psrcs[0][0]] = psrcs[0][1].op
@@ -132,31 +132,30 @@ class LazyBuffer:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
         self.realized = Device._buffers[self.device].fromCPU(self.op.arg)
+        ast = LazyOp(self.op.op, tuple())
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
         self.realized = real_src.contiguous()
-        if id(self.realized) != id(real_src): log_op(self.realized, LazyOp(self.op.op, (real_src, )))
+        ast = LazyOp(self.op.op, (real_src, ))
       elif self.optype == MovementOps:
         src = self.op.src[0]
 
         # fuse RESHAPE and ReduceOps
         if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
           ast = _realize_reduceops_w_shape(src, output_shape = self.op.arg)
-          # TODO: lines are copied below
           self.realized = self.dbuffer.exec_ast(ast)
-          log_op(self.realized, ast)
         else:
           # movement ops aren't an AST, just run them
           real_src = src.realize(self.device)
           self.realized = real_src.movement_op(self.op.op, self.op.arg)
-          log_op(self.realized, LazyOp(self.op.op, (real_src, )))
+          ast = LazyOp(self.op.op, (real_src, ))
       else:
         # everything else is an AST
         ast = _realize[self.optype](self)
         self.realized = self.dbuffer.exec_ast(ast)
-        log_op(self.realized, ast)
 
       # no need to keep the op after realization
+      log_op(self.realized, ast)
       del self.op
 
     assert self.realized.shape == self.shape
