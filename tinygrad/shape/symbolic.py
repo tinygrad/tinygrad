@@ -59,11 +59,6 @@ class Node:
     if self.min >= b: return Variable.num(0)
     return LtNode(self, b)
 
-# constructors
-class Variable(Node):
-  def __init__(self, expr:str, nmin:int, nmax:int):
-    self.expr, self.min, self.max = expr, nmin, nmax
-
   @staticmethod
   def num(num:int) -> Node:
     return NumNode(num)
@@ -87,65 +82,68 @@ class Variable(Node):
     elif len(nodes) == 1: return nodes[0]
     return AndNode(nodes)
 
+# 4 basic node types
+
+class Variable(Node):
+  def __init__(self, expr:str, nmin:int, nmax:int):
+    self.expr, self.min, self.max = expr, nmin, nmax
+
 class NumNode(Node):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
 
-class MulNode(Node):
+class OpNode(Node):
+  @property
+  def expr(self):
+    return f"({self.a}{self.op}{self.b})"
+
+class RedNode(Node):
+  @property
+  def expr(self):
+    return f"({self.op.join([str(x) for x in self.nodes])})"
+
+# operation nodes
+
+class MulNode(OpNode):
+  op, minf, maxf = "*", lambda a,b: a.min*b, lambda a,b: a.max*b
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = a.min*b, a.max*b
-  @property
-  def expr(self):
-    return f"({self.a}*{self.b})"
 
-class DivNode(Node):
+class DivNode(OpNode):
+  op = "//"
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = int(a.min/b), int(a.max/b)
-  @property
-  def expr(self):
-    return f"({self.a}//{self.b})"
 
-class ModNode(Node):
+class ModNode(OpNode):
+  op = "%"
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = min(a.min, 0), max(a.max, b-1)
-  @property
-  def expr(self):
-    assert self.a != self
-    return f"({self.a}%{self.b})"
 
-class GeNode(Node):
+class GeNode(OpNode):
+  op = ">="
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = 0, 1
-  @property
-  def expr(self):
-    return f"({self.a}>={self.b})"
 
-class LtNode(Node):
+class LtNode(OpNode):
+  op = "<"
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = 0, 1
-  @property
-  def expr(self):
-    return f"({self.a}<{self.b})"
 
 # reduce nodes
 
-class SumNode(Node):
+class SumNode(RedNode):
+  op = "+"
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = sum([x.min for x in nodes]), sum([x.max for x in nodes])
-  @property
-  def expr(self):
-    return f"({'+'.join([str(x) for x in self.nodes])})"
 
-class AndNode(Node):
+class AndNode(RedNode):
+  op = "&&"
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = min([x.min for x in nodes]), max([x.max for x in nodes])
-  @property
-  def expr(self):
-    return f"({'&&'.join([str(x) for x in self.nodes])})"
