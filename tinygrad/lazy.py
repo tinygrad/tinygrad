@@ -35,19 +35,20 @@ def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
 
 # **** realize functions ****
 def _realize_processingops(self:LazyBuffer) -> LazyOp:
-  return LazyOp(self.op.op, tuple(x.realize(self.device) for x in self.op.src), self.op.arg)
+  ast = self.op
+  return map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
 
-# this supports late merging an upstream Elementwise op
-def _realize_reduceops(self:LazyBuffer) -> LazyOp:
+def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
   if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
-    # this is the new version, deprecate _processing_op
-    real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_buffers(src.op)}
-    ast = LazyOp(self.op.op, (map_buffers(real_srcs, src.op),), self.op.arg)
-  else:
-    ast = LazyOp(self.op.op, (src.realize(self.device),), self.op.arg)
-  return ast
+    src = src.op
+  return LazyOp(self.op.op, (src,), self.op.arg)
+
+# this supports late merging an upstream Elementwise op
+def _realize_reduceops(self:LazyBuffer) -> LazyOp:
+  ast = _ast_reduceops(self)
+  return map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _realize_binaryops(self:LazyBuffer) -> LazyOp:
@@ -63,17 +64,13 @@ def _realize_binaryops(self:LazyBuffer) -> LazyOp:
   intermediate_shape : Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if psrcs[0][1].optype == ProcessingOps:
-      real_srcs[psrcs[0][0]] = psrcs[0][1].op
-      for x in psrcs[0][1].op.src:
-        real_srcs[x] = x.realize(self.device)
+      real_srcs[psrcs[0][0]] = psrcs[0][1].op  # _ast_processingops
     elif psrcs[0][1].optype == ReduceOps:
-      src = psrcs[0][1].op.src[0]
-      if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
-        src = src.op
-      real_srcs[psrcs[0][0]] = LazyOp(psrcs[0][1].op.op, (src,), psrcs[0][1].op.arg)
-      for x in get_buffers(real_srcs[psrcs[0][0]]):  # type: ignore
-        # these are the early buffers
-        real_srcs[x] = x.realize(self.device)
+      real_srcs[psrcs[0][0]] = _ast_reduceops(psrcs[0][1])
+
+    for x in get_buffers(real_srcs[psrcs[0][0]]):  # type: ignore
+      real_srcs[x] = x.realize(self.device)
+
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrcs[0][0].shape != psrcs[0][1].shape:
       intermediate_shape = psrcs[0][1].shape
