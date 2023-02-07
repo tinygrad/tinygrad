@@ -28,10 +28,10 @@ class Device:
     vars()[name] = name
 
 # **** realize helpers ****
-def realize_buffers(real_srcs, x:LazyOp) -> LazyOp:
+def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
   if x in real_srcs:
-    return realize_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
-  return LazyOp(x.op, tuple(realize_buffers(real_srcs, y) for y in x.src), x.arg)
+    return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
+  return LazyOp(x.op, tuple(map_buffers(real_srcs, y) for y in x.src), x.arg)
 
 # **** realize functions ****
 def _realize_processingops(self:LazyBuffer) -> LazyOp:
@@ -44,7 +44,7 @@ def _realize_reduceops(self:LazyBuffer) -> LazyOp:
   if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
     # this is the new version, deprecate _processing_op
     real_srcs : Dict[LazyBuffer, DeviceBuffer] = {x:x.realize(self.device) for x in get_buffers(src.op)}
-    ast = LazyOp(self.op.op, (realize_buffers(real_srcs, src.op),), self.op.arg)
+    ast = LazyOp(self.op.op, (map_buffers(real_srcs, src.op),), self.op.arg)
   else:
     ast = LazyOp(self.op.op, (src.realize(self.device),), self.op.arg)
   return ast
@@ -84,7 +84,7 @@ def _realize_binaryops(self:LazyBuffer) -> LazyOp:
   for x in real_srcs.keys():
     if real_srcs[x] is None:
       real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape).realize(self.device)
-  return LazyOp(MovementOps.RESHAPE, (realize_buffers(real_srcs, self.op), ), self.shape)
+  return LazyOp(MovementOps.RESHAPE, (map_buffers(real_srcs, self.op), ), self.shape)
 
 # **** lazy operations ****
 
