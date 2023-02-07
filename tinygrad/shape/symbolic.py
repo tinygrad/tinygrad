@@ -117,7 +117,8 @@ class RedNode(Node):
 
 class MulNode(OpNode): op, minmax = "*", staticmethod(lambda a,b: (a.min*b, a.max*b))
 class DivNode(OpNode): op, minmax = "//", staticmethod(lambda a,b: (int(a.min/b), int(a.max/b)))
-# TODO: this is wrong! should be flipped
+# TODO: this is wrong! should be flipped or something!
+# though if you change it to (0,b-1) it breaks VALIDHACKS=1
 class ModNode(OpNode): op, minmax = "%", staticmethod(lambda a,b: (min(a.min, 0), max(a.max, b-1)))
 class GeNode(OpNode): op, minmax = ">=", staticmethod(lambda a,b: (0,1))
 class LtNode(OpNode): op, minmax = "<", staticmethod(lambda a,b: (0,1))

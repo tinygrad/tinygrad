@@ -96,6 +96,8 @@ class TestSymbolicNumeric(unittest.TestCase):
   def test_times_2(self): self.helper_test_numeric(lambda x: x*2)
   def test_times_2_plus_3(self): self.helper_test_numeric(lambda x: x*2 + 3)
   def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)%4)
+  def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
+  def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4%4)
 
 if __name__ == '__main__':
   unittest.main()
