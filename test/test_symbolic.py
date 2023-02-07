@@ -51,6 +51,13 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_remove(self):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
+  def test_big_mod(self):
+    self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
+    self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
+
   def test_gt_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "0")
 
@@ -67,7 +74,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_factor(self):
     # this is technically wrong, if b is 0 the output will be negative
-    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -1, 27, "((-1+a)%28)")
+    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -1, 9, "((-1+a)%28)")
+    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, -1, 27, "((-1+a)%28)")
 
   def test_div_factor(self):
     # TODO: this isn't right

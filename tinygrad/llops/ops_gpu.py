@@ -44,7 +44,7 @@ class CLASTKernel(ASTKernel):
     assert self.buftokens[buf_index].typ == Types.FLOAT4, f"image must be FLOAT4 {self.buftokens[buf_index]} {self.bufs[buf_index].st}"
     idx = (idxy//4)%self.bufs[buf_index]._base_shape[1]
     idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
-    if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.max < x.b*2 else x for x in (idx, idy)]
+    if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
     return f"(int2)({idx.cl}, {idy.cl})"
 
   def store(self, buf_index, value:List[Token]):
