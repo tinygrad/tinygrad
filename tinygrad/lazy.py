@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Union, List, Dict, Any
+from typing import Optional, Tuple, Union, List, Dict, Any, Final
 import sys, weakref
-from tinygrad.helpers import ConvArgs, get_available_llops, prod
+from tinygrad.helpers import ConvArgs, prod
 from tinygrad.shape import ShapeTracker
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, DEBUG
 from tinygrad.graph import log_op
@@ -14,17 +14,13 @@ OPT = getenv("OPT", 2)
 NOCONV = getenv("NOCONV", 0)
 IMAGE = getenv("IMAGE", 0)
 
+# late import of Device
+from tinygrad.device import Device
+
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
 SHUFFLE_PAD_OPS = OPT>=3  # NOTE: 0/0 is NaN if you pad, so this can change the output
-
-# **** enumerate supported devices ****
-
-class Device:
-  _buffers, DEFAULT = get_available_llops()
-  for name in _buffers.keys():
-    vars()[name] = name
 
 # **** realize helpers ****
 def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
@@ -79,7 +75,8 @@ def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(roo
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
 
 class LazyBuffer:
-  lazycache : weakref.WeakValueDictionary[Tuple[str, OpType, LazyOp], LazyBuffer] = weakref.WeakValueDictionary()
+  __deletable__ = ('op',)
+  lazycache : Final[weakref.WeakValueDictionary[Tuple[str, OpType, LazyOp], LazyBuffer]] = weakref.WeakValueDictionary()
   def __new__(cls, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
     # fromcpu aren't cached
     if optype == LoadOps and op.op == LoadOps.FROMCPU:
@@ -322,17 +319,10 @@ class LazyBuffer:
 
     if NOCONV or not getattr(x.dbuffer, "processing_op", False):
       # universal conv, just mul and reduce
-      # TODO: is there any way to replace strided with other movement ops? answer: not really
-      if C.sy == 1 and C.sx == 1 and C.H == 1 and C.W == 1 and False:
-        # TODO: this doesn't belong here, ShapeTracker or lazy should be able to infer this from STRIDED
-        # TODO: this is disabled. it breaks fusion of ops without pushing PERMUTES. this is also a depthwise conv
-        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.oy, C.ox, 1, C.H, C.W))
-        x = x.movement_op(MovementOps.PERMUTE, (0,1,5,3,4,2,6,7))
-      else:
-        x = x.movement_op(MovementOps.STRIDED, (
-          (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
-          (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
-          (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
+      x = x.movement_op(MovementOps.STRIDED, (
+        (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
+        (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
+        (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
       #if C.H <= 3 and C.W <= 3:  # max 9x the RAM overhead, this is im2col
       #  x = x.contiguous()
       x = x.movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
