@@ -135,16 +135,17 @@ class LazyBuffer:
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
         self.realized = real_src.contiguous()
-        if self.realized != real_src: log_op([LoadOps.CONTIGUOUS], self.realized, [real_src])
+        if self.realized != real_src:
+          log_op([LoadOps.CONTIGUOUS], self.realized, [real_src])
       elif self.optype == MovementOps:
         src = self.op.src[0]
 
         # fuse RESHAPE and ReduceOps
         if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
-          self.op = _realize_reduceops_w_shape(src, output_shape = self.op.arg)
-          # TODO: copied below
-          self.realized = self.dbuffer.exec_ast(self.op)
-          log_op([x.op for x in get_lazyops(self.op)], self.realized, get_buffers(self.op))
+          ast = _realize_reduceops_w_shape(src, output_shape = self.op.arg)
+          # TODO: lines are copied below
+          self.realized = self.dbuffer.exec_ast(ast)
+          log_op([x.op for x in get_lazyops(ast)], self.realized, get_buffers(ast))
         else:
           # movement ops aren't an AST, just run them
           real_src = src.realize(self.device)
@@ -152,9 +153,9 @@ class LazyBuffer:
           log_op([self.op.op], self.realized, [real_src])
       else:
         # everything else is an AST
-        self.op = _realize[self.optype](self)
-        self.realized = self.dbuffer.exec_ast(self.op)
-        log_op([x.op for x in get_lazyops(self.op)], self.realized, get_buffers(self.op))
+        ast = _realize[self.optype](self)
+        self.realized = self.dbuffer.exec_ast(ast)
+        log_op([x.op for x in get_lazyops(ast)], self.realized, get_buffers(ast))
 
       # no need to keep the op after realization
       del self.op
