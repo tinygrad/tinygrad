@@ -135,7 +135,7 @@ class LazyBuffer:
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
         self.realized = real_src.contiguous()
-        if self.realized != real_src:
+        if id(self.realized) != id(real_src):
           log_op([LoadOps.CONTIGUOUS], self.realized, [real_src])
       elif self.optype == MovementOps:
         src = self.op.src[0]
