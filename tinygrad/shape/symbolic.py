@@ -4,7 +4,9 @@ from typing import List
 from tinygrad.helpers import partition, modn, all_same
 
 class Node:
-  b, min, max = 0, -math.inf, math.inf   # make mypy happy
+  b: int
+  min: int
+  max: int
   expr: str
   def __str__(self):
     if self.min == self.max: return str(self.min)  # this is universal
@@ -49,6 +51,7 @@ class Node:
     else:
       a = self
     if a.min >= 0 and a.max < b: return a
+    if a.min == a.max: return Variable.num(modn(a.min, b))
     return ModNode(a, b)
   def __ge__(self, b:int):
     if self.max < b: return Variable.num(0)
@@ -96,8 +99,7 @@ class OpNode(Node):
   def __init__(self, a:Node, b:int):
     self.a, self.b = a,b
     self.min, self.max = self.minmax(a,b)
-  @staticmethod
-  def minmax(a, b): raise NotImplementedError()
+  minmax = staticmethod(lambda a,b: (1//0, 1//0))
   @property
   def expr(self):
     return f"({self.a}{self.op}{self.b})"
@@ -106,8 +108,7 @@ class RedNode(Node):
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = self.minmax(nodes)
-  @staticmethod
-  def minmax(nodes): raise NotImplementedError()
+  minmax = staticmethod(lambda nodes: (1//0, 1//0))
   @property
   def expr(self):
     return f"({self.op.join([str(x) for x in self.nodes])})"
@@ -116,6 +117,7 @@ class RedNode(Node):
 
 class MulNode(OpNode): op, minmax = "*", staticmethod(lambda a,b: (a.min*b, a.max*b))
 class DivNode(OpNode): op, minmax = "//", staticmethod(lambda a,b: (int(a.min/b), int(a.max/b)))
+# TODO: this is wrong! should be flipped
 class ModNode(OpNode): op, minmax = "%", staticmethod(lambda a,b: (min(a.min, 0), max(a.max, b-1)))
 class GeNode(OpNode): op, minmax = ">=", staticmethod(lambda a,b: (0,1))
 class LtNode(OpNode): op, minmax = "<", staticmethod(lambda a,b: (0,1))
