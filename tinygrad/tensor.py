@@ -2,7 +2,7 @@
 from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
-from tinygrad.helpers import prod, argfix, make_pair, slcfix
+from tinygrad.helpers import prod, argfix, make_pair
 from typing import List, Tuple, Callable, Optional
 from tinygrad.lazy import Device, LazyBuffer
 
@@ -153,17 +153,28 @@ class Tensor:
 
   # ***** non first class ops (hlops) *****
 
-  # supports positive and negative indices / slices, as well as None to add a new axis
+  # Tensors mostly follow the normal python indexing / slicing behavior for sequences
+  # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
+  # - A slice i:j returns the elements with indices in [i, j)
+  #   - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
+  #   - Negative values for i and j are taken relative to the end of the sequence
+  #   - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
+  # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
+  # - Empty slices are not allowed
+  # - Strides other than 1 are not allowedå
   def __getitem__(self, val):
+    def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))  # Fix negative idxs, clamp to [0,N]
     new_slice, new_shape = [], []
     val = [val] if not isinstance(val, (list, tuple)) else val
-    assert all(s.step is None or s.step == 1 for s in val if isinstance(val, slice))
-    for i,(sz,s) in enumerate(zip(self.shape, (v for v in val if v is not None))):
+    assert sum(s is not None for s in val) <= len(self.shape)
+    assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
+    for i,(sz,s) in enumerate(zip(self.shape, (v for v in val if v is not None))):  # Slicing only depends on ints + slices
       if isinstance(s, int) and not (-sz <= s < sz):
         raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
       new_slice.append((s%sz, s%sz+1) if isinstance(s, int) else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
-    for sz, s in zip(self.shape, (v for v in val if not isinstance(v, int))):
-      new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
+    for s,sz in zip(val, (self.shape[i-1] for i in itertools.accumulate(s is not None for s in val))):  # Shape depends on slices + positions of Nones
+      if not isinstance(s, int):
+        new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
     new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
     return self.slice(arg = new_slice).reshape(new_shape if len(new_shape) else (1,))
