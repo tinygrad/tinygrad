@@ -172,6 +172,9 @@ class LazyBuffer:
     return self.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
 
   def movement_op(self:LazyBuffer, op:MovementOps, arg : Tuple[Any, ...]) -> LazyBuffer:
+    # very instant nop
+    if op == MovementOps.RESHAPE and self.shape == arg: return self
+
     # TODO: look into why that copy is needed
     local_st = ShapeTracker(self.shape).movement_op(op, arg)
 
