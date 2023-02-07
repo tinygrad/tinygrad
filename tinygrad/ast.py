@@ -130,7 +130,7 @@ class ASTKernel:
         else:
           rets[j].append((shapes[j][i], strides[j][i]))
 
-    for i,x in enumerate(rets): self.sts[i].reshape([y[0] for y in x])
+    for i,x in enumerate(rets): self.sts[i].reshape(tuple(y[0] for y in x))
     self.first_reduce = get_first_reduce([x.shape for x in self.sts])
 
   # this should be aware of the three parts to the shape
@@ -139,8 +139,8 @@ class ASTKernel:
   #  * the size outputted by each kernel
   def reshape_and_permute(self, new_shape_fxn, axis):
     for st in self.sts:
-      if new_shape_fxn is not None: st.reshape(new_shape_fxn(st.shape))
-      if axis is not None: st.permute(axis)
+      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
+      if axis is not None: st.permute(tuple(axis))
 
   # drops the final dimension
   def upcast(self, allow_float4=True):
