@@ -132,12 +132,12 @@ class ShapeTracker:
     else: return f"idx={idx}"
 
   #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
-  def movement_op(self, op, arg): return getattr(self, str(op).split(".")[1].lower())(*arg)
+  def movement_op(self, op, arg): return getattr(self, str(op).split(".")[1].lower())(arg)
   def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
 
   # TODO: do we really need this for conv?
   # if we replace, confirm the ops taken fold into one view
-  def strided(self, *arg):
+  def strided(self, arg):
     view = View([x[0] for x in arg], [x[1] for x in arg])
     # TODO: this does not always require a new view if non contiguous
     if self.views[-1].contiguous:
@@ -146,7 +146,8 @@ class ShapeTracker:
       self.views.append(view)
     return self
 
-  def reshape(self, *new_shape):
+  def reshape(self, new_shape):
+    if self.shape == new_shape: return self
     assert all(isinstance(x, int) and x != 0 for x in new_shape), f"shape must be ints and can't contain 0 {new_shape}"
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
@@ -189,7 +190,7 @@ class ShapeTracker:
       self.views.append(view)
     return self
 
-  def permute(self, *axis):
+  def permute(self, axis):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View([self.shape[a] for a in axis], [self.strides[a] for a in axis], self.offset)
@@ -197,17 +198,17 @@ class ShapeTracker:
 
   # TODO: this is a special case of slice with strides, remove it
   # though it's nice that it can't change size
-  def flip(self, *axis): return self.stride(*[-1 if i in axis else 1 for i in range(len((self.shape)))])
+  def flip(self, axis): return self.stride([-1 if i in axis else 1 for i in range(len((self.shape)))])
 
   # *** under this line are not invertible ***
 
   # TODO: take this functionality out of slice
-  def pad(self, *arg):
+  def pad(self, arg):
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
-    return self.shrink(*[(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
+    return self.shrink([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
 
   # TODO: take the pad functionality out of shrink
-  def shrink(self, *arg):
+  def shrink(self, arg):
     assert len(arg) == len(self.shape)
     offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
     zeroview = ZeroView(self.shape, arg)
@@ -217,7 +218,7 @@ class ShapeTracker:
       self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
     return self
 
-  def expand(self, *new_shape):
+  def expand(self, new_shape):
     assert all(isinstance(x, int) for x in new_shape)
     assert all(x == y or x == 1 for x,y in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
     strides = [s if x == y else 0 for s,(x,y) in zip(self.strides, zip(self.shape, new_shape))]
@@ -225,7 +226,7 @@ class ShapeTracker:
     return self
 
   # TODO: combine with slice? this doesn't require a ZeroView, though slice shouldn't always either
-  def stride(self, *mul):
+  def stride(self, mul):
     assert all(isinstance(x, int) for x in mul)
     strides = [z*m for z,m in zip(self.strides, mul)]
     new_shape = [(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)]
