@@ -6,7 +6,7 @@ from tinygrad.helpers import shape_to_axis
 
 class CPUBuffer(np.ndarray, GenericExecAST):
   fxn_for_op = {
-    UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
+    UnaryOps.NOOP: lambda x: x[:].contiguous(), UnaryOps.NEG: lambda x: -x, UnaryOps.RELU: lambda x: x.relu(),
     UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), UnaryOps.GT0: lambda x: operator.gt(x, 0.0), UnaryOps.RECIPROCAL: lambda x: 1.0/x,
     BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
     BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow, BinaryOps.CMPEQ: lambda x,y: (x==y).float(),

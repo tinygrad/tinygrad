@@ -3,7 +3,7 @@ import atexit
 import itertools
 from collections import defaultdict
 from typing import Dict, List
-from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType
+from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv
 
 GRAPH = getenv("GRAPH", 0)
@@ -34,7 +34,13 @@ if GRAPH:
   atexit.register(save_graph_exit)
 
 global_num_max = 0
-def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[DeviceBuffer]):
+def log_op(ret : DeviceBuffer, ast : LazyOp):
+  if not DEBUG and not GRAPH: return
+  op : List[Op] = [x.op for x in get_lazyops(ast)]
+  inp : List[DeviceBuffer] = get_buffers(ast)
+  if len(inp) == 1 and inp[0] == ret: return   # don't log self loops
+  oporder = [LoadOps, ProcessingOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
+  optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
   if DEBUG >= 3:
     print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
