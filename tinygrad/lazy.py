@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union, List, Dict, Any, Final
 import sys, weakref
 from tinygrad.helpers import ConvArgs, prod
 from tinygrad.shape import ShapeTracker
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, DEBUG
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, DEBUG
 from tinygrad.graph import log_op
 from tinygrad.helpers import getenv
 
@@ -21,12 +21,6 @@ from tinygrad.device import Device
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
 SHUFFLE_PAD_OPS = OPT>=3  # NOTE: 0/0 is NaN if you pad, so this can change the output
-
-# **** realize helpers ****
-def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
-  if x in real_srcs:
-    return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
-  return LazyOp(x.op, tuple(map_buffers(real_srcs, y) for y in x.src), x.arg)
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
