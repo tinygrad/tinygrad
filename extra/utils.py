@@ -9,19 +9,16 @@ def fetch(url):
     with open(url, "rb") as f:
       dat = f.read()
     return dat
-  import requests, os, hashlib, tempfile
+  import os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
-  if os.path.isfile(fp) and os.stat(fp).st_size > 0 and not getenv("NOCACHE"):
-    with open(fp, "rb") as f:
-      dat = f.read()
-  else:
-    r = requests.get(url, stream=True)
-    assert r.status_code == 200
-    progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-    dat = b''.join((x,progress_bar.update(len(x)))[0] for x in r.iter_content(chunk_size=16384))
-    with open(fp+".tmp", "wb") as f:
-      f.write(dat)
-    os.rename(fp+".tmp", fp)
+  if getenv("NOCACHE"):
+    try:
+      os.unlink(fp)
+    except FileNotFoundError:
+      pass
+  download_file_if_not_exists(url, fp)
+  with open(fp, "rb") as f:
+    dat = f.read()
   return dat
 
 def download_file_if_not_exists(url, outfp):
