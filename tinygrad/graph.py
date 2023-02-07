@@ -34,7 +34,9 @@ if GRAPH:
   atexit.register(save_graph_exit)
 
 global_num_max = 0
-def log_op(optype : OpType, op : List[Op], ret : DeviceBuffer, inp : List[DeviceBuffer]):
+def log_op(op : List[Op], ret : DeviceBuffer, inp : List[DeviceBuffer]):
+  oporder = [LoadOps, ProcessingOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
+  optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
   if DEBUG >= 3:
     print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")

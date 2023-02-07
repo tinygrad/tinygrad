@@ -34,37 +34,11 @@ def realize_buffers(real_srcs, x:LazyOp) -> LazyOp:
   return LazyOp(x.op, tuple(realize_buffers(real_srcs, y) for y in x.src), x.arg)
 
 # **** realize functions ****
-# TODO: make all _realize functions return an AST, perhaps unrealized
-# NOTE: loadops and movementops aren't valid ASTs and won't become kernels
-
-def _realize_loadops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], Optional[OpType]]:
-  if self.op.op == LoadOps.FROMCPU:
-    return Device._buffers[self.device].fromCPU(self.op.arg), [], LoadOps
-  elif self.op.op == LoadOps.CONTIGUOUS:
-    # under the hood, this is an AST or a no op. rename to MetaOps?
-    real_src = self.op.src[0].realize(self.device)
-    ret = real_src.contiguous()
-    return ret, [real_src], LoadOps if id(ret) != id(real_src) else None
-  else:
-    raise NotImplementedError(f"unknown LoadOp {self.op.op}")
-
-def _realize_movementops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  src = self.op.src[0]
-
-  # fuse RESHAPE and ReduceOps
-  # TODO: add MetaOps.TOIMAGE instead?
-  if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
-    return _realize_reduceops_w_shape(src, output_shape = self.op.arg)
-
-  real_src = src.realize(self.device)
-  return real_src.movement_op(self.op.op, self.op.arg), [real_src], MovementOps
-
-def _realize_processingops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
-  ast = LazyOp(self.op.op, tuple(x.realize(self.device) for x in self.op.src), self.op.arg)
-  return self.dbuffer.exec_ast(ast), get_buffers(ast), ProcessingOps
+def _realize_processingops(self:LazyBuffer) -> LazyOp:
+  return LazyOp(self.op.op, tuple(x.realize(self.device) for x in self.op.src), self.op.arg)
 
 # this supports late merging an upstream Elementwise op
-def _realize_reduceops_w_shape(self:LazyBuffer, output_shape=None) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
+def _realize_reduceops_w_shape(self:LazyBuffer, output_shape=None) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
   if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
@@ -74,13 +48,12 @@ def _realize_reduceops_w_shape(self:LazyBuffer, output_shape=None) -> Tuple[Devi
   else:
     ast = LazyOp(self.op.op, (src.realize(self.device),), self.op.arg)
   if output_shape is not None: ast = LazyOp(MovementOps.RESHAPE, (ast, ), output_shape)
-  return self.dbuffer.exec_ast(ast), get_buffers(ast), ReduceOps
-def _realize_reduceops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]: return _realize_reduceops_w_shape(self)
+  return ast
+def _realize_reduceops(self:LazyBuffer) -> LazyOp: return _realize_reduceops_w_shape(self)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
-def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer], OpType]:
+def _realize_binaryops(self:LazyBuffer) -> LazyOp:
   real_srcs : Dict[LazyBuffer, Union[None, LazyOp, DeviceBuffer]] = {x:None for x in get_buffers(self.op)}
-  op_type : OpType = BinaryOps
   if DEBUG >= 3:
     for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())):
       if x.optype in [ProcessingOps,ReduceOps] and x.realized is None:
@@ -95,7 +68,6 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       real_srcs[psrcs[0][0]] = psrcs[0][1].op
       for x in psrcs[0][1].op.src:
         real_srcs[x] = x.realize(self.device)
-      op_type = ProcessingOps
     elif psrcs[0][1].optype == ReduceOps:
       src = psrcs[0][1].op.src[0]
       if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
@@ -104,7 +76,6 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
       for x in get_buffers(real_srcs[psrcs[0][0]]):  # type: ignore
         # these are the early buffers
         real_srcs[x] = x.realize(self.device)
-      op_type = ReduceOps
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrcs[0][0].shape != psrcs[0][1].shape:
       intermediate_shape = psrcs[0][1].shape
@@ -115,10 +86,9 @@ def _realize_binaryops(self:LazyBuffer) -> Tuple[DeviceBuffer, List[DeviceBuffer
   for x in real_srcs.keys():
     if real_srcs[x] is None:
       real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape).realize(self.device)
-  ast = LazyOp(MovementOps.RESHAPE, (realize_buffers(real_srcs, self.op), ), self.shape)
-  return self.dbuffer.exec_ast(ast), get_buffers(ast), op_type
+  return LazyOp(MovementOps.RESHAPE, (realize_buffers(real_srcs, self.op), ), self.shape)
 
-_realize = {LoadOps:_realize_loadops, ReduceOps:_realize_reduceops, MovementOps:_realize_movementops, BinaryOps:_realize_binaryops, ProcessingOps:_realize_processingops}
+_realize = {ReduceOps:_realize_reduceops, BinaryOps:_realize_binaryops, ProcessingOps:_realize_processingops}
 
 # **** lazy operations ****
 
@@ -159,11 +129,33 @@ class LazyBuffer:
     if required_device is not None:
       assert required_device == self.device
     if self.realized is None:
-      # we haven't realized the Buffer yet
-      self.realized, real_srcs, real_type = _realize[self.optype](self)
-      # in lazy mode, we don't log until we realize
-      if real_type is not None:
-        log_op(real_type, [x.op for x in get_lazyops(self.op)], self.realized, real_srcs)
+      # get real ops first
+      if self.op.op == LoadOps.FROMCPU:
+        self.realized = Device._buffers[self.device].fromCPU(self.op.arg)
+      elif self.op.op == LoadOps.CONTIGUOUS:
+        real_src = self.op.src[0].realize(self.device)
+        self.realized = real_src.contiguous()
+        if self.realized != real_src: log_op([LoadOps.CONTIGUOUS], self.realized, [real_src])
+      elif self.optype == MovementOps:
+        src = self.op.src[0]
+
+        # fuse RESHAPE and ReduceOps
+        if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
+          self.op = _realize_reduceops_w_shape(src, output_shape = self.op.arg)
+          # TODO: copied below
+          self.realized = self.dbuffer.exec_ast(self.op)
+          log_op([x.op for x in get_lazyops(self.op)], self.realized, get_buffers(self.op))
+        else:
+          # movement ops aren't an AST, just run them
+          real_src = src.realize(self.device)
+          self.realized = real_src.movement_op(self.op.op, self.op.arg)
+          log_op([self.op.op], self.realized, [real_src])
+      else:
+        # everything else is an AST
+        self.op = _realize[self.optype](self)
+        self.realized = self.dbuffer.exec_ast(self.op)
+        log_op([x.op for x in get_lazyops(self.op)], self.realized, get_buffers(self.op))
+
       # no need to keep the op after realization
       del self.op
 
