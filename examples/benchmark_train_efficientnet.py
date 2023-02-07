@@ -66,7 +66,7 @@ if __name__ == "__main__":
       CL.CACHE = None
 
     mem_used = CL.mem_used
-    loss_cpu = loss.detach().cpu().data[0]
+    loss_cpu = loss.detach().numpy()[0]
     cl = time.monotonic()
 
     print(f"{(st-cpy)*1000.0:7.2f} ms cpy,  {(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used, {ops*1e-9/(cl-st):9.2f} GFLOPS")

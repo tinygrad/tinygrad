@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar
 import functools, operator
 from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker
@@ -67,9 +67,9 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     return ret
 
 class GlobalCounters:
-  global_ops : int = 0
-  global_mem : int = 0
-  time_sum : int = 0
+  global_ops : ClassVar[int] = 0
+  global_mem : ClassVar[int] = 0
+  time_sum : ClassVar[int] = 0
   # TODO: reset method
 
 class GenericShape(GenericExecAST):  # pylint: disable=abstract-method

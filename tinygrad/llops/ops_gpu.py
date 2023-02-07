@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Union, Set
+from typing import List, Tuple, Optional, Dict, Union, Set, Final
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
@@ -10,7 +10,7 @@ from tinygrad.shape.symbolic import ModNode   # this will go away when VALIDHACK
 from tinygrad.helpers import getenv
 
 CUDA = getenv("CUDA", 0)
-if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL   # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL, cl as pyopencl  # NOTE: using CL will not work for the CUDA runtime # noqa: F401
 else: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
@@ -28,7 +28,7 @@ def split_float4(x):
   return sum([[Token(acc.tok+f".s{s}", Types.FLOAT) for s in range(4)] for acc in x], [])
 
 class CLASTKernel(ASTKernel):
-  code_for_op : Dict[Op, str] = {
+  code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)",
     UnaryOps.GT0:  "(A > 0.)" if CUDA else "((float)1.-step((float)0.,(-A)))",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
@@ -38,7 +38,7 @@ class CLASTKernel(ASTKernel):
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
     ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)"
   }
-  start_for_op = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
+  start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
   def image_idx(self, buf_index, idxy, validhacks=False):
     assert self.buftokens[buf_index].typ == Types.FLOAT4, f"image must be FLOAT4 {self.buftokens[buf_index]} {self.bufs[buf_index].st}"
@@ -257,12 +257,13 @@ class CLASTKernel(ASTKernel):
 
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
-    if self.reduceop:
+    if self.reduceop is not None:
       full_shape_candidates = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
       full_shape : Tuple[int, ...] = self.sts[0].shape if len(full_shape_candidates) == 0 else full_shape_candidates[0]
 
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
+      assert self.reduceopop is not None
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       expanded_accumulators = split_float4(accumulators) if len(accumulators)*4 == len(acc_offsets) else accumulators
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
@@ -283,14 +284,15 @@ class CLASTKernel(ASTKernel):
         self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce+1] + [self.first_reduce+1])
         self.upcast()
 
+      assert self.reduceopop is not None
       self.kernel.append("if (mid_idx == 0) {\n")
       new_accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(len(accumulators))]
       for i,acc in enumerate(new_accumulators):
         self.kernel.append(f"{acc.decltype()} {acc.tok} = 0.0;\n")
         if self.upcast_in_mid_reduce:
-          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', acc.tok).replace('B', f'vload4(0, &temp{i}[mid*4])')}; }}\n")
+          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'vload4(0, &temp{i}[mid*4])')}; }}\n")
         else:
-          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceop.op].replace('A', acc.tok).replace('B', f'temp{i}[mid]')}; }}\n")
+          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'temp{i}[mid]')}; }}\n")
       accumulators = new_accumulators
     
     # late ast
@@ -326,7 +328,7 @@ class CLASTKernel(ASTKernel):
 class GPUBuffer(ExplicitExecAST):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
     super().__init__(shape, hostbuf)
-    self._buf : Optional[CLBuffer] = hostbuf._buf if hostbuf is not None else None
+    self._buf : Optional[Union[CLImage, CLBuffer]] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     # early copy in for large buffers
@@ -334,9 +336,10 @@ class GPUBuffer(ExplicitExecAST):
       self.cl
   
   @property
-  def cl(self):
+  def cl(self) -> pyopencl.Buffer:
     if self._buf is None:
       self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
+    assert self._buf is not None
     if self._backing is not None:
       self._buf.copyin(self._backing)
       self._backing = None
