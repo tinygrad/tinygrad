@@ -97,7 +97,7 @@ class ShapeTracker:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
     self.views : List[ViewTypes] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
-  def copy(self): return ShapeTracker(self.shape, self.views[:])
+  def copy(self) -> ShapeTracker: return ShapeTracker(self.shape, self.views[:])
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous
@@ -134,8 +134,10 @@ class ShapeTracker:
     else: return f"idx={idx}"
 
   #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
-  def movement_op(self, op, arg:Tuple[Any, ...]) -> ShapeTracker: return getattr(self, str(op).split(".")[1].lower())(arg)
-  def needs_valid(self): return any(isinstance(v, ZeroView) for v in self.views)
+  def movement_op(self, op, arg:Tuple[Any, ...]) -> ShapeTracker:
+    return getattr(self, str(op).split(".")[1].lower())(arg)
+  def needs_valid(self) -> bool:
+    return any(isinstance(v, ZeroView) for v in self.views)
 
   # TODO: do we really need this for conv?
   # if we replace, confirm the ops taken fold into one view
