@@ -53,12 +53,12 @@ class SpeedyResNet:
 
 # TODO: this will become @tinygrad.jit
 first, cl_cache, loss = True, None, None
-from tinygrad.llops.ops_gpu import CL
+from tinygrad.runtime.opencl import CL
 def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
   global cl_cache, first, loss
+  GlobalCounters.reset()
 
   if not cl_cache:
-    GlobalCounters.global_ops = 0
     if not first:
       CL.CACHE = []
     if enable_jit: first = False
@@ -74,10 +74,8 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
       CL.CACHE = None
 
   if cl_cache:
-    GlobalCounters.global_ops = 0
     for prg, args in cl_cache:
-      prg.clprg(CL().cl_queue, *args)
-      GlobalCounters.global_ops += prg.op_estimate
+      prg(*args)
   return loss
 
 def fetch_batch(X_train, Y_train, BS):
@@ -120,9 +118,7 @@ def train_cifar():
       outs = model(Xt).numpy().argmax(axis=1)
       correct = outs == Yt.numpy().argmin(axis=1)
       print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%")
-    GlobalCounters.time_sum = 0
-    CL.kernel_count = -1
-    CL.ops_sum = 0  # TODO: this should be GlobalCounters.global_ops
+    GlobalCounters.reset()
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, X, Y, enable_jit=getenv("CLCACHE"))
     et = time.monotonic()

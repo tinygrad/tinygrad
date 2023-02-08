@@ -14,8 +14,8 @@ class CLBuffer:
   def copyout(self, a:np.ndarray): cuda.memcpy_dtoh(a, self.cl)
 
 class CLProgram:
-  def __init__(self, name:str, prg:str, op_estimate:int=0):
-    self.name, self.op_estimate = name, op_estimate
+  def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
+    self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     if DEBUG >= 4: print("CUDA compile", prg)
     self.prg = SourceModule(prg).get_function(name)
 
@@ -25,4 +25,4 @@ class CLProgram:
     assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
     global_size = [x//y for x,y in zip(global_size, local_size)]
     if DEBUG >= 2: print("CUDA launch", global_size, local_size)
-    self.prg(*args, block=tuple(local_size), grid=tuple(global_size))
+    self.prg([x.cl for x in args], block=tuple(local_size), grid=tuple(global_size))

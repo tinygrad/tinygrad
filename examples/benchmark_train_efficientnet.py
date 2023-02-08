@@ -4,7 +4,7 @@ from tqdm import trange
 from models.efficientnet import EfficientNet
 import tinygrad.nn.optim as optim
 from tinygrad.tensor import Tensor
-from tinygrad.llops.ops_gpu import CL
+from tinygrad.runtime.opencl import CL
 from tinygrad.ops import GlobalCounters
 from tinygrad.helpers import getenv
 
@@ -31,8 +31,7 @@ if __name__ == "__main__":
   Tensor.training = TRAINING
   Tensor.no_grad = not BACKWARD
   for i in trange(CNT):
-    GlobalCounters.time_sum = 0
-    GlobalCounters.global_ops = 0
+    GlobalCounters.reset()
     cpy = time.monotonic()
     x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
     y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
@@ -55,10 +54,7 @@ if __name__ == "__main__":
       ops = GlobalCounters.global_ops
     else:
       st = mt = time.monotonic()
-      ops = 0
-      for prg, args in cl_cache:
-        prg.clprg(CL().cl_queue, *args)
-        ops += prg.op_estimate
+      for prg, args in cl_cache: prg(*args)
       et = time.monotonic()
 
     if i == 2 and CLCACHE:
@@ -69,7 +65,7 @@ if __name__ == "__main__":
     loss_cpu = loss.detach().numpy()[0]
     cl = time.monotonic()
 
-    print(f"{(st-cpy)*1000.0:7.2f} ms cpy,  {(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used, {ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{(st-cpy)*1000.0:7.2f} ms cpy,  {(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
 
 
 
