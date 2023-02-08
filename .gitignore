@@ -3,6 +3,7 @@ notebooks
 .*.swp
 .*.swo
 *.pyc
+*.so
 build
 dist
 *.egg-info

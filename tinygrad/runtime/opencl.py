@@ -58,6 +58,9 @@ class CLImage:
   def __del__(self):
     CL.mem_used -= self.cl.row_pitch * self.cl.height
 
+  def copyin(self, b:np.ndarray): raise NotImplementedError("no copyin for CLImage")
+  def copyout(self, a:np.ndarray): raise NotImplementedError("no copyout for CLImage")
+
 @functools.lru_cache(maxsize=None)
 class CLProgram:
   kernel_cnt : Dict[str, int] = defaultdict(int)
