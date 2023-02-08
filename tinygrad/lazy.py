@@ -134,7 +134,7 @@ class LazyBuffer:
         self.realized = self.dbuffer.exec_ast(map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast))
       log_op(self.realized, ast)
 
-    assert self.realized.shape == self.shape
+    assert self.realized.shape == self.shape, f"shape mismatch on realize {self.realized.shape} vs {self.shape}"
     assert isinstance(self.realized, Device._buffers[self.device])
     return self.realized
 
