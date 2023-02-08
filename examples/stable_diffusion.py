@@ -12,9 +12,9 @@ from collections import namedtuple
 import numpy as np
 from tqdm import tqdm
 
-from extra.utils import fake_torch_load_zipped, get_child
-from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
 from tinygrad.tensor import Tensor
+from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
+from extra.utils import fake_torch_load_zipped, get_child
 
 # TODO: refactor AttnBlock, CrossAttention, CLIPAttention to share code
 
