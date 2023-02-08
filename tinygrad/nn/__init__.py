@@ -19,7 +19,7 @@ class BatchNorm2D:
       batch_mean = x_detached.mean(axis=(0,2,3))
       y = (x_detached - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
-      batch_invstd = batch_var.add(self.eps)**-0.5
+      batch_invstd = batch_var.add(self.eps).pow(-0.5)
       self.batch_invstd = None
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
@@ -31,7 +31,7 @@ class BatchNorm2D:
       batch_mean, batch_var = self.running_mean, self.running_var
       # NOTE: this can be precomputed for static inference. if you manually update running_var, you have to reset this
       if not hasattr(self, "batch_invstd") or not self.batch_invstd:
-        self.batch_invstd = batch_var.add(self.eps)**-0.5
+        self.batch_invstd = batch_var.add(self.eps).pow(-0.5)
       batch_invstd = self.batch_invstd
 
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)

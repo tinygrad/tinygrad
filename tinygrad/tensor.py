@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools, itertools
 import numpy as np
 from tinygrad.helpers import prod, argfix, make_pair
-from typing import List, Tuple, Callable, Optional, ClassVar, Type
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.lazy import Device, LazyBuffer
 
 # An instantiation of the Function is the Context
@@ -329,9 +329,9 @@ class Tensor:
   # ***** broadcasted binary ops *****
 
   @staticmethod
-  def broadcasted(fxn, x, y):
-    tt = [arg for arg in [x,y] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [x,y]]
+  def broadcasted(fxn:Type[Function], tx:Union[Tensor, float], ty:Union[Tensor, float]):
+    tt = [arg for arg in [tx,ty] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
+    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [tx,ty]]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
@@ -344,6 +344,7 @@ class Tensor:
   def exp(self): return mlops.Exp.apply(self)
   def reciprocal(self): return mlops.Reciprocal.apply(self)
 
+  # NOTE: __pow__ and friends are broken in mypyc with the ** operator
   def __add__(self, x): return Tensor.broadcasted(mlops.Add, self, x)
   def __radd__(self, x): return Tensor.broadcasted(mlops.Add, x, self)
   def __sub__(self, x): return Tensor.broadcasted(mlops.Sub, self, x)
@@ -355,19 +356,19 @@ class Tensor:
   def __truediv__(self, x): return self * (x.reciprocal() if isinstance(x, Tensor) else (1/x))
   def __rtruediv__(self, x): return self.reciprocal() * x
 
-  # TODO: allow this?
-  def __iadd__(self, x): return self.assign(self + x)
-  def __isub__(self, x): return self.assign(self - x)
-  def __imul__(self, x): return self.assign(self * x)
-  def __ipow__(self, x): return self.assign(self ** x)
-  def __idiv__(self, x): return self.assign(self / x)
+  # assignment, any way to make this automatic?
+  def __iadd__(self, x): return self.assign(self.__add__(x))
+  def __isub__(self, x): return self.assign(self.__sub__(x))
+  def __imul__(self, x): return self.assign(self.__mul__(x))
+  def __ipow__(self, x): return self.assign(self.__pow__(x))
+  def __idiv__(self, x): return self.assign(self.__truediv__(x))
 
-  # TODO: deprecate this API?
-  def add(self, x): return self+x
-  def sub(self, x): return self-x
-  def mul(self, x): return self*x
-  def pow(self, x): return self**x
-  def div(self, x): return self/x
+  # simple tensor math API
+  def add(self, x): return self.__add__(x)
+  def sub(self, x): return self.__sub__(x)
+  def mul(self, x): return self.__mul__(x)
+  def pow(self, x): return self.__pow__(x)
+  def div(self, x): return self.__truediv__(x)
 
   # ***** functional nn ops *****
 
