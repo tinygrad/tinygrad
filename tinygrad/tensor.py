@@ -203,7 +203,7 @@ class Tensor:
         new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
     new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
-    return mlops.Slice.apply(self, arg = new_slice).reshape(new_shape if len(new_shape) else (1,))
+    return self.slice(arg = new_slice).reshape(new_shape if len(new_shape) else (1,))
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
@@ -214,14 +214,14 @@ class Tensor:
     slc = [[(0, s) for s in self.shape] for _ in catargs]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
-    return functools.reduce(Tensor.__iadd__, [mlops.Slice.apply(arg, arg=s) for arg,s in zip(catargs, slc)])
+    return functools.reduce(Tensor.__iadd__, [arg.slice(arg=s) for arg,s in zip(catargs, slc)])
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
-    return [mlops.Slice.apply(self, arg=p) for p in slice_params]
+    return [self.slice(arg=p) for p in slice_params]
 
   def matmul(self:Tensor, w:Tensor):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
@@ -248,7 +248,7 @@ class Tensor:
   def __rmatmul__(self:Tensor, w:Tensor): return w.matmul(self)
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Tuple[int, ...]): return mlops.Slice.apply(self, arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])
+  def pad2d(self, padding:Tuple[int, ...]): return self.slice(arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])
   # TODO: this is totally not transpose
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
@@ -376,6 +376,7 @@ class Tensor:
   def expand(self, shape, *args): return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
   def permute(self, order, *args): return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args): return mlops.Flip.apply(self, axis=argfix(axis, *args))
+  def slice(self, arg): return mlops.Slice.apply(self, arg=arg)
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
