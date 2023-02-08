@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
-from enum import Enum
-from typing import Union, Type, NamedTuple, Tuple, Any, List
+from enum import Enum, auto
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar
 import functools, operator
 from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker
@@ -10,12 +10,13 @@ from tinygrad.helpers import getenv
 DEBUG = getenv("DEBUG", 0)
 
 # these are the llops your accelerator must implement, along with toCpu
-UnaryOps = Enum("UnaryOps", ["NOOP", "NEG", "RELU", "EXP", "LOG", "GT0", "RECIPROCAL"])
-BinaryOps = Enum("BinaryOps", ["ADD", "SUB", "MUL", "DIV", "POW", "CMPEQ"])
-ReduceOps = Enum("ReduceOps", ["SUM", "MAX"])
-MovementOps = Enum("MovementOps", ["RESHAPE", "PERMUTE", "EXPAND", "FLIP", "STRIDED", "PAD", "SHRINK"])
-ProcessingOps = Enum("ProcessingOps", ["CONV"])
-LoadOps = Enum("LoadOps", ["FROMCPU", "CONTIGUOUS"])
+# the Enum class doesn't work with mypy, this is static. sorry it's ugly
+class UnaryOps(Enum): NOOP = auto(); NEG = auto(); RELU = auto(); EXP = auto(); LOG = auto(); GT0 = auto(); RECIPROCAL = auto() # noqa: E702
+class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto() # noqa: E702
+class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
+class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); FLIP = auto(); STRIDED = auto(); PAD = auto(); SHRINK = auto() # noqa: E702
+class ProcessingOps(Enum): CONV = auto() # noqa: E702
+class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps]]
@@ -30,6 +31,9 @@ class LazyOp(NamedTuple):
 # Any == Union[LazyBuffer, DeviceBuffer]
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
+def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
+  if x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
+  return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
 # a placeholder class to extend by the exec classes
 class DeviceBuffer:
@@ -63,7 +67,10 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     return ret
 
 class GlobalCounters:
-  global_ops, global_mem, time_sum = 0, 0, 0
+  global_ops : ClassVar[int] = 0
+  global_mem : ClassVar[int] = 0
+  time_sum : ClassVar[int] = 0
+  # TODO: reset method
 
 class GenericShape(GenericExecAST):  # pylint: disable=abstract-method
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops

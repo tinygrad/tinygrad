@@ -1,6 +1,6 @@
-from enum import Enum
+from enum import Enum, auto
 import itertools
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from tinygrad.helpers import prod, dedup, all_same
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
 from tinygrad.shape import ShapeTracker, View, strides_for_shape
@@ -11,14 +11,15 @@ def get_first_reduce(shapes):
       return i
   return len(shapes[0])  # off the end
 
-Types = Enum("Types", ["FLOAT", "FLOAT4"])
+# this will be removed soon anyway
+class Types(Enum): FLOAT = auto(); FLOAT4 = auto() # noqa: E702
 class Token:
   def __init__(self, tok:str, typ:Types, ptr:bool=False):
     assert isinstance(tok, str)
     self.tok, self.typ, self.ptr = tok, typ, ptr
     self.axis : List[Tuple[int, int, bool]] = []
   def array(self, length, stride, reduce): self.axis.append((length, stride, reduce))
-  def size(self): return prod(x[0] for x in self.axis)
+  def size(self): return prod([x[0] for x in self.axis])
   def offsets(self): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.axis[::-1]])] if len(self.axis) else [0]
   # TODO: this is sort of a hack, it gets the accumulator indices
   def acc_offsets(self):
@@ -53,12 +54,13 @@ class ASTKernel:
     # TODO: should be optional if it's hitting a function cache
     self.processed = False
 
-  def process(self):
+  def process(self) -> None:
     if self.processed: return
     self.processed = True
     reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
+    self.reduceopop : Optional[ReduceOps] = self.reduceop.op if self.reduceop is not None and isinstance(self.reduceop.op, ReduceOps) else None
     self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
 
     self.buftokens = [Token(f"data{i}", Types.FLOAT, ptr=True) for i in range(len(self.bufs))]
@@ -98,7 +100,7 @@ class ASTKernel:
     print_ast(self.input_ast, "ast")
 
   @property
-  def shape_len(self): return len(self.sts[0].shape)
+  def shape_len(self) -> int: return len(self.sts[0].shape)
 
   def simplify_ones(self):
     # remove places where the shape is all ones
