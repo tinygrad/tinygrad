@@ -14,6 +14,7 @@ class Optimizer:
   # TODO: this probably shouldn't change the gradients, just the ones used by the optimizer
   def clipnorm(self, amount=1):
     for param in self.params:
+      assert param.grad is not None
       # clipnorm is the L2 norm, not value: is this right?
       param.grad.assign(param.grad.clip(-(amount**2), (amount**2)))
 
@@ -31,8 +32,9 @@ class SGD(Optimizer):
     super().__init__(params)
     self.lr = lr
 
-  def step(self):
+  def step(self) -> None:
     for t in self.params:
+      assert t.grad is not None
       t.assign(t.detach() - t.grad * self.lr)
     self.realize()
 
@@ -43,8 +45,9 @@ class RMSprop(Optimizer):
 
     self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
 
-  def step(self):
+  def step(self) -> None:
     for i, t in enumerate(self.params):
+      assert t.grad is not None
       self.v[i] = self.decay * self.v[i] + (1.0 - self.decay) * (t.grad * t.grad)
       t.assign(t.detach() - (t.grad * self.lr).div(self.v[i].sqrt() + self.eps))
     self.realize(self.v)
@@ -57,10 +60,11 @@ class Adam(Optimizer):
     self.m = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
     self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
 
-  def step(self):
+  def step(self) -> None:
     self.t = self.t + 1
     a = self.lr * ((1.0 - self.b2**self.t)**0.5) / (1.0 - self.b1**self.t)
     for i, t in enumerate(self.params):
+      assert t.grad is not None
       self.m[i] = self.b1 * self.m[i] + (1.0 - self.b1) * t.grad
       self.v[i] = self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad)
       t.assign(t.detach() - a * self.m[i].div(self.v[i].sqrt() + self.eps))
