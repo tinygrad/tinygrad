@@ -253,7 +253,7 @@ class Tensor:
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
-  def _reduce(self, fxn, axis=None, keepdim=False):
+  def _reduce(self, fxn:Type[Function], axis=None, keepdim=False):
     if axis is None:
       axis = range(len(self.shape))
     if isinstance(axis, int):
@@ -284,10 +284,10 @@ class Tensor:
     m, _, ss = self._softmax()
     return m - ss.log()
 
-  def dropout(self, p=0.5):
+  def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training:
       return self
-    _mask = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    _mask : np.ndarray = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
   # TODO: support arbitrary strides

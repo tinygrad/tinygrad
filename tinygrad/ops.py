@@ -67,6 +67,8 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
 
 # used in CPUBuffer and TorchBuffer
 class GenericBufExecAST(GenericExecAST):  # pylint: disable=abstract-method
+  # TODO: use generic types here to remove __init__ in specialized classes
+  def __init__(self, lbuf:Any): self.buf, self.shape = lbuf, tuple(lbuf.shape)
   def contiguous(self): return self.unary_op(UnaryOps.NOOP)
   def unary_op(self, op): return type(self)(self.fxn_for_op[op](self.buf))
   def binary_op(self, op, y): return type(self)(self.fxn_for_op[op](self.buf, y.buf))
