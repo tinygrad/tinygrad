@@ -35,24 +35,24 @@ class CL:
 class CLBuffer:
   def __init__(self, size):
     if len(CL.BUFFER_CACHE[size]) > 0:
-      self.cl = CL.BUFFER_CACHE[size].pop()
+      self._cl = CL.BUFFER_CACHE[size].pop()
     else:
       # TODO: on GPU OOM, clear the cache
-      self.cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
-      CL.mem_used += self.cl.size
+      self._cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
+      CL.mem_used += self._cl.size
 
   def __del__(self):
-    if CLCACHE: CL.BUFFER_CACHE[self.cl.size].append(self.cl)
-    else: CL.mem_used -= self.cl.size
+    if CLCACHE: CL.BUFFER_CACHE[self._cl.size].append(self._cl)
+    else: CL.mem_used -= self._cl.size
 
-  def copyin(self, b:np.ndarray): CL.enqueue_copy(self.cl, b, False)
-  def copyout(self, a:np.ndarray): CL.enqueue_copy(a, self.cl, True)
+  def copyin(self, b:np.ndarray): CL.enqueue_copy(self._cl, b, False)
+  def copyout(self, a:np.ndarray): CL.enqueue_copy(a, self._cl, True)
 
 class CLImage:
   fmt = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
 
   def __init__(self, shape):
-    self.cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
+    self._cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
     CL.mem_used += self.cl.row_pitch * self.cl.height
 
   def __del__(self):
@@ -81,7 +81,7 @@ class CLProgram:
     # print the PTX for NVIDIA. TODO: probably broken for everything else
     if DEBUG >= 5: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
     if CL.CACHE is not None: CL.CACHE.append((self, args))
-    else: e = self.clprg(CL().cl_queue, args[0], args[1], *[x.cl for x in args[2:]])
+    else: e = self.clprg(CL().cl_queue, args[0], args[1], *[x._cl for x in args[2:]])
     if DEBUG >= 2 and CL.CACHE is None:
       CL.cl_queue.finish()
       # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio

@@ -17,7 +17,7 @@ import numpy as np
 import tinygrad.graph as graph
 from tinygrad.ops import GlobalCounters
 
-from tinygrad.llops.ops_gpu import CL
+from tinygrad.runtime.opencl import CL
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
@@ -96,7 +96,6 @@ def compile(dat, output_fn):
   start_ops = GlobalCounters.global_ops
   CL.CACHE = []
   if using_graph: graph.GRAPH = True
-  CL.kernel_count = -1
   tinygrad_out.realize()
   graph.GRAPH = False
   print("kernel count:", len(CL.CACHE))
@@ -112,7 +111,7 @@ def compile(dat, output_fn):
   # save thneed (before run)
   t.save(output_fn)
 
-  print(f"buffers to save: {len(t.buffers_to_save)}, outputs: {t.outputs}")
+  print(f"buffers to save: {len(t.buffers_to_save)}, inputs: {list(t.inputs.keys())}, outputs: {t.outputs}")
   runtime = t.run()
   print(f"network using {used_ops/1e9:.2f} GOPS with runtime {runtime*1e3:.2f} ms that's {used_ops/runtime*1e-9:.2f} GFLOPS")
 

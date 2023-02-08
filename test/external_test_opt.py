@@ -12,7 +12,7 @@ from tinygrad import nn
 from tinygrad.nn import optim
 
 try:
-  from tinygrad.llops.ops_gpu import CL
+  from tinygrad.runtime.opencl import CL
 except ImportError:
   pass
 
@@ -25,9 +25,9 @@ class CLCache():
     print("cache: entering")
   def __exit__(self, type, value, traceback):
     print(f"cache: exiting with size {len(CL.CACHE)}")
-    for prg, args in CL.CACHE:
-      e = prg.clprg(CL().cl_queue, *args)
+    cl_cache_storage = CL.CACHE
     CL.CACHE = None
+    for prg, args in cl_cache_storage: prg(*args)
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOpt(unittest.TestCase):
