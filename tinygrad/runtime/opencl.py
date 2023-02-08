@@ -53,10 +53,10 @@ class CLImage:
 
   def __init__(self, shape):
     self._cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
-    CL.mem_used += self.cl.row_pitch * self.cl.height
+    CL.mem_used += self._cl.row_pitch * self._cl.height
 
   def __del__(self):
-    CL.mem_used -= self.cl.row_pitch * self.cl.height
+    CL.mem_used -= self._cl.row_pitch * self._cl.height
 
   def copyin(self, b:np.ndarray): raise NotImplementedError("no copyin for CLImage")
   def copyout(self, a:np.ndarray): raise NotImplementedError("no copyout for CLImage")
