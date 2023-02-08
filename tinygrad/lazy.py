@@ -75,7 +75,7 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
 
 def support_weakref(x): return x
-@support_weakref  # needed for mypyc
+@support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
 class LazyBuffer:
   __deletable__ = ('op',)
   lazycache : ClassVar[WeakValueDictionary[Tuple[str, OpType, LazyOp], LazyBuffer]] = WeakValueDictionary()

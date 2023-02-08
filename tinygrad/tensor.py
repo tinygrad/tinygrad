@@ -3,13 +3,14 @@ from __future__ import annotations
 import inspect, functools, importlib, itertools
 import numpy as np
 from tinygrad.helpers import prod, argfix, make_pair
-from typing import List, Tuple, Callable, Optional
+from typing import List, Tuple, Callable, Optional, ClassVar, Type
 from tinygrad.lazy import Device, LazyBuffer
 
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
-  training, no_grad = False, False
+  training : ClassVar[bool] = False
+  no_grad : ClassVar[bool] = False
 
   def __init__(self, data, device=Device.DEFAULT, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
@@ -40,14 +41,10 @@ class Tensor:
     return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
   @property
-  def shape(self): return self.lazydata.shape
-
-  # dtype handling was very broken. it's always float32 now
-  @property
-  def dtype(self): return np.float32
+  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
 
   @property
-  def device(self): return self.lazydata.device
+  def device(self) -> str: return self.lazydata.device
 
   # ***** data handlers ****
 
@@ -63,11 +60,11 @@ class Tensor:
     return x
 
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self): return np.array(self.lazydata.toCPU())
+  def numpy(self) -> np.ndarray: return np.array(self.lazydata.toCPU())
 
   # TODO: this keeps the legacy behavior working, remove it after refactor
   @property
-  def data(self): return self.numpy()
+  def data(self) -> np.ndarray: return self.numpy()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
@@ -169,7 +166,7 @@ class Tensor:
     for y in args:
       assert len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim)
     catargs = [self] + list(args)
-    shape_cumsum = [0, *itertools.accumulate(y.shape[dim] for y in catargs)]
+    shape_cumsum = [0, *itertools.accumulate([y.shape[dim] for y in catargs])]
     slc = [[(0, s) for s in self.shape] for _ in catargs]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
@@ -201,7 +198,7 @@ class Tensor:
     return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).transpose(order=order)
 
   # TODO: what's the difference between dot and matmul?
-  dot = matmul
+  def dot(self:Tensor, w:Tensor): return self.matmul(w)
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Tuple[int, ...]): return self[:, :, -padding[2]:self.shape[2]+padding[3], -padding[0]:self.shape[3]+padding[1]]
@@ -272,7 +269,7 @@ class Tensor:
   def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def swish(self): return self * self.sigmoid()
-  silu = swish   # The SiLU function is also known as the swish function.
+  def silu(self): return self.swish()   # The SiLU function is also known as the swish function.
   def relu6(self): return self.relu() - (self-6).relu()
   def hardswish(self): return self * (self+3).relu6() * (1/6)
   def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
@@ -292,12 +289,15 @@ class Tensor:
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn(x.expand(shape_ret), y.expand(shape_ret))
 
+  @staticmethod
+  def _truediv(x, y): return x * (y.reciprocal() if isinstance(y, Tensor) else (1/y))
+
   # TODO: are these the only ones that can take number arguments?
   def add(self, x): return Tensor.broadcasted(Tensor._add, self, x)
   def sub(self, x): return Tensor.broadcasted(Tensor._sub, self, x)
   def mul(self, x): return Tensor.broadcasted(Tensor._mul, self, x)
   def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
-  def div(self, y): return self * (y.reciprocal() if isinstance(y, Tensor) else (1/y))
+  def div(self, x): return Tensor._truediv(self, x)
 
   # ***** functional nn ops *****
 
@@ -334,30 +334,32 @@ class Function:
   # NOTE: it doesn't hurt to save this since the ctx will be freed fast without grad
   def save_for_backward(self, *x): self.saved_tensors.extend(x)
 
-  @classmethod
-  def apply(cls, *x:Tensor, **kwargs):
-    ctx = cls(x[0].device, *x)
+  @staticmethod
+  def apply(fxn:Type[Function], *x:Tensor, **kwargs):
+    ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad:
       ret._ctx = ctx    # used by autograd engine
     return ret
 
 # register functions to move between devices
-for device in [device for device in Device.__dict__.keys() if device[0] != "_"]:
-  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device.__dict__[device]))
-  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device.__dict__[device]))
+for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
+  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device._buffers[device]))
+  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device._buffers[device]))
 
 # register all the mlops "math" operations
-def register(name:str, fxn:Function):
-  setattr(Tensor, "_"+name if hasattr(Tensor, name) else name, lambda *args, **kwargs: fxn.apply(*args, **kwargs))  # doesn't work without lambda, pylint: disable=W0108
+def register(name:str, fxn:Type[Function]):
+  setattr(Tensor, "_"+name if hasattr(Tensor, name) else name, lambda *args, **kwargs: Function.apply(fxn, *args, **kwargs))  # doesn't work without lambda, pylint: disable=W0108
 for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
   if name[0] != "_" and name != "Function" and not name.endswith("Ops"):
     register(name.lower(), cls)
 
 # register the operators
 def register_op(name, fxn):
-  setattr(Tensor, f"__{name}__", fxn)
-  setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self,x)))
-  setattr(Tensor, f"__r{name}__", lambda self,x: fxn(x,self))
-for name in ['add', 'sub', 'mul', 'pow', 'matmul', 'truediv']:
-  register_op(name, getattr(Tensor, name if name != 'truediv' else 'div'))
+  if name in ['add', 'sub', 'mul', 'pow']: rfxn = lambda x,y: Tensor.broadcasted(fxn, x, y)
+  else: rfxn = lambda x,y: fxn(x,y)  # pylint: disable=W0108
+  setattr(Tensor, f"__{name}__", rfxn)
+  setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(rfxn(self, x)))
+  setattr(Tensor, f"__r{name}__", lambda self,x: rfxn(x, self))
+for name in ['add', 'sub', 'mul', 'pow', "truediv", "matmul"]:
+  register_op(name, getattr(Tensor, ("_"+name) if name != "matmul" else name))
