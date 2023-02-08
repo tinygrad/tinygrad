@@ -2,11 +2,10 @@
 import numpy as np
 import random
 
-from tinygrad.tensor import Device
+from tinygrad.nn.optim import Adam
 from extra.utils import get_parameters
 from extra.training import train, evaluate
 from models.transformer import Transformer
-from tinygrad.nn.optim import Adam
 
 # dataset idea from https://github.com/karpathy/minGPT/blob/master/play_math.ipynb
 def make_dataset():

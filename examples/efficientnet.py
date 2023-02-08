@@ -2,16 +2,18 @@
 # https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth
 # a rough copy of
 # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/model.py
-import os
 import sys
 import io
+import ast
 import time
+import cv2
 import numpy as np
-np.set_printoptions(suppress=True)
+from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from extra.utils import fetch, get_parameters
+from extra.utils import fetch
 from models.efficientnet import EfficientNet
+np.set_printoptions(suppress=True)
 
 def infer(model, img):
   # preprocess image
@@ -53,15 +55,12 @@ if __name__ == "__main__":
   model.load_from_pretrained()
 
   # category labels
-  import ast
   lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
   lbls = ast.literal_eval(lbls.decode('utf-8'))
 
   # load image and preprocess
-  from PIL import Image
-  url = sys.argv[1]
+  url = sys.argv[1] if len(sys.argv) >= 2 else "https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg"
   if url == 'webcam':
-    import cv2
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     while 1:
@@ -86,5 +85,4 @@ if __name__ == "__main__":
     st = time.time()
     out, _ = infer(model, img)
     print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
-    print("did inference in %.2f s" % (time.time()-st))
-  #print("NOT", np.argmin(out.data), np.min(out.data), lbls[np.argmin(out.data)])
+    print(f"did inference in {(time.time()-st):2f}")

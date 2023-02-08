@@ -3,16 +3,16 @@
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
 # TODO: gelu is causing nans!
-import numpy as np
 import time
+import numpy as np
 from datasets import fetch_cifar
 from tinygrad import nn
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from extra.training import train, evaluate
-from extra.utils import get_parameters
 from tinygrad.ops import GlobalCounters
+from tinygrad.llops.ops_gpu import CL
+from extra.utils import get_parameters
 
 num_classes = 10
 
@@ -53,7 +53,6 @@ class SpeedyResNet:
 
 # TODO: this will become @tinygrad.jit
 first, cl_cache, loss = True, None, None
-from tinygrad.llops.ops_gpu import CL
 def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
   global cl_cache, first, loss
 
@@ -97,7 +96,6 @@ def train_cifar():
   X_test,Y_test = fetch_cifar(train=False)
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
-  def make_lr(x): return Tensor([x]).realize()
   optimizer = optim.SGD(get_parameters(model), lr=0.001)
   #optimizer = optim.Adam(get_parameters(model), lr=3e-4)
 

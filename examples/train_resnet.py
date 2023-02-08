@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 import numpy as np
-import random
 from PIL import Image
 
-from tinygrad.tensor import Device
+from tinygrad.nn.optim import Adam
+from tinygrad.helpers import getenv
 from extra.utils import get_parameters
 from extra.training import train, evaluate
 from models.resnet import ResNet
-from tinygrad.nn.optim import Adam
-from tinygrad.helpers import getenv
 from datasets import fetch_mnist
 
 

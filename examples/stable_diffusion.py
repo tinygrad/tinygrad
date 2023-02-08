@@ -394,7 +394,7 @@ class CLIPAttention:
 
     attn_weights = attn_weights.reshape(bsz, self.num_heads, tgt_len, src_len) + causal_attention_mask
     attn_weights = attn_weights.reshape(bsz * self.num_heads, tgt_len, src_len)
-    
+
     attn_weights = attn_weights.softmax()
 
     attn_output = attn_weights @ value_states
@@ -429,7 +429,7 @@ class CLIPEncoderLayer:
 class CLIPEncoder:
   def __init__(self):
     self.layers = [CLIPEncoderLayer() for i in range(12)]
-  
+
   def __call__(self, hidden_states, causal_attention_mask):
     for l in self.layers:
       hidden_states = l(hidden_states, causal_attention_mask)
@@ -556,8 +556,7 @@ class ClipTokenizer:
       word = new_word
       if len(word) == 1:
         break
-      else:
-        pairs = get_pairs(word)
+      pairs = get_pairs(word)
     word = ' '.join(word)
     self.cache[token] = word
     return word
@@ -620,7 +619,7 @@ if __name__ == "__main__":
       w = get_child(model, k)
     except (AttributeError, KeyError, IndexError):
       #traceback.print_exc()
-      w = None 
+      w = None
     #print(f"{str(v.shape):30s}", w.shape if w is not None else w, k)
     if w is not None:
       assert w.shape == v.shape

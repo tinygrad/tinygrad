@@ -1,19 +1,14 @@
 #!/usr/bin/env python
 #inspired by https://github.com/Matuzas77/MNIST-0.17/blob/master/MNIST_final_solution.ipynb
-import os
 import sys
-sys.path.append(os.getcwd())
-sys.path.append(os.path.join(os.getcwd(), 'test'))
-
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.nn import BatchNorm2D
-from extra.utils import get_parameters
-from datasets import fetch_mnist
-from extra.training import train, evaluate, sparse_categorical_crossentropy
-import tinygrad.nn.optim as optim
+from tinygrad.nn import BatchNorm2D, optim
 from tinygrad.helpers import getenv
+from datasets import fetch_mnist
 from extra.augment import augment_img
+from extra.utils import get_parameters
+from extra.training import train, evaluate, sparse_categorical_crossentropy
 GPU = getenv("GPU")
 QUICK = getenv("QUICK")
 DEBUG = getenv("DEBUG")
