@@ -1,5 +1,4 @@
 import torch
-from typing import Tuple
 from tinygrad.llops.ops_cpu import base_fxn_for_op, CPUBuffer  # type: ignore
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ProcessingOps, GenericExecAST
 from tinygrad.helpers import getenv
@@ -12,9 +11,7 @@ class TorchBuffer(GenericExecAST):
     MovementOps.STRIDED: lambda x, arg: x.contiguous().as_strided([y[0] for y in arg], [y[1] for y in arg])
   })
 
-  def __init__(self, lbuf:torch.Tensor): self.buf = lbuf
-  @property
-  def shape(self) -> Tuple[int, ...]: return self.buf.shape
+  def __init__(self, lbuf:torch.Tensor): self.buf, self.shape = lbuf, tuple(lbuf.shape)
 
   @staticmethod
   def fromCPU(data): return TorchBuffer(torch.from_numpy(data).requires_grad_(False).to(device))
