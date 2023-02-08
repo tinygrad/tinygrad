@@ -15,12 +15,12 @@ base_fxn_for_op = {
 }
 
 class CPUBuffer(GenericExecAST):
-  fxn_for_op = base_fxn_for_op | {
+  fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
     UnaryOps.RELU: lambda x: np.maximum(x, 0), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
     MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
     MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
     MovementOps.STRIDED: lambda x, arg: np.lib.stride_tricks.as_strided(x.ravel().reshape(x.shape), shape=[y[0] for y in arg], strides=[y[1]*x.dtype.itemsize for y in arg])
-  }
+  })
 
   def __init__(self, lbuf:np.ndarray): self.buf = lbuf
   @property

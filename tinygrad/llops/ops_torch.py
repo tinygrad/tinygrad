@@ -6,11 +6,11 @@ from tinygrad.helpers import getenv
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
 class TorchBuffer(GenericExecAST):
-  fxn_for_op = base_fxn_for_op | {
+  fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
     UnaryOps.RELU: lambda x: x.relu(), UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(), BinaryOps.CMPEQ: lambda x,y: (x==y).float(),
     MovementOps.PAD: lambda x, padding: torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist]),
     MovementOps.STRIDED: lambda x, arg: x.contiguous().as_strided([y[0] for y in arg], [y[1] for y in arg])
-  }
+  })
 
   def __init__(self, lbuf:torch.Tensor): self.buf = lbuf
   @property
