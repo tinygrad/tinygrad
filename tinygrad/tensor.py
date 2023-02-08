@@ -313,13 +313,6 @@ class Tensor:
   @staticmethod
   def _truediv(x, y): return x * (y.reciprocal() if isinstance(y, Tensor) else (1/y))
 
-  # TODO: are these the only ones that can take number arguments?
-  def add(self, x): return Tensor.broadcasted(Tensor._add, self, x)
-  def sub(self, x): return Tensor.broadcasted(Tensor._sub, self, x)
-  def mul(self, x): return Tensor.broadcasted(Tensor._mul, self, x)
-  def pow(self, x): return Tensor.broadcasted(Tensor._pow, self, x)
-  def div(self, x): return Tensor._truediv(self, x)
-
   # ***** functional nn ops *****
 
   # TODO: fix the kwargs problem, then remove these (or not, since they now fix tuples)
@@ -328,7 +321,7 @@ class Tensor:
   def permute(self, order, *args): return self._permute(order=argfix(order, *args))
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
-    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
+    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
     return x.add(bias) if bias is not None else x
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
@@ -369,18 +362,20 @@ for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))
 
 # register all the mlops "math" operations
+broadcasted_operations = ['add', 'sub', 'mul', 'pow']
 def register(name:str, fxn:Type[Function]):
-  setattr(Tensor, "_"+name if hasattr(Tensor, name) else name, lambda *args, **kwargs: Function.apply(fxn, *args, **kwargs))  # doesn't work without lambda, pylint: disable=W0108
+  setattr(Tensor, "_"+name if hasattr(Tensor, name) or name in broadcasted_operations else name, lambda *args, **kwargs: Function.apply(fxn, *args, **kwargs))  # doesn't work without lambda, pylint: disable=W0108
 for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
   if name[0] != "_" and name != "Function" and not name.endswith("Ops"):
     register(name.lower(), cls)
 
 # register the operators
 def register_op(name, fop):
-  if name in ['add', 'sub', 'mul', 'pow']: fxn = lambda x,y: Tensor.broadcasted(fop, x, y)
+  if name in broadcasted_operations: fxn = lambda x,y: Tensor.broadcasted(fop, x, y)
   else: fxn = lambda x,y: fop(x,y)  # pylint: disable=W0108
+  setattr(Tensor, name if name != 'truediv' else 'div', fxn)
   setattr(Tensor, f"__{name}__", fxn)
   setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self, x)))
   setattr(Tensor, f"__r{name}__", lambda self,x: fxn(x, self))
-for name in ['add', 'sub', 'mul', 'pow', "truediv", "matmul"]:
+for name in broadcasted_operations + ["truediv", "matmul"]:
   register_op(name, getattr(Tensor, ("_"+name) if name != "matmul" else name))
