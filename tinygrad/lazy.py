@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Union, List, Dict, Any, Final
+from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar
 import sys, weakref
+from weakref import WeakValueDictionary
 from tinygrad.helpers import ConvArgs, prod
 from tinygrad.shape import ShapeTracker
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, DEBUG
@@ -68,18 +69,25 @@ def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if
 def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
 
+def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
+  if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
+  assert y.op in BinaryOps or y.op in UnaryOps
+  return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
+
+def support_weakref(x): return x
+@support_weakref  # needed for mypyc
 class LazyBuffer:
   __deletable__ = ('op',)
-  lazycache : Final[weakref.WeakValueDictionary[Tuple[str, OpType, LazyOp], LazyBuffer]] = weakref.WeakValueDictionary()
+  lazycache : ClassVar[WeakValueDictionary[Tuple[str, OpType, LazyOp], LazyBuffer]] = WeakValueDictionary()
   def __new__(cls, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
     # fromcpu aren't cached
     if optype == LoadOps and op.op == LoadOps.FROMCPU:
       return super().__new__(cls)
     wop = (device, optype, get_weakop(op))   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
     # NOTE: we need "ret" to prevent the new buffer from being immediately deleted
-    if wop not in LazyBuffer.lazycache:
-      LazyBuffer.lazycache[wop] = ret = super().__new__(cls) # noqa: F841, pylint: disable=W0612
-    return LazyBuffer.lazycache[wop]
+    if wop not in LazyBuffer.lazycache: LazyBuffer.lazycache[wop] = ret = super().__new__(cls)
+    else: ret = LazyBuffer.lazycache[wop]
+    return ret
 
   def __init__(self, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp):
     if hasattr(self, 'device'):
@@ -162,7 +170,7 @@ class LazyBuffer:
     padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg))
     return self.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
 
-  def movement_op(self:LazyBuffer, op:MovementOps, arg : Tuple[Any, ...]) -> LazyBuffer:
+  def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop
     if op == MovementOps.RESHAPE and self.shape == arg: return self
 
@@ -194,12 +202,7 @@ class LazyBuffer:
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
-      def replace_with_movement_op(y:Union[LazyOp, LazyBuffer]) -> LazyBuffer:
-        if isinstance(y, LazyBuffer):
-          return y.movement_op(op, arg)
-        assert y.op in BinaryOps or y.op in UnaryOps
-        return elementwise_op(y.op, *[replace_with_movement_op(z) for z in y.src])   # type: ignore
-      return replace_with_movement_op(self.op)
+      return replace_with_movement_op(self.op, op, arg)
 
     # create the buffer
     ret = LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg))
