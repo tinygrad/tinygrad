@@ -80,7 +80,8 @@ if cmd == "import":
 
   vgg7.load_waifu2x_json(json.load(open(src, "rb")))
 
-  os.mkdir(model)
+  if not os.path.isdir(model):
+    os.mkdir(model)
   load_and_save(model, True)
 elif cmd == "execute":
   model = sys.argv[2]
@@ -101,7 +102,8 @@ elif cmd == "execute_full":
 elif cmd == "new":
   model = sys.argv[2]
 
-  os.mkdir(model)
+  if not os.path.isdir(model):
+    os.mkdir(model)
   load_and_save(model, True)
 elif cmd == "train":
   model = sys.argv[2]
@@ -236,8 +238,8 @@ elif cmd == "samplify":
       patch_x = a_img[:, :, posy - CONTEXT : posy + CONTEXT + sample_size, posx - CONTEXT : posx + CONTEXT + sample_size]
       patch_y = b_img[:, :, posy : posy + sample_size, posx : posx + sample_size]
 
-      image_save(samples_base + "/" + str(samples_count) + "a.png", patch_x)
-      image_save(samples_base + "/" + str(samples_count) + "b.png", patch_y)
+      image_save(f"{samples_base}/{str(samples_count)}a.png", patch_x)
+      image_save(f"{samples_base}/{str(samples_count)}b.png", patch_y)
       samples_count += 1
       samples_added += 1
 
