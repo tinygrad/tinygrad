@@ -335,6 +335,7 @@ class GPUBuffer(ExplicitExecAST):
     if (self._backing is not None and self._backing.shape != (1,)) or force_create:
       self.cl
   
+  # TODO: refactor this to return self._buf and not import pyopencl
   @property
   def cl(self) -> pyopencl.Buffer:
     if self._buf is None:

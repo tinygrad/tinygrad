@@ -376,11 +376,11 @@ for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), i
     register(name.lower(), cls)
 
 # register the operators
-def register_op(name, fxn):
-  if name in ['add', 'sub', 'mul', 'pow']: rfxn = lambda x,y: Tensor.broadcasted(fxn, x, y)
-  else: rfxn = lambda x,y: fxn(x,y)  # pylint: disable=W0108
-  setattr(Tensor, f"__{name}__", rfxn)
-  setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(rfxn(self, x)))
-  setattr(Tensor, f"__r{name}__", lambda self,x: rfxn(x, self))
+def register_op(name, fop):
+  if name in ['add', 'sub', 'mul', 'pow']: fxn = lambda x,y: Tensor.broadcasted(fop, x, y)
+  else: fxn = lambda x,y: fop(x,y)  # pylint: disable=W0108
+  setattr(Tensor, f"__{name}__", fxn)
+  setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self, x)))
+  setattr(Tensor, f"__r{name}__", lambda self,x: fxn(x, self))
 for name in ['add', 'sub', 'mul', 'pow', "truediv", "matmul"]:
   register_op(name, getattr(Tensor, ("_"+name) if name != "matmul" else name))
