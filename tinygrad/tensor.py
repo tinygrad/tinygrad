@@ -203,7 +203,7 @@ class Tensor:
         new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
     new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
-    return self.slice(arg = new_slice).reshape(new_shape if len(new_shape) else (1,))
+    return mlops.Slice.apply(self, arg = new_slice).reshape(new_shape if len(new_shape) else (1,))
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
@@ -214,14 +214,14 @@ class Tensor:
     slc = [[(0, s) for s in self.shape] for _ in catargs]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
-    return functools.reduce(Tensor.__iadd__, [arg.slice(arg=s) for arg,s in zip(catargs, slc)])
+    return functools.reduce(Tensor.__iadd__, [mlops.Slice.apply(arg, arg=s) for arg,s in zip(catargs, slc)])
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
-    return [self.slice(arg=p) for p in slice_params]
+    return [mlops.Slice.apply(self, arg=p) for p in slice_params]
 
   def matmul(self:Tensor, w:Tensor):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
@@ -376,7 +376,6 @@ class Tensor:
   def expand(self, shape, *args): return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
   def permute(self, order, *args): return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args): return mlops.Flip.apply(self, axis=argfix(axis, *args))
-  def slice(self, arg, *args): return mlops.Slice.apply(self, arg=argfix(arg, *args))
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
@@ -391,7 +390,6 @@ class Tensor:
   def batchnorm(self, weight:Tensor, bias:Tensor, mean:Tensor, invstd:Tensor):
     x = (self - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
     return x.mul(invstd.reshape(shape=[1, -1, 1, 1])) + bias.reshape(shape=[1, -1, 1, 1])
-
 
 # register functions to move between devices
 for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
