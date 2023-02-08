@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Final
+from typing import ClassVar
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ProcessingOps, GenericBufExecAST, base_fxn_for_op
 
 specialized_fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
@@ -10,7 +10,7 @@ specialized_fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
 })
 
 class CPUBuffer(GenericBufExecAST):
-  fxn_for_op : Final = specialized_fxn_for_op
+  fxn_for_op : ClassVar = specialized_fxn_for_op
   def __init__(self, lbuf:np.ndarray): self.buf, self.shape = lbuf, tuple(lbuf.shape)
 
   @staticmethod

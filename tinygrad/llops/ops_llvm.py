@@ -2,7 +2,7 @@ from __future__ import annotations
 import hashlib
 import math
 import time
-from typing import Tuple, Union, Dict, Any, List
+from typing import Tuple, Union, Dict, Any, List, ClassVar
 from tinygrad.helpers import prod, getenv
 from tinygrad.shape import ShapeTracker, ZeroView
 from tinygrad.ops import LazyOp
@@ -68,9 +68,9 @@ def idx_deref(builder, buf, ptr, idx):
     return builder.load(builder.gep(ptr, [idx], inbounds=True))
 
 class LLVM:
-  target_machine = None
-  engine = None
-  optimizer = None
+  target_machine : ClassVar[llvm.targets.TargetMachine] = None
+  engine : ClassVar[llvm.executionengine.ExecutionEngine] = None
+  optimizer : ClassVar[llvm.passmanagers.ModulePassManager] = None
 
   def __init__(self):
     if LLVM.engine is not None:
@@ -104,7 +104,7 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-  def exec(self, module, bufs, op_estimate=0, mem_estimate=0):
+  def exec(self, module:ir.Module, bufs, op_estimate=0, mem_estimate=0):
     module.triple = llvm.get_process_triple()
     module.data_layout = self.engine.target_data
     llvm_ir = str(module)
@@ -146,7 +146,7 @@ class LLVM:
 
 # TODO: Refactor LLVMBuffer and GPUBuffer into ShapeTrackedBuffer
 class LLVMBuffer(ExplicitExecAST):
-  op_lookup = {
+  op_lookup : ClassVar = {
     UnaryOps.NOOP: lambda builder,x: x,
     UnaryOps.NEG: lambda builder,x: builder.fneg(x, flags=('fast',)),
     UnaryOps.RELU: lambda builder,x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x, flags=('fast',)), x, ir.Constant(ir.FloatType(), 0)),
@@ -161,7 +161,7 @@ class LLVMBuffer(ExplicitExecAST):
     BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y], fastmath=('fast',)),
     BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType())
   }
-  start_for_op = {
+  start_for_op : ClassVar = {
     ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
     ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
   }
