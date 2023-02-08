@@ -13,7 +13,6 @@ import tinygrad.nn.optim as optim
 from datasets import fetch_mnist
 from torchvision.utils import make_grid, save_image
 import torch
-
 GPU = getenv("GPU")
 
 class LinearGen:
@@ -126,7 +125,7 @@ if __name__ == "__main__":
     loss_g = 0.0
     loss_d = 0.0
     print(f"Epoch {epoch} of {epochs}")
-    for i in tqdm(range(n_steps)):
+    for _ in tqdm(range(n_steps)):
       image = generator_batch()
       for step in range(k): # Try with k = 5 or 7.
         noise = Tensor(np.random.randn(batch_size,128))

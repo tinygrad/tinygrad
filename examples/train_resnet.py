@@ -39,7 +39,7 @@ if __name__ == "__main__":
     lambda x: x / 255.0,
     lambda x: np.tile(np.expand_dims(x, 1), (1, 3, 1, 1)).astype(np.float32),
   ])
-  for i in range(10):
+  for _ in range(10):
     optim = Adam(get_parameters(model), lr=lr)
     train(model, X_train, Y_train, optim, 50, BS=32, transform=transform)
     acc, Y_test_preds = evaluate(model, X_test, Y_test, num_classes=10, return_predict=True, transform=transform)
