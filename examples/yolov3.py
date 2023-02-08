@@ -357,7 +357,7 @@ class Darknet:
 
         # BatchNorm2d
         if batch_normalize:
-          bn = BatchNorm2D(filters, eps=1e-05, training=True, track_running_stats=True)
+          bn = BatchNorm2D(filters, eps=1e-05, track_running_stats=True)
           module.append(bn)
 
         # LeakyReLU activation
