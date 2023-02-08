@@ -171,11 +171,11 @@ class Tensor:
     val = [val] if not isinstance(val, (list, tuple)) else val
     assert sum(s is not None for s in val) <= len(self.shape)
     assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
-    for i,(sz,s) in enumerate(zip(self.shape, (v for v in val if v is not None))):  # Slicing only depends on ints + slices
+    for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
       if isinstance(s, int) and not (-sz <= s < sz):
         raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
       new_slice.append((s%sz, s%sz+1) if isinstance(s, int) else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
-    for s,sz in zip(val, (self.shape[i-1] for i in itertools.accumulate(s is not None for s in val))):  # Shape depends on slices + positions of Nones
+    for s,sz in zip(val, [self.shape[i-1] for i in itertools.accumulate([s is not None for s in val])]):  # Shape depends on slices + positions of Nones
       if not isinstance(s, int):
         new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
