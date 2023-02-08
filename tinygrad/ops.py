@@ -3,7 +3,7 @@ import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar
 import functools, operator
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, shape_to_axis
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import getenv
 
@@ -45,7 +45,6 @@ class DeviceBuffer:
   def exec_ast(cls, ast:LazyOp): raise NotImplementedError("must be implemented")
 
 # extend this if you don't have an exec_ast function
-# used in CPUBuffer and TorchBuffer
 class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   @classmethod
   def exec_ast(cls, ast:LazyOp, preprocess=lambda x: x):
@@ -65,6 +64,22 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     else:
       raise TypeError("unknown op")
     return ret
+
+# used in CPUBuffer and TorchBuffer
+class GenericBufExecAST(GenericExecAST):  # pylint: disable=abstract-method
+  def contiguous(self): return self.unary_op(UnaryOps.NOOP)
+  def unary_op(self, op): return type(self)(self.fxn_for_op[op](self.buf))
+  def binary_op(self, op, y): return type(self)(self.fxn_for_op[op](self.buf, y.buf))
+  def reduce_op(self, op, new_shape): return type(self)(self.fxn_for_op[op](self.buf, new_shape))
+  def movement_op(self, op, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
+
+base_fxn_for_op = {
+  UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.GT0: lambda x: operator.gt(x, 0.0), UnaryOps.RECIPROCAL: lambda x: 1.0/x,
+  BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul, BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow,
+  ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
+  ReduceOps.MAX: lambda x, new_shape: (x.amax if hasattr(x, 'amax') else x.max)(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
+  MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)],
+}
 
 class GlobalCounters:
   global_ops : ClassVar[int] = 0
