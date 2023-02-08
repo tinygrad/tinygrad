@@ -88,7 +88,9 @@ class GlobalCounters:
   global_ops : ClassVar[int] = 0
   global_mem : ClassVar[int] = 0
   time_sum : ClassVar[int] = 0
-  # TODO: reset method
+  kernel_count : ClassVar[int] = 0
+  @staticmethod
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum, GlobalCounters.kernel_count = 0,0,0,0
 
 class GenericShape(GenericExecAST):  # pylint: disable=abstract-method
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops

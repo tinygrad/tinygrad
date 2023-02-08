@@ -3,19 +3,19 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import SourceModule # type: ignore
 import numpy as np
-from tinygrad.ops import DEBUG
+from tinygrad.ops import DEBUG, GlobalCounters
 
 class CLImage:
   def __init__(self, shape): raise NotImplementedError("CUDA runtime doesn't support images")
 
 class CLBuffer:
-  def __init__(self, size): self.cl = cuda.mem_alloc(size)
-  def copyin(self, b:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self.cl, b, stream)
-  def copyout(self, a:np.ndarray): cuda.memcpy_dtoh(a, self.cl)
+  def __init__(self, size): self._cuda = cuda.mem_alloc(size)
+  def copyin(self, b:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cuda, b, stream)
+  def copyout(self, a:np.ndarray): cuda.memcpy_dtoh(a, self._cuda)
 
 class CLProgram:
-  def __init__(self, name:str, prg:str, op_estimate:int=0):
-    self.name, self.op_estimate = name, op_estimate
+  def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
+    self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     if DEBUG >= 4: print("CUDA compile", prg)
     self.prg = SourceModule(prg).get_function(name)
 
@@ -25,4 +25,7 @@ class CLProgram:
     assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
     global_size = [x//y for x,y in zip(global_size, local_size)]
     if DEBUG >= 2: print("CUDA launch", global_size, local_size)
-    self.prg(*args, block=tuple(local_size), grid=tuple(global_size))
+    self.prg([x._cuda for x in args], block=tuple(local_size), grid=tuple(global_size))
+    GlobalCounters.kernel_count += 1
+    GlobalCounters.global_ops += self.op_estimate
+    GlobalCounters.global_mem += self.mem_estimate

@@ -4,7 +4,8 @@ import struct
 import json
 import traceback
 import numpy as np
-from tinygrad.llops.ops_gpu import CL, CLProgram
+from tinygrad.runtime.opencl import CL
+from tinygrad.llops.ops_gpu import CLProgram, CLImage, CLBuffer
 from tinygrad.helpers import prod, getenv
 from collections import defaultdict
 import pyopencl as cl
@@ -15,7 +16,8 @@ FLOAT16 = getenv("FLOAT16", 0)
 
 class Thneed:
   def __init__(self, cl_cache=[], inputs={}):
-    self.cl_cache, self.inputs = cl_cache[:], inputs
+    self.cl_cache = [(prg, (list(args[0:2]) + [(x._cl if isinstance(x, (CLImage, CLBuffer)) else x) for x in args[2:]])) for prg,args in cl_cache]
+    self.inputs = {k:v._cl for k,v in inputs.items()}
     self.gobj = 0
 
     # build graph
