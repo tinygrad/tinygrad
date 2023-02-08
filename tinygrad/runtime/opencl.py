@@ -81,7 +81,7 @@ class CLProgram:
     # print the PTX for NVIDIA. TODO: probably broken for everything else
     if DEBUG >= 5: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
     if CL.CACHE is not None: CL.CACHE.append((self, args))
-    else: e = self.clprg(CL().cl_queue, args[0], args[1], *[(x._cl if isinstance(x, (CLImage, CLBuffer)) else x) for x in args[2:]])
+    else: e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2 and CL.CACHE is None:
       CL.cl_queue.finish()
       # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio

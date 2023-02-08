@@ -16,8 +16,7 @@ FLOAT16 = getenv("FLOAT16", 0)
 
 class Thneed:
   def __init__(self, cl_cache=[], inputs={}):
-    self.cl_cache = [(prg, (list(args[0:2]) + [(x._cl if isinstance(x, (CLImage, CLBuffer)) else x) for x in args[2:]])) for prg,args in cl_cache]
-    self.inputs = {k:v._cl for k,v in inputs.items()}
+    self.cl_cache, self.inputs = cl_cache[:], inputs
     self.gobj = 0
 
     # build graph
