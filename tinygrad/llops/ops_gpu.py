@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
 from tinygrad.helpers import prod
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST
+from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker
@@ -361,7 +361,9 @@ class GPUBuffer(ExplicitExecAST):
     if KOPT:
       from extra.kernel_search import apply_optimization
       apply_optimization(k, ast, max_interventions=KOPT)
-    k.codegen()(*k.bufs)
+    prg = k.codegen()
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
+    prg(*k.bufs)
     if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
       print(k.fxn.name)
       k.print()

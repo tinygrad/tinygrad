@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional
 import functools, operator
 from tinygrad.helpers import prod, shape_to_axis
 from tinygrad.shape import ShapeTracker
@@ -89,8 +89,9 @@ class GlobalCounters:
   global_mem : ClassVar[int] = 0
   time_sum : ClassVar[int] = 0
   kernel_count : ClassVar[int] = 0
+  cache : ClassVar[Optional[list]] = None
   @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum, GlobalCounters.kernel_count = 0,0,0,0
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0,0,None
 
 class GenericShape(GenericExecAST):  # pylint: disable=abstract-method
   def __init__(self, shape, flops=0): self.shape, self.flops = shape, flops

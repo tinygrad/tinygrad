@@ -40,8 +40,7 @@ if __name__ == "__main__":
       st = time.monotonic()
       out = model.forward(x_train)
       loss = out.logsoftmax().mul(y_train).mean()
-      if ADAM: optimizer.t = 0    # TODO: fixing this requires optional constant folding
-      if i == 2 and CLCACHE: CL.CACHE = []
+      if i == 2 and CLCACHE: GlobalCounters.cache = []
       if BACKWARD:
         optimizer.zero_grad()
         loss.backward()
@@ -51,15 +50,13 @@ if __name__ == "__main__":
       for p in parameters:
         p.realize()
       et = time.monotonic()
-      ops = GlobalCounters.global_ops
     else:
       st = mt = time.monotonic()
       for prg, args in cl_cache: prg(*args)
       et = time.monotonic()
 
     if i == 2 and CLCACHE:
-      cl_cache = CL.CACHE
-      CL.CACHE = None
+      cl_cache = GlobalCounters.cache
 
     mem_used = CL.mem_used
     loss_cpu = loss.detach().numpy()[0]
