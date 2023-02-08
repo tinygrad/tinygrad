@@ -1,10 +1,34 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import inspect, functools, importlib, itertools
+import functools, itertools
 import numpy as np
 from tinygrad.helpers import prod, argfix, make_pair
 from typing import List, Tuple, Callable, Optional, ClassVar, Type
 from tinygrad.lazy import Device, LazyBuffer
+
+# An instantiation of the Function is the Context
+class Function:
+  def __init__(self, device:str, *tensors:Tensor):
+    self.device, self.parents = device, tensors
+    self.needs_input_grad = [t.requires_grad for t in self.parents]
+    self.requires_grad = True if any(self.needs_input_grad) else (None if any(x is None for x in self.needs_input_grad) else False)
+    self.saved_tensors : List[LazyBuffer] = []
+
+  def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
+  def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")
+
+  # NOTE: it doesn't hurt to save this since the ctx will be freed fast without grad
+  def save_for_backward(self, *x): self.saved_tensors.extend(x)
+
+  @classmethod
+  def apply(fxn:Type[Function], *x:Tensor, **kwargs):
+    ctx = fxn(x[0].device, *x)
+    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
+    if ctx.requires_grad and not Tensor.no_grad:
+      ret._ctx = ctx    # used by autograd engine
+    return ret
+
+import tinygrad.mlops as mlops
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -43,7 +67,6 @@ class Tensor:
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
-
 
   # dtype handling was very broken. it's always float32 now
   @property
@@ -220,9 +243,12 @@ class Tensor:
 
   # TODO: what's the difference between dot and matmul?
   def dot(self:Tensor, w:Tensor): return self.matmul(w)
+  def __matmul__(self:Tensor, w:Tensor): return self.matmul(w)
+  def __imatmul__(self:Tensor, w:Tensor): self.assign(self.matmul(w))
+  def __rmatmul__(self:Tensor, w:Tensor): return w.matmul(self)
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Tuple[int, ...]): return self.slice(arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])  # type: ignore
+  def pad2d(self, padding:Tuple[int, ...]): return mlops.Slice.apply(self, arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])
   # TODO: this is totally not transpose
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
@@ -234,11 +260,11 @@ class Tensor:
       axis = [axis]
     axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
-    ret = fxn(self, axis=axis)
+    ret = fxn.apply(self, axis=axis)
     return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
 
-  def sum(self, axis=None, keepdim=False): return self._reduce(Tensor._sum, axis, keepdim)
-  def max(self, axis=None, keepdim=False): return self._reduce(Tensor._max, axis, keepdim)
+  def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
+  def max(self, axis=None, keepdim=False): return self._reduce(mlops.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
@@ -273,7 +299,7 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2)): return self._pool2d(*make_pair(kernel_size)).max(axis=(3,5))
 
   def conv2d(self, weight, bias=None, **kwargs):
-    ret = self._conv2d(weight, **kwargs)
+    ret = mlops.Conv2D.apply(self, weight, **kwargs)
     return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
 
   # ***** math functions (unary) *****
@@ -308,17 +334,48 @@ class Tensor:
     x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [x,y]]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
-    return fxn(x.expand(shape_ret), y.expand(shape_ret))
+    return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
-  @staticmethod
-  def _truediv(x, y): return x * (y.reciprocal() if isinstance(y, Tensor) else (1/y))
+  # ***** first class ops (mlops) *****
+
+  def contiguous(self): return mlops.Contiguous.apply(self)
+  def relu(self): return mlops.ReLU.apply(self)
+  def log(self): return mlops.Log.apply(self)
+  def exp(self): return mlops.Exp.apply(self)
+  def reciprocal(self): return mlops.Reciprocal.apply(self)
+
+  def __add__(self, x): return Tensor.broadcasted(mlops.Add, self, x)
+  def __radd__(self, x): return Tensor.broadcasted(mlops.Add, x, self)
+  def __sub__(self, x): return Tensor.broadcasted(mlops.Sub, self, x)
+  def __rsub__(self, x): return Tensor.broadcasted(mlops.Sub, x, self)
+  def __mul__(self, x): return Tensor.broadcasted(mlops.Mul, self, x)
+  def __rmul__(self, x): return Tensor.broadcasted(mlops.Mul, x, self)
+  def __pow__(self, x): return Tensor.broadcasted(mlops.Pow, self, x)
+  def __rpow__(self, x): return Tensor.broadcasted(mlops.Pow, x, self)
+  def __truediv__(self, x): return self * (x.reciprocal() if isinstance(x, Tensor) else (1/x))
+  def __rtruediv__(self, x): return self.reciprocal() * x
+
+  # TODO: allow this?
+  def __iadd__(self, x): return self.assign(self + x)
+  def __isub__(self, x): return self.assign(self - x)
+  def __imul__(self, x): return self.assign(self * x)
+  def __ipow__(self, x): return self.assign(self ** x)
+  def __idiv__(self, x): return self.assign(self / x)
+
+  # TODO: deprecate this API?
+  def add(self, x): return self+x
+  def sub(self, x): return self-x
+  def mul(self, x): return self*x
+  def pow(self, x): return self**x
+  def div(self, x): return self/x
 
   # ***** functional nn ops *****
 
-  # TODO: fix the kwargs problem, then remove these (or not, since they now fix tuples)
-  def reshape(self, shape, *args): return self._reshape(shape=argfix(shape, *args))
-  def expand(self, shape, *args): return self._expand(shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
-  def permute(self, order, *args): return self._permute(order=argfix(order, *args))
+  def reshape(self, shape, *args): return mlops.Reshape.apply(self, shape=argfix(shape, *args))
+  def expand(self, shape, *args): return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
+  def permute(self, order, *args): return mlops.Permute.apply(self, order=argfix(order, *args))
+  def flip(self, axis, *args): return mlops.Flip.apply(self, axis=argfix(axis, *args))
+  def slice(self, arg, *args): return mlops.Slice.apply(self, arg=argfix(arg, *args))
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
@@ -334,48 +391,8 @@ class Tensor:
     x = (self - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
     return x.mul(invstd.reshape(shape=[1, -1, 1, 1])) + bias.reshape(shape=[1, -1, 1, 1])
 
-# An instantiation of the Function is the Context
-class Function:
-  def __init__(self, device:str, *tensors:Tensor):
-    self.device, self.parents = device, tensors
-    self.needs_input_grad = [t.requires_grad for t in self.parents]
-    self.requires_grad = True if any(self.needs_input_grad) else (None if any(x is None for x in self.needs_input_grad) else False)
-    self.saved_tensors : List[LazyBuffer] = []
-
-  def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
-  def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")
-
-  # NOTE: it doesn't hurt to save this since the ctx will be freed fast without grad
-  def save_for_backward(self, *x): self.saved_tensors.extend(x)
-
-  @staticmethod
-  def apply(fxn:Type[Function], *x:Tensor, **kwargs):
-    ctx = fxn(x[0].device, *x)
-    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
-    if ctx.requires_grad and not Tensor.no_grad:
-      ret._ctx = ctx    # used by autograd engine
-    return ret
 
 # register functions to move between devices
 for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))
-
-# register all the mlops "math" operations
-broadcasted_operations = ['add', 'sub', 'mul', 'pow']
-def register(name:str, fxn:Type[Function]):
-  setattr(Tensor, "_"+name if hasattr(Tensor, name) or name in broadcasted_operations else name, lambda *args, **kwargs: Function.apply(fxn, *args, **kwargs))  # doesn't work without lambda, pylint: disable=W0108
-for name, cls in inspect.getmembers(importlib.import_module('tinygrad.mlops'), inspect.isclass):
-  if name[0] != "_" and name != "Function" and not name.endswith("Ops"):
-    register(name.lower(), cls)
-
-# register the operators
-def register_op(name, fop):
-  if name in broadcasted_operations: fxn = lambda x,y: Tensor.broadcasted(fop, x, y)
-  else: fxn = lambda x,y: fop(x,y)  # pylint: disable=W0108
-  setattr(Tensor, name if name != 'truediv' else 'div', fxn)
-  setattr(Tensor, f"__{name}__", fxn)
-  setattr(Tensor, f"__i{name}__", lambda self,x: self.assign(fxn(self, x)))
-  setattr(Tensor, f"__r{name}__", lambda self,x: fxn(x, self))
-for name in broadcasted_operations + ["truediv", "matmul"]:
-  register_op(name, getattr(Tensor, ("_"+name) if name != "matmul" else name))
