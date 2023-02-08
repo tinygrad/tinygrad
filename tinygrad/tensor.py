@@ -9,6 +9,7 @@ from tinygrad.lazy import Device, LazyBuffer
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
+  __deletable__ = ('_ctx',)
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
 
@@ -42,6 +43,11 @@ class Tensor:
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
+
+
+  # dtype handling was very broken. it's always float32 now
+  @property
+  def dtype(self) -> type: return np.float32
 
   @property
   def device(self) -> str: return self.lazydata.device
@@ -344,8 +350,8 @@ class Function:
 
 # register functions to move between devices
 for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
-  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, Device._buffers[device]))
-  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, Device._buffers[device]))
+  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
+  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))
 
 # register all the mlops "math" operations
 def register(name:str, fxn:Type[Function]):
