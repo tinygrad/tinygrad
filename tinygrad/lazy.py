@@ -132,7 +132,7 @@ class LazyBuffer:
         else:
           # movement ops aren't an AST, just run them
           real_src = src.realize(self.device)
-          self.realized = real_src.movement_op(self.op.op, self.op.arg)
+          self.realized = real_src.movement_op(self.op.op, self.op.arg)  # movement_op stays
           ast = LazyOp(self.op.op, (real_src, ))
       elif self.optype == ProcessingOps: ast = self.op   # no ast modifications for ProcessingOps
       elif self.optype == ReduceOps: ast = _ast_reduceops(self)

@@ -1,7 +1,5 @@
-import os
-
 def get_available_llops():
-  import importlib, inspect
+  import os, importlib, inspect
   _buffers, DEFAULT = {}, "CPU"
   for op in [os.path.splitext(x)[0] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "llops"))) if x.startswith("ops_")]:
     name = op[len("ops_"):].upper()

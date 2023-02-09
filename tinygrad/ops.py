@@ -61,27 +61,23 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   fxn_for_op : ClassVar = shape_fxn_for_op
   # TODO: use generic types here to remove __init__ in specialized classes
   def __init__(self, lbuf:Any): self.buf, self.shape = lbuf, tuple(lbuf.shape)
-  def contiguous(self): return self.unary_op(UnaryOps.NOOP)
-  def unary_op(self, op): return type(self)(self.fxn_for_op[op](self.buf))
-  def binary_op(self, op, y): return type(self)(self.fxn_for_op[op](self.buf, y.buf))
-  def reduce_op(self, op, new_shape): return type(self)(self.fxn_for_op[op](self.buf, new_shape))
-  def movement_op(self, op, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
-  def processing_op(self, op, w, C): return type(self)(self.fxn_for_op[op](self.buf, w.buf, C))
+  def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
+  def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None, preprocess=lambda x: x):
     srcs = [cls.exec_ast(x, preprocess=preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
     if ast.op in UnaryOps:
-      ret = srcs[0].unary_op(ast.op)
+      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf))
     elif ast.op in BinaryOps:
       assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
-      ret = srcs[0].binary_op(ast.op, srcs[1])
+      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf, srcs[1].buf))
     elif ast.op in ReduceOps:
       assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
-      ret = srcs[0].reduce_op(ast.op, ast.arg)
+      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf, ast.arg))
     elif ast.op in MovementOps:
       ret = srcs[0].movement_op(ast.op, ast.arg)
     elif ast.op in ProcessingOps:
-      ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
+      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf, srcs[1].buf, ast.arg))
     else:
       raise TypeError("unknown op")
     if output_buffer is not None:
@@ -107,15 +103,8 @@ class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
-
-  # universal
-  def unary_op(self, op:UnaryOps): return type(self)(self.shape).exec_ast(LazyOp(op=op, src=(self,)))
-  def binary_op(self, op:BinaryOps, y): return type(self)(self.shape).exec_ast(LazyOp(op=op, src=(self, y)))
-  def reduce_op(self, op:ReduceOps, new_shape:Tuple[int, ...]): return type(self)(new_shape).exec_ast(LazyOp(op=op, src=(self,), arg=new_shape))
+    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
 
   # universal for shape tracked
+  def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
-
-  # TODO: creating a new object is making a copy, breaking the thneed compiler
-  def contiguous(self): return self if self.st.contiguous else self.unary_op(UnaryOps.NOOP)
-  #def contiguous(self): return type(self)(self.shape, hostbuf=self) if self.st.contiguous else self.unary_op(UnaryOps.NOOP)

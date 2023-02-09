@@ -12,11 +12,21 @@ base_fxn_for_op : Dict[Op, Callable] = {
   MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)],
 }
 
+def numpy_strided(x,arg): return np.lib.stride_tricks.as_strided(x.ravel().reshape(x.shape), shape=[y[0] for y in arg], strides=[y[1]*x.dtype.itemsize for y in arg])
+def numpy_conv(x,w,C):
+  assert C.px == 0 and C.px_ == 0 and C.py == 0 and C.py_ == 0, "padding in conv is not supported"
+  tx = numpy_strided(x, (
+    (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
+    (C.oy, C.sy*x.shape[3]), (C.ox, C.sx), (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
+  tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
+  out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
+  return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
+
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.RELU: lambda x: np.maximum(x, 0), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
   MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
   MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
-  MovementOps.STRIDED: lambda x, arg: np.lib.stride_tricks.as_strided(x.ravel().reshape(x.shape), shape=[y[0] for y in arg], strides=[y[1]*x.dtype.itemsize for y in arg])
+  MovementOps.STRIDED: numpy_strided, ProcessingOps.CONV: numpy_conv
 }}
 
 class CPUBuffer(GenericExecAST):
@@ -25,13 +35,3 @@ class CPUBuffer(GenericExecAST):
   @staticmethod
   def fromCPU(x): return CPUBuffer(x)
   def toCPU(x): return x.buf
-
-  def processing_op(x,op,w,C):
-    assert op == ProcessingOps.CONV, f"{op} isn't supported"
-    assert C.px == 0 and C.px_ == 0 and C.py == 0 and C.py_ == 0, "padding in conv is not supported"
-    tx = x.movement_op(MovementOps.STRIDED, (
-      (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
-      (C.oy, C.sy*x.shape[3]), (C.ox, C.sx), (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
-    tw = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W))
-    out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.buf.ravel().reshape(tx.shape), tw.buf.ravel().reshape(tw.shape))
-    return CPUBuffer(out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox))
