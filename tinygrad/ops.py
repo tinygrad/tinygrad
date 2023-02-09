@@ -68,8 +68,8 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   def movement_op(self, op, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
   def processing_op(self, op, w, C): return type(self)(self.fxn_for_op[op](self.buf, w.buf, C))
   @classmethod
-  def exec_ast(cls, ast:LazyOp, preprocess=lambda x: x):
-    srcs = [cls.exec_ast(x, preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
+  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None, preprocess=lambda x: x):
+    srcs = [cls.exec_ast(x, preprocess=preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
     if ast.op in UnaryOps:
       ret = srcs[0].unary_op(ast.op)
     elif ast.op in BinaryOps:
@@ -84,8 +84,13 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
       ret = srcs[0].processing_op(ast.op, srcs[1], ast.arg)
     else:
       raise TypeError("unknown op")
-    return ret
-def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(ast, lambda x: GenericExecAST(GenericShape(x.shape))).buf
+    if output_buffer is not None:
+      assert output_buffer.shape == ret.shape
+      output_buffer.buf = ret.buf
+      return output_buffer
+    else:
+      return ret
+def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(ast, preprocess=lambda x: GenericExecAST(GenericShape(x.shape))).buf
 
 class GlobalCounters:
   global_ops : ClassVar[int] = 0
