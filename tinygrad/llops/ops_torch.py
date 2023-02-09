@@ -1,6 +1,6 @@
 import torch
 from typing import ClassVar
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ProcessingOps, GenericBufExecAST, base_fxn_for_op
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ProcessingOps, GenericExecAST, base_fxn_for_op
 from tinygrad.helpers import getenv
 
 specialized_fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
@@ -10,9 +10,8 @@ specialized_fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
 })
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
-class TorchBuffer(GenericBufExecAST):
+class TorchBuffer(GenericExecAST):
   fxn_for_op : ClassVar = specialized_fxn_for_op
-  def __init__(self, lbuf:torch.Tensor): self.buf, self.shape = lbuf, tuple(lbuf.shape)
 
   @staticmethod
   def fromCPU(data): return TorchBuffer(torch.from_numpy(data).requires_grad_(False).to(device))

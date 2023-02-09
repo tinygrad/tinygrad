@@ -1,6 +1,6 @@
 import numpy as np
 from typing import ClassVar
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ProcessingOps, GenericBufExecAST, base_fxn_for_op
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ProcessingOps, GenericExecAST, base_fxn_for_op
 
 specialized_fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
   UnaryOps.RELU: lambda x: np.maximum(x, 0), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
@@ -9,9 +9,8 @@ specialized_fxn_for_op = (lambda d: d.update(base_fxn_for_op) or d)({
   MovementOps.STRIDED: lambda x, arg: np.lib.stride_tricks.as_strided(x.ravel().reshape(x.shape), shape=[y[0] for y in arg], strides=[y[1]*x.dtype.itemsize for y in arg])
 })
 
-class CPUBuffer(GenericBufExecAST):
+class CPUBuffer(GenericExecAST):
   fxn_for_op : ClassVar = specialized_fxn_for_op
-  def __init__(self, lbuf:np.ndarray): self.buf, self.shape = lbuf, tuple(lbuf.shape)
 
   @staticmethod
   def fromCPU(x): return CPUBuffer(x)
