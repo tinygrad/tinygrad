@@ -19,7 +19,7 @@ class BatchNorm2D:
       batch_mean = x_detached.mean(axis=(0,2,3))
       y = (x_detached - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
-      batch_invstd = batch_var.add(self.eps)**-0.5
+      batch_invstd = batch_var.add(self.eps).pow(-0.5)
       self.batch_invstd = None
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
@@ -31,7 +31,7 @@ class BatchNorm2D:
       batch_mean, batch_var = self.running_mean, self.running_var
       # NOTE: this can be precomputed for static inference. if you manually update running_var, you have to reset this
       if not hasattr(self, "batch_invstd") or not self.batch_invstd:
-        self.batch_invstd = batch_var.add(self.eps)**-0.5
+        self.batch_invstd = batch_var.add(self.eps).pow(-0.5)
       batch_invstd = self.batch_invstd
 
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
@@ -61,7 +61,7 @@ class GroupNorm:
     self.num_groups, self.num_channels, self.eps, self.affine = num_groups, num_channels, eps, affine
     self.weight, self.bias = (Tensor.ones(num_channels), Tensor.zeros(num_channels)) if affine else (None, None)
 
-  def __call__(self, x):
+  def __call__(self, x:Tensor):
     # reshape for layernorm to work as group norm
     # subtract mean and divide stddev
     x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
@@ -76,7 +76,7 @@ class LayerNorm:
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(normalized_shape))), eps, elementwise_affine
     self.weight, self.bias = (Tensor.ones(*normalized_shape), Tensor.zeros(*normalized_shape)) if elementwise_affine else (None, None)
 
-  def __call__(self, x):
+  def __call__(self, x:Tensor):
     x = x.layernorm(eps=self.eps, axis=self.axis)
     if not self.elementwise_affine: return x
     return x * self.weight + self.bias

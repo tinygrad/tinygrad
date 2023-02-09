@@ -10,7 +10,7 @@ from tinygrad.shape.symbolic import ModNode   # this will go away when VALIDHACK
 from tinygrad.helpers import getenv
 
 CUDA = getenv("CUDA", 0)
-if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram, CL, cl as pyopencl  # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
 else: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
@@ -26,6 +26,12 @@ def group_float4(x):
 def split_float4(x):
   assert all(y.typ == Types.FLOAT4 for y in x)
   return sum([[Token(acc.tok+f".s{s}", Types.FLOAT) for s in range(4)] for acc in x], [])
+
+class GPURunner:
+  def __init__(self, clprg:CLProgram, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]]):
+    self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete = clprg, global_work_size, local_work_size, bufs_to_delete
+  def __call__(self, *bufs):
+    return self.clprg(self.global_work_size, self.local_work_size, *[x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
 
 class CLASTKernel(ASTKernel):
   code_for_op : Final[Dict[Op, str]] = {
@@ -308,16 +314,9 @@ class CLASTKernel(ASTKernel):
       [") {\n"] + self.kernel
 
     # compile kernel
-    self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops)
-    mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
-
+    self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    def runner(*bufs):
-      GlobalCounters.global_ops += self.info.flops
-      GlobalCounters.global_mem += mem_estimate
-      clbufs = [x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
-      return self.fxn(self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None, *clbufs)
-    return runner
+    return GPURunner(self.fxn, self.bufs_to_delete, self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None)
 
   def print(self):
     super().print()
@@ -337,15 +336,16 @@ class GPUBuffer(ExplicitExecAST):
   
   # TODO: refactor this to return self._buf and not import pyopencl
   @property
-  def cl(self) -> pyopencl.Buffer:
+  def cl(self) -> Union[CLBuffer, CLImage]:
     if self._buf is None:
       self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
     assert self._buf is not None
     if self._backing is not None:
       self._buf.copyin(self._backing)
       self._backing = None
-    return self._buf.cl
+    return self._buf._cl
 
+  # TODO: we don't always need a hostbuf
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
 
   @staticmethod
@@ -365,7 +365,9 @@ class GPUBuffer(ExplicitExecAST):
     if KOPT:
       from extra.kernel_search import apply_optimization
       apply_optimization(k, ast, max_interventions=KOPT)
-    k.codegen()(*k.bufs)
+    prg = k.codegen()
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
+    prg(*k.bufs)
     if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
       print(k.fxn.name)
       k.print()

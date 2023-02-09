@@ -3,8 +3,8 @@ import gc
 from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.llops.ops_gpu import CL, GPUBuffer
-#from tinygrad.llops.ops_opencl import CLImage, OpenCLBuffer
+from tinygrad.llops.ops_gpu import GPUBuffer
+from tinygrad.runtime.opencl import CL
 
 def print_objects():
   #gc.collect()

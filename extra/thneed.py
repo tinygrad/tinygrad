@@ -4,7 +4,8 @@ import struct
 import json
 import traceback
 import numpy as np
-from tinygrad.llops.ops_gpu import CL, CLProgram
+from tinygrad.runtime.opencl import CL
+from tinygrad.llops.ops_gpu import CLProgram, CLImage, CLBuffer
 from tinygrad.helpers import prod, getenv
 from collections import defaultdict
 import pyopencl as cl

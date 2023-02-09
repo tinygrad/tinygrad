@@ -34,6 +34,13 @@ if GRAPH:
   atexit.register(save_graph_exit)
 
 global_num_max = 0
+def nm(x):
+  global global_num_max
+  if not hasattr(x, 'global_num'):
+    setattr(x, 'global_num', global_num_max)
+    global_num_max += 1
+  return f"<{x.global_num}>"
+
 def log_op(ret : DeviceBuffer, ast : LazyOp):
   if not DEBUG and not GRAPH: return
   op : List[Op] = [x.op for x in get_lazyops(ast)]
@@ -43,15 +50,8 @@ def log_op(ret : DeviceBuffer, ast : LazyOp):
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
   if DEBUG >= 3:
-    print(f"{op} : {', '.join([str(x.shape) for x in inp])} -> {ret.shape}")
+    print(f"{op} : {', '.join([f'{x.shape}-{nm(x)}' for x in inp])} -> {ret.shape}-{nm(ret)}")
   if GRAPH:
-    def nm(x):
-      global global_num_max
-      if not hasattr(x, 'global_num'):
-        setattr(x, 'global_num', global_num_max)
-        global_num_max += 1
-      return f"<<< {x.global_num} >>>"
-
     top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080"}
     dashed = (optype == LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
 
