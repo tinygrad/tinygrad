@@ -66,20 +66,10 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None, preprocess=lambda x: x):
     srcs = [cls.exec_ast(x, preprocess=preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
-    if ast.op in UnaryOps:
-      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf))
-    elif ast.op in BinaryOps:
-      assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
-      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf, srcs[1].buf))
-    elif ast.op in ReduceOps:
-      assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
-      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf, ast.arg))
-    elif ast.op in MovementOps:
-      ret = srcs[0].movement_op(ast.op, ast.arg)
-    elif ast.op in ProcessingOps:
-      ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](srcs[0].buf, srcs[1].buf, ast.arg))
-    else:
-      raise TypeError("unknown op")
+    if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
+    if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
+    if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
+    else: ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](*([x.buf for x in srcs] + ([ast.arg] if ast.arg else []))))
     if output_buffer is not None:
       assert output_buffer.shape == ret.shape
       output_buffer.buf = ret.buf

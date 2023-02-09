@@ -4,7 +4,7 @@ import sys, weakref
 from weakref import WeakValueDictionary
 from tinygrad.helpers import ConvArgs, prod
 from tinygrad.shape import ShapeTracker
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, DEBUG
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, DEBUG, GenericExecAST
 from tinygrad.graph import log_op
 from tinygrad.helpers import getenv
 
@@ -132,7 +132,7 @@ class LazyBuffer:
         else:
           # movement ops aren't an AST, just run them
           real_src = src.realize(self.device)
-          self.realized = real_src.movement_op(self.op.op, self.op.arg)  # movement_op stays
+          self.realized = real_src.movement_op(self.op.op, self.op.arg)
           ast = LazyOp(self.op.op, (real_src, ))
       elif self.optype == ProcessingOps: ast = self.op   # no ast modifications for ProcessingOps
       elif self.optype == ReduceOps: ast = _ast_reduceops(self)
@@ -319,7 +319,7 @@ class LazyBuffer:
       x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
       C = C._replace(px=0, px_=0, py=0, py_=0)
 
-    if NOCONV or not getattr(x.dbuffer, "processing_op", False):
+    if NOCONV or not issubclass(x.dbuffer, GenericExecAST):
       # universal conv, just mul and reduce
       x = x.movement_op(MovementOps.STRIDED, (
         (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
