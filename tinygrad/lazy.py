@@ -14,6 +14,7 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 NOCONV = getenv("NOCONV", 0)
 IMAGE = getenv("IMAGE", 0)
+LAZY = getenv("LAZY", 1)
 
 # late import of Device
 from tinygrad.device import Device
@@ -102,7 +103,7 @@ class LazyBuffer:
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_buffers(op):
       x.children.add(self)
-    if not getenv("LAZY", 1):
+    if not LAZY:
       self.realize()
     if DEBUG >= 4: print(f"create {self}")
 
