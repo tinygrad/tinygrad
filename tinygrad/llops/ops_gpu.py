@@ -360,8 +360,8 @@ class GPUBuffer(ExplicitExecAST):
     return data
 
   @classmethod
-  def exec_ast(cls, ast:LazyOp):
-    k = CLASTKernel(ast)
+  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GPUBuffer]=None):
+    k = CLASTKernel(ast, output_buffer)
     if KOPT:
       from extra.kernel_search import apply_optimization
       apply_optimization(k, ast, max_interventions=KOPT)
