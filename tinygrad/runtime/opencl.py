@@ -34,6 +34,7 @@ class CL:
 
 class CLBuffer:
   def __init__(self, size):
+    if DEBUG >= 4: print(f"allocate GPU Buffer {size}")
     if len(CL.BUFFER_CACHE[size]) > 0:
       self._cl = CL.BUFFER_CACHE[size].pop()
     else:

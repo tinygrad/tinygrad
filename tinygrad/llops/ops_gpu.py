@@ -345,6 +345,7 @@ class GPUBuffer(ExplicitExecAST):
       self._backing = None
     return self._buf._cl
 
+  # TODO: we don't always need a hostbuf
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
 
   @staticmethod

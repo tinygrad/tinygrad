@@ -61,7 +61,8 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   for x in real_srcs.keys():
     if real_srcs[x] is None:
       real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape)
-  return LazyOp(MovementOps.RESHAPE, (map_buffers(real_srcs, self.op), ), self.shape)
+  ast = map_buffers(real_srcs, self.op)
+  return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
 # **** lazy operations ****
 
@@ -139,7 +140,8 @@ class LazyBuffer:
 
       # run the ast if we still have to, and log the op
       if self.realized is None:
-        self.realized = self.dbuffer.exec_ast(map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast))
+        ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
+        self.realized = self.dbuffer.exec_ast(ast)
       log_op(self.realized, ast)
 
     assert self.realized.shape == self.shape, f"shape mismatch on realize {self.realized.shape} vs {self.shape}"
