@@ -96,6 +96,7 @@ class LazyBuffer:
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape, self.optype, self.op = self.st.shape, optype, op
     self.realized : Optional[DeviceBuffer] = None
+    self.output_buffer : Optional[DeviceBuffer] = None
     self.device, self.dbuffer = device, Device._buffers[device]
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
@@ -103,6 +104,7 @@ class LazyBuffer:
       x.children.add(self)
     if not getenv("LAZY", 1):
       self.realize()
+    if DEBUG >= 4: print(f"create {self}")
 
   def __repr__(self): return f"<LB {self.shape} op:{self.op.op if self.realized is None else 'realized'}>"
 
@@ -141,7 +143,8 @@ class LazyBuffer:
       # run the ast if we still have to, and log the op
       if self.realized is None:
         ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
-        self.realized = self.dbuffer.exec_ast(ast)
+        # TODO: check if self.output_buffer is usable. not if it's aliased
+        self.realized = self.dbuffer.exec_ast(ast, self.output_buffer)
       log_op(self.realized, ast)
 
     assert self.realized.shape == self.shape, f"shape mismatch on realize {self.realized.shape} vs {self.shape}"

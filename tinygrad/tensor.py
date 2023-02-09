@@ -5,6 +5,7 @@ import numpy as np
 from tinygrad.helpers import prod, argfix, make_pair
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.lazy import Device, LazyBuffer
+from tinygrad.ops import DEBUG
 
 # An instantiation of the Function is the Context
 class Function:
@@ -81,12 +82,14 @@ class Tensor:
     self.lazydata.realize()
     return self
 
-  def assign(self, x):
-    if not isinstance(x, Tensor):
-      x = Tensor(x)
+  def assign(self, x:Tensor) -> Tensor:
+    assert isinstance(x, Tensor)
     assert self.shape == x.shape
+    assert not x.requires_grad  # self requires_grad is okay?
+    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
+    if self.lazydata.realized is not None: x.lazydata.output_buffer = self.lazydata.realized
     self.lazydata = x.lazydata
-    return x
+    return self
 
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
   def numpy(self) -> np.ndarray: return np.array(self.lazydata.toCPU())
@@ -214,7 +217,7 @@ class Tensor:
     slc = [[(0, s) for s in self.shape] for _ in catargs]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
-    return functools.reduce(Tensor.__iadd__, [arg.slice(arg=s) for arg,s in zip(catargs, slc)])
+    return functools.reduce(Tensor.__add__, [arg.slice(arg=s) for arg,s in zip(catargs, slc)])
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):

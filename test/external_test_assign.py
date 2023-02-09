@@ -6,6 +6,8 @@ if __name__ == "__main__":
   GlobalCounters.cache = []
   a = Tensor.ones(4,4)
   b = Tensor.ones(4,4)
+  a.realize()
+  b.realize()
   a += b
   print(a.numpy())
   runner, args = GlobalCounters.cache[0]
