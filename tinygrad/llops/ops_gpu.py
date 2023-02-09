@@ -352,6 +352,7 @@ class GPUBuffer(ExplicitExecAST):
 
   def toCPU(self) -> np.ndarray:
     cl_buf = self.contiguous()
+    cl_buf.cl   # force buffer creation, happens if it's a backed buffer that hasn't been created yet
     cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else self.movement_op(MovementOps.RESHAPE, tuple(list(self.shape)+[1])).contiguous()
     assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
     data = np.empty(self.shape, dtype=np.float32)
