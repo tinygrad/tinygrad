@@ -66,6 +66,7 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   def binary_op(self, op, y): return type(self)(self.fxn_for_op[op](self.buf, y.buf))
   def reduce_op(self, op, new_shape): return type(self)(self.fxn_for_op[op](self.buf, new_shape))
   def movement_op(self, op, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
+  def processing_op(self, op, w, C): return type(self)(self.fxn_for_op[op](self.buf, w.buf, C))
   @classmethod
   def exec_ast(cls, ast:LazyOp, preprocess=lambda x: x):
     srcs = [cls.exec_ast(x, preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
