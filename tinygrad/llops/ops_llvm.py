@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Tuple, Union, Dict, Any, List, ClassVar
+from typing import Tuple, Union, Dict, Any, List, ClassVar, Optional
 from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker, ZeroView
 from tinygrad.ops import LazyOp
@@ -104,8 +104,8 @@ class LLVMBuffer(ExplicitExecAST):
 
   func_cache : Dict[str, Any] = {}
   @classmethod
-  def exec_ast(cls, ast:LazyOp) -> LLVMBuffer:
-    k = ASTKernel(ast)
+  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[LLVMBuffer]=None) -> LLVMBuffer:
+    k = ASTKernel(ast, output_buffer)
 
     # cached kernel
     if k.key in LLVMBuffer.func_cache:
