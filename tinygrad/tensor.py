@@ -82,8 +82,8 @@ class Tensor:
     self.lazydata.realize()
     return self
 
-  def assign(self, x:Tensor) -> Tensor:
-    assert isinstance(x, Tensor)
+  def assign(self, x) -> Tensor:
+    if not isinstance(x, Tensor): x = Tensor(x)
     assert self.shape == x.shape
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
