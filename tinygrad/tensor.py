@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools, itertools
 import numpy as np
-from tinygrad.helpers import prod, argfix, make_pair
+from tinygrad.helpers import prod, argfix, make_pair, getenv
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import DEBUG
@@ -87,7 +87,7 @@ class Tensor:
     assert self.shape == x.shape
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
-    if self.lazydata.realized is not None: x.lazydata.output_buffer = self.lazydata.realized
+    if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
     self.lazydata = x.lazydata
     return self
 
