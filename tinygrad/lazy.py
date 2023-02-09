@@ -143,7 +143,6 @@ class LazyBuffer:
       # run the ast if we still have to, and log the op
       if self.realized is None:
         ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
-        # TODO: check if self.output_buffer is usable. not if it's aliased
         self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
       log_op(self.realized, ast)
 
