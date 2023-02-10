@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv
 try:
-  from tinygrad.llops.ops_gpu import CL
+  from tinygrad.runtime.opencl import CL
 except ImportError:
   CL = None
 
