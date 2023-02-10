@@ -7,22 +7,24 @@ from tinygrad.helpers import prod, getenv
 def fetch(url):
   if url.startswith("/"):
     with open(url, "rb") as f:
-      dat = f.read()
-    return dat
-  import requests, os, hashlib, tempfile
+      return f.read()
+  import os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
-  if os.path.isfile(fp) and os.stat(fp).st_size > 0 and not getenv("NOCACHE"):
-    with open(fp, "rb") as f:
-      dat = f.read()
-  else:
-    r = requests.get(url, stream=True)
-    assert r.status_code == 200
-    progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-    dat = b''.join((x,progress_bar.update(len(x)))[0] for x in r.iter_content(chunk_size=16384))
-    with open(fp+".tmp", "wb") as f:
-      f.write(dat)
-    os.rename(fp+".tmp", fp)
-  return dat
+  download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
+  with open(fp, "rb") as f:
+    return f.read()
+
+def download_file(url, fp, skip_if_exists=False):
+  import requests, os
+  if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
+    return
+  r = requests.get(url, stream=True)
+  assert r.status_code == 200
+  progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
+  with open(fp+".tmp", "wb") as f:
+    for chunk in r.iter_content(chunk_size=16384):
+      progress_bar.update(f.write(chunk))
+  os.rename(fp+".tmp", fp)
 
 from tinygrad.nn.optim import get_parameters
 
