@@ -7,32 +7,24 @@ from tinygrad.helpers import prod, getenv
 def fetch(url):
   if url.startswith("/"):
     with open(url, "rb") as f:
-      dat = f.read()
-    return dat
+      return f.read()
   import os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
-  if getenv("NOCACHE"):
-    try:
-      os.unlink(fp)
-    except FileNotFoundError:
-      pass
-  download_file_if_not_exists(url, fp)
+  download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   with open(fp, "rb") as f:
-    dat = f.read()
-  return dat
+    return f.read()
 
-def download_file_if_not_exists(url, outfp):
+def download_file(url, fp, skip_if_exists=False):
   import requests, os
-  if os.path.isfile(outfp) and os.stat(outfp).st_size > 0:
+  if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
     return
-  fp = outfp+".tmp"
   r = requests.get(url, stream=True)
   assert r.status_code == 200
   progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-  with open(fp, "wb") as f:
+  with open(fp+".tmp", "wb") as f:
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
-  os.rename(fp, outfp)
+  os.rename(fp+".tmp", fp)
 
 from tinygrad.nn.optim import get_parameters
 

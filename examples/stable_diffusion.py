@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
-from extra.utils import fake_torch_load_zipped, get_child, download_file_if_not_exists
+from extra.utils import fake_torch_load_zipped, get_child, download_file
 
 # TODO: refactor AttnBlock, CrossAttention, CLIPAttention to share code
 
@@ -613,9 +613,10 @@ if __name__ == "__main__":
   model = StableDiffusion()
 
   # load in weights
-  download_file_if_not_exists(
+  download_file(
     'https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt',
-    FILENAME
+    FILENAME,
+    skip_if_exists=True
   )
   dat = fake_torch_load_zipped(open(FILENAME, "rb"))
   for k,v in tqdm(dat['state_dict'].items()):
