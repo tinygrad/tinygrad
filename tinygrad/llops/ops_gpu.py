@@ -6,7 +6,9 @@ from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, Laz
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker
-from tinygrad.shape.symbolic import ModNode   # this will go away when VALIDHACKS does
+from tinygrad.shape.symbolic import ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
+render_cl = render_python.copy()
+render_cl[DivNode] = lambda self,ops: f"({self.a.render(ops)}/{self.b})"
 from tinygrad.helpers import getenv
 
 CUDA = getenv("CUDA", 0)
@@ -51,7 +53,7 @@ class CLASTKernel(ASTKernel):
     idx = (idxy//4)%self.bufs[buf_index]._base_shape[1]
     idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
     if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
-    return f"(int2)({idx.cl}, {idy.cl})"
+    return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
   def store(self, buf_index, value:List[Token]):
     if len(value) == self.buftokens[buf_index].size()*4: value = group_float4(value)
@@ -64,7 +66,7 @@ class CLASTKernel(ASTKernel):
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       else:
-        self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).cl}] = {v.tok};\n")
+        self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
 
   def load(self, buf_index:int) -> List[Token]:
     # constant folding
@@ -84,8 +86,8 @@ class CLASTKernel(ASTKernel):
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         else:
-          ldr = Token(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if self.buftokens[buf_index].typ == Types.FLOAT4 else 1)).cl}]", self.buftokens[buf_index].typ)
-        ldr = ldr if str(valid) == "1" or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else Token(f"({valid.cl} ? {ldr.tok} : 0.0f)", ldr.typ)
+          ldr = Token(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if self.buftokens[buf_index].typ == Types.FLOAT4 else 1)).render(render_cl)}]", self.buftokens[buf_index].typ)
+        ldr = ldr if str(valid) == "1" or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ)
         if const is not None:
           self.loaded_keys[(buf_index,o)] = ldr
         else:
@@ -278,7 +280,7 @@ class CLASTKernel(ASTKernel):
     if self.group_for_reduce:
       lidx, lvalid = self.sts[-1].expr_idxs()
       assert str(lvalid) == "1", "local buffer must be valid"
-      self.kernel.append(f"int mid_idx = {lidx.cl};")
+      self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};")
       for i,acc in enumerate(accumulators):
         self.kernel.append(("__shared__ " if CUDA else "__local ") + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];  // second stage\n")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import List
+from typing import List, Dict, Callable, Type
 from tinygrad.helpers import partition, modn, all_same
 
 class Node:
@@ -8,12 +8,9 @@ class Node:
   min: int
   max: int
   expr: str
-  def __str__(self):
-    if self.min == self.max: return str(self.min)  # this is universal
-    return self.expr
-  @property
-  def cl(self):
-    return str(self).replace('//', '/')
+  def render(self, ops):
+    if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops)
+    return ops[type(self)](self, ops)
   def __add__(self, b:int): return Variable.sum([self, Variable.num(b)])
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
@@ -98,12 +95,9 @@ class NumNode(Node):
 class OpNode(Node):
   op : str
   def __init__(self, a:Node, b:int):
-    self.a, self.b = a,b
+    self.a, self.b = a, b
     self.min, self.max = self.minmax(a,b)
   minmax = staticmethod(lambda a,b: (1//0, 1//0))
-  @property
-  def expr(self):
-    return f"({self.a}{self.op}{self.b})"
 
 class RedNode(Node):
   op : str
@@ -111,20 +105,29 @@ class RedNode(Node):
     self.nodes = nodes
     self.min, self.max = self.minmax(nodes)
   minmax = staticmethod(lambda nodes: (1//0, 1//0))
-  @property
-  def expr(self):
-    return f"({self.op.join([str(x) for x in self.nodes])})"
 
 # operation nodes
 
-class MulNode(OpNode): op, minmax = "*", staticmethod(lambda a,b: (a.min*b, a.max*b))
-class DivNode(OpNode): op, minmax = "//", staticmethod(lambda a,b: (int(a.min/b), int(a.max/b)))
+class MulNode(OpNode): minmax = staticmethod(lambda a,b: (a.min*b, a.max*b))
+class DivNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.min/b), int(a.max/b)))
 # TODO: next three could be better
-class ModNode(OpNode): op, minmax = "%", staticmethod(lambda a,b: (min(max(a.min,-b+1),0),max(min(a.max,b-1),0)))
-class GeNode(OpNode): op, minmax = ">=", staticmethod(lambda a,b: (0,1))
-class LtNode(OpNode): op, minmax = "<", staticmethod(lambda a,b: (0,1))
+class ModNode(OpNode): minmax = staticmethod(lambda a,b: (min(max(a.min,-b+1),0),max(min(a.max,b-1),0)))
+class GeNode(OpNode): minmax = staticmethod(lambda a,b: (0,1))
+class LtNode(OpNode): minmax = staticmethod(lambda a,b: (0,1))
 
 # reduce nodes
 
-class SumNode(RedNode): op, minmax = "+", staticmethod(lambda nodes: (sum([x.min for x in nodes]), sum([x.max for x in nodes])))
-class AndNode(RedNode): op, minmax = "&&", staticmethod(lambda nodes: (min([x.min for x in nodes]), max([x.max for x in nodes])))
+class SumNode(RedNode): minmax = staticmethod(lambda nodes: (sum([x.min for x in nodes]), sum([x.max for x in nodes])))
+class AndNode(RedNode): minmax = staticmethod(lambda nodes: (min([x.min for x in nodes]), max([x.max for x in nodes])))
+
+render_python : Dict[Type, Callable] = {
+  Variable: lambda self,ops: f"{self.expr}",
+  NumNode: lambda self,ops: f"{self.b}",
+  MulNode: lambda self,ops: f"({self.a.render(ops)}*{self.b})",
+  DivNode: lambda self,ops: f"({self.a.render(ops)}//{self.b})",
+  ModNode: lambda self,ops: f"({self.a.render(ops)}%{self.b})",
+  GeNode: lambda self,ops: f"({self.a.render(ops)}>={self.b})",
+  LtNode: lambda self,ops: f"({self.a.render(ops)}<{self.b})",
+  SumNode: lambda self,ops: f"({'+'.join([x.render(ops) for x in self.nodes])})",
+  AndNode: lambda self,ops: f"({'&&'.join([x.render(ops) for x in self.nodes])})"
+}
