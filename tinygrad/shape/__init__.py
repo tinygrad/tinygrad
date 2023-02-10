@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod, getenv
-from tinygrad.shape.symbolic import Variable, render_python
+from tinygrad.shape.symbolic import Variable
 
 # TODO: fix DEBUG import
 DEBUG = getenv("DEBUG", 0)
@@ -114,8 +114,8 @@ class ShapeTracker:
   # TODO: kept for legacy behavior. remove?
   def expr(self) -> str:
     idx, valid = self.expr_node()
-    if valid is not None and str(valid) != "valid": return f"valid={valid.render(render_python)};idx={idx.render(render_python)}"
-    else: return f"idx={idx.render(render_python)}"
+    if valid is not None and str(valid) != "valid": return f"valid={valid.render()};idx={idx.render()}"
+    else: return f"idx={idx.render()}"
 
   def movement_op(self, op, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     return getattr(self, str(op).split(".")[1].lower())(arg)

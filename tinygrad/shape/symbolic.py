@@ -8,7 +8,8 @@ class Node:
   min: int
   max: int
   expr: str
-  def render(self, ops):
+  def render(self, ops=None):
+    if ops is None: ops = render_python
     if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops)
     return ops[type(self)](self, ops)
   def __add__(self, b:int): return Variable.sum([self, Variable.num(b)])

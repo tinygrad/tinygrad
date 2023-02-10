@@ -7,6 +7,7 @@ from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker
 from tinygrad.shape.symbolic import ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
+# div is different in cl than python
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops: f"({self.a.render(ops)}/{self.b})"
 from tinygrad.helpers import getenv
