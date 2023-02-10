@@ -35,12 +35,8 @@ class KinneDir:
     It is important that if you wish to save in the current directory,
      you use ".", not the empty string.
     """
-    if save:
-      try:
-        os.mkdir(base)
-      except:
-        # Silence the exception - the directory may (and if reading, does) already exist.
-        pass
+    if save and not os.path.isdir(base):
+      os.mkdir(base)
     self.base = base + "/snoop_bin_"
     self.next_part_index = 0
     self.save = save

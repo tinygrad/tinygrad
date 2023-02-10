@@ -1,20 +1,18 @@
 # https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg
-# running 
-
+# running
 import sys
 import io
 import time
+import cv2
 import numpy as np
-np.set_printoptions(suppress=True)
+from PIL import Image
 from tinygrad.tensor import Tensor
-from extra.utils import fetch, get_parameters
-from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
 from tinygrad.nn import BatchNorm2D, Conv2d
 from tinygrad.helpers import getenv
+from extra.utils import fetch, get_parameters
+from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
+np.set_printoptions(suppress=True)
 GPU = getenv("GPU")
-
-import cv2
-from PIL import Image
 
 def show_labels(prediction, confidence = 0.5, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
@@ -29,7 +27,7 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
   def numpy_max(input, dim):
     # Input -> tensor (10x8)
     return np.amax(input, axis=dim), np.argmax(input, axis=dim)
-  
+
   # Iterate over batches
   for i in range(prediction.shape[0]):
     img_pred = prediction[i]
@@ -40,7 +38,7 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
     image_pred = np.concatenate(seq, axis=1)
 
     non_zero_ind = np.nonzero(image_pred[:,4])[0]
-    assert(all(image_pred[non_zero_ind,0] > 0))
+    assert all(image_pred[non_zero_ind,0] > 0)
 
     image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
     try:
@@ -59,10 +57,9 @@ def letterbox_image(img, inp_dim=608):
   new_w = int(img_w * min(w/img_w, h/img_h))
   new_h = int(img_h * min(w/img_w, h/img_h))
   resized_image = cv2.resize(img, (new_w,new_h), interpolation = cv2.INTER_CUBIC)
-  
+
   canvas = np.full((inp_dim[1], inp_dim[0], 3), 128)
   canvas[(h-new_h)//2:(h-new_h)//2 + new_h,(w-new_w)//2:(w-new_w)//2 + new_w,  :] = resized_image
-  
   return canvas
 
 def add_boxes(img, prediction):
@@ -89,7 +86,6 @@ def add_boxes(img, prediction):
     c2 = corner1[0] + t_size[0] + 3, corner1[1] + t_size[1] + 4
     img = cv2.rectangle(img, corner1, c2, (255, 0, 0), -1)
     img = cv2.putText(img, label, (corner1[0], corner1[1] + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 1, [225,255,255], 1)
-  
   return img
 
 def bbox_iou(box1, box2):
@@ -127,17 +123,16 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
   prediction = prediction * conf_mask
-  
+
   # Non max suppression
   box_corner = prediction
   box_corner[:,:,0] = (prediction[:,:,0] - prediction[:,:,2]/2)
   box_corner[:,:,1] = (prediction[:,:,1] - prediction[:,:,3]/2)
-  box_corner[:,:,2] = (prediction[:,:,0] + prediction[:,:,2]/2) 
+  box_corner[:,:,2] = (prediction[:,:,0] + prediction[:,:,2]/2)
   box_corner[:,:,3] = (prediction[:,:,1] + prediction[:,:,3]/2)
   prediction[:,:,:4] = box_corner[:,:,:4]
 
   batch_size = prediction.shape[0]
-
   write = False
 
   # Process img
@@ -146,7 +141,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   def numpy_max(input, dim):
     # Input -> tensor (10x8)
     return np.amax(input, axis=dim), np.argmax(input, axis=dim)
-  
+
   max_conf, max_conf_score = numpy_max(img_pred[:,5:5 + num_classes], 1)
   max_conf_score = np.expand_dims(max_conf_score, axis=1)
   max_conf = np.expand_dims(max_conf, axis=1)
@@ -154,7 +149,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   image_pred = np.concatenate(seq, axis=1)
 
   non_zero_ind = np.nonzero(image_pred[:,4])[0]
-  assert(all(image_pred[non_zero_ind,0] > 0))
+  assert all(image_pred[non_zero_ind,0] > 0)
   image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
   try:
     image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
@@ -165,7 +160,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   if image_pred_.shape[0] == 0:
     print("No detections found!")
     return 0
-  
+
   def unique(tensor):
     tensor_np = tensor
     unique_np = np.unique(tensor_np)
@@ -179,35 +174,34 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
     class_mask_ind = np.squeeze(np.nonzero(cls_mask[:,-2]))
     # class_mask_ind = np.nonzero()
     image_pred_class = np.reshape(image_pred_[class_mask_ind], (-1, 7))
-    
+
     # sort the detections such that the entry with the maximum objectness
     # confidence is at the top
     conf_sort_index = np.argsort(image_pred_class[:,4])
     image_pred_class = image_pred_class[conf_sort_index]
     idx = image_pred_class.shape[0]   #Number of detections
-    
+
     for i in range(idx):
-      #Get the IOUs of all boxes that come after the one we are looking at 
-      #in the loop
+      # Get the IOUs of all boxes that come after the one we are looking at in the loop
       try:
         ious = bbox_iou(np.expand_dims(image_pred_class[i], axis=0), image_pred_class[i+1:])
       except ValueError:
         break
-  
+
       except IndexError:
         break
-  
+
       # Zero out all the detections that have IoU > threshold
       iou_mask = np.expand_dims((ious < nms_conf), axis=1)
       image_pred_class[i+1:] *= iou_mask
-  
+
       # Remove the non-zero entries
       non_zero_ind = np.squeeze(np.nonzero(image_pred_class[:,4]))
-      image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))    
+      image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))
 
     batch_ind = np.array([[0]])
     seq = (batch_ind, image_pred_class)
-    
+
     if not write:
       output = np.concatenate(seq, 1)
       write = True
@@ -228,10 +222,9 @@ def resize(img, inp_dim=(608, 608)):
   new_w = int(img_w * min(w/img_w, h/img_h))
   new_h = int(img_h * min(w/img_w, h/img_h))
   resized_image = cv2.resize(img, (new_w,new_h), interpolation = cv2.INTER_CUBIC)
-  
+
   canvas = np.full((inp_dim[1], inp_dim[0], 3), 128)
   canvas[(h-new_h)//2:(h-new_h)//2 + new_h,(w-new_w)//2:(w-new_w)//2 + new_w,  :] = resized_image
-  
   return canvas
 
 def infer(model, img):
@@ -275,12 +268,12 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   grid_size = inp_dim // stride
   bbox_attrs = 5 + num_classes
   num_anchors = len(anchors)
-  
+
   prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
   # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
   prediction = prediction.transpose(order=(0, 2, 1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
-  
+
   # st = time.time()
   prediction_cpu = prediction.cpu().data
   # print('put on CPU in %.2f s' % (time.time() - st))
@@ -290,11 +283,11 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   # TODO: Fix this
   def dsigmoid(data):
     return 1/(1+np.exp(-data))
-  
+
   prediction_cpu[:,:,0] = dsigmoid(prediction_cpu[:,:,0])
   prediction_cpu[:,:,1] = dsigmoid(prediction_cpu[:,:,1])
   prediction_cpu[:,:,4] = dsigmoid(prediction_cpu[:,:,4])
-  
+
   # Add the center offsets
   grid = np.arange(grid_size)
   a, b = np.meshgrid(grid, grid)
@@ -315,7 +308,6 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   prediction_cpu[:,:,2:4] = np.exp(prediction_cpu[:,:,2:4])*anchors
   prediction_cpu[:,:,5: 5 + num_classes] = dsigmoid((prediction_cpu[:,:, 5 : 5 + num_classes]))
   prediction_cpu[:,:,:4] *= stride
-  prediction.gpu_()
 
   return Tensor(prediction_cpu)
 
@@ -352,19 +344,19 @@ class Darknet:
           pad = (int(x["size"]) - 1) // 2
         else:
           pad = 0
-        
+
         conv = Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias = bias)
         module.append(conv)
 
         # BatchNorm2d
         if batch_normalize:
-          bn = BatchNorm2D(filters, eps=1e-05, training=True, track_running_stats=True)
+          bn = BatchNorm2D(filters, eps=1e-05, track_running_stats=True)
           module.append(bn)
 
         # LeakyReLU activation
         if activation == "leaky":
           module.append(LeakyReLU(0.1))
-      
+
       # TODO: Add tiny model
       elif module_type == "maxpool":
         size = int(x["size"])
@@ -375,7 +367,7 @@ class Darknet:
       elif module_type == "upsample":
         upsample = Upsample(scale_factor = 2, mode = "nearest")
         module.append(upsample)
-      
+
       elif module_type == "route":
         x["layers"] = x["layers"].split(",")
         # Start of route
@@ -393,11 +385,11 @@ class Darknet:
           filters = output_filters[index + start] + output_filters[index + end]
         else:
           filters = output_filters[index + start]
-        
+
       # Shortcut corresponds to skip connection
       elif module_type == "shortcut":
         module.append(EmptyLayer())
-      
+
       elif module_type == "yolo":
         mask = x["mask"].split(",")
         mask = [int(x) for x in mask]
@@ -409,15 +401,15 @@ class Darknet:
 
         detection = DetectionLayer(anchors)
         module.append(detection)
-      
+
       # Append to module_list
       module_list.append(module)
       if filters is not None:
         prev_filters = filters
       output_filters.append(filters)
-    
+
     return (net_info, module_list)
-  
+
   def dump_weights(self):
     for i in range(len(self.module_list)):
       module_type = self.blocks[i + 1]["type"]
@@ -432,7 +424,7 @@ class Darknet:
           print(conv.bias.cpu().data[0][0:5])
         else:
           print("None biases for layer", i)
-  
+
   def load_weights(self, url):
     weights = fetch(url)
     # First 5 values (major, minor, subversion, Images seen)
@@ -456,10 +448,10 @@ class Darknet:
           batch_normalize = int(self.blocks[i + 1]["batch_normalize"])
         except: # no batchnorm, load conv weights + biases
           batch_normalize = 0
-        
+
         conv = model[0]
 
-        if (batch_normalize):
+        if batch_normalize:
           bn = model[1]
 
           # Get the number of weights of batchnorm
@@ -502,7 +494,7 @@ class Darknet:
 
           # Copy
           conv.bias = conv_biases
-        
+
         # Load weighys for conv layers
         num_weights = numel(conv.weight)
 
@@ -512,9 +504,6 @@ class Darknet:
         conv_weights = conv_weights.reshape(shape=tuple(conv.weight.shape))
         conv.weight = conv_weights
 
-
-
-  
   def forward(self, x):
     modules = self.blocks[1:]
     outputs = {} # Cached outputs for route layer
@@ -522,36 +511,28 @@ class Darknet:
 
     for i, module in enumerate(modules):
       module_type = (module["type"])
-      st = time.time()
       if module_type == "convolutional" or module_type == "upsample":
-        for index, layer in enumerate(self.module_list[i]):
+        for layer in self.module_list[i]:
           x = layer(x)
-      
       elif module_type == "route":
         layers = module["layers"]
         layers = [int(a) for a in layers]
-
         if (layers[0]) > 0:
           layers[0] = layers[0] - i
         if len(layers) == 1:
           x = outputs[i + (layers[0])]
         else:
           if (layers[1]) > 0: layers[1] = layers[1] - i
-          
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
-
           x = Tensor(np.concatenate((map1.cpu().data, map2.cpu().data), 1))
-      
       elif module_type == "shortcut":
         from_ = int(module["from"])
         x = outputs[i - 1] + outputs[i + from_]
-      
       elif module_type == "yolo":
         anchors = self.module_list[i][0].anchors
         inp_dim = int(self.net_info["height"])
         # inp_dim = 416
-
         num_classes = int(module["classes"])
         # Transform
         x = predict_transform(x, inp_dim, anchors, num_classes)
@@ -560,10 +541,10 @@ class Darknet:
           write = 1
         else:
           detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
-      
+
       # print(module_type, 'layer took %.2f s' % (time.time() - st))
       outputs[i] = x
-    
+
     return detections # Return detections
 
 if __name__ == "__main__":
@@ -614,12 +595,12 @@ if __name__ == "__main__":
     img = cv2.imdecode(np.fromstring(img_stream.read(), np.uint8), 1)
   else:
     img = cv2.imread(url)
-  
+
   # Predict
   st = time.time()
   print('running inference…')
   prediction = infer(model, img)
-  print('did inference in %.2f s' % (time.time() - st))
+  print(f'did inference in {(time.time() - st):2f} s')
 
   labels = show_labels(prediction)
   prediction = process_results(prediction)

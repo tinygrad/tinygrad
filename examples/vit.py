@@ -1,5 +1,11 @@
-
+import ast
+import io
 import numpy as np
+from PIL import Image
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
+from models.vit import ViT
+from extra.utils import fetch
 """
 fn = "gs://vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0.npz"
 import tensorflow as tf
@@ -8,11 +14,6 @@ with tf.io.gfile.GFile(fn, "rb") as f:
   with open("cache/"+ fn.rsplit("/", 1)[1], "wb") as g:
     g.write(dat)
 """
-
-
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
-from models.vit import ViT
 
 Tensor.training = False
 if getenv("LARGE", 0) == 1:
@@ -23,9 +24,6 @@ else:
 m.load_from_pretrained()
 
 # category labels
-import ast
-import io
-from extra.utils import fetch
 lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
 lbls = ast.literal_eval(lbls.decode('utf-8'))
 
@@ -33,7 +31,6 @@ lbls = ast.literal_eval(lbls.decode('utf-8'))
 url = "https://repository-images.githubusercontent.com/296744635/39ba6700-082d-11eb-98b8-cb29fb7369c0"
 
 # junk
-from PIL import Image
 img = Image.open(io.BytesIO(fetch(url)))
 aspect_ratio = img.size[0] / img.size[1]
 img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
@@ -50,5 +47,3 @@ out = m.forward(Tensor(img))
 outnp = out.cpu().data.ravel()
 choice = outnp.argmax()
 print(out.shape, choice, outnp[choice], lbls[choice])
-
-

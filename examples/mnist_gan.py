@@ -3,20 +3,17 @@ import os
 import sys
 import numpy as np
 from tqdm import tqdm
-sys.path.append(os.getcwd())
-sys.path.append(os.path.join(os.getcwd(), 'test'))
-
+import torch
+from torchvision.utils import make_grid, save_image
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from extra.utils import get_parameters
 import tinygrad.nn.optim as optim
+from extra.utils import get_parameters
 from datasets import fetch_mnist
-from torchvision.utils import make_grid, save_image
-import torch
 GPU = getenv("GPU")
+
 class LinearGen:
   def __init__(self):
-    lv = 128
     self.l1 = Tensor.uniform(128, 256)
     self.l2 = Tensor.uniform(256, 512)
     self.l3 = Tensor.uniform(512, 1024)
@@ -31,7 +28,6 @@ class LinearGen:
 
 class LinearDisc:
   def __init__(self):
-    in_sh = 784
     self.l1 = Tensor.uniform(784, 1024)
     self.l2 = Tensor.uniform(1024, 512)
     self.l3 = Tensor.uniform(512, 256)
@@ -124,7 +120,7 @@ if __name__ == "__main__":
     loss_g = 0.0
     loss_d = 0.0
     print(f"Epoch {epoch} of {epochs}")
-    for i in tqdm(range(n_steps)):
+    for _ in tqdm(range(n_steps)):
       image = generator_batch()
       for step in range(k): # Try with k = 5 or 7.
         noise = Tensor(np.random.randn(batch_size,128))
@@ -143,5 +139,4 @@ if __name__ == "__main__":
     epoch_loss_g = loss_g / n_steps
     epoch_loss_d = loss_d / n_steps
     print(f"EPOCH: Generator loss: {epoch_loss_g}, Discriminator loss: {epoch_loss_d}")
-  else:
-    print("Training Completed!")
+  print("Training Completed!")

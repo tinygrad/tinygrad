@@ -1,31 +1,27 @@
-import os
 import traceback
 import time
+from multiprocessing import Process, Queue
 import numpy as np
-from models.efficientnet import EfficientNet
-from tinygrad.tensor import Tensor
-from extra.utils import get_parameters
 from tqdm import trange
-from tinygrad.nn import BatchNorm2D
 import tinygrad.nn.optim as optim
 from tinygrad.helpers import getenv
+from tinygrad.tensor import Tensor
 from datasets import fetch_cifar
+from datasets.imagenet import fetch_batch
+from extra.utils import get_parameters
+from models.efficientnet import EfficientNet
 
 class TinyConvNet:
   def __init__(self, classes=10):
     conv = 3
     inter_chan, out_chan = 8, 16   # for speed
     self.c1 = Tensor.uniform(inter_chan,3,conv,conv)
-    #self.bn1 = BatchNorm2D(inter_chan)
     self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv)
-    #self.bn2 = BatchNorm2D(out_chan)
     self.l1 = Tensor.uniform(out_chan*6*6, classes)
 
   def forward(self, x):
     x = x.conv2d(self.c1).relu().max_pool2d()
-    #x = self.bn1(x)
     x = x.conv2d(self.c2).relu().max_pool2d()
-    #x = self.bn2(x)
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1)
 
@@ -47,12 +43,10 @@ if __name__ == "__main__":
   print("parameter count", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 
-  BS, steps = getenv("BS", 64 if TINY else 16)), getenv("STEPS", 2048))
-  print("training with batch size %d for %d steps" % (BS, steps))
+  BS, steps = getenv("BS", 64 if TINY else 16), getenv("STEPS", 2048)
+  print(f"training with batch size {BS} for {steps} steps")
 
   if IMAGENET:
-    from datasets.imagenet import fetch_batch
-    from multiprocessing import Process, Queue
     def loader(q):
       while 1:
         try:
@@ -93,8 +87,6 @@ if __name__ == "__main__":
     st = time.time()
     optimizer.step()
     opt_time = (time.time()-st)*1000.0
-
-    #print(out.cpu().data)
 
     st = time.time()
     loss = loss.cpu().data

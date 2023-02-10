@@ -1,13 +1,13 @@
-from PIL import Image
-from tinygrad.tensor import Tensor
-from tinygrad.nn.optim import SGD
-import examples.yolo.waifu2x
-from examples.yolo.kinne import KinneDir
 import sys
 import os
 import random
 import json
 import numpy
+from PIL import Image
+from tinygrad.tensor import Tensor
+from tinygrad.nn.optim import SGD
+from examples.yolo.kinne import KinneDir
+from examples.yolo.waifu2x import image_load, image_save, Vgg7
 
 # amount of context erased by model
 CONTEXT = 7
@@ -22,9 +22,8 @@ def get_sample_count(samples_dir):
     return 0
 
 def set_sample_count(samples_dir, sc):
-  samples_dir_count_file = open(samples_dir + "/sample_count.txt", "w")
-  samples_dir_count_file.write(str(sc) + "\n")
-  samples_dir_count_file.close()
+  with open(samples_dir + "/sample_count.txt", "w") as file:
+    file.write(str(sc) + "\n")
 
 if len(sys.argv) < 2:
   print("python3 -m examples.vgg7 import MODELJSON MODELDIR")
@@ -58,7 +57,7 @@ if len(sys.argv) < 2:
   sys.exit(1)
 
 cmd = sys.argv[1]
-vgg7 = extra.waifu2x.Vgg7()
+vgg7 = Vgg7()
 
 def nansbane(p):
   if numpy.isnan(numpy.min(p.data)):
@@ -81,7 +80,8 @@ if cmd == "import":
 
   vgg7.load_waifu2x_json(json.load(open(src, "rb")))
 
-  os.mkdir(model)
+  if not os.path.isdir(model):
+    os.mkdir(model)
   load_and_save(model, True)
 elif cmd == "execute":
   model = sys.argv[2]
@@ -90,7 +90,7 @@ elif cmd == "execute":
 
   load_and_save(model, False)
 
-  extra.waifu2x.image_save(out_file, vgg7.forward(Tensor(extra.waifu2x.image_load(in_file))).data)
+  image_save(out_file, vgg7.forward(Tensor(image_load(in_file))).data)
 elif cmd == "execute_full":
   model = sys.argv[2]
   in_file = sys.argv[3]
@@ -98,11 +98,12 @@ elif cmd == "execute_full":
 
   load_and_save(model, False)
 
-  extra.waifu2x.image_save(out_file, vgg7.forward_tiled(extra.waifu2x.image_load(in_file), 156))
+  image_save(out_file, vgg7.forward_tiled(image_load(in_file), 156))
 elif cmd == "new":
   model = sys.argv[2]
 
-  os.mkdir(model)
+  if not os.path.isdir(model):
+    os.mkdir(model)
   load_and_save(model, True)
 elif cmd == "train":
   model = sys.argv[2]
@@ -127,7 +128,6 @@ elif cmd == "train":
   except:
     # it's fine
     print("sample probs could not be loaded - initializing")
-    pass
 
   if sample_probs is None:
     # This stupidly high amount is used to force an initial pass over all samples
@@ -151,8 +151,8 @@ elif cmd == "train":
       print("exception occurred (PROBABLY value-probabilities-dont-sum-to-1)")
       sample_idx = random.randint(0, samples_count - 1)
 
-    x_img = extra.waifu2x.image_load(samples_base + "/" + str(sample_idx) + "a.png")
-    y_img = extra.waifu2x.image_load(samples_base + "/" + str(sample_idx) + "b.png")
+    x_img = image_load(samples_base + "/" + str(sample_idx) + "a.png")
+    y_img = image_load(samples_base + "/" + str(sample_idx) + "b.png")
 
     sample_x = Tensor(x_img, requires_grad = False)
     sample_y = Tensor(y_img, requires_grad = False)
@@ -209,8 +209,8 @@ elif cmd == "samplify":
 
   # This bit is interesting because it actually does some work.
   # Not much, but some work.
-  a_img = extra.waifu2x.image_load(a_img)
-  b_img = extra.waifu2x.image_load(b_img)
+  a_img = image_load(a_img)
+  b_img = image_load(b_img)
 
   # as with the main library body,
   # Y X order is used here
@@ -238,14 +238,13 @@ elif cmd == "samplify":
       patch_x = a_img[:, :, posy - CONTEXT : posy + CONTEXT + sample_size, posx - CONTEXT : posx + CONTEXT + sample_size]
       patch_y = b_img[:, :, posy : posy + sample_size, posx : posx + sample_size]
 
-      extra.waifu2x.image_save(samples_base + "/" + str(samples_count) + "a.png", patch_x)
-      extra.waifu2x.image_save(samples_base + "/" + str(samples_count) + "b.png", patch_y)
+      image_save(f"{samples_base}/{str(samples_count)}a.png", patch_x)
+      image_save(f"{samples_base}/{str(samples_count)}b.png", patch_y)
       samples_count += 1
       samples_added += 1
 
-  print("Added " + str(samples_added) + " samples")
+  print(f"Added {str(samples_added)} samples")
   set_sample_count(samples_base, samples_count)
 
 else:
   print("unknown command")
-
