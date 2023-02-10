@@ -7,10 +7,10 @@ class Node:
   b: int
   min: int
   max: int
-  def render(self, ops=None):
+  def render(self, ops=None, ctx=None):
     if ops is None: ops = render_python
-    if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops)
-    return ops[type(self)](self, ops)
+    if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops, ctx)
+    return ops[type(self)](self, ops, ctx)
   def __add__(self, b:int): return Variable.sum([self, Variable.num(b)])
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
@@ -119,13 +119,13 @@ class SumNode(RedNode): minmax = staticmethod(lambda nodes: (sum([x.min for x in
 class AndNode(RedNode): minmax = staticmethod(lambda nodes: (min([x.min for x in nodes]), max([x.max for x in nodes])))
 
 render_python : Dict[Type, Callable] = {
-  Variable: lambda self,ops: f"{self.expr}",
-  NumNode: lambda self,ops: f"{self.b}",
-  MulNode: lambda self,ops: f"({self.a.render(ops)}*{self.b})",
-  DivNode: lambda self,ops: f"({self.a.render(ops)}//{self.b})",
-  ModNode: lambda self,ops: f"({self.a.render(ops)}%{self.b})",
-  GeNode: lambda self,ops: f"({self.a.render(ops)}>={self.b})",
-  LtNode: lambda self,ops: f"({self.a.render(ops)}<{self.b})",
-  SumNode: lambda self,ops: f"({'+'.join([x.render(ops) for x in self.nodes])})",
-  AndNode: lambda self,ops: f"({'&&'.join([x.render(ops) for x in self.nodes])})"
+  Variable: lambda self,ops,ctx: f"{self.expr}",
+  NumNode: lambda self,ops,ctx: f"{self.b}",
+  MulNode: lambda self,ops,ctx: f"({self.a.render(ops)}*{self.b})",
+  DivNode: lambda self,ops,ctx: f"({self.a.render(ops)}//{self.b})",
+  ModNode: lambda self,ops,ctx: f"({self.a.render(ops)}%{self.b})",
+  GeNode: lambda self,ops,ctx: f"({self.a.render(ops)}>={self.b})",
+  LtNode: lambda self,ops,ctx: f"({self.a.render(ops)}<{self.b})",
+  SumNode: lambda self,ops,ctx: f"({'+'.join([x.render(ops) for x in self.nodes])})",
+  AndNode: lambda self,ops,ctx: f"({'&&'.join([x.render(ops) for x in self.nodes])})"
 }
