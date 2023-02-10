@@ -104,18 +104,12 @@ class ShapeTracker:
       else: idx = v.expr_node(idx)
     return idx, valid
 
-  # TODO: pass in the idxs?
-  def expr_idxs(self, offset=0):
-    return self._expr_idx(self.views[-1].expr_idxs([f"idx{i}" for i in range(len(self.shape))], offset))
+  def expr_idxs(self, offset=0, idxs=None):
+    if idxs is None: idxs = [f"idx{i}" for i in range(len(self.shape))]
+    return self._expr_idx(self.views[-1].expr_idxs(idxs, offset))
 
-  def expr_node(self):
-    return self._expr_idx(self.views[-1].expr_node(Variable('idx', 0, prod(self.shape)-1)))
-
-  # TODO: kept for legacy behavior. remove?
-  def expr(self) -> str:
-    idx, valid = self.expr_node()
-    if valid is not None and str(valid) != "valid": return f"valid={valid.render()};idx={idx.render()}"
-    else: return f"idx={idx.render()}"
+  def expr_node(self, idx='idx'):
+    return self._expr_idx(self.views[-1].expr_node(Variable(idx, 0, prod(self.shape)-1)))
 
   def movement_op(self, op, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     return getattr(self, str(op).split(".")[1].lower())(arg)
