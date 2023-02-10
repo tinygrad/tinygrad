@@ -61,7 +61,7 @@ class CLASTKernel(ASTKernel):
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     for v, o in zip(value, self.buftokens[buf_index].offsets()):
       idxy, valid = self.sts[buf_index].expr_idxs(o)
-      assert str(valid) == "1", "store must always be valid"
+      assert valid.render(render_cl) == "1", "store must always be valid"
       assert self.buftokens[buf_index].typ == v.typ, f"buf must be {v.typ}"
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
@@ -279,7 +279,7 @@ class CLASTKernel(ASTKernel):
     # middle
     if self.group_for_reduce:
       lidx, lvalid = self.sts[-1].expr_idxs()
-      assert str(lvalid) == "1", "local buffer must be valid"
+      assert lvalid.render(render_cl) == "1", "local buffer must be valid"
       self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};")
       for i,acc in enumerate(accumulators):
         self.kernel.append(("__shared__ " if CUDA else "__local ") + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];  // second stage\n")
