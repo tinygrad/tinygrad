@@ -42,7 +42,7 @@ class TestZeroViewShapeTracker(unittest.TestCase):
     self.st.pad(((1, 1), (1, 1)))
     assert self.st.shape == (6,6)
     compareZv = ZeroView((4,4), ((-1,5), (-1,5)))
-    assert self.st.views[1].expr == compareZv.expr
+    assert str(self.st.views[1]) == str(compareZv)
 
 class TestComplexShapeTracker(unittest.TestCase):
   def test_add_1s(self):
