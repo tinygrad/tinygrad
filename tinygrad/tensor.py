@@ -364,7 +364,7 @@ class Tensor:
   def __isub__(self, x): return self.assign(self.__sub__(x))
   def __imul__(self, x): return self.assign(self.__mul__(x))
   def __ipow__(self, x): return self.assign(self.__pow__(x))
-  def __idiv__(self, x): return self.assign(self.__truediv__(x))
+  def __itruediv__(self, x): return self.assign(self.__truediv__(x))
 
   # simple tensor math API
   def add(self, x): return self.__add__(x)
