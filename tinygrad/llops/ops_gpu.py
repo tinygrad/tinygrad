@@ -62,7 +62,7 @@ class CLASTKernel(ASTKernel):
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     for v, o in zip(value, self.buftokens[buf_index].offsets()):
       idxy, valid = self.sts[buf_index].expr_idxs(o)
-      assert valid.render(render_cl) == "1", "store must always be valid"
+      assert valid.min == 1, "store must always be valid"
       assert self.buftokens[buf_index].typ == v.typ, f"buf must be {v.typ}"
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
@@ -88,7 +88,7 @@ class CLASTKernel(ASTKernel):
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if self.buftokens[buf_index].typ == Types.FLOAT4 else 1)).render(render_cl)}]", self.buftokens[buf_index].typ)
-        ldr = ldr if str(valid) == "1" or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ)
+        ldr = ldr if valid.min == 1 or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ)
         if const is not None:
           self.loaded_keys[(buf_index,o)] = ldr
         else:
@@ -280,7 +280,7 @@ class CLASTKernel(ASTKernel):
     # middle
     if self.group_for_reduce:
       lidx, lvalid = self.sts[-1].expr_idxs()
-      assert lvalid.render(render_cl) == "1", "local buffer must be valid"
+      assert lvalid.min == 1, "local buffer must always be valid"
       self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};")
       for i,acc in enumerate(accumulators):
         self.kernel.append(("__shared__ " if CUDA else "__local ") + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];  // second stage\n")
