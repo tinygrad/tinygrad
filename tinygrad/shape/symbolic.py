@@ -7,7 +7,6 @@ class Node:
   b: int
   min: int
   max: int
-  expr: str
   def render(self, ops=None):
     if ops is None: ops = render_python
     if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops)
