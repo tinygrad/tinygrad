@@ -13,7 +13,7 @@ from tinygrad.helpers import getenv
 from extra.lib_test_ast import test_ast
 
 import pickle, dbm
-intervention_cache = dbm.open('/tmp/kopt.db', 'c')
+intervention_cache = None
 
 Interventions = Enum("Interventions", ["SWAP", "UPCAST", "SHIFT", "REDUCE"])
 def get_interventions(k):
@@ -108,6 +108,8 @@ def search_one(ast, winning_interventions=[], debug=False):
   return best
 
 def apply_optimization(k, ast, max_interventions=1, cache=True):
+  global intervention_cache
+  if intervention_cache is None: intervention_cache = dbm.open('/tmp/kopt.db', 'c')
   from extra.kernel_search import search_one, apply_intervention
   if k.key not in intervention_cache or cache == False:
     winning_interventions = []
@@ -172,6 +174,18 @@ def test_correctness(ast):
     test_ast(k)
 
 if __name__ == "__main__":
+  if intervention_cache is None: intervention_cache = dbm.open('/tmp/kopt.db', 'c')
+  if getenv("DUMP"):
+    keys = list(intervention_cache.keys())
+    from collections import defaultdict
+    cnts = defaultdict(int)
+    for k in keys:
+      ic = pickle.loads(intervention_cache[k])
+      for i in ic:
+        cnts[i] += 1
+    for k,v in sorted(cnts.items(), key=lambda x: -x[1]):
+      print(k, v)
+    exit(0)
   if getenv("OP", 0) == 1:
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 3, 3, 3, 4), views=[View((1, 130, 258, 1, 12), (393216, 3072, 12, 12, 1), -3084), ZeroView((1, 128, 256, 1, 12), ((0, 1), (-1, 129), (-1, 257), (0, 1), (0, 12))), View((1, 64, 128, 8, 4, 3, 3, 3, 4), (0, 6192, 24, 0, 0, 3096, 12, 4, 1), 0)]), hostbuf=GPUBuffer(shape=(128, 768, 4), force_create=True))
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 64, 128, 8, 4, 3, 3, 3, 4), views=[View((1, 64, 128, 8, 4, 3, 3, 3, 4), (0, 0, 0, 432, 4, 144, 16, 48, 1), 0)]), hostbuf=GPUBuffer(shape=(8, 108, 4), force_create=True))
@@ -251,7 +265,7 @@ if __name__ == "__main__":
     op1 = LazyOp(BinaryOps.MUL, (op0,buf2,), None)
     op2 = LazyOp(BinaryOps.SUB, (buf0,op1,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op2,), (64,))
-  elif int(os.getenv("BROKEN3", "0")):
+  elif getenv("BROKEN3"):
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(5, 1, 128, 16, 16, 128, 3, 3), views=[View((5, 128, 18, 18), (32768, 256, 16, 1), -17), ZeroView((5, 128, 16, 16), ((0, 5), (0, 128), (-1, 17), (-1, 17))), View((5, 1, 128, 16, 16, 128, 3, 3), (41472, 41472, 0, 18, 1, 324, 18, 1), 0)]), hostbuf=GPUBuffer(shape=(5, 128, 16, 16), force_create=True))
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(5, 1, 128, 16, 16, 128, 3, 3), views=[View((5, 1, 128, 16, 16, 128, 3, 3), (0, 0, 1152, 0, 0, 9, 3, 1), 0)]), hostbuf=GPUBuffer(shape=(128, 128, 3, 3), force_create=True))
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
