@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
-from extra.utils import fetch, fake_torch_load, get_child
+from extra.utils import get_child
 import numpy as np
 
 class BasicBlock:
