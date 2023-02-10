@@ -20,8 +20,10 @@ IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
 torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
 
-def colorize_float(x):
+def colorize_float(x, y):
   ret = f"{x:7.2f}x"
+  if y == "faster":
+    return colored(ret, 'cyan')
   if x < 0.75:
     return colored(ret, 'green')
   elif x > 1.5:
@@ -69,9 +71,10 @@ def helper_test_generic(name, f1, f2):
     val_torch, et_torch = helper_test_speed(f1)
   val_tinygrad, et_tinygrad = helper_test_speed(lambda: f2().realize())
 
+  desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*4*1e-6
-  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} slower {flops:7.2f} MOPS {mem:7.2f} MB")
+  print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch,desc)} {desc} {flops:7.2f} MOPS {mem:7.2f} MB")
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
 
