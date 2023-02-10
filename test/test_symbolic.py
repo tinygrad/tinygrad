@@ -2,12 +2,11 @@
 import unittest
 from tinygrad.shape.symbolic import Variable
 
-
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
     self.assertEqual(v.min, n)
     self.assertEqual(v.max, m)
-    self.assertEqual(str(v), s)
+    self.assertEqual(v.render(), s)
 
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")

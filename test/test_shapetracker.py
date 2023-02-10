@@ -42,7 +42,7 @@ class TestZeroViewShapeTracker(unittest.TestCase):
     self.st.pad(((1, 1), (1, 1)))
     assert self.st.shape == (6,6)
     compareZv = ZeroView((4,4), ((-1,5), (-1,5)))
-    assert self.st.views[1].expr == compareZv.expr
+    assert str(self.st.views[1]) == str(compareZv)
 
 class TestComplexShapeTracker(unittest.TestCase):
   def test_add_1s(self):
@@ -170,7 +170,8 @@ class TestSingleShapeTracker(unittest.TestCase):
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
-  exec(st.expr(), None, locals)
+  idx, valid = st.expr_node()
+  exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
   return locals["idx"] if locals["valid"] else -1
 
 class TestShapeTracker(unittest.TestCase):
@@ -182,7 +183,8 @@ class TestShapeTracker(unittest.TestCase):
   def tearDown(self):
     x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
     y = [self.dt[i] for i in range(prod(self.dt.shape))]
-    print(x,y, self.st.shape, self.dt.shape, self.st.expr())
+    idx, valid = self.st.expr_node()
+    print(x,y, self.st.shape, self.dt.shape, idx.render(), valid.render())
     assert self.st.shape == self.dt.shape
     assert x == y
 

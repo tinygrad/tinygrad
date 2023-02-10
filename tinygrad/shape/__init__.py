@@ -38,10 +38,6 @@ class View:
       acc *= d
     return Variable.sum(ret)
 
-  @property
-  def expr(self) -> str:
-    return 'idx=' + str(self.expr_node(Variable('idx', 0, prod([x[0] for x in self.shape_strides])-1)))
-
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, offset=0):
     return Variable.sum([Variable.num(self.offset+offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
@@ -55,20 +51,14 @@ class ZeroView:
     # fake properties
     self.strides, self.contiguous, self.offset = strides_for_shape(self.shape), False, 0
 
-  def expr_idxs(self, idxs, offset=0): raise NotImplementedError("ZeroView doesn't have expr_idxs")
-
-  def expr_node(self, valid, idx):
+  def expr_node(self, idx=None, valid=None):
+    if idx is None: idx = Variable('idx', 0, prod([y-x for x,y in self.arg]))
     expr, acc = [valid] if valid is not None else [], 1
     for s,ns,(x,y) in list(zip(self.old_shape, self.shape, self.arg))[::-1]:
       base = ((idx//acc) % ns) + x
       expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
       acc *= ns
     return Variable.ands(expr)
-
-  @property
-  def expr(self) -> str:
-    max_idx = prod([y-x for x,y in self.arg])
-    return 'valid=' + str(self.expr_node(Variable('valid', 0, 1), Variable('idx', 0, max_idx-1)))
 
   def __repr__(self): return f"ZeroView({self.old_shape}, {self.arg})"
 
@@ -107,29 +97,20 @@ class ShapeTracker:
   @property
   def offset(self) -> int: return self.views[-1].offset
 
-  # TODO: pass in the idxs?
-  def expr_idxs(self, offset=0):
-    idx = self.views[-1].expr_idxs([f"idx{i}" for i in range(len(self.shape))], offset)
+  def _expr_idx(self, idx):
     valid = Variable.num(1)
     for v in self.views[0:-1][::-1]:
-      if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
+      if isinstance(v, ZeroView): valid = v.expr_node(idx, valid)
       else: idx = v.expr_node(idx)
     return idx, valid
 
-  def expr_node(self):
-    idx = Variable('idx', 0, prod(self.shape)-1)
-    valid = None #Variable.num(1)
-    for v in self.views[::-1]:
-      if isinstance(v, ZeroView): valid = v.expr_node(valid, idx)
-      else: idx = v.expr_node(idx)
-    return idx, valid
-  
-  def expr(self) -> str:
-    idx, valid = self.expr_node()
-    if valid is not None and str(valid) != "valid": return f"valid={valid};idx={idx}"
-    else: return f"idx={idx}"
+  def expr_idxs(self, offset=0, idxs=None):
+    if idxs is None: idxs = [f"idx{i}" for i in range(len(self.shape))]
+    return self._expr_idx(self.views[-1].expr_idxs(idxs, offset))
 
-  #def expr(self): return ';'.join([v.expr for v in self.views[::-1] if v.expr != 'idx=idx' and v.expr != 'valid=valid'])
+  def expr_node(self, idx='idx'):
+    return self._expr_idx(self.views[-1].expr_node(Variable(idx, 0, prod(self.shape)-1)))
+
   def movement_op(self, op, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     return getattr(self, str(op).split(".")[1].lower())(arg)
   def needs_valid(self) -> bool:
@@ -219,7 +200,7 @@ class ShapeTracker:
     offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
     zeroview = ZeroView(self.shape, arg)
     self.views[-1] = View(tuple(y-x for x,y in arg), self.strides, self.offset+offset)
-    if zeroview.expr != "valid=valid":
+    if zeroview.expr_node().min == 0:  # may be invalid
       # if we add a ZeroView, we add another (stock) view also for modding
       self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
     return self
