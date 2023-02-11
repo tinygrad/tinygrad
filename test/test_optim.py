@@ -1,3 +1,6 @@
+import sys
+sys.path.append("/home/tomfinet/projects/tinygrad")
+
 import numpy as np
 import torch
 import unittest
@@ -9,19 +12,11 @@ x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-def step_tinygrad(net, optim, kwargs={}):
+def step(net, optim, kwargs={}):
   optim = optim([net.x, net.W], **kwargs)
   out = net.forward()
   out.backward()
   optim.step()
-  return net.x.cpu().data, net.W.cpu().data
-
-def step_pytorch(net, optim, kwargs={}):
-  optim = optim([net.x, net.W], **kwargs)
-  out = net.forward()
-  out.backward()
-  optim.step()
-  return net.x.detach().numpy(), net.W.detach().numpy()
 
 
 class TinyNet():
@@ -50,13 +45,15 @@ class TorchNet():
     return out
 
 
-def helper_test_optim(steps, tinyopt, torchopt, tinyargs={}, torchargs={}):
-  tinynet = TinyNet()
-  torchnet = TorchNet()
+def helper_test_optim(steps, tinyoptim, torchoptim, tinyargs={}, torchargs={}):
+  tinynet, torchnet = TinyNet(), TorchNet()
   for _ in range(steps):
-    for x,y in zip(step_tinygrad(tinynet, tinyopt, tinyargs),
-                   step_pytorch(torchnet, torchopt, torchargs)):
-      np.testing.assert_allclose(x, y, atol=1e-4)
+    step(tinynet, tinyoptim, tinyargs)
+    step(torchnet, torchoptim, torchargs)
+    x1, y1 = tinynet.x.cpu().data, tinynet.W.cpu().data
+    x2, y2 = torchnet.x.detach().numpy(), torchnet.W.detach().numpy()
+    np.testing.assert_allclose(x1, x2, atol=1e-4)
+    np.testing.assert_allclose(y1, y2, atol=1e-4)
 
 steps = 3
 class TestOptim(unittest.TestCase):
