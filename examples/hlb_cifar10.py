@@ -86,19 +86,20 @@ def train_cifar():
   Tensor.training = True
   BS = getenv("BS", 512)
   if getenv("FAKEDATA"):
-    np.random.randint
-    X_train = np.random.default_rng().standard_normal(size=(5000, 3, 32, 32), dtype=np.float32)
-    Y_train = np.random.randint(0,10,size=(5000), dtype=np.int32)
-    X_test = np.random.default_rng().standard_normal(size=(100, 3, 32, 32), dtype=np.float32)
-    Y_test = np.random.randint(0,10,size=(100), dtype=np.int32)
+    N = 256
+    X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
+    Y_train = np.random.randint(0,10,size=(N), dtype=np.int32)
+    X_test, Y_test = X_train, Y_train
   else:
     X_train,Y_train = fetch_cifar(train=True)
     print(X_train.shape, Y_train.shape)
     X_test,Y_test = fetch_cifar(train=False)
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
-  optimizer = optim.SGD(get_parameters(model), lr=0.001)
-  #optimizer = optim.Adam(get_parameters(model), lr=3e-4)
+  if getenv("ADAM"):
+    optimizer = optim.Adam(get_parameters(model), lr=3e-4)
+  else:
+    optimizer = optim.SGD(get_parameters(model), lr=0.001)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
