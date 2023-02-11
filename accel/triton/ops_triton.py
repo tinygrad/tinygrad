@@ -128,8 +128,8 @@ class TritonBuffer(ExplicitExecAST):
     return data
 
   @classmethod
-  def exec_ast(cls, ast:LazyOp):
-    k = TritonASTKernel(ast)
+  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[TritonBuffer]=None):
+    k = TritonASTKernel(ast, output_buffer)
     k.codegen()(*k.bufs)
     return k.ret
 

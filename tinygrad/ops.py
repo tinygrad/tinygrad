@@ -42,7 +42,7 @@ class DeviceBuffer:
   def fromCPU(x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")
   def toCPU(self:DeviceBuffer) -> np.ndarray: raise NotImplementedError("must be implemented")
   @classmethod
-  def exec_ast(cls, ast:LazyOp): raise NotImplementedError("must be implemented")
+  def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
 
 # this is a quick "buffer" class for flop tracking
 class GenericShape(NamedTuple):
@@ -64,8 +64,8 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
   @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None, preprocess=lambda x: x):
-    srcs = [cls.exec_ast(x, preprocess=preprocess) if isinstance(x, LazyOp) else preprocess(x) for x in ast.src]
+  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None):
+    srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
@@ -76,7 +76,7 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
       return output_buffer
     else:
       return ret
-def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(ast, preprocess=lambda x: GenericExecAST(GenericShape(x.shape))).buf
+def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(map_buffers({x:GenericExecAST(GenericShape(x.shape)) for x in get_buffers(ast)}, ast)).buf
 
 class GlobalCounters:
   global_ops : ClassVar[int] = 0
