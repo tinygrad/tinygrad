@@ -87,7 +87,8 @@ def train_cifar():
   if getenv("ADAM"):
     optimizer = optim.Adam(get_parameters(model), lr=3e-4)
   else:
-    optimizer = optim.SGD(get_parameters(model), lr=0.001)
+    #optimizer = optim.SGD(get_parameters(model), lr=0.001)
+    optimizer = optim.SGD(get_parameters(model), lr=0.001, momentum=0.85, nesterov=True)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
