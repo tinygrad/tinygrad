@@ -1,6 +1,3 @@
-import sys
-sys.path.append("/home/tomfinet/projects/tinygrad")
-
 import numpy as np
 import torch
 import unittest
