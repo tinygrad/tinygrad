@@ -91,7 +91,5 @@ class CLProgram:
     if DEBUG >= 1:
       print(f"**CL** {GlobalCounters.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
             (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
-    GlobalCounters.kernel_count += 1
-    GlobalCounters.global_ops += self.op_estimate
-    GlobalCounters.global_mem += self.mem_estimate
+    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return e if CL.CACHE is None else None

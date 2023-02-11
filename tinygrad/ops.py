@@ -86,6 +86,11 @@ class GlobalCounters:
   cache : ClassVar[Optional[list]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0,0,None
+  @staticmethod
+  def log_kernel(op_estimate:int, mem_estimate:int):
+    GlobalCounters.kernel_count += 1
+    GlobalCounters.global_ops += op_estimate
+    GlobalCounters.global_mem += mem_estimate
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
