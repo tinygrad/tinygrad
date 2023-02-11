@@ -11,7 +11,7 @@ from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
-from tinygrad.llops.ops_gpu import CL
+from tinygrad.runtime.opencl import CL
 from extra.utils import get_parameters
 
 num_classes = 10
