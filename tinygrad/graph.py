@@ -72,5 +72,5 @@ def log_op(ret : DeviceBuffer, ast : LazyOp):
       G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
     else:
       G.nodes[nm(ret)]['label'] = str(ret.shape)
-    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else '')) if optype in top_colors else "#ffffff"
+    G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else str())) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
