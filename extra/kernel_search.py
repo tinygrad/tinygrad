@@ -255,8 +255,11 @@ if __name__ == "__main__":
     ii = []
     ii.append((Interventions.SWAP, (4, 6)))
     ii.append((Interventions.REDUCE, (32,)))
-    ii.append((Interventions.UPCAST, (3, 3)))
-    ii.append((Interventions.UPCAST, (2, 3)))
+    #ii.append((Interventions.UPCAST, (3, 3)))
+    #ii.append((Interventions.UPCAST, (2, 3)))
+    #ii.append((Interventions.UPCAST, (0, 2)))
+    #ii.append((Interventions.UPCAST, (0, 8)))
+    #ii.append((Interventions.SWAP, (1, 3)))
     #ii.append((Interventions.UPCAST, (2, 3)))
     #ii.append((Interventions.UPCAST, (1, 128)))
     #search(ast, ii)

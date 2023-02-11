@@ -77,7 +77,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, -1, 27, "((a+-1)%28)")
 
   def test_sum_combine_num(self):
-    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable.num(23)]), -6, 4, "(a+-6)")
+    self.helper_test_variable(Variable.sum([Variable.num(29), Variable("a", 0, 10), Variable.num(-23)]), 6, 16, "(a+6)")
 
   def test_div_factor(self):
     # TODO: this isn't right
