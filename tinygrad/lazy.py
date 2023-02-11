@@ -68,6 +68,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
 # **** lazy operations ****
 
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
+def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.op.src[0]) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
 def get_movementroot(root:LazyBuffer) -> LazyBuffer: return get_movementroot(root.op.src[0]) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot(x) if x.optype == MovementOps and x.st.contiguous else x
 
@@ -227,31 +228,29 @@ class LazyBuffer:
 
     if IMAGE >= 1:
       w = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W))
-      added_output_channels = 0
+      # TODO: moving the x reshape here creates more views?
 
       # hack for non multiples of 4 on C.cin
       if C.cin % 4 != 0 and not (C.cin == 1 and C.groups%4 == 0):
-        to_add = 4 - (C.cin % 4)
-        w = w.movement_op(MovementOps.PAD, tuple((0, to_add) if i == 2 else (0, 0) for i in range(len(w.shape))))
+        added_input_channels = 4 - (C.cin % 4)
+        w = w.movement_op(MovementOps.PAD, tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(w.shape))))
         x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix))
-        x = x.movement_op(MovementOps.PAD, tuple((0, to_add) if i == 2 else (0, 0) for i in range(len(x.shape))))
-        C = C._replace(cin = C.cin + to_add)
+        x = x.movement_op(MovementOps.PAD, tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(x.shape))))
+        C = C._replace(cin = C.cin + added_input_channels)
         x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups*C.cin, C.iy, C.ix))
 
       # hack for non multiples of 4 on C.rcout
+      added_output_channels = 0
       if C.rcout % 4 != 0 and not (C.rcout == 1 and C.groups%4 == 0):
         added_output_channels = 4 - (C.rcout % 4)
         w = w.movement_op(MovementOps.PAD, tuple((0, added_output_channels) if i == 1 else (0, 0) for i in range(len(w.shape))))
         C = C._replace(rcout = C.rcout + added_output_channels, cout = C.groups * (C.rcout + added_output_channels))
 
       # packed
-      assert (C.groups*C.cin) % 4 == 0
       x = x.movement_op(MovementOps.PERMUTE, (0,2,3,1))
       x = x.movement_op(MovementOps.RESHAPE, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
 
-      assert C.cout % 4 == 0
-      if C.cin == 1:
-        # depthwise
+      if C.cin == 1:  # depthwise
         w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.H*C.W))
         w = w.movement_op(MovementOps.PERMUTE, (0,2,1))
       else:
@@ -259,48 +258,29 @@ class LazyBuffer:
         w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
         w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
 
-      C = C._replace(out_shape = (C.bs*C.oy, C.ox*C.cout//4, 4))
+      # contiguous creates the image, and early realize static weights
+      x, w = x.contiguous(), w.contiguous()
+      if get_single_root(w).realized: w.realize()
 
-      # contiguous before image, always
-      x = x.contiguous()
-      w = w.contiguous()
-
-      # early realize on the weights
-      bw = w
-      while getattr(bw, 'op', None) and len(bw.op.src) == 1:
-        bw = bw.op.src[0]
-      if bw.realized:
-        w.realize()
-
-      # set up the conv
-      # (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4)
+      # set up the conv from (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4), pad, stride, and expand
       x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups, C.cin))
-      # padding (implicit is fine in image)
       x = x.slice(((0, x.shape[0]), (-C.py, x.shape[1]+C.py_), (-C.px, x.shape[2]+C.px_), (0, x.shape[3]), (0, x.shape[4])))
-
       x = x.movement_op(MovementOps.STRIDED, (
         (C.bs, x.shape[1]*x.shape[2]*C.groups*C.cin),
         (C.oy, C.sy*x.shape[2]*C.groups*C.cin), (C.ox, C.sx*C.groups*C.cin),
         (C.groups, C.cin), (1, 1), (1, 1),
         (C.H, C.dy*x.shape[2]*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin//4 if C.cin >= 4 else 1, 4), (4 if C.cin >= 4 else 1, 1)
       ))
-      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4 if C.rcout >= 4 else 1, 4 if C.rcout >= 4 else 1, C.H, C.W, C.cin//4 if C.cin >= 4 else 1, 4 if C.cin >= 4 else 1))
-      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, C.cin//4 if C.cin >= 4 else 1, 4 if C.cin >= 4 else 1))
+      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4 if C.rcout >= 4 else 1, 4 if C.rcout >= 4 else 1, C.H, C.W, x.shape[-2], x.shape[-1]))
+      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, x.shape[-2], x.shape[-1]))
 
-      # set up the weights
-      if C.cin == 1:
-        # depthwise
-        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.W, 4))
-        w = w.movement_op(MovementOps.PERMUTE, (0,3,1,2))
-        w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.cout//4, 4, C.H, C.W, 1, 1)) \
-            .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, 1, 1))
-      else:
-        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4, C.W, 4, 4))
-        w = w.movement_op(MovementOps.PERMUTE, (0,4,1,3,2,5))
-        w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.cout//4, 4, C.H, C.W, C.cin//4, 4)) \
-            .movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, C.cin//4, 4))
+      # set up the weights from (C.cout//4, C.H * C.cin//4 * C.W * 4, 4)
+      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4 if C.cin >= 4 else 1, C.W, 4, 4 if C.cin >= 4 else 1))
+      w = w.movement_op(MovementOps.PERMUTE, (0,4,1,3,2,5))
+      w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.cout//4, 4, C.H, C.W, w.shape[-2], w.shape[-1]))
+      w = w.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, w.shape[-2], w.shape[-1]))
 
-      # now do the conv in this space
+      # now do the conv in this space and force it to be an image
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.cout//4, 4, 1, 1, 1, 1))
       ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4)).contiguous()
 
