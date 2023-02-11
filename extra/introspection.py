@@ -4,7 +4,7 @@ from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.llops.ops_gpu import GPUBuffer
-from tinygrad.runtime.opencl import CL
+from tinygrad.ops import GlobalCounters
 
 def print_objects():
   #gc.collect()
@@ -15,7 +15,7 @@ def print_objects():
   realized_buffers = [x.realized for x in lazybuffers if x.realized]
   gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
 
-  print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {CL.mem_used/1e9:.2f} GB")
+  print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {GlobalCounters.mem_used/1e9:.2f} GB")
   print(f"{len(lazybuffers)} lazybuffers {len(realized_buffers)} realized, {len(gpubuffers)} GPU buffers")
   print(f"{len(gpubuffers_orphaned)} GPU buffers are orphaned")
 
@@ -41,7 +41,7 @@ def print_objects():
 import gc
 
 def print_ram():
-  print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+  print(GlobalCounters.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
   img_count = sum([x.is_image() for x in gc.get_objects() if isinstance(x, OpenCLBuffer)])
   print("img_count", img_count)
   buffer_bytes = sum([x.cl.size for x in gc.get_objects() if isinstance(x, CLBuffer)])

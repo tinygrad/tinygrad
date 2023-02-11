@@ -83,6 +83,7 @@ class GlobalCounters:
   global_mem : ClassVar[int] = 0
   time_sum : ClassVar[int] = 0
   kernel_count : ClassVar[int] = 0
+  mem_used : ClassVar[int] = 0   # NOTE: this is not reset
   cache : ClassVar[Optional[list]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0,0,None

@@ -1,7 +1,7 @@
 import functools, platform
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, ClassVar
 from collections import defaultdict
 from tinygrad.ops import DEBUG, GlobalCounters
 from tinygrad.helpers import getenv
@@ -13,10 +13,10 @@ CLCACHE = getenv("CLCACHE", 1)
 FLOAT16 = getenv("FLOAT16", 0)
 
 class CL:
-  CACHE, mem_used = None, 0
-  BUFFER_CACHE : Dict[int, List[cl.Buffer]] = defaultdict(list)
-  cl_ctx : Optional[cl.Context] = None
-  cl_queue : Optional[cl.CommandQueue] = None
+  CACHE : ClassVar = None
+  BUFFER_CACHE : ClassVar[Dict[int, List[cl.Buffer]]] = defaultdict(list)
+  cl_ctx : ClassVar[Optional[cl.Context]] = None
+  cl_queue : ClassVar[Optional[cl.CommandQueue]] = None
   def __init__(self):
     if CL.cl_queue is not None: return   # already initted
     devices : List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
@@ -40,11 +40,11 @@ class CLBuffer:
     else:
       # TODO: on GPU OOM, clear the cache
       self._cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
-      CL.mem_used += self._cl.size
+      GlobalCounters.mem_used += self._cl.size
 
   def __del__(self):
     if CLCACHE: CL.BUFFER_CACHE[self._cl.size].append(self._cl)
-    else: CL.mem_used -= self._cl.size
+    else: GlobalCounters.mem_used -= self._cl.size
 
   def copyin(self, b:np.ndarray): CL.enqueue_copy(self._cl, b, False)
   def copyout(self, a:np.ndarray): CL.enqueue_copy(a, self._cl, True)
@@ -54,10 +54,10 @@ class CLImage:
 
   def __init__(self, shape):
     self._cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
-    CL.mem_used += self._cl.row_pitch * self._cl.height
+    GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
 
   def __del__(self):
-    CL.mem_used -= self._cl.row_pitch * self._cl.height
+    GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
 
   def copyin(self, b:np.ndarray): raise NotImplementedError("no copyin for CLImage")
   def copyout(self, a:np.ndarray): raise NotImplementedError("no copyout for CLImage")
@@ -84,12 +84,13 @@ class CLProgram:
     if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
     if DEBUG >= 2 and CL.CACHE is None:
+      assert CL.cl_queue is not None
       CL.cl_queue.finish()
       # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
       et = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
       GlobalCounters.time_sum += et
     if DEBUG >= 1:
-      print(f"**CL** {GlobalCounters.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {CL.mem_used/1e9:5.2f} GB " +
+      print(f"**CL** {GlobalCounters.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return e if CL.CACHE is None else None

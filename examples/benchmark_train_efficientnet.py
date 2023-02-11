@@ -5,7 +5,6 @@ from tqdm import trange
 from models.efficientnet import EfficientNet
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
-from tinygrad.runtime.opencl import CL
 from tinygrad.ops import GlobalCounters
 from tinygrad.helpers import getenv
 
@@ -58,7 +57,7 @@ if __name__ == "__main__":
     if i == 2 and CLCACHE:
       cl_cache = GlobalCounters.cache
 
-    mem_used = CL.mem_used
+    mem_used = GlobalCounters.mem_used
     loss_cpu = loss.detach().numpy()[0]
     cl = time.monotonic()
 
