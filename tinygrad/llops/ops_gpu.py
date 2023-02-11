@@ -155,7 +155,6 @@ class CLASTKernel(ASTKernel):
       #self.reshape_and_permute(None, [0,1,2,3,6,4,5])
 
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    self.upcast_in_mid_reduce = False
     if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
       lb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
@@ -234,6 +233,7 @@ class CLASTKernel(ASTKernel):
   # group_for_reduce will have to be better first
   def codegen(self) -> Callable:
     self.process()
+    self.upcast_in_mid_reduce = False
     self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
@@ -281,9 +281,9 @@ class CLASTKernel(ASTKernel):
     if self.group_for_reduce:
       lidx, lvalid = self.sts[-1].expr_idxs()
       assert lvalid.min == 1, "local buffer must always be valid"
-      self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};")
+      self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
       for i,acc in enumerate(accumulators):
-        self.kernel.append(("__shared__ " if CUDA else "__local ") + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];  // second stage\n")
+        self.kernel.append(("__shared__ " if CUDA else "__local ") + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
       self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n" if not CUDA else "__syncthreads();\n")
 
@@ -297,7 +297,7 @@ class CLASTKernel(ASTKernel):
       self.kernel.append("if (mid_idx == 0) {\n")
       new_accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(len(accumulators))]
       for i,acc in enumerate(new_accumulators):
-        self.kernel.append(f"{acc.decltype()} {acc.tok} = 0.0;\n")
+        self.kernel.append(f"{acc.decltype()} {acc.tok} = 0.0;")
         if self.upcast_in_mid_reduce:
           self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'vload4(0, &temp{i}[mid*4])')}; }}\n")
         else:

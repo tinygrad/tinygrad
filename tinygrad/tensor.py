@@ -351,6 +351,8 @@ class Tensor:
   def __rmul__(self, x): return Tensor.broadcasted(mlops.Mul, x, self)
   def __pow__(self, x): return Tensor.broadcasted(mlops.Pow, self, x)
   def __rpow__(self, x): return Tensor.broadcasted(mlops.Pow, x, self)
+
+  # non broadcasted ops
   def __truediv__(self, x): return self * (x.reciprocal() if isinstance(x, Tensor) else (1/x))
   def __rtruediv__(self, x): return self.reciprocal() * x
   def __matmul__(self, x): return self.dot(x)
