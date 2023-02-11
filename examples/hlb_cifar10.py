@@ -58,8 +58,7 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
   GlobalCounters.reset()
 
   if not cl_cache:
-    if not first:
-      CL.CACHE = []
+    if not first: GlobalCounters.cache = []
     if enable_jit: first = False
     out = model(X)
     loss = out.mul(Y).mean()
@@ -68,11 +67,8 @@ def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
       loss.backward()
       optimizer.step()
       loss.realize()
-    if not first:
-      cl_cache = CL.CACHE
-      CL.CACHE = None
-
-  if cl_cache:
+    if not first: cl_cache = GlobalCounters.cache
+  else:
     for prg, args in cl_cache:
       prg(*args)
   return loss
@@ -89,9 +85,16 @@ def fetch_batch(X_train, Y_train, BS):
 def train_cifar():
   Tensor.training = True
   BS = getenv("BS", 512)
-  X_train,Y_train = fetch_cifar(train=True)
-  print(X_train.shape, Y_train.shape)
-  X_test,Y_test = fetch_cifar(train=False)
+  if getenv("FAKEDATA"):
+    np.random.randint
+    X_train = np.random.default_rng().standard_normal(size=(5000, 3, 32, 32), dtype=np.float32)
+    Y_train = np.random.randint(0,10,size=(5000), dtype=np.int32)
+    X_test = np.random.default_rng().standard_normal(size=(100, 3, 32, 32), dtype=np.float32)
+    Y_test = np.random.randint(0,10,size=(100), dtype=np.int32)
+  else:
+    X_train,Y_train = fetch_cifar(train=True)
+    print(X_train.shape, Y_train.shape)
+    X_test,Y_test = fetch_cifar(train=False)
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
   optimizer = optim.SGD(get_parameters(model), lr=0.001)
