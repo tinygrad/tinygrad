@@ -50,8 +50,8 @@ class SpeedyResNet:
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of logsoftmax
   def __call__(self, x): return x.sequential(self.net).logsoftmax()
 
-from extra.jit import tinyjit
-@tinyjit(enable=getenv("CLCACHE"))
+from extra.jit import TinyJit
+@TinyJit
 def train_step_jitted(model, optimizer, X, Y):
   out = model(X)
   loss = out.mul(Y).mean()

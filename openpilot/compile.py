@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, time, io, pathlib, sys
+import os, time, io, pathlib, sys, traceback
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 if os.getenv("OPT", None) is None:
@@ -56,6 +56,15 @@ def get_random_input_tensors(input_shapes):
   for _,v in inputs.items(): v.realize()
   return inputs, np_inputs
 
+from extra.jit import TinyJit
+
+@TinyJit
+def model_exec(run_onnx, using_graph, **inputs):
+  ret = next(iter(run_onnx(inputs).values()))
+  GlobalCounters.cache = []  # don't cache pre-realize
+  if using_graph: graph.GRAPH = True
+  return ret
+
 def compile(dat, output_fn):
   Tensor.no_grad = True
   using_graph = graph.GRAPH
@@ -68,43 +77,25 @@ def compile(dat, output_fn):
   for inp in onnx_model.graph.input:
     input_shapes[inp.name] = tuple(x.dim_value for x in inp.type.tensor_type.shape.dim)
 
-  inputs, _ = get_random_input_tensors(input_shapes)
-
-  # initial run(s) to load weights
-  for _ in range(2):
-    st = time.monotonic()
-    tinygrad_out = next(iter(run_onnx(inputs).values()))
-    mt = time.monotonic()
-    tinygrad_out.realize()
-    mt2 = time.monotonic()
-    tinygrad_out = tinygrad_out.numpy()
-    et = time.monotonic()
-    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
-
-    # realize all non GCed tensors (fix for batchnorm folding)
-    import gc
-    gc.collect()
-    for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
-      x.realize()
-
-  # real run
   inputs, np_inputs = get_random_input_tensors(input_shapes)
-  print("***** REAL RUN *****")
-  tinygrad_out = next(iter(run_onnx(inputs).values()))
-
-  # note, since CL.CACHE is enabled, it doesn't actually run the kernels
-  start_ops = GlobalCounters.global_ops
-  CL.CACHE = []
-  if using_graph: graph.GRAPH = True
-  tinygrad_out.realize()
+  # run twice to trigger the JIT
+  for i in range(2): tinygrad_out = model_exec(run_onnx, i == 1 and using_graph, **inputs)
   graph.GRAPH = False
-  print("kernel count:", len(CL.CACHE))
-  assert len(CL.CACHE) <= ALLOWED_KERNEL_COUNT or ALLOWED_KERNEL_COUNT == 0, "too many kernels!"
-  used_ops = GlobalCounters.global_ops - start_ops
+  print("kernel count:", len(model_exec.jit_cache))
+  assert len(model_exec.jit_cache) <= ALLOWED_KERNEL_COUNT or ALLOWED_KERNEL_COUNT == 0, "too many kernels!"
+
+  # transform to CL.CACHE
+  used_ops = 0
+  cl_cache = []
+  for prg,args in model_exec.jit_cache:
+    real_clprg = prg.clprg
+    used_ops += real_clprg.op_estimate
+    prg.clprg = lambda *args: cl_cache.append((real_clprg, args))
+    prg(*args)
 
   from extra.thneed import Thneed
-  t = Thneed(CL.CACHE, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
-  CL.CACHE = None
+  t = Thneed(cl_cache, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
+
   if getenv("OPTWG", 0):
     t.optimize_local_workgroup()
 
@@ -163,7 +154,6 @@ def compile(dat, output_fn):
       print("thneed self-test passed!")
     except ModuleNotFoundError:
       pass
-  
 
 
 # UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 python3 openpilot/compile.py

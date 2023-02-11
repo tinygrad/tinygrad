@@ -343,6 +343,7 @@ class GPUBuffer(ExplicitExecAST):
       self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
     assert self._buf is not None
     if self._backing is not None:
+      assert GlobalCounters.cache is None, f"can't copy in {self._backing.shape} while caching"
       self._buf.copyin(self._backing)
       self._backing = None
     return self._buf._cl
@@ -359,6 +360,7 @@ class GPUBuffer(ExplicitExecAST):
     cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else self.movement_op(MovementOps.RESHAPE, tuple(list(self.shape)+[1])).contiguous()
     assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
     data = np.empty(self.shape, dtype=np.float32)
+    assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     cl_buf._buf.copyout(data)
     return data
 
