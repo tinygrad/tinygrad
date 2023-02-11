@@ -11,7 +11,6 @@ from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
-from tinygrad.runtime.opencl import CL
 from extra.utils import get_parameters
 
 num_classes = 10
@@ -51,9 +50,7 @@ class SpeedyResNet:
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of logsoftmax
   def __call__(self, x): return x.sequential(self.net).logsoftmax()
 
-# TODO: this will become @tinygrad.jit
-from tinygrad.jit import tinyjit
-
+from extra.jit import tinyjit
 @tinyjit(enable=getenv("CLCACHE"))
 def train_step_jitted(model, optimizer, X, Y):
   out = model(X)
