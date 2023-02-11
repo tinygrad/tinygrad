@@ -65,6 +65,10 @@ class Node:
 
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
+    nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
+    num_sum = sum([x.b for x in num_nodes])
+    if num_sum != 0: nodes.append(NumNode(num_sum))
+
     if any([isinstance(x, SumNode) for x in nodes]):
       nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
       for x in sum_nodes: nodes += x.nodes
