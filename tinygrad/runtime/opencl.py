@@ -13,7 +13,6 @@ CLCACHE = getenv("CLCACHE", 1)
 FLOAT16 = getenv("FLOAT16", 0)
 
 class CL:
-  CACHE : ClassVar = None
   BUFFER_CACHE : ClassVar[Dict[int, List[cl.Buffer]]] = defaultdict(list)
   cl_ctx : ClassVar[Optional[cl.Context]] = None
   cl_queue : ClassVar[Optional[cl.CommandQueue]] = None
@@ -28,7 +27,6 @@ class CL:
 
   @staticmethod
   def enqueue_copy(a, b, is_blocking=False):
-    if CL.CACHE is not None: assert False, f"can't copy {a} -> {b} while caching"
     if DEBUG >= 1: print(f"**CL**        copy in {b.shape}" if isinstance(b, np.ndarray) else f"**CL**        copy OUT {a.shape}")
     cl.enqueue_copy(CL().cl_queue, a, b, is_blocking=is_blocking)
 
@@ -81,9 +79,8 @@ class CLProgram:
     if DEBUG >= 4: print(args[0], args[1], self.prg)
     # print the PTX for NVIDIA. TODO: probably broken for everything else
     if DEBUG >= 5: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
-    if CL.CACHE is not None: CL.CACHE.append((self, args))
     else: e = self.clprg(CL().cl_queue, *args)
-    if DEBUG >= 2 and CL.CACHE is None:
+    if DEBUG >= 2:
       assert CL.cl_queue is not None
       CL.cl_queue.finish()
       # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
@@ -91,6 +88,6 @@ class CLProgram:
       GlobalCounters.time_sum += et
     if DEBUG >= 1:
       print(f"**CL** {GlobalCounters.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if DEBUG <= 1 or CL.CACHE is not None else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
+            (str() if DEBUG <= 1 else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
-    return e if CL.CACHE is None else None
+    return e

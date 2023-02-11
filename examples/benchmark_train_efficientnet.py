@@ -35,6 +35,7 @@ if __name__ == "__main__":
     x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
     y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
 
+    # TODO: replace with TinyJit
     if i < 3 or not CLCACHE:
       st = time.monotonic()
       out = model.forward(x_train)
@@ -56,6 +57,7 @@ if __name__ == "__main__":
 
     if i == 2 and CLCACHE:
       cl_cache = GlobalCounters.cache
+      GlobalCounters.cache = None
 
     mem_used = GlobalCounters.mem_used
     loss_cpu = loss.detach().numpy()[0]
