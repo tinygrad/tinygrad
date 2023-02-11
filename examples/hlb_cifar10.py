@@ -52,25 +52,16 @@ class SpeedyResNet:
   def __call__(self, x): return x.sequential(self.net).logsoftmax()
 
 # TODO: this will become @tinygrad.jit
-first, cl_cache, loss = True, None, None
-def train_step_jitted(model, optimizer, X, Y, enable_jit=False):
-  global cl_cache, first, loss
-  GlobalCounters.reset()
+from tinygrad.jit import tinyjit
 
-  if not cl_cache:
-    if not first: GlobalCounters.cache = []
-    if enable_jit: first = False
-    out = model(X)
-    loss = out.mul(Y).mean()
-    if not getenv("DISABLE_BACKWARD"):
-      optimizer.zero_grad()
-      loss.backward()
-      optimizer.step()
-      loss.realize()
-    if not first: cl_cache = GlobalCounters.cache
-  else:
-    for prg, args in cl_cache:
-      prg(*args)
+@tinyjit(enable=getenv("CLCACHE"))
+def train_step_jitted(model, optimizer, X, Y):
+  out = model(X)
+  loss = out.mul(Y).mean()
+  if not getenv("DISABLE_BACKWARD"):
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
   return loss
 
 def fetch_batch(X_train, Y_train, BS):
@@ -122,7 +113,7 @@ def train_cifar():
       print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%")
     GlobalCounters.reset()
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, X, Y, enable_jit=getenv("CLCACHE"))
+    loss = train_step_jitted(model, optimizer, X, Y)
     et = time.monotonic()
     X, Y = fetch_batch(X_train, Y_train, BS=BS)  # do this here
     loss_cpu = loss.numpy()[0]
