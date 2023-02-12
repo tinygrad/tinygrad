@@ -59,8 +59,8 @@ def train_step_jitted(model, optimizer, X, Y):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-  optimizer.lr *= 0.995  # decay LR
-  optimizer.lr.realize()
+  #optimizer.lr *= 0.995  # decay LR
+  #optimizer.lr.realize()
   return loss.realize()
 
 def fetch_batch(X_train, Y_train, BS):
@@ -87,7 +87,7 @@ def train_cifar():
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
   if getenv("ADAM"):
-    optimizer = optim.Adam(get_parameters(model), lr=3e-4)
+    optimizer = optim.Adam(get_parameters(model), lr=Tensor([0.001]).realize())
   else:
     #optimizer = optim.SGD(get_parameters(model), lr=0.001)
     optimizer = optim.SGD(get_parameters(model), lr=Tensor([0.003]).realize(), momentum=0.85, nesterov=True)
