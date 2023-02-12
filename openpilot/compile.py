@@ -63,7 +63,7 @@ def model_exec(run_onnx, using_graph, **inputs):
   ret = next(iter(run_onnx(inputs).values()))
   GlobalCounters.cache = []  # don't cache pre-realize
   if using_graph: graph.GRAPH = True
-  return ret
+  return ret.realize()
 
 def compile(dat, output_fn):
   Tensor.no_grad = True
