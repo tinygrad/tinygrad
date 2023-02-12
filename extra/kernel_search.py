@@ -38,7 +38,9 @@ def get_interventions(k, winning_interventions=[]):
         p4.append((Interventions.SHIFT, (up_axis, amount, False)))
   """
   # no double reduce
-  if len([x for x in winning_interventions if x[0] == Interventions.REDUCE]) == 0:
+  #if len([x for x in winning_interventions if x[0] == Interventions.REDUCE]) == 0:
+  # in fact, reduce first
+  if len(winning_interventions) == 0:
     for axis in range(k.first_reduce + len(k.group_for_reduce), k.shape_len):
       max_up = max(st.shape[axis] for st in k.sts)
       if max_up <= 1024: p5 += [(Interventions.REDUCE, (axis, max_up))]
