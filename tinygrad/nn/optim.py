@@ -31,16 +31,15 @@ class SGD(Optimizer):
   def __init__(self, params : List[Tensor], lr=0.001, momentum=0, nesterov=False):
     super().__init__(params)
     self.lr, self.momentum, self.nesterov = lr, momentum, nesterov
-    self.b = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params] if self.momentum else []
+    self.b = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
       g = t.grad
-      if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)
-        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      self.b[i].assign(self.momentum * self.b[i] + g)
+      g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g * self.lr)
     self.realize(self.b)
 
