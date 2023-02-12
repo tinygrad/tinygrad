@@ -59,7 +59,8 @@ class TritonASTKernel(ASTKernel):
     for i, (s,a,r) in enumerate(self.buftokens[buf_index].axis):
       idxxx = ["None"] * al
       idxxx[i] = ":"
-      if a != 0: ranges.append(f" + (tl.arange(0, {s})[{','.join(idxxx)}] * {a})")
+      #if a != 0:
+      ranges.append(f" + (tl.arange(0, {s})[{','.join(idxxx)}] * {a})")
     return ranges
 
   func_cache: WeakValueDictionary = WeakValueDictionary()
