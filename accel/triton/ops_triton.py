@@ -8,6 +8,7 @@ import pycuda.driver as cuda # type: ignore
 
 import triton # type: ignore # noqa: F401
 import triton.language as tl  # type: ignore # noqa: F401
+from triton.compiler import compile as triton_compile
 
 from typing import Union, Tuple, Optional, Dict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
@@ -23,8 +24,8 @@ class TritonASTKernel(ASTKernel):
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.maximum(A, 0.0)", UnaryOps.GT0: "tl.where(A>0,1,0)",
     UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)",
-    #BinaryOps.MUL: "tl.dot(A,B)",
-    BinaryOps.MUL: "(A*B)",
+    #BinaryOps.MUL: "A*B",
+    BinaryOps.MUL: "tl.sum(A*B, axis=2)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "tl.exp(tl.log(A)*B)", BinaryOps.CMPEQ: "(A==B)",
     ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = tl.maximum(A,B)"
   }
@@ -59,8 +60,8 @@ class TritonASTKernel(ASTKernel):
     for i, (s,a,r) in enumerate(self.buftokens[buf_index].axis):
       idxxx = ["None"] * al
       idxxx[i] = ":"
-      #if a != 0:
-      ranges.append(f" + (tl.arange(0, {s})[{','.join(idxxx)}] * {a})")
+      if a != 0:
+        ranges.append(f" + (tl.arange(0, {s})[{','.join(idxxx)}] * {a})")
     return ranges
 
   func_cache: WeakValueDictionary = WeakValueDictionary()
@@ -73,7 +74,7 @@ class TritonASTKernel(ASTKernel):
     self.kernel = ["@triton.jit"]
     self.kernel.append("def fxn("+','.join(f"data{i}" for i in range(len(self.bufs)))+"):")
 
-    self.output_shape = list(self.sts[0].shape[:self.first_reduce]) 
+    self.output_shape = list(self.sts[0].shape[:self.first_reduce])
 
     # copied from ops_gpu
     # TODO CUDA only supports a grid of (2^31-1, 65535, 65535), that results in invalid kernel launches for some shapes, so flattern the grid for now.
@@ -86,12 +87,14 @@ class TritonASTKernel(ASTKernel):
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
     elif len(self.output_shape) == 0: self.output_shape = [1]
-    
+
     if self.reduceop:
       full_shape = [st.shape for st in self.sts if st.shape != self.sts[0].shape]
       full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
-      #self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
-      self.kernel += ["  acc = tl.zeros(("+','.join([str(x[0]) for x in self.buftokens[0].axis])+",), dtype=tl.float32)"]
+      if len(self.buftokens[0].axis):
+        self.kernel += ["  acc = tl.zeros(("+','.join([str(x[0]) for x in self.buftokens[0].axis])+",), dtype=tl.float32)"]
+      else:
+        self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
       self.kernel += [("  "*(i-self.first_reduce)+f"  for idx{i} in range(0, {full_shape[i]}):") for i in range(self.first_reduce, self.shape_len)]
       self.kernel_prefix =  "  "*(self.shape_len - self.first_reduce)
       self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.reduceop, "acc", True))
@@ -111,15 +114,35 @@ class TritonASTKernel(ASTKernel):
     hash = hashlib.md5(self.key.encode('utf-8')).hexdigest()
     fn = f"/tmp/{hash}.py"
     kernel = '\n'.join(self.kernel)
+
+    replace_kernel = """
+@triton.jit
+def fxn(data0,data1,data2):
+  idx1 = tl.program_id(0)
+  idx0 = tl.program_id(1)
+  acc = tl.zeros((16,16,), dtype=tl.float32)
+  for idx2 in range(0, 48):
+    val1 = tl.load(data1 + ((idx1*16)+(idx2*12288)) + (tl.arange(0, 16)[None,:] * 1) + (tl.arange(0, 16)[:,None] * 768))
+    val2 = tl.load(data2 + ((idx0*16)+(idx2*12288)) + (tl.arange(0, 16)[:,None] * 1) + (tl.arange(0, 16)[None,:] * 768))
+    acc += tl.dot(val2, val1, allow_tf32=False)
+  tl.store(data0 + ((idx0*12288)+(idx1*16)) + (tl.arange(0, 16)[:,None] * 768) + (tl.arange(0, 16)[None,:] * 1), acc)
+"""
+    if 'tl.zeros((16,16,)' in kernel: kernel = replace_kernel
     if DEBUG >= 4: print(kernel)
     with open(fn, "w") as f: f.write(kernel)
     codeObject = compile(kernel, fn, "exec")
     exec(codeObject, globals())
-    program = globals()['fxn']
+    program_jit = globals()['fxn']
+    config = program_jit._get_config(*[x.cuda for x in self.bufs])
+    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0)
+    if DEBUG >= 5:
+      #print(compiled.asm['ttir'])
+      #print(compiled.asm['llir'])
+      print(compiled.asm['ptx'])
     mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):
       GlobalCounters.log_kernel(self.info.flops, mem_estimate)
-      return program[tuple(self.output_shape[::-1])](*[x.cuda for x in bufs], stream=stream.handle)
+      return compiled[tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape)))](*[x.cuda for x in bufs], stream=stream.handle)
     self.func_cache[self.key] = runner
     return runner
 

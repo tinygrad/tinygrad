@@ -17,8 +17,9 @@ def test_gemm():
   k = TritonASTKernel(ast)
 
   ii = []
-  ii.append((Interventions.UPCAST, (0, 32)))
-  ii.append((Interventions.UPCAST, (1, 32)))
+  ii.append((Interventions.UPCAST, (0, 16)))
+  ii.append((Interventions.UPCAST, (1, 16)))
+  ii.append((Interventions.UPCAST, (2, 16)))
   #ii.append((Interventions.UPCAST, (1, 16)))
   #ii.append((Interventions.SHIFT, (1, 16, False)))
   #ii.append((Interventions.SHIFT, (1, 16, False)))
