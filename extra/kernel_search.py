@@ -81,11 +81,12 @@ def apply_intervention(k, typ, dat):
   k.simplify_ones()
   k.simplify_merge_adjacent()
 
-def run_and_time(k,cnt=3):
+def run_and_time(k,cnt=3,local_override=None):
   prog = k.codegen()
   ret = []
   for i in range(cnt):
     t1 = time.monotonic_ns()
+    if local_override: prog.local_work_size = local_override
     e = prog(*k.bufs)
     e.wait()
     t4 = time.monotonic_ns()
@@ -102,6 +103,7 @@ def search_one(ast, winning_interventions=[], debug=False):
   ints = get_interventions(k, winning_interventions)
   options = [(run_and_time(k), None, 0.9)]
   name = k.fxn.name
+  ops = k.fxn.op_estimate
   if debug: print(f"{options[-1][1]} : {options[-1][0]*1e-3:.2f}")
   for int in ints:
     try:
@@ -118,7 +120,7 @@ def search_one(ast, winning_interventions=[], debug=False):
   baseline = options[0]
   options = sorted(options, key=lambda x: x[0]*x[2])
   best = options[0]
-  print(f"{name:30s} {baseline[0]/1e3:9.2f} us -> {best[0]/1e3:9.2f} us {baseline[0]/best[0]:7.2f}x *with* {winning_interventions} + {best[1]}")
+  print(f"{name:30s} {baseline[0]/1e3:9.2f} us -> {best[0]/1e3:9.2f} us {baseline[0]/best[0]:7.2f}x {ops/best[0]*1e-3:5.2f}T *with* {winning_interventions} + {best[1]}")
   return best
 
 def apply_optimization(k, ast, max_interventions=1, cache=True):
@@ -144,26 +146,27 @@ def randomize_buffers(ast):
     randomness = np.random.default_rng().standard_normal(size=b._base_shape, dtype=np.float32)
     if b._buf is not None: b._buf.copyin(randomness)
 
-def one(ast, winning_interventions):
+def one(ast, winning_interventions, local_override=None):
   randomize_buffers(ast)
   k = CLASTKernel(ast)
   baseline = run_and_time(k, 1)
 
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
-  best = run_and_time(k, 1)
+  best = run_and_time(k, 1, local_override)
 
   name = k.fxn.name
   print(f"{name:30s} {baseline/1e3:9.2f} us -> {best/1e3:9.2f} us {baseline/best:7.2f}x *with* {winning_interventions}")
+  if not getenv("NOTEST"): test_ast(k)
 
-def search(ast, start_interventions=[]):
+def search(ast, start_interventions=[], depth=10):
   winning_interventions = start_interventions[:]
   randomize_buffers(ast)
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
   best_time = baseline = run_and_time(k)
 
-  for i in range(10):
+  for i in range(depth):
     print(winning_interventions)
     oo = search_one(ast, winning_interventions, True)
     print(oo)
@@ -296,11 +299,20 @@ if __name__ == "__main__":
     op1 = LazyOp(BinaryOps.MUL, (op0,buf1,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (1, 64, 1, 1))
   elif getenv("GEMM", 0):
-    buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, 512, 512, 1, 1, 1, 512), views=[View((1, 512, 512, 1), (0, 1, 512, 0), 0), View((1, 1, 512, 512, 1, 1, 1, 512), (0, 0, 0, 1, 0, 0, 0, 512), 0)]), hostbuf=GPUBuffer(shape=(512, 512), force_create=True))
-    buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, 512, 512, 1, 1, 1, 512), views=[View((1, 1, 512, 512, 1, 1, 1, 512), (0, 0, 1, 0, 0, 0, 0, 512), 0)]), hostbuf=GPUBuffer(shape=(512, 512), force_create=True))
+    N = 768
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, N, N, 1), (0, 1, N, 0), 0), View((1, 1, N, N, 1, 1, 1, N), (0, 0, 0, 1, 0, 0, 0, N), 0)]), hostbuf=GPUBuffer(shape=(N, N), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, 1, N, N, 1, 1, 1, N), (0, 0, 1, 0, 0, 0, 0, N), 0)]), hostbuf=GPUBuffer(shape=(N, N), force_create=True))
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
-    op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 1, 512, 512, 1, 1, 1, 1))
-    ast = LazyOp(MovementOps.RESHAPE, (op1,), (512, 512))
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 1, N, N, 1, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
+    ii = []
+    ii.append((Interventions.SHIFT, (1, 8, False)))
+    ii.append((Interventions.SHIFT, (1, 8, False)))
+    #ii.append((Interventions.UPCAST, (1, 4)))
+    #ii.append((Interventions.UPCAST, (0, 4)))
+    one(ast, ii, local_override=[8,8,1])
+    #search(ast, ii) #, depth=0)
+    exit(0)
   elif getenv("FASTCONV", 0):
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(32, 1, 32, 32, 32, 64, 3, 3), views=[View((32, 1, 32, 32, 32, 64, 3, 3), (73984, 73984, 0, 34, 1, 1156, 34, 1), 0)]), hostbuf=GPUBuffer(shape=(32, 64, 34, 34), force_create=True))
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(32, 1, 32, 32, 32, 64, 3, 3), views=[View((32, 1, 32, 32, 32, 64, 3, 3), (0, 0, 576, 0, 0, 9, 3, 1), 0)]), hostbuf=GPUBuffer(shape=(32, 64, 3, 3), force_create=True))
