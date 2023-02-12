@@ -107,7 +107,7 @@ class ASTKernel:
   def printbufs(self, prefix=""):
     print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
     for i in range(len(self.sts)):
-      print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, type(self.bufs[i]._buf))
+      print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf))
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)

@@ -22,7 +22,9 @@ class TritonASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "tl.maximum(A, 0.0)", UnaryOps.GT0: "tl.where(A>0,1,0)",
     UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)",
-    BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
+    BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)",
+    #BinaryOps.MUL: "tl.dot(A,B)",
+    BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "tl.exp(tl.log(A)*B)", BinaryOps.CMPEQ: "(A==B)",
     ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = tl.maximum(A,B)"
   }
@@ -35,10 +37,7 @@ class TritonASTKernel(ASTKernel):
       if buf_index not in self.loaded:
         idx, valid = self.sts[buf_index].expr_idxs()
         if valid.min == 1:
-          ranges = []
-          for s,a,r in self.buftokens[buf_index].axis:
-            if a != 0: ranges.append(f" + (tl.arange(0, {s}) * {a})")
-          self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.load(data{buf_index} + {idx.render()}{''.join(ranges)})")
+          self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.load(data{buf_index} + {idx.render()}{''.join(self.ranges(buf_index))})")
         else:
           valid_expr = valid.render().replace("&&", "*1*")
           self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx.render()}, mask={valid_expr}), 0.0)")
@@ -52,6 +51,16 @@ class TritonASTKernel(ASTKernel):
     code = code.replace("A", values[0])
     if len(values) == 2: code = code.replace("B", values[1])
     return code
+
+  def ranges(self, buf_index):
+    assert len(self.bufs[buf_index].st.views) == 1
+    ranges = []
+    al = len(self.buftokens[buf_index].axis)
+    for i, (s,a,r) in enumerate(self.buftokens[buf_index].axis):
+      idxxx = ["None"] * al
+      idxxx[i] = ":"
+      if a != 0: ranges.append(f" + (tl.arange(0, {s})[{','.join(idxxx)}] * {a})")
+    return ranges
 
   func_cache: WeakValueDictionary = WeakValueDictionary()
   def codegen(self):
@@ -95,10 +104,7 @@ class TritonASTKernel(ASTKernel):
 
     # store
     idx, valid = self.sts[0].expr_idxs()
-    ranges = []
-    for s,a,r in self.buftokens[0].axis:
-      if a != 0: ranges.append(f" + (tl.arange(0, {s}) * {a})")
-    self.kernel.append(f"  tl.store(data0 + {idx.render()}{''.join(ranges)}, {code})")
+    self.kernel.append(f"  tl.store(data0 + {idx.render()}{''.join(self.ranges(0))}, {code})")
 
     # Torch inductor seems to write out files too!
     hash = hashlib.md5(self.key.encode('utf-8')).hexdigest()
