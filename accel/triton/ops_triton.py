@@ -34,8 +34,14 @@ class TritonASTKernel(ASTKernel):
       buf_index = self.bufs.index(x)
       if buf_index not in self.loaded:
         idx, valid = self.sts[buf_index].expr_idxs()
-        valid_expr = valid.render().replace("&&", "*1*")
-        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx.render()}, mask={valid_expr}), 0.0)")
+        if valid.min == 1:
+          ranges = []
+          for s,a,r in self.buftokens[buf_index].axis:
+            if a != 0: ranges.append(f" + (tl.arange(0, {s}) * {a})")
+          self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.load(data{buf_index} + {idx.render()}{''.join(ranges)})")
+        else:
+          valid_expr = valid.render().replace("&&", "*1*")
+          self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx.render()}, mask={valid_expr}), 0.0)")
         self.loaded.add(buf_index)
       return f"val{buf_index}"
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
@@ -61,7 +67,7 @@ class TritonASTKernel(ASTKernel):
 
     # copied from ops_gpu
     # TODO CUDA only supports a grid of (2^31-1, 65535, 65535), that results in invalid kernel launches for some shapes, so flattern the grid for now.
-    MAX_OUTPUT_SHAPE = 1
+    MAX_OUTPUT_SHAPE = 3
     self.kernel += [f"  idx{len(self.output_shape)-1-i} = tl.program_id({i})" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape)))]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
@@ -74,17 +80,25 @@ class TritonASTKernel(ASTKernel):
     if self.reduceop:
       full_shape = [st.shape for st in self.sts if st.shape != self.sts[0].shape]
       full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]
-      self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
+      #self.kernel += [f"  acc = {TritonASTKernel.start_for_op[self.reduceop.op]}"]
+      self.kernel += ["  acc = tl.zeros(("+','.join([str(x[0]) for x in self.buftokens[0].axis])+",), dtype=tl.float32)"]
       self.kernel += [("  "*(i-self.first_reduce)+f"  for idx{i} in range(0, {full_shape[i]}):") for i in range(self.first_reduce, self.shape_len)]
       self.kernel_prefix =  "  "*(self.shape_len - self.first_reduce)
       self.kernel.append("  "+self.kernel_prefix+self.ast_parse(self.reduceop, "acc", True))
       self.kernel_prefix =  ""
 
+    if DEBUG >= 3:
+      print("output shape", self.output_shape)
+      self.printbufs("new:")
+
     code = self.ast_parse(self.ast, "acc")
 
     # store
     idx, valid = self.sts[0].expr_idxs()
-    self.kernel.append(f"  tl.store(data0 + {idx.render()}, {code})")
+    ranges = []
+    for s,a,r in self.buftokens[0].axis:
+      if a != 0: ranges.append(f" + (tl.arange(0, {s}) * {a})")
+    self.kernel.append(f"  tl.store(data0 + {idx.render()}{''.join(ranges)}, {code})")
 
     # Torch inductor seems to write out files too!
     hash = hashlib.md5(self.key.encode('utf-8')).hexdigest()
