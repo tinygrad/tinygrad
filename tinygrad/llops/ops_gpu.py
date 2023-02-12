@@ -74,7 +74,7 @@ class CLASTKernel(ASTKernel):
     const = None
     if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
       assert self.buftokens[buf_index].typ == Types.FLOAT
-      self.bufs_to_delete.add(buf_index)
+      if buf_index != 0: self.bufs_to_delete.add(buf_index)
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", self.buftokens[buf_index].typ)
 
     tokens = []

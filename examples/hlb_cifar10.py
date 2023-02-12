@@ -59,7 +59,9 @@ def train_step_jitted(model, optimizer, X, Y):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-  return loss
+  optimizer.lr *= 0.995  # decay LR
+  optimizer.lr.realize()
+  return loss.realize()
 
 def fetch_batch(X_train, Y_train, BS):
   # fetch a batch
@@ -88,7 +90,7 @@ def train_cifar():
     optimizer = optim.Adam(get_parameters(model), lr=3e-4)
   else:
     #optimizer = optim.SGD(get_parameters(model), lr=0.001)
-    optimizer = optim.SGD(get_parameters(model), lr=0.003, momentum=0.85, nesterov=True)
+    optimizer = optim.SGD(get_parameters(model), lr=Tensor([0.003]).realize(), momentum=0.85, nesterov=True)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
