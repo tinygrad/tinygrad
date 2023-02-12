@@ -52,7 +52,7 @@ def helper_test_optim(steps, tinyoptim, torchoptim, tinyargs={}, torchargs={}):
     np.testing.assert_allclose(x1, x2, atol=1e-4)
     np.testing.assert_allclose(y1, y2, atol=1e-4)
 
-steps = 10
+steps = 20
 class TestOptim(unittest.TestCase):
 
   def test_adam(self):
@@ -74,7 +74,8 @@ class TestOptim(unittest.TestCase):
 
   def test_rmsprop(self):
     helper_test_optim(steps, RMSprop, torch.optim.RMSprop, 
-                      tinyargs={'lr': 0.001, 'decay': 0.99}, torchargs={'lr': 0.001, 'alpha': 0.99})
+                      tinyargs={'lr': 0.001, 'decay': 0.99},
+                      torchargs={'lr': 0.001, 'alpha': 0.99})
 
 if __name__ == '__main__':
   unittest.main()
