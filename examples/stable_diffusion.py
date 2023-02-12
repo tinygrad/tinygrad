@@ -605,7 +605,7 @@ FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
-  parser.add_argument('--phrase', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
+  parser.add_argument('--prompt', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
   parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
   args = parser.parse_args()
 
@@ -633,12 +633,12 @@ if __name__ == "__main__":
   # run through CLIP to get context
 
   tokenizer = ClipTokenizer()
-  phrase = tokenizer.encode(args.phrase)
-  context = model.cond_stage_model.transformer.text_model(phrase).realize()
+  prompt = tokenizer.encode(args.prompt)
+  context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got CLIP context", context.shape)
 
-  phrase = tokenizer.encode("")
-  unconditional_context = model.cond_stage_model.transformer.text_model(phrase).realize()
+  prompt = tokenizer.encode("")
+  unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
 
   # done with clip model
