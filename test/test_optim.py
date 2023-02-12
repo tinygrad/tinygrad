@@ -14,6 +14,7 @@ def walk_tinygrad(optim, steps, kwargs={}):
   optim = optim([net.x, net.W], **kwargs)
   for _ in range(steps):
     out = net.forward()
+    out.data
     out.backward()
     optim.step()
   return net.x.cpu().data, net.W.cpu().data
