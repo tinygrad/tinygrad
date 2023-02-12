@@ -278,6 +278,7 @@ class Tensor:
     _, e, ss = self._softmax()
     return e.div(ss)
 
+  # TODO: logsoftmax -> log_softmax and add dim param
   def logsoftmax(self):
     m, _, ss = self._softmax()
     return m - ss.log()
