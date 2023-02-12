@@ -10,7 +10,7 @@ import triton # type: ignore # noqa: F401
 import triton.language as tl  # type: ignore # noqa: F401
 
 from typing import Union, Tuple, Optional, Dict
-from tinygrad.ops import MovementOps, UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import prod
 from tinygrad.runtime.cuda import CLBuffer
@@ -34,8 +34,8 @@ class TritonASTKernel(ASTKernel):
       buf_index = self.bufs.index(x)
       if buf_index not in self.loaded:
         idx, valid = self.sts[buf_index].expr_idxs()
-        valid_expr = str(valid).replace("&&", "*1*")
-        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx}, mask={valid_expr}), 0.0)")
+        valid_expr = valid.render().replace("&&", "*1*")
+        self.kernel.append(self.kernel_prefix + f"  val{buf_index} = tl.where({valid_expr}, tl.load(data{buf_index} + {idx.render()}, mask={valid_expr}), 0.0)")
         self.loaded.add(buf_index)
       return f"val{buf_index}"
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
@@ -84,7 +84,7 @@ class TritonASTKernel(ASTKernel):
 
     # store
     idx, valid = self.sts[0].expr_idxs()
-    self.kernel.append(f"  tl.store(data0 + {idx}, {code})")
+    self.kernel.append(f"  tl.store(data0 + {idx.render()}, {code})")
 
     # Torch inductor seems to write out files too!
     hash = hashlib.md5(self.key.encode('utf-8')).hexdigest()
@@ -97,8 +97,7 @@ class TritonASTKernel(ASTKernel):
     program = globals()['fxn']
     mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):
-      GlobalCounters.global_ops += self.info.flops
-      GlobalCounters.global_mem += mem_estimate
+      GlobalCounters.log_kernel(self.info.flops, mem_estimate)
       return program[tuple(self.output_shape[::-1])](*[x.cuda for x in bufs], stream=stream.handle)
     self.func_cache[self.key] = runner
     return runner
@@ -123,7 +122,8 @@ class TritonBuffer(ExplicitExecAST):
 
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
-    buf = self.contiguous() if self._buf is not None else self.movement_op(MovementOps.RESHAPE, list(self.shape)+[1]).unary_op(UnaryOps.NOOP)
+    buf = self.contiguous()
+    buf.cuda
     buf._buf.copyout(data)
     return data
 
@@ -138,4 +138,4 @@ class TritonDeviceAllocation(CLBuffer):
     super().__init__(size)
     self.dtype = float32
 
-  def data_ptr(self): return int(self.cl)
+  def data_ptr(self): return int(self._cl)
