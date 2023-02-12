@@ -43,9 +43,9 @@ def helper_test_speed(f1, *args):
     args = [(x+1).realize() if isinstance(x,Tensor) else (None if x is None else (x+1)) for x in args]  # cache defeats
     st = time.monotonic()
     ret = f1(*args)
-    if CL is not None and ret.device in ["GPU"]:
+    if isinstance(ret, Tensor) and CL is not None and ret.device in ["GPU"]:
       CL.cl_queue.finish()
-    if torch_device != "cpu":
+    if not isinstance(ret, Tensor) and torch_device != "cpu":
       # TODO: better way to sync?
       torch.zeros(1, device=torch_device).cpu()
     et = (time.monotonic() - st) * 1000
