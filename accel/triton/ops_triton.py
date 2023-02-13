@@ -135,14 +135,21 @@ def fxn(data0,data1,data2):
     program_jit = globals()['fxn']
     config = program_jit._get_config(*[x.cuda for x in self.bufs])
     compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=4, num_warps=4)
+    from tinygrad.runtime.cuda import CLProgram
+    real_name = compiled.asm['ptx'].split(".visible .entry ")[1].split("(")[0]
+    self.fxn = CLProgram(real_name, compiled.asm['ptx'], binary=True, shared=compiled.shared)
+
     if DEBUG >= 5:
       #print(compiled.asm['ttir'])
       #print(compiled.asm['llir'])
       print(compiled.asm['ptx'])
+
     mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):
       GlobalCounters.log_kernel(self.info.flops, mem_estimate)
-      return compiled[tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape)))](*[x.cuda for x in bufs], stream=stream.handle)
+      return self.fxn([32*4*12, 6, 1], [32*4, 1, 1], *[x.cuda._cl for x in bufs], stream=stream)
+      #return self.fxn(self.output_shape[::-1] + [1]*(3-len(self.output_shape)), [1, 1, 1], *[x.cuda._cl for x in bufs])
+      #return compiled[tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape)))](*[x.cuda for x in bufs], stream=stream.handle)
     self.func_cache[self.key] = runner
     return runner
 
