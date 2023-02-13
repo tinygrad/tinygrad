@@ -42,7 +42,7 @@ class SGD(Optimizer):
         self.b[i].assign(self.momentum * self.b[i] + g)
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g * self.lr)
-    self.realize(self.b)
+    #self.realize(self.b)
 
 class RMSprop(Optimizer):
   def __init__(self, params : List[Tensor], lr=0.001, decay=0.9, eps=1e-8):
@@ -56,7 +56,7 @@ class RMSprop(Optimizer):
       assert t.grad is not None
       self.v[i].assign(self.decay * self.v[i] + (1.0 - self.decay) * (t.grad * t.grad))
       t.assign(t.detach() - (t.grad * self.lr).div(self.v[i].sqrt() + self.eps))
-    self.realize(self.v)
+    #self.realize(self.v)
 
 class Adam(Optimizer):
   def __init__(self, params : List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
@@ -75,7 +75,7 @@ class Adam(Optimizer):
       self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
       t.assign(t.detach() - a * self.m[i].div(self.v[i].sqrt() + self.eps))
-    self.realize([self.t] + self.m + self.v)
+    #self.realize([self.t] + self.m + self.v)
 
 def get_parameters(obj) -> List[Tensor]:
   parameters : List[Tensor] = []
