@@ -131,7 +131,7 @@ def fxn(data0,data1,data2):
     codeObject = compile(kernel, fn, "exec")
     exec(codeObject, globals())
     program_jit = globals()['fxn']
-    config = program_jit._get_config(*[x.cuda for x in self.bufs])
+    config = program_jit._get_config(*[x.cl for x in self.bufs])
     compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=4, num_warps=4)
     from tinygrad.runtime.cuda import CLProgram
     real_name = compiled.asm['ptx'].split(".visible .entry ")[1].split("(")[0]
