@@ -1,12 +1,13 @@
 from __future__ import annotations
 import numpy as np
+import itertools
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
-from tinygrad.shape import ShapeTracker
-from tinygrad.shape.symbolic import ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
+from tinygrad.shape import ShapeTracker, View
+from tinygrad.shape.symbolic import ModNode, DivNode, Variable, render_python   # this will go away when VALIDHACKS does
 # div is different in cl than python
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
@@ -81,7 +82,7 @@ class CLASTKernel(ASTKernel):
     for o in self.buftokens[buf_index].offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
       if (buf_index, o) not in self.loaded_keys:
-        idxy, valid = self.sts[buf_index].expr_idxs(o)
+        idxy, valid = self.sts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(self.shape_len)] if self.is_local[buf_index] else None)
         if const is not None:
           ldr = const
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
@@ -263,6 +264,20 @@ class CLASTKernel(ASTKernel):
         self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
+    
+    self.local_shape = (4,4)
+    self.kernel += [f"int lidx{len(self.local_shape)-1-i} = get_local_id({i}); /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
+    
+    # caching all the buffers
+    zero_stride = []
+    for i in range(1, len(self.bufs)):
+      zero_stride.append(self.sts[i].views[-1].strides.index(0))
+      local_offs = [[j*self.sts[i].views[-1].strides[d] for j in range(0,self.local_shape[d])] for d in range(len(self.local_shape))]
+      off = self.buftokens[i].offsets()
+      all_offs = [sum(x) for x in itertools.product(off, *local_offs)]
+      print(i, all_offs)
+      self.kernel.append(f"__local float ldata{i}[{len(set(all_offs))}];\n")
+      self.is_local[i] = True
 
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
@@ -274,6 +289,32 @@ class CLASTKernel(ASTKernel):
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
+
+      for i in range(1, len(self.bufs)):
+        tsts = self.sts[i]
+        tbt = self.buftokens[i]
+        # do the loads
+
+        # replace the buftoken
+        self.buftokens[i] = Token(f"ldata{i}", Types.FLOAT, True)
+        zs = self.local_shape[zero_stride[i-1]]
+        for l,s,r in tbt.axis: self.buftokens[i].array(min(zs, l),min(zs, s),r)
+
+        # fix up the shapetracker
+        view = View(tuple([min(s, ls) for s,ls in zip(tsts.views[-1].shape, self.local_shape)] + list(tsts.views[-1].shape[len(self.local_shape):])),
+                    tuple([min(s, ls) for s,ls in zip(tsts.views[-1].strides, self.local_shape)] + [0]*(self.shape_len-len(self.local_shape))))
+        self.sts[i] = ShapeTracker(shape=view.shape, views=[view])
+
+        expr, valid = tsts.expr_idxs(0)
+        lexpr = Variable(f"lidx{zero_stride[i-1]}", 0, self.local_shape[zero_stride[i-1]]) * tbt.axis[0][1]
+        expr = Variable.sum([expr, lexpr])
+        self.kernel.append(f"ldata{i}[lidx0*{self.local_shape[0]}+lidx1] = data{i}[{expr.render()}];\n")
+      self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
+
+      if DEBUG >= 3:
+        print("output shape", self.output_shape, self.local_shape)
+        self.printbufs("pr:")
+
       expanded_accumulators = split_float4(accumulators) if accumulators[0].typ == Types.FLOAT4 and len(accumulators)*4 == len(acc_offsets) else accumulators
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
@@ -319,7 +360,8 @@ class CLASTKernel(ASTKernel):
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    return GPURunner(self.fxn, self.bufs_to_delete, self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None)
+    return GPURunner(self.fxn, self.bufs_to_delete, self.output_shape[::-1] if len(self.output_shape) > 0 else [1], list(self.local_shape))
+    #(self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None)
 
   def print(self):
     super().print()

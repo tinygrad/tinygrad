@@ -78,6 +78,7 @@ class ASTKernel:
 
     # process
     self.sts : List[ShapeTracker] = [x.st.copy() for x in self.bufs]   # create new shapetrackers inside this kernel
+    self.is_local : List[bool] = [False] * len(self.sts)
     self.simplify_ones()
     self.simplify_merge_adjacent()
 

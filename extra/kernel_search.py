@@ -147,10 +147,11 @@ def randomize_buffers(ast):
     randomness = np.random.default_rng().standard_normal(size=b._base_shape, dtype=np.float32)
     if b._buf is not None: b._buf.copyin(randomness)
 
-def one(ast, winning_interventions, local_override=None, code_override=None):
+def one(ast, winning_interventions, local_override=None, code_override=None, skip_baseline=False):
   randomize_buffers(ast)
   k = CLASTKernel(ast)
-  baseline = run_and_time(k, 1)
+  if skip_baseline: baseline = 0
+  else: baseline = run_and_time(k, 1)
 
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
@@ -317,7 +318,7 @@ if __name__ == "__main__":
     op1 = LazyOp(ReduceOps.SUM, (op0,), (N, N, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
     ii = []
-    #ii.append((Interventions.UPCAST, (0, 4, False)))
+    #ii.append((Interventions.UPCAST, (0, 2, False)))
     #ii.append((Interventions.UPCAST, (1, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
     code_override = """
@@ -331,8 +332,8 @@ __kernel void re_S768_768_N1( __global float* data0, __global float* data1, __gl
  float acc0 = 0.0;
  for (int idx2 = 0; idx2 < 192; idx2++) {
   // 4*4*2 = 32 global loads
-  ldata1[lidx0*4+lidx1] = data1[((idx0*768)+(idx2*4))+lidx1];
-  ldata2[lidx0*4+lidx1] = data2[(idx1+(idx2*3072)+(lidx0*768))];
+  ldata1[lidx0*4+lidx1] = data1[(lidx1+(idx0*768)+(idx2*4))];                     
+  ldata2[lidx0*4+lidx1] = data2[((lidx0*768)+idx1+(idx2*3072))]; 
  barrier(CLK_LOCAL_MEM_FENCE);
  float val1_0 = ldata1[((lidx0*4))];
  float val1_1 = ldata1[((lidx0*4)+1)];
@@ -359,7 +360,8 @@ __kernel void re_S768_768_N1( __global float* data0, __global float* data1, __gl
  data0[((idx0*768)+idx1)] = acc0;
  }
 """
-    k = one(ast, ii, local_override=(4,4), code_override=code_override)
+    k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
+    #k = one(ast, ii, code_override=code_override, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
     exit(0)
   elif getenv("GEMM", 0):
