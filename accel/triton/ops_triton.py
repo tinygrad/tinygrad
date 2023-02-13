@@ -4,7 +4,7 @@ from weakref import WeakValueDictionary
 from torch import float32
 import numpy as np
 import pycuda.autoprimaryctx # type: ignore # noqa: F401
-import pycuda.driver as cuda # type: ignore
+import pycuda.driver as cuda # type: ignore # noqa: F401
 
 import triton # type: ignore # noqa: F401
 import triton.language as tl  # type: ignore # noqa: F401
@@ -16,8 +16,6 @@ from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import prod
 from tinygrad.runtime.cuda import CLBuffer
 from tinygrad.ast import ASTKernel
-
-stream = cuda.Stream()
 
 class TritonASTKernel(ASTKernel):
   code_for_op : Dict[Op, str] = {
@@ -146,10 +144,9 @@ def fxn(data0,data1,data2):
 
     mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):
+      #compiled[tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape)))](*[x.cl for x in bufs], stream=0)
+      self.fxn.prg(*[x.cl._cl for x in bufs], grid=tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape))), block=(32*compiled.num_warps, 1, 1), shared=compiled.shared)
       GlobalCounters.log_kernel(self.info.flops, mem_estimate)
-      return self.fxn([32*4*12, 6, 1], [32*4, 1, 1], *[x.cuda._cl for x in bufs], stream=stream)
-      #return self.fxn(self.output_shape[::-1] + [1]*(3-len(self.output_shape)), [1, 1, 1], *[x.cuda._cl for x in bufs])
-      #return compiled[tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape)))](*[x.cuda for x in bufs], stream=stream.handle)
     self.func_cache[self.key] = runner
     return runner
 
@@ -159,13 +156,13 @@ class TritonBuffer(ExplicitExecAST):
     self._buf : Optional[TritonDeviceAllocation] = hostbuf._buf if hostbuf is not None else None
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
-    if force_create: self.cuda
+    if force_create: self.cl
 
   @property
-  def cuda(self):
+  def cl(self):
     if self._buf is None:
       self._buf = TritonDeviceAllocation(4*prod(self._base_shape))
-      if self._backing is not None: self._buf.copyin(self._backing, stream)
+      if self._backing is not None: self._buf.copyin(self._backing)
     return self._buf
 
   @staticmethod
@@ -174,7 +171,7 @@ class TritonBuffer(ExplicitExecAST):
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
     buf = self.contiguous()
-    buf.cuda
+    buf.cl
     buf._buf.copyout(data)
     return data
 

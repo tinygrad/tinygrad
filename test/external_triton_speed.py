@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad.helpers import getenv
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
-from tinygrad.llops.ops_triton import TritonBuffer, TritonASTKernel, stream
+from tinygrad.llops.ops_triton import TritonBuffer, TritonASTKernel, cuda
 from extra.kernel_search import apply_intervention, Interventions, randomize_buffers
 from extra.lib_test_ast import test_ast
 
@@ -31,15 +31,16 @@ def test_gemm():
 
   runner = k.codegen()
   runner(*k.bufs)
-  stream.synchronize()
+  cuda.Context.synchronize()
   ops = k.info.flops
 
   t1 = time.monotonic_ns()
   runner(*k.bufs)
-  stream.synchronize()
   t2 = time.monotonic_ns()
+  cuda.Context.synchronize()
+  t3 = time.monotonic_ns()
 
-  print(f"{(t2-t1)*1e-3:7.2f} us  {ops/(t2-t1):5.2f} GFLOPS")
+  print(f"{(t3-t1)*1e-3:7.2f} us ({(t2-t1)*1e-3:7.2f} us to launch) {ops/(t3-t1):5.2f} GFLOPS (up to {ops/(t3-t2):5.2f} GFLOPS)")
 
   real = hb0.toCPU() @ hb1.toCPU()
   test = k.ret.toCPU()
