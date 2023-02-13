@@ -321,46 +321,7 @@ if __name__ == "__main__":
     #ii.append((Interventions.UPCAST, (0, 2, False)))
     #ii.append((Interventions.UPCAST, (1, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
-    code_override = """
-__kernel void re_S768_768_N1( __global float* data0, __global float* data1, __global float* data2 ) {
- int idx1 = get_global_id(0); /* 768 */
- int idx0 = get_global_id(1); /* 768 */
- int lidx1 = get_local_id(0); /* 4 */
- int lidx0 = get_local_id(1); /* 4 */
- __local float ldata1[4*4];
- __local float ldata2[4*4];
- float acc0 = 0.0;
- for (int idx2 = 0; idx2 < 192; idx2++) {
-  // 4*4*2 = 32 global loads
-  ldata1[lidx0*4+lidx1] = data1[(lidx1+(idx0*768)+(idx2*4))];                     
-  ldata2[lidx0*4+lidx1] = data2[((lidx0*768)+idx1+(idx2*3072))]; 
- barrier(CLK_LOCAL_MEM_FENCE);
- float val1_0 = ldata1[((lidx0*4))];
- float val1_1 = ldata1[((lidx0*4)+1)];
- float val1_2 = ldata1[((lidx0*4)+2)];
- float val1_3 = ldata1[((lidx0*4)+3)];
- float val2_0 = ldata2[(lidx1)];
- float val2_768 = ldata2[(lidx1+4)];
- float val2_1536 = ldata2[(lidx1+8)];
- float val2_2304 = ldata2[(lidx1+12)];
- // 4*4*8 = 128 global loads
- /*float val1_0 = data1[((idx0*768)+(idx2*4))];
- float val1_1 = data1[((idx0*768)+(idx2*4)+1)];
- float val1_2 = data1[((idx0*768)+(idx2*4)+2)];
- float val1_3 = data1[((idx0*768)+(idx2*4)+3)];
- float val2_0 = data2[(idx1+(idx2*3072))];
- float val2_768 = data2[(idx1+(idx2*3072)+768)];
- float val2_1536 = data2[(idx1+(idx2*3072)+1536)];
- float val2_2304 = data2[(idx1+(idx2*3072)+2304)];*/
- acc0+=(val1_0*val2_0);
- acc0+=(val1_1*val2_768);
- acc0+=(val1_2*val2_1536);
- acc0+=(val1_3*val2_2304);
- }
- data0[((idx0*768)+idx1)] = acc0;
- }
-"""
-    k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
+    k = one(ast, ii, skip_baseline=False) #, local_override=(4,4)) #, code_override=code_override)
     #k = one(ast, ii, code_override=code_override, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
     exit(0)
