@@ -271,7 +271,7 @@ class CLASTKernel(ASTKernel):
     for i in range(1, len(self.bufs)):
       if len(self.buftokens[i].axis) == 0: continue
       zero_stride.append(self.sts[i].views[-1].strides.index(0))
-      self.local_shape[zero_stride[-1]] = self.buftokens[i].axis[-1][0]
+      self.local_shape[zero_stride[-1]] = self.buftokens[i].axis[0][0]
       self.is_local[i] = True
     for i in range(1, len(self.bufs)):
       if not self.is_local[i]: continue
@@ -293,22 +293,24 @@ class CLASTKernel(ASTKernel):
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
 
+      if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
       for i in range(1, len(self.bufs)):
         if not self.is_local[i]: continue
         tsts = self.sts[i]
         tbt = self.buftokens[i]
-        # do the loads
-
-        # replace the buftoken
-        self.buftokens[i] = Token(f"ldata{i}", Types.FLOAT, True)
         zs = self.local_shape[zero_stride[i-1]]
-        for l,s,r in tbt.axis: self.buftokens[i].array(min(zs, l),min(zs, s),r)  # wrong
+        # do the loads
 
         # loadtoken
         loadtoken = Token(f"ldata{i}", Types.FLOAT, True)
-        for l,s,r in tbt.axis[0:-1]: loadtoken.array(l, s, r)
+        for l,s,r in tbt.axis[1:]: loadtoken.array(l, s, r)
         lloadtoken = Token(f"ldata{i}", Types.FLOAT, True)
-        for l,s,r in tbt.axis[0:-1]: lloadtoken.array(min(zs, l),min(zs, s), r)
+        for l,s,r in tbt.axis[1:]: lloadtoken.array(min(zs, l),min(zs, s), r)
+        num = len(set(lloadtoken.offsets()))
+
+        # replace the buftoken
+        self.buftokens[i] = Token(f"ldata{i}", Types.FLOAT, True)
+        for l,s,r in tbt.axis: self.buftokens[i].array(l,min(zs*num,s),r)  # wrong
 
         # fix up the shapetracker
         view = View(tuple([min(s, ls) for s,ls in zip(tsts.views[-1].shape, self.local_shape)] + list(tsts.views[-1].shape[len(self.local_shape):])),
@@ -320,12 +322,14 @@ class CLASTKernel(ASTKernel):
           if o in seen_o: continue
           seen_o.add(o)
           expr, valid = tsts.expr_idxs(o)
-          lexpr = Variable(f"lidx{zero_stride[i-1]}", 0, self.local_shape[zero_stride[i-1]]) * tbt.axis[-1][1]
+          lexpr = Variable(f"lidx{zero_stride[i-1]}", 0, self.local_shape[zero_stride[i-1]]) * tbt.axis[0][1]
           expr = Variable.sum([expr, lexpr])
-          self.kernel.append(f"ldata{i}[lidx0*{self.local_shape[0]*len(set(lloadtoken.offsets()))}+lidx1+{lo}] = data{i}[{expr.render()}];\n")
+          self.kernel.append(f"ldata{i}[lidx0*{self.local_shape[0]*num}+lidx1*{num}+{lo}] = data{i}[{expr.render()}];\n")
 
-        ts = self.sts[i].views[-1].strides 
-        self.sts[i].views[-1].strides = tuple([ts[0]*len(set(lloadtoken.offsets()))] + list(ts[1:]))
+        ts = list(self.sts[i].views[-1].strides)
+        print(num)
+        ts[0] *= num  # wrong
+        self.sts[i].views[-1].strides = tuple(ts)
       if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
 
       if DEBUG >= 3:
