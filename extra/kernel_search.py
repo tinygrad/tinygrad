@@ -6,7 +6,7 @@ from enum import Enum
 import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
-from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel
+from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CLProgram
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
 from tinygrad.ops import DEBUG
 from tinygrad.helpers import getenv
@@ -81,8 +81,9 @@ def apply_intervention(k, typ, dat):
   k.simplify_ones()
   k.simplify_merge_adjacent()
 
-def run_and_time(k,cnt=3,local_override=None):
+def run_and_time(k,cnt=3,local_override=None, code_override=None):
   prog = k.codegen()
+  if code_override: prog.clprg = CLProgram(prog.clprg.name, code_override, op_estimate=prog.clprg.op_estimate, mem_estimate=prog.clprg.mem_estimate)
   ret = []
   for i in range(cnt):
     t1 = time.monotonic_ns()
@@ -146,18 +147,19 @@ def randomize_buffers(ast):
     randomness = np.random.default_rng().standard_normal(size=b._base_shape, dtype=np.float32)
     if b._buf is not None: b._buf.copyin(randomness)
 
-def one(ast, winning_interventions, local_override=None):
+def one(ast, winning_interventions, local_override=None, code_override=None):
   randomize_buffers(ast)
   k = CLASTKernel(ast)
   baseline = run_and_time(k, 1)
 
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
-  best = run_and_time(k, 1, local_override)
+  best = run_and_time(k, 1, local_override, code_override)
 
   name = k.fxn.name
   print(f"{name:30s} {baseline/1e3:9.2f} us -> {best/1e3:9.2f} us {baseline/best:7.2f}x *with* {winning_interventions}")
   if not getenv("NOTEST"): test_ast(k)
+  return k
 
 def search(ast, start_interventions=[], depth=10):
   winning_interventions = start_interventions[:]
@@ -305,6 +307,44 @@ if __name__ == "__main__":
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
     op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 1, N, N, 1, 1, 1, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
+  elif getenv("DGEMM", 0):
+    N = 768
+    hb0 = GPUBuffer(shape=(N, N), force_create=True)
+    hb1 = GPUBuffer(shape=(N, N), force_create=True)
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(N, N, N), views=[View((N, N, N), (N, 0, 1), 0)]), hostbuf=hb0)
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(N, N, N), views=[View((N, N, N), (0, 1, N), 0)]), hostbuf=hb1)
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (N, N, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
+    ii = []
+    #ii.append((Interventions.UPCAST, (0, 4, False)))
+    #ii.append((Interventions.UPCAST, (1, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 4, False)))
+    code_override = """
+__kernel void re_S768_768_N1( __global float* data0, __global float* data1, __global float* data2 ) {
+ int idx1 = get_global_id(0); /* 768 */
+ int idx0 = get_global_id(1); /* 768 */
+ float acc0 = 0.0;
+ for (int idx2 = 0; idx2 < 192; idx2++) {
+ float val1_0 = data1[((idx0*768)+(idx2*4))];
+ float val1_1 = data1[((idx0*768)+(idx2*4)+1)];
+ float val1_2 = data1[((idx0*768)+(idx2*4)+2)];
+ float val1_3 = data1[((idx0*768)+(idx2*4)+3)];
+ float val2_0 = data2[(idx1+(idx2*3072))];
+ float val2_768 = data2[(idx1+(idx2*3072)+768)];
+ float val2_1536 = data2[(idx1+(idx2*3072)+1536)];
+ float val2_2304 = data2[(idx1+(idx2*3072)+2304)];
+ acc0+=(val1_0*val2_0);
+ acc0+=(val1_1*val2_768);
+ acc0+=(val1_2*val2_1536);
+ acc0+=(val1_3*val2_2304);
+ }
+ data0[((idx0*768)+idx1)] = acc0;
+ }
+"""
+    k = one(ast, ii, local_override=(4,4), code_override=code_override)
+    np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
+    exit(0)
   elif getenv("GEMM", 0):
     N = 768
     # TODO: this is creating too many views
