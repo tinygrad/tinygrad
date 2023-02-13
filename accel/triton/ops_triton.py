@@ -58,7 +58,7 @@ class TritonASTKernel(ASTKernel):
     for i, (s,a,r) in enumerate(self.buftokens[buf_index].axis):
       idxxx = ["None"] * al
       idxxx[i] = ":"
-      if a != 0 or True:
+      if a != 0: # or True:
         ranges.append(f" + (tl.arange(0, {s})[{','.join(idxxx)}] * {a})")
     return ranges
 
@@ -125,17 +125,21 @@ def fxn(data0,data1,data2):
     acc += tl.dot(val1, val2, allow_tf32=False)
   tl.store(data0 + ((idx0*98304)+(idx1*64)) + (tl.arange(0, 128)[:,None] * 768) + (tl.arange(0, 64)[None,:] * 1), acc)
 """
-    if 'tl.zeros((128,64,)' in kernel: kernel = replace_kernel
+    if 'tl.zeros((128,64,)' in kernel and False: kernel = replace_kernel
     if DEBUG >= 4: print(kernel)
     with open(fn, "w") as f: f.write(kernel)
     codeObject = compile(kernel, fn, "exec")
     exec(codeObject, globals())
     program_jit = globals()['fxn']
     config = program_jit._get_config(*[x.cl for x in self.bufs])
-    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=4, num_warps=4)
+    # num_warps=8 is faster
+    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=1, num_warps=8)
     from tinygrad.runtime.cuda import CLProgram
     real_name = compiled.asm['ptx'].split(".visible .entry ")[1].split("(")[0]
     self.fxn = CLProgram(real_name, compiled.asm['ptx'], binary=True, shared=compiled.shared)
+
+    if DEBUG >= 4:
+      print(f"num_warps: {compiled.num_warps} shared: 0x{compiled.shared:x}")
 
     if DEBUG >= 5:
       #print(compiled.asm['ttir'])

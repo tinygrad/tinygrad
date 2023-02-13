@@ -34,13 +34,17 @@ def test_gemm():
   cuda.Context.synchronize()
   ops = k.info.flops
 
-  t1 = time.monotonic_ns()
-  runner(*k.bufs)
-  t2 = time.monotonic_ns()
+  n_repeat = 20
+  start_event = [cuda.Event() for _ in range(n_repeat)]
+  end_event = [cuda.Event() for _ in range(n_repeat)]
+  for i in range(20):
+    start_event[i].record()
+    runner(*k.bufs)
+    end_event[i].record()
+  # there's like 10 us of launch overhead
   cuda.Context.synchronize()
-  t3 = time.monotonic_ns()
-
-  print(f"{(t3-t1)*1e-3:7.2f} us ({(t2-t1)*1e-3:7.2f} us to launch) {ops/(t3-t1):5.2f} GFLOPS (up to {ops/(t3-t2):5.2f} GFLOPS)")
+  kt = min([e.time_since(s)*1e6 for s, e in zip(start_event, end_event)])
+  print(f"{kt*1e-3:7.2f} us kernel, {ops/kt:5.2f} GFLOPS")
 
   real = hb0.toCPU() @ hb1.toCPU()
   test = k.ret.toCPU()
