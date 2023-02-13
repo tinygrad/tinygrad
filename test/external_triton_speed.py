@@ -1,4 +1,5 @@
 import time
+import numpy as np
 from tinygrad.helpers import getenv
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
@@ -8,18 +9,21 @@ from extra.lib_test_ast import test_ast
 
 def test_gemm():
   N = 768
-  buf0 = TritonBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, 1, N, N, 1, 1, 1, N), (0, 0, 0, 1, 0, 0, 0, N), 0)]), hostbuf=TritonBuffer(shape=(N, N), force_create=True))
-  buf1 = TritonBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, 1, N, N, 1, 1, 1, N), (0, 0, 1, 0, 0, 0, 0, N), 0)]), hostbuf=TritonBuffer(shape=(N, N), force_create=True))
+  hb0 = TritonBuffer(shape=(N, N), force_create=True)
+  hb1 = TritonBuffer(shape=(N, N), force_create=True)
+  buf0 = TritonBuffer(shape=ShapeTracker(shape=(N, N, N), views=[View((N, N, N), (N, 0, 1), 0)]), hostbuf=hb0)
+  buf1 = TritonBuffer(shape=ShapeTracker(shape=(N, N, N), views=[View((N, N, N), (0, 1, N), 0)]), hostbuf=hb1)
   op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
-  op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 1, N, N, 1, 1, 1, 1))
+  op1 = LazyOp(ReduceOps.SUM, (op0,), (N, N, 1))
   ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
   randomize_buffers(ast)
+
   k = TritonASTKernel(ast)
 
   ii = []
-  ii.append((Interventions.UPCAST, (0, 16)))
-  ii.append((Interventions.UPCAST, (1, 16)))
-  ii.append((Interventions.UPCAST, (2, 16)))
+  ii.append((Interventions.UPCAST, (0, 128)))
+  ii.append((Interventions.UPCAST, (1, 64)))
+  ii.append((Interventions.UPCAST, (2, 32)))
   #ii.append((Interventions.UPCAST, (1, 16)))
   #ii.append((Interventions.SHIFT, (1, 16, False)))
   #ii.append((Interventions.SHIFT, (1, 16, False)))
@@ -37,6 +41,10 @@ def test_gemm():
 
   print(f"{(t2-t1)*1e-3:7.2f} us  {ops/(t2-t1):5.2f} GFLOPS")
 
+  real = hb0.toCPU() @ hb1.toCPU()
+  test = k.ret.toCPU()
+  #print(real, test)
+  np.testing.assert_allclose(real, test, atol=1e-3)
   if not getenv("NOTEST"): test_ast(k)
 
 if __name__ == "__main__":

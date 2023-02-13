@@ -298,8 +298,16 @@ if __name__ == "__main__":
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(64, 1, 1, 1), views=[View((64, 1, 1, 1), (0, 0, 0, 0), 0)]), hostbuf=GPUBuffer(shape=(1,), backing=np.array([1.9073486e-06], dtype=np.float32)))
     op1 = LazyOp(BinaryOps.MUL, (op0,buf1,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (1, 64, 1, 1))
+  elif getenv("SGEMM", 0):
+    N = 768
+    buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, 1, N, N, 1, 1, 1, N), (0, 0, 0, 1, 0, 0, 0, N), 0)]), hostbuf=GPUBuffer(shape=(N, N), force_create=True))
+    buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, 1, N, N, 1, 1, 1, N), (0, 0, 1, 0, 0, 0, 0, N), 0)]), hostbuf=GPUBuffer(shape=(N, N), force_create=True))
+    op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 1, N, N, 1, 1, 1, 1))
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
   elif getenv("GEMM", 0):
     N = 768
+    # TODO: this is creating too many views
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, N, N, 1), (0, 1, N, 0), 0), View((1, 1, N, N, 1, 1, 1, N), (0, 0, 0, 1, 0, 0, 0, N), 0)]), hostbuf=GPUBuffer(shape=(N, N), force_create=True))
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 1, N, N, 1, 1, 1, N), views=[View((1, 1, N, N, 1, 1, 1, N), (0, 0, 1, 0, 0, 0, 0, N), 0)]), hostbuf=GPUBuffer(shape=(N, N), force_create=True))
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)

@@ -60,7 +60,7 @@ class TritonASTKernel(ASTKernel):
     for i, (s,a,r) in enumerate(self.buftokens[buf_index].axis):
       idxxx = ["None"] * al
       idxxx[i] = ":"
-      if a != 0:
+      if a != 0 or True:
         ranges.append(f" + (tl.arange(0, {s})[{','.join(idxxx)}] * {a})")
     return ranges
 
@@ -120,21 +120,21 @@ class TritonASTKernel(ASTKernel):
 def fxn(data0,data1,data2):
   idx1 = tl.program_id(0)
   idx0 = tl.program_id(1)
-  acc = tl.zeros((16,16,), dtype=tl.float32)
-  for idx2 in range(0, 48):
-    val1 = tl.load(data1 + ((idx1*16)+(idx2*12288)) + (tl.arange(0, 16)[None,:] * 1) + (tl.arange(0, 16)[:,None] * 768))
-    val2 = tl.load(data2 + ((idx0*16)+(idx2*12288)) + (tl.arange(0, 16)[:,None] * 1) + (tl.arange(0, 16)[None,:] * 768))
-    acc += tl.dot(val2, val1, allow_tf32=False)
-  tl.store(data0 + ((idx0*12288)+(idx1*16)) + (tl.arange(0, 16)[:,None] * 768) + (tl.arange(0, 16)[None,:] * 1), acc)
+  acc = tl.zeros((128,64,), dtype=tl.float32)
+  for idx2 in range(0, 24):
+    val1 = tl.load(data1 + ((idx0*98304)+(idx2*32)) + (tl.arange(0, 128)[:,None] * 768) + (tl.arange(0, 32)[None,:] * 1))
+    val2 = tl.load(data2 + ((idx1*64)+(idx2*24576)) + (tl.arange(0, 64)[None,:] * 1) + (tl.arange(0, 32)[:,None] * 768))
+    acc += tl.dot(val1, val2, allow_tf32=False)
+  tl.store(data0 + ((idx0*98304)+(idx1*64)) + (tl.arange(0, 128)[:,None] * 768) + (tl.arange(0, 64)[None,:] * 1), acc)
 """
-    if 'tl.zeros((16,16,)' in kernel: kernel = replace_kernel
+    if 'tl.zeros((128,64,)' in kernel: kernel = replace_kernel
     if DEBUG >= 4: print(kernel)
     with open(fn, "w") as f: f.write(kernel)
     codeObject = compile(kernel, fn, "exec")
     exec(codeObject, globals())
     program_jit = globals()['fxn']
     config = program_jit._get_config(*[x.cuda for x in self.bufs])
-    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0)
+    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=4, num_warps=4)
     if DEBUG >= 5:
       #print(compiled.asm['ttir'])
       #print(compiled.asm['llir'])
