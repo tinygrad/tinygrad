@@ -310,21 +310,24 @@ class CLASTKernel(ASTKernel):
 
         # replace the buftoken
         self.buftokens[i] = Token(f"ldata{i}", Types.FLOAT, True)
-        for l,s,r in tbt.axis: self.buftokens[i].array(l,min(zs*num,s),r)  # wrong
+        for j,(l,s,r) in enumerate(tbt.axis): self.buftokens[i].array(l,min(zs*num if j == 0 else zs,s),r)  # wrong
 
         # fix up the shapetracker
         view = View(tuple([min(s, ls) for s,ls in zip(tsts.views[-1].shape, self.local_shape)] + list(tsts.views[-1].shape[len(self.local_shape):])),
                     tuple([min(s, ls) for s,ls in zip(tsts.views[-1].strides, self.local_shape)] + [0]*(self.shape_len-len(self.local_shape))))
         self.sts[i] = ShapeTracker(shape=view.shape, views=[view])
 
-        seen_o = set()
+        seen_o : Set[int] = set()
         for o,lo in zip(loadtoken.offsets(), lloadtoken.offsets()):
           if o in seen_o: continue
-          seen_o.add(o)
           expr, valid = tsts.expr_idxs(o)
           lexpr = Variable(f"lidx{zero_stride[i-1]}", 0, self.local_shape[zero_stride[i-1]]) * tbt.axis[0][1]
           expr = Variable.sum([expr, lexpr])
-          self.kernel.append(f"ldata{i}[lidx0*{self.local_shape[0]*num}+lidx1*{num}+{lo}] = data{i}[{expr.render()}];\n")
+          if i == 2:
+            self.kernel.append(f"ldata{i}[lidx0*{self.local_shape[0]*num}+lidx1*{num}+{len(seen_o)}] = data{i}[{expr.render()}];\n")
+          else:
+            self.kernel.append(f"ldata{i}[lidx0*{self.local_shape[0]*num}+lidx1+{lo}] = data{i}[{expr.render()}];\n")
+          seen_o.add(o)
 
         ts = list(self.sts[i].views[-1].strides)
         print(num)
