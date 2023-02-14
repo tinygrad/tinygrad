@@ -318,8 +318,8 @@ if __name__ == "__main__":
     op1 = LazyOp(ReduceOps.SUM, (op0,), (N, N, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
     ii = []
-    ii.append((Interventions.UPCAST, (0, 8, False)))
-    ii.append((Interventions.UPCAST, (1, 4, False)))
+    ii.append((Interventions.UPCAST, (0, 4, False)))
+    ii.append((Interventions.UPCAST, (1, 8, False)))
     ii.append((Interventions.UPCAST, (2, 16, False)))
     #ii.append((Interventions.UPCAST, (0, 2, False)))
     #ii.append((Interventions.UPCAST, (1, 2, False)))
@@ -328,8 +328,8 @@ if __name__ == "__main__":
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
     """
     for z in [4,8,16]:
-      for x in [2,4,8]:
-        for y in [2,4,8]:
+      for x in [2,4,8,16]:
+        for y in [2,4,8,16]:
           ii = []
           ii.append((Interventions.UPCAST, (0, x, False)))
           ii.append((Interventions.UPCAST, (1, y, False)))
@@ -339,8 +339,8 @@ if __name__ == "__main__":
             np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
           except Exception:
             print("failed")
-    """
       #k = one(ast, ii, code_override=code_override, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
+    """
     exit(0)
   elif getenv("GEMM", 0):
     N = 768

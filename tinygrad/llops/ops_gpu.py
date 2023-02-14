@@ -265,13 +265,13 @@ class CLASTKernel(ASTKernel):
 
     # output_shape[-1] is get_global_id(0)
     MAX_OUTPUT_SHAPE = 3
-    self.kernel += [f"int idx{len(self.output_shape)-1-i} = {f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' if CUDA else f'get_global_id({i})'}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+    self.kernel += [f"size_t idx{len(self.output_shape)-1-i} = {f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' if CUDA else f'get_global_id({i})'}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
       # TODO: these compactions should be searchable
       final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
       for i in range(final_dimension-1, -1, -1):
-        self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
+        self.kernel += [f"size_t idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
     
@@ -310,7 +310,7 @@ class CLASTKernel(ASTKernel):
       for j in range(len(self.local_shape), len(new_shape)):
         self.lbuftokens[i].array(view.shape[j], view.strides[j], True)
       self.kernel.append(f"__local float ldata{i}[{prod([s for s,st in zip(view.shape, view.strides) if st != 0])}];\n")
-    if any(self.is_local): self.kernel += [f"int lidx{len(self.local_shape)-1-i} = get_local_id({i}); /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
+    if any(self.is_local): self.kernel += [f"size_t lidx{len(self.local_shape)-1-i} = get_local_id({i}); /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
 
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
