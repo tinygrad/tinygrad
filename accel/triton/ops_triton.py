@@ -125,7 +125,7 @@ def fxn(data0,data1,data2):
     acc += tl.dot(val1, val2, allow_tf32=False)
   tl.store(data0 + ((idx0*98304)+(idx1*64)) + (tl.arange(0, 128)[:,None] * 768) + (tl.arange(0, 64)[None,:] * 1), acc)
 """
-    if 'tl.zeros((128,64,)' in kernel and False: kernel = replace_kernel
+    if 'tl.zeros((128,64,)' in kernel: kernel = replace_kernel
     if DEBUG >= 4: print(kernel)
     with open(fn, "w") as f: f.write(kernel)
     codeObject = compile(kernel, fn, "exec")

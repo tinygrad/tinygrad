@@ -1,6 +1,5 @@
 from __future__ import annotations
 import numpy as np
-import itertools
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
 from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
@@ -57,45 +56,56 @@ class CLASTKernel(ASTKernel):
     if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
     return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
-  def store(self, buf_index, value:List[Token]):
-    if len(value) == self.buftokens[buf_index].size()*4: value = group_float4(value)
-    if len(value)*4 == self.buftokens[buf_index].size(): value = split_float4(value)
-    assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
-    for v, o in zip(value, self.buftokens[buf_index].offsets()):
-      idxy, valid = self.sts[buf_index].expr_idxs(o)
+  def store(self, buf_index, value:List[Token], extra=None):
+    buftoken = self.lbuftokens[buf_index] if self.is_local[buf_index] else self.buftokens[buf_index]
+    if len(value) == buftoken.size()*4: value = group_float4(value)
+    if len(value)*4 == buftoken.size(): value = split_float4(value)
+    assert len(value) == buftoken.size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
+    to_store : Dict[int, Token] = {}
+    for o, v in zip(buftoken.offsets(), value):
+      if o in to_store: assert to_store[o] == v
+      to_store[o] = v
+    for o, v in to_store.items():
+      idxy, valid = self.sts[buf_index].expr_idxs(o) if not self.is_local[buf_index] else self.lsts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(len(self.local_shape))])
+      if extra is not None: idxy = Variable.sum([idxy, extra])
       assert valid.min == 1, "store must always be valid"
-      assert self.buftokens[buf_index].typ == v.typ, f"buf must be {v.typ}"
+      assert buftoken.typ == v.typ, f"buf must be {v.typ}"
       if isinstance(self.bufs[buf_index]._buf, CLImage):
-        self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+        self.kernel.append(f"write_imagef{buftoken.tok}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       else:
-        self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"{buftoken.tok}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
 
-  def load(self, buf_index:int) -> List[Token]:
+  def load(self, buf_index:int, non_local:bool=False, extra=None) -> List[Token]:
+    is_local = self.is_local[buf_index] and not non_local
+    buftoken = self.lbuftokens[buf_index] if is_local else self.buftokens[buf_index]
+
     # constant folding
     const = None
     if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
-      assert self.buftokens[buf_index].typ == Types.FLOAT
+      assert buftoken.typ == Types.FLOAT
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
-      const = Token(f"({self.bufs[buf_index]._backing[0]}f)", self.buftokens[buf_index].typ)
+      const = Token(f"({self.bufs[buf_index]._backing[0]}f)", buftoken.typ)
 
     tokens = []
-    for o in self.buftokens[buf_index].offsets():
+    for o in buftoken.offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
+      if is_local: key = "l"+key
       if (buf_index, o) not in self.loaded_keys:
-        idxy, valid = self.sts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(self.shape_len)] if self.is_local[buf_index] else None)
+        idxy, valid = self.lsts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(len(self.local_shape))]) if is_local else self.sts[buf_index].expr_idxs(o)
+        if extra is not None: idxy = Variable.sum([idxy, extra])
         if const is not None:
           ldr = const
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
-          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
+          ldr = Token(f"read_imagef({buftoken.tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         else:
-          ldr = Token(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if self.buftokens[buf_index].typ == Types.FLOAT4 else 1)).render(render_cl)}]", self.buftokens[buf_index].typ)
+          ldr = Token(f"{buftoken.tok}[{(idxy//(4 if buftoken.typ == Types.FLOAT4 else 1)).render(render_cl)}]", buftoken.typ)
         ldr = ldr if valid.min == 1 or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
         if const is not None:
-          self.loaded_keys[(buf_index,o)] = ldr
+          self.loaded_keys[(is_local, buf_index,o)] = ldr
         else:
           self.kernel.append(f"{ldr.decltype()} {key} = {ldr.tok};\n")
-          self.loaded_keys[(buf_index,o)] = Token(key, ldr.typ)
-      tokens.append(self.loaded_keys[(buf_index,o)])
+          self.loaded_keys[(is_local, buf_index,o)] = Token(key, ldr.typ)
+      tokens.append(self.loaded_keys[(is_local, buf_index,o)])
     return tokens
 
   def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:List[Token], do_reduce=False) -> List[Token]:
@@ -248,7 +258,7 @@ class CLASTKernel(ASTKernel):
       self.printbufs("new:")
 
     self.bufs_to_delete : Set[int] = set()
-    self.loaded_keys : Dict[Tuple[int,int], Token] = {}
+    self.loaded_keys : Dict[Tuple[bool,int,int], Token] = {}
 
     self.prekernel : Set[str] = set()
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(isinstance(buf._buf, CLImage) for buf in self.bufs) else []
@@ -267,19 +277,39 @@ class CLASTKernel(ASTKernel):
     
     # caching all the buffers
     self.local_shape = [0]*len(self.output_shape)
-    zero_stride = []
+    zero_stride_dim = []
+    self.lsts = {}
+    self.lbuftokens = {}
     for i in range(1, len(self.bufs)):
       if len(self.buftokens[i].axis) == 0: continue
-      zero_stride.append(self.sts[i].views[-1].strides.index(0))
-      self.local_shape[zero_stride[-1]] = self.buftokens[i].axis[0][0]
+      zero_stride_dim.append(self.sts[i].views[-1].strides.index(0))
+      self.local_shape[zero_stride_dim[-1]] = self.buftokens[i].axis[-1][0]
       self.is_local[i] = True
+
+    # moved above local
+    acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
+
     for i in range(1, len(self.bufs)):
       if not self.is_local[i]: continue
-      local_offs = [[j*self.sts[i].views[-1].strides[d] for j in range(0,self.local_shape[d])] for d in range(len(self.local_shape))]
-      off = self.buftokens[i].offsets()
-      all_offs = [sum(x) for x in itertools.product(off, *local_offs)]
-      #print(i, all_offs)
-      self.kernel.append(f"__local float ldata{i}[{len(set(all_offs))}];\n")
+      # fix up the shapetracker
+      tsts = self.sts[i]
+      # note: this can be shuffled arbitrarly
+      new_shape = [min(s, ls) for s,ls in zip(tsts.views[-1].shape, self.local_shape)] + [x[0] for x in self.buftokens[i].axis]
+      old_strides = [min(s, ls) for s,ls in zip(tsts.views[-1].strides, self.local_shape)] + [x[1] for x in self.buftokens[i].axis]
+      new_strides = []
+      base = 1
+      for s,st in zip(new_shape[::-1], old_strides[::-1]):
+        if st == 0:
+          new_strides.append(0)
+        else:
+          new_strides.append(base)
+          base *= s
+      view = View(tuple(new_shape), tuple(new_strides[::-1]))
+      self.lsts[i] = ShapeTracker(shape=view.shape, views=[view])
+      self.lbuftokens[i] = Token(f"ldata{i}", Types.FLOAT, True)
+      for j in range(len(self.local_shape), len(new_shape)):
+        self.lbuftokens[i].array(view.shape[j], view.strides[j], True)
+      self.kernel.append(f"__local float ldata{i}[{prod([s for s,st in zip(view.shape, view.strides) if st != 0])}];\n")
     if any(self.is_local): self.kernel += [f"int lidx{len(self.local_shape)-1-i} = get_local_id({i}); /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
 
     # early ast
@@ -288,17 +318,26 @@ class CLASTKernel(ASTKernel):
       full_shape_candidates = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
       full_shape : Tuple[int, ...] = self.sts[0].shape if len(full_shape_candidates) == 0 else full_shape_candidates[0]
 
-      acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
 
-      if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
       for i in range(1, len(self.bufs)):
         if not self.is_local[i]: continue
+        extra_l = Variable(f"lidx{zero_stride_dim[i-1]}", 0, self.local_shape[zero_stride_dim[i-1]]) * self.buftokens[i].axis[-1][1]
+        extra_s = Variable(f"lidx{zero_stride_dim[i-1]}", 0, self.local_shape[zero_stride_dim[i-1]]) * self.lbuftokens[i].axis[-1][1]
+        self.buftokens[i].axis = self.buftokens[i].axis[:-1]  # remove lidx axis
+        print(i, self.lbuftokens[i], self.lsts[i])
+        gload = self.load(i, True, extra_l)
+        axis_backup = self.lbuftokens[i].axis
+        self.lbuftokens[i].axis = self.lbuftokens[i].axis[:-1]
+        self.store(i, gload, extra_s)
+        self.lbuftokens[i].axis = axis_backup
+        #self.lbuftokens
+        """
         tsts = self.sts[i]
         tbt = self.buftokens[i]
-        zs = self.local_shape[zero_stride[i-1]]
+        zs = self.local_shape[zero_stride_dim[i-1]]
         # do the loads
 
         # loadtoken
@@ -321,7 +360,7 @@ class CLASTKernel(ASTKernel):
         for o,lo in zip(loadtoken.offsets(), lloadtoken.offsets()):
           if o in seen_o: continue
           expr, valid = tsts.expr_idxs(o)
-          lexpr = Variable(f"lidx{zero_stride[i-1]}", 0, self.local_shape[zero_stride[i-1]]) * tbt.axis[0][1]
+          lexpr = Variable(f"lidx{zero_stride_dim[i-1]}", 0, self.local_shape[zero_stride_dim[i-1]]) * tbt.axis[0][1]
           expr = Variable.sum([expr, lexpr])
           if i == 2:
             self.kernel.append(f"ldata{i}[lidx0*{self.local_shape[0]*num}+lidx1*{num}+{len(seen_o)}] = data{i}[{expr.render()}];\n")
@@ -332,6 +371,7 @@ class CLASTKernel(ASTKernel):
         ts = list(self.sts[i].views[-1].strides)
         ts[0] *= num  # wrong
         self.sts[i].views[-1].strides = tuple(ts)
+        """
       if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
 
       if DEBUG >= 3:
@@ -339,7 +379,9 @@ class CLASTKernel(ASTKernel):
         self.printbufs("pr:")
 
       expanded_accumulators = split_float4(accumulators) if accumulators[0].typ == Types.FLOAT4 and len(accumulators)*4 == len(acc_offsets) else accumulators
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)]
+      if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
+      self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
     if self.group_for_reduce:
