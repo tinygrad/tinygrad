@@ -330,7 +330,6 @@ class CLASTKernel(ASTKernel):
           seen_o.add(o)
 
         ts = list(self.sts[i].views[-1].strides)
-        print(num)
         ts[0] *= num  # wrong
         self.sts[i].views[-1].strides = tuple(ts)
       if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
