@@ -63,7 +63,7 @@ class CLASTKernel(ASTKernel):
     assert len(value) == buftoken.size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     to_store : Dict[int, Token] = {}
     for o, v in zip(buftoken.offsets(), value):
-      if o in to_store: assert to_store[o] == v
+      if o in to_store: assert str(to_store[o]) == str(v), f"mismatch {to_store[o]} {v}"
       to_store[o] = v
     for o, v in to_store.items():
       idxy, valid = self.sts[buf_index].expr_idxs(o) if not self.is_local[buf_index] else self.lsts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(len(self.local_shape))])
@@ -90,7 +90,7 @@ class CLASTKernel(ASTKernel):
     for o in buftoken.offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
       if is_local: key = "l"+key
-      if (buf_index, o) not in self.loaded_keys:
+      if (is_local, buf_index, o) not in self.loaded_keys:
         idxy, valid = self.lsts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(len(self.local_shape))]) if is_local else self.sts[buf_index].expr_idxs(o)
         if extra is not None: idxy = Variable.sum([idxy, extra])
         if const is not None:
