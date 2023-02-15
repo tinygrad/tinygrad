@@ -86,7 +86,21 @@ class CLASTKernel(ASTKernel):
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", buftoken.typ)
     
+    # float4 upcast
+    should_upcast = False
+    for a in buftoken.axis:
+      if a[0:2] == (4,1):
+        should_upcast = True
+    
+    if should_upcast:
+      buftoken_backup = buftoken
+      buftoken = Token(buftoken.tok, Types.FLOAT4)
+      for x in buftoken_backup.axis:
+        if x[0:2] != (4,1):
+          buftoken.array(x[0], x[1], x[2])
+    
     tokens = []
+    offset_to_tokens = {}
     for o in buftoken.offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
       if is_local: key = "l"+key
@@ -97,8 +111,10 @@ class CLASTKernel(ASTKernel):
           ldr = const
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
           ldr = Token(f"read_imagef({buftoken.tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
+        elif buftoken.typ == Types.FLOAT4:
+          ldr = Token(f"((float4*){buftoken.tok})[{(idxy//4).render(render_cl)}]", buftoken.typ)
         else:
-          ldr = Token(f"{buftoken.tok}[{(idxy//(4 if buftoken.typ == Types.FLOAT4 else 1)).render(render_cl)}]", buftoken.typ)
+          ldr = Token(f"{buftoken.tok}[{idxy.render(render_cl)}]", buftoken.typ)
         ldr = ldr if valid.min == 1 or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
         if const is not None:
           self.loaded_keys[(is_local, buf_index,o)] = ldr
@@ -106,6 +122,11 @@ class CLASTKernel(ASTKernel):
           self.kernel.append(f"{ldr.decltype()} {key} = {ldr.tok};\n")
           self.loaded_keys[(is_local, buf_index,o)] = Token(key, ldr.typ)
       tokens.append(self.loaded_keys[(is_local, buf_index,o)])
+      offset_to_tokens[o] = tokens[-1]
+    if should_upcast:
+      tokens = []
+      for oo in buftoken_backup.offsets():
+        tokens.append(Token(offset_to_tokens[oo - oo%4].tok+f".s{oo%4}", Types.FLOAT))
     return tokens
 
   def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:List[Token], do_reduce=False) -> List[Token]:

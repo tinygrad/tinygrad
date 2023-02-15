@@ -323,21 +323,18 @@ if __name__ == "__main__":
     op1 = LazyOp(ReduceOps.SUM, (op0,), (N, N, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
     ii = []
-    # -294912, -196608, -98304, 
-    # 1: [0,1,2,3], [768*32+0, 768*32+1, 768*32+2, 768*32+3], ...
+    # -294912, -196608, -98304, 0
+    # 
+    # 1: [0,1,2,3], [768*32+0, 768*32+1, 768*32+2, 768*32+3], ... -> [0, 24576, 49152, 73728]
     # 2: [0,1,2,3], [768*16+0, 768*16+1, 768*16+2, 768*16+3]
     # store: [0, 768, 1536, 2304, 49152, 49920, 50688, 51456]
 
-    ii.append((Interventions.UPCAST, (1, 4, False)))
-    #ii.append((Interventions.UPCAST, (2, 16, False)))
-    #ii.append((Interventions.UPCAST, (0, 4, False)))
-    #ii.append((Interventions.UPCAST, (0, 2, False)))
-    #ii.append((Interventions.UPCAST, (1, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 2, False)))
-    ii.append((Interventions.UPCAST, (0, 4, False)))
-    ii.append((Interventions.UPCAST, (0, 2, 16)))
+    ii.append((Interventions.UPCAST, (1, 4, False)))  # 0:
+    ii.append((Interventions.UPCAST, (2, 4, False)))  # 1: used in 2
+    ii.append((Interventions.UPCAST, (2, 4, False)))  # 2: used in 1,2
+    ii.append((Interventions.UPCAST, (2, 2, False)))  # 3: 
+    ii.append((Interventions.UPCAST, (0, 4, False)))  # 4: used in 1
+    ii.append((Interventions.UPCAST, (0, 2, 16)))     # used in output
     #ii.append((Interventions.UPCAST, (0, 4, False)))
     #ii.append((Interventions.UPCAST, (1, 4, False)))
     #ii.append((Interventions.UPCAST, (2, 4, False)))
