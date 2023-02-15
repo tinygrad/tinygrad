@@ -331,7 +331,7 @@ class CLASTKernel(ASTKernel):
       def get_pieces(i, bt):
         shape = tuple(bt[i].axis[j][0] for j in AXIS_NUMS[i][::-1])
         strides = tuple(bt[i].axis[j][1] for j in AXIS_NUMS[i][::-1])
-        idx = Variable(f"lidx{zero_stride_dim[i]}", 0, self.local_shape[zero_stride_dim[i]])
+        idx = Variable(f"lidx{zero_stride_dim[i]}", 0, self.local_shape[zero_stride_dim[i]]-1)
         pieces = []
         for sh,st in to_shape_strides(shape, strides)[::-1]:
           pieces.append((idx % sh) * st)
