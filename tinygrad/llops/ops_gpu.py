@@ -85,7 +85,7 @@ class CLASTKernel(ASTKernel):
       assert buftoken.typ == Types.FLOAT
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", buftoken.typ)
-
+    
     tokens = []
     for o in buftoken.offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
@@ -278,7 +278,8 @@ class CLASTKernel(ASTKernel):
     # caching all the buffers
     #AXIS_NUMS = {1:0,2:2}
     #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
-    AXIS_NUMS = {1:[0,4],2:[3,4]}
+    #AXIS_NUMS = {1:[0,4],2:[3,4]}
+    AXIS_NUMS = {1:[2,4],2:[1,2]}
     #AXIS_NUMS = {1:[3,4],2:[3,4]}
     self.local_shape = [1]*len(self.output_shape)
     zero_stride_dim = {}
@@ -286,7 +287,7 @@ class CLASTKernel(ASTKernel):
     self.lbuftokens = {}
     for i in range(1, len(self.bufs)):
       if len(self.buftokens[i].axis) == 0 or len(AXIS_NUMS[i]) == 0: continue
-      zero_stride_dim[i] = self.sts[i].views[-1].strides.index(0)
+      zero_stride_dim[i] = len(self.sts[i].views[-1].strides) - 1 - self.sts[i].views[-1].strides[::-1].index(0)
       self.local_shape[zero_stride_dim[i]] = prod([self.buftokens[i].axis[an][0] for an in AXIS_NUMS[i]])
       self.is_local[i] = True
 
@@ -406,7 +407,7 @@ class CLASTKernel(ASTKernel):
     # compile kernel
     self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    return GPURunner(self.fxn, self.bufs_to_delete, self.output_shape[::-1] if len(self.output_shape) > 0 else [1], self.local_shape if any(self.is_local) else None)
+    return GPURunner(self.fxn, self.bufs_to_delete, self.output_shape[::-1] if len(self.output_shape) > 0 else [1], self.local_shape[::-1] if any(self.is_local) else None)
     #(self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None)
 
   def print(self):

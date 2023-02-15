@@ -59,11 +59,16 @@ def apply_intervention(k, typ, dat):
   elif typ == Interventions.UPCAST:
     if dat is not None:
       # upcast
-      up_axis, amount = dat[0], dat[1]
-      # no change, we added a dimension
-      k.reshape_and_permute(
-        lambda x: list(x[0:up_axis]) + ([x[up_axis]//amount, amount] if x[up_axis] > 1 else [1,1]) + list(x[up_axis+1:]),
-        [i for i in range(k.shape_len+1) if i != up_axis+1] + [up_axis+1])
+      up_axis, amount, offset = dat[0], dat[1], dat[2] if len(dat) == 3 else 0
+      if offset:
+        k.reshape_and_permute(
+          lambda x: list(x[0:up_axis]) + ([x[up_axis]//(amount*offset), amount, offset] if x[up_axis] > 1 else [1,1,1]) + list(x[up_axis+1:]),
+          [i for i in range(k.shape_len+2) if i != up_axis+1] + [up_axis+1])
+      else:
+        # no change, we added a dimension
+        k.reshape_and_permute(
+          lambda x: list(x[0:up_axis]) + ([x[up_axis]//amount, amount] if x[up_axis] > 1 else [1,1]) + list(x[up_axis+1:]),
+          [i for i in range(k.shape_len+1) if i != up_axis+1] + [up_axis+1])
     # drop the last dimension
     k.upcast(allow_float4=False)
   elif typ == Interventions.SHIFT:
@@ -321,9 +326,8 @@ if __name__ == "__main__":
     # -294912, -196608, -98304, 
     # 1: [0,1,2,3], [768*32+0, 768*32+1, 768*32+2, 768*32+3], ...
     # 2: [0,1,2,3], [768*16+0, 768*16+1, 768*16+2, 768*16+3]
+    # store: [0, 768, 1536, 2304, 49152, 49920, 50688, 51456]
 
-    ii.append((Interventions.UPCAST, (0, 4, False)))
-    ii.append((Interventions.UPCAST, (0, 2, False)))
     ii.append((Interventions.UPCAST, (1, 4, False)))
     #ii.append((Interventions.UPCAST, (2, 16, False)))
     #ii.append((Interventions.UPCAST, (0, 4, False)))
@@ -332,6 +336,8 @@ if __name__ == "__main__":
     ii.append((Interventions.UPCAST, (2, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
     ii.append((Interventions.UPCAST, (2, 2, False)))
+    ii.append((Interventions.UPCAST, (0, 4, False)))
+    ii.append((Interventions.UPCAST, (0, 2, 16)))
     #ii.append((Interventions.UPCAST, (0, 4, False)))
     #ii.append((Interventions.UPCAST, (1, 4, False)))
     #ii.append((Interventions.UPCAST, (2, 4, False)))
