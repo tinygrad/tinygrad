@@ -5,7 +5,7 @@ from tinygrad.helpers import prod
 from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
-from tinygrad.shape import ShapeTracker, View
+from tinygrad.shape import ShapeTracker, View, to_shape_strides
 from tinygrad.shape.symbolic import ModNode, DivNode, Variable, render_python   # this will go away when VALIDHACKS does
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -278,7 +278,7 @@ class CLASTKernel(ASTKernel):
     # caching all the buffers
     #AXIS_NUMS = {1:0,2:2}
     #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
-    AXIS_NUMS = {1:[1,0],2:[0,1]}
+    AXIS_NUMS = {1:[0,4],2:[3,4]}
     #AXIS_NUMS = {1:[3,4],2:[3,4]}
     self.local_shape = [1]*len(self.output_shape)
     zero_stride_dim = {}
@@ -329,12 +329,13 @@ class CLASTKernel(ASTKernel):
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
 
       def get_pieces(i, bt):
+        shape = tuple(bt[i].axis[j][0] for j in AXIS_NUMS[i][::-1])
+        strides = tuple(bt[i].axis[j][1] for j in AXIS_NUMS[i][::-1])
         idx = Variable(f"lidx{zero_stride_dim[i]}", 0, self.local_shape[zero_stride_dim[i]])
         pieces = []
-        for j in AXIS_NUMS[i]:
-          axis = bt[i].axis[AXIS_NUMS[i][j]]
-          pieces.append((idx % axis[0]) * axis[1])
-          idx //= axis[0]
+        for sh,st in to_shape_strides(shape, strides)[::-1]:
+          pieces.append((idx % sh) * st)
+          idx //= sh
         return Variable.sum(pieces)
 
       gloads = []

@@ -322,15 +322,16 @@ if __name__ == "__main__":
     # 1: [0,1,2,3], [768*32+0, 768*32+1, 768*32+2, 768*32+3], ...
     # 2: [0,1,2,3], [768*16+0, 768*16+1, 768*16+2, 768*16+3]
 
-    #ii.append((Interventions.UPCAST, (0, 8, False)))
-    #ii.append((Interventions.UPCAST, (1, 4, False)))
+    ii.append((Interventions.UPCAST, (0, 4, False)))
+    ii.append((Interventions.UPCAST, (0, 2, False)))
+    ii.append((Interventions.UPCAST, (1, 4, False)))
     #ii.append((Interventions.UPCAST, (2, 16, False)))
     #ii.append((Interventions.UPCAST, (0, 4, False)))
     #ii.append((Interventions.UPCAST, (0, 2, False)))
     #ii.append((Interventions.UPCAST, (1, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
-    #ii.append((Interventions.UPCAST, (2, 2, False)))
+    ii.append((Interventions.UPCAST, (2, 2, False)))
     #ii.append((Interventions.UPCAST, (0, 4, False)))
     #ii.append((Interventions.UPCAST, (1, 4, False)))
     #ii.append((Interventions.UPCAST, (2, 4, False)))
