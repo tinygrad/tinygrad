@@ -6,7 +6,8 @@ from enum import Enum
 import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
-from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CLProgram
+from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CLProgram, CUDA
+from tinygrad.runtime.cuda import cuda
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
 from tinygrad.ops import DEBUG
 from tinygrad.helpers import getenv
@@ -93,13 +94,22 @@ def run_and_time(k,cnt=3,local_override=None, code_override=None):
   for i in range(cnt):
     t1 = time.monotonic_ns()
     if local_override: prog.local_work_size = local_override
+    if CUDA:
+      start_event = cuda.Event()
+      end_event = cuda.Event()
+      start_event.record()
     e = prog(*k.bufs)
-    e.wait()
+    if CUDA:
+      end_event.record()
+      cuda.Context.synchronize()
+      et = end_event.time_since(start_event)*1e6
+    else:
+      e.wait()
+      et = e.profile.end * OSX_TIMING_RATIO - e.profile.start * OSX_TIMING_RATIO
     t4 = time.monotonic_ns()
-    t2, t3 = e.profile.start * OSX_TIMING_RATIO, e.profile.end * OSX_TIMING_RATIO
     #print(*[f"{(x-t1)*1e-3:7.2f} us" for x in [t1, t2, t3, t4]])  # TODO: this may be wrong on non OS X
     #assert t1 < t2 < t3 < t4, "timings not in order"
-    ret.append(t3-t2)
+    ret.append(et)
     #ret.append(t4-t1)
   return min(ret)
 
@@ -329,15 +339,20 @@ if __name__ == "__main__":
     # 2: [0,1,2,3], [768*16+0, 768*16+1, 768*16+2, 768*16+3]
     # store: [0, 768, 1536, 2304, 49152, 49920, 50688, 51456]
 
+    """
     ii.append((Interventions.UPCAST, (1, 4, False)))  # 0:
     ii.append((Interventions.UPCAST, (2, 4, False)))  # 1: used in 2
     ii.append((Interventions.UPCAST, (2, 4, False)))  # 2: used in 1,2
     ii.append((Interventions.UPCAST, (2, 2, False)))  # 3: 
     ii.append((Interventions.UPCAST, (0, 4, False)))  # 4: used in 1
     ii.append((Interventions.UPCAST, (0, 2, 16)))     # used in output
-    #ii.append((Interventions.UPCAST, (0, 4, False)))
-    #ii.append((Interventions.UPCAST, (1, 4, False)))
-    #ii.append((Interventions.UPCAST, (2, 4, False)))
+    """
+    ii.append((Interventions.UPCAST, (0, 4, False)))
+    ii.append((Interventions.UPCAST, (0, 2, False)))
+    ii.append((Interventions.UPCAST, (1, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 2, False)))
     k = one(ast, ii, skip_baseline=False) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
     exit(0)

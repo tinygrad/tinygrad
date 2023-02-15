@@ -14,7 +14,7 @@ class CLBuffer:
   def copyout(self, a:np.ndarray): cuda.memcpy_dtoh(a, self._cl)
 
 class CLProgram:
-  def __init__(self, name:str, prg:str, binary=False, shared=None, op_estimate:int=0, mem_estimate:int=0):
+  def __init__(self, name:str, prg:str, binary=False, shared=0, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate, self.shared = name, op_estimate, mem_estimate, shared
     if DEBUG >= 4 and not binary: print("CUDA compile", prg)
     self.prg = (cuda.module_from_buffer(prg.encode('utf-8')) if binary else SourceModule(prg)).get_function(name)
