@@ -318,16 +318,21 @@ if __name__ == "__main__":
     op1 = LazyOp(ReduceOps.SUM, (op0,), (N, N, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
     ii = []
+    # -294912, -196608, -98304, 
+    # 1: [0,1,2,3], [768*32+0, 768*32+1, 768*32+2, 768*32+3], ...
+    # 2: [0,1,2,3], [768*16+0, 768*16+1, 768*16+2, 768*16+3]
+
     #ii.append((Interventions.UPCAST, (0, 8, False)))
     #ii.append((Interventions.UPCAST, (1, 4, False)))
     #ii.append((Interventions.UPCAST, (2, 16, False)))
-    ii.append((Interventions.UPCAST, (0, 2, False)))
-    ii.append((Interventions.UPCAST, (1, 2, False)))
-    ii.append((Interventions.UPCAST, (2, 2, False)))
-
-    ii.append((Interventions.UPCAST, (2, 2, False)))
+    #ii.append((Interventions.UPCAST, (0, 4, False)))
     #ii.append((Interventions.UPCAST, (0, 2, False)))
-    #ii.append((Interventions.UPCAST, (1, 2, False)))
+    #ii.append((Interventions.UPCAST, (1, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 4, False)))
+    #ii.append((Interventions.UPCAST, (2, 2, False)))
+    #ii.append((Interventions.UPCAST, (0, 4, False)))
+    #ii.append((Interventions.UPCAST, (1, 4, False)))
     #ii.append((Interventions.UPCAST, (2, 4, False)))
     k = one(ast, ii, skip_baseline=False) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
