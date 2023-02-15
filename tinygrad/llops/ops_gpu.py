@@ -88,7 +88,7 @@ class CLASTKernel(ASTKernel):
     
     # float4 upcast
     should_upcast = False
-    if not is_local and False:
+    if not is_local:
       for a in buftoken.axis:
         if a[0:2] == (4,1):
           should_upcast = True
@@ -127,7 +127,7 @@ class CLASTKernel(ASTKernel):
     if should_upcast:
       tokens = []
       for oo in buftoken_backup.offsets():
-        tokens.append(Token(offset_to_tokens[oo - oo%4].tok+f".s{oo%4}", Types.FLOAT))
+        tokens.append(Token(offset_to_tokens[oo - oo%4].tok+f".{'xyzw'[oo%4]}", Types.FLOAT))
     return tokens
 
   def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:List[Token], do_reduce=False) -> List[Token]:
