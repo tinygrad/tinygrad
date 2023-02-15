@@ -276,14 +276,16 @@ class CLASTKernel(ASTKernel):
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
     
     # caching all the buffers
-    self.local_shape = [0]*len(self.output_shape)
-    zero_stride_dim = []
+    #AXIS_NUMS = {1:None,2:2}
+    AXIS_NUMS = {1:2,2:2}
+    self.local_shape = [1]*len(self.output_shape)
+    zero_stride_dim = {}
     self.lsts = {}
     self.lbuftokens = {}
     for i in range(1, len(self.bufs)):
-      if len(self.buftokens[i].axis) == 0: continue
-      zero_stride_dim.append(self.sts[i].views[-1].strides.index(0))
-      self.local_shape[zero_stride_dim[-1]] = self.buftokens[i].axis[-1][0]
+      if len(self.buftokens[i].axis) == 0 or AXIS_NUMS[i] is None: continue
+      zero_stride_dim[i] = self.sts[i].views[-1].strides.index(0)
+      self.local_shape[zero_stride_dim[i]] = self.buftokens[i].axis[AXIS_NUMS[i]][0]
       self.is_local[i] = True
 
     # moved above local
@@ -325,16 +327,16 @@ class CLASTKernel(ASTKernel):
       gloads = []
       for i in range(1, len(self.bufs)):
         if not self.is_local[i]: continue
-        extra_l = Variable(f"lidx{zero_stride_dim[i-1]}", 0, self.local_shape[zero_stride_dim[i-1]]) * self.buftokens[i].axis[-1][1]
-        self.buftokens[i].axis = self.buftokens[i].axis[:-1]  # remove lidx axis
+        extra_l = Variable(f"lidx{zero_stride_dim[i]}", 0, self.local_shape[zero_stride_dim[i]]) * self.buftokens[i].axis[AXIS_NUMS[i]][1]
+        self.buftokens[i].axis.pop(AXIS_NUMS[i])
         if DEBUG >= 3: print(i, self.lbuftokens[i], self.lsts[i])
         gloads.append((i, self.load(i, True, extra_l)))
 
-      if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
+      #if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
       for i,gload in gloads:
-        extra_s = Variable(f"lidx{zero_stride_dim[i-1]}", 0, self.local_shape[zero_stride_dim[i-1]]) * self.lbuftokens[i].axis[-1][1]
-        axis_backup = self.lbuftokens[i].axis
-        self.lbuftokens[i].axis = self.lbuftokens[i].axis[:-1]
+        extra_s = Variable(f"lidx{zero_stride_dim[i]}", 0, self.local_shape[zero_stride_dim[i]]) * self.lbuftokens[i].axis[AXIS_NUMS[i]][1]
+        axis_backup = self.lbuftokens[i].axis[:]
+        self.lbuftokens[i].axis.pop(AXIS_NUMS[i])
         self.store(i, gload, extra_s)
         self.lbuftokens[i].axis = axis_backup
       if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
@@ -345,6 +347,7 @@ class CLASTKernel(ASTKernel):
 
       expanded_accumulators = split_float4(accumulators) if accumulators[0].typ == Types.FLOAT4 and len(accumulators)*4 == len(acc_offsets) else accumulators
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)]
+      if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n")
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
