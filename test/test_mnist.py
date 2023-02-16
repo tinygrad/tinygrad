@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn.optim import get_parameters, SGD, Adam, RMSprop
+from tinygrad.nn import optim
 from extra.training import train, evaluate
 from datasets import fetch_mnist
 
@@ -16,7 +16,7 @@ class TinyBobNet:
     self.l2 = Tensor.scaled_uniform(128, 10)
 
   def parameters(self):
-    return get_parameters(self)
+    return optim.get_parameters(self)
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
@@ -33,7 +33,7 @@ class TinyConvNet:
     self.l1 = Tensor.scaled_uniform(out_chan*5*5, 10)
 
   def parameters(self):
-    return get_parameters(self)
+    return optim.get_parameters(self)
 
   def forward(self, x):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
@@ -46,60 +46,60 @@ class TestMNIST(unittest.TestCase):
   def test_sgd_onestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = SGD(model.parameters(), lr=0.001)
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1)
     for p in model.parameters(): p.realize()
 
   def test_sgd_threestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = SGD(model.parameters(), lr=0.001)
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=3)
 
   def test_sgd_sixstep(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = SGD(model.parameters(), lr=0.001)
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=6, noloss=True)
 
   def test_adam_onestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1)
     for p in model.parameters(): p.realize()
 
   def test_adam_threestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=3)
 
   def test_conv_onestep(self):
     np.random.seed(1337)
     model = TinyConvNet()
-    optimizer = SGD(model.parameters(), lr=0.001)
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, BS=69, steps=1, noloss=True)
     for p in model.parameters(): p.realize()
 
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
-    optimizer = Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, steps=100)
     assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
 
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = SGD(model.parameters(), lr=0.001)
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, steps=600)
     assert evaluate(model, X_test, Y_test) > 0.95
 
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = RMSprop(model.parameters(), lr=0.0002)
+    optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
     train(model,  X_train, Y_train, optimizer, steps=400)
     assert evaluate(model, X_test, Y_test) > 0.95
 
