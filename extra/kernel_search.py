@@ -345,7 +345,7 @@ if __name__ == "__main__":
     # store: [0, 768, 1536, 2304, 49152, 49920, 50688, 51456]
 
     # https://en.wikipedia.org/wiki/Ampere_(microarchitecture)
-    # we have 10240 CUDA cores @ 2100 MHz (or 1665 MHz)
+    # we have 10240 CUDA cores @ 1665 MHz
     # 80 SMs
     # FP32 cores (four each) / SM = 64
     # Threads / warp = 32
