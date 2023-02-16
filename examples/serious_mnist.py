@@ -3,7 +3,7 @@
 import sys
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.nn import BatchNorm2D, optim
+from tinygrad.nn import BatchNorm2d, optim
 from tinygrad.helpers import getenv
 from datasets import fetch_mnist
 from extra.augment import augment_img
@@ -39,7 +39,7 @@ class ConvBlock:
     self.cweights = [Tensor.uniform(filters, inp if i==0 else filters, conv, conv) for i in range(3)]
     self.cbiases = [Tensor.uniform(1, filters, 1, 1) for i in range(3)]
     #init layers
-    self._bn = BatchNorm2D(128)
+    self._bn = BatchNorm2d(128)
     self._seb = SqueezeExciteBlock2D(filters)
 
   def __call__(self, input):

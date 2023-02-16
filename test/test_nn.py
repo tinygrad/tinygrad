@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import BatchNorm2D, Conv2d, Linear, GroupNorm, LayerNorm
+from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm
 import torch
 
 @unittest.skipUnless(Device.DEFAULT == Device.CPU, "Not Implemented")
@@ -13,7 +13,7 @@ class TestNN(unittest.TestCase):
 
     # create in tinygrad
     Tensor.training = training
-    bn = BatchNorm2D(sz, eps=1e-5, track_running_stats=training)
+    bn = BatchNorm2d(sz, eps=1e-5, track_running_stats=training)
     bn.weight = Tensor.randn(sz)
     bn.bias = Tensor.randn(sz)
     bn.running_mean = Tensor.randn(sz)

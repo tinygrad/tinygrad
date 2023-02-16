@@ -1,9 +1,8 @@
 from tinygrad.tensor import Tensor
 
-# TODO: BatchNorm2D -> BatchNorm2d
-class BatchNorm2D:
+class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
-    assert affine, "BatchNorm2D is only supported with affine"
+    assert affine, "BatchNorm2d is only supported with affine"
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
