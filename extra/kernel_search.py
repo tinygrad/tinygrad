@@ -339,6 +339,13 @@ if __name__ == "__main__":
     # 2: [0,1,2,3], [768*16+0, 768*16+1, 768*16+2, 768*16+3]
     # store: [0, 768, 1536, 2304, 49152, 49920, 50688, 51456]
 
+    # https://en.wikipedia.org/wiki/Ampere_(microarchitecture)
+    # we have 10240 CUDA cores @ 2100 MHz (or 1665 MHz)
+    # 80 SMs
+    # FP32 cores (four each) / SM = 64
+    # Threads / warp = 32
+    # 80*64*4*1.665 = 34.1 TFLOPS
+
     """
     ii.append((Interventions.UPCAST, (1, 4, False)))  # 0:
     ii.append((Interventions.UPCAST, (2, 4, False)))  # 1: used in 2
@@ -348,9 +355,15 @@ if __name__ == "__main__":
     ii.append((Interventions.UPCAST, (0, 2, 16)))     # used in output
     """
     ii.append((Interventions.UPCAST, (1, 4, False)))
-    ii.append((Interventions.UPCAST, (0, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 2, False)))
+    ii.append((Interventions.UPCAST, (0, 2, False)))
+    ii.append((Interventions.UPCAST, (0, 2, False)))
+    #ii.append((Interventions.UPCAST, (0, 2, 4)))
+
+    #ii.append((Interventions.UPCAST, (0, 8, 4)))
+    #ii.append((Interventions.UPCAST, (2, 4, False)))
     k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
     exit(0)

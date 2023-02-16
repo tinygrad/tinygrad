@@ -88,7 +88,7 @@ class CLASTKernel(ASTKernel):
     
     # float4 upcast
     should_upcast = False
-    if not is_local and False:
+    if not is_local: # and False:
       for a in buftoken.axis:
         if a[0:2] == (4,1):
           should_upcast = True
@@ -296,14 +296,22 @@ class CLASTKernel(ASTKernel):
         self.kernel += [f"size_t idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
-    
-    self.local_shape = [16,16]
-    zero_stride_dim = {}
 
+    # this is in addition to all the rest
+    AXIS_NUMS = {1:[2,3,4],2:[1,2]}
+
+    self.local_shape = [1]*len(self.output_shape)
+    zero_stride_dim = {}
     # create local shapes
+    for i in range(1, len(self.bufs)):
+      if len(AXIS_NUMS[i]) == 0: continue
+      zero_stride_dim[i] = len(self.sts[i].views[-1].strides) - 1 - self.sts[i].views[-1].strides[::-1].index(0)
+      self.local_shape[zero_stride_dim[i]] = prod([self.buftokens[i].axis[an][0] for an in AXIS_NUMS[i]])
+      self.is_local[i] = True
+
     self.lsts, self.lbuftokens = {}, {}
     for i in range(1, len(self.bufs)):
-      if len(self.buftokens[i].axis) == 0: continue
+      if not self.is_local[i]: continue
       # fix up the shapetracker
       tsts = self.sts[i]
       # note: this can be shuffled arbitrarly
@@ -313,17 +321,14 @@ class CLASTKernel(ASTKernel):
       new_strides = []
       base = 1
       for s,st in zip(new_shape, old_strides):
-        if st == 0:
+        if st == 0 or s == 0:
           new_strides.append(0)
         else:
           new_strides.append(base)
           base *= s
-      print(i, new_shape, new_strides)
-      #if i == 2: new_strides = [0, 0, 16, 1, 64, 256, 1024, 0, 0]
-      # [16, 16, 4, 4, 4, 4]
-      if i == 1: new_strides = [64, 0, 0, 16, 1, 4]
-      # [16, 16, 4, 4, 4, 4]
-      if i == 2: new_strides = [0, 4, 1, 0, 64, 256]
+      print(i, AXIS_NUMS[i], new_shape, new_strides)
+      if i == 1: new_strides = [16, 0, 0, 1, 4, 256, 512, 1024] 
+      if i == 2: new_strides = [0, 16, 1, 4, 256, 1024, 0, 0]
       view = View(tuple(new_shape), tuple(new_strides))
       st_view = View(tuple(new_shape[0:len(self.local_shape)]), tuple(new_strides[0:len(self.local_shape)]))
       self.lsts[i] = ShapeTracker(shape=st_view.shape, views=[st_view])
@@ -331,11 +336,7 @@ class CLASTKernel(ASTKernel):
       for j in range(len(self.local_shape), len(new_shape)):
         self.lbuftokens[i].array(view.shape[j], view.strides[j], is_reduce[j])
       self.kernel.append(("__shared__ " if CUDA else "__local ") + f"float ldata{i}[{prod([s for s,st in zip(view.shape, view.strides) if st != 0])}];\n")
-      self.is_local[i] = True
       if DEBUG >= 3: print(i, self.lbuftokens[i], self.lsts[i])
-      zero_stride_dim[i] = len(self.sts[i].views[-1].strides) - 1 - self.sts[i].views[-1].strides[::-1].index(0)
-
-    AXIS_NUMS = {1:[1,3],2:[3,2]}
 
     # moved above local
     acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
@@ -365,6 +366,7 @@ class CLASTKernel(ASTKernel):
         if not self.is_local[i]: continue
         pieces = get_pieces(i, self.buftokens)
         self.buftokens[i].axis = [x for j,x in enumerate(self.buftokens[i].axis) if j not in AXIS_NUMS[i]]
+        print(sorted(set(self.buftokens[i].offsets())))
         gload = self.load(i, True, pieces)
         pieces = get_pieces(i, self.lbuftokens)
         axis_backup = self.lbuftokens[i].axis
