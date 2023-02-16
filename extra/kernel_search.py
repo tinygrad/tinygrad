@@ -369,7 +369,10 @@ if __name__ == "__main__":
     """
     ii.append((Interventions.UPCAST, (1, 4, False)))
     ii.append((Interventions.UPCAST, (0, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 16, False)))
+    ii.append((Interventions.UPCAST, (0, 2, 4)))
+    ii.append((Interventions.UPCAST, (3, 4, False)))
+    ii.append((Interventions.UPCAST, (3, 4, False)))
+    ii.append((Interventions.UPCAST, (3, 2, False)))
 
     #ii.append((Interventions.UPCAST, (0, 2, 4)))
 
@@ -378,8 +381,8 @@ if __name__ == "__main__":
     k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
 
-    while 1:
-      time.sleep(1)
+    #while 1:
+    #  time.sleep(1)
     exit(0)
 
     for z in [4,8,16]:

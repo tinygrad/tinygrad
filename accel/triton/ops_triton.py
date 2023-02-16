@@ -133,9 +133,9 @@ class TritonASTKernel(ASTKernel):
 
     if DEBUG >= 5:
       print(list(compiled.asm.keys())) # ['cubin', 'ptx', 'llir', 'ttir']
-      print(compiled.asm['ttir'])
+      #print(compiled.asm['ttir'])
       #print(compiled.asm['llir'])
-      #print(compiled.asm['ptx'])
+      print(compiled.asm['ptx'])
 
     mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):

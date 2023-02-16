@@ -88,7 +88,7 @@ class CLASTKernel(ASTKernel):
     
     # float4 upcast
     should_upcast = False
-    if not is_local and False:
+    if not is_local:
       for a in buftoken.axis:
         if a[0:2] == (4,1):
           should_upcast = True
@@ -299,7 +299,8 @@ class CLASTKernel(ASTKernel):
 
     # this is in addition to all the rest
     #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
-    AXIS_NUMS = {1:[2],2:[2]}
+    #AXIS_NUMS = {1:[2],2:[2]}
+    AXIS_NUMS = {1:[4,5],2:[3]}
 
     self.local_shape = [1]*len(self.output_shape)
     zero_stride_dim = {}
