@@ -1,7 +1,7 @@
 import unittest
 import time
 import numpy as np
-from tinygrad.nn import optim
+from tinygrad.nn.optim import get_parameters, SGD
 from tinygrad.tensor import Device
 from tinygrad.helpers import getenv
 from extra.training import train
@@ -13,11 +13,11 @@ from models.resnet import ResNet18
 BS = getenv("BS", 2)
 
 def train_one_step(model,X,Y):
-  params = optim.get_parameters(model)
+  params = get_parameters(model)
   pcount = 0
   for p in params:
     pcount += np.prod(p.shape)
-  optimizer = optim.SGD(params, lr=0.001)
+  optimizer = SGD(params, lr=0.001)
   print("stepping %r with %.1fM params bs %d" % (type(model), pcount/1e6, BS))
   st = time.time()
   train(model, X, Y, optimizer, steps=1, BS=BS)

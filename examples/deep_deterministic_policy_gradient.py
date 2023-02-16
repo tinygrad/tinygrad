@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 from numpy.typing import NDArray
 
 from tinygrad.tensor import Tensor
-from tinygrad.nn.optim import Adam, get_parameter
+from tinygrad.nn.optim import Adam, get_parameters
 from tinygrad.helpers import getenv
 
 import numpy as np

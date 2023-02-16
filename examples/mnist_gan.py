@@ -7,7 +7,7 @@ import torch
 from torchvision.utils import make_grid, save_image
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from tinygrad.nn import optim
+from tinygrad.nn.optim import Adam, get_parameters
 from datasets import fetch_mnist
 GPU = getenv("GPU")
 
@@ -51,8 +51,8 @@ if __name__ == "__main__":
   batch_size = 512
   k = 1
   epochs = 300
-  generator_params = optim.get_parameters(generator)
-  discriminator_params = optim.get_parameters(discriminator)
+  generator_params = get_parameters(generator)
+  discriminator_params = get_parameters(discriminator)
   gen_loss = []
   disc_loss = []
   output_folder = "outputs"
@@ -64,8 +64,8 @@ if __name__ == "__main__":
   if GPU:
     [x.gpu_() for x in generator_params+discriminator_params]
   # optimizers
-  optim_g = optim.Adam(generator_params,lr=0.0002, b1=0.5) # 0.0002 for equilibrium!
-  optim_d = optim.Adam(discriminator_params,lr=0.0002, b1=0.5)
+  optim_g = Adam(generator_params,lr=0.0002, b1=0.5) # 0.0002 for equilibrium!
+  optim_d = Adam(discriminator_params,lr=0.0002, b1=0.5)
 
   def regularization_l2(model, a=1e-4):
       #TODO: l2 reg loss

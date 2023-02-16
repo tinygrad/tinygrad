@@ -1,6 +1,5 @@
 import numpy as np
 from tqdm import trange
-from tinygrad.nn.optim import get_parameters
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import getenv
 
