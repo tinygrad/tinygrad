@@ -18,6 +18,7 @@ class CLProgram:
     self.name, self.op_estimate, self.mem_estimate, self.shared = name, op_estimate, mem_estimate, shared
     if DEBUG >= 4 and not binary: print("CUDA compile", prg)
     self.prg = (cuda.module_from_buffer(prg.encode('utf-8')) if binary else SourceModule(prg)).get_function(name)
+    if DEBUG >= 5: print(dir(self.prg))
 
   def __call__(self, global_size, local_size, *args):
     local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)

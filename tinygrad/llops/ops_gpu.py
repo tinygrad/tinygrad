@@ -61,10 +61,33 @@ class CLASTKernel(ASTKernel):
     if len(value) == buftoken.size()*4: value = group_float4(value)
     if len(value)*4 == buftoken.size(): value = split_float4(value)
     assert len(value) == buftoken.size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
+
     to_store : Dict[int, Token] = {}
     for o, v in zip(buftoken.offsets(), value):
       if o in to_store: assert str(to_store[o]) == str(v), f"mismatch {to_store[o]} {v}"
       to_store[o] = v
+
+    # float4 upcast
+    should_upcast = False
+    if not self.is_local[buf_index]:
+      for a in buftoken.axis:
+        if a[0:2] == (4,1):
+          should_upcast = True
+
+    if should_upcast:
+      buftoken_backup = buftoken
+      buftoken = Token(buftoken.tok, Types.FLOAT4)
+      for x in buftoken_backup.axis:
+        if x[0:2] != (4,1):
+          buftoken.array(x[0], x[1], x[2])
+      to_store_float4 = {}
+      for o in buftoken.offsets():
+        if CUDA:
+          to_store_float4[o] = Token(f"make_float4({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+        else:
+          to_store_float4[o] = Token(f"(float4)({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+      to_store = to_store_float4
+
     for o, v in sorted(to_store.items(), key=lambda x: x[0]):
       idxy, valid = self.sts[buf_index].expr_idxs(o) if not self.is_local[buf_index] else self.lsts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(len(self.local_shape))])
       if extra is not None: idxy = Variable.sum([idxy, extra])
@@ -72,8 +95,10 @@ class CLASTKernel(ASTKernel):
       assert buftoken.typ == v.typ, f"buf must be {v.typ}"
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         self.kernel.append(f"write_imagef{buftoken.tok}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+      elif v.typ == Types.FLOAT4:
+        self.kernel.append(f"((float4*){buftoken.tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
-        self.kernel.append(f"{buftoken.tok}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"{buftoken.tok}[{idxy.render(render_cl)}] = {v.tok};\n")
 
   def load(self, buf_index:int, non_local:bool=False, extra=None) -> List[Token]:
     is_local = self.is_local[buf_index] and not non_local
@@ -300,7 +325,7 @@ class CLASTKernel(ASTKernel):
     # this is in addition to all the rest
     #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
     #AXIS_NUMS = {1:[2],2:[2]}
-    AXIS_NUMS = {1:[4,5],2:[3]}
+    AXIS_NUMS = {1:[4],2:[3]}
 
     self.local_shape = [1]*len(self.output_shape)
     zero_stride_dim = {}
@@ -329,10 +354,10 @@ class CLASTKernel(ASTKernel):
           new_strides.append(base)
           base *= s
       print(i, AXIS_NUMS[i], new_shape, new_strides)
-      # [1, 4, 8, 4, 4, 2, 4, 4, 2]
-      if i == 1: new_strides = [0, 4, 0, 0, 128, 512, 1, 16, 64]
-      # [1, 4, 8, 4, 4, 2, 4, 4, 2]
-      if i == 2: new_strides = [0, 0, 4, 1, 0, 0, 32, 128, 512]
+      # [1, 4, 8, 4, 4, 2, 4, 8]
+      if i == 1: new_strides = [0, 4, 0, 0, 128, 512, 1, 16]
+      # [1, 4, 8, 4, 4, 2, 4, 8]
+      if i == 2: new_strides = [0, 0, 4, 1, 0, 0, 32, 128]
       view = View(tuple(new_shape), tuple(new_strides))
       st_view = View(tuple(new_shape[0:len(self.local_shape)]), tuple(new_strides[0:len(self.local_shape)]))
       self.lsts[i] = ShapeTracker(shape=st_view.shape, views=[st_view])

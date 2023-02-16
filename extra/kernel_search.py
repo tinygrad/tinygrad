@@ -95,13 +95,13 @@ def run_and_time(k,cnt=3,local_override=None, code_override=None):
   for i in range(cnt):
     t1 = time.monotonic_ns()
     if local_override: prog.local_work_size = local_override
+    # UGH! is this really the best way do to timing
+    prog(*k.bufs)
+    prog(*k.bufs)
+    prog(*k.bufs)
     if CUDA:
       start_event = cuda.Event()
       end_event = cuda.Event()
-      # UGH! is this really the best way do to timing
-      prog(*k.bufs)
-      prog(*k.bufs)
-      prog(*k.bufs)
       start_event.record()
     e = prog(*k.bufs)
     if CUDA:
@@ -371,8 +371,7 @@ if __name__ == "__main__":
     ii.append((Interventions.UPCAST, (0, 4, False)))
     ii.append((Interventions.UPCAST, (0, 2, 4)))
     ii.append((Interventions.UPCAST, (3, 4, False)))
-    ii.append((Interventions.UPCAST, (3, 4, False)))
-    ii.append((Interventions.UPCAST, (3, 2, False)))
+    ii.append((Interventions.UPCAST, (3, 8, False)))
 
     #ii.append((Interventions.UPCAST, (0, 2, 4)))
 
