@@ -2,9 +2,8 @@
 import numpy as np
 from PIL import Image
 
-from tinygrad.nn.optim import Adam
+from tinygrad.nn.optim import Adam, get_parameters
 from tinygrad.helpers import getenv
-from extra.utils import get_parameters
 from extra.training import train, evaluate
 from models.resnet import ResNet
 from datasets import fetch_mnist

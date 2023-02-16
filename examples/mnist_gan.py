@@ -7,8 +7,7 @@ import torch
 from torchvision.utils import make_grid, save_image
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-import tinygrad.nn.optim as optim
-from extra.utils import get_parameters
+from tinygrad.nn import optim
 from datasets import fetch_mnist
 GPU = getenv("GPU")
 
@@ -52,8 +51,8 @@ if __name__ == "__main__":
   batch_size = 512
   k = 1
   epochs = 300
-  generator_params = get_parameters(generator)
-  discriminator_params = get_parameters(discriminator)
+  generator_params = optim.get_parameters(generator)
+  discriminator_params = optim.get_parameters(discriminator)
   gen_loss = []
   disc_loss = []
   output_folder = "outputs"

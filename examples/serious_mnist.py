@@ -3,11 +3,11 @@
 import sys
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.nn import BatchNorm2D, optim
+from tinygrad.nn import BatchNorm2D
+from tinygrad.nn.optim import Adam, get_parameters
 from tinygrad.helpers import getenv
 from datasets import fetch_mnist
 from extra.augment import augment_img
-from extra.utils import get_parameters
 from extra.training import train, evaluate, sparse_categorical_crossentropy
 GPU = getenv("GPU")
 QUICK = getenv("QUICK")
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     [x.gpu_() for x in params]
 
   for lr, epochs in zip(lrs, epochss):
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = Adam(model.parameters(), lr=lr)
     for epoch in range(1,epochs+1):
       #first epoch without augmentation
       X_aug = X_train if epoch == 1 else augment_img(X_train)

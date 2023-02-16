@@ -3,12 +3,11 @@ import time
 from multiprocessing import Process, Queue
 import numpy as np
 from tqdm import trange
-import tinygrad.nn.optim as optim
+from tinygrad.nn.optim import Adam, get_parameters
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from datasets import fetch_cifar
 from datasets.imagenet import fetch_batch
-from extra.utils import get_parameters
 from models.efficientnet import EfficientNet
 
 class TinyConvNet:
@@ -41,7 +40,7 @@ if __name__ == "__main__":
 
   parameters = get_parameters(model)
   print("parameter count", len(parameters))
-  optimizer = optim.Adam(parameters, lr=0.001)
+  optimizer = Adam(parameters, lr=0.001)
 
   BS, steps = getenv("BS", 64 if TINY else 16), getenv("STEPS", 2048)
   print(f"training with batch size {BS} for {steps} steps")

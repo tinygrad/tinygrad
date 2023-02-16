@@ -2,9 +2,8 @@ from typing import Optional, Tuple
 from numpy.typing import NDArray
 
 from tinygrad.tensor import Tensor
-import tinygrad.nn.optim as optim
+from tinygrad.nn.optim import Adam, get_parameter
 from tinygrad.helpers import getenv
-from extra.utils import get_parameters
 
 import numpy as np
 import gym
@@ -161,8 +160,8 @@ class DeepDeterministicPolicyGradient:
     if DEVICE == "GPU":
       [x.gpu_() for x in actor_params + critic_params + target_actor_params + target_critic_params]
 
-    self.actor_optimizer = optim.Adam(actor_params, lr_actor)
-    self.critic_optimizer = optim.Adam(critic_params, lr_critic)
+    self.actor_optimizer = Adam(actor_params, lr_actor)
+    self.critic_optimizer = Adam(critic_params, lr_critic)
 
     self.update_network_parameters(tau=1.0)
 
