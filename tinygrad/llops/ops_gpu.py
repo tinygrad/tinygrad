@@ -65,7 +65,7 @@ class CLASTKernel(ASTKernel):
     for o, v in zip(buftoken.offsets(), value):
       if o in to_store: assert str(to_store[o]) == str(v), f"mismatch {to_store[o]} {v}"
       to_store[o] = v
-    for o, v in to_store.items():
+    for o, v in sorted(to_store.items(), key=lambda x: x[0]):
       idxy, valid = self.sts[buf_index].expr_idxs(o) if not self.is_local[buf_index] else self.lsts[buf_index].expr_idxs(o, [f"lidx{i}" for i in range(len(self.local_shape))])
       if extra is not None: idxy = Variable.sum([idxy, extra])
       assert valid.min == 1, "store must always be valid"
@@ -329,12 +329,10 @@ class CLASTKernel(ASTKernel):
           new_strides.append(base)
           base *= s
       print(i, AXIS_NUMS[i], new_shape, new_strides)
-      #if i == 1: new_strides = [128, 0, 0, 1, 4]
-      #if i == 2: new_strides = [0, 128, 1, 0, 4]
-      # [16, 16, 4, 2, 2, 4, 4, 2]
-      #if i == 1: new_strides = [1, 0, 0, 16, 32, 64, 256, 1024]
-      # [16, 16, 4, 2, 2, 4, 4, 2]
-      #if i == 2: new_strides = [0, 4, 1, 0, 0, 64, 256, 1024]
+      # [1, 4, 8, 4, 4, 2, 4, 4, 2]
+      if i == 1: new_strides = [0, 4, 0, 0, 128, 512, 1, 16, 64]
+      # [1, 4, 8, 4, 4, 2, 4, 4, 2]
+      if i == 2: new_strides = [0, 0, 4, 1, 0, 0, 32, 128, 512]
       view = View(tuple(new_shape), tuple(new_strides))
       st_view = View(tuple(new_shape[0:len(self.local_shape)]), tuple(new_strides[0:len(self.local_shape)]))
       self.lsts[i] = ShapeTracker(shape=st_view.shape, views=[st_view])
