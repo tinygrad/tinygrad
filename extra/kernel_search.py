@@ -178,7 +178,7 @@ def one(ast, winning_interventions, local_override=None, code_override=None, ski
   best = run_and_time(k, 1, local_override, code_override)
 
   name = k.fxn.name
-  print(f"{name:30s} {baseline/1e3:9.2f} us -> {best/1e3:9.2f} us {baseline/best:7.2f}x *with* {winning_interventions}")
+  print(f"{name:30s} {baseline/1e3:9.2f} us -> {best/1e3:9.2f} us ({k.info.flops/best:7.2f} GFLOPS) {baseline/best:7.2f}x *with* {winning_interventions}")
   if not getenv("NOTEST"): test_ast(k)
   return k
 
