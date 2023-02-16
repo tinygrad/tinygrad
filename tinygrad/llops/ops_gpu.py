@@ -56,6 +56,40 @@ class CLASTKernel(ASTKernel):
     if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
     return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
+  # global to shared
+  def copy(self, i, pieces, lpieces):
+    if not CUDA or True:
+      gload = self.load(i, True, pieces)
+      self.store(i, gload, lpieces)
+      return
+    load_float4 = [a for a in self.buftokens[i].axis if a[0:2] == (4,1)]
+    store_float4 = [a for a in self.lbuftokens[i].axis if a[0:2] == (4,1)]
+    assert len(load_float4) == 1 and len(store_float4) == 1
+
+    buftoken = Token(self.buftokens[i].tok, Types.FLOAT4)
+    for x in self.buftokens[i].axis:
+      if x[0:2] != (4,1):
+        buftoken.array(x[0], x[1], x[2])
+
+    lbuftoken = Token(self.lbuftokens[i].tok, Types.FLOAT4)
+    for x in self.lbuftokens[i].axis:
+      if x[0:2] != (4,1):
+        lbuftoken.array(x[0], x[1], x[2])
+
+    self.prekernel.add('#include <cuda_pipeline_primitives.h>\n')
+    seen = set()
+    for o, lo in zip(buftoken.offsets(), lbuftoken.offsets()):
+      if (o, lo) in seen:
+        continue
+      seen.add((o, lo))
+      idxy, _ = self.sts[i].expr_idxs(o)
+      lidxy, _ = self.lsts[i].expr_idxs(lo, [f"lidx{i}" for i in range(len(self.local_shape))])
+      if pieces is not None: idxy = Variable.sum([idxy, pieces])
+      if lpieces is not None: lidxy = Variable.sum([lidxy, lpieces])
+      self.kernel.append(f"__pipeline_memcpy_async(&{lbuftoken.tok}[{lidxy.render(render_cl)}], &{buftoken.tok}[{idxy.render(render_cl)}], 16);\n")
+    self.kernel.append("__pipeline_commit();\n")
+    self.kernel.append("__pipeline_wait_prior(0);\n")
+
   def store(self, buf_index, value:List[Token], extra=None):
     buftoken = self.lbuftokens[buf_index] if self.is_local[buf_index] else self.buftokens[buf_index]
     if len(value) == buftoken.size()*4: value = group_float4(value)
@@ -356,10 +390,8 @@ class CLASTKernel(ASTKernel):
           base *= s
       print(i, AXIS_NUMS[i], new_shape, new_strides)
       # [1, 4, 8, 4, 4, 2, 4, 8]
-      #if i == 1: new_strides = [0, 4, 0, 0, 128, 512, 1, 16]
       if i == 1: new_strides = [4, 0, 0, 128, 1, 16]
       # [1, 4, 8, 4, 4, 2, 4, 8]
-      #if i == 2: new_strides = [0, 0, 4, 1, 0, 0, 32, 128]
       if i == 2: new_strides = [0, 4, 1, 0, 32, 128]
       view = View(tuple(new_shape), tuple(new_strides))
       st_view = View(tuple(new_shape[0:len(self.local_shape)]), tuple(new_strides[0:len(self.local_shape)]))
@@ -400,13 +432,10 @@ class CLASTKernel(ASTKernel):
         pieces = get_pieces(i, self.buftokens)
         self.buftokens[i].axis = [x for j,x in enumerate(self.buftokens[i].axis) if j not in AXIS_NUMS[i]]
         print(sorted(set(self.buftokens[i].offsets())))
-        gload = self.load(i, True, pieces)
-        #gloads.append((i,
-      #for i,gload in gloads:
-        pieces = get_pieces(i, self.lbuftokens)
+        lpieces = get_pieces(i, self.lbuftokens)
         axis_backup = self.lbuftokens[i].axis
         self.lbuftokens[i].axis = [x for j,x in enumerate(self.lbuftokens[i].axis) if j not in AXIS_NUMS[i]]
-        self.store(i, gload, pieces)
+        self.copy(i, pieces, lpieces)
         self.lbuftokens[i].axis = axis_backup
       if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n" if not CUDA else "__syncthreads();\n")
 
