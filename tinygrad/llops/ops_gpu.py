@@ -388,7 +388,7 @@ class CLASTKernel(ASTKernel):
           base *= s
       print(i, AXIS_NUMS[i], new_shape, new_strides)
       # [8, 16, 4, 2, 4, 4, 2, 4]
-      if i == 1: new_strides = [4, 0, 0, 256, 512, 1, 32, 64]
+      if i == 1: new_strides = [32, 0, 0, 256, 512, 1, 4, 8]
       # [8, 16, 4, 2, 4, 4, 2, 4]
       if i == 2: new_strides = [0, 4, 1, 0, 0, 64, 256, 512]
       view = View(tuple(new_shape), tuple(new_strides))
