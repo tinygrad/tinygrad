@@ -6,7 +6,7 @@ from typing import Dict, List
 from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv
 
-GRAPH = getenv("GRAPH", 0)
+GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 # **** debugging and graphing ****
 
@@ -17,29 +17,30 @@ if GRAPH:
   def save_graph_exit():
     for k,v in cnts.items():
       print(k, v)
-    if getenv("PRUNEGRAPH", 0):
+    if PRUNEGRAPH:
       dead_nodes = []
       for n in G.nodes:
         # prune movementops and loadops
-        if 'fillcolor' in G.nodes[n] and G.nodes[n]['fillcolor'] in ["#80ff8080", "#80ff80", "#FFFF8080", "#FFFF80"]:
-          for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n)):
-            G.add_edge(x, y)
+        if 'prunable' in G.nodes[n] and G.nodes[n]['prunable']:
+          G.add_edges_from([(x, y) for (x,_),(_,y) in itertools.product(G.in_edges(n), G.out_edges(n))]) 
           dead_nodes.append(n)
-      for n in dead_nodes:
-        G.remove_node(n)
+      G.remove_nodes_from(dead_nodes)
     print("saving", G)
-    nx.drawing.nx_pydot.write_dot(G, '/tmp/net.dot')
+    nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
-    os.system('dot -Tsvg /tmp/net.dot -o /tmp/net.svg')
+    os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
   atexit.register(save_graph_exit)
 
-global_num_max = 0
+id_gen = itertools.count()
 def nm(x):
-  global global_num_max
-  if not hasattr(x, 'global_num'):
-    setattr(x, 'global_num', global_num_max)
-    global_num_max += 1
-  return f"<{x.global_num}>"
+  if not hasattr(x, 'node_id'):
+    setattr(x, 'node_id', next(id_gen))
+  return f"<{x.node_id}>"
+
+def get_sop(op : List[Op]):
+  if len(op) <= 2: return '.'.join([str(y).split(".")[1] for y in op][::-1])
+  if len(op) <= 4: return '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
+  return str(len(op))
 
 def log_op(ret : DeviceBuffer, ast : LazyOp):
   if not DEBUG and not GRAPH: return
@@ -56,21 +57,13 @@ def log_op(ret : DeviceBuffer, ast : LazyOp):
     dashed = (optype == LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
 
     for x in inp:
-      if len(op) <= 2:
-        sop = '.'.join([str(y).split(".")[1] for y in op][::-1])
-      elif len(op) <= 4:
-        sop = '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
-      else:
-        sop = str(len(op))
-      G.add_edge(nm(x), nm(ret), label=sop)
+      G.add_edge(nm(x), nm(ret), label=get_sop(op))
       if 'label' not in G.nodes[nm(x)]:
         G.nodes[nm(x)]['label'] = str(x.shape)
     if nm(ret) not in G.nodes:
       G.add_node(nm(ret))
 
-    if optype == ReduceOps:
-      G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape)
-    else:
-      G.nodes[nm(ret)]['label'] = str(ret.shape)
+    G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape) if optype == ReduceOps else str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else str())) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
+    G.nodes[nm(ret)]['prunable'] = optype in [LoadOps, MovementOps]
