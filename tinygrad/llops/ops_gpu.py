@@ -88,7 +88,7 @@ class CLASTKernel(ASTKernel):
     
     # float4 upcast
     should_upcast = False
-    if not is_local: # and False:
+    if not is_local and False:
       for a in buftoken.axis:
         if a[0:2] == (4,1):
           should_upcast = True
@@ -298,7 +298,8 @@ class CLASTKernel(ASTKernel):
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # this is in addition to all the rest
-    AXIS_NUMS = {1:[2,3,4],2:[1,2]}
+    #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
+    AXIS_NUMS = {1:[2],2:[2]}
 
     self.local_shape = [1]*len(self.output_shape)
     zero_stride_dim = {}
@@ -327,8 +328,12 @@ class CLASTKernel(ASTKernel):
           new_strides.append(base)
           base *= s
       print(i, AXIS_NUMS[i], new_shape, new_strides)
-      if i == 1: new_strides = [16, 0, 0, 1, 4, 256, 512, 1024] 
-      if i == 2: new_strides = [0, 16, 1, 4, 256, 1024, 0, 0]
+      #if i == 1: new_strides = [128, 0, 0, 1, 4]
+      #if i == 2: new_strides = [0, 128, 1, 0, 4]
+      # [16, 16, 4, 2, 2, 4, 4, 2]
+      #if i == 1: new_strides = [1, 0, 0, 16, 32, 64, 256, 1024]
+      # [16, 16, 4, 2, 2, 4, 4, 2]
+      #if i == 2: new_strides = [0, 4, 1, 0, 0, 64, 256, 1024]
       view = View(tuple(new_shape), tuple(new_strides))
       st_view = View(tuple(new_shape[0:len(self.local_shape)]), tuple(new_strides[0:len(self.local_shape)]))
       self.lsts[i] = ShapeTracker(shape=st_view.shape, views=[st_view])

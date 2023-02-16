@@ -122,7 +122,11 @@ def fxn(data0,data1,data2):
   for idx2 in range(0, 24):
     val1 = tl.load(data1 + ((idx0*49152)+(idx2*32)) + (tl.arange(0, 64)[:,None] * 768) + (tl.arange(0, 32)[None,:] * 1))
     val2 = tl.load(data2 + ((idx1*64)+(idx2*24576)) + (tl.arange(0, 64)[None,:] * 1) + (tl.arange(0, 32)[:,None] * 768))
-    acc += tl.dot(val1, val2, allow_tf32=False)
+    #val1 = tl.load(data1 + ((idx0*49152)+(idx2*32)) + (tl.arange(0, 64)[:,None,None] * 768) + (tl.arange(0, 32)[None,None,:] * 1))
+    #val2 = tl.load(data2 + ((idx1*64)+(idx2*24576)) + (tl.arange(0, 64)[None,:,None] * 1) + (tl.arange(0, 32)[None,None,:] * 768))
+    acc += tl.dot(val1, val2, trans_b=False, allow_tf32=False)
+    #acc += tl.dot(tl.reshape(val1, (64, 32)), tl.reshape(val2, (64, 32)), trans_b=True, allow_tf32=False)
+    #acc += tl.dot(val1, val2, allow_tf32=False)
   tl.store(data0 + ((idx0*49152)+(idx1*64)) + (tl.arange(0, 64)[:,None] * 768) + (tl.arange(0, 64)[None,:] * 1), acc)
 """
     if 'tl.zeros((64,64,)' in kernel: kernel = replace_kernel

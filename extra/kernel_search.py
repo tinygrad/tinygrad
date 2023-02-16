@@ -354,12 +354,18 @@ if __name__ == "__main__":
     ii.append((Interventions.UPCAST, (0, 4, False)))  # 4: used in 1
     ii.append((Interventions.UPCAST, (0, 2, 16)))     # used in output
     """
+    """
     ii.append((Interventions.UPCAST, (1, 4, False)))
+    ii.append((Interventions.UPCAST, (0, 2, False)))
+    ii.append((Interventions.UPCAST, (0, 2, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
     ii.append((Interventions.UPCAST, (2, 2, False)))
-    ii.append((Interventions.UPCAST, (0, 2, False)))
-    ii.append((Interventions.UPCAST, (0, 2, False)))
+    """
+    ii.append((Interventions.UPCAST, (1, 4, False)))
+    ii.append((Interventions.UPCAST, (0, 4, False)))
+    ii.append((Interventions.UPCAST, (2, 8, False)))
+
     #ii.append((Interventions.UPCAST, (0, 2, 4)))
 
     #ii.append((Interventions.UPCAST, (0, 8, 4)))
