@@ -69,7 +69,7 @@ class CLASTKernel(ASTKernel):
 
     # float4 upcast
     should_upcast = False
-    if not self.is_local[buf_index]:
+    if not self.is_local[buf_index] and False:
       for a in buftoken.axis:
         if a[0:2] == (4,1):
           should_upcast = True
@@ -391,12 +391,15 @@ class CLASTKernel(ASTKernel):
           idx //= sh
         return Variable.sum(pieces)
 
+      #gloads = []
       for i in range(1, len(self.bufs)):
         if not self.is_local[i]: continue
         pieces = get_pieces(i, self.buftokens)
         self.buftokens[i].axis = [x for j,x in enumerate(self.buftokens[i].axis) if j not in AXIS_NUMS[i]]
         print(sorted(set(self.buftokens[i].offsets())))
         gload = self.load(i, True, pieces)
+        #gloads.append((i,
+      #for i,gload in gloads:
         pieces = get_pieces(i, self.lbuftokens)
         axis_backup = self.lbuftokens[i].axis
         self.lbuftokens[i].axis = [x for j,x in enumerate(self.lbuftokens[i].axis) if j not in AXIS_NUMS[i]]

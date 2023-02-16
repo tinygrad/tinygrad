@@ -1,7 +1,7 @@
 from typing import Optional
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
-from pycuda.compiler import SourceModule # type: ignore
+from pycuda.compiler import compile # type: ignore
 import numpy as np
 from tinygrad.ops import DEBUG, GlobalCounters
 
@@ -17,8 +17,9 @@ class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, shared=0, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate, self.shared = name, op_estimate, mem_estimate, shared
     if DEBUG >= 4 and not binary: print("CUDA compile", prg)
-    self.prg = (cuda.module_from_buffer(prg.encode('utf-8')) if binary else SourceModule(prg)).get_function(name)
-    if DEBUG >= 5: print(dir(self.prg))
+    if not binary: prg = compile(prg, target="ptx").decode('utf-8')
+    if DEBUG >= 5: print(prg)
+    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(name)
 
   def __call__(self, global_size, local_size, *args):
     local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
