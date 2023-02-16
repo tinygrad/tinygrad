@@ -8,7 +8,7 @@ import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CLProgram, CUDA
-from tinygrad.runtime.cuda import cuda
+if CUDA: from tinygrad.runtime.cuda import cuda
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
 from tinygrad.ops import DEBUG
 from tinygrad.helpers import getenv

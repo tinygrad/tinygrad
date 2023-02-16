@@ -128,7 +128,7 @@ class CLASTKernel(ASTKernel):
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         self.kernel.append(f"write_imagef{buftoken.tok}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
-        self.kernel.append(f"((float4*){buftoken.tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"(({('__global ' if not self.is_local[buf_index] else '__local ') if not CUDA else str()}float4*){buftoken.tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
         self.kernel.append(f"{buftoken.tok}[{idxy.render(render_cl)}] = {v.tok};\n")
 
@@ -170,7 +170,7 @@ class CLASTKernel(ASTKernel):
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
           ldr = Token(f"read_imagef({buftoken.tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         elif buftoken.typ == Types.FLOAT4:
-          ldr = Token(f"((float4*){buftoken.tok})[{(idxy//4).render(render_cl)}]", buftoken.typ)
+          ldr = Token(f"(({('__global ' if not self.is_local[buf_index] or non_local else '__local ') if not CUDA else str()}float4*){buftoken.tok})[{(idxy//4).render(render_cl)}]", buftoken.typ)
         else:
           ldr = Token(f"{buftoken.tok}[{idxy.render(render_cl)}]", buftoken.typ)
         ldr = ldr if valid.min == 1 or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
