@@ -23,7 +23,8 @@ class TritonASTKernel(ASTKernel):
     UnaryOps.EXP: "tl.exp(A)", UnaryOps.LOG: "tl.log(A)", UnaryOps.RECIPROCAL: "(1.0/A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)",
     #BinaryOps.MUL: "A*B",
-    BinaryOps.MUL: "tl.sum(A*B, axis=2)",
+    #BinaryOps.MUL: "tl.sum(A*B, axis=2)",
+    BinaryOps.MUL: "tl.dot(A, B, allow_tf32=False)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "tl.exp(tl.log(A)*B)", BinaryOps.CMPEQ: "(A==B)",
     ReduceOps.SUM: "A += B", ReduceOps.MAX: "A = tl.maximum(A,B)"
   }
@@ -53,9 +54,11 @@ class TritonASTKernel(ASTKernel):
 
   def ranges(self, buf_index):
     assert len(self.bufs[buf_index].st.views) == 1
+    axis = [(s,a,r) for (s,a,r) in self.buftokens[buf_index].axis if a != 0]
+    if buf_index == 2: axis = axis[::-1]  # trans_b = True
+    al = len(axis)
     ranges = []
-    al = len(self.buftokens[buf_index].axis)
-    for i, (s,a,r) in enumerate(self.buftokens[buf_index].axis):
+    for i, (s,a,r) in enumerate(axis):
       idxxx = ["None"] * al
       idxxx[i] = ":"
       if a != 0: # or True:
@@ -113,53 +116,6 @@ class TritonASTKernel(ASTKernel):
     fn = f"/tmp/{hash}.py"
     kernel = '\n'.join(self.kernel)
 
-    replace_kernel = """
-@triton.jit
-def fxn(data0,data1,data2):
-  idx1 = tl.program_id(0)
-  idx0 = tl.program_id(1)
-  acc = tl.zeros((64,64,), dtype=tl.float32)
-  for idx2 in range(0, 24):
-    val1 = tl.load(data1 + ((idx0*49152)+(idx2*32)) + (tl.arange(0, 64)[:,None] * 768) + (tl.arange(0, 32)[None,:] * 1))
-    val2 = tl.load(data2 + ((idx1*64)+(idx2*24576)) + (tl.arange(0, 64)[None,:] * 1) + (tl.arange(0, 32)[:,None] * 768))
-    #val1 = tl.load(data1 + ((idx0*49152)+(idx2*32)) + (tl.arange(0, 64)[:,None,None] * 768) + (tl.arange(0, 32)[None,None,:] * 1))
-    #val2 = tl.load(data2 + ((idx1*64)+(idx2*24576)) + (tl.arange(0, 64)[None,:,None] * 1) + (tl.arange(0, 32)[None,None,:] * 768))
-    acc += tl.dot(val1, val2, trans_b=False, allow_tf32=False)
-    #acc += tl.dot(tl.reshape(val1, (64, 32)), tl.reshape(val2, (64, 32)), trans_b=True, allow_tf32=False)
-    #acc += tl.dot(val1, val2, allow_tf32=False)
-  tl.store(data0 + ((idx0*49152)+(idx1*64)) + (tl.arange(0, 64)[:,None] * 768) + (tl.arange(0, 64)[None,:] * 1), acc)
-"""
-    if 'tl.zeros((64,64,)' in kernel: kernel = replace_kernel
-
-    replace_kernel = """
-@triton.jit                                                                            
-def fxn(data0,data1,data2):                                                            
-  idx1 = tl.program_id(0)                                                              
-  idx0 = tl.program_id(1)                                                              
-  acc = tl.zeros((32,32,), dtype=tl.float32)                                           
-  for idx2 in range(0, 24):                                                            
-    val1 = tl.load(data1 + ((idx0*24576)+(idx2*32)) + (tl.arange(0, 32)[:,None] * 768) + (tl.arange(0, 32)[None,:] * 1))                                             
-    val2 = tl.load(data2 + ((idx1*32)+(idx2*24576)) + (tl.arange(0, 32)[None,:] * 1) + (tl.arange(0, 32)[:,None] * 768))                                             
-    acc += tl.dot(val1, val2, allow_tf32=False)
-    #acc += tl.dot(tl.reshape(val1, (32, 32)), tl.reshape(val2, (32, 32)), allow_tf32=False)
-    #acc += tl.sum(val1*val2, axis=2)                                                   
-  tl.store(data0 + ((idx0*24576)+(idx1*32)) + (tl.arange(0, 32)[:,None] * 768) + (tl.arange(0, 32)[None,:] * 1), acc)
-"""
-    if 'tl.zeros((32,32,)' in kernel: kernel = replace_kernel
-
-    replace_kernel = """
-@triton.jit
-def fxn(data0,data1,data2):
-  idx1 = tl.program_id(0)
-  idx0 = tl.program_id(1)
-  acc = tl.zeros((128,64,), dtype=tl.float32)
-  for idx2 in range(0, 24):
-    val1 = tl.load(data1 + ((idx0*98304)+(idx2*32)) + (tl.arange(0, 128)[:,None] * 768) + (tl.arange(0, 32)[None,:] * 1))
-    val2 = tl.load(data2 + ((idx1*64)+(idx2*24576)) + (tl.arange(0, 64)[None,:] * 1) + (tl.arange(0, 32)[:,None] * 768))
-    acc += tl.dot(val1, val2, allow_tf32=False)
-  tl.store(data0 + ((idx0*98304)+(idx1*64)) + (tl.arange(0, 128)[:,None] * 768) + (tl.arange(0, 64)[None,:] * 1), acc)
-"""
-    if 'tl.zeros((128,64,)' in kernel: kernel = replace_kernel
     if DEBUG >= 4: print(kernel)
     with open(fn, "w") as f: f.write(kernel)
     codeObject = compile(kernel, fn, "exec")
@@ -167,7 +123,7 @@ def fxn(data0,data1,data2):
     program_jit = globals()['fxn']
     config = program_jit._get_config(*[x.cl for x in self.bufs])
     # num_warps=8 is faster
-    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=1, num_warps=8)
+    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=1, num_warps=1)
     from tinygrad.runtime.cuda import CLProgram
     real_name = compiled.asm['ptx'].split(".visible .entry ")[1].split("(")[0]
     self.fxn = CLProgram(real_name, compiled.asm['ptx'], binary=True, shared=compiled.shared)
@@ -177,9 +133,9 @@ def fxn(data0,data1,data2):
 
     if DEBUG >= 5:
       print(list(compiled.asm.keys())) # ['cubin', 'ptx', 'llir', 'ttir']
-      #print(compiled.asm['ttir'])
+      print(compiled.asm['ttir'])
       #print(compiled.asm['llir'])
-      print(compiled.asm['ptx'])
+      #print(compiled.asm['ptx'])
 
     mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):

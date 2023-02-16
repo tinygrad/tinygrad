@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import random, traceback
 import time
 import itertools
@@ -97,6 +98,10 @@ def run_and_time(k,cnt=3,local_override=None, code_override=None):
     if CUDA:
       start_event = cuda.Event()
       end_event = cuda.Event()
+      # UGH! is this really the best way do to timing
+      prog(*k.bufs)
+      prog(*k.bufs)
+      prog(*k.bufs)
       start_event.record()
     e = prog(*k.bufs)
     if CUDA:
@@ -364,7 +369,7 @@ if __name__ == "__main__":
     """
     ii.append((Interventions.UPCAST, (1, 4, False)))
     ii.append((Interventions.UPCAST, (0, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 8, False)))
+    ii.append((Interventions.UPCAST, (2, 16, False)))
 
     #ii.append((Interventions.UPCAST, (0, 2, 4)))
 
@@ -372,21 +377,25 @@ if __name__ == "__main__":
     #ii.append((Interventions.UPCAST, (2, 4, False)))
     k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
+
+    while 1:
+      time.sleep(1)
     exit(0)
+
     for z in [4,8,16]:
       for x in [2,4,8,16]:
         for y in [2,4,8,16]:
           ii = []
-          ii.append((Interventions.UPCAST, (0, x, False)))
-          ii.append((Interventions.UPCAST, (1, y, False)))
+          ii.append((Interventions.UPCAST, (1, x, False)))
+          ii.append((Interventions.UPCAST, (0, y, False)))
           ii.append((Interventions.UPCAST, (2, z, False)))
           try:
-            k = one(ast, ii, skip_baseline=False) #, local_override=(4,4)) #, code_override=code_override)
+            k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
             np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
           except Exception:
+            traceback.print_exc()
             print("failed")
       #k = one(ast, ii, code_override=code_override, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
-    exit(0)
   elif getenv("GEMM", 0):
     N = 768
     # TODO: this is creating too many views
