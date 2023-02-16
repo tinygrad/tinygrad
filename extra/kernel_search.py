@@ -329,7 +329,7 @@ if __name__ == "__main__":
     op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 1, N, N, 1, 1, 1, 1))
     ast = LazyOp(MovementOps.RESHAPE, (op1,), (N, N))
   elif getenv("DGEMM", 0):
-    N = 768
+    N = 2048
     hb0 = GPUBuffer(shape=(N, N), force_create=True)
     hb1 = GPUBuffer(shape=(N, N), force_create=True)
     buf0 = GPUBuffer(shape=ShapeTracker(shape=(N, N, N), views=[View((N, N, N), (N, 0, 1), 0)]), hostbuf=hb0)
@@ -367,12 +367,17 @@ if __name__ == "__main__":
     ii.append((Interventions.UPCAST, (2, 4, False)))
     ii.append((Interventions.UPCAST, (2, 2, False)))
     """
-    ii.append((Interventions.UPCAST, (1, 4, False)))
-    ii.append((Interventions.UPCAST, (0, 2, False)))
-    ii.append((Interventions.UPCAST, (0, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 2, False)))
-    ii.append((Interventions.UPCAST, (2, 4, False)))
+    if CUDA:
+      ii.append((Interventions.UPCAST, (1, 4, False)))
+      ii.append((Interventions.UPCAST, (0, 2, False)))
+      ii.append((Interventions.UPCAST, (0, 4, False)))
+      ii.append((Interventions.UPCAST, (2, 4, False)))
+      ii.append((Interventions.UPCAST, (2, 2, False)))
+      ii.append((Interventions.UPCAST, (2, 4, False)))
+    else:
+      ii.append((Interventions.UPCAST, (1, 4, False)))
+      ii.append((Interventions.UPCAST, (0, 4, False)))
+      ii.append((Interventions.UPCAST, (2, 8, False)))
     """
     ii.append((Interventions.UPCAST, (0, 2, 4)))
     ii.append((Interventions.UPCAST, (3, 4, False)))
