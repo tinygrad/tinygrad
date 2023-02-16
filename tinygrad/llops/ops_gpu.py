@@ -58,7 +58,7 @@ class CLASTKernel(ASTKernel):
 
   # global to shared
   def copy(self, i, pieces, lpieces):
-    if not CUDA or True:
+    if not CUDA: # or True:
       gload = self.load(i, True, pieces)
       self.store(i, gload, lpieces)
       return
@@ -87,8 +87,6 @@ class CLASTKernel(ASTKernel):
       if pieces is not None: idxy = Variable.sum([idxy, pieces])
       if lpieces is not None: lidxy = Variable.sum([lidxy, lpieces])
       self.kernel.append(f"__pipeline_memcpy_async(&{lbuftoken.tok}[{lidxy.render(render_cl)}], &{buftoken.tok}[{idxy.render(render_cl)}], 16);\n")
-    self.kernel.append("__pipeline_commit();\n")
-    self.kernel.append("__pipeline_wait_prior(0);\n")
 
   def store(self, buf_index, value:List[Token], extra=None):
     buftoken = self.lbuftokens[buf_index] if self.is_local[buf_index] else self.buftokens[buf_index]
@@ -103,7 +101,7 @@ class CLASTKernel(ASTKernel):
 
     # float4 upcast
     should_upcast = False
-    if not self.is_local[buf_index] or True: # and False:
+    if not self.is_local[buf_index] or True:
       for a in buftoken.axis:
         if a[0:2] == (4,1):
           should_upcast = True
@@ -359,8 +357,8 @@ class CLASTKernel(ASTKernel):
     # this is in addition to all the rest
     #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
     #AXIS_NUMS = {1:[2],2:[2]}
-    #AXIS_NUMS = {1:[4],2:[3]}
-    AXIS_NUMS = {1:[3],2:[2]}
+    AXIS_NUMS = {1:[4,5,1],2:[3,4]}
+    #AXIS_NUMS = {1:[],2:[2]}
 
     self.local_shape = [1]*len(self.output_shape)
     zero_stride_dim = {}
@@ -389,10 +387,10 @@ class CLASTKernel(ASTKernel):
           new_strides.append(base)
           base *= s
       print(i, AXIS_NUMS[i], new_shape, new_strides)
-      # [1, 4, 8, 4, 4, 2, 4, 8]
-      if i == 1: new_strides = [4, 0, 0, 128, 1, 16]
-      # [1, 4, 8, 4, 4, 2, 4, 8]
-      if i == 2: new_strides = [0, 4, 1, 0, 32, 128]
+      # [8, 16, 4, 2, 4, 4, 2, 4]
+      if i == 1: new_strides = [4, 0, 0, 256, 512, 1, 32, 64]
+      # [8, 16, 4, 2, 4, 4, 2, 4]
+      if i == 2: new_strides = [0, 4, 1, 0, 0, 64, 256, 512]
       view = View(tuple(new_shape), tuple(new_strides))
       st_view = View(tuple(new_shape[0:len(self.local_shape)]), tuple(new_strides[0:len(self.local_shape)]))
       self.lsts[i] = ShapeTracker(shape=st_view.shape, views=[st_view])
@@ -437,6 +435,9 @@ class CLASTKernel(ASTKernel):
         self.lbuftokens[i].axis = [x for j,x in enumerate(self.lbuftokens[i].axis) if j not in AXIS_NUMS[i]]
         self.copy(i, pieces, lpieces)
         self.lbuftokens[i].axis = axis_backup
+      if CUDA:
+        self.kernel.append("__pipeline_commit();\n")
+        self.kernel.append("__pipeline_wait_prior(0);\n")
       if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n" if not CUDA else "__syncthreads();\n")
 
       if DEBUG >= 3:

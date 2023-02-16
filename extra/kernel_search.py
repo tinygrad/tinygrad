@@ -368,9 +368,11 @@ if __name__ == "__main__":
     ii.append((Interventions.UPCAST, (2, 2, False)))
     """
     ii.append((Interventions.UPCAST, (1, 4, False)))
-    ii.append((Interventions.UPCAST, (0, 8, False)))
+    ii.append((Interventions.UPCAST, (0, 2, False)))
+    ii.append((Interventions.UPCAST, (0, 4, False)))
     ii.append((Interventions.UPCAST, (2, 4, False)))
-    ii.append((Interventions.UPCAST, (2, 8, False)))
+    ii.append((Interventions.UPCAST, (2, 2, False)))
+    ii.append((Interventions.UPCAST, (2, 4, False)))
     """
     ii.append((Interventions.UPCAST, (0, 2, 4)))
     ii.append((Interventions.UPCAST, (3, 4, False)))

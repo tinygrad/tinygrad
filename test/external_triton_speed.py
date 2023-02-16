@@ -24,7 +24,7 @@ def test_gemm():
   #ii.append((Interventions.UPCAST, (0, 64)))
   #ii.append((Interventions.UPCAST, (1, 64)))
   ii.append((Interventions.UPCAST, (0, 64)))
-  ii.append((Interventions.UPCAST, (1, 128)))
+  ii.append((Interventions.UPCAST, (1, 64)))
   ii.append((Interventions.UPCAST, (2, 32)))
   #ii.append((Interventions.UPCAST, (1, 16)))
   #ii.append((Interventions.SHIFT, (1, 16, False)))

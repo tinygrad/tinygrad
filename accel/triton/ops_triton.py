@@ -123,7 +123,7 @@ class TritonASTKernel(ASTKernel):
     program_jit = globals()['fxn']
     config = program_jit._get_config(*[x.cl for x in self.bufs])
     # num_warps=8 is faster
-    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=4, num_warps=4)
+    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=1, num_warps=4)
     from tinygrad.runtime.cuda import CLProgram
     real_name = compiled.asm['ptx'].split(".visible .entry ")[1].split("(")[0]
     self.fxn = CLProgram(real_name, compiled.asm['ptx'], binary=True, shared=compiled.shared)
