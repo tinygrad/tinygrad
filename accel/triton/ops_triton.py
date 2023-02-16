@@ -123,7 +123,7 @@ class TritonASTKernel(ASTKernel):
     program_jit = globals()['fxn']
     config = program_jit._get_config(*[x.cl for x in self.bufs])
     # num_warps=8 is faster
-    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=1, num_warps=1)
+    compiled = triton_compile(program_jit, configs=(config,), signature={i:'*fp32' for i in range(len(self.bufs))}, device=0, num_stages=4, num_warps=4)
     from tinygrad.runtime.cuda import CLProgram
     real_name = compiled.asm['ptx'].split(".visible .entry ")[1].split("(")[0]
     self.fxn = CLProgram(real_name, compiled.asm['ptx'], binary=True, shared=compiled.shared)
@@ -139,8 +139,8 @@ class TritonASTKernel(ASTKernel):
 
     mem_estimate = sum(prod(x._base_shape) for x in self.bufs)
     def runner(*bufs):
-      #compiled[tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape)))](*[x.cl for x in bufs], stream=0)
-      self.fxn.prg(*[x.cl._cl for x in bufs], grid=tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape))), block=(32*compiled.num_warps, 1, 1), shared=compiled.shared)
+      compiled[tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape)))](*[x.cl for x in bufs], stream=0)
+      #self.fxn.prg(*[x.cl._cl for x in bufs], grid=tuple(self.output_shape[::-1] + [1]*(3-len(self.output_shape))), block=(32*compiled.num_warps, 1, 1), shared=compiled.shared)
       GlobalCounters.log_kernel(self.info.flops, mem_estimate)
     self.func_cache[self.key] = runner
     return runner
