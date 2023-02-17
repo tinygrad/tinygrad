@@ -1,5 +1,5 @@
 # pip3 install pyobjc-framework-Metal
-import Metal
+import Metal # type: ignore
 import numpy as np
 from typing import List, Any
 from tinygrad.ops import DEBUG
@@ -33,10 +33,11 @@ class CLBuffer:
   def copyout(self, a:np.ndarray): np.copyto(a, self.toCPU().reshape(a.shape))
 
 class CLProgram:
-  kernel_prefix = "kernel"
+  kernel_prefix = "using namespace metal;\nkernel"
   buffer_prefix = "device "
-  @staticmethod
-  def gid(i): return f"gid.{chr(120+i)}"
+  smem_prefix = "threadgroup "
+  barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
+  gid = [f"gid.{chr(120+i)}" for i in range(3)]
   def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     options = Metal.MTLCompileOptions.alloc().init()
