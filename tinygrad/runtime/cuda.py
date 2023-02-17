@@ -14,6 +14,10 @@ class CLBuffer:
   def copyout(self, a:np.ndarray): cuda.memcpy_dtoh(a, self._cl)
 
 class CLProgram:
+  kernel_prefix = "__global__"
+  buffer_prefix = ""
+  @staticmethod
+  def gid(i): return f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}'
   def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     if DEBUG >= 4: print("CUDA compile", prg)
