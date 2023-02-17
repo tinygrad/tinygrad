@@ -22,13 +22,13 @@ b = CLBuffer(buffer_sz)
 #rd = np.empty(shape=(buffer_sz//4,), dtype=np.float32)
 
 print("*** empty kernel launch ***")
-prog = CLProgram("empty", "__kernel void empty(__global float4 *a, __global float4 *b) { }")
+prog = CLProgram("test", "__kernel void test(__global float4 *a, __global float4 *b) { }")
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], None, a._cl, b._cl))
   print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel")
 
 print("*** speed of global memory (L2) ***")
-prog = CLProgram("copy", """__kernel void copy(__global float4 *a, __global float4 *b) {
+prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
   a[gid] = b[gid];
 }""")
@@ -37,25 +37,26 @@ for sz in [2**i for i in range(10,MAX)][::-1]:
   print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*2)/tm:8.3f} GB/s")
 
 print("*** speed of global memory (L1 cached) ***")
-prog = CLProgram("copy", """__kernel void copy(__global float4 *a, __global float4 *b) {
+prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
   float4 acc = 0;
-  for (int i = 0; i < 256; i++) { acc += b[gid]; }
+  for (int i = 0; i < 256; i++) { acc += b[i]; }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], None, a._cl, b._cl))
-  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s")
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s L1 cache broadcast")
 
 print("*** speed of local memory ***")
-prog = CLProgram("smem", """__kernel void smem(__global float4 *a, __global float4 *b) {
+prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
   int lid = get_local_id(0);
   __local float4 lmem[256];
-  lmem[lid] = (float4)(4.0, 4.0, 4.0, 4.0);
+  lmem[lid] = (float4)(lid, lid, lid, lid);
   barrier(CLK_LOCAL_MEM_FENCE);
   float4 acc = 0;
-  for (int i = 0; i < 256; i++) { acc += lmem[lid]; }
+  for (int i = lid; i < 256; i++) { acc += lmem[i]; }
+  for (int i = 0; i < lid; i++) { acc += lmem[i]; }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
@@ -64,7 +65,7 @@ for sz in [2**i for i in range(10,MAX)][::-1]:
 
 
 print("*** speed of FMAs ***")
-prog = CLProgram("fma", """__kernel void fma(__global float4 *a, __global float4 *b) {
+prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
   float4 r0 = (float4)(0.0, 8.0, 4.0, 4.0);
   float4 r1 = (float4)(1.0, 9.0, 4.0, 8.0);
