@@ -7,6 +7,8 @@ from tinygrad.runtime.opencl import CLBuffer, CLProgram, CLImage, OSX_TIMING_RAT
 # In total, the M1 Max GPU contains up to 512 execution units or 4096 ALUs.
 # M1 Max delivers up to 400GB/s of memory bandwidth
 
+# 32 cores -> each with 16 Execution Units -> each with (up to) 32 Threads = 16384
+
 # returns ns
 def benchmark(prog):
   e = prog()
@@ -53,12 +55,17 @@ prog = CLProgram("test", """__kernel void test(__global float4 *a, __global floa
   int gid = get_global_id(0);
   int lid = get_local_id(0);
   float4 acc = 0;
-  for (int i = lid; i < 256+lid; i++) { acc += b[i]; }
+  for (int i = lid; i < 256+lid; i++) {
+    acc += b[i];
+    acc += b[i+1];
+    acc += b[i+2];
+    acc += b[i+3];
+  }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], [256,1,1], a._cl, b._cl))
-  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s L1 cache")
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*4*16*256)/tm:10.3f} GB/s L1 cache")
 
 print("*** speed of texture memory (L1 cached) ***")
 prog = CLProgram("test", """__kernel void test(__global float4 *a, read_only image2d_t c) {
@@ -66,28 +73,40 @@ prog = CLProgram("test", """__kernel void test(__global float4 *a, read_only ima
   int lid = get_local_id(0);
   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
   float4 acc = 0;
-  for (int i = 0; i < 256; i++) { acc += read_imagef(c, smp, (int2)(i,0)); }
+  for (int i = 0; i < 256; i++) {
+    acc += read_imagef(c, smp, (int2)(i,0));
+    acc += read_imagef(c, smp, (int2)(i,1));
+    acc += read_imagef(c, smp, (int2)(i,2));
+    acc += read_imagef(c, smp, (int2)(i,3));
+  }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], [256,1,1], a._cl, c._cl))
-  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s L1 texture cache")
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*4*16*256)/tm:10.3f} GB/s L1 texture cache")
 
 print("*** speed of local memory ***")
 prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
   int lid = get_local_id(0);
-  __local float4 lmem[512];
-  lmem[lid] = (float4)(lid, lid, lid, lid);
-  lmem[lid+256] = (float4)(lid, lid, lid, lid);
+  __local float4 lmem[1024];
+  lmem[lid] = lid;
+  lmem[lid+256] = lid;
+  lmem[lid+512] = lid;
+  lmem[lid+768] = lid;
   barrier(CLK_LOCAL_MEM_FENCE);
   float4 acc = 0;
-  for (int i = lid; i < 256+lid; i++) { acc += lmem[i]; }
+  for (int i = lid; i < 256+lid; i++) {
+    acc += lmem[i];
+    acc += lmem[i+1];
+    acc += lmem[i+2];
+    acc += lmem[i+3];
+  }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], [256,1,1], a._cl, b._cl))
-  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s local memory read")
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*4*16*256)/tm:10.3f} GB/s local memory read")
 
 
 print("*** speed of FMAs ***")
