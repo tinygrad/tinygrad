@@ -27,8 +27,8 @@ prog = CLProgram("test", f"""
 #include <metal_simdgroup_matrix>
 using namespace metal;
 kernel void test(device float *a, device float *data1, device float *data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
-  int pos_x = gid.x%{N//8} * 8;
-  int pos_y = gid.x/{N//8} * 8;
+  int pos_x = gid.x*8;
+  int pos_y = gid.y*8;
   simdgroup_float8x8 acc = simdgroup_float8x8(0);
   simdgroup_float8x8 A;
   simdgroup_float8x8 B;
@@ -39,7 +39,7 @@ kernel void test(device float *a, device float *data1, device float *data2, uint
   }}
   simdgroup_store(acc, a, {N}, ulong2(pos_y, pos_x));
 }}""")
-tm = mb(lambda: prog([N*N//2,1], [32,1], a._cl, b._cl, c._cl))
+tm = mb(lambda: prog([N//8*32,N//8], [32,1], a._cl, b._cl, c._cl))
 na = a.toCPU().reshape(N,N)
 comp = nb@nc
 #print(na)
