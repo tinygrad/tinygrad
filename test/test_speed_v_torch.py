@@ -12,8 +12,13 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv
 from extra.jit import TinyJit
+METAL = getenv("METAL")
 try:
   from tinygrad.runtime.opencl import CL
+  if METAL:
+    from tinygrad.runtime.metal import sync
+  else:
+    def sync(): CL.cl_queue.finish()
 except ImportError:
   CL = None
 
@@ -44,7 +49,7 @@ def helper_test_speed(f1, *args):
     st = time.monotonic()
     ret = f1(*args)
     if isinstance(ret, Tensor) and CL is not None and ret.device in ["GPU"]:
-      CL.cl_queue.finish()
+      sync()
     if not isinstance(ret, Tensor) and torch_device != "cpu":
       # TODO: better way to sync?
       torch.zeros(1, device=torch_device).cpu()

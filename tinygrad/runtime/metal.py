@@ -2,7 +2,7 @@
 import Metal # type: ignore
 import numpy as np
 from typing import List, Any
-from tinygrad.ops import DEBUG
+from tinygrad.ops import DEBUG, GlobalCounters
 
 device = Metal.MTLCreateSystemDefaultDevice()
 mtl_queue = device.newCommandQueue()
@@ -49,6 +49,7 @@ class CLProgram:
     global_size += [1] * (3-len(global_size))
     if local_size is None: local_size = []
     local_size += [1] * (3-len(local_size))
+    if DEBUG >= 2: print("METAL launch", global_size, local_size)
     pipeline_state = device.newComputePipelineStateWithFunction_error_(self.fxn, None)
     assert pipeline_state[0] is not None, str(pipeline_state)
     command_buffer = mtl_queue.commandBuffer()
@@ -60,4 +61,5 @@ class CLProgram:
     encoder.endEncoding()
     command_buffer.commit()
     mtl_buffers_in_flight.append(command_buffer)
+    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return command_buffer
