@@ -47,9 +47,8 @@ class CLProgram:
     self.fxn = self.library[0].newFunctionWithName_(name)
   def __call__(self, global_size, local_size, *args):
     global_size += [1] * (3-len(global_size))
-    if local_size is None: local_size = []
+    if local_size is None: local_size = [32]
     local_size += [1] * (3-len(local_size))
-    if DEBUG >= 2: print("METAL launch", global_size, local_size)
     pipeline_state = device.newComputePipelineStateWithFunction_error_(self.fxn, None)
     assert pipeline_state[0] is not None, str(pipeline_state)
     command_buffer = mtl_queue.commandBuffer()
@@ -60,6 +59,12 @@ class CLProgram:
     encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()
-    mtl_buffers_in_flight.append(command_buffer)
+    if DEBUG >= 2:
+      command_buffer.waitUntilCompleted()
+      et = command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+      print(f"METAL et {et*1e6:8.2f} us  {self.name:28s} launch {str(global_size):18s} {local_size}")
+      GlobalCounters.time_sum += et
+    else:
+      mtl_buffers_in_flight.append(command_buffer)
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return command_buffer

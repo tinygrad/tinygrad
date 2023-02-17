@@ -7,7 +7,7 @@ import time
 import numpy as np
 np.set_printoptions(linewidth=160)
 from functools import partial
-from tinygrad.ops import GlobalCounters
+from tinygrad.ops import GlobalCounters, DEBUG
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv
@@ -18,7 +18,7 @@ try:
   if METAL:
     from tinygrad.runtime.metal import sync
   else:
-    def sync(): CL.cl_queue.finish()
+    def sync(): CL().cl_queue.finish()
 except ImportError:
   CL = None
 
@@ -46,6 +46,12 @@ def helper_test_speed(f1, *args):
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     args = [(x+1).realize() if isinstance(x,Tensor) else (None if x is None else (x+1)) for x in args]  # cache defeats
+
+    # sync all before!
+    sync()
+    torch.zeros(1, device=torch_device).cpu()
+
+    if DEBUG >= 4: print("benchmark start")
     st = time.monotonic()
     ret = f1(*args)
     if isinstance(ret, Tensor) and CL is not None and ret.device in ["GPU"]:
@@ -55,6 +61,7 @@ def helper_test_speed(f1, *args):
       torch.zeros(1, device=torch_device).cpu()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
+    if DEBUG >= 4: print("benchmark stop")
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)
@@ -99,6 +106,7 @@ class TestSpeed(unittest.TestCase):
 
   def test_sum(self):
     def f(a, b): return a.sum()
+    helper_test_generic_square('sum', 2048, f, f, onearg=True)
     helper_test_generic_square('sum', 4096, f, f, onearg=True)
 
   def test_partial_sum(self):
