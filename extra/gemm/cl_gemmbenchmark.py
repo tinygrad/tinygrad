@@ -70,6 +70,9 @@ prog = CLProgram("test", """__kernel void test(__global float4 *a, __global floa
   barrier(CLK_LOCAL_MEM_FENCE);
   float4 acc = 0;
   for (int i = 0; i < 256; i++) {
+    ldata1[lidx0] = lidx0;
+    ldata2[lidx1] = lidx1;
+    barrier(CLK_LOCAL_MEM_FENCE);
     float4 lval1_0 = ((__local float4*)ldata1)[(lidx0*8)];
     float4 lval1_4 = ((__local float4*)ldata1)[((lidx0*8)+1)];
     float4 lval1_8 = ((__local float4*)ldata1)[((lidx0*8)+2)];
@@ -102,6 +105,7 @@ prog = CLProgram("test", """__kernel void test(__global float4 *a, __global floa
     acc += lval2_160;
     acc += lval2_192;
     acc += lval2_224;
+    barrier(CLK_LOCAL_MEM_FENCE);
   }
   a[idx1*512+idx0] = acc;
 }""")
