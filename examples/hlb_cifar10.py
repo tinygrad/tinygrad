@@ -19,7 +19,7 @@ class ConvGroup:
   def __init__(self, channels_in, channels_out, short, se=True):
     self.short, self.se = short, se and not short
     self.conv = [nn.Conv2d(channels_in if i == 0 else channels_out, channels_out, kernel_size=3, padding=1, bias=False) for i in range(1 if short else 3)]
-    self.norm = [nn.BatchNorm2D(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(1 if short else 3)]
+    self.norm = [nn.BatchNorm2d(channels_out, track_running_stats=False, eps=1e-12, momentum=0.8) for _ in range(1 if short else 3)]
     if self.se: self.se1, self.se2 = nn.Linear(channels_out, channels_out//16), nn.Linear(channels_out//16, channels_out)
 
   def __call__(self, x):
@@ -37,7 +37,7 @@ class SpeedyResNet:
     # TODO: add whitening
     self.net = [
       nn.Conv2d(3, 64, kernel_size=1),
-      nn.BatchNorm2D(64, track_running_stats=False, eps=1e-12, momentum=0.8),
+      nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
       lambda x: x.relu(),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),

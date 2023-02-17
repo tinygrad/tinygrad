@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Conv2d, BatchNorm2D, optim
+from tinygrad.nn import Conv2d, BatchNorm2d, optim
 
 def model_step(lm):
   Tensor.training = True
@@ -37,9 +37,9 @@ class TestBatchnorm(unittest.TestCase):
     class LilModel:
       def __init__(self):
         self.c = Conv2d(12, 24, 3, padding=1, bias=False)
-        self.bn = BatchNorm2D(24, track_running_stats=False)
+        self.bn = BatchNorm2d(24, track_running_stats=False)
         self.c2 = Conv2d(24, 32, 3, padding=1, bias=False)
-        self.bn2 = BatchNorm2D(32, track_running_stats=False)
+        self.bn2 = BatchNorm2d(32, track_running_stats=False)
       def forward(self, x):
         x = self.bn(self.c(x)).relu()
         return self.bn2(self.c2(x)).relu()
@@ -50,7 +50,7 @@ class TestBatchnorm(unittest.TestCase):
     class LilModel:
       def __init__(self):
         self.c = Conv2d(12, 32, 3, padding=1, bias=False)
-        self.bn = BatchNorm2D(32, track_running_stats=False)
+        self.bn = BatchNorm2d(32, track_running_stats=False)
       def forward(self, x):
         return self.bn(self.c(x)).relu()
     lm = LilModel()
