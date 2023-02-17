@@ -395,6 +395,9 @@ class CLASTKernel(ASTKernel):
       if not CUDA:
         if i == 1: new_strides = [32, 0, 0, 1, 4]
         if i == 2: new_strides = [0, 4, 1, 0, 32]
+        #if i == 1: new_strides = [64, 0, 0, 1024, 1, 4, 16]
+        #if i == 2: new_strides = [0, 4, 1, 0, 64, 256, 1024]
+        pass
       else:
         # [8, 16, 4, 2, 4, 4, 2, 4]
         if i == 1: new_strides = [32, 0, 0, 256, 512, 1, 4, 8]
