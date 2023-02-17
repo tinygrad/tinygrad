@@ -21,6 +21,7 @@ try:
     def sync(): CL().cl_queue.finish()
 except ImportError:
   CL = None
+  def sync(): pass
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
