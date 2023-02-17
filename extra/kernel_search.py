@@ -95,11 +95,11 @@ def run_and_time(k,cnt=3,local_override=None, code_override=None):
   for i in range(cnt):
     t1 = time.monotonic_ns()
     if local_override: prog.local_work_size = local_override
-    # UGH! is this really the best way do to timing
-    prog(*k.bufs)
-    prog(*k.bufs)
-    prog(*k.bufs)
     if CUDA:
+      # UGH! is this really the best way do to timing
+      prog(*k.bufs)
+      prog(*k.bufs)
+      prog(*k.bufs)
       start_event = cuda.Event()
       end_event = cuda.Event()
       start_event.record()
@@ -178,7 +178,7 @@ def one(ast, winning_interventions, local_override=None, code_override=None, ski
 
   k = CLASTKernel(ast)
   for w in winning_interventions: apply_intervention(k, *w)
-  best = run_and_time(k, 1, local_override, code_override)
+  best = run_and_time(k, 10, local_override, code_override)
 
   name = k.fxn.name
   print(f"{name:30s} {baseline/1e3:9.2f} us -> {best/1e3:9.2f} us ({k.info.flops/best:7.2f} GFLOPS) {baseline/best:7.2f}x *with* {winning_interventions}")

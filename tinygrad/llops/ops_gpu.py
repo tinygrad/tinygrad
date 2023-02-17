@@ -102,7 +102,7 @@ class CLASTKernel(ASTKernel):
 
     # float4 upcast
     should_upcast = False
-    if not self.is_local[buf_index] or True:
+    if not self.is_local[buf_index]:
       for a in buftoken.axis:
         if a[0:2] == (4,1):
           should_upcast = True
@@ -117,6 +117,8 @@ class CLASTKernel(ASTKernel):
       for o in buftoken.offsets():
         if CUDA:
           to_store_float4[o] = Token(f"make_float4({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+        elif METAL:
+          to_store_float4[o] = Token(f"float4({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
         else:
           to_store_float4[o] = Token(f"(float4)({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
       to_store = to_store_float4
