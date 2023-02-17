@@ -34,7 +34,7 @@ prog = CLProgram("copy", """__kernel void copy(__global float4 *a, __global floa
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], None, a._cl, b._cl))
-  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*2)/tm:7.3f} GB/s")
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*2)/tm:8.3f} GB/s")
 
 print("*** speed of local memory ***")
 prog = CLProgram("copy", """__kernel void copy(__global float4 *a, __global float4 *b) {
@@ -44,8 +44,6 @@ prog = CLProgram("copy", """__kernel void copy(__global float4 *a, __global floa
   lmem[lid] = (float4)(4.0, 4.0, 4.0, 4.0);
   barrier(CLK_LOCAL_MEM_FENCE);
   float4 acc = 0;
-  //for (int i = lid; i < 256; i++) { acc += lmem[i]; }
-  //for (int i = 0; i < lid; i++) { acc += lmem[i]; }
   for (int i = 0; i < 256; i++) { acc += lmem[i]; }
   a[gid] = acc;
 }""")
@@ -54,5 +52,43 @@ for sz in [2**i for i in range(10,MAX)][::-1]:
   print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s local memory read")
 
 
-# speed of FMAs
+print("*** speed of FMAs ***")
+prog = CLProgram("copy", """__kernel void copy(__global float4 *a, __global float4 *b) {
+  int gid = get_global_id(0);
+  int lid = get_local_id(0);
+  float4 r0 = (float4)(0.0, 8.0, 4.0, 4.0);
+  float4 r1 = (float4)(1.0, 9.0, 4.0, 8.0);
+  float4 r2 = (float4)(2.0, 10.0, 4.0, 4.0);
+  float4 r3 = (float4)(3.0, 11.0, 3.0, 9.0);
+  float4 b0 = (float4)(4.0, 12.0, 4.0, 4.0);
+  float4 b1 = (float4)(5.0, 13.0, 4.0, 2.0);
+  float4 b2 = (float4)(6.0, 14.0, 2.0, 4.0);
+  float4 b3 = (float4)(7.0, 15.0, 4.0, 3.0);
+  barrier(CLK_LOCAL_MEM_FENCE);
+  float4 acc = 0;
+  for (int i = 0; i < 256; i++) {
+    acc += r0 * b0;
+    acc += r0 * b1;
+    acc += r0 * b2;
+    acc += r0 * b3;
+    acc += r1 * b0;
+    acc += r1 * b1;
+    acc += r1 * b2;
+    acc += r1 * b3;
+    acc += r2 * b0;
+    acc += r2 * b1;
+    acc += r2 * b2;
+    acc += r2 * b3;
+    acc += r3 * b0;
+    acc += r3 * b1;
+    acc += r3 * b2;
+    acc += r3 * b3;
+  }
+  a[gid] = acc;
+}""")
+for sz in [2**i for i in range(10,MAX)][::-1]:
+  #      fma  float4   statements    loop
+  FLOPS = 2 *   4    *   16       *   256
+  tm = mb(lambda: prog([sz,1,1], [256,1,1], a._cl, b._cl))
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {sz*FLOPS/tm:10.3f} GFLOPS")
 
