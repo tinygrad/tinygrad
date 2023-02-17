@@ -39,24 +39,25 @@ for sz in [2**i for i in range(10,MAX)][::-1]:
 print("*** speed of global memory (L1 cached) ***")
 prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
+  int lid = get_local_id(0);
   float4 acc = 0;
-  for (int i = 0; i < 256; i++) { acc += b[i]; }
+  for (int i = lid; i < 256+lid; i++) { acc += b[i]; }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
-  tm = mb(lambda: prog([sz,1,1], None, a._cl, b._cl))
-  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s L1 cache broadcast")
+  tm = mb(lambda: prog([sz,1,1], [256,1,1], a._cl, b._cl))
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*16*256)/tm:10.3f} GB/s L1 cache")
 
 print("*** speed of local memory ***")
 prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
   int lid = get_local_id(0);
-  __local float4 lmem[256];
+  __local float4 lmem[512];
   lmem[lid] = (float4)(lid, lid, lid, lid);
+  lmem[lid+256] = (float4)(lid, lid, lid, lid);
   barrier(CLK_LOCAL_MEM_FENCE);
   float4 acc = 0;
-  for (int i = lid; i < 256; i++) { acc += lmem[i]; }
-  for (int i = 0; i < lid; i++) { acc += lmem[i]; }
+  for (int i = lid; i < 256+lid; i++) { acc += lmem[i]; }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
