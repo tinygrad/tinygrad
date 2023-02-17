@@ -351,13 +351,13 @@ class CLASTKernel(ASTKernel):
 
     # output_shape[-1] is get_global_id(0)
     MAX_OUTPUT_SHAPE = 3
-    self.kernel += [f"size_t idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+    self.kernel += [f"uint idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
       # TODO: these compactions should be searchable
       final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
       for i in range(final_dimension-1, -1, -1):
-        self.kernel += [f"size_t idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
+        self.kernel += [f"uint idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
@@ -366,6 +366,7 @@ class CLASTKernel(ASTKernel):
     #AXIS_NUMS = {1:[],2:[]}
     if CUDA: AXIS_NUMS = {1:[4,5,1],2:[3,4]}
     else: AXIS_NUMS = {1:[2], 2:[2]}
+    #else: AXIS_NUMS = {1:[1], 2:[1]}
 
     #AXIS_NUMS = {1:[],2:[2]}
 
@@ -397,6 +398,8 @@ class CLASTKernel(ASTKernel):
           base *= s
       if DEBUG >= 3: print(i, AXIS_NUMS[i], new_shape, new_strides)
       if not CUDA:
+        #if i == 1: new_strides = [32, 0, 0, 1] 
+        #if i == 2: new_strides = [0, 4, 1, 128] 
         if i == 1: new_strides = [new_shape[3],0,0,1,new_shape[0]*new_shape[3]]
         if i == 2: new_strides = [0,new_shape[2],1,0,new_shape[1]*new_shape[2]]
         pass
@@ -417,7 +420,7 @@ class CLASTKernel(ASTKernel):
     # moved above local
     acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
     if any(self.is_local):
-      self.kernel += [f"size_t lidx{len(self.output_shape)-1-i} = {CLProgram.lid[i]}; /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
+      self.kernel += [f"uint lidx{len(self.output_shape)-1-i} = {CLProgram.lid[i]}; /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop is not None:
@@ -426,7 +429,7 @@ class CLASTKernel(ASTKernel):
 
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
-      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
+      self.kernel += [f"for (uint idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
 
       def get_pieces(i, bt):
         shape = tuple(bt[i].axis[j][0] for j in AXIS_NUMS[i][::-1])

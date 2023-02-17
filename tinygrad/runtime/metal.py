@@ -3,6 +3,7 @@ import Metal # type: ignore
 import numpy as np
 from typing import List, Any
 from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.helpers import prod
 
 device = Metal.MTLCreateSystemDefaultDevice()
 mtl_queue = device.newCommandQueue()
@@ -50,8 +51,10 @@ class CLProgram:
     global_size += [1] * (3-len(global_size))
     if local_size is None: local_size = [32]
     local_size += [1] * (3-len(local_size))
+    # TODO: only create this once for the program
     pipeline_state = device.newComputePipelineStateWithFunction_error_(self.fxn, None)
     assert pipeline_state[0] is not None, str(pipeline_state)
+    assert prod(local_size) <= pipeline_state[0].maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {pipeline_state[0].maxTotalThreadsPerThreadgroup()} with exec width {pipeline_state[0].threadExecutionWidth()} memory length {pipeline_state[0].staticThreadgroupMemoryLength()}"
     command_buffer = mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(pipeline_state[0])
