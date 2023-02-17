@@ -11,3 +11,5 @@ dist
 a.out
 boxes.jpg
 weights/*
+pandecode.dump
+vertex.bin

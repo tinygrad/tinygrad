@@ -18,6 +18,8 @@ Due to its extreme simplicity, it aims to be the easiest framework to add new ac
 
 We are working on support for the Apple Neural Engine and the Google TPU in the `accel/` folder. Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blindingly fast. Now, it is slow.
 
+This project is maintained by [tiny corp](https://tinygrad.org/).
+
 ### Installation
 
 ```bash

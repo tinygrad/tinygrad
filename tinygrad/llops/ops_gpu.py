@@ -12,9 +12,10 @@ render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
 from tinygrad.helpers import getenv
 
-CUDA = getenv("CUDA", 0)
-if not CUDA: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
-else: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
+CUDA,METAL = getenv("CUDA", 0), getenv("METAL", 0)
+if not CUDA and not METAL: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+elif CUDA: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
+elif METAL: from tinygrad.runtime.metal import CLBuffer, CLImage, CLProgram  # type: ignore
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
@@ -236,7 +237,8 @@ class CLASTKernel(ASTKernel):
 
     # are we grouping?
     if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
-      for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+      # TODO: use 1024 if it's allowed in a smarter way
+      for sz in ((([1024] if METAL else []) + [256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
           self.group_for_reduce.append(sz)
           break
@@ -347,7 +349,7 @@ class CLASTKernel(ASTKernel):
 
     # output_shape[-1] is get_global_id(0)
     MAX_OUTPUT_SHAPE = 3
-    self.kernel += [f"size_t idx{len(self.output_shape)-1-i} = {f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' if CUDA else f'get_global_id({i})'}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+    self.kernel += [f"size_t idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
       # TODO: these compactions should be searchable
@@ -464,9 +466,9 @@ class CLASTKernel(ASTKernel):
       assert lvalid.min == 1, "local buffer must always be valid"
       self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
       for i,acc in enumerate(accumulators):
-        self.kernel.append(("__shared__ " if CUDA else "__local ") + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
+        self.kernel.append(CLProgram.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
-      self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n" if not CUDA else "__syncthreads();\n")
+      self.kernel.append(CLProgram.barrier+"\n")
 
       if self.upcast_in_mid_reduce:
         assert len(self.group_for_reduce) == 2
@@ -492,9 +494,9 @@ class CLASTKernel(ASTKernel):
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else ("__global "+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)] if not CUDA else [self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
-    self.kernel = list(self.prekernel) + [f"{'__global__' if CUDA else '__kernel'} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete])] + \
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else (CLProgram.buffer_prefix+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
+    self.kernel = list(self.prekernel) + [f"{CLProgram.kernel_prefix} void {function_name}(",] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + (['uint3 gid [[thread_position_in_grid]]'] if METAL else []))] + \
       [") {\n"] + self.kernel
 
     # compile kernel

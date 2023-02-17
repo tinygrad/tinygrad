@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
-from tinygrad.nn import BatchNorm2D, Conv2d
+from tinygrad.nn import BatchNorm2d, Conv2d
 from tinygrad.helpers import getenv
 from extra.utils import fetch, get_parameters
 from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
@@ -350,7 +350,7 @@ class Darknet:
 
         # BatchNorm2d
         if batch_normalize:
-          bn = BatchNorm2D(filters, eps=1e-05, track_running_stats=True)
+          bn = BatchNorm2d(filters, eps=1e-05, track_running_stats=True)
           module.append(bn)
 
         # LeakyReLU activation
