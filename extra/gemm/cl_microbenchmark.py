@@ -89,11 +89,9 @@ print("*** speed of local memory ***")
 prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
   int gid = get_global_id(0);
   int lid = get_local_id(0);
-  __local float4 lmem[1024];
+  __local float4 lmem[516];
   lmem[lid] = lid;
   lmem[lid+256] = lid;
-  lmem[lid+512] = lid;
-  lmem[lid+768] = lid;
   barrier(CLK_LOCAL_MEM_FENCE);
   float4 acc = 0;
   for (int i = lid; i < 256+lid; i++) {
@@ -107,7 +105,6 @@ prog = CLProgram("test", """__kernel void test(__global float4 *a, __global floa
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], [256,1,1], a._cl, b._cl))
   print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {(sz*4*16*256)/tm:10.3f} GB/s local memory read")
-
 
 print("*** speed of FMAs ***")
 prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
