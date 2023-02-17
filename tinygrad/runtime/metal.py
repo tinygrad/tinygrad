@@ -38,6 +38,7 @@ class CLProgram:
   smem_prefix = "threadgroup "
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
+  lid = [f"lid.{chr(120+i)}" for i in range(3)]
   def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     options = Metal.MTLCompileOptions.alloc().init()

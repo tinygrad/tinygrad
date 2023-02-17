@@ -19,6 +19,7 @@ class CLProgram:
   smem_prefix = "__shared__ "
   barrier = "__syncthreads();"
   gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)]
+  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   def __init__(self, name:str, prg:str, binary=False, shared=0, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate, self.shared = name, op_estimate, mem_estimate, shared
     if DEBUG >= 4 and not binary: print("CUDA compile", prg)

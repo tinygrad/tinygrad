@@ -129,7 +129,7 @@ class CLASTKernel(ASTKernel):
       if isinstance(self.bufs[buf_index]._buf, CLImage):
         self.kernel.append(f"write_imagef{buftoken.tok}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
-        self.kernel.append(f"(({('__global ' if not self.is_local[buf_index] else '__local ') if not CUDA else str()}float4*){buftoken.tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"(({(CLProgram.buffer_prefix if not self.is_local[buf_index] else CLProgram.smem_prefix) if not CUDA else str()}float4*){buftoken.tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
         self.kernel.append(f"{buftoken.tok}[{idxy.render(render_cl)}] = {v.tok};\n")
 
@@ -174,7 +174,7 @@ class CLASTKernel(ASTKernel):
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
           ldr = Token(f"read_imagef({buftoken.tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         elif buftoken.typ == Types.FLOAT4:
-          ldr = Token(f"(({('__global ' if not self.is_local[buf_index] or non_local else '__local ') if not CUDA else str()}float4*){buftoken.tok})[{(idxy//4).render(render_cl)}]", buftoken.typ)
+          ldr = Token(f"(({(CLProgram.buffer_prefix if not self.is_local[buf_index] or non_local else CLProgram.smem_prefix) if not CUDA else str()}float4*){buftoken.tok})[{(idxy//4).render(render_cl)}]", buftoken.typ)
         else:
           ldr = Token(f"{buftoken.tok}[{idxy.render(render_cl)}]", buftoken.typ)
         ldr = ldr if valid.min == 1 or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
@@ -363,7 +363,7 @@ class CLASTKernel(ASTKernel):
     #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
     #AXIS_NUMS = {1:[],2:[]}
     if CUDA: AXIS_NUMS = {1:[4,5,1],2:[3,4]}
-    else: AXIS_NUMS = {1:[1], 2:[1]}
+    else: AXIS_NUMS = {1:[2], 2:[2]}
 
     #AXIS_NUMS = {1:[],2:[2]}
 
@@ -395,8 +395,8 @@ class CLASTKernel(ASTKernel):
           base *= s
       if DEBUG >= 3: print(i, AXIS_NUMS[i], new_shape, new_strides)
       if not CUDA:
-        #if i == 1: new_strides = [new_shape[3],0,0,1,new_shape[0]*new_shape[3]]
-        #if i == 2: new_strides = [0,new_shape[2],1,0,new_shape[1]*new_shape[2]]
+        if i == 1: new_strides = [new_shape[3],0,0,1,new_shape[0]*new_shape[3]]
+        if i == 2: new_strides = [0,new_shape[2],1,0,new_shape[1]*new_shape[2]]
         pass
       else:
         # [8, 16, 4, 2, 4, 4, 2, 4]
@@ -409,13 +409,13 @@ class CLASTKernel(ASTKernel):
       self.lbuftokens[i] = Token(f"ldata{i}", Types.FLOAT, True)
       for j in range(len(self.local_shape), len(new_shape)):
         self.lbuftokens[i].array(view.shape[j], view.strides[j], is_reduce[j])
-      self.kernel.append(("__shared__ " if CUDA else "__local ") + f"float ldata{i}[{prod([s for s,st in zip(view.shape, view.strides) if st != 0])}];\n")
+      self.kernel.append(CLProgram.smem_prefix + f"float ldata{i}[{prod([s for s,st in zip(view.shape, view.strides) if st != 0])}];\n")
       if DEBUG >= 3: print(i, self.lbuftokens[i], self.lsts[i])
 
     # moved above local
     acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
     if any(self.is_local):
-      self.kernel += [f"size_t lidx{len(self.output_shape)-1-i} = {f'threadIdx.{chr(120+i)}' if CUDA else f'get_local_id({i})'}; /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
+      self.kernel += [f"size_t lidx{len(self.output_shape)-1-i} = {CLProgram.lid[i]}; /* {self.local_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.local_shape))) if self.local_shape[-1-i] != 1]
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop is not None:
@@ -449,7 +449,7 @@ class CLASTKernel(ASTKernel):
       if CUDA:
         self.kernel.append("__pipeline_commit();\n")
         self.kernel.append("__pipeline_wait_prior(0);\n")
-      if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n" if not CUDA else "__syncthreads();\n")
+      if any(self.is_local): self.kernel.append(CLProgram.barrier+"\n")
 
       if DEBUG >= 3:
         print("output shape", self.output_shape, self.local_shape)
@@ -457,7 +457,7 @@ class CLASTKernel(ASTKernel):
 
       expanded_accumulators = split_float4(accumulators) if accumulators[0].typ == Types.FLOAT4 and len(accumulators)*4 == len(acc_offsets) else accumulators
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)]
-      if any(self.is_local): self.kernel.append("barrier(CLK_LOCAL_MEM_FENCE);\n" if not CUDA else "__syncthreads();\n")
+      if any(self.is_local): self.kernel.append(CLProgram.barrier+"\n")
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
@@ -496,7 +496,7 @@ class CLASTKernel(ASTKernel):
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else (CLProgram.buffer_prefix+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"{CLProgram.kernel_prefix} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + (['uint3 gid [[thread_position_in_grid]]'] if METAL else []))] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + (['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'] if METAL else []))] + \
       [") {\n"] + self.kernel
 
     # compile kernel

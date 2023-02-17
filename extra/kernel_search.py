@@ -7,7 +7,7 @@ from enum import Enum
 import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
-from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CLProgram, CUDA
+from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel, CLProgram, CUDA, METAL
 if CUDA: from tinygrad.runtime.cuda import cuda
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
 from tinygrad.ops import DEBUG
@@ -108,6 +108,9 @@ def run_and_time(k,cnt=3,local_override=None, code_override=None):
       end_event.record()
       cuda.Context.synchronize()
       et = end_event.time_since(start_event)*1e6
+    elif METAL:
+      e.waitUntilCompleted()
+      et = (e.GPUEndTime() - e.GPUStartTime())*1e9
     else:
       e.wait()
       et = e.profile.end * OSX_TIMING_RATIO - e.profile.start * OSX_TIMING_RATIO
@@ -376,7 +379,7 @@ if __name__ == "__main__":
       ii.append((Interventions.UPCAST, (2, 4, False)))
     else:
       ii.append((Interventions.UPCAST, (1, 4, False)))
-      #ii.append((Interventions.UPCAST, (0, 4, False)))
+      ii.append((Interventions.UPCAST, (0, 4, False)))
       ii.append((Interventions.UPCAST, (2, 8, False)))
     k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)
