@@ -55,7 +55,7 @@ prog = CLProgram("test", """__kernel void test(__global float4 *a, read_only ima
   int lid = get_local_id(0);
   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
   float4 acc = 0;
-  for (int i = lid; i < 256+lid; i++) { acc += read_imagef(c, smp, (int2)(0,i)); }
+  for (int i = 0; i < 256; i++) { acc += read_imagef(c, smp, (int2)(i,0)); }
   a[gid] = acc;
 }""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
