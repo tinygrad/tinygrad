@@ -2,8 +2,7 @@
 import numpy as np
 import random
 
-from tinygrad.nn.optim import Adam
-from extra.utils import get_parameters
+from tinygrad.nn.optim import Adam, get_parameters
 from extra.training import train, evaluate
 from models.transformer import Transformer
 

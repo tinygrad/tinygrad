@@ -1,7 +1,7 @@
-from tinygrad.tensor import Tensor
 import pickle
-from tqdm import tqdm
 import numpy as np
+from tqdm import tqdm
+from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv
 
 def fetch(url):
@@ -25,8 +25,6 @@ def download_file(url, fp, skip_if_exists=False):
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
   os.rename(fp+".tmp", fp)
-
-from tinygrad.nn.optim import get_parameters
 
 def my_unpickle(fb0):
   key_prelookup = {}

@@ -2,9 +2,8 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-import tinygrad.nn.optim as optim
+from tinygrad.nn import optim
 from extra.training import train, evaluate
-from extra.utils import get_parameters
 from datasets import fetch_mnist
 
 # load the mnist dataset
@@ -17,7 +16,7 @@ class TinyBobNet:
     self.l2 = Tensor.scaled_uniform(128, 10)
 
   def parameters(self):
-    return get_parameters(self)
+    return optim.get_parameters(self)
 
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
@@ -34,7 +33,7 @@ class TinyConvNet:
     self.l1 = Tensor.scaled_uniform(out_chan*5*5, 10)
 
   def parameters(self):
-    return get_parameters(self)
+    return optim.get_parameters(self)
 
   def forward(self, x):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks

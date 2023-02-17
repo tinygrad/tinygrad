@@ -2,9 +2,8 @@ from typing import Optional, Tuple
 from numpy.typing import NDArray
 
 from tinygrad.tensor import Tensor
-import tinygrad.nn.optim as optim
+from tinygrad.nn import optim
 from tinygrad.helpers import getenv
-from extra.utils import get_parameters
 
 import numpy as np
 import gym
@@ -153,10 +152,10 @@ class DeepDeterministicPolicyGradient:
     self.target_actor = Actor(self.num_actions, self.num_states, hidden_size)
     self.target_critic = Critic(self.num_actions + self.num_states, hidden_size)
 
-    actor_params = get_parameters(self.actor)
-    critic_params = get_parameters(self.critic)
-    target_actor_params = get_parameters(self.target_actor)
-    target_critic_params = get_parameters(self.target_critic)
+    actor_params = optim.get_parameters(self.actor)
+    critic_params = optim.get_parameters(self.critic)
+    target_actor_params = optim.get_parameters(self.target_actor)
+    target_critic_params = optim.get_parameters(self.target_critic)
 
     if DEVICE == "GPU":
       [x.gpu_() for x in actor_params + critic_params + target_actor_params + target_critic_params]
@@ -172,12 +171,12 @@ class DeepDeterministicPolicyGradient:
       tau = self.tau
 
     for param, target_param in zip(
-        get_parameters(self.actor), get_parameters(self.target_actor)
+        optim.get_parameters(self.actor), optim.get_parameters(self.target_actor)
     ):
       target_param.assign(param * tau + target_param * (1.0 - tau))
 
     for param, target_param in zip(
-        get_parameters(self.critic), get_parameters(self.target_critic)
+        optim.get_parameters(self.critic), optim.get_parameters(self.target_critic)
     ):
       target_param.assign(param * tau + target_param * (1.0 - tau))
 

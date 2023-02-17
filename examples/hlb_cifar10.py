@@ -11,7 +11,6 @@ from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.ops import GlobalCounters
-from extra.utils import get_parameters
 
 num_classes = 10
 
@@ -87,10 +86,10 @@ def train_cifar():
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
   if getenv("ADAM"):
-    optimizer = optim.Adam(get_parameters(model), lr=Tensor([0.001]).realize())
+    optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
   else:
-    #optimizer = optim.SGD(get_parameters(model), lr=0.001)
-    optimizer = optim.SGD(get_parameters(model), lr=Tensor([0.003]).realize(), momentum=0.85, nesterov=True)
+    #optimizer = optim.SGD(optim.get_parameters(model), lr=0.001)
+    optimizer = optim.SGD(optim.get_parameters(model), lr=Tensor([0.003]).realize(), momentum=0.85, nesterov=True)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
