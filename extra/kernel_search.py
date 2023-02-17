@@ -376,7 +376,7 @@ if __name__ == "__main__":
       ii.append((Interventions.UPCAST, (2, 4, False)))
     else:
       ii.append((Interventions.UPCAST, (1, 4, False)))
-      ii.append((Interventions.UPCAST, (0, 4, False)))
+      #ii.append((Interventions.UPCAST, (0, 4, False)))
       ii.append((Interventions.UPCAST, (2, 8, False)))
     k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
     np.testing.assert_allclose(hb0.toCPU() @ hb1.toCPU(), k.ret.toCPU(), atol=1e-3)

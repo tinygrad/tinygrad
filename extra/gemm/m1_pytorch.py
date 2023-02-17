@@ -1,6 +1,11 @@
 import time
 import torch
 
+# each kernel is outputting 4 values
+# Apple is CHEATING with a local size of 1024
+# global_size: [N*N//4, 1, 1]
+# local_size:  [1024, 1, 1]
+
 N = 2048
 a = torch.randn((N, N), dtype=torch.float32).to('mps')
 b = torch.randn((N, N), dtype=torch.float32).to('mps')

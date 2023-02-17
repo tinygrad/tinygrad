@@ -359,9 +359,9 @@ class CLASTKernel(ASTKernel):
 
     # this is in addition to all the rest
     #AXIS_NUMS = {1:[1,4,5],2:[3,4]}
-    #AXIS_NUMS = {1:[2],2:[2]}
+    #AXIS_NUMS = {1:[],2:[]}
     if CUDA: AXIS_NUMS = {1:[4,5,1],2:[3,4]}
-    else: AXIS_NUMS = {1:[2], 2:[2]}
+    else: AXIS_NUMS = {1:[1], 2:[1]}
 
     #AXIS_NUMS = {1:[],2:[2]}
 
@@ -393,8 +393,8 @@ class CLASTKernel(ASTKernel):
           base *= s
       if DEBUG >= 3: print(i, AXIS_NUMS[i], new_shape, new_strides)
       if not CUDA:
-        if i == 1: new_strides = [new_shape[3],0,0,1,new_shape[0]*new_shape[3]]
-        if i == 2: new_strides = [0,new_shape[2],1,0,new_shape[1]*new_shape[2]]
+        #if i == 1: new_strides = [new_shape[3],0,0,1,new_shape[0]*new_shape[3]]
+        #if i == 2: new_strides = [0,new_shape[2],1,0,new_shape[1]*new_shape[2]]
         pass
       else:
         # [8, 16, 4, 2, 4, 4, 2, 4]
