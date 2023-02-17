@@ -391,12 +391,10 @@ class CLASTKernel(ASTKernel):
         else:
           new_strides.append(base)
           base *= s
-      print(i, AXIS_NUMS[i], new_shape, new_strides)
+      if DEBUG >= 3: print(i, AXIS_NUMS[i], new_shape, new_strides)
       if not CUDA:
-        if i == 1: new_strides = [4, 0, 0, 1, 32]
-        if i == 2: new_strides = [0, 4, 1, 0, 32]
-        #if i == 1: new_strides = [64, 0, 0, 1024, 1, 4, 16]
-        #if i == 2: new_strides = [0, 4, 1, 0, 64, 256, 1024]
+        if i == 1: new_strides = [new_shape[3],0,0,1,new_shape[0]*new_shape[3]]
+        if i == 2: new_strides = [0,new_shape[2],1,0,new_shape[1]*new_shape[2]]
         pass
       else:
         # [8, 16, 4, 2, 4, 4, 2, 4]
@@ -441,7 +439,6 @@ class CLASTKernel(ASTKernel):
         if not self.is_local[i]: continue
         pieces = get_pieces(i, self.buftokens)
         self.buftokens[i].axis = [x for j,x in enumerate(self.buftokens[i].axis) if j not in AXIS_NUMS[i]]
-        print(sorted(set(self.buftokens[i].offsets())))
         lpieces = get_pieces(i, self.lbuftokens)
         axis_backup = self.lbuftokens[i].axis
         self.lbuftokens[i].axis = [x for j,x in enumerate(self.lbuftokens[i].axis) if j not in AXIS_NUMS[i]]
