@@ -378,7 +378,7 @@ if __name__ == "__main__":
       ii.append((Interventions.UPCAST, (2, 2, False)))
       ii.append((Interventions.UPCAST, (2, 4, False)))
     else:
-      ii.append((Interventions.UPCAST, (1, 4, False)))
+      ii.append((Interventions.UPCAST, (1, 8, False)))
       ii.append((Interventions.UPCAST, (0, 4, False)))
       ii.append((Interventions.UPCAST, (2, 8, False)))
     k = one(ast, ii, skip_baseline=True) #, local_override=(4,4)) #, code_override=code_override)
