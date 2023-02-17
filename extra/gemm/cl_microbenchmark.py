@@ -14,7 +14,7 @@ def benchmark(prog):
   return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO)
 def mb(prog, N=10): return min([benchmark(prog) for _ in range(N)])
 
-MAX = 23
+MAX = 22
 buffer_sz = 2**(MAX-1)*16
 print(f"buffers using {3*2**MAX*16*1e-6:.2f} MB")
 a = CLBuffer(buffer_sz)
@@ -24,6 +24,17 @@ c = CLImage((1024, 1024, 4))
 
 print("*** empty kernel launch ***")
 prog = CLProgram("test", "__kernel void test(__global float4 *a, __global float4 *b) { }")
+for sz in [2**i for i in range(10,MAX)][::-1]:
+  tm = mb(lambda: prog([sz,1,1], None, a._cl, b._cl))
+  print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel")
+
+print("*** internally slow kernel launch ***")
+prog = CLProgram("test", """__kernel void test(__global float4 *a, __global float4 *b) {
+  int gid = get_global_id(0);
+  float acc = 0;
+  for (int i = 0; i < 4096; i++) { acc += gid; }
+  a[gid] = acc;
+}""")
 for sz in [2**i for i in range(10,MAX)][::-1]:
   tm = mb(lambda: prog([sz,1,1], None, a._cl, b._cl))
   print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel")
