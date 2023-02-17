@@ -312,9 +312,6 @@ prog = CLProgram("test", """__kernel void test(__global float *data0, __global f
   __local float ldata2[256];
   size_t lidx1 = get_local_id(0); /* 8 */
   size_t lidx0 = get_local_id(1); /* 8 */
-  ldata1[lidx0] = lidx0;
-  ldata2[lidx1] = lidx1;
-  barrier(CLK_LOCAL_MEM_FENCE);
   float acc0 = 0.0;
   float acc1 = 0.0;
   float acc2 = 0.0;
@@ -331,6 +328,9 @@ prog = CLProgram("test", """__kernel void test(__global float *data0, __global f
   float acc14 = 0.0;
   float acc15 = 0.0;
   for (int i = 0; i < 256; i++) {
+    ldata1[lidx0] = lidx0;
+    ldata2[lidx1] = lidx1;
+    barrier(CLK_LOCAL_MEM_FENCE);
     float4 lval1_0 = ((__local float4*)ldata1)[(lidx0*8)];
     float4 lval2_0 = ((__local float4*)ldata2)[lidx1];
     acc0+=(lval1_0.x*lval2_0.x);
@@ -475,6 +475,7 @@ prog = CLProgram("test", """__kernel void test(__global float *data0, __global f
     acc13+=(lval1_28.w*lval2_224.y);
     acc14+=(lval1_28.w*lval2_224.z);
     acc15+=(lval1_28.w*lval2_224.w);
+    barrier(CLK_LOCAL_MEM_FENCE);
   }
   ((__global float4*)data0)[((idx0*2048)+idx1)] = (float4)(acc0,acc1,acc2,acc3);
   ((__global float4*)data0)[((idx0*2048)+idx1+512)] = (float4)(acc4,acc5,acc6,acc7);
