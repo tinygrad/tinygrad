@@ -13,7 +13,8 @@ def benchmark(prog):
   return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO)
 def mb(prog, N=10): return min([benchmark(prog) for _ in range(N)])
 
-MAX = 28
+MAX = 25
+print(f"buffers using {2*2**MAX*16*1e-6} MB")
 a = CLBuffer(2**MAX*16)
 b = CLBuffer(2**MAX*16)
 
