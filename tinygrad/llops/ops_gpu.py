@@ -393,7 +393,7 @@ class CLASTKernel(ASTKernel):
           base *= s
       print(i, AXIS_NUMS[i], new_shape, new_strides)
       if not CUDA:
-        if i == 1: new_strides = [32, 0, 0, 1, 4]
+        if i == 1: new_strides = [4, 0, 0, 1, 32]
         if i == 2: new_strides = [0, 4, 1, 0, 32]
         #if i == 1: new_strides = [64, 0, 0, 1024, 1, 4, 16]
         #if i == 2: new_strides = [0, 4, 1, 0, 64, 256, 1024]
