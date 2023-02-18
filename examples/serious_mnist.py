@@ -71,14 +71,14 @@ class BigConvNet:
     with open(filename+'.npy', 'wb') as f:
       for par in optim.get_parameters(self):
         #if par.requires_grad:
-        np.save(f, par.cpu().data)
+        np.save(f, par.cpu().numpy())
 
   def load(self, filename):
     with open(filename+'.npy', 'rb') as f:
       for par in optim.get_parameters(self):
         #if par.requires_grad:
         try:
-          par.cpu().data[:] = np.load(f)
+          par.cpu().numpy()[:] = np.load(f)
           if GPU:
             par.gpu()
         except:

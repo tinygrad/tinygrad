@@ -14,7 +14,7 @@ def step_tinygrad(optim, kwargs={}):
   out = net.forward()
   out.backward()
   optim.step()
-  return net.x.cpu().data, net.W.cpu().data
+  return net.x.cpu().numpy(), net.W.cpu().numpy()
 
 def step_pytorch(optim, kwargs={}):
   net = TorchNet()

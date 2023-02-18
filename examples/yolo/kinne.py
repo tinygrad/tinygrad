@@ -7,7 +7,7 @@ import os
 #   where the * is a number starting at 0.
 #  Each file is simply raw little-endian floats,
 #   as readable by: numpy.fromfile(path, "<f4")
-#   and as writable by: t.data.astype("<f4", "C").tofile(path)
+#   and as writable by: t.numpy().astype("<f4", "C").tofile(path)
 # This format is intended to be extremely simple to get into literally anything.
 # It is not intended to be structural or efficient - reloading a network when
 #  unnecessary is inefficient anyway.
@@ -49,7 +49,7 @@ class KinneDir:
     """
     path = f"{self.base}{self.next_part_index}.bin"
     if self.save:
-      t.data.astype("<f4", "C").tofile(path)
+      t.numpy().astype("<f4", "C").tofile(path)
       self.metadata.write(f"{self.next_part_index}: {t.shape}\n")
     else:
       t.assign(Tensor(numpy.fromfile(path, "<f4")).reshape(shape=t.shape))

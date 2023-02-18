@@ -18,7 +18,7 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
 
-  prediction = prediction.detach().cpu().data
+  prediction = prediction.detach().cpu().numpy()
 
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
@@ -119,7 +119,7 @@ def bbox_iou(box1, box2):
 
 
 def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0.4):
-  prediction = prediction.detach().cpu().data
+  prediction = prediction.detach().cpu().numpy()
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
   prediction = prediction * conf_mask
@@ -275,7 +275,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
 
   # st = time.time()
-  prediction_cpu = prediction.cpu().data
+  prediction_cpu = prediction.cpu().numpy()
   # print('put on CPU in %.2f s' % (time.time() - st))
 
   anchors = [(a[0]/stride, a[1]/stride) for a in anchors]
@@ -417,11 +417,11 @@ class Darknet:
         print(self.blocks[i + 1]["type"], "weights", i)
         model = self.module_list[i]
         conv = model[0]
-        print(conv.weight.cpu().data[0][0][0])
+        print(conv.weight.cpu().numpy()[0][0][0])
         if conv.bias is not None:
           print("biases")
           print(conv.bias.shape)
-          print(conv.bias.cpu().data[0][0:5])
+          print(conv.bias.cpu().numpy()[0][0:5])
         else:
           print("None biases for layer", i)
 
@@ -525,7 +525,7 @@ class Darknet:
           if (layers[1]) > 0: layers[1] = layers[1] - i
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
-          x = Tensor(np.concatenate((map1.cpu().data, map2.cpu().data), 1))
+          x = Tensor(np.concatenate((map1.cpu().numpy(), map2.cpu().numpy()), 1))
       elif module_type == "shortcut":
         from_ = int(module["from"])
         x = outputs[i - 1] + outputs[i + from_]
@@ -540,7 +540,7 @@ class Darknet:
           detections = x
           write = 1
         else:
-          detections = Tensor(np.concatenate((detections.cpu().data, x.cpu().data), 1))
+          detections = Tensor(np.concatenate((detections.cpu().numpy(), x.cpu().numpy()), 1))
 
       # print(module_type, 'layer took %.2f s' % (time.time() - st))
       outputs[i] = x

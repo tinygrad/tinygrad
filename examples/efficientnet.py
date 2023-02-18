@@ -44,7 +44,7 @@ def infer(model, img):
   # if you want to look at the outputs
   """
   import matplotlib.pyplot as plt
-  plt.plot(out.data[0])
+  plt.plot(out.numpy()[0])
   plt.show()
   """
   return out, retimg
@@ -68,7 +68,7 @@ if __name__ == "__main__":
       ret, frame = cap.read()
       img = Image.fromarray(frame[:, :, [2,1,0]])
       out, retimg = infer(model, img)
-      print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
+      print(np.argmax(out.numpy()), np.max(out.numpy()), lbls[np.argmax(out.numpy())])
       SCALE = 3
       simg = cv2.resize(retimg, (224*SCALE, 224*SCALE))
       retimg = cv2.cvtColor(simg, cv2.COLOR_RGB2BGR)
@@ -84,5 +84,5 @@ if __name__ == "__main__":
       img = Image.open(url)
     st = time.time()
     out, _ = infer(model, img)
-    print(np.argmax(out.data), np.max(out.data), lbls[np.argmax(out.data)])
+    print(np.argmax(out.numpy()), np.max(out.numpy()), lbls[np.argmax(out.numpy())])
     print(f"did inference in {(time.time()-st):2f}")

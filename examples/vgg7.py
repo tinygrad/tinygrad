@@ -60,7 +60,7 @@ cmd = sys.argv[1]
 vgg7 = Vgg7()
 
 def nansbane(p):
-  if numpy.isnan(numpy.min(p.data)):
+  if numpy.isnan(numpy.min(p.numpy())):
     raise Exception("A NaN in the model has been detected. This model will not be interacted with to prevent further damage.")
 
 def load_and_save(path, save):
@@ -90,7 +90,7 @@ elif cmd == "execute":
 
   load_and_save(model, False)
 
-  image_save(out_file, vgg7.forward(Tensor(image_load(in_file))).data)
+  image_save(out_file, vgg7.forward(Tensor(image_load(in_file))).numpy())
 elif cmd == "execute_full":
   model = sys.argv[2]
   in_file = sys.argv[3]
@@ -179,7 +179,7 @@ elif cmd == "train":
     optim.step()
 
     # warning: used by sample probability adjuster
-    loss_indicator = loss.max().data[0]
+    loss_indicator = loss.max().numpy()[0]
     print("Round " + str(rnum) + " : " + str(loss_indicator))
 
     if (rnum % rounds_per_save) == 0:
