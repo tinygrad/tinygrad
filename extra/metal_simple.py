@@ -19,32 +19,21 @@ c = CLBuffer(N*N*4)
 
 prog = CLProgram("test", f"""
 using namespace metal;
-kernel void test(device float4 *a, device const float4 *data1, device const float4 *data2, uint3 gid [[thread_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
-  float4 r0 = data1[0];
-  float4 r1 = data1[1];
-  float4 b0 = data2[0];
-  float4 b1 = data2[1];
-  float4 b2 = data2[2];
-  float4 b3 = data2[3];
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  float4 acc[8];
-  for (uint i = 0; i < 8; i++) {{ acc[i] = 0; }}
-  for (uint i = 0; i < 1024; i++) {{
-    acc[0] += r0 * b0;
-    acc[1] += r0 * b1;
-    acc[2] += r0 * b2;
-    acc[3] += r0 * b3;
-    acc[4] += r1 * b0;
-    acc[5] += r1 * b1;
-    acc[6] += r1 * b2;
-    acc[7] += r1 * b3;
+kernel void test(device float4 *a, device const float4 *data1, device const float4 *data2, uint3 gid [[thread_position_in_grid]]) {{
+  float4 acc0 = 0;
+  for (uint i = 0; i < 4096; i+=4) {{
+    float4 r0 = data1[i];
+    float4 r1 = data1[i+1];
+    float4 r2 = data1[i+2];
+    acc0.x += dot(r0, r0);
+    acc0.y += dot(r0, r1);
+    acc0.z += dot(r0, r2);
+    acc0.w += dot(r1, r2);
   }}
-  float4 facc = 0;
-  for (uint i = 0; i < 8; i++) facc += acc[i];
-  a[gid.x] = facc;
+  a[gid.x] = acc0;
 }}""")
 #      fma  float4   statements    loop
-FLOPS = 2 *   4    *    8      *   1024
+FLOPS = 2 *   4    *    4      *   1024
 sz = 512*512
 tm = mb(lambda: prog([sz,1,1], [32,1,1], a._cl, b._cl, c._cl))
 print(f"{sz:10d} {tm*1e-3:9.2f} us {tm/sz:7.3f} ns/kernel -- {sz*FLOPS/tm:10.3f} GFLOPS")
