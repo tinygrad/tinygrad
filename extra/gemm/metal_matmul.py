@@ -27,11 +27,10 @@ prog = CLProgram("test", f"""
 #include <metal_stdlib>
 #include <metal_simdgroup_matrix>
 using namespace metal;
-kernel void test(device float *a, device float *data1, device float *data2, uint3 gid [[thread_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
-  //int simd = lid.x/32;
-  int idx = gid.x/32;
-  int pos_x = (idx%{N//32}) * 32;
-  int pos_y = (idx/{N//32}) * 32;
+kernel void test(device float *a, device const float *data1, device const float *data2, uint3 gid [[thread_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
+  uint idx = gid.x/32;
+  uint pos_x = (idx%{N//32}) * 32;
+  uint pos_y = (idx/{N//32}) * 32;
   simdgroup_float8x8 acc[4][4];
   for (uint i = 0; i < 4; i++) {{
     for (uint j = 0; j < 4; j++) {{

@@ -66,6 +66,7 @@ class CLProgram:
       _, err = arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None)
       assert err is None, str(err)
       import Cocoa
+      os.system("rm -f /tmp/shader.bin")
       _, err = arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None)
       assert err is None, str(err)
       # https://github.com/dougallj/applegpu.git
