@@ -42,9 +42,9 @@ kernel void test(device float *a, device float *data1, device float *data2, uint
   //__metal_get_null_simdgroup_event
   //__metal_simdgroup_async_copy_2d
   for (uint k = 0; k < {N}; k+=8) {{
-    threadgroup_barrier(mem_flags::mem_threadgroup);
     simdgroup_load(A[0], data1, {N}, ulong2(k, pos_x));
     simdgroup_load(A[1], data1, {N}, ulong2(k, pos_x+8));
+    threadgroup_barrier(mem_flags::mem_threadgroup);
     simdgroup_load(A[2], data1, {N}, ulong2(k, pos_x+16));
     simdgroup_load(A[3], data1, {N}, ulong2(k, pos_x+24));
     simdgroup_load(B[0], data2, {N}, ulong2(pos_y, k));
