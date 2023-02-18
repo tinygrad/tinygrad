@@ -19,12 +19,12 @@ c = CLBuffer(N*N*4)
 
 prog = CLProgram("test", f"""
 using namespace metal;
-kernel void test(device float4 *a, device const float4 *data1, device const float4 *data2, uint3 gid [[thread_position_in_grid]]) {{
+kernel void test(device float4 *a, device const half4 *data1, device const half4 *data2, uint3 gid [[thread_position_in_grid]]) {{
   float4 acc0 = 0;
   for (uint i = 0; i < 4096; i+=4) {{
-    float4 r0 = data1[i];
-    float4 r1 = data1[i+1];
-    float4 r2 = data1[i+2];
+    float4 r0 = float4(data1[i]);
+    float4 r1 = float4(data1[i+1]);
+    float4 r2 = float4(data1[i+2]);
     acc0.x += dot(r0, r0);
     acc0.y += dot(r0, r1);
     acc0.z += dot(r0, r2);
