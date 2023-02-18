@@ -24,6 +24,7 @@ c.copyin(nc)
 FLOPS = N*N*N*2
 
 prog = CLProgram("test", f"""
+#include <metal_stdlib>
 #include <metal_simdgroup_matrix>
 using namespace metal;
 kernel void test(device float *a, device float *data1, device float *data2, uint3 gid [[thread_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
@@ -52,13 +53,22 @@ kernel void test(device float *a, device float *data1, device float *data2, uint
     simdgroup_load(B[2], data2, {N}, ulong2(pos_y+16, k));
     simdgroup_load(B[3], data2, {N}, ulong2(pos_y+24, k));
 
-    for (uint i = 0; i < 4; i++) {{
-      // must be manually unrolled
-      simdgroup_multiply_accumulate(acc[i][0], A[0], B[i], acc[i][0]);
-      simdgroup_multiply_accumulate(acc[i][1], A[1], B[i], acc[i][1]);
-      simdgroup_multiply_accumulate(acc[i][2], A[2], B[i], acc[i][2]);
-      simdgroup_multiply_accumulate(acc[i][3], A[3], B[i], acc[i][3]);
-    }}
+    simdgroup_multiply_accumulate(acc[0][0], A[0], B[0], acc[0][0]);
+    simdgroup_multiply_accumulate(acc[0][1], A[1], B[0], acc[0][1]);
+    simdgroup_multiply_accumulate(acc[0][2], A[2], B[0], acc[0][2]);
+    simdgroup_multiply_accumulate(acc[0][3], A[3], B[0], acc[0][3]);
+    simdgroup_multiply_accumulate(acc[1][0], A[0], B[1], acc[1][0]);
+    simdgroup_multiply_accumulate(acc[1][1], A[1], B[1], acc[1][1]);
+    simdgroup_multiply_accumulate(acc[1][2], A[2], B[1], acc[1][2]);
+    simdgroup_multiply_accumulate(acc[1][3], A[3], B[1], acc[1][3]);
+    simdgroup_multiply_accumulate(acc[2][0], A[0], B[2], acc[2][0]);
+    simdgroup_multiply_accumulate(acc[2][1], A[1], B[2], acc[2][1]);
+    simdgroup_multiply_accumulate(acc[2][2], A[2], B[2], acc[2][2]);
+    simdgroup_multiply_accumulate(acc[2][3], A[3], B[2], acc[2][3]);
+    simdgroup_multiply_accumulate(acc[3][0], A[0], B[3], acc[3][0]);
+    simdgroup_multiply_accumulate(acc[3][1], A[1], B[3], acc[3][1]);
+    simdgroup_multiply_accumulate(acc[3][2], A[2], B[3], acc[3][2]);
+    simdgroup_multiply_accumulate(acc[3][3], A[3], B[3], acc[3][3]);
   }}
   for (uint i = 0; i < 4; i++) {{
     for (uint j = 0; j < 4; j++) {{

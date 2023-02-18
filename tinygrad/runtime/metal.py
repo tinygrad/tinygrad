@@ -48,6 +48,7 @@ class CLProgram:
       import os
       with open("/tmp/prog.metal", "w") as f:
         f.write(prg)
+      os.system('rm -f /tmp/prog.air*')
       os.system('xcrun -sdk macosx metal -c /tmp/prog.metal -o /tmp/prog.air')
       os.system('/Users/kafka/Downloads/clang+llvm-15.0.7-arm64-apple-darwin22.0/bin/llvm-dis /tmp/prog.air')
       os.system('cat /tmp/prog.air.ll')
