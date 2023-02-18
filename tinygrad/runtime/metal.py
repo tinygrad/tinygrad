@@ -44,7 +44,8 @@ class CLProgram:
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     options = Metal.MTLCompileOptions.alloc().init()
     if DEBUG >= 4: print("Metal compile", prg)
-    if DEBUG >= 5:
+    # hacks to get LLVM
+    if DEBUG >= 6:
       import os
       with open("/tmp/prog.metal", "w") as f:
         f.write(prg)
@@ -55,6 +56,20 @@ class CLProgram:
     self.library = device.newLibraryWithSource_options_error_(prg, options, None)
     assert self.library[0] is not None, str(self.library)
     self.fxn = self.library[0].newFunctionWithName_(name)
+    # hacks to disassemble shader
+    if DEBUG >= 5:
+      import os
+      arc, err = device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
+      assert err is None, str(err)
+      desc = Metal.MTLComputePipelineDescriptor.alloc().init()
+      desc.setComputeFunction_(self.fxn)
+      _, err = arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None)
+      assert err is None, str(err)
+      import Cocoa
+      _, err = arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None)
+      assert err is None, str(err)
+      # https://github.com/dougallj/applegpu.git
+      os.system("cd /Users/kafka/fun/m1/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
   def __call__(self, global_size, local_size, *args):
     global_size += [1] * (3-len(global_size))
     if local_size is None: local_size = [32]
