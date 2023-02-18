@@ -103,7 +103,7 @@ kernel void test(device float *a, device const float *data1, device const float 
     }}
   }}
 }}""")
-tm = mb(lambda: prog([N*N//(2*4*4)], [4*32], a._cl, b._cl, c._cl))
+tm = mb(lambda: prog([N*N//(2*4*4)], [2*32], a._cl, b._cl, c._cl))
 na = a.toCPU().reshape(N,N)
 comp = nb@nc
 if N <= 32:
