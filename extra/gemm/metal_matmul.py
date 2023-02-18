@@ -27,6 +27,7 @@ prog = CLProgram("test", f"""
 #include <metal_simdgroup_matrix>
 using namespace metal;
 kernel void test(device float *a, device float *data1, device float *data2, uint3 gid [[thread_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
+  //int simd = lid.x/32;
   int idx = gid.x/32;
   int pos_x = (idx%{N//32}) * 32;
   int pos_y = (idx/{N//32}) * 32;
@@ -41,6 +42,7 @@ kernel void test(device float *a, device float *data1, device float *data2, uint
   //__metal_get_null_simdgroup_event
   //__metal_simdgroup_async_copy_2d
   for (uint k = 0; k < {N}; k+=8) {{
+    threadgroup_barrier(mem_flags::mem_threadgroup);
     simdgroup_load(A[0], data1, {N}, ulong2(k, pos_x));
     simdgroup_load(A[1], data1, {N}, ulong2(k, pos_x+8));
     simdgroup_load(A[2], data1, {N}, ulong2(k, pos_x+16));
@@ -51,6 +53,7 @@ kernel void test(device float *a, device float *data1, device float *data2, uint
     simdgroup_load(B[3], data2, {N}, ulong2(pos_y+24, k));
 
     for (uint i = 0; i < 4; i++) {{
+      // must be manually unrolled
       simdgroup_multiply_accumulate(acc[i][0], A[0], B[i], acc[i][0]);
       simdgroup_multiply_accumulate(acc[i][1], A[1], B[i], acc[i][1]);
       simdgroup_multiply_accumulate(acc[i][2], A[2], B[i], acc[i][2]);
@@ -63,7 +66,7 @@ kernel void test(device float *a, device float *data1, device float *data2, uint
     }}
   }}
 }}""")
-tm = mb(lambda: prog([N*N//(2*4*4)], [512], a._cl, b._cl, c._cl))
+tm = mb(lambda: prog([N*N//(2*4*4)], [4*32], a._cl, b._cl, c._cl))
 na = a.toCPU().reshape(N,N)
 comp = nb@nc
 if N <= 32:
