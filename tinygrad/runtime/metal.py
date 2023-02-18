@@ -44,6 +44,13 @@ class CLProgram:
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     options = Metal.MTLCompileOptions.alloc().init()
     if DEBUG >= 4: print("Metal compile", prg)
+    if DEBUG >= 5:
+      import os
+      with open("/tmp/prog.metal", "w") as f:
+        f.write(prg)
+      os.system('xcrun -sdk macosx metal -c /tmp/prog.metal -o /tmp/prog.air')
+      os.system('/Users/kafka/Downloads/clang+llvm-15.0.7-arm64-apple-darwin22.0/bin/llvm-dis /tmp/prog.air')
+      os.system('cat /tmp/prog.air.ll')
     self.library = device.newLibraryWithSource_options_error_(prg, options, None)
     assert self.library[0] is not None, str(self.library)
     self.fxn = self.library[0].newFunctionWithName_(name)

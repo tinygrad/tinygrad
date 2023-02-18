@@ -25,6 +25,7 @@ FLOPS = N*N*N*2
 
 prog = CLProgram("test", f"""
 #include <metal_simdgroup_matrix>
+#pragma METAL internals : enable
 using namespace metal;
 kernel void test(device float *a, device float *data1, device float *data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
   int pos_x = gid.x*8;
@@ -32,6 +33,7 @@ kernel void test(device float *a, device float *data1, device float *data2, uint
   simdgroup_float8x8 acc = simdgroup_float8x8(0);
   simdgroup_float8x8 A;
   simdgroup_float8x8 B;
+  //__metal_simdgroup_async_copy_2d
   for (uint k = 0; k < {N}; k+=8) {{
     simdgroup_load(A, data1, {N}, ulong2(k, pos_x));
     simdgroup_load(B, data2, {N}, ulong2(pos_y, k));
