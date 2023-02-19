@@ -40,7 +40,7 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, offset=0):
-    return Variable.sum([Variable.num(self.offset+offset)] + [Variable(idxs[i], 0, sh-1)*st for i,(sh,st) in enumerate(zip(self.shape, self.strides)) if sh != 1 and st != 0])
+    return Variable.sum([Variable.num(self.offset+offset)] + [Variable(idx, 0, sh-1)*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
 class ZeroView:
   __slots__ = ('old_shape', 'arg', 'shape', 'contiguous', 'strides', 'offset')
