@@ -20,11 +20,7 @@ class CLImage:
 class CLBuffer:
   def __init__(self, size): self._cl = device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
   def copyin(self, b:np.ndarray):
-    wrapper = np.frombuffer(self._cl.contents().as_buffer(self._cl.length()), dtype=np.float32)
-    np.copyto(wrapper, b.data)
-    # print(f"attempting shape {b.shape} {b.dtype} {np.frombuffer(b.data, dtype=np.float32)} {b.size*b.itemsize}")
-    # self._cl = device.newBufferWithBytesNoCopy_length_options_deallocator_(b.data, b.size*b.itemsize, Metal.MTLResourceStorageModeShared, None)
-
+    np.copyto(np.frombuffer(self._cl.contents().as_buffer(self._cl.length()), dtype=np.float32), b.data)
 
   def toCPU(self):
     sync()
@@ -41,7 +37,7 @@ class CLProgram:
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
   def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
-    options = Metal.MTLCompileOptions.alloc().init()  
+    options = Metal.MTLCompileOptions.alloc().init()
     if DEBUG >= 4: print("Metal compile", prg)
     self.library = device.newLibraryWithSource_options_error_(prg, options, None)
     assert self.library[0] is not None, str(self.library)
