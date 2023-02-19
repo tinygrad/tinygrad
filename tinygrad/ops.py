@@ -84,10 +84,9 @@ class GlobalCounters:
   time_sum : ClassVar[int] = 0
   kernel_count : ClassVar[int] = 0
   mem_used : ClassVar[int] = 0   # NOTE: this is not reset
-  graph_node_count : ClassVar[int] = 0
   cache : ClassVar[Optional[list]] = None
   @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum, GlobalCounters.kernel_count, GlobalCounters.graph_node_count, GlobalCounters.cache = 0,0,0,0,0,None
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0,0,None
   @staticmethod
   def log_kernel(op_estimate:int, mem_estimate:int):
     GlobalCounters.kernel_count += 1

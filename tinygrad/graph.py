@@ -4,7 +4,7 @@ import itertools
 import networkx as nx  # type: ignore
 from collections import defaultdict
 from typing import Dict, List
-from tinygrad.ops import DeviceBuffer, DEBUG, GlobalCounters, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
+from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv
 
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
@@ -25,10 +25,12 @@ if GRAPH:
     os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
   atexit.register(save_graph_exit)
 
+node_count = 0
 def nm(x):
+  global node_count
   if not hasattr(x, 'node_id'):
-    setattr(x, 'node_id', GlobalCounters.graph_node_count)
-    GlobalCounters.graph_node_count += 1
+    setattr(x, 'node_id', node_count)
+    node_count += 1
   return x.node_id
 
 def get_sop(op : List[Op]):

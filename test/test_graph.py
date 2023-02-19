@@ -4,11 +4,10 @@ import networkx as nx  # type: ignore
 import numpy as np
 from tinygrad.graph import G, log_op, prune_graph
 from tinygrad.llops.ops_cpu import CPUBuffer
-from tinygrad.ops import BinaryOps, GlobalCounters, LazyOp, MovementOps, ReduceOps
+from tinygrad.ops import BinaryOps, LazyOp, MovementOps, ReduceOps
 
 class TestGraph(unittest.TestCase):
   def setUp(self):
-    GlobalCounters.reset()
     G.clear()
 
   def helper_compare_graph(self, RG: nx.DiGraph):
