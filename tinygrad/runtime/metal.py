@@ -4,6 +4,9 @@ import numpy as np
 from typing import List, Any
 from tinygrad.ops import DEBUG, GlobalCounters
 from tinygrad.helpers import prod
+import subprocess
+
+USE_XCODE_METAL = True
 
 device = Metal.MTLCreateSystemDefaultDevice()
 mtl_queue = device.newCommandQueue()
@@ -42,7 +45,6 @@ class CLProgram:
   lid = [f"lid.{chr(120+i)}" for i in range(3)]
   def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
-    options = Metal.MTLCompileOptions.alloc().init()
     if DEBUG >= 4: print("Metal compile", prg)
     # hacks to get LLVM
     if DEBUG >= 6:
@@ -53,7 +55,18 @@ class CLProgram:
       os.system('xcrun -sdk macosx metal -c /tmp/prog.metal -o /tmp/prog.air')
       os.system('/Users/kafka/Downloads/clang+llvm-15.0.7-arm64-apple-darwin22.0/bin/llvm-dis /tmp/prog.air')
       os.system('cat /tmp/prog.air.ll')
-    self.library = device.newLibraryWithSource_options_error_(prg, options, None)
+
+    if USE_XCODE_METAL:
+      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
+      lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+      # newLibraryWithData needs a dispatch_data_t
+      with open("/tmp/prog.metallib", "wb") as f:
+        f.write(lib)
+      import Cocoa
+      self.library = device.newLibraryWithURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/prog.metallib"), None)
+    else:
+      options = Metal.MTLCompileOptions.alloc().init()
+      self.library = device.newLibraryWithSource_options_error_(prg, options, None)
     assert self.library[0] is not None, str(self.library)
     self.fxn = self.library[0].newFunctionWithName_(name)
     # hacks to disassemble shader

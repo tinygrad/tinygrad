@@ -18,10 +18,16 @@ c = CLBuffer(N*N*4)
 # 32*16*8 = 4096 ALUs
 
 prog = CLProgram("test", f"""
+#include <metal_simdgroup_async>
 using namespace metal;
-kernel void test(device float4 *a, device const half4 *data1, device const half4 *data2, uint3 gid [[thread_position_in_grid]]) {{
+kernel void test(device float4 *a, device const float4 *data1, device const float4 *data2, uint3 gid [[thread_position_in_grid]]) {{
   float4 acc0 = 0;
-  for (uint i = 0; i < 4096; i+=4) {{
+  threadgroup float4 ldata1[32];
+  //__metal_simdgroup_event_t event;
+  //__metal_threadgroup_event_t event;
+  //__metal_async_wg_copy((threadgroup char*)&ldata1[0], (device char*)data1, 32, event);
+  //__metal_wait_wg_events(1, &event);
+  /*for (uint i = 0; i < 4096; i+=4) {{
     float4 r0 = float4(data1[i]);
     float4 r1 = float4(data1[i+1]);
     float4 r2 = float4(data1[i+2]);
@@ -29,7 +35,7 @@ kernel void test(device float4 *a, device const half4 *data1, device const half4
     acc0.y += dot(r0, r1);
     acc0.z += dot(r0, r2);
     acc0.w += dot(r1, r2);
-  }}
+  }}*/
   a[gid.x] = acc0;
 }}""")
 #      fma  float4   statements    loop
