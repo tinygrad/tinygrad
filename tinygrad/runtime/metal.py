@@ -23,7 +23,7 @@ class CLImage:
 class CLBuffer:
   def __init__(self, size): self._cl = device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
   def copyin(self, b:np.ndarray):
-    np.copyto(np.frombuffer(self._cl.contents().as_buffer(self._cl.length()), dtype=np.float32), b.data)
+    np.copyto(np.frombuffer(self._cl.contents().as_buffer(self._cl.length()), dtype=np.float32), b.reshape(-1).data)
 
   def toCPU(self):
     sync()
