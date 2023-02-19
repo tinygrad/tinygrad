@@ -251,13 +251,13 @@ class CLASTKernel(ASTKernel):
 
     # output_shape[-1] is get_global_id(0)
     MAX_OUTPUT_SHAPE = 3
-    self.kernel += [f"uint idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+    self.kernel += [f"int idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
     if len(self.output_shape) > MAX_OUTPUT_SHAPE:
       # sometimes, there's more dimensions. compact all the dimensions into the first one
       # TODO: these compactions should be searchable
       final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
       for i in range(final_dimension-1, -1, -1):
-        self.kernel += [f"uint idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
+        self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
@@ -270,7 +270,7 @@ class CLASTKernel(ASTKernel):
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
-      self.kernel += [f"for (uint idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       expanded_accumulators = split_float4(accumulators) if accumulators[0].typ == Types.FLOAT4 and len(accumulators)*4 == len(acc_offsets) else accumulators
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
@@ -278,7 +278,7 @@ class CLASTKernel(ASTKernel):
     if self.group_for_reduce:
       lidx, lvalid = self.sts[-1].expr_idxs()
       assert lvalid.min == 1, "local buffer must always be valid"
-      self.kernel.append(f"uint mid_idx = {lidx.render(render_cl)};\n")
+      self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
       for i,acc in enumerate(accumulators):
         self.kernel.append(CLProgram.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
@@ -296,9 +296,9 @@ class CLASTKernel(ASTKernel):
       for i,acc in enumerate(new_accumulators):
         self.kernel.append(f"{acc.decltype()} {acc.tok} = 0.0;")
         if self.upcast_in_mid_reduce:
-          self.kernel.append(f"for (uint mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'vload4(0, &temp{i}[mid*4])')}; }}\n")
+          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'vload4(0, &temp{i}[mid*4])')}; }}\n")
         else:
-          self.kernel.append(f"for (uint mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'temp{i}[mid]')}; }}\n")
+          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'temp{i}[mid]')}; }}\n")
       accumulators = new_accumulators
     
     # late ast

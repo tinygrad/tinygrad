@@ -1,5 +1,5 @@
 # pip3 install pyobjc-framework-Metal
-import Metal # type: ignore
+import Metal, Cocoa # type: ignore
 import numpy as np
 from typing import List, Any
 from tinygrad.ops import DEBUG, GlobalCounters
@@ -52,7 +52,6 @@ class CLProgram:
       # newLibraryWithData needs a dispatch_data_t
       with open("/tmp/prog.metallib", "wb") as f:
         f.write(lib)
-      import Cocoa
       self.library = device.newLibraryWithURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/prog.metallib"), None)
     else:
       options = Metal.MTLCompileOptions.alloc().init()
@@ -67,7 +66,6 @@ class CLProgram:
       desc.setComputeFunction_(self.fxn)
       _, err = arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None)
       assert err is None, str(err)
-      import Cocoa
       _, err = arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None)
       assert err is None, str(err)
       # https://github.com/dougallj/applegpu.git
