@@ -88,8 +88,8 @@ if __name__ == "__main__":
     opt_time = (time.time()-st)*1000.0
 
     st = time.time()
-    loss = loss.cpu().data
-    cat = np.argmax(out.cpu().data, axis=1)
+    loss = loss.cpu().numpy()
+    cat = np.argmax(out.cpu().numpy(), axis=1)
     accuracy = (cat == Y).mean()
     finish_time = (time.time()-st)*1000.0
 

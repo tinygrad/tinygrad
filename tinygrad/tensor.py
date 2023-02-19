@@ -94,10 +94,6 @@ class Tensor:
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
   def numpy(self) -> np.ndarray: return np.array(self.lazydata.toCPU())
 
-  # TODO: this keeps the legacy behavior working, remove it after refactor
-  @property
-  def data(self) -> np.ndarray: return self.numpy()
-
   # TODO: if things are realized this won't work
   def to_(self, device:str):
     assert self.lazydata.realized is None

@@ -38,7 +38,7 @@ class Upsample:
   def upsampleNearest(self, input):
     # TODO: Implement actual interpolation function
     # inspired: https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/nn/functional/upsampling.h
-    return input.cpu().data.repeat(self.scale_factor, axis=len(input.shape)-2).repeat(self.scale_factor, axis=len(input.shape)-1)
+    return input.cpu().numpy().repeat(self.scale_factor, axis=len(input.shape)-2).repeat(self.scale_factor, axis=len(input.shape)-1)
 
   def __repr__(self):
     return f"Upsample(scale_factor={self.scale_factor!r}, mode={self.mode!r})"
