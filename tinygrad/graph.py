@@ -4,7 +4,7 @@ import itertools
 try:
   import networkx as nx  # type: ignore
 except ImportError:
-  pass  # graph won't work
+  nx = None # graph won't work
 from collections import defaultdict
 from typing import Dict, List, Optional
 from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
@@ -14,7 +14,7 @@ GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), gete
 
 # **** debugging and graphing ****
 
-G = nx.DiGraph()
+G = nx.DiGraph() if nx is not None else None
 cnts : Dict[OpType, int] = defaultdict(int)
 if GRAPH:
   def save_graph_exit():
