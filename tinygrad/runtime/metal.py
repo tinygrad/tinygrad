@@ -1,5 +1,5 @@
-# pip3 install pyobjc-framework-Metal
-import Metal, Cocoa # type: ignore
+# pip3 install pyobjc-framework-Metal pyobjc-framework-libdispatch
+import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
 from tinygrad.ops import DEBUG, GlobalCounters
@@ -33,7 +33,7 @@ class CLBuffer:
   def copyout(self, a:np.ndarray): np.copyto(a, self.toCPU().reshape(a.shape))
 
 class CLProgram:
-  kernel_prefix = "using namespace metal;\nkernel"
+  kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel"
   buffer_prefix = "device "
   smem_prefix = "threadgroup "
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
@@ -49,15 +49,13 @@ class CLProgram:
     if METAL_XCODE:
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-      # newLibraryWithData needs a dispatch_data_t
-      with open("/tmp/prog.metallib", "wb") as f:
-        f.write(lib)
-      self.library = device.newLibraryWithURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/prog.metallib"), None)
+      data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+      self.library, err = device.newLibraryWithData_error_(data, None)
     else:
       options = Metal.MTLCompileOptions.alloc().init()
-      self.library = device.newLibraryWithSource_options_error_(prg, options, None)
-    assert self.library[0] is not None, str(self.library)
-    self.fxn = self.library[0].newFunctionWithName_(name)
+      self.library, err = device.newLibraryWithSource_options_error_(prg, options, None)
+    assert err is None, str(err)
+    self.fxn = self.library.newFunctionWithName_(name) #self.library.functionNames()[0]
     # hacks to disassemble shader
     if DEBUG >= 5:
       arc, err = device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
