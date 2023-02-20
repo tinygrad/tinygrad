@@ -20,7 +20,6 @@ if __name__ == "__main__":
   # c header
   cprog = ["#include <stdio.h>", "#include <math.h>","#define max(x,y) fmax(x,y)"] 
 
-
   # functions that run the net
   bufs = {}
   bufnum = 0
@@ -96,5 +95,5 @@ int main(int argc, char* argv[]) {
 }
   """]
 
-  # CLANG=1 GPU=1 python3 examples/compile_efficientnet.py | clang -O2 -x c - -o recognize && time ./recognize docs/stable_diffusion_by_tinygrad.jpg
+  # CLANG=1 GPU=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && time ./recognize docs/stable_diffusion_by_tinygrad.jpg
   print('\n'.join(cprog))
