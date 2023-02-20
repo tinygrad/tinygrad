@@ -60,6 +60,26 @@ jobs:
     - name: Run Pytest (lazy)
       run: LAZY=1 python -m pytest -s -v -n=auto
 
+  testcpu:
+    name: ImageNet Compile Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e .
+    - name: Compile EfficientNet to C
+      run: CLANG=1 GPU=1 python3 examples/compile_efficientnet.py > recognize.c
+    - name: Compile C to native
+      run: clang -O2 recognize.c -lm -o recognize
+    - name: Test EfficientNet
+      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+
   testllvm:
     name: LLVM Tests
     runs-on: ubuntu-latest

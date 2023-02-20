@@ -15,6 +15,8 @@ if __name__ == "__main__":
   the_input = Tensor.randn(1,3,224,224)
   the_output = run(the_input)
   the_output = run(the_input)
+
+  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
 
   # c header
@@ -92,8 +94,7 @@ int main(int argc, char* argv[]) {
   }
   if (DEBUG) printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
   else printf("%s\\n", lbls[best_idx]);
-}
-  """]
+}"""]
 
   # CLANG=1 GPU=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && time ./recognize docs/stable_diffusion_by_tinygrad.jpg
   print('\n'.join(cprog))
