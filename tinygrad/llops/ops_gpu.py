@@ -46,7 +46,7 @@ class GPURunner:
 class CLASTKernel(ASTKernel):
   code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)",
-    UnaryOps.GT0:  "(A > 0.)" if CUDA else "((float)1.-step((float)0.,(-A)))",
+    UnaryOps.GT0:  "(A > 0.)" if CUDA or CLANG else "((float)1.-step((float)0.,(-A)))",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
@@ -256,16 +256,19 @@ class CLASTKernel(ASTKernel):
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(isinstance(buf._buf, CLImage) for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    MAX_OUTPUT_SHAPE = 3
-    self.kernel += [f"int idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
-    if len(self.output_shape) > MAX_OUTPUT_SHAPE:
-      # sometimes, there's more dimensions. compact all the dimensions into the first one
-      # TODO: these compactions should be searchable
-      final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
-      for i in range(final_dimension-1, -1, -1):
-        self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
-      self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
-      if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
+    if CLANG:
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
+    else:
+      MAX_OUTPUT_SHAPE = 3
+      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+      if len(self.output_shape) > MAX_OUTPUT_SHAPE:
+        # sometimes, there's more dimensions. compact all the dimensions into the first one
+        # TODO: these compactions should be searchable
+        final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
+        for i in range(final_dimension-1, -1, -1):
+          self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
+        self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
+        if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
@@ -310,7 +313,8 @@ class CLASTKernel(ASTKernel):
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
-    self.kernel.append("}")
+    if CLANG: self.kernel += ["}"] * len(self.output_shape)
+    self.kernel.append("\n}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
