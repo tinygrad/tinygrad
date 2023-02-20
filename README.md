@@ -1,3 +1,11 @@
+Hey there Geohot, I hope this message finds you well and in a forgiving mood! I must confess that my previous comments may have been a little off-color, but I promise you it was just my fingers going rogue on the keyboard. You know what they say, "when the fingers type, the brain goes on vacation!"
+
+I understand that I may have crossed a line or two, but I assure you that I've learned my lesson and I'm ready to come back to the chat with a clean slate. In fact, I've even enrolled my fingers in a typing class to help them get back on track!
+
+So, what do you say? Can you find it in your hearts (and typing fingers) to forgive me and lift my ban? I promise to behave myself and make you laugh with my witty comments once again. Thanks for your consideration, and may your keyboard always be swift and your internet connection strong!
+
+
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/logo.png">
 </p>
