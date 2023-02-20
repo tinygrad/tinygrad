@@ -3,7 +3,7 @@ import atexit
 import itertools
 import networkx as nx  # type: ignore
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv
 
@@ -38,7 +38,8 @@ def get_sop(op : List[Op]):
   if len(op) <= 4: return '.'.join([str(y).split(".")[1][0:2] for y in op][::-1])
   return str(len(op))
 
-def log_op(ret : DeviceBuffer, ast : LazyOp, show_graph : bool = GRAPH):
+def log_op(ret : DeviceBuffer, ast : LazyOp, show_graph : Optional[bool] = None):
+  if show_graph is None: show_graph = GRAPH
   if not DEBUG and not show_graph: return
   op : List[Op] = [x.op for x in get_lazyops(ast)]
   inp : List[DeviceBuffer] = get_buffers(ast)
