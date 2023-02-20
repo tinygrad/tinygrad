@@ -65,10 +65,11 @@ if __name__ == "__main__":
 
   cprog += ["""
 int main(int argc, char* argv[]) {
+  int DEBUG = getenv("DEBUG") != NULL ? atoi(getenv("DEBUG")) : 0;
   int X=0, Y=0, chan=0;
-  stbi_uc *image = stbi_load(argv[1], &X, &Y, &chan, 3);
+  stbi_uc *image = (argc > 1) ? stbi_load(argv[1], &X, &Y, &chan, 3) : stbi_load_from_file(stdin, &X, &Y, &chan, 3);
   assert(chan == 3);
-  printf("loaded image %dx%d c %d\\n", X, Y, chan);
+  if (DEBUG) printf("loaded image %dx%d c %d\\n", X, Y, chan);
   // resize to input[1,3,224,224] and rescale
   for (int y = 0; y < 224; y++) {
     for (int x = 0; x < 224; x++) {
@@ -89,9 +90,11 @@ int main(int argc, char* argv[]) {
       best_idx = i;
     }
   }
-  printf("category : %d(%s) with %f\\n", best_idx, lbls[best_idx], best);
+  if (DEBUG) printf("category : %d(%s) with %f\\n", best_idx, lbls[best_idx], best);
+  else printf("%s\\n", lbls[best_idx]);
 }
   """]
 
   # CLANG=1 GPU=1 python3 examples/compile_efficientnet.py | clang -O2 -x c - && time ./a.out docs/stable_diffusion_by_tinygrad.jpg
+  # install with 'sudo mv a.out /usr/bin/recognize' or 'mv a.out /opt/homebrew/bin/recognize'
   print('\n'.join(cprog))
