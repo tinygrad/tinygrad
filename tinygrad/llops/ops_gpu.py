@@ -12,10 +12,16 @@ render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
 from tinygrad.helpers import getenv
 
-CUDA,METAL = getenv("CUDA", 0), getenv("METAL", 0)
-if not CUDA and not METAL: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
-elif CUDA: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
-elif METAL: from tinygrad.runtime.metal import CLBuffer, CLImage, CLProgram  # type: ignore
+# TODO: select runtimes in a smarter way
+CUDA,METAL,CLANG = getenv("CUDA", 0), getenv("METAL", 0), getenv("CLANG", 0)
+if not CUDA and not METAL and not CLANG:
+  from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+else:
+  class CLImage:  # type: ignore
+    def __init__(self, shape): raise NotImplementedError("current runtime doesn't support images")
+  if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLProgram  # type: ignore
+  elif METAL: from tinygrad.runtime.metal import CLBuffer, CLProgram  # type: ignore
+  elif CLANG: from tinygrad.runtime.clang import CLBuffer, CLProgram  # type: ignore
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
@@ -310,7 +316,7 @@ class CLASTKernel(ASTKernel):
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else (CLProgram.buffer_prefix+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"{CLProgram.kernel_prefix} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + (['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'] if METAL else []))] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + CLProgram.extra_args)] + \
       [") {\n"] + self.kernel
 
     # compile kernel

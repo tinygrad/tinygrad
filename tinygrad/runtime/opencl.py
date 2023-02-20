@@ -69,6 +69,7 @@ class CLProgram:
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   gid = [f'get_global_id({i})' for i in range(3)]
   lid = [f'get_local_id({i})' for i in range(3)]
+  extra_args : List[str] = []
   def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False, op_estimate=0, mem_estimate=0):
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else str()}" if rename else name
     self.prg, self.options, self.argdtypes, self.op_estimate, self.mem_estimate = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes, op_estimate, mem_estimate
