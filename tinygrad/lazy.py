@@ -27,7 +27,7 @@ class _Device:
         self._buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module('tinygrad.llops.'+op), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
         self.__setattr__(name, name)
       except ImportError as e:  # NOTE: this can't be put on one line due to mypy issue
-        print(op, "not available", e)
+        print(op, "not available", e, file=sys.stderr)
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
