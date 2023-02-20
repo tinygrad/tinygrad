@@ -149,7 +149,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if not CLANG and self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in ((([1024] if METAL else []) + [256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):

@@ -25,7 +25,7 @@ class CLProgram:
     prg = "#include <math.h>\n#define max(x,y) fmax(x,y)\n" + prg
     if DEBUG >= 4: print(prg)  # TODO: outside runtime!
     # TODO: is there a way to not write this to disk?
-    fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if OSX else '.so'}"
+    fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if OSX else 'so'}"
     if not os.path.exists(fn):
       subprocess.check_output(['clang', '-shared', '-O2', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
       os.rename(fn+".tmp", fn)
