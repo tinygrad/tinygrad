@@ -277,8 +277,9 @@ class Thneed:
     et = time.monotonic() - st
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 
-    #for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
-    #  print(f"{i:3d} {prg.name:20s} " + "queued @ %5.2f ms, submit @ %5.2fms, start @ %5.2f ms, end @ %5.2f ms" % tuple((x*OSX_TIMING_RATIO - st*1e9)/1e6 for x in [e.profile.queued, e.profile.submit, e.profile.start, e.profile.end]))
+    if DEBUGCL >= 2:
+      for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
+        print(f"{i:3d} {prg.name:20s} " + "queued @ %5.2f ms, submit @ %5.2fms, start @ %5.2f ms, end @ %5.2f ms" % tuple((x*OSX_TIMING_RATIO - st*1e9)/1e6 for x in [e.profile.queued, e.profile.submit, e.profile.start, e.profile.end]))
     if DEBUGCL >= 1:
       total_runtime = 0
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):

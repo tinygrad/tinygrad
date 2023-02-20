@@ -1,7 +1,10 @@
 import os
 import atexit
 import itertools
-import networkx as nx  # type: ignore
+try:
+  import networkx as nx  # type: ignore
+except ImportError:
+  pass  # graph won't work
 from collections import defaultdict
 from typing import Dict, List, Optional
 from tinygrad.ops import DeviceBuffer, DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, Op, OpType, LazyOp, get_buffers, get_lazyops
