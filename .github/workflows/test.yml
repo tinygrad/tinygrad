@@ -60,8 +60,8 @@ jobs:
     - name: Run Pytest (lazy)
       run: LAZY=1 python -m pytest -s -v -n=auto
 
-  testcpu:
-    name: ImageNet Compile Test
+  testimagenet:
+    name: ImageNet to C Compile Test
     runs-on: ubuntu-latest
 
     steps:
