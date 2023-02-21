@@ -78,7 +78,7 @@ class Tensor:
 
   # ***** data handlers ****
 
-  def realize(self):
+  def realize(self) -> Tensor:
     self.lazydata.realize()
     return self
 

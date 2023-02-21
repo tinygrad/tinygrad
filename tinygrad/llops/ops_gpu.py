@@ -12,10 +12,16 @@ render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
 from tinygrad.helpers import getenv
 
-CUDA,METAL = getenv("CUDA", 0), getenv("METAL", 0)
-if not CUDA and not METAL: from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
-elif CUDA: from tinygrad.runtime.cuda import CLBuffer, CLImage, CLProgram  # type: ignore
-elif METAL: from tinygrad.runtime.metal import CLBuffer, CLImage, CLProgram  # type: ignore
+# TODO: select runtimes in a smarter way
+CUDA,METAL,CLANG = getenv("CUDA", 0), getenv("METAL", 0), getenv("CLANG", 0)
+if not CUDA and not METAL and not CLANG:
+  from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+else:
+  class CLImage:  # type: ignore
+    def __init__(self, shape): raise NotImplementedError("current runtime doesn't support images")
+  if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLProgram  # type: ignore
+  elif METAL: from tinygrad.runtime.metal import CLBuffer, CLProgram  # type: ignore
+  elif CLANG: from tinygrad.runtime.clang import CLBuffer, CLProgram  # type: ignore
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
@@ -40,7 +46,7 @@ class GPURunner:
 class CLASTKernel(ASTKernel):
   code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.RELU: "max(A, (float)0.)",
-    UnaryOps.GT0:  "(A > 0.)" if CUDA else "((float)1.-step((float)0.,(-A)))",
+    UnaryOps.GT0:  "(A > 0.)" if CUDA or CLANG else "((float)1.-step((float)0.,(-A)))",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     UnaryOps.RECIPROCAL: "native_recip(A)" if NATIVE_EXPLOG else "((float)1.0/A)",
@@ -143,7 +149,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if not CLANG and self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in ((([1024] if METAL else []) + [256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -250,16 +256,19 @@ class CLASTKernel(ASTKernel):
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(isinstance(buf._buf, CLImage) for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    MAX_OUTPUT_SHAPE = 3
-    self.kernel += [f"int idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
-    if len(self.output_shape) > MAX_OUTPUT_SHAPE:
-      # sometimes, there's more dimensions. compact all the dimensions into the first one
-      # TODO: these compactions should be searchable
-      final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
-      for i in range(final_dimension-1, -1, -1):
-        self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
-      self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
-      if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
+    if CLANG:
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
+    else:
+      MAX_OUTPUT_SHAPE = 3
+      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
+      if len(self.output_shape) > MAX_OUTPUT_SHAPE:
+        # sometimes, there's more dimensions. compact all the dimensions into the first one
+        # TODO: these compactions should be searchable
+        final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
+        for i in range(final_dimension-1, -1, -1):
+          self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
+        self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
+        if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
@@ -304,13 +313,14 @@ class CLASTKernel(ASTKernel):
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
-    self.kernel.append("}")
+    if CLANG: self.kernel += ["}"] * len(self.output_shape)
+    self.kernel.append("\n}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else (CLProgram.buffer_prefix+self.buftokens[i].decltype()) for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"{CLProgram.kernel_prefix} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + (['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'] if METAL else []))] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + CLProgram.extra_args)] + \
       [") {\n"] + self.kernel
 
     # compile kernel

@@ -1,12 +1,9 @@
-from typing import Optional
+from typing import Optional, List
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile # type: ignore
 import numpy as np
 from tinygrad.ops import DEBUG, GlobalCounters
-
-class CLImage:
-  def __init__(self, shape): raise NotImplementedError("CUDA runtime doesn't support images")
 
 class CLBuffer:
   def __init__(self, size): self._cl = cuda.mem_alloc(size)
@@ -20,6 +17,7 @@ class CLProgram:
   barrier = "__syncthreads();"
   gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
+  extra_args : List[str] = []
   def __init__(self, name:str, prg:str, binary=False, shared=0, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate, self.shared = name, op_estimate, mem_estimate, shared
     if DEBUG >= 4 and not binary: print("CUDA compile", prg)

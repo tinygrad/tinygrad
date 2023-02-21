@@ -17,9 +17,6 @@ def sync():
   for cbuf in mtl_buffers_in_flight: cbuf.waitUntilCompleted()
   mtl_buffers_in_flight = []
 
-class CLImage:
-  def __init__(self, shape): raise NotImplementedError("Metal runtime doesn't support images")
-
 class CLBuffer:
   def __init__(self, size): self._cl = device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
   def copyin(self, b:np.ndarray):
@@ -39,6 +36,7 @@ class CLProgram:
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
   lid = [f"lid.{chr(120+i)}" for i in range(3)]
+  extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
     self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
     if DEBUG >= 4: print("Metal compile", prg)
