@@ -33,5 +33,6 @@ class CLProgram:
     if not os.path.exists(fn):
       subprocess.check_output(['clang', '-shared', '-O2', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
       os.rename(fn+".tmp", fn)
-    self.fxn = ctypes.CDLL(fn)[name]
+    self.lib = ctypes.CDLL(fn)
+    self.fxn = self.lib[name]
   def __call__(self, *args): self.fxn(*args[2:])
