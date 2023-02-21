@@ -22,7 +22,7 @@ setup(name='tinygrad',
       install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx'],
       python_requires='>=3.8',
       extras_require={
-        'gpu': ["pyopencl", "six"],
+        'gpu': ["pyopencl"],
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
         'triton': ["triton>=2.0.0.dev20221202"],
