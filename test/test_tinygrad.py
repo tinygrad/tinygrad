@@ -12,7 +12,6 @@ def count_lines(s):
 def traverse_dir(files, base, count=0, traversed=[]):
     base = str(base)
     #files = [base+'/'+i for i in files]
-    print(files, end='\n\n')
     #print(files)
     for i in files:
         if '__pycache__' in i or i in traversed:
@@ -26,14 +25,12 @@ def traverse_dir(files, base, count=0, traversed=[]):
             #print(i)
             count = traverse_dir([base + '/' + i.split('/')[-1] +'/' + j for j in os.listdir(i)], i, count)
             traversed.append(i)
-        print(i)
         print(count, end='\n\n')
     return count
 
 class TestTinygrad(unittest.TestCase):
     def test_tinygrad(self):
         line_count = traverse_dir([str(TINYGRAD_PATH)+'/'+i for i in os.listdir(TINYGRAD_PATH)], TINYGRAD_PATH)
-        print(line_count)
         assert line_count <= 1000
 if __name__ == "__main__":
     unittest.main()
