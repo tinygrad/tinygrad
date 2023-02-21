@@ -1,5 +1,5 @@
 from collections import namedtuple
-import os, math, functools
+import os, math, functools, time
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x): return math.prod(x)
@@ -10,6 +10,10 @@ def colored(st, color): return f"\u001b[{30+['black', 'red', 'green', 'yellow', 
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def modn(x, a): return -((-x)%a) if x < 0 else x%a
 def make_pair(x): return (x,x) if isinstance(x, int) else x
+
+class Timing(object):
+  def __enter__(self): self.st = time.monotonic_ns()
+  def __exit__(self, exc_type, exc_val, exc_tb): print(f"{(time.monotonic_ns()-self.st)*1e-6:.2f} ms")
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
