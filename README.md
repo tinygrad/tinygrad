@@ -129,14 +129,14 @@ hlops are syntactic sugar around mlops. They support most things torch does.
 
 ### mlops
 
-mlops are mid level ops, there's 15 of them. They understand memory allocation and derivatives
+mlops are mid level ops, there's 16 of them. They understand memory allocation and derivatives
 
 ```
-Relu, Log, Exp                          # unary ops
-Sum, Max                                # reduce ops (with axis argument)
-Add, Sub, Mul, Pow                      # binary ops (no broadcasting, use expand)
-Reshape, Permute, Slice, Expand, Flip   # movement ops
-Conv2D(NCHW)                            # processing op (Matmul is also Conv2D)
+Relu, Log, Exp                                     # unary ops
+Sum, Max                                           # reduce ops (with axis argument)
+Add, Sub, Mul, Pow                                 # binary ops (no broadcasting, use expand)
+Reshape, Permute, Slice, Expand, Flip, Unsqueeze   # movement ops
+Conv2D(NCHW)                                       # processing op (Matmul is also Conv2D)
 ```
 
 You no longer need to write mlops for a new accelerator
@@ -146,12 +146,12 @@ You no longer need to write mlops for a new accelerator
 The autodiff stuff is all in mlops now so you can focus on the raw operations
 
 ```
-Buffer                                                     # class of memory on this device
-unary_op  (RELU, EXP, LOG, NEG, GT0)                       # A -> A
-reduce_op (SUM, MAX)                                       # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + B -> C (all the same size)
-movement_op (RESHAPE, PERMUTE, PAD, SHRINK, EXPAND, FLIP)  # A -> B (different size)
-processing_op (CONV)                                       # A + B -> C
+Buffer                                                                # class of memory on this device
+unary_op  (RELU, EXP, LOG, NEG, GT0)                                  # A -> A
+reduce_op (SUM, MAX)                                                  # A -> B (smaller size, B has 1 in shape)
+binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                            # A + B -> C (all the same size)
+movement_op (RESHAPE, PERMUTE, PAD, SHRINK, EXPAND, FLIP, UNSQUEEZE)  # A -> B (different size)
+processing_op (CONV)                                                  # A + B -> C
 ```
 
 When tinygrad moves to lazy evaluation, optimizations will happen here.

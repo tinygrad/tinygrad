@@ -158,6 +158,15 @@ class Flip(Function):
 
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.FLIP, self.axis)
+  
+class Unsqueeze(Function):
+  def forward(self, x, dim): 
+    self.input_shape = x.shape
+    if dim < 0: dim = len(x.shape) + dim + 1
+    return x.movement_op(MovementOps.RESHAPE, x.shape[:dim] + (1,) + x.shape[dim:])
+
+  def backward(self, grad_output):
+    return grad_output.movement_op(MovementOps.RESHAPE, self.input_shape)
 
 # ************* processing ops *************
 
