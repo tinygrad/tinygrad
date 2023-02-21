@@ -378,7 +378,9 @@ class Tensor:
   def permute(self, order, *args): return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args): return mlops.Flip.apply(self, axis=argfix(axis, *args))
   def slice(self, arg): return mlops.Slice.apply(self, arg=arg)
-  def unsqueeze(self, dim): return mlops.Unsqueeze.apply(self, dim=dim)
+  def unsqueeze(self, dim):
+    if dim < 0: dim = len(self.shape) + dim + 1
+    return mlops.Reshape.apply(self, shape=self.shape[:dim] + (1,) + self.shape[dim:])
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
