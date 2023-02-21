@@ -26,7 +26,7 @@ setup(name='tinygrad',
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
         'triton': ["triton>=2.0.0.dev20221202"],
-        'metal': ["pyobjc-framework-Metal", "PyCocoa", "pyobjc-framework-libdispatch"],
+        'metal': ["pyobjc-framework-Metal", "pyobjc-framework-Cocoa", "pyobjc-framework-libdispatch"],
         'linting': [
             "flake8",
             "pylint",
