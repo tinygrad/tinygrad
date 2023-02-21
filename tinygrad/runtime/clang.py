@@ -31,7 +31,7 @@ class CLProgram:
     # TODO: is there a way to not write this to disk?
     fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if OSX else 'so'}"
     if not os.path.exists(fn):
-      subprocess.check_output(['clang', '-shared', '-O2', '-lm', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
+      subprocess.check_output(['clang', '-shared', '-O2', '-lm', '-fPIC', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
