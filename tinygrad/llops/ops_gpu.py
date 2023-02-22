@@ -67,7 +67,9 @@ class CLASTKernel(ASTKernel):
     #if len(value) == self.buftokens[buf_index].size()*4: value = group_float4(value)
     #if len(value)*4 == self.buftokens[buf_index].size(): value = split_float4(value)
     #assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
-    should_upcast = self.buftokens[buf_index].can_float4()
+    can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
+    should_upcast = can_merge and self.buftokens[buf_index].can_float4()
+
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
 
     did_store = set()
@@ -95,7 +97,8 @@ class CLASTKernel(ASTKernel):
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", Types.FLOAT)
 
-    should_upcast = const is None and self.buftokens[buf_index].can_float4()
+    can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
+    should_upcast = const is None and can_merge and self.buftokens[buf_index].can_float4()
 
     tokens = []
     for o in self.buftokens[buf_index].offsets():
@@ -313,13 +316,17 @@ class CLASTKernel(ASTKernel):
 
       assert self.reduceopop is not None
       self.kernel.append("if (mid_idx == 0) {\n")
-      new_accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(len(accumulators))]
-      for i,acc in enumerate(new_accumulators):
-        self.kernel.append(f"{acc.decltype()} {acc.tok} = 0.0;")
+      new_accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
+      for acc in new_accumulators: self.kernel.append(f"{acc.decltype()} {acc.tok} = 0.0;\n")
+      self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//(4 if self.upcast_in_mid_reduce else 1)}; mid++) {{\n")
+      for i in range(len(new_accumulators)//(4 if self.upcast_in_mid_reduce else 1)):
         if self.upcast_in_mid_reduce:
-          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//4}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'vload4(0, &temp{i}[mid*4])')}; }}\n")
+          self.kernel.append(f'float4 ld = vload4(0, &temp{i}[mid*4]);\n')
+          for j in range(4):
+            self.kernel.append(CLASTKernel.code_for_op[self.reduceopop].replace('A', new_accumulators[i*4+j].tok).replace('B', f'ld.{"xyzw"[j]}')+";\n")
         else:
-          self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)}; mid++) {{ {CLASTKernel.code_for_op[self.reduceopop].replace('A', acc.tok).replace('B', f'temp{i}[mid]')}; }}\n")
+          self.kernel.append(CLASTKernel.code_for_op[self.reduceopop].replace('A', new_accumulators[i].tok).replace('B', f'temp{i}[mid]')+";\n")
+      self.kernel.append("}\n")
       accumulators = new_accumulators
     
     # late ast
