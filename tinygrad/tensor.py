@@ -35,6 +35,7 @@ import tinygrad.mlops as mlops
 
 class Tensor:
   __deletable__ = ('_ctx',)
+  _rng = np.random.default_rng()
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
 
@@ -75,6 +76,10 @@ class Tensor:
 
   @property
   def device(self) -> str: return self.lazydata.device
+
+  @staticmethod
+  def manual_seed(seed=None):
+    Tensor._rng = np.random.default_rng(seed=seed)
 
   # ***** data handlers ****
 
@@ -124,7 +129,7 @@ class Tensor:
   def empty(cls, *shape, **kwargs): return cls(np.empty(shape, dtype=np.float32), **kwargs)
 
   @classmethod
-  def randn(cls, *shape, **kwargs): return cls(np.random.standard_normal(size=shape).astype(np.float32), **kwargs)
+  def randn(cls, *shape, **kwargs): return cls(Tensor._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
 
   @classmethod
   def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop, dtype=np.float32), **kwargs)
@@ -133,14 +138,14 @@ class Tensor:
   # Return random number between -1 and 1
   # NOTE: this behavior changed from depending on the shape to not
   @classmethod
-  def uniform(cls, *shape, **kwargs): return cls((np.random.random(size=shape).astype(np.float32) * 2 - 1), **kwargs)
+  def uniform(cls, *shape, **kwargs): return cls((Tensor._rng.random(size=shape, dtype=np.float32) * 2 - 1), **kwargs)
 
   @classmethod
-  def scaled_uniform(cls, *shape, **kwargs): return cls((np.random.random(size=shape).astype(np.float32) * 2 - 1) * (prod(shape)**-0.5), **kwargs)
+  def scaled_uniform(cls, *shape, **kwargs): return cls((Tensor._rng.random(size=shape, dtype=np.float32) * 2 - 1) * (prod(shape)**-0.5), **kwargs)
 
   @classmethod
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
-  def glorot_uniform(cls, *shape, **kwargs): return cls((np.random.random(size=shape).astype(np.float32) * 2 - 1) * ((6/(shape[0]+prod(shape[1:])))**0.5), **kwargs)
+  def glorot_uniform(cls, *shape, **kwargs): return cls((Tensor._rng.random(size=shape, dtype=np.float32) * 2 - 1) * ((6/(shape[0]+prod(shape[1:])))**0.5), **kwargs)
 
   @classmethod
   def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
@@ -282,7 +287,7 @@ class Tensor:
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training:
       return self
-    _mask : np.ndarray = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
   # TODO: support arbitrary strides

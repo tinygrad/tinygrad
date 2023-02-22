@@ -148,9 +148,9 @@ class TestTinygrad(unittest.TestCase):
   def test_random_fns_are_deterministic_with_seed(self):
     for random_fn in [Tensor.randn, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform]:
       with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
-        np.random.seed(1337)
+        Tensor.manual_seed(1337)
         a = random_fn(10,10)
-        np.random.seed(1337)
+        Tensor.manual_seed(1337)
         b = random_fn(10,10)
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
