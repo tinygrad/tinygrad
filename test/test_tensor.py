@@ -24,11 +24,11 @@ class TestTinygrad(unittest.TestCase):
   def test_slicing(self):
     x = Tensor.randn(10,10)
     slices = [0,1,9,-1,-10,None] + [slice(s,e) for s,e in itertools.combinations([0,1,-1,None], r=2)] + [slice(9,11), slice(-11,-9)]
-    def fmt(s): f'{s.start}:{s.stop}' if isinstance(s, slice) else str(s)
+    def fmt(s): return f'{s.start}:{s.stop}' if isinstance(s, slice) else str(s)
     for s in list(itertools.product(slices, slices)) + [(None,0,None,0,None), (slice(0,2),None,None,slice(2,4),None,None)]:
       np.testing.assert_equal(x.numpy()[s], x[s].numpy(), f'Test failed for slice x[{",".join(fmt(x) for x in s)}]')
     for s in [-11,10]:
-      self.assertRaises(IndexError, lambda _s : x[_s], s)
+      self.assertRaises(IndexError, lambda s=s : x[s])
       self.assertRaises(AssertionError, lambda : x[::2])
       self.assertRaises(AssertionError, lambda : x[0,0,0])
 
