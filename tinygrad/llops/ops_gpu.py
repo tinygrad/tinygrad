@@ -59,7 +59,7 @@ class CLASTKernel(ASTKernel):
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
 
     can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
-    should_upcast = can_merge and self.buftokens[buf_index].can_float4()
+    should_upcast = not CLANG and can_merge and self.buftokens[buf_index].can_float4()
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()
@@ -88,7 +88,7 @@ class CLASTKernel(ASTKernel):
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", Types.FLOAT)
 
     can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
-    should_upcast = const is None and can_merge and self.buftokens[buf_index].can_float4()
+    should_upcast = not CLANG and const is None and can_merge and self.buftokens[buf_index].can_float4()
 
     tokens = []
     for o in self.buftokens[buf_index].offsets():
