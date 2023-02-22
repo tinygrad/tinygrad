@@ -1,6 +1,6 @@
 from typing import ClassVar
-from tinygrad.helpers import getenv
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.helpers import getenv, DEBUG
+from tinygrad.ops import GlobalCounters
 import hashlib
 import time
 import ctypes

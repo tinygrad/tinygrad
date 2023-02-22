@@ -7,10 +7,10 @@ import time
 import numpy as np
 np.set_printoptions(linewidth=160)
 from functools import partial
-from tinygrad.ops import GlobalCounters, DEBUG
+from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv
+from tinygrad.helpers import colored, getenv, DEBUG
 from extra.jit import TinyJit
 METAL = getenv("METAL")
 try:
@@ -20,7 +20,6 @@ try:
   else:
     def sync(): CL().cl_queue.finish()
 except ImportError:
-  CL = None
   def sync(): pass
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
@@ -55,7 +54,7 @@ def helper_test_speed(f1, *args):
     if DEBUG >= 4: print("benchmark start")
     st = time.monotonic()
     ret = f1(*args)
-    if isinstance(ret, Tensor) and CL is not None and ret.device in ["GPU"]:
+    if isinstance(ret, Tensor) and ret.device in ["GPU"]:
       sync()
     if not isinstance(ret, Tensor) and torch_device != "cpu":
       # TODO: better way to sync?

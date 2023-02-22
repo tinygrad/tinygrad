@@ -3,7 +3,8 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile # type: ignore
 import numpy as np
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.helpers import DEBUG
+from tinygrad.ops import GlobalCounters
 
 class CLBuffer:
   def __init__(self, size): self._cl = cuda.mem_alloc(size)
@@ -15,6 +16,7 @@ class CLProgram:
   buffer_prefix = ""
   smem_prefix = "__shared__ "
   barrier = "__syncthreads();"
+  float4 = "make_float4"
   gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   extra_args : List[str] = []

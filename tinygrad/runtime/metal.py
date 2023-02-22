@@ -2,8 +2,8 @@
 import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
-from tinygrad.ops import DEBUG, GlobalCounters
-from tinygrad.helpers import prod, getenv
+from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import prod, getenv, DEBUG
 import subprocess
 
 METAL_XCODE = getenv("METAL_XCODE")
@@ -36,6 +36,7 @@ class CLProgram:
   buffer_prefix = "device "
   smem_prefix = "threadgroup "
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
+  float4 = "float4"
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
   lid = [f"lid.{chr(120+i)}" for i in range(3)]
   extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']

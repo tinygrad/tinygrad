@@ -8,8 +8,7 @@ from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
-from tinygrad.ops import DEBUG
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEBUG
 from extra.lib_test_ast import test_ast
 
 import pickle, dbm
@@ -65,7 +64,7 @@ def apply_intervention(k, typ, dat):
         lambda x: list(x[0:up_axis]) + ([x[up_axis]//amount, amount] if x[up_axis] > 1 else [1,1]) + list(x[up_axis+1:]),
         [i for i in range(k.shape_len+1) if i != up_axis+1] + [up_axis+1])
     # drop the last dimension
-    k.upcast(allow_float4=False)
+    k.upcast()
   elif typ == Interventions.SHIFT:
     up_axis, amount, flip = dat[0], dat[1], dat[2]
     k.reshape_and_permute(
