@@ -6,7 +6,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker
-from tinygrad.shape.symbolic import ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
+from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
 # div is different in cl than python
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
@@ -49,20 +49,19 @@ class CLASTKernel(ASTKernel):
   }
   start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
-  def image_idx(self, buf_index, idxy, validhacks=False):
-    #assert self.buftokens[buf_index].typ == Types.FLOAT4, f"image must be FLOAT4 {self.buftokens[buf_index]} {self.bufs[buf_index].st}"
+  def image_idx(self, buf_index:int, idxy:Node, validhacks=False):
     idx = (idxy//4)%self.bufs[buf_index]._base_shape[1]
     idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
     if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
     return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
-  def store(self, buf_index, value:List[Token]):
+  def store(self, buf_index:int, value:List[Token]) -> None:
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
+
     can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
     should_upcast = can_merge and self.buftokens[buf_index].can_float4()
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
-
     did_store = set()
     for o,v in to_store.items():
       if o in did_store: continue
@@ -111,8 +110,8 @@ class CLASTKernel(ASTKernel):
         else:
           self.kernel.append(f"{ldr.decltype()} {key} = {ldr.tok};\n")
           if should_upcast:
-            for lo in range(4):
-              self.loaded_keys[(buf_index,o+lo)] = Token(key+f".s{lo}", Types.FLOAT)
+            for j in range(4):
+              self.loaded_keys[(buf_index,o+j)] = Token(key+f'.{"xyzw"[j]}', Types.FLOAT)
           else:
             self.loaded_keys[(buf_index,o)] = Token(key, Types.FLOAT)
       tokens.append(self.loaded_keys[(buf_index,o)])
@@ -121,11 +120,10 @@ class CLASTKernel(ASTKernel):
   def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:List[Token], do_reduce=False) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
-    values = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
+    values : List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 2:
-      assert values[0][0].typ == values[1][0].typ
-      assert len(values[0]) == len(values[1]), f"values mismatch {values}"
+      assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
