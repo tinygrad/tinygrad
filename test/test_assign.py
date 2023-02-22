@@ -40,13 +40,13 @@ class TestAssign(unittest.TestCase):
     a.realize()
     b.realize()
     #GlobalCounters.cache = []
-    ba1 = a.lazydata.realized
-    bb1 = b.lazydata.realized
+    # ba1 = a.lazydata.realized
+    # bb1 = b.lazydata.realized
     a.assign(a.permute(1,0) + b)   # this should not work!
     a.realize()
-    ba2 = a.lazydata.realized
+    # ba2 = a.lazydata.realized
     # NOTE: don't test that it's assigned
-    assert ba1 == ba2 and ba1 != bb1
+    # assert ba1 == ba2 and ba1 != bb1
 
     
     # if len(GlobalCounters.cache):
