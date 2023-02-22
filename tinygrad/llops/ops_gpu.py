@@ -67,7 +67,7 @@ class CLASTKernel(ASTKernel):
     #if len(value) == self.buftokens[buf_index].size()*4: value = group_float4(value)
     #if len(value)*4 == self.buftokens[buf_index].size(): value = split_float4(value)
     #assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
-    should_upcast = any(a == (4,1,False) for a in self.buftokens[buf_index].axis)
+    should_upcast = self.buftokens[buf_index].can_float4()
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
 
     did_store = set()
@@ -95,7 +95,7 @@ class CLASTKernel(ASTKernel):
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
       const = Token(f"({self.bufs[buf_index]._backing[0]}f)", Types.FLOAT)
 
-    should_upcast = const is None and any(a[0:2] == (4,1) for a in self.buftokens[buf_index].axis)
+    should_upcast = const is None and self.buftokens[buf_index].can_float4()
 
     tokens = []
     for o in self.buftokens[buf_index].offsets():
@@ -105,7 +105,7 @@ class CLASTKernel(ASTKernel):
         if const is not None:
           ldr = const
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
-          assert should_upcast, "Image requires upcasting to FLOAT4"
+          assert should_upcast, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         elif should_upcast:
           ldr = Token(f"(({CLProgram.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
@@ -161,7 +161,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if not CLANG and self.buftokens[0].typ != Types.FLOAT4 and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if not CLANG and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in ((([1024] if METAL else []) + [256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -175,7 +175,7 @@ class CLASTKernel(ASTKernel):
       #self.reshape_and_permute(None, [0,1,2,3,6,4,5])
 
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and self.buftokens[0].typ != Types.FLOAT4:
+    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and not self.buftokens[0].can_float4():
       lb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
         valids = [self.sts[i].shape[j]%4 == 0 and (self.sts[i].views[-1].strides[j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(self.shape_len)]
@@ -201,7 +201,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].typ == Types.FLOAT4 and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
+    if self.buftokens[0].can_float4() and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(st.shape[i]%4 == 0 for st in self.sts):

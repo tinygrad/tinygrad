@@ -21,6 +21,7 @@ class Token:
   def array(self, length, stride, reduce): self.axis.append((length, stride, reduce))
   def size(self): return prod([x[0] for x in self.axis])
   def offsets(self): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.axis[::-1]])] if len(self.axis) else [0]
+  def can_float4(self): return any(a[0:2] == (4,1) for a in self.axis)
   # TODO: this is sort of a hack, it gets the accumulator indices
   def acc_offsets(self):
     if len(self.axis) == 0: return [0]
