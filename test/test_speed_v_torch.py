@@ -7,10 +7,10 @@ import time
 import numpy as np
 np.set_printoptions(linewidth=160)
 from functools import partial
-from tinygrad.ops import GlobalCounters, DEBUG
+from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv
+from tinygrad.helpers import colored, getenv, DEBUG
 from extra.jit import TinyJit
 METAL = getenv("METAL")
 try:
