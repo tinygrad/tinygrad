@@ -11,16 +11,16 @@ prg = CLProgram("test", """__kernel void test(__global float *a, __global float 
   int idx = get_global_id(0);
   a[idx] = b[idx] + c[idx];
 }""")
-prg.clprg(CL().cl_queue, [N,], None, a.cl, b.cl, c.cl)
+prg.clprg(CL().cl_queue, [N,], None, a._cl, b._cl, c._cl)
 
 t1 = time.monotonic_ns()
-e1 = prg.clprg(CL().cl_queue, [N,], None, a.cl, b.cl, c.cl)
-CL.cl_queue.finish()
+e1 = prg.clprg(CL().cl_queue, [N,], None, a._cl, b._cl, c._cl)
+CL().cl_queue.finish()  # type: ignore
 t2 = time.monotonic_ns()
 time.sleep(3)
 t3 = time.monotonic_ns()
-e2 = prg.clprg(CL().cl_queue, [N,], None, a.cl, b.cl, c.cl)
-CL.cl_queue.finish()
+e2 = prg.clprg(CL().cl_queue, [N,], None, a._cl, b._cl, c._cl)
+CL().cl_queue.finish()  # type: ignore
 t4 = time.monotonic_ns()
 
 print(e1.profile.queued)
