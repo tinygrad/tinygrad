@@ -24,7 +24,7 @@ class TestTinygrad(unittest.TestCase):
   def test_slicing(self):
     x = Tensor.randn(10,10)
     slices = [0,1,9,-1,-10,None] + [slice(s,e) for s,e in itertools.combinations([0,1,-1,None], r=2)] + [slice(9,11), slice(-11,-9)]
-    fmt = lambda s: f'{s.start}:{s.stop}' if isinstance(s, slice) else str(s)
+    def fmt(s): f'{s.start}:{s.stop}' if isinstance(s, slice) else str(s)
     for s in list(itertools.product(slices, slices)) + [(None,0,None,0,None), (slice(0,2),None,None,slice(2,4),None,None)]:
       np.testing.assert_equal(x.numpy()[s], x[s].numpy(), f'Test failed for slice x[{",".join(fmt(x) for x in s)}]')
     for s in [-11,10]:
@@ -115,7 +115,7 @@ class TestTinygrad(unittest.TestCase):
 
     torch_x = torch.tensor(x, requires_grad=True)
     torch_W = torch.tensor(W, requires_grad=True)
-    torch_func = lambda x: torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
+    def torch_func(x): torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
     PJ = torch.autograd.functional.jacobian(torch_func, torch_x).squeeze().numpy()
 
     tiny_x = Tensor(x)
