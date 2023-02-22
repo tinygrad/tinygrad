@@ -30,13 +30,6 @@ KOPT = getenv("KOPT", 0)
 PRINT_AST = getenv("PRINT_AST", "0")
 TEST_AST = getenv("TEST_AST", 0)
 
-def group_float4(x):
-  assert all(y.typ == Types.FLOAT for y in x) and len(x)%4 == 0
-  return [Token(f"(float4)({','.join([x[i+j].tok for j in range(4)])})", Types.FLOAT4) for i in range(0, len(x), 4)]
-def split_float4(x):
-  assert all(y.typ == Types.FLOAT4 for y in x)
-  return sum([[Token(acc.tok+"."+"xyzw"[s], Types.FLOAT) for s in range(4)] for acc in x], [])
-
 class GPURunner:
   def __init__(self, clprg:CLProgram, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]]):
     self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete = clprg, global_work_size, local_work_size, bufs_to_delete
@@ -64,9 +57,7 @@ class CLASTKernel(ASTKernel):
     return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
   def store(self, buf_index, value:List[Token]):
-    #if len(value) == self.buftokens[buf_index].size()*4: value = group_float4(value)
-    #if len(value)*4 == self.buftokens[buf_index].size(): value = split_float4(value)
-    #assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
+    assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
     should_upcast = can_merge and self.buftokens[buf_index].can_float4()
 
@@ -295,8 +286,7 @@ class CLASTKernel(ASTKernel):
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      expanded_accumulators = split_float4(accumulators) if accumulators[0].typ == Types.FLOAT4 and len(accumulators)*4 == len(acc_offsets) else accumulators
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [expanded_accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
     if self.group_for_reduce:
