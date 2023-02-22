@@ -162,12 +162,6 @@ class CLASTKernel(ASTKernel):
           self.group_for_reduce.append(sz)
           break
 
-    # TODO: this makes re_S3_32_3_3 at least 10x faster
-    #if self.first_reduce == 4 and self.shape_len == 7:
-      #self.group_for_reduce.append(112//2)
-      # TODO: this shouldn't have to be permuted
-      #self.reshape_and_permute(None, [0,1,2,3,6,4,5])
-
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
     if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and not self.buftokens[0].can_float4():
       lb_valids = [True] * self.shape_len

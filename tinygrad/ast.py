@@ -158,21 +158,13 @@ class ASTKernel:
       if axis is not None: st.permute(tuple(axis))
 
   # drops the final dimension
-  def upcast(self, allow_float4=True):
+  def upcast(self):
     upcasted = [x.shape[-1] for x in self.sts if x.shape[-1] != 1]
     assert len(upcasted) >= 1 and all_same(upcasted), f"can't upcast mismatch {upcasted}"
     for i in range(len(self.bufs)):
       st = self.sts[i]
       if st.shape[-1] == upcasted[0]:
-        # multiview shapetrackers can slice through a float4, so don't allow them
-        can_merge = (not st.needs_valid() and len(st.views) == 1) or "Image" in str(type(self.bufs[i]._buf))  # TODO: terrible hack
-        if False and allow_float4 and st.shape[-1] == 4 and self.buftokens[i].typ == Types.FLOAT and st.views[-1].strides[-1] == 1 and can_merge:
-          # this is an upcast to FLOAT4
-          self.buftokens[i].typ = Types.FLOAT4
-          assert all(st.views[-1].strides[i]%upcasted[0] == 0 or st.views[-1].shape[i] == 1 for i in range(len(st.shape)-1))
-          assert self.sts[i].offset % upcasted[0] == 0
-        else:
-          self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
+        self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
 
     # remove the last dimension
     for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset)

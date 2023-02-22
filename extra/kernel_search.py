@@ -64,7 +64,7 @@ def apply_intervention(k, typ, dat):
         lambda x: list(x[0:up_axis]) + ([x[up_axis]//amount, amount] if x[up_axis] > 1 else [1,1]) + list(x[up_axis+1:]),
         [i for i in range(k.shape_len+1) if i != up_axis+1] + [up_axis+1])
     # drop the last dimension
-    k.upcast(allow_float4=False)
+    k.upcast()
   elif typ == Interventions.SHIFT:
     up_axis, amount, flip = dat[0], dat[1], dat[2]
     k.reshape_and_permute(
