@@ -5,9 +5,6 @@ from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional
 import functools, operator
 from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker
-from tinygrad.helpers import getenv
-
-DEBUG = getenv("DEBUG", 0)
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly

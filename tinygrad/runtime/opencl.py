@@ -3,8 +3,8 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List, ClassVar, Final
 from collections import defaultdict
-from tinygrad.ops import DEBUG, GlobalCounters
-from tinygrad.helpers import getenv
+from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import getenv, DEBUG
 
 OSX = platform.system() == "Darwin"
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something

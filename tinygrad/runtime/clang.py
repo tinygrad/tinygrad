@@ -5,7 +5,7 @@ import hashlib
 import subprocess
 from collections import defaultdict
 from typing import List, Final, Dict
-from tinygrad.ops import DEBUG
+from tinygrad.helpers import DEBUG
 import platform
 OSX = platform.system() == "Darwin"
 

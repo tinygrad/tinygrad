@@ -2,8 +2,8 @@
 import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
-from tinygrad.ops import DEBUG, GlobalCounters
-from tinygrad.helpers import prod, getenv
+from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import prod, getenv, DEBUG
 import subprocess
 
 METAL_XCODE = getenv("METAL_XCODE")

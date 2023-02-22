@@ -17,6 +17,7 @@ class Timing(object):
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
+DEBUG = getenv("DEBUG", 0)
 
 def reduce_shape(shape, axis): return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 def shape_to_axis(old_shape, new_shape):

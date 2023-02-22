@@ -1,8 +1,8 @@
 from __future__ import annotations
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
-from tinygrad.helpers import prod
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.helpers import prod, DEBUG
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker

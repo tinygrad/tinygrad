@@ -8,8 +8,7 @@ from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.shape import ShapeTracker, View, ZeroView
 from tinygrad.llops.ops_gpu import GPUBuffer, CLASTKernel
 from tinygrad.runtime.opencl import OSX_TIMING_RATIO
-from tinygrad.ops import DEBUG
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEBUG
 from extra.lib_test_ast import test_ast
 
 import pickle, dbm

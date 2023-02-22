@@ -3,7 +3,8 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile # type: ignore
 import numpy as np
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.helpers import DEBUG
+from tinygrad.ops import GlobalCounters
 
 class CLBuffer:
   def __init__(self, size): self._cl = cuda.mem_alloc(size)
