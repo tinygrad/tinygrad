@@ -67,6 +67,7 @@ class CLProgram:
   smem_prefix = "__local "
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
+  float4 = "(float4)"
   gid = [f'get_global_id({i})' for i in range(3)]
   lid = [f'get_local_id({i})' for i in range(3)]
   extra_args : List[str] = []
