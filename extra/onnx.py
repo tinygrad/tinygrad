@@ -1,8 +1,7 @@
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
-from tinygrad.ops import DEBUG
-from tinygrad.helpers import getenv
+from tinygrad.helpers import prod, getenv
+from tinygrad.shape import DEBUG
 from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
 
 ONNXLIMIT = getenv("ONNXLIMIT", -1)

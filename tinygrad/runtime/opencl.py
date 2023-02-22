@@ -3,7 +3,8 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, Tuple, List, ClassVar, Final
 from collections import defaultdict
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.ops import GlobalCounters
+from tinygrad.shape import DEBUG
 from tinygrad.helpers import getenv
 
 OSX = platform.system() == "Darwin"

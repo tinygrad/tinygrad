@@ -2,7 +2,8 @@
 import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.ops import GlobalCounters
+from tinygrad.shape import DEBUG
 from tinygrad.helpers import prod, getenv
 import subprocess
 

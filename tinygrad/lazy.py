@@ -3,8 +3,8 @@ from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import sys, weakref, os, importlib, inspect
 from weakref import WeakValueDictionary
 from tinygrad.helpers import ConvArgs, prod
-from tinygrad.shape import ShapeTracker
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, DEBUG, GenericExecAST
+from tinygrad.shape import ShapeTracker, DEBUG
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, GenericExecAST
 from tinygrad.graph import log_op
 from tinygrad.helpers import getenv
 

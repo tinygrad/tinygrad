@@ -5,7 +5,6 @@ from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod, getenv
 from tinygrad.shape.symbolic import Variable
 
-# TODO: fix DEBUG import
 DEBUG = getenv("DEBUG", 0)
 
 @functools.lru_cache(maxsize=None)

@@ -2,10 +2,10 @@ from __future__ import annotations
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
 from tinygrad.helpers import prod
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
-from tinygrad.shape import ShapeTracker
+from tinygrad.shape import ShapeTracker, DEBUG
 from tinygrad.shape.symbolic import ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
 # div is different in cl than python
 render_cl = render_python.copy()

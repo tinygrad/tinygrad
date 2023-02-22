@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.helpers import prod, argfix, make_pair, getenv
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.lazy import Device, LazyBuffer
-from tinygrad.ops import DEBUG
+from tinygrad.shape import DEBUG
 
 # An instantiation of the Function is the Context
 class Function:

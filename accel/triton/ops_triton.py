@@ -10,8 +10,8 @@ import triton # type: ignore # noqa: F401
 import triton.language as tl  # type: ignore # noqa: F401
 
 from typing import Union, Tuple, Optional, Dict
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, DEBUG, GlobalCounters
-from tinygrad.shape import ShapeTracker
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.shape import ShapeTracker, DEBUG
 from tinygrad.helpers import prod
 from tinygrad.runtime.cuda import CLBuffer
 from tinygrad.ast import ASTKernel

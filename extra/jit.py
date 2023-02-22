@@ -2,7 +2,8 @@ from typing import Callable, List, Tuple
 import itertools
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import DEBUG, GlobalCounters
+from tinygrad.ops import GlobalCounters
+from tinygrad.shape import DEBUG
 
 class TinyJit:
   def __init__(self, fxn):

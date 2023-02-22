@@ -7,7 +7,8 @@ import time
 import numpy as np
 np.set_printoptions(linewidth=160)
 from functools import partial
-from tinygrad.ops import GlobalCounters, DEBUG
+from tinygrad.ops import GlobalCounters
+from tinygrad.shape import DEBUG
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv

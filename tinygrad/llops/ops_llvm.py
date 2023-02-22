@@ -2,13 +2,12 @@ from __future__ import annotations
 import math
 import functools
 from typing import Tuple, Union, Dict, Any, List, ClassVar, Optional
-from tinygrad.helpers import prod
-from tinygrad.shape import ShapeTracker
-from tinygrad.ops import LazyOp
-from tinygrad.ast import ASTKernel
 import ctypes
 import numpy as np
-from tinygrad.ops import DEBUG, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST
+from tinygrad.helpers import prod
+from tinygrad.shape import ShapeTracker, DEBUG
+from tinygrad.ast import ASTKernel
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST
 from tinygrad.runtime.llvm import LLVM, ir
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
 
