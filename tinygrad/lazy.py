@@ -16,13 +16,13 @@ NOCONV = getenv("NOCONV", 0)
 IMAGE = getenv("IMAGE", 0)
 LAZY = getenv("LAZY", 1)
 
-backends: Dict[str, str] = {
-  "CPU": "tinygrad.llops.ops_cpu", "GPU": "tinygrad.llops.ops_gpu", "LLVM": "tinygrad.llops.ops_llvm",
-  "TORCH": "tinygrad.llops.ops_torch", "TRITON": "accel.triton.ops_triton",
-}
-
 class _Device:
   def __init__(self) -> None:
+    backends: Dict[str, str] = {
+      "CPU": "tinygrad.llops.ops_cpu", "GPU": "tinygrad.llops.ops_gpu", "LLVM": "tinygrad.llops.ops_llvm",
+      "TORCH": "tinygrad.llops.ops_torch", "TRITON": "accel.triton.ops_triton",
+    }
+
     self.DEFAULT : str = "CPU"
     self._buffers : Dict[str, Type[DeviceBuffer]] = {}
     for name, path in backends.items():
