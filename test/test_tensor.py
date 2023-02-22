@@ -115,7 +115,7 @@ class TestTinygrad(unittest.TestCase):
 
     torch_x = torch.tensor(x, requires_grad=True)
     torch_W = torch.tensor(W, requires_grad=True)
-    def torch_func(x): torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
+    def torch_func(x): return torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
     PJ = torch.autograd.functional.jacobian(torch_func, torch_x).squeeze().numpy()
 
     tiny_x = Tensor(x)
