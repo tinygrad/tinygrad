@@ -35,7 +35,7 @@ import tinygrad.mlops as mlops
 
 class Tensor:
   __deletable__ = ('_ctx',)
-  _rng = np.random.default_rng()
+  _rng : ClassVar[np.random.Generator] = np.random.default_rng()
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
 
