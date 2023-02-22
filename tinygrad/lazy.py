@@ -16,13 +16,13 @@ NOCONV = getenv("NOCONV", 0)
 IMAGE = getenv("IMAGE", 0)
 LAZY = getenv("LAZY", 1)
 
+backends: Dict[str, str] = {
+  "CPU": "tinygrad.llops.ops_cpu", "GPU": "tinygrad.llops.ops_gpu", "LLVM": "tinygrad.llops.ops_llvm",
+  "TORCH": "tinygrad.llops.ops_torch", "TRITON": "accel.triton.ops_triton",
+}
+
 class _Device:
   def __init__(self) -> None:
-    backends: Dict[str, str] = {
-      "CPU": "tinygrad.llops.ops_cpu", "GPU": "tinygrad.llops.ops_gpu", "LLVM": "tinygrad.llops.ops_llvm",
-      "TORCH": "tinygrad.llops.ops_torch", "TRITON": "accel.triton.ops_triton",
-    }
-
     self.DEFAULT : str = "CPU"
     self._buffers : Dict[str, Type[DeviceBuffer]] = {}
     for name, path in backends.items():
@@ -31,7 +31,7 @@ class _Device:
         self._buffers[name] = [cls for cname, cls in inspect.getmembers(importlib.import_module(path), inspect.isclass) if (cname.upper() == name + "BUFFER")][0]
         self.__setattr__(name, name)
       except ImportError as e:  # NOTE: this can't be put on one line due to mypy issue
-        print(name, "backend not available", e)
+        print(name, "backend not available", e, file=sys.stderr)
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
