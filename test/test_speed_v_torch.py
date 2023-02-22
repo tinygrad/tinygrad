@@ -6,7 +6,6 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
-from functools import partial
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
@@ -209,7 +208,7 @@ class TestSpeed(unittest.TestCase):
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
     tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
 
-    def f1(torch_dat): return torch_conv(torch_dat.permute(0,3,1,2))
+    def f1(torch_dat): return torch_conv.__call__(torch_dat.permute(0,3,1,2))
     def f2(tiny_dat): return tiny_conv(tiny_dat.permute(0,3,1,2)).realize()
     helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
@@ -221,13 +220,12 @@ class TestSpeed(unittest.TestCase):
           img_size = 34
           torch_dat = torch.rand(bs, in_chans, img_size, img_size).to(torch_device)
           torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None).to(torch_device)
-
           tiny_dat = Tensor(torch_dat.cpu().numpy())
           tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None)
           tiny_conv.weight = Tensor(torch_conv.weight.detach().cpu().numpy())
 
-          def f1(torch_dat): return torch_conv(torch_dat)
-          def f2(tiny_dat): return tiny_conv(tiny_dat).realize()
+          def f1(td, torch_conv=torch_conv): return torch_conv.__call__(td)
+          def f2(td, tiny_conv=tiny_conv): return tiny_conv(td).realize()
           helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
 if __name__ == '__main__':

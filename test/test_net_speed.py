@@ -4,10 +4,9 @@ import cProfile
 import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 
 def start_profile():
-  import time
   pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
   pr.enable()
   return pr

@@ -1,6 +1,5 @@
 import ast
 import pathlib
-import sys
 import unittest
 
 import numpy as np

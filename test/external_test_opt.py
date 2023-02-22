@@ -19,7 +19,7 @@ class CLCache():
       x.realize()
     GlobalCounters.cache = []
     print("cache: entering")
-  def __exit__(self, type, value, traceback):
+  def __exit__(self, t, value, traceback):
     print(f"cache: exiting with size {len(GlobalCounters.cache)}")
     GlobalCounters.cache = None
 
@@ -88,9 +88,9 @@ class TestOpt(unittest.TestCase):
     c1 = nn.Conv2d(3,32,3)
     bn = nn.BatchNorm2d(32, track_running_stats=False)
     # precache the bn
-    img_conv = bn(c1(img)).relu().realize()
+    bn(c1(img)).relu().realize()
     with CLCache():
-      img_conv = bn(c1(img)).relu().realize()
+      bn(c1(img)).relu().realize()
       assert len(GlobalCounters.cache) == 1, "optimizer didn't fold conv-batchnorm at test time"
 
   def test_fold_conv_batchnorm(self):

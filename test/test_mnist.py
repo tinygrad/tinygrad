@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from extra.training import train, evaluate
 from datasets import fetch_mnist

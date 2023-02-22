@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import unittest
 import itertools
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -28,12 +28,9 @@ class TestTinygrad(unittest.TestCase):
     for s in list(itertools.product(slices, slices)) + [(None,0,None,0,None), (slice(0,2),None,None,slice(2,4),None,None)]:
       np.testing.assert_equal(x.numpy()[s], x[s].numpy(), f'Test failed for slice x[{",".join(fmt(x) for x in s)}]')
     for s in [-11,10]:
-      with self.assertRaises(IndexError):
-        x[s]
-    with self.assertRaises(AssertionError):
-      x[::2]
-    with self.assertRaises(AssertionError):
-      x[0,0,0]
+      self.assertRaises(IndexError, lambda _s : x[_s], s)
+      self.assertRaises(AssertionError, lambda : x[::2])
+      self.assertRaises(AssertionError, lambda : x[0,0,0])
 
   def test_backward_pass(self):
     def test_tinygrad():

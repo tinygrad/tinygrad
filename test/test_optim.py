@@ -2,13 +2,14 @@ import numpy as np
 import torch
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.nn.optim import Adam, SGD, RMSprop, get_parameters
+from tinygrad.nn.optim import Adam, SGD, RMSprop
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-def step_tinygrad(optim, kwargs={}):
+def step_tinygrad(optim, kwargs=None):
+  kwargs = kwargs if kwargs is not None else {}
   net = TinyNet()
   optim = optim([net.x, net.W], **kwargs)
   out = net.forward()
@@ -16,7 +17,8 @@ def step_tinygrad(optim, kwargs={}):
   optim.step()
   return net.x.cpu().numpy(), net.W.cpu().numpy()
 
-def step_pytorch(optim, kwargs={}):
+def step_pytorch(optim, kwargs=None):
+  kwargs = kwargs if kwargs is not None else {}
   net = TorchNet()
   optim = optim([net.x, net.W], **kwargs)
   out = net.forward()

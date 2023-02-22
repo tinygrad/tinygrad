@@ -3,8 +3,6 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LAZY
-from tinygrad.ops import GlobalCounters
-from tinygrad.graph import nm
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -48,16 +46,16 @@ class TestAssign(unittest.TestCase):
     a.realize()
     ba2 = a.lazydata.realized
     # NOTE: don't test that it's assigned
-    #assert ba1 == ba2 and ba1 != bb1
+    assert ba1 == ba2 and ba1 != bb1
 
-    """
-    if len(GlobalCounters.cache):
-      runner, args = GlobalCounters.cache[0]
-      b0, b1, b2 = args
-      print(nm(b0), id(b0.cl))
-      print(nm(b1), id(b1.cl))
-      print(nm(b2), id(b2.cl))
-    """
+    
+    # if len(GlobalCounters.cache):
+    #   runner, args = GlobalCounters.cache[0]
+    #   b0, b1, b2 = args
+    #   print(nm(b0), id(b0.cl))
+    #   print(nm(b1), id(b1.cl))
+    #   print(nm(b2), id(b2.cl))
+    
 
     np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
