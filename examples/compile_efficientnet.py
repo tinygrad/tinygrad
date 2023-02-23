@@ -3,23 +3,9 @@ from tinygrad.tensor import Tensor
 from extra.utils import fetch
 import ast
 
-if __name__ == "__main__":
-  model = EfficientNet(0)
-  model.load_from_pretrained()
-
-  from extra.jit import TinyJit
-  @TinyJit
-  def run(x): return model.forward(x).realize()
-
-  # twice to run the JIT
-  the_input = Tensor.randn(1,3,224,224)
-  the_output = run(the_input)
-  the_output = run(the_input)
-
-  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
-
+def compile_net(run, special_names):
   # c header
+  weights = []
   cprog = ["#include <stdio.h>", "#include <math.h>","#define max(x,y) fmax(x,y)"] 
 
   # functions that run the net
@@ -49,11 +35,29 @@ if __name__ == "__main__":
   # buffers (weights)
   for name,cl in bufs_to_save.items():
     weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl)[0:len(cl)//4])])
-    cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+    weights.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog.append(f"float *{name} = (float *){name}_data;")
 
   # the net
   cprog += ["void net() {"] + statements + ["}"]
+  return weights+cprog
+
+if __name__ == "__main__":
+  model = EfficientNet(0)
+  model.load_from_pretrained()
+
+  from extra.jit import TinyJit
+  @TinyJit
+  def run(x): return model.forward(x).realize()
+
+  # twice to run the JIT
+  the_input = Tensor.randn(1,3,224,224)
+  the_output = run(the_input)
+  the_output = run(the_input)
+
+  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
+  special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
+  cprog = compile_net(run, special_names)
 
   # image library!
   cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode('utf-8')]
