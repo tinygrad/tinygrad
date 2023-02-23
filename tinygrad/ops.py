@@ -51,7 +51,7 @@ shape_fxn_for_op : Dict[Op, Callable] = {
   **{op:lambda self,new_shape: GenericShape(new_shape, self.flops + prod(self.shape)) for op in ReduceOps},
   **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.flops), op) for op in MovementOps},
   # https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html
-  **{op:lambda self,w,C: GenericShape(C.out_shape, 2 * (C.bs * C.cout * C.oy * C.ox) * (C.cin * C.H * C.W)) for op in ProcessingOps}}
+  ProcessingOps.CONV:lambda self,w,C: GenericShape(C.out_shape, 2 * (C.bs * C.cout * C.oy * C.ox) * (C.cin * C.H * C.W))}
 
 # used in CPUBuffer and TorchBuffer
 class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
