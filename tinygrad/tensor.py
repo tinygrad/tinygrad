@@ -323,11 +323,12 @@ class Tensor:
     # padding
     x = self.slice(((0, bs), (0, cin_), (-py, iy+py_), (-px, ix+px_)))
     x = x._pool2d(H,W,sy,sx,dy,dx)
-    oy, ox = x.shape[3], x.shape[5]
-    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
+    oy, ox, rcout = x.shape[3], x.shape[5], cout//groups
+    # NOTE: we do this expand explicitly so the permute isn't pushed in the binop
+    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).expand(bs, groups, rcout, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
 
     # weight
-    w = weight.reshape(1, groups, cout//groups, 1, 1, cin, H, W)
+    w = weight.reshape(1, groups, rcout, 1, 1, cin, H, W)
 
     # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
     ret = (x*w).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
