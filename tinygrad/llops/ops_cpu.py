@@ -28,14 +28,15 @@ def axes_slice(a):
          tuple(slice(0, a.shape[i]) if a.strides[i] != 0 else 0 for i in range(len(a.shape)))
 def mulacc(a, b, new_shape):
   #return (x*y).sum(shape_to_axis(x.shape, new_shape), keepdims=True)
+  reduce_axes = shape_to_axis(a.shape, new_shape)
   a_axes, a_slices = axes_slice(a)
   b_axes, b_slices = axes_slice(b)
-  reduce_axes = shape_to_axis(a.shape, new_shape)
   out = ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if i not in reduce_axes and (x in a_axes or x in b_axes)])
   #print(a.shape, b.shape)
   #print(a.strides, b.strides)
   #print(f"{a_axes}, {b_axes} -> {out}")
-  return np.einsum(f"{a_axes}, {b_axes} -> {out}", a[a_slices], b[b_slices]).reshape(new_shape)
+  a, b = a[a_slices], b[b_slices]
+  return np.einsum(f"{a_axes}, {b_axes} -> {out}", a.ravel().reshape(a.shape), b.ravel().reshape(b.shape)).reshape(new_shape)
 
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.RELU: lambda x: np.maximum(x, 0), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),

@@ -312,6 +312,9 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(2,4))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
+    #ret = mlops.Conv2D.apply(self, weight, stride=stride, groups=groups, dilation=dilation, padding=padding)
+    #return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
+
     (bs,cin_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
     (sy,sx), (dy,dx) = make_pair(stride), make_pair(dilation)
