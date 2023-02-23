@@ -286,12 +286,13 @@ class Tensor:
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
   # TODO: support arbitrary strides
-  def _pool2d(self, py, px):
-    xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px] if (self.shape[2]%py != 0) or (self.shape[3]%px != 0) else self
-    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
+  def _pool2d(self, py, px, sy, sx):
+    if py > sy or px > sx: raise NotImplementedError("pool2d doesn't support kernel_size > stride")
+    xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-py))//sy*sy), (0, (self.shape[3]+(sx-px))//sx*sx)))
+    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :py, :, :px]
 
-  def avg_pool2d(self, kernel_size=(2,2)): return self._pool2d(*make_pair(kernel_size)).mean(axis=(3,5))
-  def max_pool2d(self, kernel_size=(2,2)): return self._pool2d(*make_pair(kernel_size)).max(axis=(3,5))
+  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(3,5))
+  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(3,5))
 
   def conv2d(self, weight, bias=None, **kwargs):
     ret = mlops.Conv2D.apply(self, weight, **kwargs)
