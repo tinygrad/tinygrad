@@ -19,7 +19,7 @@ LAZY = getenv("LAZY", 1)
 def get_buffer(name, base='tinygrad.llops'):
   try:
     return (name.upper(), [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.ops_{name}'), inspect.isclass) if (cname.lower() == name + "buffer")][0])
-  except ImportError as e:  # NOTE: this can't be put on one line due to mypy issue
+  except Exception as e:  # NOTE: this can't be put on one line due to mypy issue
     print(name, "backend not available", e, file=sys.stderr)
 
 class _Device:
