@@ -307,24 +307,21 @@ class Tensor:
   def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(2,4))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
-    bs,cin_,iy,ix = self.shape
-    cout,cin,H,W = weight.shape
+    (bs,cin_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
-    rcout = cout//groups
-    sy,sx = make_pair(stride)
+    (sy,sx), (dy,dx) = make_pair(stride), make_pair(dilation)
     px,px_,py,py_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
-    dy,dx = make_pair(dilation)
 
     # padding
     x = self.slice(((0, bs), (0, cin_), (-py, iy+py_), (-px, ix+px_)))
     x = x._pool2d(H,W,sy,sx,dy,dx)
     oy, ox = x.shape[3], x.shape[5]
-    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6).expand(bs, groups, rcout, oy, ox, cin, H, W)
+    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
 
     # weight
-    w = weight.reshape(1, groups, rcout, 1, 1, cin, H, W).expand(bs, groups, rcout, oy, ox, cin, H, W)
+    w = weight.reshape(1, groups, cout//groups, 1, 1, cin, H, W)
 
-    # conv!
+    # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
     ret = (x*w).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
