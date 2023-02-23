@@ -68,7 +68,7 @@ def compile_onnx_model(onnx_model):
     fclose(f);
 
     // init the net
-    initialize((float *)weights);
+    initialize(weights);
 
     // test run
     float input[32];
