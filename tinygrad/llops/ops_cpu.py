@@ -22,11 +22,19 @@ def numpy_conv(x,w,C):
   out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
   return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
+def mulacc(x, y, new_shape):
+  #return (x*y).sum(shape_to_axis(x.shape, new_shape), keepdims=True)
+  subs = "abcdefghijklmnopqrstuvwxyz"
+  reduce_axes = shape_to_axis(x.shape, new_shape)
+  out = ''.join([x for i,x in enumerate(subs[:len(x.shape)]) if i not in reduce_axes])
+  return np.einsum(f"{subs[:len(x.shape)]}, {subs[:len(y.shape)]} -> {out}", x, y).reshape(new_shape)
+
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.RELU: lambda x: np.maximum(x, 0), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
   MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
   MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
-  MovementOps.STRIDED: numpy_strided, ProcessingOps.CONV: numpy_conv
+  MovementOps.STRIDED: numpy_strided, ProcessingOps.CONV: numpy_conv,
+  ProcessingOps.MULACC: mulacc
 }}
 
 class CPUBuffer(GenericExecAST):
