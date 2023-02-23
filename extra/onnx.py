@@ -104,7 +104,7 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Expand": ret = inp[0].reshape([1]*(max(len(inp[0].shape), len(inp[1]))-len(inp[0].shape)) + list(inp[0].shape)) # just broadcast
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value']
-      elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) for x in safe_numpy(inp[1])])
+      elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Gather":
         # TODO: is this correct? seems to work for simple gather ops
         axis = opt['axis']
@@ -137,7 +137,7 @@ def get_run_onnx(onnx_model):
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = inp[0] * inp[1]
       elif n.op_type == "Split":
-        if 'split' not in opt: opt['split'] = [int(x) for x in inp[1].numpy()]  # split can be a tensor
+        if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         i = 0
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
