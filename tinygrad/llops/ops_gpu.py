@@ -26,7 +26,7 @@ else:
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
-KOPT = getenv("KOPT", 0)
+KOPT = getenv("KOPT", -1)
 PRINT_AST = getenv("PRINT_AST", "0")
 TEST_AST = getenv("TEST_AST", 0)
 
@@ -235,7 +235,7 @@ class CLASTKernel(ASTKernel):
   def codegen(self) -> Callable:
     self.process()
     self.upcast_in_mid_reduce = False
-    if not KOPT or IMAGE == 2: self.hand_coded_optimizations()
+    if KOPT == -1 or IMAGE == 2: self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -378,7 +378,7 @@ class GPUBuffer(ExplicitExecAST):
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GPUBuffer]=None):
     k = CLASTKernel(ast, output_buffer)
-    if KOPT:
+    if KOPT > 0:
       from extra.kernel_search import apply_optimization
       apply_optimization(k, ast, max_interventions=KOPT)
     prg = k.codegen()
