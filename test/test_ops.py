@@ -459,11 +459,16 @@ class TestOps(unittest.TestCase):
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1), shape[2:]]:
+    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
+
+  def test_global_avgpool2d(self):
+    helper_test_op([(32,2,111,28)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
   def test_cat(self):
     for dim in range(-1, 2):

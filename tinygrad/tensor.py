@@ -291,17 +291,22 @@ class Tensor:
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
   def _pool2d(self, ky, kx, sy, sx, dy=1, dx=1):
-    bs,c,iy,ix = self.shape
-    oy = (iy - dy * (ky-1) - 1)//sy + 1
-    ox = (ix - dx * (kx-1) - 1)//sx + 1
-    # duplicate the inputs for each of the kernels
-    xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
-    # slide by dilation
-    xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+dy)), (0,kx*(ix+dx))))
-    xup = xup.reshape(bs, c, ky, iy+dy, kx, ix+dx)
-    xup = xup.slice(((0,bs), (0,c), (0,ky), (0,oy*sy), (0,kx), (0,ox*sx)))
-    # handle stride, and permute to move reduce to the end
-    return xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
+    if ky > sy or kx > sx or dy != 1 or dx != 1:
+      bs,c,iy,ix = self.shape
+      oy = (iy - dy * (ky-1) - 1)//sy + 1
+      ox = (ix - dx * (kx-1) - 1)//sx + 1
+      # duplicate the inputs for each of the kernels
+      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+      # slide by dilation
+      xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+dy)), (0,kx*(ix+dx))))
+      xup = xup.reshape(bs, c, ky, iy+dy, kx, ix+dx)
+      xup = xup.slice(((0,bs), (0,c), (0,ky), (0,oy*sy), (0,kx), (0,ox*sx)))
+      # handle stride, and permute to move reduce to the end
+      return xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
+    else:
+      # TODO: once the shapetracker can optimize well, remove this alternative implementation
+      xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-ky))//sy*sy), (0, (self.shape[3]+(sx-kx))//sx*sx)))
+      return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :ky, :, :kx].permute(0, 1, 3, 2, 5, 4)
 
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(2,4))
   def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(2,4))

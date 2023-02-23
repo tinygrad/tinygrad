@@ -66,7 +66,7 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
-    else: ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](*([x.buf for x in srcs] + ([ast.arg] if ast.arg else []))))
+    else: ret = cls(cls.fxn_for_op[ast.op](*([x.buf for x in srcs] + ([ast.arg] if ast.arg else []))))
     if output_buffer is not None:
       assert output_buffer.shape == ret.shape
       output_buffer.buf = ret.buf
