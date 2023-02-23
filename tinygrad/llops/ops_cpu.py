@@ -22,17 +22,18 @@ def numpy_conv(x,w,C):
   out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
   return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
+subs = "abcdefghijklmnopqrstuvwxyz"
+def axes_slice(a):
+  return ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if a.strides[i] != 0]), \
+         tuple(slice(0, a.shape[i]) if a.strides[i] != 0 else 0 for i in range(len(a.shape)))
 def mulacc(a, b, new_shape):
   #return (x*y).sum(shape_to_axis(x.shape, new_shape), keepdims=True)
-  subs = "abcdefghijklmnopqrstuvwxyz"
-  #print(a.shape, b.shape)
-  #print(a.strides, b.strides)
-  a_axes = ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if a.strides[i] != 0])
-  b_axes = ''.join([x for i,x in enumerate(subs[:len(b.shape)]) if b.strides[i] != 0])
-  a_slices = tuple(slice(0, a.shape[i]) if a.strides[i] != 0 else 0 for i in range(len(a.shape)))
-  b_slices = tuple(slice(0, b.shape[i]) if b.strides[i] != 0 else 0 for i in range(len(b.shape)))
+  a_axes, a_slices = axes_slice(a)
+  b_axes, b_slices = axes_slice(b)
   reduce_axes = shape_to_axis(a.shape, new_shape)
   out = ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if i not in reduce_axes and (x in a_axes or x in b_axes)])
+  #print(a.shape, b.shape)
+  #print(a.strides, b.strides)
   #print(f"{a_axes}, {b_axes} -> {out}")
   return np.einsum(f"{a_axes}, {b_axes} -> {out}", a[a_slices], b[b_slices]).reshape(new_shape)
 
