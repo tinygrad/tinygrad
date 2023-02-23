@@ -245,6 +245,9 @@ class CLASTKernel(ASTKernel):
     self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 3:
       print("output shape", self.output_shape)
+      if DEBUG >= 4:
+        for b in self.bufs:
+          print(b.st)
       self.printbufs("new:")
 
     self.bufs_to_delete : Set[int] = set()

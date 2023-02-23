@@ -290,14 +290,27 @@ class Tensor:
     _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
-  # TODO: support arbitrary strides
-  def _pool2d(self, py, px, sy, sx):
-    if py > sy or px > sx: raise NotImplementedError("pool2d doesn't support kernel_size > stride")
-    xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-py))//sy*sy), (0, (self.shape[3]+(sx-px))//sx*sx)))
-    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :py, :, :px]
+  def _pool2d(self, ky, kx, sy, sx):
+    if ky > sy or kx > sx:
+      # NOTE: this gives me hope for an hlop conv. need to optimize this to one view
+      bs,c,iy,ix = self.shape
+      oy = (iy - (ky-1) - 1)//sy + 1
+      ox = (ix - (kx-1) - 1)//sx + 1
+      # duplicate the inputs for each of the kernels
+      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+      # slide by 1 (this is dilation?)
+      xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+1)), (0,kx*(ix+1))))
+      xup = xup.reshape(bs, c, ky, iy+1, kx, ix+1)
+      xup = xup.slice(((0,bs), (0,c), (0,ky), (0,oy*sy), (0,kx), (0,ox*sx)))
+      # handle stride, and permute to move reduce to the end
+      xup = xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
+      return xup.permute(0, 1, 3, 5, 2, 4)
+    # TODO: once the shapetracker can optimize, remove this alternative implementation
+    xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-ky))//sy*sy), (0, (self.shape[3]+(sx-kx))//sx*sx)))
+    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :ky, :, :kx].permute(0, 1, 2, 4, 3, 5)
 
-  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(3,5))
-  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(3,5))
+  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(4,5))
+  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(4,5))
 
   def conv2d(self, weight, bias=None, **kwargs):
     ret = mlops.Conv2D.apply(self, weight, **kwargs)

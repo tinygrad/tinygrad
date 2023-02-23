@@ -445,6 +445,18 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
+  def test_maxpool2d_unit_stride(self):
+    helper_test_op([(32,2,110,28)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=1))
+
+  def test_maxpool2d_smaller_stride(self):
+    for stride in [(2,3), (3,2), 2, 3]:
+      with self.subTest(stride=stride):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
+
   def test_avgpool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1), shape[2:]]:
