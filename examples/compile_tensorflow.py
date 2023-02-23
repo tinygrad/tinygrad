@@ -52,6 +52,9 @@ def compile_onnx_model(onnx_model):
     weights += bytes(memoryview(cl)[0:len(cl)//4])
   cprog.append("}")
 
+  with open("/tmp/tf_weights", "wb") as f:
+    f.write(weights)
+
   # the net
   cprog += ["float *infer(float *input) {"] + statements + ["return outputs;", "}"]
 
@@ -74,13 +77,13 @@ def compile_onnx_model(onnx_model):
 
   # add test weights
   prg = cweights + prg
-  subprocess.check_output(['clang', '-O2', '-lm', '-fPIC', '-x', 'c', '-', '-o', "/tmp/test"], input=prg.encode('utf-8'))
+  subprocess.check_output(['clang', '-O2', '-lm', '-fPIC', '-x', 'c', '-', '-o', "/tmp/tf_test"], input=prg.encode('utf-8'))
 
   tinygrad_output = [x for x in the_output.numpy()[0]]
   print("tinygrad:", tinygrad_output, file=sys.stderr)
 
   c_input = ' '.join(["%f" % x for x in the_input[0].numpy()])+"\n"
-  c_output = [float(x) for x in subprocess.check_output(["/tmp/test"], input=c_input.encode('utf-8')).decode('utf-8').strip().split(" ")]
+  c_output = [float(x) for x in subprocess.check_output(["/tmp/tf_test"], input=c_input.encode('utf-8')).decode('utf-8').strip().split(" ")]
   print("compiled:", c_output, file=sys.stderr)
 
   np.testing.assert_allclose(tinygrad_output, c_output, atol=1e-5, rtol=1e-5)
