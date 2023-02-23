@@ -143,7 +143,6 @@ class Permute(Function):
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.PERMUTE, tuple(argsort(self.input_order)))
 
-# TODO: merge Slice and Flip into Stride with the 3 arguments. or don't, __getitem__ should support strides as an hlop
 class Slice(Function):
   def forward(self, x, arg=None):
     self.narg = tuple((0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg))

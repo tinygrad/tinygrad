@@ -129,14 +129,13 @@ hlops are syntactic sugar around mlops. They support most things torch does.
 
 ### mlops
 
-mlops are mid level ops, there's 15 of them. They understand memory allocation and derivatives
+mlops are mid level ops, there's 15 of them. They understand derivatives. They are very simple.
 
 ```
-Relu, Log, Exp                          # unary ops
+Relu, Log, Exp, Reciprocal              # unary ops
 Sum, Max                                # reduce ops (with axis argument)
 Add, Sub, Mul, Pow                      # binary ops (no broadcasting, use expand)
-Reshape, Permute, Slice, Expand, Flip   # movement ops
-Conv2D(NCHW)                            # processing op (Matmul is also Conv2D)
+Expand, Reshape, Permute, Slice, Flip   # movement ops
 ```
 
 You no longer need to write mlops for a new accelerator
