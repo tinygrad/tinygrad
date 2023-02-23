@@ -241,14 +241,14 @@ class TestOps(unittest.TestCase):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
 
-  @unittest.skip("very slow")
+  @unittest.skipIf(not getenv("ALL"), "very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
     helper_test_op([(1,256,64,64), (512,256,3,3)],
-                    torch.nn.functional.conv2,
+                    torch.nn.functional.conv2d,
                     lambda x,w: x.conv2d(w), atol=1e-2)
 
-  @unittest.skip("not supported with IMAGE=1")
+  @unittest.skipIf(not getenv("ALL"), "not supported with IMAGE=1")
   def test_large_bs_conv(self):
     # large batch size can cause OpenCL image to exceed max image height on macOS
     # (or cause the conv kernel to overflow short sampling coords)
@@ -256,7 +256,7 @@ class TestOps(unittest.TestCase):
                     torch.nn.functional.conv2d,
                     lambda x,w: x.conv2d(w), atol=1e-4, rtol=1e-2)
 
-  @unittest.skip("not supported with IMAGE=1")
+  @unittest.skipIf(not getenv("ALL"), "not supported with IMAGE=1")
   def test_large_ic_conv(self):
     # large input channel count can cause OpenCL image to exceed max image width on macOS
     helper_test_op([(1,2048,3,3), (1,2048,3,3)],
@@ -451,8 +451,8 @@ class TestOps(unittest.TestCase):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
         helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
-          lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
+          lambda x, stride=stride: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
+          lambda x, stride=stride: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
   def test_maxpool2d_unit_stride(self):
     helper_test_op([(32,2,110,28)],
