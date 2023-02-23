@@ -24,6 +24,13 @@ def shape_to_axis(old_shape, new_shape):
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
   return tuple([i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b])
 
+def einsum_mulacc(a_shape, a_strides, b_shape, b_strides, new_shape):
+  def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
+  def axes_slice(shape, strides): return [i for i in range(len(shape)) if strides[i] != 0], tuple(slice(0, shape[i]) if strides[i] != 0 else 0 for i in range(len(shape)))
+  (a_axes, a_slices), (b_axes, b_slices) = axes_slice(a_shape, a_strides), axes_slice(b_shape, b_strides)
+  out = [i for i in range(len(a_shape)) if a_shape[i] == new_shape[i] and (i in a_axes or i in b_axes)]
+  return f"{einscripts(a_axes)}, {einscripts(b_axes)} -> {einscripts(out)}", a_slices, b_slices
+
 ConvArgs = namedtuple('ConvArgs', ['H', 'W', 'groups', 'rcout', 'cin', 'oy', 'ox', 'iy', 'ix', 'sy', 'sx', 'bs', 'cout', 'py', 'py_', 'px', 'px_', 'dy', 'dx', 'out_shape'])
 def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, out_shape=None):
   # TODO: https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html#tensor-layout

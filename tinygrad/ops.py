@@ -65,7 +65,7 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     if ProcessingOps.MULACC in cls.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(ProcessingOps.MULACC, ast.src[0].src, ast.arg)
     srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
-    if DEBUG >= 4: print("exec_ast", ast.op, [x.shape for x in srcs])
+    if DEBUG >= 4: print("exec_ast", ast.op, [x.shape for x in srcs], ast.arg)
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)

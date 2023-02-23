@@ -2,7 +2,7 @@ import numpy as np
 import operator
 from typing import ClassVar, Callable, Dict
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, ProcessingOps, GenericExecAST, Op
-from tinygrad.helpers import shape_to_axis
+from tinygrad.helpers import shape_to_axis, einsum_mulacc
 
 base_fxn_for_op : Dict[Op, Callable] = {
   UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.GT0: lambda x: operator.gt(x, 0.0), UnaryOps.RECIPROCAL: lambda x: 1.0/x,
@@ -22,21 +22,9 @@ def numpy_conv(x,w,C):
   out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
   return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
-subs = "abcdefghijklmnopqrstuvwxyz"
-def axes_slice(a):
-  return ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if a.strides[i] != 0]), \
-         tuple(slice(0, a.shape[i]) if a.strides[i] != 0 else 0 for i in range(len(a.shape)))
 def mulacc(a, b, new_shape):
-  #return (x*y).sum(shape_to_axis(x.shape, new_shape), keepdims=True)
-  reduce_axes = shape_to_axis(a.shape, new_shape)
-  a_axes, a_slices = axes_slice(a)
-  b_axes, b_slices = axes_slice(b)
-  out = ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if i not in reduce_axes and (x in a_axes or x in b_axes)])
-  #print(a.shape, b.shape)
-  #print(a.strides, b.strides)
-  #print(f"{a_axes}, {b_axes} -> {out}")
-  a, b = a[a_slices], b[b_slices]
-  return np.einsum(f"{a_axes}, {b_axes} -> {out}", a.ravel().reshape(a.shape), b.ravel().reshape(b.shape)).reshape(new_shape)
+  subscripts, a_slices, b_slices = einsum_mulacc(a.shape, a.strides, b.shape, b.strides, new_shape)
+  return np.einsum(subscripts, a[a_slices].copy(), b[b_slices].copy()).reshape(new_shape)
 
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.RELU: lambda x: np.maximum(x, 0), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
