@@ -80,7 +80,7 @@ def get_run_onnx(onnx_model):
 
     for num,n in enumerate(onnx_model.graph.node):
       if debug: print(f"{num}: op {n.op_type}")
-      inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else input_tensors[x]) for x in n.input]
+      inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else (input_tensors[x] if x != str() else None)) for x in n.input]
       opt = attribute_dict[num]
 
       # free ones
@@ -105,6 +105,13 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
+      elif n.op_type == "Resize":
+        # TODO: this is handcoded for YOLOv8
+        scales = safe_numpy(inp[2])
+        assert all([int(x) == x and x >= 1 for x in scales])
+        ret = inp[0].reshape([val for pair in zip(inp[0].shape, [1] * len(scales)) for val in pair])
+        ret = ret.expand([val for pair in zip(inp[0].shape, [int(x) for x in scales]) for val in pair])
+        ret = ret.reshape([x*y for x,y in zip(inp[0].shape, [int(x) for x in scales])])
       elif n.op_type == "Gather":
         # TODO: is this correct? seems to work for simple gather ops
         axis = opt['axis']
