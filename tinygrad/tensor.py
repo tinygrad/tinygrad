@@ -290,31 +290,43 @@ class Tensor:
     _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
-  def _pool2d(self, ky, kx, sy, sx):
-    if ky > sy or kx > sx:
-      # NOTE: this gives me hope for an hlop conv. need to optimize this to one view
-      bs,c,iy,ix = self.shape
-      oy = (iy - (ky-1) - 1)//sy + 1
-      ox = (ix - (kx-1) - 1)//sx + 1
-      # duplicate the inputs for each of the kernels
-      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
-      # slide by 1 (this is dilation?)
-      xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+1)), (0,kx*(ix+1))))
-      xup = xup.reshape(bs, c, ky, iy+1, kx, ix+1)
-      xup = xup.slice(((0,bs), (0,c), (0,ky), (0,oy*sy), (0,kx), (0,ox*sx)))
-      # handle stride, and permute to move reduce to the end
-      xup = xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
-      return xup.permute(0, 1, 3, 5, 2, 4)
-    # TODO: once the shapetracker can optimize, remove this alternative implementation
-    xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-ky))//sy*sy), (0, (self.shape[3]+(sx-kx))//sx*sx)))
-    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :ky, :, :kx].permute(0, 1, 2, 4, 3, 5)
+  def _pool2d(self, ky, kx, sy, sx, dy=1, dx=1):
+    bs,c,iy,ix = self.shape
+    oy = (iy - dy * (ky-1) - 1)//sy + 1
+    ox = (ix - dx * (kx-1) - 1)//sx + 1
+    # duplicate the inputs for each of the kernels
+    xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+    # slide by dilation
+    xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+dy)), (0,kx*(ix+dx))))
+    xup = xup.reshape(bs, c, ky, iy+dy, kx, ix+dx)
+    xup = xup.slice(((0,bs), (0,c), (0,ky), (0,oy*sy), (0,kx), (0,ox*sx)))
+    # handle stride, and permute to move reduce to the end
+    return xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
 
-  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(4,5))
-  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(4,5))
+  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(2,4))
+  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(2,4))
 
-  def conv2d(self, weight, bias=None, **kwargs):
-    ret = mlops.Conv2D.apply(self, weight, **kwargs)
-    return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
+  def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
+    bs,cin_,iy,ix = self.shape
+    cout,cin,H,W = weight.shape
+    assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
+    rcout = cout//groups
+    sy,sx = make_pair(stride)
+    px,px_,py,py_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
+    dy,dx = make_pair(dilation)
+
+    # padding
+    x = self.slice(((0, bs), (0, cin_), (-py, iy+py_), (-px, ix+px_)))
+    x = x._pool2d(H,W,sy,sx,dy,dx)
+    oy, ox = x.shape[3], x.shape[5]
+    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6).expand(bs, groups, rcout, oy, ox, cin, H, W)
+
+    # weight
+    w = weight.reshape(1, groups, rcout, 1, 1, cin, H, W).expand(bs, groups, rcout, oy, ox, cin, H, W)
+
+    # conv!
+    ret = (x*w).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
+    return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
   # ***** math functions (unary) *****
 
