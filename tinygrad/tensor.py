@@ -217,7 +217,6 @@ class Tensor:
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
-    assert self.shape != (0,), f"Shape of tensor must not be {self.shape}"
     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
@@ -226,9 +225,6 @@ class Tensor:
   # TODO: what's the difference between dot and matmul?
   def dot(self:Tensor, w:Tensor):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    assert self.shape != (0,) and w.shape != (0,), f"Shape of tensors must not be {self.shape}"
-    assert self.shape == w.shape, f"Shape of tensors must match"
-
     bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
     cin, cout = w.shape[-2], w.shape[-1]
     out_shape_t = tuple(list(self.shape[0:-2])+[cout,-1])
