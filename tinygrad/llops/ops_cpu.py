@@ -22,12 +22,19 @@ def numpy_conv(x,w,C):
   out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
   return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
-def mulacc(x, y, new_shape):
+def mulacc(a, b, new_shape):
   #return (x*y).sum(shape_to_axis(x.shape, new_shape), keepdims=True)
   subs = "abcdefghijklmnopqrstuvwxyz"
-  reduce_axes = shape_to_axis(x.shape, new_shape)
-  out = ''.join([x for i,x in enumerate(subs[:len(x.shape)]) if i not in reduce_axes])
-  return np.einsum(f"{subs[:len(x.shape)]}, {subs[:len(y.shape)]} -> {out}", x, y).reshape(new_shape)
+  #print(a.shape, b.shape)
+  #print(a.strides, b.strides)
+  a_axes = ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if a.strides[i] != 0])
+  b_axes = ''.join([x for i,x in enumerate(subs[:len(b.shape)]) if b.strides[i] != 0])
+  a_slices = tuple(slice(0, a.shape[i]) if a.strides[i] != 0 else 0 for i in range(len(a.shape)))
+  b_slices = tuple(slice(0, b.shape[i]) if b.strides[i] != 0 else 0 for i in range(len(b.shape)))
+  reduce_axes = shape_to_axis(a.shape, new_shape)
+  out = ''.join([x for i,x in enumerate(subs[:len(a.shape)]) if i not in reduce_axes and (x in a_axes or x in b_axes)])
+  #print(f"{a_axes}, {b_axes} -> {out}")
+  return np.einsum(f"{a_axes}, {b_axes} -> {out}", a[a_slices], b[b_slices]).reshape(new_shape)
 
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.RELU: lambda x: np.maximum(x, 0), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
