@@ -3,6 +3,18 @@ from tinygrad.tensor import Tensor
 # PyTorch style layers for tinygrad. These layers are here because of tinygrads
 # line limit.
 
+class AvgPool2d:
+  def __init__(self, kernel_size, stride):
+    if isinstance(kernel_size, int): self.kernel_size = (kernel_size, kernel_size)
+    else: self.kernel_size = kernel_size
+    self.stride = stride if (stride is not None) else kernel_size
+
+  def __repr__(self):
+    return f"AvgPool2d(kernel_size={self.kernel_size!r}, stride={self.stride!r})"
+
+  def __call__(self, input):
+    return input.avg_pool2d(kernel_size=self.kernel_size, stride=self.stride)
+
 class MaxPool2d:
   def __init__(self, kernel_size, stride):
     if isinstance(kernel_size, int): self.kernel_size = (kernel_size, kernel_size)
@@ -13,9 +25,7 @@ class MaxPool2d:
     return f"MaxPool2d(kernel_size={self.kernel_size!r}, stride={self.stride!r})"
   
   def __call__(self, input):
-    # TODO: Implement strided max_pool2d, and maxpool2d for 3d inputs
-    return input.max_pool2d(kernel_size=self.kernel_size)
-
+    return input.max_pool2d(kernel_size=self.kernel_size, stride=self.stride)
 
 class DetectionLayer:
   def __init__(self, anchors):
@@ -55,4 +65,3 @@ class LeakyReLU:
 
   def __call__(self, input):
     return input.leakyrelu(self.neg_slope)
-
