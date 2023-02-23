@@ -5,7 +5,6 @@ import ast
 
 def compile_net(run, special_names):
   # c header
-  weights = []
   cprog = ["#include <stdio.h>", "#include <math.h>","#define max(x,y) fmax(x,y)"] 
 
   # functions that run the net
@@ -29,18 +28,7 @@ def compile_net(run, special_names):
       cargs.append(bufs[key][0])
     statements.append(f"{fxn.clprg.name}({', '.join(cargs)});")
 
-  # buffers (empty)
-  cprog += [f"float {x[0]}[{x[1]}];" for x in bufs.values() if x[0] not in bufs_to_save] 
-
-  # buffers (weights)
-  for name,cl in bufs_to_save.items():
-    weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl)[0:len(cl)//4])])
-    weights.append(f"unsigned char {name}_data[] = \"{weight}\";")
-    cprog.append(f"float *{name} = (float *){name}_data;")
-
-  # the net
-  cprog += ["void net() {"] + statements + ["}"]
-  return weights+cprog
+  return cprog, statements, bufs, bufs_to_save
 
 if __name__ == "__main__":
   model = EfficientNet(0)
@@ -57,7 +45,20 @@ if __name__ == "__main__":
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
-  cprog = compile_net(run, special_names)
+
+  cprog, statements, bufs, bufs_to_save = compile_net(run, special_names)
+
+  # buffers (empty)
+  cprog += [f"float {x[0]}[{x[1]}];" for x in bufs.values() if x[0] not in bufs_to_save] 
+
+  # buffers (weights)
+  for name,cl in bufs_to_save.items():
+    weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl)[0:len(cl)//4])])
+    cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+    cprog.append(f"float *{name} = (float *){name}_data;")
+
+  # the net
+  cprog += ["void net() {"] + statements + ["}"]
 
   # image library!
   cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode('utf-8')]
