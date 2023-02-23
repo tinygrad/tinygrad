@@ -18,6 +18,7 @@ def get_run_onnx(onnx_model):
   def attribute_parse(a):
     if a.type == 7: return tuple([int(x) for x in a.ints])
     elif a.type == 4: return buffer_parse(a.t)  # TENSOR
+    elif a.type == 3: return str(a.s)
     elif a.type == 2: return int(a.i)
     elif a.type == 1: return float(a.f)
     else: raise Exception(f"can't parse {a.type} {a}")
@@ -136,6 +137,7 @@ def get_run_onnx(onnx_model):
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = inp[0] * inp[1]
       elif n.op_type == "Split":
+        if 'split' not in opt: opt['split'] = [int(x) for x in inp[1].numpy()]  # split can be a tensor
         i = 0
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
@@ -147,11 +149,11 @@ def get_run_onnx(onnx_model):
         assert opt['kernel_shape'] == opt['strides'] or opt['strides'] == (1,1)
         ret = inp[0].avg_pool2d(opt['kernel_shape'])
       elif n.op_type == "MaxPool":
-        assert opt['kernel_shape'] == opt['strides']
+        assert opt['kernel_shape'] == opt['strides'], f"kernel_shape and stride mismatch {opt}"
         #opt['kernel_shape'] = opt['strides']
         # TODO: this is untested and probably wrong
         ret = inp[0].pad2d(opt['pads'])
-        ret = ret.max_pool2d(opt['kernel_shape'])
+        ret = ret.max_pool2d(opt['kernel_shape'], opt['strides'])
         # strides aren't supported in max_pool
         #chan = ret.shape[1]
         #w = Tensor.eye(chan).reshape((chan, chan, 1, 1))
