@@ -39,7 +39,7 @@ def compile_onnx_model(onnx_model):
 
   special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
   cprog, statements, bufs, bufs_to_save = compile_net(run, special_names)
-  cprog = ["#include <string.h>", "#include <stdio.h>"] + cprog
+  cprog = ["#include <string.h>", "#include <stdio.h>", "#include <stdlib.h>"] + cprog
 
   # buffers (all except input)
   cprog += [f"float {x[0]}[{x[1]}];" for x in bufs.values() if x[0] != "input"]
@@ -52,6 +52,7 @@ def compile_onnx_model(onnx_model):
     weights += bytes(memoryview(cl)[0:len(cl)//4])
   cprog.append("}")
 
+  # write the weights to disk
   with open("/tmp/tf_weights", "wb") as f:
     f.write(weights)
 
@@ -59,24 +60,28 @@ def compile_onnx_model(onnx_model):
   cprog += ["float *infer(float *input) {"] + statements + ["return outputs;", "}"]
 
   # test program
-  cprog.append("""int main(int argc, char *argv[]) {
+  cprog.append(f"""int main(int argc, char *argv[]) {{
+    // read in the weights from disk
+    FILE *f = fopen("/tmp/tf_weights", "rb");
+    float *weights = (float *)malloc({len(weights)});
+    fread(weights, 1, {len(weights)}, f);
+    fclose(f);
+
+    // init the net
+    initialize((float *)weights);
+
+    // test run
     float input[32];
     for (int i = 0; i < 32; i++) scanf("%f", &input[i]);
-    initialize((float *)weights);
     float *outputs = infer(input);
     printf("%f %f %f %f\\n", outputs[0], outputs[1], outputs[2], outputs[3]);
-  }""")
-
-  # the (test) weights
-  joined_weights = ''.join(['\\x%02X'%x for x in weights])
-  cweights = f"unsigned char weights[] = \"{joined_weights}\";\n"
+  }}""")
 
   # ready the program
   prg = '\n'.join(cprog)
   print(prg)
 
   # add test weights
-  prg = cweights + prg
   subprocess.check_output(['clang', '-O2', '-lm', '-fPIC', '-x', 'c', '-', '-o', "/tmp/tf_test"], input=prg.encode('utf-8'))
 
   tinygrad_output = [x for x in the_output.numpy()[0]]
