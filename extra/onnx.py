@@ -2,7 +2,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
-from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+from onnx.helper import tensor_dtype_to_np_dtype
 
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
@@ -10,7 +10,7 @@ def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
     if inp.data_type in (1,10,7):
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=TENSOR_TYPE_TO_NP_TYPE[inp.data_type]).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+      ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
