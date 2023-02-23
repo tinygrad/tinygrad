@@ -25,7 +25,7 @@ FLOPS = N*N*N*2
 
 prog = CLProgram("test", f"""
 #include <metal_stdlib>
-#include <metal_simdgroup_matrix>//Available from Metal version 2.3 released with osx 11.0+
+#include <metal_simdgroup_matrix>  // Available from Metal version 2.3 released with OS X 11.0+
 using namespace metal;
 kernel void test(device float *a, device const float *data1, device const float *data2, uint3 gid [[thread_position_in_grid]], uint3 xid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]], uint sidx [[simdgroup_index_in_threadgroup]]) {{
   // 1-2 simd groups
