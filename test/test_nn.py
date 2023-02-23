@@ -76,7 +76,7 @@ class TestNN(unittest.TestCase):
 
   def test_conv2d(self):
     BS, C1, H, W = 4, 16, 224, 224
-    C2, K, S, P = 64, 5, 2, 1
+    C2, K, S, P = 64, 7, 2, 1
     
     # create in tinygrad
     layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
