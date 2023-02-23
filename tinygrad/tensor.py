@@ -318,10 +318,12 @@ class Tensor:
     (bs,cin_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
     (sy,sx), (dy,dx) = make_pair(stride), make_pair(dilation)
-    px,px_,py,py_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
 
     # padding
+    px,px_,py,py_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
     x = self.slice(((0, bs), (0, cin_), (-py, iy+py_), (-px, ix+px_)))
+
+    # conv2d is a pooling op
     x = x._pool2d(H,W,sy,sx,dy,dx)
     oy, ox, rcout = x.shape[3], x.shape[5], cout//groups
     # NOTE: we do this expand explicitly so the permute isn't pushed in the binop

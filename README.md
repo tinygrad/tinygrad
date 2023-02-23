@@ -147,14 +147,12 @@ The autodiff stuff is all in mlops now so you can focus on the raw operations
 
 ```
 Buffer                                                     # class of memory on this device
-unary_op  (RELU, EXP, LOG, NEG, GT0)                       # A -> A
+unary_op  (NOOP, NEG, RELU, EXP, LOG, GT0, RECIPROCAL)     # A -> A
 reduce_op (SUM, MAX)                                       # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + B -> C (all the same size)
-movement_op (RESHAPE, PERMUTE, PAD, SHRINK, EXPAND, FLIP)  # A -> B (different size)
-processing_op (CONV)                                       # A + B -> C
+binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + A -> A (all the same size)
+movement_op (RESHAPE, PERMUTE, EXPAND, FLIP, PAD, SHRINK)  # A -> B (different size)
+processing_op [[optional]] (MULACC)                        # A * A -> B
 ```
-
-When tinygrad moves to lazy evaluation, optimizations will happen here.
 
 ## ImageNet inference
 
