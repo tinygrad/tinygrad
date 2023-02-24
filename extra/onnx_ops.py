@@ -65,6 +65,7 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   return data * mask * (1/(1.0 - ratio)), mask
 
 def Shape(data, end=None, start=0): return list(data.shape)[start:end]
+def Size(data): return prod(data.shape)
 
 # TODO: this doesn't match Tensor.flatten behavior
 def Flatten(input, axis=1):
@@ -124,3 +125,6 @@ def Tile(input, repeats):
   expand_shape = [x for r,s in zip(repeats_, input.shape) for x in [r,s]]
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
+
+def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
+def Where(condition, X, Y): return condition*X + (1-condition)*Y
