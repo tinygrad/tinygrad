@@ -20,7 +20,6 @@ class Timing(object):
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 DEBUG = getenv("DEBUG", 0)
 
-def reduce_shape(shape, axis): return tuple(1 if i in axis else shape[i] for i in range(len(shape)))
 def shape_to_axis(old_shape, new_shape):
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
   return tuple([i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b])

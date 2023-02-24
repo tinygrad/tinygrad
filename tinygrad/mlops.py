@@ -1,4 +1,4 @@
-from tinygrad.helpers import prod, argsort, reduce_shape, get_conv_args
+from tinygrad.helpers import prod, argsort, get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
@@ -48,16 +48,16 @@ class Reciprocal(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x, axis=None):
+  def forward(self, x, new_shape):
     self.input_shape = x.shape
-    return x.reduce_op(ReduceOps.SUM, reduce_shape(x.shape, axis))
+    return x.reduce_op(ReduceOps.SUM, new_shape)
 
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.EXPAND, self.input_shape)
 
 class Max(Function):
-  def forward(self, x, axis=None):
-    ret = x.reduce_op(ReduceOps.MAX, reduce_shape(x.shape, axis))
+  def forward(self, x, new_shape):
+    ret = x.reduce_op(ReduceOps.MAX, new_shape)
     self.save_for_backward(x, ret)
     return ret
 

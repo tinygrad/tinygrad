@@ -255,14 +255,11 @@ class Tensor:
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
-  def _reduce(self, fxn:Type[Function], axis=None, keepdim=False):
-    if axis is None:
-      axis = range(len(self.shape))
-    if isinstance(axis, int):
-      axis = [axis]
-    axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
-    shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
-    ret = fxn.apply(self, axis=axis)
+  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
+    axis_ : List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
+    axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
+    shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
+    ret = fxn.apply(self, new_shape=tuple(1 if i in axis_ else self.shape[i] for i in range(len(self.shape))))
     return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
 
   def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
@@ -417,9 +414,10 @@ class Tensor:
   def permute(self, order, *args): return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args): return mlops.Flip.apply(self, axis=argfix(axis, *args))
   def slice(self, arg): return mlops.Slice.apply(self, arg=arg)
+
   def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1
-    return mlops.Reshape.apply(self, shape=self.shape[:dim] + (1,) + self.shape[dim:])
+    return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
