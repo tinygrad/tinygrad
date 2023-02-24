@@ -25,7 +25,7 @@ class Function:
   def save_for_backward(self, *x): self.saved_tensors.extend(x)
 
   @classmethod
-  def apply(fxn:Type[Function], *x:Tensor, **kwargs):
+  def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad:
@@ -421,7 +421,7 @@ class Tensor:
   # ***** functional nn ops *****
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
-    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
+    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
