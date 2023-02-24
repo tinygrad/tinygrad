@@ -1,3 +1,4 @@
+import functools
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
@@ -66,7 +67,7 @@ def get_run_onnx(onnx_model):
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
       shape = shape_to_tuple(inp.type.tensor_type.shape)
-      if shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
+      if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
         input_shape = inputs[inp.name].shape
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
@@ -106,6 +107,7 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Unsqueeze":
         if 'axes' not in opt: opt['axes'] = [int(x) for x in safe_numpy(inp[1])]
+        opt['axes'] = [len(inp[0].shape) + x if x < 0 else x for x in opt['axes']]
         ptr = 0
         new_shape = []
         for i in range(len(inp[0].shape) + len(opt['axes'])):
@@ -132,14 +134,17 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "BatchNormalization":
         invstd = inp[4].add(opt.get('epsilon', 1e-5))**-0.5
         ret = inp[0].batchnorm(inp[1], inp[2], inp[3], invstd)
-      elif n.op_type == "Gemm": ret = inp[0].linear(inp[1].transpose() if opt.get('transB', 0) == 1 else inp[1], inp[2])
+      elif n.op_type == "Gemm":
+        A = inp[0].transpose() if opt.get('transA', 0) == 1 else inp[0]
+        B = inp[1].transpose() if opt.get('transB', 0) == 1 else inp[1]
+        ret = opt.get('alpha', 1.0) * (A @ B)
+        if len(inp) > 2: ret += opt.get('beta', 1.0) * inp[2]
       elif n.op_type == "Conv":
         x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)
         assert 'dilations' not in opt or opt['dilations'] == (1,1)
         ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1), padding=(opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]) if 'pads' in opt else 0)
       elif n.op_type in ["Sum"]:
-        # multiple?
-        ret = inp[0] + inp[1]
+        ret = functools.reduce(Tensor.__add__, inp)
       elif n.op_type in ["Add", "Sub", "Mul"]:
         # TODO: add this to tinygrad? i don't think it's in torch
         if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
@@ -160,10 +165,10 @@ def get_run_onnx(onnx_model):
         continue
       elif n.op_type == "AveragePool":
         ret = inp[0].pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3])) if 'pads' in opt else inp[0]
-        ret = ret.avg_pool2d(opt['kernel_shape'], opt.get('strides', None))
+        ret = ret.avg_pool2d(opt['kernel_shape'], opt.get('strides', [1]*len(opt['kernel_shape'])))
       elif n.op_type == "MaxPool":
         ret = inp[0].pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3])) if 'pads' in opt else inp[0]
-        ret = ret.max_pool2d(opt['kernel_shape'], opt.get('strides', None))
+        ret = ret.max_pool2d(opt['kernel_shape'], opt.get('strides', [1]*len(opt['kernel_shape'])))
       elif n.op_type == "Slice":
         assert onnx_model.opset_import[0].version == 10
         arg = [(0,x) for x in inp[0].shape]
