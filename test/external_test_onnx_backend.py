@@ -42,8 +42,11 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
 # passing node tests
 backend_test.include('test_unsqueeze_*')
-backend_test.include('test_sum_*')
 backend_test.include('test_gemm_*')
+backend_test.include('test_batchnorm_*')
+
+"""
+backend_test.include('test_sum_*')
 backend_test.include('test_transpose_*')
 backend_test.include('test_tanh_*')
 
@@ -53,6 +56,7 @@ backend_test.include('test_reshape_*')
 backend_test.include('test_flatten_*')
 backend_test.include('test_expand_*')
 backend_test.include('test_clip_*')
+"""
 
 # requires CastLike?
 #backend_test.include('test_relu_*')

@@ -1,9 +1,22 @@
 import functools
+import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
 from onnx.helper import tensor_dtype_to_np_dtype
+
+# global numpy cache for parameters
+numpy_cache = {}
+def safe_numpy(t):
+  global numpy_cache
+  if t not in numpy_cache:
+    if DEBUG >= 1:
+      print("numpy cache miss", t)
+    numpy_cache[t] = t.numpy()
+  return numpy_cache[t]
+
+onnx_ops = importlib.import_module('extra.onnx_ops')
 
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
@@ -50,16 +63,6 @@ def get_run_onnx(onnx_model):
   attribute_dict = {}
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
-
-  # and cache them
-  numpy_cache = {}
-  def safe_numpy(t):
-    nonlocal numpy_cache
-    if t not in numpy_cache:
-      if DEBUG >= 1:
-        print("numpy cache miss", t)
-      numpy_cache[t] = t.numpy()
-    return numpy_cache[t]
 
   def run_onnx(inputs={}, debug=False):
     input_tensors = {}
@@ -108,17 +111,6 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
-      elif n.op_type == "Unsqueeze":
-        if 'axes' not in opt: opt['axes'] = [int(x) for x in safe_numpy(inp[1])]
-        opt['axes'] = [len(inp[0].shape) + x if x < 0 else x for x in opt['axes']]
-        ptr = 0
-        new_shape = []
-        for i in range(len(inp[0].shape) + len(opt['axes'])):
-          if i in opt['axes']: new_shape.append(1)
-          else:
-            new_shape.append(inp[0].shape[ptr])
-            ptr += 1
-        ret = inp[0].reshape(new_shape)
       elif n.op_type == "Resize":
         # TODO: this is handcoded for YOLOv8
         scales = safe_numpy(inp[2])
@@ -134,14 +126,6 @@ def get_run_onnx(onnx_model):
         args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
-      elif n.op_type == "BatchNormalization":
-        invstd = inp[4].add(opt.get('epsilon', 1e-5))**-0.5
-        ret = inp[0].batchnorm(inp[1], inp[2], inp[3], invstd)
-      elif n.op_type == "Gemm":
-        A = inp[0].transpose() if opt.get('transA', 0) == 1 else inp[0]
-        B = inp[1].transpose() if opt.get('transB', 0) == 1 else inp[1]
-        ret = opt.get('alpha', 1.0) * (A @ B)
-        if len(inp) > 2: ret += opt.get('beta', 1.0) * inp[2]
       elif n.op_type == "Conv":
         x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)
         assert 'dilations' not in opt or opt['dilations'] == (1,1)
@@ -182,12 +166,15 @@ def get_run_onnx(onnx_model):
         starts = starts + inp[0].shape[axis] if starts < 0 else starts
         arg[axis] = (starts, ends)
         ret = inp[0].slice(arg=arg)
+      elif hasattr(onnx_ops, n.op_type):
+        ret = getattr(onnx_ops, n.op_type)(*inp, **opt)
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
-      assert len(n.output) == 1, f"output size must be 1, it's {n.output}"
-      if debug: print(ret.shape)
-      intermediate_tensors[n.output[0]] = ret
+      if not isinstance(ret, tuple): ret = (ret, )
+      assert len(n.output) == len(ret), f"output size must be {len(ret)}, it's {n.output}"
+      if debug: print([x.shape for x in ret])
+      for i,r in enumerate(ret): intermediate_tensors[n.output[i]] = r
       #print(ret.numpy().mean())
       if num == ONNXLIMIT:
         output_tensor_names = n.output
