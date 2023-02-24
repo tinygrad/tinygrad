@@ -123,8 +123,6 @@ def get_run_onnx(onnx_model):
         args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
-      elif n.op_type in ["Sum"]:
-        ret = functools.reduce(Tensor.__add__, inp)
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
         # TODO: add this to tinygrad? i don't think it's in torch
         if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):

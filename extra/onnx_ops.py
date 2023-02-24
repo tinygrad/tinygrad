@@ -2,6 +2,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from extra.onnx import safe_numpy
 import numpy as np
+import functools
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -81,6 +82,7 @@ def Expand(input, shape):
 
 def Identity(input): return input
 def Neg(input): return -input
+def Reciprocal(input): return input.reciprocal()
 def Sqrt(input): return input.sqrt()
 def Sign(input): return input.sign()
 def Abs(input): return input.abs()
@@ -97,6 +99,9 @@ def Softmax(input, axis=-1): return input.softmax(axis)
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
 
+def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
+def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
+
 def _axes(axes, noop_with_empty_axes): return [int(x) for x in safe_numpy(axes)] if axes is not None else ([] if noop_with_empty_axes else None)
 
 # ReduceProd would require a new llop
@@ -112,3 +117,10 @@ def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return
 
 def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
+
+def Tile(input, repeats):
+  repeats_ = [int(x) for x in safe_numpy(repeats)]
+  new_shape = [x for i in range(len(input.shape)) for x in [1,input.shape[i]]]
+  expand_shape = [x for r,s in zip(repeats_, input.shape) for x in [r,s]]
+  final_shape = [r*s for r,s in zip(repeats_, input.shape)]
+  return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
