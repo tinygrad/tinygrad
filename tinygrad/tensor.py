@@ -349,7 +349,7 @@ class Tensor:
     w = w.reshape(cout//4, H, cin//4 if cin >= 4 else 1, W, 4, 4 if cin >= 4 else 1).permute(0,4,2,5,1,3).reshape(cout, cin, H, W)
 
     # run normal conv
-    ret = x._conv2d(w, bias, stride, groups, dilation, padding)
+    ret = x._conv2d(w, None, stride, groups, dilation, padding)
 
     # make image sized
     oy, ox = ret.shape[2:]
@@ -362,7 +362,10 @@ class Tensor:
       cout = groups * rcout
 
     # NCHW output
-    return ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+    ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+
+    # add the bias after the prcessing so it fuses correctly
+    return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
   def _conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
     #ret = mlops.Conv2D.apply(self, weight, stride=stride, groups=groups, dilation=dilation, padding=padding)
