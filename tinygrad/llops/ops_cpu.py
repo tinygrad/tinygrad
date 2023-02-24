@@ -1,7 +1,7 @@
 import numpy as np
 import operator
 from typing import ClassVar, Callable, Dict
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, ProcessingOps, GenericExecAST, Op
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, ProcessingOps, FusedOps, GenericExecAST, Op
 from tinygrad.helpers import shape_to_axis
 
 base_fxn_for_op : Dict[Op, Callable] = {
@@ -37,7 +37,7 @@ numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
   MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
   MovementOps.STRIDED: numpy_strided, ProcessingOps.CONV: numpy_conv,
-  ProcessingOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides)
+  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides)
 }}
 
 class CPUBuffer(GenericExecAST):

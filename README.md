@@ -150,7 +150,7 @@ unary_op  (NOOP, NEG, RELU, EXP, LOG, GT0, RECIPROCAL)     # A -> A
 reduce_op (SUM, MAX)                                       # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + A -> A (all the same size)
 movement_op (RESHAPE, PERMUTE, EXPAND, FLIP, PAD, SHRINK)  # A -> B (different size)
-processing_op [[optional]] (MULACC)                        # A * A -> B
+fused_op [[optional]] (MULACC)                             # A * A -> B
 ```
 
 ## ImageNet inference

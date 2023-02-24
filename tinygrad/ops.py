@@ -12,11 +12,12 @@ class UnaryOps(Enum): NOOP = auto(); NEG = auto(); RELU = auto(); EXP = auto(); 
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); FLIP = auto(); STRIDED = auto(); PAD = auto(); SHRINK = auto() # noqa: E702
-class ProcessingOps(Enum): MULACC = auto(); CONV = auto() # noqa: E702
+class FusedOps(Enum): MULACC = auto() # noqa: E702
+class ProcessingOps(Enum): CONV = auto() # noqa: E702
 class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto() # noqa: E702
 
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps]]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, FusedOps]
+OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps], Type[FusedOps]]
 
 class LazyOp(NamedTuple):
   op: Op
@@ -62,8 +63,8 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None):
-    if ProcessingOps.MULACC in cls.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(ProcessingOps.MULACC, ast.src[0].src, ast.arg)
+    if FusedOps.MULACC in cls.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
     if DEBUG >= 4: print("exec_ast", ast.op, [x.shape for x in srcs], ast.arg)
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
