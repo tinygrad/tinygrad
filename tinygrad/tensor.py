@@ -376,47 +376,42 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  @staticmethod
-  def broadcasted(fxn:Type[Function], tx:Union[Tensor, float], ty:Union[Tensor, float]):
-    tt = [arg for arg in [tx,ty] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [tx,ty]]
+  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool) -> Tensor:
+    x,y = [Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
+  def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse)
+  def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse)
+  def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse)
+  def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse)
+  def div(self, x, reverse=False): return (self.reciprocal() * x) if reverse else (self * (x.reciprocal() if isinstance(x, Tensor) else (1/x)))
+  def matmul(self, x:Tensor, reverse=False): return x.dot(self) if reverse else self.dot(x)
+
+  # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
+
   # NOTE: __pow__ and friends are broken in mypyc with the ** operator
-  def __add__(self, x): return Tensor.broadcasted(mlops.Add, self, x)
-  def __radd__(self, x): return Tensor.broadcasted(mlops.Add, x, self)
-  def __sub__(self, x): return Tensor.broadcasted(mlops.Sub, self, x)
-  def __rsub__(self, x): return Tensor.broadcasted(mlops.Sub, x, self)
-  def __mul__(self, x): return Tensor.broadcasted(mlops.Mul, self, x)
-  def __rmul__(self, x): return Tensor.broadcasted(mlops.Mul, x, self)
-  def __pow__(self, x): return Tensor.broadcasted(mlops.Pow, self, x)
-  def __rpow__(self, x): return Tensor.broadcasted(mlops.Pow, x, self)
+  def __add__(self, x): return self.add(x)
+  def __sub__(self, x): return self.sub(x)
+  def __mul__(self, x): return self.mul(x)
+  def __pow__(self, x): return self.pow(x)
+  def __truediv__(self, x): return self.div(x)
+  def __matmul__(self, x): return self.matmul(x)
 
-  # ***** arithmetic hlops and wrappers *****
+  def __radd__(self, x): return self.add(x, True)
+  def __rsub__(self, x): return self.sub(x, True)
+  def __rmul__(self, x): return self.mul(x, True)
+  def __rpow__(self, x): return self.pow(x, True)
+  def __rtruediv__(self, x): return self.div(x, True)
+  def __rmatmul__(self, x): return self.matmul(x, True)
 
-  # non broadcasted ops
-  def __truediv__(self, x): return self * (x.reciprocal() if isinstance(x, Tensor) else (1/x))
-  def __rtruediv__(self, x): return self.reciprocal() * x
-  def __matmul__(self, x): return self.dot(x)
-  def __rmatmul__(self, x:Tensor): return x.dot(self)
-
-  # assignment, any way to make this automatic?
-  def __iadd__(self, x): return self.assign(self.__add__(x))
-  def __isub__(self, x): return self.assign(self.__sub__(x))
-  def __imul__(self, x): return self.assign(self.__mul__(x))
-  def __ipow__(self, x): return self.assign(self.__pow__(x))
-  def __itruediv__(self, x): return self.assign(self.__truediv__(x))
-  def __imatmul__(self, x): self.assign(self.__matmul__(x))
-
-  # simple tensor math API
-  def add(self, x): return self.__add__(x)
-  def sub(self, x): return self.__sub__(x)
-  def mul(self, x): return self.__mul__(x)
-  def pow(self, x): return self.__pow__(x)
-  def div(self, x): return self.__truediv__(x)
-  def matmul(self, x): return self.__matmul__(x)
+  def __iadd__(self, x): return self.assign(self.add(x))
+  def __isub__(self, x): return self.assign(self.sub(x))
+  def __imul__(self, x): return self.assign(self.mul(x))
+  def __ipow__(self, x): return self.assign(self.pow(x))
+  def __itruediv__(self, x): return self.assign(self.div(x))
+  def __imatmul__(self, x): return self.assign(self.matmul(x))
 
   # ***** functional nn ops *****
 
