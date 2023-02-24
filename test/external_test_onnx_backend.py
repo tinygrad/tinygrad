@@ -45,13 +45,20 @@ backend_test.include('test_unsqueeze_*')
 backend_test.include('test_gemm_*')
 backend_test.include('test_batchnorm_*')
 
+# almost passing node tests
+#backend_test.include('test_conv_.*')
+#backend_test.include('test_dropout_*')
+
+# failing for real reasons
+#backend_test.include('test_averagepool_2d_*')
+#backend_test.include('test_maxpool_2d_*')
+
 """
 backend_test.include('test_sum_*')
 backend_test.include('test_transpose_*')
 backend_test.include('test_tanh_*')
 
 # should be passing (good place to start!)
-backend_test.include('test_conv_.*')
 backend_test.include('test_reshape_*')
 backend_test.include('test_flatten_*')
 backend_test.include('test_expand_*')
@@ -74,17 +81,17 @@ backend_test.include('test_clip_*')
 #backend_test.include('test_slice_*')
 #backend_test.include('test_lrn_*')
 #backend_test.include('test_batchnorm_*')
-#backend_test.include('test_maxpool_*')
-#backend_test.include('test_averagepool_*')
 
-"""
 # working big model tests
 backend_test.include('test_resnet50')
 backend_test.include('test_densenet121')
+backend_test.include('test_vgg19')
 
+"""
 # wrong big model tests
 backend_test.include('test_shufflenet')
 backend_test.include('test_inception_v2')
+backend_test.include('test_squeezenet')
 """
 
 """
@@ -92,10 +99,6 @@ backend_test.include('test_inception_v2')
 backend_test.include('test_bvlc_alexnet')
 backend_test.include('test_inception_v1')
 backend_test.include('test_zfnet512')
-
-# unsupported big model tests : Dropout
-backend_test.include('test_squeezenet')
-backend_test.include('test_vgg19')
 """
 
 globals().update(backend_test.enable_report().test_cases)

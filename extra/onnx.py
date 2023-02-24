@@ -9,6 +9,7 @@ from onnx.helper import tensor_dtype_to_np_dtype
 # global numpy cache for parameters
 numpy_cache = {}
 def safe_numpy(t):
+  if not isinstance(t, Tensor): return t
   global numpy_cache
   if t not in numpy_cache:
     if DEBUG >= 1:
@@ -126,10 +127,6 @@ def get_run_onnx(onnx_model):
         args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
-      elif n.op_type == "Conv":
-        x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)
-        assert 'dilations' not in opt or opt['dilations'] == (1,1)
-        ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1), padding=(opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]) if 'pads' in opt else 0)
       elif n.op_type in ["Sum"]:
         ret = functools.reduce(Tensor.__add__, inp)
       elif n.op_type in ["Add", "Sub", "Mul"]:
@@ -150,12 +147,6 @@ def get_run_onnx(onnx_model):
           intermediate_tensors[o] = inp[0].slice(arg=arg)
           i = i+s
         continue
-      elif n.op_type == "AveragePool":
-        ret = inp[0].pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3])) if 'pads' in opt else inp[0]
-        ret = ret.avg_pool2d(opt['kernel_shape'], opt.get('strides', [1]*len(opt['kernel_shape'])))
-      elif n.op_type == "MaxPool":
-        ret = inp[0].pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3])) if 'pads' in opt else inp[0]
-        ret = ret.max_pool2d(opt['kernel_shape'], opt.get('strides', [1]*len(opt['kernel_shape'])))
       elif n.op_type == "Slice":
         assert onnx_model.opset_import[0].version == 10
         arg = [(0,x) for x in inp[0].shape]
@@ -172,9 +163,9 @@ def get_run_onnx(onnx_model):
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
       if not isinstance(ret, tuple): ret = (ret, )
-      assert len(n.output) == len(ret), f"output size must be {len(ret)}, it's {n.output}"
+      assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape for x in ret])
-      for i,r in enumerate(ret): intermediate_tensors[n.output[i]] = r
+      for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
       #print(ret.numpy().mean())
       if num == ONNXLIMIT:
         output_tensor_names = n.output
