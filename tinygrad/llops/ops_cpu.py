@@ -12,16 +12,6 @@ base_fxn_for_op : Dict[Op, Callable] = {
   MovementOps.SHRINK: lambda x, arg: x[tuple(slice(p[0], p[1], None) for p in arg)],
 }
 
-def numpy_strided(x,arg): return np.lib.stride_tricks.as_strided(x.ravel().reshape(x.shape), shape=[y[0] for y in arg], strides=[y[1]*x.dtype.itemsize for y in arg])
-def numpy_conv(x,w,C):
-  assert C.px == 0 and C.px_ == 0 and C.py == 0 and C.py_ == 0, "padding in conv is not supported"
-  tx = numpy_strided(x, (
-    (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
-    (C.oy, C.sy*x.shape[3]), (C.ox, C.sx), (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
-  tw = w.reshape(C.groups, C.rcout, C.cin, C.H, C.W)
-  out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
-  return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
-
 def einsum_mulacc(einsum, get_strides):
   def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
   def axes_slice(strides): return [i for i in range(len(strides)) if strides[i] != 0], tuple(slice(None) if strides[i] != 0 else 0 for i in range(len(strides)))
@@ -36,7 +26,6 @@ numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.GT0: lambda x: (x > 0.0).astype(np.float32), BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
   MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
   MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
-  MovementOps.STRIDED: numpy_strided, ProcessingOps.CONV: numpy_conv,
   ProcessingOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides)
 }}
 

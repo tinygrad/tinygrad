@@ -5,10 +5,7 @@ import numpy as np
 from tinygrad.helpers import prod, argfix, make_pair, getenv
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.lazy import Device, LazyBuffer
-from tinygrad.helpers import DEBUG
-
-IMAGE = getenv("IMAGE", 0)
-HLOP = getenv("HLOP", 0)
+from tinygrad.helpers import DEBUG, IMAGE
 
 # An instantiation of the Function is the Context
 class Function:
@@ -379,11 +376,8 @@ class Tensor:
     return ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
-    if HLOP:
-      padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
-      ret = (self._image_conv2d if IMAGE >= 1 else self._conv2d)(weight, groups, padding_, *make_pair(stride), *make_pair(dilation))
-    else:
-      ret = mlops.Conv2D.apply(self, weight, stride=stride, groups=groups, dilation=dilation, padding=padding)
+    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
+    ret = (self._image_conv2d if IMAGE >= 1 else self._conv2d)(weight, groups, padding_, *make_pair(stride), *make_pair(dilation))
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
   # ***** math functions (unary) *****

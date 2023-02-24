@@ -113,18 +113,6 @@ class ShapeTracker:
   def needs_valid(self) -> bool:
     return any(isinstance(v, ZeroView) for v in self.views)
 
-  # TODO: do we really need this for conv?
-  # if we replace, confirm the ops taken fold into one view
-  def strided(self, arg : Tuple[Tuple[int, int], ...]) -> ShapeTracker:
-    assert isinstance(arg, tuple)
-    view = View(tuple(x[0] for x in arg), tuple(x[1] for x in arg))
-    # TODO: this does not always require a new view if non contiguous
-    if self.views[-1].contiguous:
-      self.views[-1] = view
-    else:
-      self.views.append(view)
-    return self
-
   def reshape(self, new_shape : Tuple[int, ...]) -> ShapeTracker:
     assert isinstance(new_shape, tuple)
     if self.shape == new_shape: return self

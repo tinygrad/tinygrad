@@ -1,10 +1,9 @@
 from __future__ import annotations
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.helpers import prod, DEBUG, IMAGE
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
-from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker
 from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
 # div is different in cl than python
