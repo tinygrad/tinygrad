@@ -76,7 +76,8 @@ def Expand(input, shape):
   # copied from _broadcasted
   x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]
   shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
-  return input.reshape(x_shape).expand(shape_ret)
+  # TODO: openpilot is broken if we actually do the expand!!
+  return input.reshape(x_shape) #.expand(shape_ret)
 
 def Exp(input): return input.exp()
 def Softmax(input, axis=-1): return input.softmax(axis)
@@ -85,4 +86,5 @@ def _axes(axes, noop_with_empty_axes): return [int(x) for x in safe_numpy(axes)]
 
 def ReduceMax(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.pow(2).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()
+def ReduceSumSquare(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()

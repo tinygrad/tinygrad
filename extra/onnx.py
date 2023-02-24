@@ -80,6 +80,7 @@ def get_run_onnx(onnx_model):
       if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
         input_shape = inputs[inp.name].shape
+        if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]

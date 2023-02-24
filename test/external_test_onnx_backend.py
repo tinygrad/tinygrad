@@ -81,8 +81,8 @@ backend_test.include('test_clip_*')
 #backend_test.include('test_div_*')
 
 # the node tests, slowly
-#backend_test.include('test_reduce_sum_*')
-backend_test.include('test_softmax_*')
+backend_test.include('test_reduce_sum_*')
+#backend_test.include('test_softmax_*')
 #backend_test.include('test_lrn_*')
 
 # working big model tests
