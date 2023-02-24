@@ -2,10 +2,13 @@
 from __future__ import annotations
 import functools, itertools
 import numpy as np
-from tinygrad.helpers import prod, argfix, make_pair, getenv
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
+from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG
 from tinygrad.lazy import Device, LazyBuffer
-from tinygrad.helpers import DEBUG
+
+HLOP = getenv("HLOP", 0)
+
+from tinygrad.image import image_conv2d_decorator
 
 # An instantiation of the Function is the Context
 class Function:
@@ -22,7 +25,7 @@ class Function:
   def save_for_backward(self, *x): self.saved_tensors.extend(x)
 
   @classmethod
-  def apply(fxn:Type[Function], *x:Tensor, **kwargs):
+  def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad:
@@ -108,8 +111,11 @@ class Tensor:
     return ret
 
   # ***** creation helper functions *****
+  # TODO: remove use of numpy here and make lazy
 
-  # TODO: remove use of numpy here
+  _rng : ClassVar[np.random.Generator] = np.random.default_rng()
+  @staticmethod
+  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @classmethod
   def zeros_like(cls, tensor, **kwargs): return cls.zeros(*tensor.shape, **kwargs)
@@ -124,7 +130,7 @@ class Tensor:
   def empty(cls, *shape, **kwargs): return cls(np.empty(shape, dtype=np.float32), **kwargs)
 
   @classmethod
-  def randn(cls, *shape, **kwargs): return cls(np.random.default_rng().standard_normal(size=shape, dtype=np.float32), **kwargs)
+  def randn(cls, *shape, **kwargs): return cls(Tensor._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
 
   @classmethod
   def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop, dtype=np.float32), **kwargs)
@@ -133,14 +139,14 @@ class Tensor:
   # Return random number between -1 and 1
   # NOTE: this behavior changed from depending on the shape to not
   @classmethod
-  def uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1), **kwargs)
+  def uniform(cls, *shape, **kwargs): return cls((Tensor._rng.random(size=shape, dtype=np.float32) * 2 - 1), **kwargs)
 
   @classmethod
-  def scaled_uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * (prod(shape)**-0.5), **kwargs)
+  def scaled_uniform(cls, *shape, **kwargs): return cls((Tensor._rng.random(size=shape, dtype=np.float32) * 2 - 1) * (prod(shape)**-0.5), **kwargs)
 
   @classmethod
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
-  def glorot_uniform(cls, *shape, **kwargs): return cls((np.random.default_rng().random(size=shape, dtype=np.float32) * 2 - 1) * ((6/(shape[0]+prod(shape[1:])))**0.5), **kwargs)
+  def glorot_uniform(cls, *shape, **kwargs): return cls((Tensor._rng.random(size=shape, dtype=np.float32) * 2 - 1) * ((6/(shape[0]+prod(shape[1:])))**0.5), **kwargs)
 
   @classmethod
   def eye(cls, dim, **kwargs): return cls(np.eye(dim, dtype=np.float32), **kwargs)
@@ -176,7 +182,15 @@ class Tensor:
           t.grad = g if t.grad is None else (t.grad + g)
       del t0._ctx
 
-  # ***** non first class ops (hlops) *****
+  # ***** movement mlops *****
+
+  def reshape(self, shape, *args): return mlops.Reshape.apply(self, shape=argfix(shape, *args))
+  def expand(self, shape, *args): return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
+  def permute(self, order, *args): return mlops.Permute.apply(self, order=argfix(order, *args))
+  def flip(self, axis, *args): return mlops.Flip.apply(self, axis=argfix(axis, *args))
+  def slice(self, arg): return mlops.Slice.apply(self, arg=arg)
+
+  # ***** movement hlops *****
 
   # Tensors mostly follow the normal python indexing / slicing behavior for sequences
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
@@ -222,24 +236,9 @@ class Tensor:
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(arg=p) for p in slice_params]
 
-  # TODO: what's the difference between dot and matmul?
-  def dot(self:Tensor, w:Tensor):
-    # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
-    cin, cout = w.shape[-2], w.shape[-1]
-    out_shape_t = tuple(list(self.shape[0:-2])+[cout,-1])
-    if len(self.shape) > 1:
-      order = tuple(list(range(len(self.shape)-2))+[len(self.shape)-1, len(self.shape)-2])
-    else:
-      order, out_shape_t = (0,), (cout, )
-    worder = tuple(list(range(len(w.shape)-2))+[len(w.shape)-1, len(w.shape)-2])
-
-    # NOTE: with NHWC we can remove the transposes
-    # bs x groups*cin x H x W
-    cx = self.transpose(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
-    # groups*cout x cin x H, W
-    cw = w.transpose(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
-    return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).transpose(order=order)
+  def unsqueeze(self, dim):
+    if dim < 0: dim = len(self.shape) + dim + 1
+    return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Tuple[int, ...]): return self.slice(arg = [(0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])])
@@ -247,14 +246,13 @@ class Tensor:
   def transpose(self, order=(1,0)): return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
-  def _reduce(self, fxn:Type[Function], axis=None, keepdim=False):
-    if axis is None:
-      axis = range(len(self.shape))
-    if isinstance(axis, int):
-      axis = [axis]
-    axis = tuple([x if x >= 0 else x+len(self.shape) for x in axis])
-    shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis]
-    ret = fxn.apply(self, axis=axis)
+  # ***** reduce ops *****
+
+  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
+    axis_ : List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
+    axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
+    shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
+    ret = fxn.apply(self, new_shape=tuple(1 if i in axis_ else self.shape[i] for i in range(len(self.shape))))
     return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
 
   def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
@@ -279,23 +277,76 @@ class Tensor:
     m, _, ss = self._softmax()
     return m - ss.log()
 
-  def dropout(self, p=0.5) -> Tensor:
-    if not Tensor.training:
-      return self
-    _mask : np.ndarray = np.asarray(np.random.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+  # ***** processing ops *****
 
-  # TODO: support arbitrary strides
-  def _pool2d(self, py, px):
-    xup = self[:, :, :self.shape[2]-self.shape[2]%py, :self.shape[3]-self.shape[3]%px] if (self.shape[2]%py != 0) or (self.shape[3]%px != 0) else self
-    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//py, py, xup.shape[3]//px, px))
+  def _pool2d(self, ky, kx, sy, sx, dy=1, dx=1):
+    if ky > sy or kx > sx or dy != 1 or dx != 1:
+      bs,c,iy,ix = self.shape
+      oy = (iy - dy * (ky-1) - 1)//sy + 1
+      ox = (ix - dx * (kx-1) - 1)//sx + 1
+      # duplicate the inputs for each of the kernels
+      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+      # slide by dilation
+      xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+dy)), (0,kx*(ix+dx))))
+      xup = xup.reshape(bs, c, ky, iy+dy, kx, ix+dx)
+      xup = xup.slice(((0,bs), (0,c), (0,ky), (0,oy*sy), (0,kx), (0,ox*sx)))
+      # handle stride, and permute to move reduce to the end
+      return xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
+    else:
+      # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
+      xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-ky))//sy*sy), (0, (self.shape[3]+(sx-kx))//sx*sx)))
+      return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :ky, :, :kx].permute(0, 1, 3, 2, 5, 4)
 
-  def avg_pool2d(self, kernel_size=(2,2)): return self._pool2d(*make_pair(kernel_size)).mean(axis=(3,5))
-  def max_pool2d(self, kernel_size=(2,2)): return self._pool2d(*make_pair(kernel_size)).max(axis=(3,5))
+  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(2,4))
+  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(2,4))
 
-  def conv2d(self, weight, bias=None, **kwargs):
-    ret = mlops.Conv2D.apply(self, weight, **kwargs)
-    return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
+  @image_conv2d_decorator
+  def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
+    (bs,cin_,_,_), (cout,cin,H,W) = self.shape, weight.shape
+    assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
+    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
+
+    # old implementation
+    if not HLOP:
+      ret = mlops.Conv2D.apply(self, weight, groups=groups, stride=stride, dilation=dilation, padding=padding)
+      return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+
+    # conv2d is a pooling op (with padding)
+    x = self.pad2d(padding_)._pool2d(H,W,*make_pair(stride),*make_pair(dilation))
+
+    oy, ox, rcout = x.shape[3], x.shape[5], cout//groups
+    # NOTE: we do this expand explicitly so the permute isn't pushed in the binop
+    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).expand(bs, groups, rcout, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
+
+    # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
+    ret = (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
+    return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+
+  def dot(self:Tensor, w:Tensor):
+    # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
+    bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
+    cin, cout = w.shape[-2], w.shape[-1]
+    out_shape_t = self.shape[0:-2] + (cout,-1)
+    if len(self.shape) > 1:
+      order = tuple(range(len(self.shape)-2)) + (len(self.shape)-1, len(self.shape)-2)
+    else:
+      order, out_shape_t = (0,), (cout, )
+    worder = tuple(range(len(w.shape)-2)) + (len(w.shape)-1, len(w.shape)-2)
+
+    # NOTE: with NHWC we can remove the transposes
+    # bs x groups*cin x H x W
+    cx = self.transpose(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
+    # groups*cout x cin x H, W
+    cw = w.transpose(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
+    return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).transpose(order=order)
+
+  # ***** mlops (unary) *****
+
+  def contiguous(self): return mlops.Contiguous.apply(self)
+  def relu(self): return mlops.ReLU.apply(self)
+  def log(self): return mlops.Log.apply(self)
+  def exp(self): return mlops.Exp.apply(self)
+  def reciprocal(self): return mlops.Reciprocal.apply(self)
 
   # ***** math functions (unary) *****
 
@@ -321,69 +372,49 @@ class Tensor:
   def mish(self): return self * self.softplus().tanh()
   def softplus(self, limit=20, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
 
-  # ***** broadcasted binary ops *****
+  # ***** broadcasted binary mlops *****
 
-  @staticmethod
-  def broadcasted(fxn:Type[Function], tx:Union[Tensor, float], ty:Union[Tensor, float]):
-    tt = [arg for arg in [tx,ty] if isinstance(arg, Tensor)][0]  # this is the prototype tensor
-    x,y = [Tensor([t], device=tt.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in [tx,ty]]
+  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool) -> Tensor:
+    x,y = [Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
-  # ***** first class ops (mlops) *****
+  def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse)
+  def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse)
+  def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse)
+  def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse)
+  def div(self, x, reverse=False): return (self.reciprocal() * x) if reverse else (self * (x.reciprocal() if isinstance(x, Tensor) else (1/x)))
+  def matmul(self, x:Tensor, reverse=False): return x.dot(self) if reverse else self.dot(x)
 
-  def contiguous(self): return mlops.Contiguous.apply(self)
-  def relu(self): return mlops.ReLU.apply(self)
-  def log(self): return mlops.Log.apply(self)
-  def exp(self): return mlops.Exp.apply(self)
-  def reciprocal(self): return mlops.Reciprocal.apply(self)
+  # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
   # NOTE: __pow__ and friends are broken in mypyc with the ** operator
-  def __add__(self, x): return Tensor.broadcasted(mlops.Add, self, x)
-  def __radd__(self, x): return Tensor.broadcasted(mlops.Add, x, self)
-  def __sub__(self, x): return Tensor.broadcasted(mlops.Sub, self, x)
-  def __rsub__(self, x): return Tensor.broadcasted(mlops.Sub, x, self)
-  def __mul__(self, x): return Tensor.broadcasted(mlops.Mul, self, x)
-  def __rmul__(self, x): return Tensor.broadcasted(mlops.Mul, x, self)
-  def __pow__(self, x): return Tensor.broadcasted(mlops.Pow, self, x)
-  def __rpow__(self, x): return Tensor.broadcasted(mlops.Pow, x, self)
+  def __add__(self, x): return self.add(x)
+  def __sub__(self, x): return self.sub(x)
+  def __mul__(self, x): return self.mul(x)
+  def __pow__(self, x): return self.pow(x)
+  def __truediv__(self, x): return self.div(x)
+  def __matmul__(self, x): return self.matmul(x)
 
-  # non broadcasted ops
-  def __truediv__(self, x): return self * (x.reciprocal() if isinstance(x, Tensor) else (1/x))
-  def __rtruediv__(self, x): return self.reciprocal() * x
-  def __matmul__(self, x): return self.dot(x)
-  def __rmatmul__(self, x:Tensor): return x.dot(self)
+  def __radd__(self, x): return self.add(x, True)
+  def __rsub__(self, x): return self.sub(x, True)
+  def __rmul__(self, x): return self.mul(x, True)
+  def __rpow__(self, x): return self.pow(x, True)
+  def __rtruediv__(self, x): return self.div(x, True)
+  def __rmatmul__(self, x): return self.matmul(x, True)
 
-  # assignment, any way to make this automatic?
-  def __iadd__(self, x): return self.assign(self.__add__(x))
-  def __isub__(self, x): return self.assign(self.__sub__(x))
-  def __imul__(self, x): return self.assign(self.__mul__(x))
-  def __ipow__(self, x): return self.assign(self.__pow__(x))
-  def __itruediv__(self, x): return self.assign(self.__truediv__(x))
-  def __imatmul__(self, x): self.assign(self.__matmul__(x))
-
-  # simple tensor math API
-  def add(self, x): return self.__add__(x)
-  def sub(self, x): return self.__sub__(x)
-  def mul(self, x): return self.__mul__(x)
-  def pow(self, x): return self.__pow__(x)
-  def div(self, x): return self.__truediv__(x)
-  def matmul(self, x): return self.__matmul__(x)
+  def __iadd__(self, x): return self.assign(self.add(x))
+  def __isub__(self, x): return self.assign(self.sub(x))
+  def __imul__(self, x): return self.assign(self.mul(x))
+  def __ipow__(self, x): return self.assign(self.pow(x))
+  def __itruediv__(self, x): return self.assign(self.div(x))
+  def __imatmul__(self, x): return self.assign(self.matmul(x))
 
   # ***** functional nn ops *****
 
-  def reshape(self, shape, *args): return mlops.Reshape.apply(self, shape=argfix(shape, *args))
-  def expand(self, shape, *args): return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
-  def permute(self, order, *args): return mlops.Permute.apply(self, order=argfix(order, *args))
-  def flip(self, axis, *args): return mlops.Flip.apply(self, axis=argfix(axis, *args))
-  def slice(self, arg): return mlops.Slice.apply(self, arg=arg)
-  def unsqueeze(self, dim):
-    if dim < 0: dim = len(self.shape) + dim + 1
-    return mlops.Reshape.apply(self, shape=self.shape[:dim] + (1,) + self.shape[dim:])
-
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
-    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)  # type: ignore
+    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
@@ -395,6 +426,11 @@ class Tensor:
   def batchnorm(self, weight:Tensor, bias:Tensor, mean:Tensor, invstd:Tensor):
     x = (self - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
     return x.mul(invstd.reshape(shape=[1, -1, 1, 1])) + bias.reshape(shape=[1, -1, 1, 1])
+
+  def dropout(self, p=0.5) -> Tensor:
+    if not Tensor.training: return self
+    _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
 # register functions to move between devices
 for device in [device for device in Device._buffers.keys() if device[0] != "_"]:

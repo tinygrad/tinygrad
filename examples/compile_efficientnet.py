@@ -3,22 +3,7 @@ from tinygrad.tensor import Tensor
 from extra.utils import fetch
 import ast
 
-if __name__ == "__main__":
-  model = EfficientNet(0)
-  model.load_from_pretrained()
-
-  from extra.jit import TinyJit
-  @TinyJit
-  def run(x): return model.forward(x).realize()
-
-  # twice to run the JIT
-  the_input = Tensor.randn(1,3,224,224)
-  the_output = run(the_input)
-  the_output = run(the_input)
-
-  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
-
+def compile_net(run, special_names):
   # c header
   cprog = ["#include <stdio.h>", "#include <math.h>","#define max(x,y) fmax(x,y)"] 
 
@@ -42,6 +27,26 @@ if __name__ == "__main__":
           if i > 0: bufs_to_save[bufs[key][0]] = arg.cl  # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
     statements.append(f"{fxn.clprg.name}({', '.join(cargs)});")
+
+  return cprog, statements, bufs, bufs_to_save
+
+if __name__ == "__main__":
+  model = EfficientNet(0)
+  model.load_from_pretrained()
+
+  from extra.jit import TinyJit
+  @TinyJit
+  def run(x): return model.forward(x).realize()
+
+  # twice to run the JIT
+  the_input = Tensor.randn(1,3,224,224)
+  the_output = run(the_input)
+  the_output = run(the_input)
+
+  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
+  special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
+
+  cprog, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
   # buffers (empty)
   cprog += [f"float {x[0]}[{x[1]}];" for x in bufs.values() if x[0] not in bufs_to_save] 

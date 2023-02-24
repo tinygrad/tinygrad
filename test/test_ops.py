@@ -438,13 +438,37 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
+  def test_maxpool2d_bigger_stride(self):
+    for stride in [(2,3), (3,2), 2, 3]:
+      with self.subTest(stride=stride):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
+
+  def test_maxpool2d_unit_stride(self):
+    helper_test_op([(32,2,110,28)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=1))
+
+  def test_maxpool2d_smaller_stride(self):
+    for stride in [(2,3), (3,2), 2, 3]:
+      with self.subTest(stride=stride):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
+
   def test_avgpool2d(self):
     shape = (32,2,111,28)
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1), shape[2:]]:
+    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
+
+  def test_global_avgpool2d(self):
+    helper_test_op([(32,2,111,28)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
   def test_cat(self):
     for dim in range(-1, 2):

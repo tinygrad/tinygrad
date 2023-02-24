@@ -29,7 +29,7 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/6c5693e965b9c63f8678
 np.random.seed(1337)
 def get_random_input_tensors(input_shapes):
   # this 16 is a random scale factor
-  inputs = {k:Tensor.randn(*shp, requires_grad=False)*16 for k,shp in input_shapes.items()}
+  inputs = {k:Tensor.randn(*shp, requires_grad=False)*8 for k,shp in input_shapes.items()}
   np_inputs = {k:v.realize().numpy() for k,v in inputs.items()}
   return inputs, np_inputs
 
@@ -43,6 +43,7 @@ def model_exec(run_onnx, using_graph, **inputs):
   return ret.realize()
 
 def compile(dat, output_fn):
+  Tensor.manual_seed(1337)
   Tensor.no_grad = True
   using_graph = graph.GRAPH
   graph.GRAPH = False

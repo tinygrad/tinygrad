@@ -145,5 +145,14 @@ class TestTinygrad(unittest.TestCase):
     # coarse approx. since a "big" eps and the non-linearities of the model
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 0.1))
 
+  def test_random_fns_are_deterministic_with_seed(self):
+    for random_fn in [Tensor.randn, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform]:
+      with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
+        Tensor.manual_seed(1337)
+        a = random_fn(10,10)
+        Tensor.manual_seed(1337)
+        b = random_fn(10,10)
+        np.testing.assert_allclose(a.numpy(), b.numpy())
+
 if __name__ == '__main__':
   unittest.main()

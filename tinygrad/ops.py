@@ -3,7 +3,7 @@ import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict
 import functools, operator
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape import ShapeTracker
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -12,11 +12,12 @@ class UnaryOps(Enum): NOOP = auto(); NEG = auto(); RELU = auto(); EXP = auto(); 
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); FLIP = auto(); STRIDED = auto(); PAD = auto(); SHRINK = auto() # noqa: E702
+class FusedOps(Enum): MULACC = auto() # noqa: E702
 class ProcessingOps(Enum): CONV = auto() # noqa: E702
 class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto() # noqa: E702
 
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps]]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, FusedOps]
+OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps], Type[FusedOps]]
 
 class LazyOp(NamedTuple):
   op: Op
@@ -51,7 +52,7 @@ shape_fxn_for_op : Dict[Op, Callable] = {
   **{op:lambda self,new_shape: GenericShape(new_shape, self.flops + prod(self.shape)) for op in ReduceOps},
   **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.flops), op) for op in MovementOps},
   # https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html
-  **{op:lambda self,w,C: GenericShape(C.out_shape, 2 * (C.bs * C.cout * C.oy * C.ox) * (C.cin * C.H * C.W)) for op in ProcessingOps}}
+  ProcessingOps.CONV:lambda self,w,C: GenericShape(C.out_shape, 2 * (C.bs * C.cout * C.oy * C.ox) * (C.cin * C.H * C.W))}
 
 # used in CPUBuffer and TorchBuffer
 class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
@@ -62,11 +63,14 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None):
+    if FusedOps.MULACC in cls.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
+    if DEBUG >= 4: print("exec_ast", ast.op, [x.shape for x in srcs], ast.arg)
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
-    else: ret = type(srcs[0])(srcs[0].fxn_for_op[ast.op](*([x.buf for x in srcs] + ([ast.arg] if ast.arg else []))))
+    else: ret = cls(cls.fxn_for_op[ast.op](*([x.buf for x in srcs] + ([ast.arg] if ast.arg else []))))
     if output_buffer is not None:
       assert output_buffer.shape == ret.shape
       output_buffer.buf = ret.buf
