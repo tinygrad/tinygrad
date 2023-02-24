@@ -79,9 +79,9 @@ def get_run_onnx(onnx_model):
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
     for num,n in enumerate(onnx_model.graph.node):
-      if debug: print(f"{num}: op {n.op_type}")
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else (input_tensors[x] if x != str() else None)) for x in n.input]
       opt = attribute_dict[num]
+      if debug: print(f"{num}: op {n.op_type} shape {[x.shape for x in inp]} opt {opt}")
 
       # free ones
       if n.op_type == "Relu": ret = inp[0].relu()
@@ -96,7 +96,6 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Flatten": ret = inp[0].flatten(opt['axis'] if 'axis' in opt else 0)
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt['perm'])
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
-      elif n.op_type == "Unsqueeze": ret = inp[0].reshape(np.insert(inp[0].shape, opt['axes'][0], 1).tolist())
       elif n.op_type == "ReduceL2": ret = inp[0].pow(2).sum(axis=opt['axes'], keepdim=opt['keepdims']).sqrt()
       elif n.op_type == "ReduceSum": ret = inp[0].sum(axis=opt['axes'], keepdim=opt['keepdims'])
       elif n.op_type == "GlobalAveragePool": ret = inp[0].mean(axis=tuple(range(2, len(inp[0].shape))), keepdim=True)
@@ -105,6 +104,16 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
+      elif n.op_type == "Unsqueeze":
+        if 'axes' not in opt: opt['axes'] = [int(x) for x in safe_numpy(inp[1])]
+        ptr = 0
+        new_shape = []
+        for i in range(len(inp[0].shape) + len(opt['axes'])):
+          if i in opt['axes']: new_shape.append(1)
+          else:
+            new_shape.append(inp[0].shape[ptr])
+            ptr += 1
+        ret = inp[0].reshape(new_shape)
       elif n.op_type == "Resize":
         # TODO: this is handcoded for YOLOv8
         scales = safe_numpy(inp[2])
@@ -128,6 +137,9 @@ def get_run_onnx(onnx_model):
         x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)
         assert 'dilations' not in opt or opt['dilations'] == (1,1)
         ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1), padding=(opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]) if 'pads' in opt else 0)
+      elif n.op_type in ["Sum"]:
+        # multiple?
+        ret = inp[0] + inp[1]
       elif n.op_type in ["Add", "Sub", "Mul"]:
         # TODO: add this to tinygrad? i don't think it's in torch
         if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
@@ -147,18 +159,11 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "AveragePool":
-        #assert opt['kernel_shape'] == opt['strides'] or opt['strides'] == (1,1)
-        ret = inp[0].avg_pool2d(opt['kernel_shape'], opt['strides'])
+        ret = inp[0].pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3])) if 'pads' in opt else inp[0]
+        ret = ret.avg_pool2d(opt['kernel_shape'], opt.get('strides', None))
       elif n.op_type == "MaxPool":
-        #assert opt['kernel_shape'] == opt['strides'], f"kernel_shape and stride mismatch {opt}"
-        #opt['kernel_shape'] = opt['strides']
-        # TODO: this is untested and probably wrong
-        ret = inp[0].pad2d(opt['pads'])
-        ret = ret.max_pool2d(opt['kernel_shape'], opt['strides'])
-        # strides aren't supported in max_pool
-        #chan = ret.shape[1]
-        #w = Tensor.eye(chan).reshape((chan, chan, 1, 1))
-        #ret = ret.conv2d(w, stride=opt['strides'])
+        ret = inp[0].pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3])) if 'pads' in opt else inp[0]
+        ret = ret.max_pool2d(opt['kernel_shape'], opt.get('strides', None))
       elif n.op_type == "Slice":
         assert onnx_model.opset_import[0].version == 10
         arg = [(0,x) for x in inp[0].shape]
@@ -172,7 +177,7 @@ def get_run_onnx(onnx_model):
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
-      assert len(n.output) == 1
+      assert len(n.output) == 1, f"output size must be 1, it's {n.output}"
       if debug: print(ret.shape)
       intermediate_tensors[n.output[0]] = ret
       #print(ret.numpy().mean())
