@@ -313,8 +313,21 @@ class Tensor:
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(2,4))
   def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(2,4))
 
+  def _conv2d(self, weight:Tensor, groups, padding, sy, sx, dy, dx) -> Tensor:
+    (bs,cin_,_,_), (cout,cin,H,W) = self.shape, weight.shape
+    assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
+
+    # conv2d is a pooling op (with padding)
+    x = self.pad2d(padding)._pool2d(H,W,sy,sx,dy,dx)
+    oy, ox, rcout = x.shape[3], x.shape[5], cout//groups
+    # NOTE: we do this expand explicitly so the permute isn't pushed in the binop
+    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).expand(bs, groups, rcout, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
+
+    # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
+    return (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
+
   # TODO: does this belong in Tensor?
-  def _image_conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
+  def _image_conv2d(self, weight:Tensor, groups, padding, sy, sx, dy, dx) -> Tensor:
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     rcout = cout//groups
     x, w = self, weight.reshape(groups, rcout, cin, H, W)
@@ -349,7 +362,7 @@ class Tensor:
     w = w.reshape(cout//4, H, cin//4 if cin >= 4 else 1, W, 4, 4 if cin >= 4 else 1).permute(0,4,2,5,1,3).reshape(cout, cin, H, W)
 
     # run normal conv
-    ret = x._conv2d(w, None, stride, groups, dilation, padding)
+    ret = x._conv2d(w, groups, padding, sy, sx, dy, dx)
 
     # make image sized
     oy, ox = ret.shape[2:]
@@ -362,37 +375,13 @@ class Tensor:
       cout = groups * rcout
 
     # NCHW output
-    ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+    return ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
 
-    # add the bias after the prcessing so it fuses correctly
-    return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-
-  def _conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
+  def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
     #ret = mlops.Conv2D.apply(self, weight, stride=stride, groups=groups, dilation=dilation, padding=padding)
-    #return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
-
-    (bs,cin_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
-    assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
-    (sy,sx), (dy,dx) = make_pair(stride), make_pair(dilation)
-
-    # padding
-    px,px_,py,py_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
-    x = self.slice(((0, bs), (0, cin_), (-py, iy+py_), (-px, ix+px_)))
-
-    # conv2d is a pooling op
-    x = x._pool2d(H,W,sy,sx,dy,dx)
-    oy, ox, rcout = x.shape[3], x.shape[5], cout//groups
-    # NOTE: we do this expand explicitly so the permute isn't pushed in the binop
-    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).expand(bs, groups, rcout, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
-
-    # weight
-    w = weight.reshape(1, groups, rcout, 1, 1, cin, H, W)
-
-    # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
-    ret = (x*w).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
+    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
+    ret = (self._image_conv2d if IMAGE >= 1 else self._conv2d)(weight, groups, padding_, *make_pair(stride), *make_pair(dilation))
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-
-  conv2d = _image_conv2d if IMAGE >= 1 else _conv2d
 
   # ***** math functions (unary) *****
 
