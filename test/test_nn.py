@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm
 import torch
 

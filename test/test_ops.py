@@ -463,8 +463,8 @@ class TestOps(unittest.TestCase):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
         helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
-          lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
+          lambda x, stride=stride: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
+          lambda x, stride=stride: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)

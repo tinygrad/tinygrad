@@ -156,18 +156,18 @@ for x in backend_test.test_suite:
     backend_test.exclude(str(x).split(" ")[0])
 
 # passing node tests
-"""
-backend_test.include('test_unsqueeze_*')
-backend_test.include('test_gemm_*')
-backend_test.include('test_batchnorm_*')
-backend_test.include('test_transpose_*')
-backend_test.include('test_shape_*')
-backend_test.include('test_flatten_*')
-backend_test.include('test_sum_*')
-backend_test.include('test_global*')
-backend_test.include('test_log_softmax*')
-backend_test.include('test_softplus*')
-"""
+
+# backend_test.include('test_unsqueeze_*')
+# backend_test.include('test_gemm_*')
+# backend_test.include('test_batchnorm_*')
+# backend_test.include('test_transpose_*')
+# backend_test.include('test_shape_*')
+# backend_test.include('test_flatten_*')
+# backend_test.include('test_sum_*')
+# backend_test.include('test_global*')
+# backend_test.include('test_log_softmax*')
+# backend_test.include('test_softplus*')
+
 
 # requires Less, which would be a new llop
 #backend_test.include('test_clip_*')
@@ -194,11 +194,11 @@ backend_test.include('test_softplus*')
 #backend_test.include('test_averagepool_2d_*')
 #backend_test.include('test_maxpool_2d_*')
 
-"""
-backend_test.include('test_tanh_*')
+
+# backend_test.include('test_tanh_*')
 
 # should be passing (good place to start!)
-"""
+
 
 # requires CastLike?
 #backend_test.include('test_relu_*')
@@ -221,19 +221,17 @@ backend_test.include('test_tanh_*')
 #backend_test.include('test_densenet121')
 #backend_test.include('test_vgg19')
 
-"""
-# wrong big model tests
-backend_test.include('test_shufflenet')
-backend_test.include('test_inception_v2')
-backend_test.include('test_squeezenet')
-"""
 
-"""
+# wrong big model tests
+# backend_test.include('test_shufflenet')
+# backend_test.include('test_inception_v2')
+# backend_test.include('test_squeezenet')
+
+
 # unsupported big model tests : LRN
-backend_test.include('test_bvlc_alexnet')
-backend_test.include('test_inception_v1')
-backend_test.include('test_zfnet512')
-"""
+# backend_test.include('test_bvlc_alexnet')
+# backend_test.include('test_inception_v1')
+# backend_test.include('test_zfnet512')
 
 globals().update(backend_test.enable_report().test_cases)
 
