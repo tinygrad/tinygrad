@@ -1,6 +1,8 @@
 import unittest
 from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
+import numpy as np
+from tinygrad.tensor import Tensor
 from typing import Any, Tuple
 
 # pip3 install tabulate
@@ -17,7 +19,7 @@ class TinygradModel(BackendRep):
   def run(self, inputs: Any, **kwargs: Any) -> Tuple[Any, ...]:
     real_inputs = {k:v for k,v in zip(self.input_names, inputs)}
     ret = self.fxn(real_inputs, debug=True)
-    return tuple(x.numpy() for x in ret.values())
+    return tuple(x.numpy() if isinstance(x, Tensor) else np.array(x) for x in ret.values())
 
 class TinygradBackend(Backend):
   @classmethod
@@ -41,13 +43,19 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 #    backend_test.include(str(x).split(" ")[0])
 
 # passing node tests
-backend_test.include('test_unsqueeze_*')
-backend_test.include('test_gemm_*')
-backend_test.include('test_batchnorm_*')
+#backend_test.include('test_unsqueeze_*')
+#backend_test.include('test_gemm_*')
+#backend_test.include('test_batchnorm_*')
+#backend_test.include('test_transpose_*')
+
+backend_test.include('test_shape_*')
 
 # almost passing node tests
 #backend_test.include('test_conv_.*')
 #backend_test.include('test_dropout_*')
+
+# good to investigate
+#backend_test.include('test_slice_*')
 
 # failing for real reasons
 #backend_test.include('test_averagepool_2d_*')
@@ -55,7 +63,6 @@ backend_test.include('test_batchnorm_*')
 
 """
 backend_test.include('test_sum_*')
-backend_test.include('test_transpose_*')
 backend_test.include('test_tanh_*')
 
 # should be passing (good place to start!)
@@ -76,16 +83,13 @@ backend_test.include('test_clip_*')
 
 # the node tests, slowly
 #backend_test.include('test_reduce_sum_*')
-#backend_test.include('test_shape_*')
 #backend_test.include('test_softmax_*')
-#backend_test.include('test_slice_*')
 #backend_test.include('test_lrn_*')
-#backend_test.include('test_batchnorm_*')
 
 # working big model tests
-backend_test.include('test_resnet50')
-backend_test.include('test_densenet121')
-backend_test.include('test_vgg19')
+#backend_test.include('test_resnet50')
+#backend_test.include('test_densenet121')
+#backend_test.include('test_vgg19')
 
 """
 # wrong big model tests

@@ -107,7 +107,6 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "ReduceL2": ret = inp[0].pow(2).sum(axis=opt['axes'], keepdim=opt['keepdims']).sqrt()
       elif n.op_type == "ReduceSum": ret = inp[0].sum(axis=opt['axes'], keepdim=opt['keepdims'])
       elif n.op_type == "GlobalAveragePool": ret = inp[0].mean(axis=tuple(range(2, len(inp[0].shape))), keepdim=True)
-      elif n.op_type == "Shape": ret = inp[0].shape
       elif n.op_type == "Expand": ret = inp[0].reshape([1]*(max(len(inp[0].shape), len(inp[1]))-len(inp[0].shape)) + list(inp[0].shape)) # just broadcast
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
@@ -164,7 +163,7 @@ def get_run_onnx(onnx_model):
         raise Exception(f"op_type {n.op_type} not supported")
       if not isinstance(ret, tuple): ret = (ret, )
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
-      if debug: print([x.shape for x in ret])
+      if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
       #print(ret.numpy().mean())
       if num == ONNXLIMIT:
