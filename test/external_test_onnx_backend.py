@@ -17,8 +17,7 @@ class TinygradModel(BackendRep):
   def run(self, inputs: Any, **kwargs: Any) -> Tuple[Any, ...]:
     real_inputs = {k:v for k,v in zip(self.input_names, inputs)}
     ret = self.fxn(real_inputs, debug=True)
-    ret = next(iter(ret.values())).numpy()
-    return (ret,)
+    return tuple(x.numpy() for x in ret.values())
 
 class TinygradBackend(Backend):
   @classmethod
