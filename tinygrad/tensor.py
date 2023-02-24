@@ -378,9 +378,9 @@ class Tensor:
     return ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
-    #ret = mlops.Conv2D.apply(self, weight, stride=stride, groups=groups, dilation=dilation, padding=padding)
-    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
-    ret = (self._image_conv2d if IMAGE >= 1 else self._conv2d)(weight, groups, padding_, *make_pair(stride), *make_pair(dilation))
+    ret = mlops.Conv2D.apply(self, weight, stride=stride, groups=groups, dilation=dilation, padding=padding)
+    #padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
+    #ret = (self._image_conv2d if IMAGE >= 1 else self._conv2d)(weight, groups, padding_, *make_pair(stride), *make_pair(dilation))
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
   # ***** math functions (unary) *****
