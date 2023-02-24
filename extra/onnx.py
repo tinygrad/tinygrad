@@ -93,7 +93,7 @@ def get_run_onnx(onnx_model):
     for num,n in enumerate(onnx_model.graph.node):
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else (input_tensors[x] if x != str() else None)) for x in n.input]
       opt = attribute_dict[num]
-      if debug: print(f"{num}: op {n.op_type} shape {[x.shape if x is not None else None for x in inp]} opt {opt}")
+      if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
 
       # free ones
       if n.op_type == "Relu": ret = inp[0].relu()
@@ -125,7 +125,7 @@ def get_run_onnx(onnx_model):
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type in ["Sum"]:
         ret = functools.reduce(Tensor.__add__, inp)
-      elif n.op_type in ["Add", "Sub", "Mul"]:
+      elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
         # TODO: add this to tinygrad? i don't think it's in torch
         if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
           inp[1] = inp[1].reshape(inp[0].shape)
@@ -134,6 +134,7 @@ def get_run_onnx(onnx_model):
         if n.op_type == "Add": ret = inp[0] + inp[1]
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = inp[0] * inp[1]
+        if n.op_type == "Pow": ret = inp[0] ** inp[1]
       elif n.op_type == "Split":
         if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         i = 0
