@@ -263,18 +263,17 @@ class Tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
     return out * (prod(out.shape)/prod(self.shape))
 
-  def _softmax(self):
-    m = self - self.max(axis=len(self.shape)-1, keepdim=True)
+  def _softmax(self, axis):
+    m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
-    return m, e, e.sum(axis=len(self.shape)-1, keepdim=True)
+    return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self):
-    _, e, ss = self._softmax()
+  def softmax(self, axis=-1):
+    _, e, ss = self._softmax(axis)
     return e.div(ss)
 
-  # TODO: logsoftmax -> log_softmax and add dim param
-  def logsoftmax(self):
-    m, _, ss = self._softmax()
+  def log_softmax(self, axis=-1):
+    m, _, ss = self._softmax(axis)
     return m - ss.log()
 
   # ***** processing ops *****

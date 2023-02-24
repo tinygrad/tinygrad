@@ -1,4 +1,5 @@
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import prod
 from extra.onnx import safe_numpy
 import numpy as np
 
@@ -63,3 +64,25 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   return data * mask * (1/(1.0 - ratio)), mask
 
 def Shape(data, end=None, start=0): return list(data.shape)[start:end]
+
+# TODO: this doesn't match Tensor.flatten behavior
+def Flatten(input, axis=1):
+  new_shape = (1, -1) if axis == 0 else (prod(input.shape[0:axis]), -1)
+  return input.reshape(new_shape)
+
+# TODO: abstract out the broadcast logic in tensor
+def Expand(input, shape):
+  x_shape, y_shape = input.shape, [int(x) for x in safe_numpy(shape)]
+  # copied from _broadcasted
+  x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]
+  shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
+  return input.reshape(x_shape).expand(shape_ret)
+
+def Exp(input): return input.exp()
+def Softmax(input, axis=-1): return input.softmax(axis)
+
+def _axes(axes, noop_with_empty_axes): return [int(x) for x in safe_numpy(axes)] if axes is not None else ([] if noop_with_empty_axes else None)
+
+def ReduceMax(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.pow(2).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()

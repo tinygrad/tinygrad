@@ -33,7 +33,7 @@ class LinearDisc:
     x = x.dot(self.l1).leakyrelu(0.2).dropout(0.3)
     x = x.dot(self.l2).leakyrelu(0.2).dropout(0.3)
     x = x.dot(self.l3).leakyrelu(0.2).dropout(0.3)
-    x = x.dot(self.l4).logsoftmax()
+    x = x.dot(self.l4).log_softmax()
     return x
 
 def make_batch(images):

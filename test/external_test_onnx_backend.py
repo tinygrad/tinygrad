@@ -47,12 +47,15 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 #backend_test.include('test_gemm_*')
 #backend_test.include('test_batchnorm_*')
 #backend_test.include('test_transpose_*')
-
-backend_test.include('test_shape_*')
+#backend_test.include('test_shape_*')
+#backend_test.include('test_flatten_*')
+#backend_test.include('test_sum_*')
+#backend_test.include('test_expand_*')
 
 # almost passing node tests
 #backend_test.include('test_conv_.*')
 #backend_test.include('test_dropout_*')
+#backend_test.include('test_reshape_*')
 
 # good to investigate
 #backend_test.include('test_slice_*')
@@ -62,13 +65,9 @@ backend_test.include('test_shape_*')
 #backend_test.include('test_maxpool_2d_*')
 
 """
-backend_test.include('test_sum_*')
 backend_test.include('test_tanh_*')
 
 # should be passing (good place to start!)
-backend_test.include('test_reshape_*')
-backend_test.include('test_flatten_*')
-backend_test.include('test_expand_*')
 backend_test.include('test_clip_*')
 """
 
@@ -83,7 +82,7 @@ backend_test.include('test_clip_*')
 
 # the node tests, slowly
 #backend_test.include('test_reduce_sum_*')
-#backend_test.include('test_softmax_*')
+backend_test.include('test_softmax_*')
 #backend_test.include('test_lrn_*')
 
 # working big model tests
