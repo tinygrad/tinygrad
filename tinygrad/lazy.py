@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import sys, weakref, importlib, inspect
 from weakref import WeakValueDictionary
-from tinygrad.helpers import ConvArgs, prod, DEBUG, get_contraction
+from tinygrad.helpers import ConvArgs, prod, DEBUG
 from tinygrad.shape import ShapeTracker
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, GenericExecAST
 from tinygrad.graph import log_op
@@ -227,6 +227,20 @@ class LazyBuffer:
 
     # move permutes before reshapes if we can
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
+      # is contract? if so, group the axis
+      def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
+        out : List[List[int]] = []
+        curr : List[int] = []
+        for t in old_shape:
+          if len(out) >= len(new_shape): break
+          if t*prod(curr) <= new_shape[len(out)]:
+            curr.append(t)
+          else:
+            out.append(curr)
+            curr = [t]
+        out.append(curr)
+        if len(new_shape) == len(out) and all(prod(i) == j and len(i) >= 1 for i,j in zip(out, new_shape)):
+          return out
       contraction = get_contraction(self.op.src[0].shape, self.shape)
       if contraction is not None:
         numbered = []
