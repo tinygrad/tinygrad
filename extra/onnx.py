@@ -102,11 +102,9 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
       # one liners
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
-      elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -3.4e38), opt.get('max', 3.4e38))))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
-      elif n.op_type == "GlobalAveragePool": ret = inp[0].mean(axis=tuple(range(2, len(inp[0].shape))), keepdim=True)
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])

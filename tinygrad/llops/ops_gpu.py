@@ -1,5 +1,6 @@
 from __future__ import annotations
 import numpy as np
+import math
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
@@ -85,7 +86,9 @@ class CLASTKernel(ASTKernel):
     const = None
     if self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
-      const = Token(f"({self.bufs[buf_index]._backing[0]}f)", Types.FLOAT)
+      val = self.bufs[buf_index]._backing[0]
+      assert not math.isnan(val)
+      const = Token(f"({val}f)", Types.FLOAT)
 
     can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
     should_upcast = not CLANG and const is None and can_merge and self.buftokens[buf_index].can_float4()

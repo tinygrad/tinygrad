@@ -43,16 +43,32 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 #    backend_test.include(str(x).split(" ")[0])
 
 # passing node tests
-#backend_test.include('test_unsqueeze_*')
-#backend_test.include('test_gemm_*')
-#backend_test.include('test_batchnorm_*')
-#backend_test.include('test_transpose_*')
-#backend_test.include('test_shape_*')
-#backend_test.include('test_flatten_*')
-#backend_test.include('test_sum_*')
-#backend_test.include('test_expand_*')
+"""
+backend_test.include('test_unsqueeze_*')
+backend_test.include('test_gemm_*')
+backend_test.include('test_batchnorm_*')
+backend_test.include('test_transpose_*')
+backend_test.include('test_shape_*')
+backend_test.include('test_flatten_*')
+backend_test.include('test_sum_*')
+backend_test.include('test_global*')
+backend_test.include('test_log_softmax*')
+backend_test.include('test_softplus*')
+"""
+
+# requires Less, which would be a new llop
+#backend_test.include('test_clip_*')
+
+# broken empty tensor
+#backend_test.include('test_reduce_sum_*')
+#backend_test.include('test_reduce_l1_')
+
+# requires cast
+#backend_test.include('test_reduce_log_sum*')
 
 # almost passing node tests
+#backend_test.include('test_PReLU*')
+#backend_test.include('test_expand_*')
 #backend_test.include('test_conv_.*')
 #backend_test.include('test_dropout_*')
 #backend_test.include('test_reshape_*')
@@ -68,7 +84,6 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 backend_test.include('test_tanh_*')
 
 # should be passing (good place to start!)
-backend_test.include('test_clip_*')
 """
 
 # requires CastLike?
@@ -80,8 +95,8 @@ backend_test.include('test_clip_*')
 #backend_test.include('test_sub_*')
 #backend_test.include('test_div_*')
 
+
 # the node tests, slowly
-backend_test.include('test_reduce_sum_*')
 #backend_test.include('test_softmax_*')
 #backend_test.include('test_lrn_*')
 

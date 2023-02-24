@@ -369,7 +369,7 @@ class Tensor:
   def quick_gelu(self): return self * (self * 1.702).sigmoid()
   def leakyrelu(self, neg_slope=0.01): return self.relu() - (-neg_slope*self).relu()
   def mish(self): return self * self.softplus().tanh()
-  def softplus(self, limit=20, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
+  def softplus(self, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
 
   # ***** broadcasted binary mlops *****
 
