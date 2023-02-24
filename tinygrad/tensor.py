@@ -7,6 +7,9 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.helpers import DEBUG
 
+IMAGE = getenv("IMAGE", 0)
+HLOP = getenv("HLOP", 0)
+
 # An instantiation of the Function is the Context
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
@@ -290,31 +293,98 @@ class Tensor:
     _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
-  def _pool2d(self, ky, kx, sy, sx):
-    if ky > sy or kx > sx:
-      # NOTE: this gives me hope for an hlop conv. need to optimize this to one view
+  def _pool2d(self, ky, kx, sy, sx, dy=1, dx=1):
+    if ky > sy or kx > sx or dy != 1 or dx != 1:
       bs,c,iy,ix = self.shape
-      oy = (iy - (ky-1) - 1)//sy + 1
-      ox = (ix - (kx-1) - 1)//sx + 1
+      oy = (iy - dy * (ky-1) - 1)//sy + 1
+      ox = (ix - dx * (kx-1) - 1)//sx + 1
       # duplicate the inputs for each of the kernels
       xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
-      # slide by 1 (this is dilation?)
-      xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+1)), (0,kx*(ix+1))))
-      xup = xup.reshape(bs, c, ky, iy+1, kx, ix+1)
+      # slide by dilation
+      xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+dy)), (0,kx*(ix+dx))))
+      xup = xup.reshape(bs, c, ky, iy+dy, kx, ix+dx)
       xup = xup.slice(((0,bs), (0,c), (0,ky), (0,oy*sy), (0,kx), (0,ox*sx)))
       # handle stride, and permute to move reduce to the end
-      xup = xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
-      return xup.permute(0, 1, 3, 5, 2, 4)
-    # TODO: once the shapetracker can optimize, remove this alternative implementation
-    xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-ky))//sy*sy), (0, (self.shape[3]+(sx-kx))//sx*sx)))
-    return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :ky, :, :kx].permute(0, 1, 2, 4, 3, 5)
+      return xup.reshape(bs, c, ky, oy, sy, kx, ox, sx)[:, :, :, :, 0, :, :, 0]
+    else:
+      # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
+      xup = self.slice(((0, self.shape[0]), (0, self.shape[1]), (0, (self.shape[2]+(sy-ky))//sy*sy), (0, (self.shape[3]+(sx-kx))//sx*sx)))
+      return xup.reshape(shape=(xup.shape[0], xup.shape[1], xup.shape[2]//sy, sy, xup.shape[3]//sx, sx))[:, :, :, :ky, :, :kx].permute(0, 1, 3, 2, 5, 4)
 
-  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(4,5))
-  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(4,5))
+  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).mean(axis=(2,4))
+  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool2d(*make_pair(kernel_size), *make_pair(stride if stride is not None else kernel_size)).max(axis=(2,4))
 
-  def conv2d(self, weight, bias=None, **kwargs):
-    ret = mlops.Conv2D.apply(self, weight, **kwargs)
-    return ret if bias is None else ret.add(bias.reshape(shape=[1, -1, 1, 1]))
+  def _conv2d(self, weight:Tensor, groups, padding, sy, sx, dy, dx) -> Tensor:
+    (bs,cin_,_,_), (cout,cin,H,W) = self.shape, weight.shape
+    assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
+
+    # conv2d is a pooling op (with padding)
+    x = self.pad2d(padding)._pool2d(H,W,sy,sx,dy,dx)
+    oy, ox, rcout = x.shape[3], x.shape[5], cout//groups
+    # NOTE: we do this expand explicitly so the permute isn't pushed in the binop
+    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).expand(bs, groups, rcout, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
+
+    # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
+    return (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
+
+  # TODO: does this belong in Tensor?
+  def _image_conv2d(self, weight:Tensor, groups, padding, sy, sx, dy, dx) -> Tensor:
+    (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
+    rcout = cout//groups
+    x, w = self, weight.reshape(groups, rcout, cin, H, W)
+
+    # hack for non multiples of 4 on cin
+    if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
+      x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
+      added_input_channels = 4 - (cin % 4)
+      cin = cin + added_input_channels
+      w = w.slice(tuple((0, cin) if i == 2 else (0, w.shape[i]) for i in range(len(w.shape))))
+      x = x.slice(tuple((0, cin) if i == 2 else (0, x.shape[i]) for i in range(len(x.shape))))
+      x = x.reshape(bs, groups*cin, iy, ix)
+
+    # hack for non multiples of 4 on rcout
+    added_output_channels = 0
+    if rcout % 4 != 0 and not (rcout == 1 and groups%4 == 0):
+      added_output_channels = 4 - (rcout % 4)
+      rcout += added_output_channels
+      cout = groups * rcout
+      w = w.slice(tuple((0, rcout) if i == 1 else (0, w.shape[i]) for i in range(len(w.shape))))
+
+    # packed
+    x = x.permute(0,2,3,1).reshape(bs * iy, ix * groups * cin//4, 4)
+    if cin == 1: w = w.reshape(cout//4,4,H*W).permute(0,2,1)
+    else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3).reshape(cout//4, H*cin*W, 4)
+
+    # contiguous creates the image, and early realize static weights (TODO: don't always realize)
+    x, w = x.contiguous(), w.contiguous().realize()
+
+    # put it back for normal conv
+    x = x.reshape(bs, iy, ix, groups*cin).permute(0,3,1,2)
+    w = w.reshape(cout//4, H, cin//4 if cin >= 4 else 1, W, 4, 4 if cin >= 4 else 1).permute(0,4,2,5,1,3).reshape(cout, cin, H, W)
+
+    # run normal conv
+    ret = x._conv2d(w, groups, padding, sy, sx, dy, dx)
+
+    # make image sized
+    oy, ox = ret.shape[2:]
+    ret = ret.permute(0,2,3,1).reshape(bs*oy, ox*cout//4, 4).contiguous()
+
+    # undo hack for non multiples of 4 on C.rcout
+    if added_output_channels != 0:
+      ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :, :, :-added_output_channels]
+      rcout -= added_output_channels
+      cout = groups * rcout
+
+    # NCHW output
+    return ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+
+  def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, stride=1, groups=1, dilation=1, padding=0):
+    if HLOP:
+      padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
+      ret = (self._image_conv2d if IMAGE >= 1 else self._conv2d)(weight, groups, padding_, *make_pair(stride), *make_pair(dilation))
+    else:
+      ret = mlops.Conv2D.apply(self, weight, stride=stride, groups=groups, dilation=dilation, padding=padding)
+    return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
   # ***** math functions (unary) *****
 

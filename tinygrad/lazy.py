@@ -36,7 +36,8 @@ Device = _Device()
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
-SHUFFLE_PAD_OPS = OPT>=3  # NOTE: 0/0 is NaN if you pad, so this can change the output
+PUSH_PERMUTES = OPT>=3    # fairly untested, but gets kernels back to 200 for openpilot
+SHUFFLE_PAD_OPS = OPT>=4  # NOTE: 0/0 is NaN if you pad, so this can change the output
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
@@ -211,9 +212,47 @@ class LazyBuffer:
         return self.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)))
       # TODO: MovementOps.FLIP / MovementOps.STRIDED?
 
+    # push permutes before reduce ops
+    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.optype == ReduceOps:
+      # reduceops have one buffer input, permute it
+      narg = tuple(self.op.arg[arg[i]] for i in range(len(arg)))
+      src, rop = self.op.src[0], self.op.op
+      src.children = [y for y in src.children if self != y]
+      del self  # TODO: why doesn't this delete remove it from the children
+      return src.movement_op(op, arg).reduce_op(rop, narg)
+
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and local_st.contiguous:
       return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
+
+    # move permutes before reshapes if we can
+    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
+      # is contract? if so, group the axis
+      def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
+        out : List[List[int]] = []
+        curr : List[int] = []
+        for t in old_shape:
+          if len(out) >= len(new_shape): break
+          if t*prod(curr) <= new_shape[len(out)]:
+            curr.append(t)
+          else:
+            out.append(curr)
+            curr = [t]
+        out.append(curr)
+        if len(new_shape) == len(out) and all(prod(i) == j and len(i) >= 1 for i,j in zip(out, new_shape)):
+          return out
+      contraction = get_contraction(self.op.src[0].shape, self.shape)
+      if contraction is not None:
+        numbered = []
+        start = 0
+        for c in contraction:
+          numbered.append(list(range(start, start+len(c))))
+          start += len(c)
+        new_arg = []
+        for p in arg:
+          new_arg += numbered[p]
+        return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
+          .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
     # some strideds are actually just reshapes
     # NOTE: due to how strided works, we have to check the parent to be contiguous also

@@ -50,7 +50,7 @@ class TestOpt(unittest.TestCase):
     with CLCache():
       img_bn = bn(img).realize()
       print(img_bn)
-      assert len(GlobalCounters.cache)  == 3, "optimizer didn't fold batchnorm"
+      assert len(GlobalCounters.cache) == 3, "optimizer didn't fold batchnorm"
     Tensor.training = False
 
   def test_fold_conv_sgd(self):
@@ -65,7 +65,7 @@ class TestOpt(unittest.TestCase):
       opt.step()
       # TODO: this should be 4, but the sum output child stays around
       # with pushing_permutes it can be 3
-      assert len(GlobalCounters.cache) == 5, "optimizer didn't fold conv-backward SGD"
+      assert len(GlobalCounters.cache) in [4,5], "optimizer didn't fold conv-backward SGD"
     Tensor.training = False
 
   def test_fold_conv_batchnorm_sgd(self):
@@ -80,7 +80,7 @@ class TestOpt(unittest.TestCase):
       opt.zero_grad()
       img_bn.backward()
       opt.step()
-      assert len(GlobalCounters.cache) == 10, "optimizer didn't fold conv-backward batchnorm"
+      assert len(GlobalCounters.cache) in [9,10], "optimizer didn't fold conv-backward batchnorm"
     Tensor.training = False
 
   def test_fold_conv_batchnorm_notrain(self):
