@@ -1,5 +1,6 @@
 from collections import namedtuple
 import os, math, functools, time
+from typing import Tuple, List
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x): return math.prod(x)
@@ -47,3 +48,18 @@ def get_conv_args(x_shape, w_shape, stride=1, groups=1, padding=0, dilation=1, o
     raise TypeError(f"Input Tensor shape {x_shape} does not match the shape of the weights {w_shape}. ({cin*groups} vs. {cin_})")
   assert cout % groups == 0 and (out_shape is None or out_shape == (bs, cout, oy, ox))
   return ConvArgs(H, W, groups, cout//groups, cin, oy, ox, iy, ix, sy, sx, bs, cout, py, py_, px, px_, dy, dx, (bs, cout, oy, ox))
+
+# is contract? if so, group the axis
+def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
+  out : List[List[int]] = []
+  curr : List[int] = []
+  for t in old_shape:
+    if len(out) >= len(new_shape): break
+    if t*prod(curr) <= new_shape[len(out)]:
+      curr.append(t)
+    else:
+      out.append(curr)
+      curr = [t]
+  out.append(curr)
+  if len(new_shape) == len(out) and all(prod(i) == j and len(i) >= 1 for i,j in zip(out, new_shape)):
+    return out
