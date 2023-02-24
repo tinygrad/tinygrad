@@ -127,13 +127,7 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Conv":
         x,w,b = inp if len(inp) == 3 else (inp[0], inp[1], None)
         assert 'dilations' not in opt or opt['dilations'] == (1,1)
-        if opt['pads'][0] == opt['pads'][2] and opt['pads'][1] == opt['pads'][3]:
-          # symmetric padding
-          # TODO: is this backward?
-          ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1), padding=opt['pads'][0:2])
-        else:
-          x = x.pad2d((opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]))
-          ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1))
+        ret = x.conv2d(w, b, stride=opt['strides'], groups=opt.get('group', 1), padding=(opt['pads'][0], opt['pads'][2], opt['pads'][1], opt['pads'][3]) if 'pads' in opt else 0)
       elif n.op_type in ["Add", "Sub", "Mul"]:
         # TODO: add this to tinygrad? i don't think it's in torch
         if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
@@ -153,8 +147,8 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "AveragePool":
-        assert opt['kernel_shape'] == opt['strides'] or opt['strides'] == (1,1)
-        ret = inp[0].avg_pool2d(opt['kernel_shape'])
+        #assert opt['kernel_shape'] == opt['strides'] or opt['strides'] == (1,1)
+        ret = inp[0].avg_pool2d(opt['kernel_shape'], opt['strides'])
       elif n.op_type == "MaxPool":
         #assert opt['kernel_shape'] == opt['strides'], f"kernel_shape and stride mismatch {opt}"
         #opt['kernel_shape'] = opt['strides']
