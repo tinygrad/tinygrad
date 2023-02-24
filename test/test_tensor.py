@@ -41,7 +41,7 @@ class TestTinygrad(unittest.TestCase):
       W = Tensor(W_init, requires_grad=True)
       m = Tensor(m_init)
       out = x.dot(W).relu()
-      out = out.logsoftmax()
+      out = out.log_softmax()
       out = out.mul(m).add(m).sum()
       out.backward()
       return out.cpu().numpy(), x.grad.cpu().numpy(), W.grad.cpu().numpy()
@@ -67,7 +67,7 @@ class TestTinygrad(unittest.TestCase):
       x = u.mul(v).relu()
       y = u.mul(w).relu()
       out = x.add(y).mul(y).relu()
-      out = out.logsoftmax()
+      out = out.log_softmax()
       out = out.sum()
       out.backward()
       return out.cpu().numpy(), u.cpu().grad.numpy(), v.cpu().grad.numpy(), w.cpu().grad.numpy()
@@ -123,7 +123,7 @@ class TestTinygrad(unittest.TestCase):
 
     tiny_x = Tensor(x)
     tiny_W = Tensor(W)
-    tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
+    tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
     J = jacobian(tiny_func, tiny_x)
     NJ = numerical_jacobian(tiny_func, tiny_x)
 
@@ -138,7 +138,7 @@ class TestTinygrad(unittest.TestCase):
 
     tiny_x = Tensor(x)
     tiny_W = Tensor(W)
-    tiny_func = lambda x: x.dot(tiny_W).relu().logsoftmax()
+    tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
 
     self.assertTrue(gradcheck(tiny_func, tiny_x))
 

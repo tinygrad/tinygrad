@@ -39,7 +39,7 @@ class SpeedyResNet(nn.Module):
     ])
     self.lin = nn.Linear(512, num_classes, bias=False)
 
-  # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of logsoftmax
+  # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def forward(self, x):
     x = self.ic(x)
     x = self.ib(x)

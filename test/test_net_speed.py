@@ -75,7 +75,7 @@ class TestConvSpeed(unittest.TestCase):
       x = x.conv2d(c1).relu().avg_pool2d()
       x = x.conv2d(c2).relu().max_pool2d()
       x = x.reshape(shape=(x.shape[0], -1))
-      out = x.dot(l1).logsoftmax()
+      out = x.dot(l1).log_softmax()
       out = out.mean()
       et1 = time.time()
       out.backward()

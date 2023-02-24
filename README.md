@@ -82,7 +82,7 @@ class TinyBobNet:
     self.l2 = Tensor.uniform(128, 10)
 
   def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
+    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
 
 model = TinyBobNet()
 optim = optim.SGD([model.l1, model.l2], lr=0.001)

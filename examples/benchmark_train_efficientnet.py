@@ -39,7 +39,7 @@ if __name__ == "__main__":
     if i < 3 or not CLCACHE:
       st = time.monotonic()
       out = model.forward(x_train)
-      loss = out.logsoftmax().mul(y_train).mean()
+      loss = out.log_softmax().mul(y_train).mean()
       if i == 2 and CLCACHE: GlobalCounters.cache = []
       if BACKWARD:
         optimizer.zero_grad()
