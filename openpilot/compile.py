@@ -43,6 +43,7 @@ def model_exec(run_onnx, using_graph, **inputs):
   return ret.realize()
 
 def compile(dat, output_fn):
+  Tensor.manual_seed(1337)
   Tensor.no_grad = True
   using_graph = graph.GRAPH
   graph.GRAPH = False
