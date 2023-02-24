@@ -11,7 +11,10 @@ def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
     if inp.data_type in (1,10,7):
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+      if len(inp.float_data) > 0:
+        ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
+      else:
+        ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
@@ -91,11 +94,11 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Softmax": ret = inp[0].softmax()
       elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
       # one liners
-      elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
+      elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
       elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -3.4e38), opt.get('max', 3.4e38))))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Flatten": ret = inp[0].flatten(opt['axis'] if 'axis' in opt else 0)
-      elif n.op_type == "Transpose": ret = inp[0].permute(order=opt['perm'])
+      elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
       elif n.op_type == "ReduceL2": ret = inp[0].pow(2).sum(axis=opt['axes'], keepdim=opt['keepdims']).sqrt()
       elif n.op_type == "ReduceSum": ret = inp[0].sum(axis=opt['axes'], keepdim=opt['keepdims'])
@@ -103,7 +106,7 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Shape": ret = inp[0].shape
       elif n.op_type == "Expand": ret = inp[0].reshape([1]*(max(len(inp[0].shape), len(inp[1]))-len(inp[0].shape)) + list(inp[0].shape)) # just broadcast
       elif n.op_type == "Div": ret = inp[0].div(inp[1])
-      elif n.op_type == "Constant": ret = opt['value']
+      elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Unsqueeze":
         if 'axes' not in opt: opt['axes'] = [int(x) for x in safe_numpy(inp[1])]

@@ -44,8 +44,27 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 backend_test.include('test_unsqueeze_*')
 backend_test.include('test_sum_*')
 backend_test.include('test_gemm_*')
+backend_test.include('test_transpose_*')
+backend_test.include('test_tanh_*')
+
+# should be passing (good place to start!)
+backend_test.include('test_conv_.*')
+backend_test.include('test_reshape_*')
+backend_test.include('test_flatten_*')
+backend_test.include('test_expand_*')
+backend_test.include('test_clip_*')
+
+# requires CastLike?
+#backend_test.include('test_relu_*')
+#backend_test.include('test_elu_*')
+
+# failing for lack of type support
+#backend_test.include('test_add_*')
+#backend_test.include('test_sub_*')
+#backend_test.include('test_div_*')
 
 # the node tests, slowly
+#backend_test.include('test_reduce_sum_*')
 #backend_test.include('test_shape_*')
 #backend_test.include('test_softmax_*')
 #backend_test.include('test_slice_*')
