@@ -1,4 +1,4 @@
-from tinygrad.helpers import prod, argsort, reduce_shape, get_conv_args
+from tinygrad.helpers import prod, argsort, get_conv_args
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
 from tinygrad.tensor import Function
 
@@ -48,16 +48,16 @@ class Reciprocal(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x, axis=None):
+  def forward(self, x, new_shape):
     self.input_shape = x.shape
-    return x.reduce_op(ReduceOps.SUM, reduce_shape(x.shape, axis))
+    return x.reduce_op(ReduceOps.SUM, new_shape)
 
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.EXPAND, self.input_shape)
 
 class Max(Function):
-  def forward(self, x, axis=None):
-    ret = x.reduce_op(ReduceOps.MAX, reduce_shape(x.shape, axis))
+  def forward(self, x, new_shape):
+    ret = x.reduce_op(ReduceOps.MAX, new_shape)
     self.save_for_backward(x, ret)
     return ret
 
@@ -143,7 +143,6 @@ class Permute(Function):
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.PERMUTE, tuple(argsort(self.input_order)))
 
-# TODO: merge Slice and Flip into Stride with the 3 arguments. or don't, __getitem__ should support strides as an hlop
 class Slice(Function):
   def forward(self, x, arg=None):
     self.narg = tuple((0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg))

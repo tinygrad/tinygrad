@@ -129,14 +129,13 @@ hlops are syntactic sugar around mlops. They support most things torch does.
 
 ### mlops
 
-mlops are mid level ops, there's 15 of them. They understand memory allocation and derivatives
+mlops are mid level ops, there's 15 of them. They understand derivatives. They are very simple.
 
 ```
-Relu, Log, Exp                          # unary ops
+Relu, Log, Exp, Reciprocal              # unary ops
 Sum, Max                                # reduce ops (with axis argument)
 Add, Sub, Mul, Pow                      # binary ops (no broadcasting, use expand)
-Reshape, Permute, Slice, Expand, Flip   # movement ops
-Conv2D(NCHW)                            # processing op (Matmul is also Conv2D)
+Expand, Reshape, Permute, Slice, Flip   # movement ops
 ```
 
 You no longer need to write mlops for a new accelerator
@@ -147,14 +146,12 @@ The autodiff stuff is all in mlops now so you can focus on the raw operations
 
 ```
 Buffer                                                     # class of memory on this device
-unary_op  (RELU, EXP, LOG, NEG, GT0)                       # A -> A
+unary_op  (NOOP, NEG, RELU, EXP, LOG, GT0, RECIPROCAL)     # A -> A
 reduce_op (SUM, MAX)                                       # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + B -> C (all the same size)
-movement_op (RESHAPE, PERMUTE, PAD, SHRINK, EXPAND, FLIP)  # A -> B (different size)
-processing_op (CONV)                                       # A + B -> C
+binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + A -> A (all the same size)
+movement_op (RESHAPE, PERMUTE, EXPAND, FLIP, PAD, SHRINK)  # A -> B (different size)
+fused_op [[optional]] (MULACC)                             # A * A -> B
 ```
-
-When tinygrad moves to lazy evaluation, optimizations will happen here.
 
 ## ImageNet inference
 

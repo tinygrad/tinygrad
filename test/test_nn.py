@@ -5,7 +5,6 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm
 import torch
 
-@unittest.skipUnless(Device.DEFAULT == "CPU", "Not Implemented")
 class TestNN(unittest.TestCase):
 
   def test_batchnorm2d(self, training=False):
