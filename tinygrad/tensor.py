@@ -38,7 +38,6 @@ import tinygrad.mlops as mlops
 
 class Tensor:
   __deletable__ = ('_ctx',)
-  _rng : ClassVar[np.random.Generator] = np.random.default_rng()
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
 
@@ -80,10 +79,6 @@ class Tensor:
   @property
   def device(self) -> str: return self.lazydata.device
 
-  @staticmethod
-  def manual_seed(seed=None):
-    Tensor._rng = np.random.default_rng(seed=seed)
-
   # ***** data handlers ****
 
   def realize(self) -> Tensor:
@@ -116,8 +111,11 @@ class Tensor:
     return ret
 
   # ***** creation helper functions *****
+  # TODO: remove use of numpy here and make lazy
 
-  # TODO: remove use of numpy here
+  _rng : ClassVar[np.random.Generator] = np.random.default_rng()
+  @staticmethod
+  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @classmethod
   def zeros_like(cls, tensor, **kwargs): return cls.zeros(*tensor.shape, **kwargs)
