@@ -81,7 +81,7 @@ def get_run_onnx(onnx_model):
     for num,n in enumerate(onnx_model.graph.node):
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else (input_tensors[x] if x != str() else None)) for x in n.input]
       opt = attribute_dict[num]
-      if debug: print(f"{num}: op {n.op_type} shape {[x.shape for x in inp]} opt {opt}")
+      if debug: print(f"{num}: op {n.op_type} shape {[x.shape if x is not None else None for x in inp]} opt {opt}")
 
       # free ones
       if n.op_type == "Relu": ret = inp[0].relu()
