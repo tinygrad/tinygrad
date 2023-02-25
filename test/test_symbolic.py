@@ -44,6 +44,10 @@ class TestSymbolic(unittest.TestCase):
   @unittest.skip("mod max is wrong")
   def test_mod_factor(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "(((a*100)+(b*50))%100)")
+
+  @unittest.skip("this doesn't work yet")
+  def test_mod_mul(self):
+    self.helper_test_variable((Variable("a", 0, 6)*10)%9, 0, 6, "a")
   
   def test_sum_0(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)]), 0, 7, "a")

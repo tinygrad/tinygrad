@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import functools, itertools
+import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG
@@ -284,7 +284,10 @@ class Tensor:
       oy = (iy - dy * (ky-1) - 1)//sy + 1
       ox = (ix - dx * (kx-1) - 1)//sx + 1
       # duplicate the inputs for each of the kernels
-      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+      #xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+      # NOTE: if you oversize this, you can avoid the ZeroView creation. remove when optimizer can fix
+      ey, ex = math.ceil(ky*(iy+dy) / iy), math.ceil(kx*(ix+dx) / ix)
+      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ey, iy, ex, ix).reshape(bs, c, ey*iy, ex*ix)
       # slide by dilation
       xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+dy)), (0,kx*(ix+dx))))
       xup = xup.reshape(bs, c, ky, iy+dy, kx, ix+dx)
