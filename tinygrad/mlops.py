@@ -76,6 +76,18 @@ class Max(Function):
 
 # ************* binary ops *************
 
+class Maximum(Function):
+  def forward(self, x, y):
+    ret = x.binary_op(BinaryOps.MAX, y)
+    self.save_for_backward(y, ret)
+    return ret
+
+  def backward(self, grad_output):
+    mask = self.saved_tensors[0].binary_op(BinaryOps.CMPEQ, self.saved_tensors[1])
+    return grad_output.binary_op(BinaryOps.MUL, mask.unary_op(UnaryOps.NOT)) if self.needs_input_grad[0] else None, \
+           grad_output.binary_op(BinaryOps.MUL, mask) if self.needs_input_grad[1] else None
+
+
 class Add(Function):
   def forward(self, x, y):
     return x.binary_op(BinaryOps.ADD, y)

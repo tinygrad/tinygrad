@@ -342,7 +342,8 @@ class Tensor:
   # ***** mlops (unary) *****
 
   def contiguous(self): return mlops.Contiguous.apply(self)
-  def relu(self): return mlops.ReLU.apply(self)
+  def relu(self): return self.maximum(0)
+  #def relu(self): return mlops.ReLU.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
   def reciprocal(self): return mlops.Reciprocal.apply(self)
@@ -379,6 +380,7 @@ class Tensor:
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
+  def maximum(self, x, reverse=False): return self._broadcasted(mlops.Maximum, x, reverse)
   def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse)
   def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse)
   def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse)
