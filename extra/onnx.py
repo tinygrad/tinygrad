@@ -4,7 +4,12 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
-from onnx.helper import tensor_dtype_to_np_dtype
+try:
+  from onnx.helper import tensor_dtype_to_np_dtype
+except ImportError:
+  # for onnx < 1.13
+  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+  tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
 
 # global numpy cache for parameters
 numpy_cache = {}
@@ -93,7 +98,7 @@ def get_run_onnx(onnx_model):
     for num,n in enumerate(onnx_model.graph.node):
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else (input_tensors[x] if x != str() else None)) for x in n.input]
       opt = attribute_dict[num]
-      if debug: print(f"{num}: op {n.op_type} shape {[x.shape if x is not None else None for x in inp]} opt {opt}")
+      if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
 
       # free ones
       if n.op_type == "Relu": ret = inp[0].relu()
@@ -102,12 +107,15 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
       # one liners
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
-      elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt.get('min', -3.4e38), opt.get('max', 3.4e38))))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
-      elif n.op_type == "GlobalAveragePool": ret = inp[0].mean(axis=tuple(range(2, len(inp[0].shape))), keepdim=True)
-      elif n.op_type == "Div": ret = inp[0].div(inp[1])
+      elif n.op_type == "Div":
+        if prod(inp[1].shape) == 1:
+          # due to SHUFFLE_PAD_OPS issues, this saves a kernel by taking the reciprocal of constants first, then using mul
+          ret = inp[0] * (1.0/inp[1])
+        else:
+          ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Resize":
@@ -125,9 +133,7 @@ def get_run_onnx(onnx_model):
         args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
-      elif n.op_type in ["Sum"]:
-        ret = functools.reduce(Tensor.__add__, inp)
-      elif n.op_type in ["Add", "Sub", "Mul"]:
+      elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
         # TODO: add this to tinygrad? i don't think it's in torch
         if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
           inp[1] = inp[1].reshape(inp[0].shape)
@@ -136,6 +142,7 @@ def get_run_onnx(onnx_model):
         if n.op_type == "Add": ret = inp[0] + inp[1]
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = inp[0] * inp[1]
+        if n.op_type == "Pow": ret = inp[0] ** inp[1]
       elif n.op_type == "Split":
         if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         i = 0

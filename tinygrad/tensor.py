@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import functools, itertools
+import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG
@@ -133,7 +133,7 @@ class Tensor:
   def randn(cls, *shape, **kwargs): return cls(Tensor._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
 
   @classmethod
-  def arange(cls, stop, start=0, **kwargs): return cls(np.arange(start=start, stop=stop, dtype=np.float32), **kwargs)
+  def arange(cls, stop, start=0, step=1, **kwargs): return cls(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
   # TODO: uniform should be a late binding thing
   # Return random number between -1 and 1
@@ -284,7 +284,10 @@ class Tensor:
       oy = (iy - dy * (ky-1) - 1)//sy + 1
       ox = (ix - dx * (kx-1) - 1)//sx + 1
       # duplicate the inputs for each of the kernels
-      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+      #xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ky, iy, kx, ix).reshape(bs, c, ky*iy, kx*ix)
+      # NOTE: if you oversize this, you can avoid the ZeroView creation. remove when optimizer can fix
+      ey, ex = math.ceil(ky*(iy+dy) / iy), math.ceil(kx*(ix+dx) / ix)
+      xup = self.reshape(bs, c, 1, iy, 1, ix).expand(bs, c, ey, iy, ex, ix).reshape(bs, c, ey*iy, ex*ix)
       # slide by dilation
       xup = xup.slice(((0,bs), (0,c), (0,ky*(iy+dy)), (0,kx*(ix+dx))))
       xup = xup.reshape(bs, c, ky, iy+dy, kx, ix+dx)
@@ -342,10 +345,8 @@ class Tensor:
   # ***** mlops (unary) *****
 
   def contiguous(self): return mlops.Contiguous.apply(self)
-  def relu(self): return mlops.ReLU.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
-  def reciprocal(self): return mlops.Reciprocal.apply(self)
 
   # ***** math functions (unary) *****
 
@@ -355,6 +356,8 @@ class Tensor:
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
+  def relu(self): return self.maximum(0)
+  def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
 
@@ -369,22 +372,25 @@ class Tensor:
   def quick_gelu(self): return self * (self * 1.702).sigmoid()
   def leakyrelu(self, neg_slope=0.01): return self.relu() - (-neg_slope*self).relu()
   def mish(self): return self * self.softplus().tanh()
-  def softplus(self, limit=20, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
+  def softplus(self, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
 
   # ***** broadcasted binary mlops *****
 
-  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool) -> Tensor:
+  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
     x,y = [Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
-  def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse)
-  def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse)
-  def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse)
-  def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse)
-  def div(self, x, reverse=False): return (self.reciprocal() * x) if reverse else (self * (x.reciprocal() if isinstance(x, Tensor) else (1/x)))
+  def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse) if isinstance(x, Tensor) or x != 0.0 else self
+  def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse) if isinstance(x, Tensor) or x != 0.0 or reverse else self
+  def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse) if isinstance(x, Tensor) or x != 1.0 else self
+  def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse) if isinstance(x, Tensor) or x != 1.0 or reverse else self
+  def div(self, x, reverse=False): return self._broadcasted(mlops.Div, x, reverse) if isinstance(x, Tensor) or x != 1.0 or reverse else self
   def matmul(self, x:Tensor, reverse=False): return x.dot(self) if reverse else self.dot(x)
+
+  def maximum(self, x): return self._broadcasted(mlops.Maximum, x)
+  def minimum(self, x): return -((-self).maximum(-x))
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 

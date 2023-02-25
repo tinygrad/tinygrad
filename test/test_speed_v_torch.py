@@ -11,7 +11,7 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, DEBUG
-from extra.jit import TinyJit
+from tinygrad.jit import TinyJit
 METAL = getenv("METAL")
 try:
   from tinygrad.runtime.opencl import CL
@@ -162,10 +162,6 @@ class TestSpeed(unittest.TestCase):
   def test_add_constant(self):
     def f(a, b): return a+2.0
     helper_test_generic_square('add_constant', 4096, f, f, onearg=True)
-
-  def test_add_constant_zero(self):
-    def f(a, b): return a+0.0
-    helper_test_generic_square('add_constant_zero', 4096, f, f, onearg=True)
 
   def test_add_sq(self):
     def f(a, b): return a*a + b*b

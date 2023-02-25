@@ -29,7 +29,7 @@ def create_onnx_model(keras_model):
 def compile_onnx_model(onnx_model):
   run_onnx = get_run_onnx(onnx_model)
 
-  from extra.jit import TinyJit
+  from tinygrad.jit import TinyJit
   @TinyJit
   def run(x): return run_onnx({"x": x}, debug=False)['predictions'].realize()
 

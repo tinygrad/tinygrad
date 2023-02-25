@@ -52,6 +52,10 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
 class TestOps(unittest.TestCase):
 
+  def test_maximum(self):
+    helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
+  def test_minimum(self):
+    helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
   def test_add_simple(self):
@@ -68,11 +72,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
   def test_div_const(self):
     helper_test_op([(45,65)], lambda x: x/255, lambda x: x/255)
+    helper_test_op([(45,65)], lambda x: x/1, lambda x: x/1)
+    helper_test_op([(45,65)], lambda x: 1/x, lambda x: 1/x)
+    helper_test_op([(45,65)], lambda x: x/2, lambda x: x/2)
+    helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
   def test_pow(self):
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
     helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
+  def test_pow_const(self):
+    helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
+    helper_test_op([(45,65)], lambda x: 1.0**x, lambda x: 1.0**x)
+    helper_test_op([(45,65)], lambda x: x**2.0, lambda x: x**2.0)
+    helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
   def test_relu(self):
@@ -91,6 +104,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
   def test_softplus(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.softplus(x), Tensor.softplus, atol=1e-6, grad_atol=1e-6)
+  @unittest.skip("not supported in older pytorch")
   def test_gelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu)
   def test_quick_gelu(self):
