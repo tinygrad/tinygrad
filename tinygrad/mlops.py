@@ -8,15 +8,6 @@ class Contiguous(Function):
 
 # ************* unary ops *************
 
-class ReLU(Function):
-  def forward(self, x):
-    ret = x.unary_op(UnaryOps.RELU)
-    self.save_for_backward(ret)
-    return ret
-
-  def backward(self, grad_output):
-    return self.saved_tensors[0].unary_op(UnaryOps.GT0).binary_op(BinaryOps.MUL, grad_output)
-
 class Log(Function):
   def forward(self, x):
     self.save_for_backward(x)

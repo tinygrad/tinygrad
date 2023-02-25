@@ -30,10 +30,8 @@ class LLVMBuffer(ExplicitExecAST):
   op_lookup : ClassVar = {
     UnaryOps.NOOP: lambda builder,x: x,
     UnaryOps.NEG: lambda builder,x: builder.fneg(x, flags=('fast',)),
-    UnaryOps.RELU: lambda builder,x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x, flags=('fast',)), x, ir.Constant(ir.FloatType(), 0)),
     UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x], fastmath=('fast',)),
     UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x], fastmath=('fast',)),
-    UnaryOps.GT0: lambda builder,x: builder.select(builder.fcmp_ordered(">", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), 0)),
     UnaryOps.RECIPROCAL: lambda builder,x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x, flags=('fast',)),
     UnaryOps.NOT: lambda builder,x: builder.fsub(ir.Constant(ir.FloatType(), 1), x, flags=('fast',)),
     BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y, flags=('fast',)),
