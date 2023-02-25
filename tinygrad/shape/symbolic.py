@@ -44,7 +44,14 @@ class Node:
   def __mod__(self, b:int):
     if b == 1: return NumNode(0)
     if isinstance(self, SumNode):
-      a = Variable.sum([(x if not isinstance(x, NumNode) else Variable.num(modn(x.b, b))) for x in self.nodes if not (isinstance(x, (MulNode, NumNode))) or (x.b%b != 0)])
+      new_nodes = []
+      for x in self.nodes:
+        if isinstance(x, NumNode): new_nodes.append(Variable.num(modn(x.b, b)))
+        elif isinstance(x, MulNode): new_nodes.append(x.a * modn(x.b, b))
+        else: new_nodes.append(x)
+      a = Variable.sum(new_nodes)
+    elif isinstance(self, MulNode):
+      a = self.a * modn(self.b, b)
     else:
       a = self
     if a.min >= 0 and a.max < b: return a
