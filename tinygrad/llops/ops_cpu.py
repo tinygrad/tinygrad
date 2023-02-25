@@ -32,8 +32,8 @@ def einsum_mulacc(einsum, get_strides):
   return mulacc
 
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
-  UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x), BinaryOps.MAX: np.maximum,
-  BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
+  UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x),
+  BinaryOps.MAX: np.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
   MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
   MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
   MovementOps.STRIDED: numpy_strided, ProcessingOps.CONV: numpy_conv,
