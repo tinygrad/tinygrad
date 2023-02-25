@@ -202,21 +202,24 @@ class LazyBuffer:
       return self
 
     # two ops in a row is one op. merge them if unresolved
-    if self.realized is None and self.op.op == op:
+    if self.realized is None and self.op.op == op and op != MovementOps.STRIDED:
+      # TODO: why is deleting self from children needed? shouldn't GC do it?
+      self.op.src[0].children.discard(self)
       if op in [MovementOps.RESHAPE, MovementOps.EXPAND, MovementOps.SHRINK]:
         return self.op.src[0].movement_op(op, arg)
       if op == MovementOps.PERMUTE:
         return self.op.src[0].movement_op(op, tuple(self.op.arg[i] for i in arg))
       if op == MovementOps.PAD:
         return self.op.src[0].movement_op(op, tuple((b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)))
-      # TODO: MovementOps.FLIP / MovementOps.STRIDED?
+      if op == MovementOps.FLIP:
+        return self.op.src[0].movement_op(op, tuple(i for i in arg+self.op.arg if not (i in arg and i in self.op.arg)))
 
     # push permutes before reduce ops
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.optype == ReduceOps:
       # reduceops have one buffer input, permute it
       narg = tuple(self.op.arg[arg[i]] for i in range(len(arg)))
       src, rop = self.op.src[0], self.op.op
-      src.children = [y for y in src.children if self != y]
+      src.children.discard(self)
       del self  # TODO: why doesn't this delete remove it from the children
       return src.movement_op(op, arg).reduce_op(rop, narg)
 
