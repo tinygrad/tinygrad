@@ -81,6 +81,10 @@ def Expand(input, shape):
   # TODO: openpilot is broken if we actually do the expand!!
   return input.reshape(x_shape) #.expand(shape_ret)
 
+def LRN(input, size, alpha=1e-4, beta=0.75, bias=1.0):
+  bs, c, iy, ix = input.shape 
+  return input / input.mul(input).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+
 def Identity(input): return input
 def Neg(input): return -input
 def Reciprocal(input): return input.reciprocal()
