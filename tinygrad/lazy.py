@@ -4,7 +4,7 @@ import sys, weakref, importlib, inspect
 from weakref import WeakValueDictionary
 from tinygrad.helpers import ConvArgs, prod, DEBUG
 from tinygrad.shape import ShapeTracker
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers, GenericExecAST
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers, GenericExecAST
 from tinygrad.graph import log_op
 from tinygrad.helpers import getenv
 
@@ -37,7 +37,6 @@ Device = _Device()
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
 PUSH_PERMUTES = OPT>=3    # fairly untested, but gets kernels back to 200 for openpilot
-SHUFFLE_PAD_OPS = OPT>=4  # NOTE: 0/0 is NaN if you pad, so this can change the output
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
@@ -259,8 +258,8 @@ class LazyBuffer:
     if op == MovementOps.STRIDED and local_st.contiguous and self.st.contiguous:
       return self.movement_op(MovementOps.RESHAPE, tuple(i for i,_ in arg))
 
-    # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and (SHUFFLE_PAD_OPS or op != MovementOps.PAD) and op not in [MovementOps.EXPAND, MovementOps.STRIDED]:
+    # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op not in [MovementOps.EXPAND, MovementOps.STRIDED] and (op != MovementOps.PAD or all(x.op != BinaryOps.DIV for x in get_lazyops(self.op))):
       return replace_with_movement_op(self.op, op, arg)
 
     # create the buffer
