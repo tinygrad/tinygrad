@@ -52,6 +52,10 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
 class TestOps(unittest.TestCase):
 
+  def test_maximum(self):
+    helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
+  def test_minimum(self):
+    helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add)
   def test_add_simple(self):

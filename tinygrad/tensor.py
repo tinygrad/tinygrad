@@ -342,8 +342,6 @@ class Tensor:
   # ***** mlops (unary) *****
 
   def contiguous(self): return mlops.Contiguous.apply(self)
-  def relu(self): return self.maximum(0)
-  #def relu(self): return mlops.ReLU.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
   def reciprocal(self): return mlops.Reciprocal.apply(self)
@@ -356,6 +354,7 @@ class Tensor:
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
+  def relu(self): return self.maximum(0)
 
   # ***** activation functions (unary) *****
 
@@ -380,13 +379,15 @@ class Tensor:
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
-  def maximum(self, x, reverse=False): return self._broadcasted(mlops.Maximum, x, reverse)
   def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse)
   def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse)
   def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse)
   def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse)
   def div(self, x, reverse=False): return (self.reciprocal() * x) if reverse else (self * (x.reciprocal() if isinstance(x, Tensor) else (1/x)))
   def matmul(self, x:Tensor, reverse=False): return x.dot(self) if reverse else self.dot(x)
+
+  def maximum(self, x, reverse=False): return self._broadcasted(mlops.Maximum, x, reverse)
+  def minimum(self, x, reverse=False): return -((-self).maximum(-x, reverse=reverse))
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
