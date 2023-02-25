@@ -347,7 +347,6 @@ class Tensor:
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
-  def reciprocal(self): return mlops.Reciprocal.apply(self)
 
   # ***** math functions (unary) *****
 
@@ -358,6 +357,7 @@ class Tensor:
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
   def relu(self): return self.maximum(0)
+  def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
 
@@ -386,7 +386,7 @@ class Tensor:
   def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse)
   def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse)
   def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse)
-  def div(self, x, reverse=False): return (self.reciprocal() * x) if reverse else (self * (x.reciprocal() if isinstance(x, Tensor) else (1/x)))
+  def div(self, x, reverse=False): return self._broadcasted(mlops.Div, x, reverse)
   def matmul(self, x:Tensor, reverse=False): return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x): return self._broadcasted(mlops.Maximum, x)

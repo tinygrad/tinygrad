@@ -25,17 +25,6 @@ class Exp(Function):
   def backward(self, grad_output):
     return self.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output)
 
-class Reciprocal(Function):
-  def forward(self, x):
-    ret = x.unary_op(UnaryOps.RECIPROCAL)
-    self.save_for_backward(ret)
-    return ret
-
-  def backward(self, grad_output):
-    return grad_output.unary_op(UnaryOps.NEG).binary_op(BinaryOps.MUL, self.saved_tensors[0]).binary_op(BinaryOps.MUL, self.saved_tensors[0])
-
-# TODO: add Neg? confirm the optimizer on Sub good enough
-
 # ************* reduce ops *************
 
 class Sum(Function):
@@ -111,10 +100,18 @@ class Pow(Function):
 
   def backward(self, grad_output):
     x,y,powxy = self.saved_tensors
-    # grad_x = grad_output * y * (pow(x,y)/x)
-    # grad_y = grad_output * log(x) * pow(x,y)
     return grad_output.binary_op(BinaryOps.MUL, y.binary_op(BinaryOps.MUL, powxy.binary_op(BinaryOps.DIV, x))) if self.needs_input_grad[0] else None, \
            grad_output.binary_op(BinaryOps.MUL, x.unary_op(UnaryOps.LOG).binary_op(BinaryOps.MUL, powxy)) if self.needs_input_grad[1] else None
+
+class Div(Function):
+  def forward(self, x, y):
+    self.save_for_backward(x, y)
+    return x.binary_op(BinaryOps.DIV, y)
+
+  def backward(self, grad_output):
+    x, y = self.saved_tensors
+    return grad_output.binary_op(BinaryOps.DIV, y) if self.needs_input_grad[0] else None, \
+           grad_output.unary_op(UnaryOps.NEG).binary_op(BinaryOps.MUL, x).binary_op(BinaryOps.DIV, y.binary_op(BinaryOps.MUL, y)) if self.needs_input_grad[1] else None
 
 # ************* movement ops *************
 

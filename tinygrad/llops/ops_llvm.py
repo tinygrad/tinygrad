@@ -32,7 +32,6 @@ class LLVMBuffer(ExplicitExecAST):
     UnaryOps.NEG: lambda builder,x: builder.fneg(x, flags=('fast',)),
     UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x], fastmath=('fast',)),
     UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x], fastmath=('fast',)),
-    UnaryOps.RECIPROCAL: lambda builder,x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x, flags=('fast',)),
     UnaryOps.NOT: lambda builder,x: builder.fsub(ir.Constant(ir.FloatType(), 1), x, flags=('fast',)),
     BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y, flags=('fast',)),
     BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),

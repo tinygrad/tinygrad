@@ -110,7 +110,12 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
-      elif n.op_type == "Div": ret = inp[0].div(inp[1])
+      elif n.op_type == "Div":
+        if prod(inp[1].shape) == 1:
+          # due to SHUFFLE_PAD_OPS issues, this saves a kernel by taking the reciprocal of constants first, then using mul
+          ret = inp[0] * (1.0/inp[1])
+        else:
+          ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Resize":
