@@ -100,6 +100,8 @@ def Softmax(input, axis=-1): return input.softmax(axis)
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
 
+def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
+def Min(*data_0): return -functools.reduce(Tensor.maximum, [-x for x in data_0])
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 

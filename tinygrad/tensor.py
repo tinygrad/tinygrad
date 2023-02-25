@@ -345,7 +345,6 @@ class Tensor:
   # ***** mlops (unary) *****
 
   def contiguous(self): return mlops.Contiguous.apply(self)
-  def relu(self): return mlops.ReLU.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
   def reciprocal(self): return mlops.Reciprocal.apply(self)
@@ -358,6 +357,7 @@ class Tensor:
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
+  def relu(self): return self.maximum(0)
 
   # ***** activation functions (unary) *****
 
@@ -376,7 +376,7 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool) -> Tensor:
+  def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
     x,y = [Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
@@ -388,6 +388,9 @@ class Tensor:
   def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse)
   def div(self, x, reverse=False): return (self.reciprocal() * x) if reverse else (self * (x.reciprocal() if isinstance(x, Tensor) else (1/x)))
   def matmul(self, x:Tensor, reverse=False): return x.dot(self) if reverse else self.dot(x)
+
+  def maximum(self, x): return self._broadcasted(mlops.Maximum, x)
+  def minimum(self, x): return -((-self).maximum(-x))
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
