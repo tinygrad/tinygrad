@@ -11,7 +11,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d
 from extra.utils import fetch
 
-def show_labels(prediction, confidence = 0.5, num_classes = 80):
+def show_labels(prediction, confidence=0.5, num_classes=80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
   coco_labels = coco_labels.decode('utf-8').split('\n')
   prediction = prediction.detach().cpu().numpy()
@@ -20,8 +20,8 @@ def show_labels(prediction, confidence = 0.5, num_classes = 80):
   prediction *= conf_mask
   # Iterate over batches
   for img_pred in prediction:
-    max_conf = np.amax(img_pred[:,5:5 + num_classes], axis=1)
-    max_conf_score = np.argmax(img_pred[:,5:5 + num_classes], axis=1)
+    max_conf = np.amax(img_pred[:,5:5+num_classes], axis=1)
+    max_conf_score = np.argmax(img_pred[:,5:5+num_classes], axis=1)
     max_conf_score = np.expand_dims(max_conf_score, axis=1)
     max_conf = np.expand_dims(max_conf, axis=1)
     seq = (img_pred[:,:5], max_conf, max_conf_score)
@@ -105,8 +105,8 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   write = False
   # Process img
   img_pred = prediction[0]
-  max_conf = np.amax(img_pred[:,5:5 + num_classes], axis=1)
-  max_conf_score = np.argmax(img_pred[:,5:5 + num_classes], axis=1)
+  max_conf = np.amax(img_pred[:,5:5+num_classes], axis=1)
+  max_conf_score = np.argmax(img_pred[:,5:5+num_classes], axis=1)
   max_conf_score = np.expand_dims(max_conf_score, axis=1)
   max_conf = np.expand_dims(max_conf, axis=1)
   seq = (img_pred[:,:5], max_conf, max_conf_score)
@@ -190,7 +190,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   num_anchors = len(anchors)
   prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
   # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
-  prediction = prediction.transpose(order=(0, 2, 1))
+  prediction = prediction.transpose(order=(0,2,1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
   prediction_cpu = prediction.cpu().numpy()
 
@@ -215,7 +215,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   anchors = np.expand_dims(anchors, 0)
   prediction_cpu[:,:,:2] += x_y_offset
   prediction_cpu[:,:,2:4] = np.exp(prediction_cpu[:,:,2:4])*anchors
-  prediction_cpu[:,:,5: 5 + num_classes] = sigmoid((prediction_cpu[:,:, 5 : 5 + num_classes]))
+  prediction_cpu[:,:,5:5+num_classes] = sigmoid((prediction_cpu[:,:,5:5+num_classes]))
   prediction_cpu[:,:,:4] *= stride
   return Tensor(prediction_cpu)
 
@@ -251,7 +251,6 @@ class Darknet:
         # LeakyReLU activation
         if activation == "leaky":
           module.append(lambda x: x.leakyrelu(0.1))
-      # TODO: Add tiny model
       elif module_type == "maxpool":
         size, stride = int(x["size"]), int(x["stride"])
         module.append(lambda x: x.max_pool2d(kernel_size=(size, size), stride=stride))
