@@ -4,7 +4,12 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
-from onnx.helper import tensor_dtype_to_np_dtype
+try:
+  from onnx.helper import tensor_dtype_to_np_dtype
+except ImportError:
+  # for onnx < 1.13
+  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+  tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
 
 # global numpy cache for parameters
 numpy_cache = {}
