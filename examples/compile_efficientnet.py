@@ -5,7 +5,7 @@ import ast
 
 def compile_net(run, special_names):
   # c header
-  cprog = ["#include <stdio.h>", "#include <math.h>","#define max(x,y) fmax(x,y)"] 
+  cprog = ["#include <stdio.h>", "#include <math.h>", "#define max(x,y) ((x>y)?x:y)"]
 
   # functions that run the net
   bufs = {}
