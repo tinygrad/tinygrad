@@ -11,7 +11,7 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, DEBUG
-from extra.jit import TinyJit
+from tinygrad.jit import TinyJit
 METAL = getenv("METAL")
 try:
   from tinygrad.runtime.opencl import CL

@@ -34,7 +34,7 @@ if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
 
-  from extra.jit import TinyJit
+  from tinygrad.jit import TinyJit
   @TinyJit
   def run(x): return model.forward(x).realize()
 
