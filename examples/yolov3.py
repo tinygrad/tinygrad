@@ -10,7 +10,6 @@ from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d
 from extra.utils import fetch
-from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
 
 def show_labels(prediction, confidence = 0.5, num_classes = 80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
@@ -78,16 +77,13 @@ def bbox_iou(box1, box2):
   # Get the coordinates of bounding boxes
   b1_x1, b1_y1, b1_x2, b1_y2 = box1[:,0], box1[:,1], box1[:,2], box1[:,3]
   b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,0], box2[:,1], box2[:,2], box2[:,3]
-
   # get the coordinates of the intersection rectangle
   inter_rect_x1 = np.maximum(b1_x1, b2_x1)
   inter_rect_y1 = np.maximum(b1_y1, b2_y1)
   inter_rect_x2 = np.maximum(b1_x2, b2_x2)
   inter_rect_y2 = np.maximum(b1_y2, b2_y2)
-
   #Intersection area
   inter_area = np.clip(inter_rect_x2 - inter_rect_x1 + 1, 0, 99999) * np.clip(inter_rect_y2 - inter_rect_y1 + 1, 0, 99999)
-
   #Union Area
   b1_area = (b1_x2 - b1_x1 + 1)*(b1_y2 - b1_y1 + 1)
   b2_area = (b2_x2 - b2_x1 + 1)*(b2_y2 - b2_y1 + 1)
@@ -99,7 +95,6 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
   prediction = prediction * conf_mask
-
   # Non max suppression
   box_corner = prediction
   box_corner[:,:,0] = (prediction[:,:,0] - prediction[:,:,2]/2)
@@ -108,7 +103,6 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   box_corner[:,:,3] = (prediction[:,:,1] + prediction[:,:,3]/2)
   prediction[:,:,:4] = box_corner[:,:,:4]
   write = False
-
   # Process img
   img_pred = prediction[0]
   max_conf = np.amax(img_pred[:,5:5 + num_classes], axis=1)
@@ -117,7 +111,6 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   max_conf = np.expand_dims(max_conf, axis=1)
   seq = (img_pred[:,:5], max_conf, max_conf_score)
   image_pred = np.concatenate(seq, axis=1)
-
   non_zero_ind = np.nonzero(image_pred[:,4])[0]
   assert all(image_pred[non_zero_ind,0] > 0)
   image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
@@ -129,10 +122,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
   if image_pred_.shape[0] == 0:
     print("No detections found!")
     return 0
-
-  img_classes = np.unique(image_pred_[:, -1])
-
-  for cls in img_classes:
+  for cls in np.unique(image_pred_[:, -1]):
     # perform NMS, get the detections with one particular class
     cls_mask = image_pred_*np.expand_dims(image_pred_[:, -1] == cls, axis=1)
     class_mask_ind = np.squeeze(np.nonzero(cls_mask[:,-2]))
@@ -142,9 +132,7 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
     # confidence is at the top
     conf_sort_index = np.argsort(image_pred_class[:,4])
     image_pred_class = image_pred_class[conf_sort_index]
-    idx = image_pred_class.shape[0]   #Number of detections
-
-    for i in range(idx):
+    for i in range(image_pred_class.shape[0]):
       # Get the IOUs of all boxes that come after the one we are looking at in the loop
       try:
         ious = bbox_iou(np.expand_dims(image_pred_class[i], axis=0), image_pred_class[i+1:])
@@ -156,10 +144,8 @@ def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0
       # Remove the non-zero entries
       non_zero_ind = np.squeeze(np.nonzero(image_pred_class[:,4]))
       image_pred_class = np.reshape(image_pred_class[non_zero_ind], (-1, 7))
-
     batch_ind = np.array([[0]])
     seq = (batch_ind, image_pred_class)
-
     if not write:
       output = np.concatenate(seq, axis=1)
       write = True
@@ -202,44 +188,35 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   grid_size = inp_dim // stride
   bbox_attrs = 5 + num_classes
   num_anchors = len(anchors)
-
   prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
   # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
   prediction = prediction.transpose(order=(0, 2, 1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
   prediction_cpu = prediction.cpu().numpy()
 
-
   # Sigmoid the centre_X, centre_Y. and object confidence
   def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-  prediction_cpu[:,:,0] = sigmoid(prediction_cpu[:,:,0])
-  prediction_cpu[:,:,1] = sigmoid(prediction_cpu[:,:,1])
-  prediction_cpu[:,:,4] = sigmoid(prediction_cpu[:,:,4])
+  for i in (0, 1, 4):
+    prediction_cpu[:,:,i] = sigmoid(prediction_cpu[:,:,i])
 
   # Add the center offsets
   grid = np.arange(grid_size)
   a, b = np.meshgrid(grid, grid)
-
   x_offset = a.reshape((-1, 1))
   y_offset = b.reshape((-1, 1))
-
   x_y_offset = np.concatenate((x_offset, y_offset), 1)
   x_y_offset = np.tile(x_y_offset, (1, num_anchors))
   x_y_offset = x_y_offset.reshape((-1,2))
   x_y_offset = np.expand_dims(x_y_offset, 0)
-
-  prediction_cpu[:,:,:2] += x_y_offset
-
   anchors = [(a[0]/stride, a[1]/stride) for a in anchors]
   anchors = np.tile(anchors, (grid_size*grid_size, 1))
   anchors = np.expand_dims(anchors, 0)
-
+  prediction_cpu[:,:,:2] += x_y_offset
   prediction_cpu[:,:,2:4] = np.exp(prediction_cpu[:,:,2:4])*anchors
   prediction_cpu[:,:,5: 5 + num_classes] = sigmoid((prediction_cpu[:,:, 5 : 5 + num_classes]))
   prediction_cpu[:,:,:4] *= stride
-
   return Tensor(prediction_cpu)
 
 
@@ -251,10 +228,8 @@ class Darknet:
 
   def create_modules(self, blocks):
     net_info = blocks[0] # Info about model hyperparameters
-    prev_filters = 3
-    filters = None
-    output_filters = []
-    module_list = []
+    prev_filters, filters = 3, None
+    output_filters, module_list = [], []
     ## module
     for index, x in enumerate(blocks[1:]):
       module_type = x["type"]
@@ -269,24 +244,19 @@ class Darknet:
         filters = int(x["filters"])
         padding = int(x["pad"])
         pad = (int(x["size"]) - 1) // 2 if padding else 0
-        conv = Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias=bias)
-        module.append(conv)
-
+        module.append(Conv2d(prev_filters, filters, int(x["size"]), int(x["stride"]), pad, bias=bias))
         # BatchNorm2d
         if batch_normalize:
-          bn = BatchNorm2d(filters, eps=1e-05, track_running_stats=True)
-          module.append(bn)
+          module.append(BatchNorm2d(filters, eps=1e-05, track_running_stats=True))
         # LeakyReLU activation
         if activation == "leaky":
-          module.append(LeakyReLU(0.1))
+          module.append(lambda x: x.leakyrelu(0.1))
       # TODO: Add tiny model
       elif module_type == "maxpool":
         size, stride = int(x["size"]), int(x["stride"])
-        maxpool = MaxPool2d(size, stride)
-        module.append(maxpool)
+        module.append(lambda x: x.max_pool2d(kernel_size=(size, size), stride=stride))
       elif module_type == "upsample":
-        upsample = Upsample(scale_factor = 2, mode = "nearest")
-        module.append(upsample)
+        module.append(lambda x: Tensor(x.cpu().numpy().repeat(2, axis=-2).repeat(2, axis=-1)))
       elif module_type == "route":
         x["layers"] = x["layers"].split(",")
         # Start of route
@@ -298,25 +268,19 @@ class Darknet:
           end = 0
         if start > 0: start -= index
         if end > 0: end -= index
-        route = EmptyLayer()
-        module.append(route)
+        module.append(lambda x: x)
         if end < 0:
           filters = output_filters[index + start] + output_filters[index + end]
         else:
           filters = output_filters[index + start]
       # Shortcut corresponds to skip connection
       elif module_type == "shortcut":
-        module.append(EmptyLayer())
+        module.append(lambda x: x)
       elif module_type == "yolo":
-        mask = x["mask"].split(",")
-        mask = [int(x) for x in mask]
-        anchors = x["anchors"].split(",")
-        anchors = [int(a) for a in anchors]
+        mask = list(map(int, x["mask"].split(",")))
+        anchors = [int(a) for a in x["anchors"].split(",")]
         anchors = [(anchors[i], anchors[i+1]) for i in range(0, len(anchors), 2)]
-        anchors = [anchors[i] for i in mask]
-        detection = DetectionLayer(anchors)
-        module.append(detection)
-
+        module.append([anchors[i] for i in mask])
       # Append to module_list
       module_list.append(module)
       if filters is not None:
@@ -416,7 +380,7 @@ class Darknet:
         from_ = int(module["from"])
         x = outputs[i - 1] + outputs[i + from_]
       elif module_type == "yolo":
-        anchors = self.module_list[i][0].anchors
+        anchors = self.module_list[i][0]
         inp_dim = int(self.net_info["height"])
         # inp_dim = 416
         num_classes = int(module["classes"])
