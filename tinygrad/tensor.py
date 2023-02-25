@@ -382,11 +382,11 @@ class Tensor:
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
-  def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse)
-  def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse)
-  def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse)
-  def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse)
-  def div(self, x, reverse=False): return self._broadcasted(mlops.Div, x, reverse)
+  def add(self, x, reverse=False): return self._broadcasted(mlops.Add, x, reverse) if isinstance(x, Tensor) or x != 0.0 else self
+  def sub(self, x, reverse=False): return self._broadcasted(mlops.Sub, x, reverse) if isinstance(x, Tensor) or x != 0.0 or reverse else self
+  def mul(self, x, reverse=False): return self._broadcasted(mlops.Mul, x, reverse) if isinstance(x, Tensor) or x != 1.0 else self
+  def pow(self, x, reverse=False): return self._broadcasted(mlops.Pow, x, reverse) if isinstance(x, Tensor) or x != 1.0 or reverse else self
+  def div(self, x, reverse=False): return self._broadcasted(mlops.Div, x, reverse) if isinstance(x, Tensor) or x != 1.0 or reverse else self
   def matmul(self, x:Tensor, reverse=False): return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x): return self._broadcasted(mlops.Maximum, x)

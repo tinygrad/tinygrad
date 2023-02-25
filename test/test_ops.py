@@ -72,11 +72,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
   def test_div_const(self):
     helper_test_op([(45,65)], lambda x: x/255, lambda x: x/255)
+    helper_test_op([(45,65)], lambda x: x/1, lambda x: x/1)
+    helper_test_op([(45,65)], lambda x: 1/x, lambda x: 1/x)
+    helper_test_op([(45,65)], lambda x: x/2, lambda x: x/2)
+    helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
   def test_pow(self):
     helper_test_op([(45,65)], lambda x: x**2, lambda x: Tensor.pow(x,2), a=0)
     helper_test_op([(45,65)], lambda x: x**3, lambda x: Tensor.pow(x,3), a=0)
     helper_test_op([(45,65)], lambda x: x**-2, lambda x: Tensor.pow(x,-2), a=0)
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y, Tensor.pow, a=0)
+  def test_pow_const(self):
+    helper_test_op([(45,65)], lambda x: x**1.0, lambda x: x**1.0)
+    helper_test_op([(45,65)], lambda x: 1.0**x, lambda x: 1.0**x)
+    helper_test_op([(45,65)], lambda x: x**2.0, lambda x: x**2.0)
+    helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
   def test_relu(self):
