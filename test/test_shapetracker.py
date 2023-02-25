@@ -5,10 +5,10 @@ from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker, ZeroView
 
 def shapetracker_getitem(st, val):
-  locals = {"idx": val, "valid": 1}
+  _locals = {"idx": val, "valid": 1}
   idx, valid = st.expr_node()
-  exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
-  return locals["idx"] if locals["valid"] else -1
+  exec(f"valid={valid.render()};idx={idx.render()}", None, _locals) # pylint: disable=exec-used
+  return _locals["idx"] if _locals["valid"] else -1
 
 class TestingShapeTracker:
   def __init__(self, shape):

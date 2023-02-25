@@ -120,7 +120,7 @@ class TestTinygrad(unittest.TestCase):
 
     tiny_x = Tensor(x)
     tiny_W = Tensor(W)
-    tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
+    def tiny_func(x): x.dot(tiny_W).relu().log_softmax()
     J = jacobian(tiny_func, tiny_x)
     NJ = numerical_jacobian(tiny_func, tiny_x)
 
@@ -135,7 +135,8 @@ class TestTinygrad(unittest.TestCase):
 
     tiny_x = Tensor(x)
     tiny_W = Tensor(W)
-    tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
+    def tiny_func(x): x.dot(tiny_W).relu().log_softmax()
+
 
     self.assertTrue(gradcheck(tiny_func, tiny_x))
 
