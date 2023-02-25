@@ -33,7 +33,7 @@ def get_random_input_tensors(input_shapes):
   np_inputs = {k:v.realize().numpy() for k,v in inputs.items()}
   return inputs, np_inputs
 
-from extra.jit import TinyJit
+from tinygrad.jit import TinyJit
 
 @TinyJit
 def model_exec(run_onnx, using_graph, **inputs):

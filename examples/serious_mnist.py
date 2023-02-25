@@ -92,7 +92,7 @@ class BigConvNet:
     x1 = x.avg_pool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
     x2 = x.max_pool2d(kernel_size=(14,14)).reshape(shape=(-1,128)) #global
     xo = x1.dot(self.weight1) + x2.dot(self.weight2)
-    return xo.logsoftmax()
+    return xo.log_softmax()
 
 
 if __name__ == "__main__":

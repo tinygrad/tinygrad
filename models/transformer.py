@@ -67,6 +67,6 @@ class Transformer:
 
     x = Tensor(onehot, device=x.device).dot(self.embed).reshape(shape=(bs, x.shape[1], -1))
     x = x.sequential(self.tbs)
-    x = x.reshape(shape=(-1, x.shape[-1])).dot(self.final).logsoftmax()
+    x = x.reshape(shape=(-1, x.shape[-1])).dot(self.final).log_softmax()
     return x.reshape(shape=(bs, -1, x.shape[-1]))
 

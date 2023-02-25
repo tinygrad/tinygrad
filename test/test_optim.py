@@ -33,7 +33,7 @@ class TinyNet():
 
   def forward(self):
     out = self.x.dot(self.W).relu()
-    out = out.logsoftmax()
+    out = out.log_softmax()
     out = out.mul(self.m).add(self.m).sum()
     return out
 

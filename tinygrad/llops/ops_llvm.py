@@ -30,17 +30,16 @@ class LLVMBuffer(ExplicitExecAST):
   op_lookup : ClassVar = {
     UnaryOps.NOOP: lambda builder,x: x,
     UnaryOps.NEG: lambda builder,x: builder.fneg(x, flags=('fast',)),
-    UnaryOps.RELU: lambda builder,x: builder.select(builder.fcmp_ordered("<=", ir.Constant(ir.FloatType(), 0), x, flags=('fast',)), x, ir.Constant(ir.FloatType(), 0)),
     UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x], fastmath=('fast',)),
     UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x], fastmath=('fast',)),
-    UnaryOps.GT0: lambda builder,x: builder.select(builder.fcmp_ordered(">", x, ir.Constant(ir.FloatType(), 0), flags=('fast',)), ir.Constant(ir.FloatType(), 1), ir.Constant(ir.FloatType(), 0)),
-    UnaryOps.RECIPROCAL: lambda builder,x: builder.fdiv(ir.Constant(ir.FloatType(), 1), x, flags=('fast',)),
+    UnaryOps.NOT: lambda builder,x: builder.fsub(ir.Constant(ir.FloatType(), 1), x, flags=('fast',)),
     BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y, flags=('fast',)),
     BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),
     BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y, flags=('fast',)),
     BinaryOps.DIV: lambda builder,x,y: builder.fdiv(x,y, flags=('fast',)),
     BinaryOps.POW: lambda builder,x,y: builder.call(builder._block.module.declare_intrinsic('llvm.pow', [ir.FloatType()]), [x,y], fastmath=('fast',)),
-    BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType())
+    BinaryOps.CMPEQ: lambda builder,x,y: builder.uitofp(builder.fcmp_ordered("==", x, y, flags=('fast',)), ir.FloatType()),
+    BinaryOps.MAX: lambda builder,x,y: builder.select(builder.fcmp_unordered(">", x, y, flags=('fast',)), x, y, flags=('fast',))
   }
   start_for_op : ClassVar = {
     ReduceOps.SUM: ir.Constant(ir.FloatType(), 0),
@@ -223,7 +222,7 @@ class LLVMBuffer(ExplicitExecAST):
       if k.reduceop.op == ReduceOps.SUM:
         reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
       elif k.reduceop.op == ReduceOps.MAX:
-        reduce_result = loop_exit[i].select(loop_exit[-1].fcmp_unordered(">", val, reduce_input, flags=('fast',)), val, reduce_input, flags=('fast',))
+        reduce_result = loop_exit[-1].select(loop_exit[-1].fcmp_unordered(">", val, reduce_input, flags=('fast',)), val, reduce_input, flags=('fast',))
 
       for i,phi in enumerate(phis[1:]):
         phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)

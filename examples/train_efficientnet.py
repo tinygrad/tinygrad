@@ -75,7 +75,7 @@ if __name__ == "__main__":
     y = np.zeros((BS,classes), np.float32)
     y[range(y.shape[0]),Y] = -classes
     y = Tensor(y, requires_grad=False)
-    loss = out.logsoftmax().mul(y).mean()
+    loss = out.log_softmax().mul(y).mean()
 
     optimizer.zero_grad()
 

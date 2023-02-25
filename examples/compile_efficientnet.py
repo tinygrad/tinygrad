@@ -5,7 +5,7 @@ import ast
 
 def compile_net(run, special_names):
   # c header
-  cprog = ["#include <stdio.h>", "#include <math.h>","#define max(x,y) fmax(x,y)"] 
+  cprog = ["#include <stdio.h>", "#include <math.h>", "#define max(x,y) ((x>y)?x:y)"]
 
   # functions that run the net
   bufs = {}
@@ -34,7 +34,7 @@ if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
 
-  from extra.jit import TinyJit
+  from tinygrad.jit import TinyJit
   @TinyJit
   def run(x): return model.forward(x).realize()
 

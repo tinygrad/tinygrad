@@ -20,7 +20,7 @@ class View:
   __slots__ = ('shape', 'strides', 'offset', 'shape_strides', 'contiguous')
 
   def __init__(self, shape:Tuple[int, ...], strides:Tuple[int, ...], offset:int=0):
-    self.shape, self.strides, self.offset = shape, strides, offset
+    self.shape, self.strides, self.offset = shape, tuple(stride if shp != 1 else 0 for stride,shp in zip(strides, shape)), offset
     self.shape_strides = to_shape_strides(self.shape, self.strides)
     self.contiguous : bool = self.offset == 0 and all(s1 == s2 or s == 1 for s,s1,s2 in zip(self.shape, self.strides, strides_for_shape(self.shape)))
 

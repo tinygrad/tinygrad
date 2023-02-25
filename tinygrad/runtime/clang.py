@@ -26,12 +26,12 @@ class CLProgram:
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else str()}" if rename else name
     CLProgram.kernel_cnt[name] += 1
     self.prg = prg.replace(f"{name}(", f"{self.name}(")
-    prg = "#include <math.h>\n#define max(x,y) fmax(x,y)\n" + prg
+    prg = "#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n" + prg
     if DEBUG >= 4: print(prg)  # TODO: outside runtime!
     # TODO: is there a way to not write this to disk?
     fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if OSX else 'so'}"
     if not os.path.exists(fn):
-      subprocess.check_output(['clang', '-shared', '-O2', '-lm', '-fPIC', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
+      subprocess.check_output(['clang', '-shared', '-O2', '-Wall','-Werror', '-lm', '-fPIC', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]

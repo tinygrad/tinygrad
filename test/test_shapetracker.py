@@ -4,8 +4,15 @@ import numpy as np
 from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker, ZeroView
 
-class DumbShapeTracker:
+def shapetracker_getitem(st, val):
+  locals = {"idx": val, "valid": 1}
+  idx, valid = st.expr_node()
+  exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
+  return locals["idx"] if locals["valid"] else -1
+
+class TestingShapeTracker:
   def __init__(self, shape):
+    self.st = ShapeTracker(shape)
     self.t = np.arange(prod(shape), dtype=np.uint8).reshape(shape)
 
   @property
@@ -13,25 +20,86 @@ class DumbShapeTracker:
     return self.t.shape
 
   def reshape(self, new_shape):
+    self.st.reshape(new_shape)
     self.t = self.t.reshape(new_shape)
 
   def permute(self, axis):
+    self.st.permute(axis)
     self.t = np.transpose(self.t, axis)
 
   def expand(self, new_shape):
+    self.st.expand(new_shape)
     self.t = np.broadcast_to(self.t, new_shape)
 
   def flip(self, axis):
+    self.st.flip(axis)
     self.t = np.flip(self.t, axis)
 
   def shrink(self, arg):
+    self.st.shrink(arg)
     self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
 
   def stride(self, arg):
+    self.st.stride(arg)
     self.t = self.t[tuple([slice(None, None, x) for x in arg])]
 
   def __getitem__(self, val):
     return self.t.flatten()[val]
+
+  @property
+  def views(self): return self.st.views
+
+  @property
+  def contiguous(self): return self.st.contiguous
+
+  def assert_same(self):
+    x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
+    y = [self[i] for i in range(prod(self.shape))]
+    idx, valid = self.st.expr_node()
+    print(x, y, self.st.shape, self.shape, idx.render(), valid.render())
+    assert self.st.shape == self.shape
+    assert x == y
+
+class TestSimplifyingShapeTracker(unittest.TestCase):
+  def setUp(self):
+    self.st = TestingShapeTracker((1, 10))
+
+  def tearDown(self):
+    self.st.assert_same()
+
+  # multiview simplify
+  def test_expand_contract_simple(self):
+    self.st.expand((10, 10))
+    self.st.reshape((100,))
+    print(self.st.views)
+    assert(len(self.st.views) == 2)
+    self.st.reshape((10, 10))
+    print(self.st.views)
+
+    # TODO: make this work
+    #assert(len(self.st.views) == 1)
+
+  # multiview simplify
+  def test_expand_contract_different_shape(self):
+    self.st.expand((10, 10))
+    self.st.reshape((100,))
+    print(self.st.views)
+    assert(len(self.st.views) == 2)
+    self.st.reshape((2, 5, 2, 5))
+    print(self.st.views)
+
+    # TODO: make this work
+    #assert(len(self.st.views) == 1)
+
+  # multiview simplify
+  def test_expand_contract_still_complex(self):
+    self.st.expand((10, 10))
+    self.st.reshape((100,))
+    print(self.st.views)
+    assert(len(self.st.views) == 2)
+    self.st.reshape((5, 20))
+    print(self.st.views)
+    assert(len(self.st.views) == 2)
 
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
@@ -134,7 +202,10 @@ class TestComplexShapeTracker(unittest.TestCase):
 
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = ShapeTracker((7,4))
+    self.st = TestingShapeTracker((7,4))
+
+  def tearDown(self):
+    self.st.assert_same()
 
   def test_reshape(self):
     self.st.reshape((7,1,4))
@@ -168,25 +239,13 @@ class TestSingleShapeTracker(unittest.TestCase):
     self.st.permute((1,0))
     assert not self.st.contiguous
 
-def shapetracker_getitem(st, val):
-  locals = {"idx": val, "valid": 1}
-  idx, valid = st.expr_node()
-  exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
-  return locals["idx"] if locals["valid"] else -1
-
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = ShapeTracker((7,4))
-    self.dt = DumbShapeTracker((7,4))
-    self.apply = lambda fxn: [fxn(x) for x in [self.st, self.dt]]
+    self.st = TestingShapeTracker((7,4))
+    self.apply = lambda fxn: [fxn(x) for x in [self.st]]
 
   def tearDown(self):
-    x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
-    y = [self.dt[i] for i in range(prod(self.dt.shape))]
-    idx, valid = self.st.expr_node()
-    print(x,y, self.st.shape, self.dt.shape, idx.render(), valid.render())
-    assert self.st.shape == self.dt.shape
-    assert x == y
+    self.st.assert_same()
 
   def test_noop(self):
     pass
@@ -196,17 +255,14 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.reshape((prod(self.st.shape), )))
 
   def test_reshape(self):
-    assert self.st.shape == self.dt.shape
     new_shape = self.st.shape[::-1]
     self.apply(lambda x: x.reshape(new_shape))
 
   def test_permute(self):
-    assert self.st.shape == self.dt.shape
     if len(self.st.shape) == 2: self.apply(lambda x: x.permute((1,0)))
     elif len(self.st.shape) == 3: self.apply(lambda x: x.permute((2,0,1)))
 
   def test_reshape_with_1(self):
-    assert self.st.shape == self.dt.shape
     new_shape = (self.st.shape[0], 1, self.st.shape[1])
     self.apply(lambda x: x.reshape(new_shape))
 

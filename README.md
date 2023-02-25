@@ -82,7 +82,7 @@ class TinyBobNet:
     self.l2 = Tensor.uniform(128, 10)
 
   def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
+    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
 
 model = TinyBobNet()
 optim = optim.SGD([model.l1, model.l2], lr=0.001)
@@ -146,9 +146,9 @@ The autodiff stuff is all in mlops now so you can focus on the raw operations
 
 ```
 Buffer                                                     # class of memory on this device
-unary_op  (NOOP, NEG, RELU, EXP, LOG, GT0, RECIPROCAL)     # A -> A
+unary_op  (NOOP, NEG, NOT, EXP, LOG)                       # A -> A
 reduce_op (SUM, MAX)                                       # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + A -> A (all the same size)
+binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)            # A + A -> A (all the same size)
 movement_op (RESHAPE, PERMUTE, EXPAND, FLIP, PAD, SHRINK)  # A -> B (different size)
 fused_op [[optional]] (MULACC)                             # A * A -> B
 ```
