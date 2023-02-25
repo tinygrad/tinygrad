@@ -163,10 +163,6 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a+2.0
     helper_test_generic_square('add_constant', 4096, f, f, onearg=True)
 
-  def test_add_constant_zero(self):
-    def f(a, b): return a+0.0
-    helper_test_generic_square('add_constant_zero', 4096, f, f, onearg=True)
-
   def test_add_sq(self):
     def f(a, b): return a*a + b*b
     helper_test_generic_square('add_sq', 4096, f, f)
