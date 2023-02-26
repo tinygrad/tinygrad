@@ -441,15 +441,15 @@ class Tensor:
   # ***** context manager *****
 
   class train(ContextDecorator):
-      def __init__(self):
-          self._prev = None
+    def __init__(self):
+      self._prev = None
 
-      def __enter__(self):
-          self._prev = Tensor.training
-          Tensor.training = True
+    def __enter__(self):
+      self._prev = Tensor.training
+      Tensor.training = True
 
-      def __exit__(self, exc_type, exc_val, exc_tb):
-          Tensor.training = self._prev
+    def __exit__(self, exc_type, exc_val, exc_tb):
+      Tensor.training = self._prev
 
 # register functions to move between devices
 for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
