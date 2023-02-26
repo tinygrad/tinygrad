@@ -10,7 +10,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d, optim
 from tinygrad.helpers import getenv
 from extra.utils import fetch
-from examples.yolo.yolo_nn import Upsample, EmptyLayer, DetectionLayer, LeakyReLU, MaxPool2d
 np.set_printoptions(suppress=True)
 GPU = getenv("GPU")
 
@@ -358,18 +357,17 @@ class Darknet:
 
         # LeakyReLU activation
         if activation == "leaky":
-          module.append(LeakyReLU(0.1))
+          module.append(lambda x: x.leakyrelu(0.1))
 
       # TODO: Add tiny model
       elif module_type == "maxpool":
         size = int(x["size"])
         stride = int(x["stride"])
-        maxpool = MaxPool2d(size, stride)
-        module.append(maxpool)
+        # TODO: add stride
+        module.append(lambda x: x.max_pool2d(kernel_size=(size, size)))
 
       elif module_type == "upsample":
-        upsample = Upsample(scale_factor = 2, mode = "nearest")
-        module.append(upsample)
+        module.append(lambda x: Tensor(x.cpu().numpy().repeat(2, axis=-2).repeat(2, -1)))
 
       elif module_type == "route":
         x["layers"] = x["layers"].split(",")
@@ -382,8 +380,7 @@ class Darknet:
           end = 0
         if start > 0: start = start - index
         if end > 0: end = end - index
-        route = EmptyLayer()
-        module.append(route)
+        module.append(lambda x: x)
         if end < 0:
           filters = output_filters[index + start] + output_filters[index + end]
         else:
@@ -391,7 +388,7 @@ class Darknet:
 
       # Shortcut corresponds to skip connection
       elif module_type == "shortcut":
-        module.append(EmptyLayer())
+        module.append(lambda x: x)
 
       elif module_type == "yolo":
         mask = x["mask"].split(",")
@@ -401,9 +398,7 @@ class Darknet:
         anchors = [int(a) for a in anchors]
         anchors = [(anchors[i], anchors[i+1]) for i in range(0, len(anchors), 2)]
         anchors = [anchors[i] for i in mask]
-
-        detection = DetectionLayer(anchors)
-        module.append(detection)
+        module.append(anchors)
 
       # Append to module_list
       module_list.append(module)
@@ -533,7 +528,7 @@ class Darknet:
         from_ = int(module["from"])
         x = outputs[i - 1] + outputs[i + from_]
       elif module_type == "yolo":
-        anchors = self.module_list[i][0].anchors
+        anchors = self.module_list[i][0]
         inp_dim = int(self.net_info["height"])
         # inp_dim = 416
         num_classes = int(module["classes"])
