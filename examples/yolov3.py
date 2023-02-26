@@ -3,12 +3,15 @@ import sys
 import io
 import time
 import math
-import cv2
-import numpy as np
+import numpy as n p
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d
 from extra.utils import fetch
+try:
+  import cv2
+except ModuleNotFoundError:
+  cv2 = None
 
 def show_labels(prediction, confidence=0.5, num_classes=80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
@@ -41,7 +44,7 @@ def letterbox_image(img, inp_dim=608):
   new_w = int(img_w * min(w/img_w, h/img_h))
   new_h = int(img_h * min(w/img_w, h/img_h))
   canvas = np.full((inp_dim[1], inp_dim[0], 3), 128)
-  resized_image = cv2.resize(img, (new_w,new_h), interpolation = cv2.INTER_CUBIC)
+  resized_image = cv2.resize(img, (new_w,new_h), interpolation=cv2.INTER_CUBIC)
   canvas[(h-new_h)//2:(h-new_h)//2 + new_h,(w-new_w)//2:(w-new_w)//2 + new_w, :] = resized_image
   return canvas
 
