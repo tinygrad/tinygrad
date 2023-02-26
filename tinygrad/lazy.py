@@ -338,7 +338,8 @@ class LazyBuffer:
 
       # now do the conv in this space and force it to be an image
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.cout//4, 4, 1, 1, 1, 1))
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4)).contiguous()
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4)) #.contiguous()
+      # NOTE: right now, this won't always be an image, otherwise the tests fail when we try to access it if it was SHRINKed
 
       # undo hack for non multiples of 4 on C.rcout
       if added_output_channels != 0:
