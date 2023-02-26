@@ -1,5 +1,4 @@
 # https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg
-# running
 import sys
 import io
 import time
@@ -16,8 +15,8 @@ def show_labels(prediction, confidence=0.5, num_classes=80):
   coco_labels = coco_labels.decode('utf-8').split('\n')
   prediction = prediction.detach().cpu().numpy()
   conf_mask = (prediction[:,:,4] > confidence)
-  conf_mask = np.expand_dims(conf_mask, 2)
-  prediction *= conf_mask
+  prediction *= np.expand_dims(conf_mask, 2)
+  labels = []
   # Iterate over batches
   for img_pred in prediction:
     max_conf = np.amax(img_pred[:,5:5+num_classes], axis=1)
@@ -33,6 +32,8 @@ def show_labels(prediction, confidence=0.5, num_classes=80):
     for index, coco_class in enumerate(classes):
       label, probability = coco_labels[int(coco_class)], image_pred_[indexes[index]][4] * 100
       print(f"Detected {label} {probability:.2f}")
+      labels.append(label)
+  return labels
 
 def letterbox_image(img, inp_dim=608):
   img_w, img_h = img.shape[1], img.shape[0]
@@ -90,7 +91,7 @@ def bbox_iou(box1, box2):
   iou = inter_area / (b1_area + b2_area - inter_area)
   return iou
 
-def process_results(prediction, confidence = 0.9, num_classes = 80, nms_conf = 0.4):
+def process_results(prediction, confidence=0.9, num_classes=80, nms_conf=0.4):
   prediction = prediction.detach().cpu().numpy()
   conf_mask = (prediction[:,:,4] > confidence)
   conf_mask = np.expand_dims(conf_mask, 2)
@@ -395,8 +396,6 @@ class Darknet:
 
 if __name__ == "__main__":
   cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
-  # Make deterministic
-  np.random.seed(1337)
   # Start model
   model = Darknet(cfg)
   print("Loading weights file (237MB). This might take a while…")
