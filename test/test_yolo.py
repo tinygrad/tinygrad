@@ -2,33 +2,24 @@ import io
 import unittest
 from pathlib import Path
 
-import requests
+import cv2
 import numpy as np
-from PIL import Image
 
 from tinygrad.tensor import Tensor
-from examples.yolov3 import Darknet, show_labels
+from examples.yolov3 import Darknet, infer, show_labels
 from extra.utils import fetch
 
-chicken_img = Image.open(str(Path(__file__).parent / 'efficientnet/Chicken.jpg'))
-car_img = Image.open(str(Path(__file__).parent / 'efficientnet/car.jpg'))
+chicken_img = cv2.imread(str(Path(__file__).parent / 'efficientnet/Chicken.jpg'))
+car_img = cv2.imread(str(Path(__file__).parent / 'efficientnet/car.jpg'))
 dog_url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
-dog_img = Image.open(io.BytesIO(requests.get(dog_url).content))
-
-def infer(model, img):
-  img = np.array(img.resize((608, 608)))
-  img = img[:,:,::-1].transpose((2,0,1))
-  img = img[np.newaxis,:,:,:]/255.0
-  prediction = model.forward(Tensor(img.astype(np.float32)))
-  return prediction
+dog_img = cv2.imdecode(np.frombuffer(io.BytesIO(fetch(dog_url)).read(), np.uint8), 1)
 
 class TestYOLO(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
-    cls.model = Darknet(cfg)
+    cls.model = Darknet(fetch("https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg"))
     print("Loading weights file (237MB). This might take a while…")
-    cls.model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
+    cls.model.load_weights("https://pjreddie.com/media/files/yolov3.weights")
 
   @classmethod
   def tearDownClass(cls):

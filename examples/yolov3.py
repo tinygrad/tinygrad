@@ -3,6 +3,7 @@ import sys
 import io
 import time
 import math
+import cv2
 import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
@@ -380,10 +381,8 @@ class Darknet:
         x = outputs[i - 1] + outputs[i + from_]
       elif module_type == "yolo":
         anchors = self.module_list[i][0]
-        inp_dim = int(self.net_info["height"])
-        # inp_dim = 416
+        inp_dim = int(self.net_info["height"])  # 416
         num_classes = int(module["classes"])
-        # Transform
         x = predict_transform(x, inp_dim, anchors, num_classes)
         if not write:
           detections = x
@@ -391,13 +390,10 @@ class Darknet:
         else:
           detections = Tensor(np.concatenate((detections.cpu().numpy(), x.cpu().numpy()), axis=1))
       outputs[i] = x
-    return detections # Return detections
+    return detections
 
 if __name__ == "__main__":
-  import cv2
-  cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
-  # Start model
-  model = Darknet(cfg)
+  model = Darknet(fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg'))
   print("Loading weights file (237MB). This might take a while…")
   model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
 
@@ -406,7 +402,6 @@ if __name__ == "__main__":
   else:
     url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
 
-  # We use cv2 because for some reason, cv2 imread produces better results?
   if url == 'webcam':
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -428,7 +423,6 @@ if __name__ == "__main__":
   else:
     img = cv2.imread(url)
 
-  # Predict
   st = time.time()
   print('running inference…')
   prediction = infer(model, img)
@@ -436,5 +430,4 @@ if __name__ == "__main__":
   show_labels(prediction)
   prediction = process_results(prediction)
   boxes = add_boxes(np.array(Image.fromarray(img).resize((608, 608))), prediction)
-  # Save img
   cv2.imwrite('boxes.jpg', boxes)
