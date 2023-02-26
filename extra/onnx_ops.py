@@ -44,8 +44,13 @@ def _padding(pads=None, auto_pad="NOTSET"):
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   # TODO: the padding shouldn't be counted in the average! this is causing a test failure
-  assert ceil_mode == 0 and count_include_pad == 0 and dilations == 1
-  return X.pad2d(_padding(pads, auto_pad)).avg_pool2d(kernel_shape, stride=strides)
+  assert ceil_mode == 0 and dilations == 1
+  padding_included = X.pad2d(_padding(pads, auto_pad)).avg_pool2d(kernel_shape, stride=strides)
+  if count_include_pad:
+    return padding_included
+  else:
+    div = Tensor.ones(*X.shape).pad2d(_padding(pads, auto_pad)).avg_pool2d(kernel_shape, stride=strides)
+    return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   # TODO: the padding should be infinity, not 0!
