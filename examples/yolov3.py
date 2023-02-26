@@ -31,8 +31,8 @@ def show_labels(prediction, confidence=0.5, num_classes=80):
     image_pred_ = np.reshape(image_pred[np.squeeze(non_zero_ind),:], (-1, 7))
     classes, indexes = np.unique(image_pred_[:, -1], return_index=True)
     for index, coco_class in enumerate(classes):
-      probability = image_pred_[indexes[index]][4] * 100
-      print("Detected", coco_labels[int(coco_class)], "{:.2f}%".format(probability))
+      label, probability = coco_labels[int(coco_class)], image_pred_[indexes[index]][4] * 100
+      print(f"Detected {label} {probability:.2f}")
 
 def letterbox_image(img, inp_dim=608):
   img_w, img_h = img.shape[1], img.shape[0]
@@ -433,7 +433,7 @@ if __name__ == "__main__":
   st = time.time()
   print('running inference…')
   prediction = infer(model, img)
-  print(f'did inference in {(time.time() - st):2f} s')
+  print(f'did inference in {(time.time() - st):2f}s')
   show_labels(prediction)
   prediction = process_results(prediction)
   boxes = add_boxes(np.array(Image.fromarray(img).resize((608, 608))), prediction)
