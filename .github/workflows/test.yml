@@ -161,7 +161,7 @@ jobs:
       run: GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model
       run: |
-        ALLOWED_KERNEL_COUNT=196 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        ALLOWED_KERNEL_COUNT=200 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
         UNSAFE_FLOAT4=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
 
   # disabled, this test is flaky

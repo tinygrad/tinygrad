@@ -46,7 +46,9 @@ def log_op(ret : DeviceBuffer, ast : LazyOp, show_graph : Optional[bool] = None)
   if not DEBUG and not show_graph: return
   op : List[Op] = [x.op for x in get_lazyops(ast)]
   inp : List[DeviceBuffer] = get_buffers(ast)
-  if len(inp) == 1 and inp[0] == ret: return   # don't log self loops
+  if len(inp) == 1 and inp[0] == ret:
+    if nm(ret) in G.nodes: G.nodes[nm(ret)]['style'] += ', bold'
+    return   # don't log self loops
   oporder = [LoadOps, FusedOps, ProcessingOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
