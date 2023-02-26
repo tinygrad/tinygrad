@@ -3,15 +3,11 @@ import sys
 import io
 import time
 import math
-import numpy as n p
+import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d
 from extra.utils import fetch
-try:
-  import cv2
-except ModuleNotFoundError:
-  cv2 = None
 
 def show_labels(prediction, confidence=0.5, num_classes=80):
   coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
@@ -398,6 +394,7 @@ class Darknet:
     return detections # Return detections
 
 if __name__ == "__main__":
+  import cv2
   cfg = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg')
   # Start model
   model = Darknet(cfg)
