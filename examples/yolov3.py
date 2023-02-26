@@ -178,14 +178,8 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   prediction = prediction.transpose(order=(0,2,1))
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
   prediction_cpu = prediction.cpu().numpy()
-
-  # Sigmoid the centre_X, centre_Y. and object confidence
-  def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
-
   for i in (0, 1, 4):
-    prediction_cpu[:,:,i] = sigmoid(prediction_cpu[:,:,i])
-
+    prediction_cpu[:,:,i] = 1 / (1 + np.exp(-prediction_cpu[:,:,i]))
   # Add the center offsets
   grid = np.arange(grid_size)
   a, b = np.meshgrid(grid, grid)
@@ -200,7 +194,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   anchors = np.expand_dims(anchors, 0)
   prediction_cpu[:,:,:2] += x_y_offset
   prediction_cpu[:,:,2:4] = np.exp(prediction_cpu[:,:,2:4])*anchors
-  prediction_cpu[:,:,5:5+num_classes] = sigmoid((prediction_cpu[:,:,5:5+num_classes]))
+  prediction_cpu[:,:,5:5+num_classes] = 1 / (1 + np.exp(-prediction_cpu[:,:,5:5+num_classes]))
   prediction_cpu[:,:,:4] *= stride
   return Tensor(prediction_cpu)
 
@@ -359,7 +353,7 @@ class Darknet:
           if (layers[1]) > 0: layers[1] = layers[1] - i
           map1 = outputs[i + layers[0]]
           map2 = outputs[i + layers[1]]
-          x = Tensor(np.concatenate((map1.cpu().numpy(), map2.cpu().numpy()), 1))
+          x = Tensor(np.concatenate((map1.cpu().numpy(), map2.cpu().numpy()), axis=1))
       elif module_type == "shortcut":
         from_ = int(module["from"])
         x = outputs[i - 1] + outputs[i + from_]
