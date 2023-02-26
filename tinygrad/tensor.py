@@ -445,8 +445,7 @@ class Tensor:
       self._prev = None
 
     def __enter__(self):
-      self._prev = Tensor.training
-      Tensor.training = True
+      self._prev, Tensor.training = Tensor.training, True
 
     def __exit__(self, exc_type, exc_val, exc_tb):
       Tensor.training = self._prev
