@@ -25,11 +25,11 @@ class TestYOLO(unittest.TestCase):
     del cls.model
 
   def test_chicken(self):
-    labels = show_labels(infer(self.model, chicken_img), confidence=0.6)
+    labels = show_labels(infer(self.model, chicken_img))
     self.assertEqual(labels, ["bird"])
 
   def test_car(self):
-    labels = show_labels(infer(self.model, car_img), confidence=0.6)
+    labels = show_labels(infer(self.model, car_img))
     self.assertEqual(labels, ["car"])
 
 if __name__ == '__main__':

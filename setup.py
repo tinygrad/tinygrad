@@ -39,7 +39,7 @@ setup(name='tinygrad',
             "pytest-xdist",
             "onnx~=1.13.0",
             "onnx2torch",
-            "opencv-python",
+            "opencv-python~=4.6.0",
         ],
       },
       include_package_data=True)
