@@ -102,8 +102,8 @@ class TestTinygrad(unittest.TestCase):
     assert mm.grad is not None
     assert W.grad is not None
 
+  @Tensor.train()
   def test_dropout(self):
-    Tensor.training = True
     n, rate = 1_000_000, 0.1
     w = Tensor.ones(n).dropout(rate)
     non_zeros = np.count_nonzero(w.cpu().numpy())

@@ -71,8 +71,8 @@ def fetch_batch(X_train, Y_train, BS):
   Y = Tensor(Y.reshape(BS, num_classes))
   return X.realize(), Y.realize()
 
+@Tensor.train()
 def train_cifar():
-  Tensor.training = True
   BS = getenv("BS", 512)
   if getenv("FAKEDATA"):
     N = 2048
