@@ -36,7 +36,7 @@ Device = _Device()
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
-PUSH_PERMUTES = OPT>=3    # fairly untested, but gets kernels back to 200 for openpilot
+PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
@@ -115,6 +115,7 @@ class LazyBuffer:
     self.realized : Optional[DeviceBuffer] = None
     self.output_buffer : Optional[DeviceBuffer] = None
     self.device, self.dbuffer = device, Device._buffers[device]
+    # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_buffers(op):
@@ -338,8 +339,9 @@ class LazyBuffer:
 
       # now do the conv in this space and force it to be an image
       ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.cout//4, 4, 1, 1, 1, 1))
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4)) #.contiguous()
-      # NOTE: right now, this won't always be an image, otherwise the tests fail when we try to access it if it was SHRINKed
+      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4))
+      # NOTE: right now, this can't always be an image, because the tests fail when we try to access it if it was SHRINKed
+      if IMAGE >= 3: ret = ret.contiguous()  # but if IMAGE >= 3, you can do anything
 
       # undo hack for non multiples of 4 on C.rcout
       if added_output_channels != 0:
@@ -374,6 +376,17 @@ class LazyBuffer:
 
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
+
+  # push all contiguous to the end of BinaryOps. kernels 198 -> 196
+  if PUSH_CONTIGUOUS and any(x.realized is None and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
+    new_srcs = []
+    for x in srcs:
+      if x.realized is None and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
+        x.op.src[0].children.discard(x)
+        new_srcs.append(x.op.src[0])
+      else:
+        new_srcs.append(x)
+    return elementwise_op(op, *new_srcs).contiguous()
 
   if MERGE_ELEMENTWISE_OPS or (MERGE_UNARY_OPS and len(set(srcs)) == 1):
     # remove the buffers from any (childless) BinaryOps that feed into this
