@@ -2,17 +2,18 @@ import io
 import unittest
 from pathlib import Path
 
+import requests
 import numpy as np
 from PIL import Image
 
 from tinygrad.tensor import Tensor
-from extra.utils import fetch
 from examples.yolov3 import Darknet, show_labels
+from extra.utils import fetch
 
 chicken_img = Image.open(str(Path(__file__).parent / 'efficientnet/Chicken.jpg'))
 car_img = Image.open(str(Path(__file__).parent / 'efficientnet/car.jpg'))
 dog_url = "https://github.com/ayooshkathuria/pytorch-yolo-v3/raw/master/dog-cycle-car.png"
-dog_img = Image.open(io.BytesIO(fetch(dog_url)))
+dog_img = Image.open(io.BytesIO(requests.get(dog_url).content))
 
 def infer(model, img):
   img = np.array(img.resize((608, 608)))
