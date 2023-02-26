@@ -1,6 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import math, functools, itertools
+from contextlib import ContextDecorator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG
@@ -436,6 +437,19 @@ class Tensor:
     if not Tensor.training: return self
     _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+
+  # ***** context manager *****
+
+  class train(ContextDecorator):
+      def __init__(self):
+          self._prev = None
+
+      def __enter__(self):
+          self._prev = Tensor.training
+          Tensor.training = True
+
+      def __exit__(self, exc_type, exc_val, exc_tb):
+          Tensor.training = self._prev
 
 # register functions to move between devices
 for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
