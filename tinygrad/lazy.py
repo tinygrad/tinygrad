@@ -229,6 +229,11 @@ class LazyBuffer:
     if op == MovementOps.PERMUTE and local_st.contiguous:
       return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
 
+    # move permutes before expands
+    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.EXPAND:
+      self.op.src[0].children.discard(self)
+      return self.op.src[0].movement_op(MovementOps.PERMUTE, arg).movement_op(MovementOps.EXPAND, tuple(self.op.arg[a] for a in arg))
+
     # move permutes before reshapes if we can
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
       # is contract? if so, group the axis
@@ -255,6 +260,7 @@ class LazyBuffer:
         new_arg = []
         for p in arg:
           new_arg += numbered[p]
+        self.op.src[0].children.discard(self)   # this changes nothing?
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 

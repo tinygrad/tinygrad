@@ -45,7 +45,8 @@ def image_conv2d_decorator(normal_conv):
 
     # make image sized
     oy, ox = ret.shape[2:]
-    ret = ret.permute(0,2,3,1).reshape(bs*oy, ox*cout//4, 4).contiguous()
+    ret = ret.permute(0,2,3,1).reshape(bs*oy, ox*cout//4, 4)
+    if IMAGE >= 3: ret = ret.contiguous()
 
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels != 0:
