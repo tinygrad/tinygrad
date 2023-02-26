@@ -236,6 +236,7 @@ class CLASTKernel(ASTKernel):
   def codegen(self) -> Callable:
     self.process()
     self.upcast_in_mid_reduce = False
+    if DEBUG >= 3: self.printbufs("old:")
     if KOPT == -1 or IMAGE == 2: self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce

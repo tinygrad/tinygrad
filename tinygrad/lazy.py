@@ -52,13 +52,14 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   if DEBUG >= 3:
     for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())):
       if x.optype in [ProcessingOps,ReduceOps] and x.realized is None:
-        print("\nHIT", k,x)
+        print("\nHIT", k,x, "UNFOLDABLE" if len(k.children) > 1 or len(x.children) > 1 else "")
         for tk in k.children: print("k", tk)
         for tx in x.children: print("x", tx)
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape : Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+    if DEBUG >= 3: print("FOLDING", psrcs[0])
     if psrcs[0][1].optype == ProcessingOps:
       top = psrcs[0][1].op  # _ast_processingops
     elif psrcs[0][1].optype == ReduceOps:
