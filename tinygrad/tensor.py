@@ -402,6 +402,13 @@ class Tensor:
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
 
+  # Comparison ops
+  def lt(self, x): return self._broadcasted(mlops.CompareLess, x, False)
+  def lte(self, x): return self._broadcasted(mlops.CompareLess, x, False).add(self.eq(x))
+  def gt(self, x): return self._broadcasted(mlops.CompareLess, x, True)
+  def gte(self, x): return self._broadcasted(mlops.CompareLess, x, True).add(self.eq(x))
+  def eq(self, x): return self._broadcasted(mlops.CompareEqual, x, False)
+
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
   # NOTE: __pow__ and friends are broken in mypyc with the ** operator
