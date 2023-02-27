@@ -5,10 +5,10 @@ class BatchNorm2d:
     assert affine, "BatchNorm2d is only supported with affine"
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    self.weight, self.bias = Tensor.ones(sz).realize(), Tensor.zeros(sz).realize()
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False).realize(), Tensor.ones(sz, requires_grad=False).realize()
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False).realize()
 
   def __call__(self, x):
     if Tensor.training:
@@ -27,6 +27,10 @@ class BatchNorm2d:
         self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
         self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
         self.num_batches_tracked += 1
+
+        self.running_mean.realize()
+        self.running_var.realize()
+        self.num_batches_tracked.realize()
     else:
       batch_mean, batch_var = self.running_mean, self.running_var
       # NOTE: this can be precomputed for static inference. if you manually update running_var, you have to reset this
