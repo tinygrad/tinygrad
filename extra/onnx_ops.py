@@ -152,6 +152,10 @@ def Tile(input, repeats):
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
 def Where(condition, X, Y): return condition*X + (1-condition)*Y
 
+def ConstantOfShape(input, value=0.0):
+  shape = [int(x) for x in safe_numpy(input)]
+  return Tensor.ones(*shape) * value
+
 # NOTE: since we only have one type, this is valid!
 def CastLike(input, target_type):
   assert isinstance(target_type, Tensor), "can only CastLike Tensor"
