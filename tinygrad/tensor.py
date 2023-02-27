@@ -133,18 +133,23 @@ class Tensor:
   def arange(cls, stop, start=0, step=1, **kwargs): return cls(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
   # ***** (numpy) rng helper functions *****
+  # TODO: move randomness generation out of numpy
 
   _rng : ClassVar[np.random.Generator] = np.random.default_rng()
   @staticmethod
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @classmethod
-  def _random(cls, *shape, **kwargs): return cls(cls._rng.random(size=shape, dtype=np.float32), **kwargs)
+  def rand(cls, *shape, **kwargs): return cls(cls._rng.random(size=shape, dtype=np.float32), **kwargs)
 
-  # TODO: uniform should be a late binding thing
-  # Return random number between -1 and 1
+  # TODO: replace with a transformation from uniform -> gaussian
   @classmethod
-  def uniform(cls, *shape, **kwargs): return cls._random(*shape, **kwargs) * 2 - 1
+  def randn(cls, *shape, **kwargs): return cls(cls._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
+
+  # ***** rng hlops *****
+
+  @classmethod
+  def uniform(cls, *shape, **kwargs): return cls.rand(*shape, **kwargs) * 2 - 1
 
   @classmethod
   def scaled_uniform(cls, *shape, **kwargs): return cls.uniform(*shape, **kwargs) * (prod(shape)**-0.5)
@@ -152,10 +157,6 @@ class Tensor:
   @classmethod
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
   def glorot_uniform(cls, *shape, **kwargs): return cls.uniform(*shape, **kwargs) * ((6/(shape[0]+prod(shape[1:])))**0.5)
-
-  # TODO: replace with a transformation from uniform -> gaussian
-  @classmethod
-  def randn(cls, *shape, **kwargs): return cls(Tensor._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
 
   # ***** toposort and backward pass *****
 
