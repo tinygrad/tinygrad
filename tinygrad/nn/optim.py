@@ -10,6 +10,8 @@ class Optimizer:
         x.requires_grad = True
 
     self.params : List[Tensor] = [x for x in params if x.requires_grad]
+    self.buffers : List[Tensor] = [x for x in params if not x.requires_grad]   # buffers are still realized
+    self.realize()
 
   # TODO: this probably shouldn't change the gradients, just the ones used by the optimizer
   def clipnorm(self, amount=1):
@@ -24,7 +26,7 @@ class Optimizer:
 
   def realize(self, extra=None):
     # TODO: corealize
-    for p in extra + self.params if extra is not None else self.params:
+    for p in extra + self.params + self.buffers if extra is not None else self.params + self.buffers:
       p.realize()
 
 class SGD(Optimizer):

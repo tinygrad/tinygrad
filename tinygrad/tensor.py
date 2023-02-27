@@ -114,10 +114,10 @@ class Tensor:
   # TODO: remove use of numpy here and make lazy
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor([0], **kwargs).reshape([1]*len(shape)).expand(shape)
+  def zeros(*shape, **kwargs): return Tensor([0], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor([1], **kwargs).reshape([1]*len(shape)).expand(shape)
+  def ones(*shape, **kwargs): return Tensor([1], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
 
   @staticmethod
   def zeros_like(tensor, **kwargs): return Tensor.zeros(*tensor.shape, **kwargs)
