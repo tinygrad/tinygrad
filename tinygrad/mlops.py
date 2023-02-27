@@ -54,10 +54,15 @@ class Max(Function):
 class CompareLess(Function):
   def forward(self, x, y):
     return x.binary_op(BinaryOps.CMPLT, y)
+  def backward(self, *args, **kwargs):
+    pass
 
 class CompareEqual(Function):
   def forward(self, x, y):
     return x.binary_op(BinaryOps.CMPEQ, y)
+
+  def backward(self, *args, **kwargs):
+    pass
 
 class Maximum(Function):
   def forward(self, x, y):
