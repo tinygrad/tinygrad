@@ -24,9 +24,10 @@ def print_objects():
     bb = gc.get_referrers(tb)
     for b in bb:
       if b is not gpubuffers and b is not gpubuffers_orphaned:
-        print(tb, "\nreference", type(b), len(b), str(b)[0:150], "\n\n")
+        print(tb, "\nreference", type(b), len(b), str(b)[0:150])
         for x in gc.get_referrers(b):
-          print(str(x)[0:100])
+          print("double reference", str(x)[0:100])
+        print("\n")
     if cnt == 10:
       break
     cnt += 1

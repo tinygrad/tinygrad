@@ -40,7 +40,7 @@ class TinyConvNet:
   def parameters(self):
     return optim.get_parameters(self)
 
-  def forward(self, x):
+  def forward(self, x:Tensor):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
     x = self.bn1(x.conv2d(self.c1)).relu().max_pool2d()
     x = self.bn2(x.conv2d(self.c2)).relu().max_pool2d()
@@ -99,7 +99,7 @@ class TestMNIST(unittest.TestCase):
     model = TinyConvNet(has_batchnorm=True)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, X_train, Y_train, optimizer, steps=100)
-    # TODO: batchnorm doesn't work!!!
+    assert evaluate(model, X_test, Y_test) > 0.7 # TODO: batchnorm doesn't work!!!
 
   def test_sgd(self):
     np.random.seed(1337)
