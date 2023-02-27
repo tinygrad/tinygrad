@@ -44,7 +44,7 @@ class Conv2d:
     self.padding = (padding, ) * 4 if isinstance(padding, int) else ((padding[0], padding[0], padding[1], padding[1]) if len(padding) == 2 else padding)
     # TODO: why is this realize needed? shouldn't it realize on the first run?
     self.weight = Tensor.glorot_uniform(out_channels, in_channels, self.kernel_size[0], self.kernel_size[1]).realize()
-    self.bias = Tensor.zeros(out_channels) if bias else None
+    self.bias = Tensor.zeros(out_channels).contiguous().realize() if bias else None
 
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride)
@@ -52,7 +52,7 @@ class Conv2d:
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
     self.weight = Tensor.glorot_uniform(out_features, in_features).realize()
-    self.bias = Tensor.zeros(out_features) if bias else None
+    self.bias = Tensor.zeros(out_features).contiguous().realize() if bias else None
 
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
