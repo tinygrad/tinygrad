@@ -104,6 +104,7 @@ def Neg(input): return -input
 def Reciprocal(input): return input.reciprocal()
 def Sqrt(input): return input.sqrt()
 def Sign(input): return input.sign()
+def Softsign(input): return input / (1+input.abs())
 def Abs(input): return input.abs()
 def Exp(input): return input.exp()
 def Log(input): return input.log()
