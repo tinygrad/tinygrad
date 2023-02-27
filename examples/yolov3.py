@@ -383,8 +383,8 @@ if __name__ == "__main__":
     while 1:
       _ = cap.grab() # discard one frame to circumvent capture buffering
       ret, frame = cap.read()
+      prediction = process_results(infer(model, frame))
       img = Image.fromarray(frame[:, :, [2,1,0]])
-      prediction = process_results(infer(model, img))
       boxes = add_boxes(np.array(img.resize((608, 608))), prediction)
       boxes = cv2.cvtColor(boxes, cv2.COLOR_RGB2BGR)
       cv2.imshow('yolo', boxes)
