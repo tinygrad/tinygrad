@@ -116,7 +116,9 @@ def Softplus(X): return X.softplus()
 def PRelu(X, slope): return X.leakyrelu(slope)
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
-def Softmax(input, axis=-1): return input.softmax(axis)
+def Softmax_1(input, axis=1): return input.softmax(axis)
+def Softmax_13(input, axis=-1): return input.softmax(axis)
+Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
 

@@ -74,6 +74,8 @@ def get_run_onnx(onnx_model):
   attribute_dict = {}
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
+  
+  onnx_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=False):
     if getenv("DEBUGONNX"): debug = True
@@ -156,7 +158,7 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        assert onnx_model.opset_import[0].version == 10
+        assert onnx_version == 10
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
@@ -166,7 +168,14 @@ def get_run_onnx(onnx_model):
         arg[axis] = (starts, ends)
         ret = inp[0].slice(arg=arg)
       elif hasattr(onnx_ops, n.op_type):
-        ret = getattr(onnx_ops, n.op_type)(*inp, **opt)
+        fxn = getattr(onnx_ops, n.op_type)
+        if isinstance(fxn, dict):
+          for k in sorted(fxn.keys()):
+            if k < onnx_version:
+              real_fxn = fxn[k]
+        else:
+          real_fxn = fxn
+        ret = real_fxn(*inp, **opt)
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
@@ -174,7 +183,7 @@ def get_run_onnx(onnx_model):
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
-      #print(ret.numpy().mean())
+      #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:
         output_tensor_names = n.output
         break
