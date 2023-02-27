@@ -117,6 +117,7 @@ backend_test.exclude('test_quantizelinear_*')
 backend_test.exclude('test_gru_*')
 backend_test.exclude('test_rnn_*')
 backend_test.exclude('test_lstm_*')
+backend_test.exclude('test_simple_rnn_*')
 
 # no control flow
 backend_test.exclude('test_if_*')
