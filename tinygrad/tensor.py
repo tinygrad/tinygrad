@@ -113,24 +113,24 @@ class Tensor:
   # ***** creation helper functions *****
   # TODO: remove use of numpy here and make lazy
 
-  @classmethod
-  def zeros(cls, *shape, **kwargs): return cls([0], **kwargs).reshape([1]*len(shape)).expand(shape)
+  @staticmethod
+  def zeros(*shape, **kwargs): return Tensor([0], **kwargs).reshape([1]*len(shape)).expand(shape)
 
-  @classmethod
-  def ones(cls, *shape, **kwargs): return cls([1], **kwargs).reshape([1]*len(shape)).expand(shape)
+  @staticmethod
+  def ones(*shape, **kwargs): return Tensor([1], **kwargs).reshape([1]*len(shape)).expand(shape)
 
-  @classmethod
-  def zeros_like(cls, tensor, **kwargs): return cls.zeros(*tensor.shape, **kwargs)
+  @staticmethod
+  def zeros_like(tensor, **kwargs): return Tensor.zeros(*tensor.shape, **kwargs)
 
-  @classmethod
-  def empty(cls, *shape, **kwargs): return cls.zeros(*shape, **kwargs)
+  @staticmethod
+  def empty(*shape, **kwargs): return Tensor.zeros(*shape, **kwargs)
 
-  @classmethod
-  def eye(cls, dim, **kwargs): return cls([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
+  @staticmethod
+  def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
 
   # TODO: requires cumsum to remove numpy
-  @classmethod
-  def arange(cls, stop, start=0, step=1, **kwargs): return cls(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
+  @staticmethod
+  def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
@@ -139,24 +139,24 @@ class Tensor:
   @staticmethod
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
-  @classmethod
-  def rand(cls, *shape, **kwargs): return cls(cls._rng.random(size=shape, dtype=np.float32), **kwargs)
+  @staticmethod
+  def rand(*shape, **kwargs): return Tensor(Tensor._rng.random(size=shape, dtype=np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
-  @classmethod
-  def randn(cls, *shape, **kwargs): return cls(cls._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
+  @staticmethod
+  def randn(*shape, **kwargs): return Tensor(Tensor._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
 
   # ***** rng hlops *****
 
-  @classmethod
-  def uniform(cls, *shape, **kwargs): return cls.rand(*shape, **kwargs) * 2 - 1
+  @staticmethod
+  def uniform(*shape, **kwargs) -> Tensor: return Tensor.rand(*shape, **kwargs) * 2 - 1
 
-  @classmethod
-  def scaled_uniform(cls, *shape, **kwargs): return cls.uniform(*shape, **kwargs) * (prod(shape)**-0.5)
+  @staticmethod
+  def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs) * (prod(shape)**-0.5)
 
-  @classmethod
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
-  def glorot_uniform(cls, *shape, **kwargs): return cls.uniform(*shape, **kwargs) * ((6/(shape[0]+prod(shape[1:])))**0.5)
+  @staticmethod
+  def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs) * ((6/(shape[0]+prod(shape[1:])))**0.5)
 
   # ***** toposort and backward pass *****
 

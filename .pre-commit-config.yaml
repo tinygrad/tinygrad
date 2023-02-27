@@ -15,7 +15,13 @@ repos:
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: mypy tinygrad/ test/ --ignore-missing-imports
+        entry: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: mypytest
+        name: mypytest
+        entry: mypy test/ --ignore-missing-imports
         language: system
         always_run: true
         pass_filenames: false

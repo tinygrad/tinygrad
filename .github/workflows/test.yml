@@ -40,7 +40,9 @@ jobs:
     - name: Lint tinygrad with pylint
       run: pylint tinygrad/
     - name: Run mypy
-      run: mypy tinygrad/ test/ --ignore-missing-imports
+      run: |
+        mypy tinygrad/ --ignore-missing-imports --check-untyped-defs
+        mypy test/ --ignore-missing-imports
 
   testcpu:
     name: CPU Tests

@@ -48,6 +48,8 @@ class ZeroView:
     # fake properties
     self.strides, self.contiguous, self.offset = strides_for_shape(self.shape), False, 0
 
+  def __repr__(self): return f"ZeroView({self.old_shape}, {self.arg})"
+
   def expr_node(self, idx=None, valid=None):
     if idx is None: idx = Variable('idx', 0, prod([y-x for x,y in self.arg]))
     expr, acc = [valid] if valid is not None else [], 1
@@ -57,7 +59,7 @@ class ZeroView:
       acc *= ns
     return Variable.ands(expr)
 
-  def __repr__(self): return f"ZeroView({self.old_shape}, {self.arg})"
+  def expr_idxs(self, idxs, offset=0): raise NotImplementedError("ZeroView doesn't support expr_idxs")
 
 ViewTypes = Union[View, ZeroView]
 

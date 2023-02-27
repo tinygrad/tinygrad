@@ -35,6 +35,7 @@ def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
 
 # a placeholder class to extend by the exec classes
 class DeviceBuffer:
+  _buf: Any    # underlying buffer
   shape: Any   # should be Tuple[int, ...] but ndarray and torch.tensor have incompatible types
   @staticmethod
   def fromCPU(x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")

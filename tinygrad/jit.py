@@ -1,18 +1,18 @@
-from typing import Callable, List, Tuple
+from typing import Callable, List, Tuple, Any, Dict
 import itertools
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters
+from tinygrad.ops import GlobalCounters, DeviceBuffer
 
 class TinyJit:
-  def __init__(self, fxn):
+  def __init__(self, fxn:Callable):
     self.fxn = fxn
     self.cnt = 0
-    self.jit_cache : List[Tuple[Callable, List]] = []
+    self.jit_cache : List[Tuple[Callable, Any]] = []  # TODO: Any should be List[DeviceBuffer], but this fails
     self.ret = None
-    self.input_replace = {}
+    self.input_replace : Dict[DeviceBuffer, Any]= {}
 
-  def __call__(self, *args, **kwargs):
+  def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT != "GPU": return self.fxn(*args, **kwargs)  # only jit on the GPU
     input_tensors = {k:v.realize().lazydata.realized._buf for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_tensors) != 0, "no inputs to JIT"
