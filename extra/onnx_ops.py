@@ -115,6 +115,7 @@ def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): r
 def Softplus(X): return X.softplus()
 def PRelu(X, slope): return X.leakyrelu(slope)
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
+def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
 def Softmax(input, axis=-1): return input.softmax(axis)
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
