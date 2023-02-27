@@ -76,6 +76,7 @@ def get_run_onnx(onnx_model):
     attribute_dict[num] = attribute_to_dict(n.attribute)
 
   def run_onnx(inputs={}, debug=False):
+    if getenv("DEBUGONNX"): debug = True
     input_tensors = {}
     intermediate_tensors = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]

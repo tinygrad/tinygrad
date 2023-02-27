@@ -92,8 +92,7 @@ def Expand(input, shape):
   # copied from _broadcasted
   x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]
   shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
-  # TODO: openpilot is broken if we actually do the expand!!
-  return input.reshape(x_shape) #.expand(shape_ret)
+  return input.reshape(x_shape).expand(shape_ret)
 
 def LRN(input, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = input.shape 
@@ -155,6 +154,11 @@ def Where(condition, X, Y): return condition*X + (1-condition)*Y
 def ConstantOfShape(input, value=0.0):
   shape = [int(x) for x in safe_numpy(input)]
   return Tensor.ones(*shape) * value
+
+# this is obviously wrong, but since we don't have types, it's better than nothing
+def Cast(input, to):
+  print(f"WARNING: attempting to cast to {to}")
+  return input
 
 # NOTE: since we only have one type, this is valid!
 def CastLike(input, target_type):
