@@ -704,3 +704,5 @@ if __name__ == "__main__":
   im = Image.fromarray(dat)
   print(f"saving {args.out}")
   im.save(args.out)
+  # Open image.
+  im.show()
