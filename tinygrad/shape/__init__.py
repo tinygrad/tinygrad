@@ -121,6 +121,7 @@ class ShapeTracker:
           if DEBUG >= 3: print("can't simplify", s, this_dim.render())
           break
       if len(new_strides) == len(self.views[-1].strides):
+        if DEBUG >= 3: print(f"st simplify : {self.views[-2:]} -> {self.views[-1].shape} strides {new_strides}")
         self.views = self.views[:-2] + [View(self.views[-1].shape, tuple(new_strides))]
         self.simplify()
 
