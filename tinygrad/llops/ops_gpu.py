@@ -88,21 +88,24 @@ class CLASTKernel(ASTKernel):
       val = self.bufs[buf_index]._backing[0]
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
-
-    can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
-    should_upcast = not CLANG and const is None and can_merge and self.buftokens[buf_index].can_float4()
-
+    should_upcast = not CLANG and const is None and self.buftokens[buf_index].can_float4()
     tokens = []
     for o in self.buftokens[buf_index].offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
       if (buf_index, o) not in self.loaded_keys:
         idxy, valid = self.sts[buf_index].expr_idxs(o)
+        if should_upcast:
+          can_merge = True
+          for j in range(1,4):
+            idxy_test, valid_test = self.sts[buf_index].expr_idxs(o+j)
+            can_merge = can_merge and valid.render() == valid_test.render()
+            can_merge = can_merge and (idxy+j).render() == idxy_test.render()
         if const is not None:
           ldr = const
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
-          assert should_upcast, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
+          assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
-        elif should_upcast:
+        elif should_upcast and can_merge:
           ldr = Token(f"(({CLProgram.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
@@ -111,7 +114,7 @@ class CLASTKernel(ASTKernel):
           self.loaded_keys[(buf_index,o)] = ldr
         else:
           self.kernel.append(f"{ldr.decltype()} {key} = {ldr.tok};\n")
-          if should_upcast:
+          if should_upcast and can_merge:
             for j in range(4):
               self.loaded_keys[(buf_index,o+j)] = Token(key+f'.{"xyzw"[j]}', Types.FLOAT)
           else:
