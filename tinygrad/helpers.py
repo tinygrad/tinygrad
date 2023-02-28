@@ -10,7 +10,8 @@ def all_same(items): return all(x == items[0] for x in items) if len(items) > 0 
 def colored(st, color): return f"\u001b[{30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color)}m{st}\u001b[0m"  # replace the termcolor library with one line
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def modn(x, a): return -((-x)%a) if x < 0 else x%a
-def make_pair(x:Union[int, Tuple[int, ...]]) -> Tuple[int, ...]: return (x,x) if isinstance(x, int) else x
+def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
+def flatten(l): return [item for sublist in l for item in sublist]
 
 class Timing(object):
   def __enter__(self): self.st = time.monotonic_ns()
