@@ -44,6 +44,7 @@ class ASTKernel:
 
     self.info = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
+    for b in self.bufs: b.st.simplify()
     self.ast = ast
 
     # check if the output buffer is allowed to be used

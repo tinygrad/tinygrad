@@ -48,6 +48,9 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
 
+  def test_mul_mul(self):
+    self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
+
   def test_mod_mul_sum(self):
     self.helper_test_variable(Variable.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(b+a)")
   

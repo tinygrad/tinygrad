@@ -15,6 +15,7 @@ class Node:
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
+    if isinstance(self, MulNode): return MulNode(self.a, self.b*b)
     return MulNode(self, b)
   def __floordiv__(self, b:int):
     assert b != 0

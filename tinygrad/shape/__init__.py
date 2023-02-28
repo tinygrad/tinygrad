@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, MulNode
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
@@ -26,7 +26,8 @@ class View:
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
 
-  def expr_node(self, idx):
+  def expr_node(self, idx=None):
+    if idx is None: idx = Variable('idx', 0, prod(self.shape))
     ret = [Variable.num(self.offset)]
     acc = 1
     for d,s in self.shape_strides[::-1]:
@@ -69,6 +70,7 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   for d in shape[::-1][:-1]:
     strides = [d*strides[0]] + strides
   # TODO: should we 0 out all the strides where the shape is 1?
+  #return tuple(st if s != 1 else 0 for st, s in zip(strides, shape))
   return tuple(strides)
 
 @functools.lru_cache(maxsize=None)
@@ -102,6 +104,26 @@ class ShapeTracker:
       if isinstance(v, ZeroView): valid = v.expr_node(idx, valid)
       else: idx = v.expr_node(idx)
     return idx, valid
+
+  def simplify(self):
+    # TODO: can we do something if offset isn't zero?
+    if len(self.views) >= 2 and isinstance(self.views[-2], View) and self.views[-1].offset == 0:
+      new_strides = []
+      for s,st in zip(self.views[-1].shape, self.views[-1].strides):
+        if st == 0 or s == 1:
+          new_strides.append(0)
+          continue
+        this_dim = self.views[-2].expr_node(Variable('idx', 0, s-1)*st)
+        if isinstance(this_dim, Variable):
+          new_strides.append(1)
+        elif isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
+          new_strides.append(this_dim.b)
+        else:
+          if DEBUG >= 3: print("can't simplify", s, this_dim.render())
+          break
+      if len(new_strides) == len(self.views[-1].strides):
+        self.views = self.views[:-2] + [View(self.views[-1].shape, tuple(new_strides))]
+        self.simplify()
 
   def expr_idxs(self, offset=0, idxs=None):
     if idxs is None: idxs = [f"idx{i}" for i in range(len(self.shape))]
