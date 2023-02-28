@@ -15,7 +15,7 @@ repos:
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs
+        entry: mypy tinygrad/ --check-untyped-defs --explicit-package-bases --warn-unreachable # --warn-return-any
         language: system
         always_run: true
         pass_filenames: false
