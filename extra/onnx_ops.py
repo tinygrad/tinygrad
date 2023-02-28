@@ -71,7 +71,7 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
   return _padding(X, pads, auto_pad).max_pool2d(kernel_shape, stride=strides)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_padding(pads, auto_pad))
+  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
 
 # TODO: copied from tensor.py
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
