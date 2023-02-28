@@ -35,8 +35,8 @@ def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
 
 # a placeholder class to extend by the exec classes
 class DeviceBuffer:
-  _buf: Any    # underlying buffer
-  shape: Any   # should be Tuple[int, ...] but ndarray and torch.tensor have incompatible types
+  _buf: Any                # underlying buffer
+  shape: Tuple[int, ...]
   @staticmethod
   def fromCPU(x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")
   def toCPU(self:DeviceBuffer) -> np.ndarray: raise NotImplementedError("must be implemented")
@@ -80,6 +80,18 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
       return ret
 def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(map_buffers({x:GenericExecAST(GenericShape(x.shape)) for x in get_buffers(ast)}, ast)).buf
 
+# assumes you are using ShapeTracker
+# used in GPUBuffer and LLVMBuffer
+class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
+    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
+    self.shape = self.st.shape
+    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+
+  # universal for shape tracked
+  def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
+  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
+
 class GlobalCounters:
   global_ops : ClassVar[int] = 0
   global_mem : ClassVar[int] = 0
@@ -94,15 +106,3 @@ class GlobalCounters:
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
     GlobalCounters.global_mem += mem_estimate
-
-# assumes you are using ShapeTracker
-# used in GPUBuffer and LLVMBuffer
-class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
-    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape = self.st.shape
-    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
-
-  # universal for shape tracked
-  def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
-  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
