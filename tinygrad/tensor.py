@@ -301,17 +301,18 @@ class Tensor:
       # handle stride, and permute to move reduce to the end
       xup = xup.reshape(*prefix, *flatten((k,o,s) for k,o,s in zip(k_, o_, s_)))
       xup = xup.slice(slc_prefix + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_)))
-      return xup.reshape(*prefix, *flatten((k,o) for k,o in zip(k_, o_)))
+      xup = xup.reshape(*prefix, *flatten((k,o) for k,o in zip(k_, o_)))
+      return xup.permute(*range(len(prefix)), *[len(prefix)+i*2+1 for i in range(len(k_))], *[len(prefix)+i*2 for i in range(len(k_))])
     else:
       # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
       o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
       xup = self.slice(slc_prefix + [(0,o*s) for o,s in zip(o_, s_)])
       xup = xup.reshape(*prefix, *flatten(((o, s) for o,s in zip(o_, s_))))
       xup = xup.slice(slc_prefix + flatten(((0,o), (0,k)) for o,k in zip(o_, k_)))
-      return xup.permute(*range(len(prefix)), *flatten((len(prefix)+i*2+1, len(prefix)+i*2) for i in range(len(k_))))
+      return xup.permute(*range(len(prefix)), *[len(prefix)+i*2 for i in range(len(k_))], *[len(prefix)+i*2+1 for i in range(len(k_))])
 
-  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=(2,4))
-  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).max(axis=(2,4))
+  def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=(-2,-1))
+  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).max(axis=(-2,-1))
 
   @image_conv2d_decorator
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
@@ -327,9 +328,9 @@ class Tensor:
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool((H,W),stride, dilation)
 
-    oy, ox, rcout = x.shape[3], x.shape[5], cout//groups
+    oy, ox, rcout = x.shape[2], x.shape[3], cout//groups
     # NOTE: we do this expand explicitly so the permute isn't pushed in the binop
-    x = x.reshape(bs, groups, 1, cin, H, oy, W, ox).expand(bs, groups, rcout, cin, H, oy, W, ox).permute(0,1,2,5,7,3,4,6)
+    x = x.reshape(bs, groups, 1, cin, oy, ox, H, W).expand(bs, groups, rcout, cin, oy, ox, H, W).permute(0,1,2,4,5,3,6,7)
 
     # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
     ret = (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
