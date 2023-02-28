@@ -236,7 +236,7 @@ class CLASTKernel(ASTKernel):
   def codegen(self) -> Callable:
     self.process()
     self.upcast_in_mid_reduce = False
-    if DEBUG >= 3: self.printbufs("old:")
+    if DEBUG >= 3: self.printbufs("old:", DEBUG>=4)
     if KOPT == -1 or IMAGE == 2: self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
@@ -247,10 +247,7 @@ class CLASTKernel(ASTKernel):
     self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 3:
       print("output shape", self.output_shape)
-      if DEBUG >= 4:
-        for b in self.bufs:
-          print(b.st)
-      self.printbufs("new:")
+      self.printbufs("new:", DEBUG>=4)
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
