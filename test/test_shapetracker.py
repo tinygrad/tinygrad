@@ -18,6 +18,8 @@ class TestingShapeTracker:
   @property
   def shape(self):
     return self.t.shape
+  
+  def simplify(self): self.st.simplify()
 
   def reshape(self, new_shape):
     self.st.reshape(new_shape)
@@ -76,8 +78,9 @@ class TestSimplifyingShapeTracker(unittest.TestCase):
     self.st.reshape((10, 10))
     print(self.st.views)
 
-    # TODO: make this work
-    #assert(len(self.st.views) == 1)
+    self.st.simplify()
+    print(self.st.views)
+    assert(len(self.st.views) == 1)
 
   # multiview simplify
   def test_expand_contract_different_shape(self):
@@ -88,8 +91,9 @@ class TestSimplifyingShapeTracker(unittest.TestCase):
     self.st.reshape((2, 5, 2, 5))
     print(self.st.views)
 
-    # TODO: make this work
-    #assert(len(self.st.views) == 1)
+    self.st.simplify()
+    print(self.st.views)
+    assert(len(self.st.views) == 1)
 
   # multiview simplify
   def test_expand_contract_still_complex(self):
@@ -98,6 +102,8 @@ class TestSimplifyingShapeTracker(unittest.TestCase):
     print(self.st.views)
     assert(len(self.st.views) == 2)
     self.st.reshape((5, 20))
+
+    self.st.simplify()
     print(self.st.views)
     assert(len(self.st.views) == 2)
 

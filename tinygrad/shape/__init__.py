@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from typing import Tuple, Union, List, Optional
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
@@ -110,11 +110,10 @@ class ShapeTracker:
     if len(self.views) >= 2 and isinstance(self.views[-2], View) and self.views[-1].offset == 0:
       new_strides = []
       for s,st in zip(self.views[-1].shape, self.views[-1].strides):
-        if st == 0 or s == 1:
-          new_strides.append(0)
-          continue
         this_dim = self.views[-2].expr_node(Variable('idx', 0, s-1)*st)
-        if isinstance(this_dim, Variable):
+        if isinstance(this_dim, NumNode) and this_dim.b == 0:
+          new_strides.append(0)
+        elif isinstance(this_dim, Variable):
           new_strides.append(1)
         elif isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
           new_strides.append(this_dim.b)
