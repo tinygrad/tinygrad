@@ -46,20 +46,15 @@ class LLVMBuffer(ExplicitExecAST):
     ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
   }
 
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, force_create=False):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, backing:Optional[np.ndarray]=None, force_create=False):
     super().__init__(shape, hostbuf)
     # TODO: force alignment?
     self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
+    if backing is not None:
+      ctypes.memmove(self._buf, backing.ctypes.data, prod(self.shape)*4)
     #assert ctypes.addressof(self._buf) & 0x1F == 0
 
   def __repr__(self): return f"LLVMBuffer {str(self.st)}"
-
-  @staticmethod
-  def fromCPU(x):
-    x = x.astype(np.float32)
-    ret = LLVMBuffer(x.shape)
-    ctypes.memmove(ret._buf, x.ctypes.data, prod(ret.shape)*4)
-    return ret
   
   def toCPU(x): return np.ctypeslib.as_array(x.contiguous()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 

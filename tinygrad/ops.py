@@ -83,7 +83,7 @@ def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(map_buffers({x:G
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, backing:Optional[np.ndarray]=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape

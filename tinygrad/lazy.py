@@ -2,9 +2,10 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import sys, weakref, importlib, inspect
 from weakref import WeakValueDictionary
+import numpy as np
 from tinygrad.helpers import ConvArgs, prod, DEBUG
 from tinygrad.shape import ShapeTracker
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers, GenericExecAST
+from tinygrad.ops import DeviceBuffer, ExplicitExecAST, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers, GenericExecAST
 from tinygrad.graph import log_op
 from tinygrad.helpers import getenv
 
@@ -133,7 +134,8 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        self.realized = Device._buffers[self.device].fromCPU(self.op.arg)
+        buf, np_arr = Device._buffers[self.device], self.op.arg
+        self.realized = buf(np_arr.shape, backing=np_arr.view(np.ndarray).astype(np.float32).ravel()) if issubclass(buf, ExplicitExecAST) else buf.fromCPU(np_arr)
         ast = LazyOp(self.op.op, tuple())
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)

@@ -362,9 +362,6 @@ class GPUBuffer(ExplicitExecAST):
   # TODO: we don't always need a hostbuf
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
 
-  @staticmethod
-  def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
-
   def toCPU(self) -> np.ndarray:
     cl_buf = self.contiguous()
     cl_buf.cl   # force buffer creation, happens if it's a backed buffer that hasn't been created yet

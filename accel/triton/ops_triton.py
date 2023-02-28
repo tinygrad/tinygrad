@@ -117,9 +117,6 @@ class TritonBuffer(ExplicitExecAST):
       if self._backing is not None: self._buf.copyin(self._backing, stream)
     return self._buf
 
-  @staticmethod
-  def fromCPU(x): return TritonBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
-
   def toCPU(self):
     data = np.empty(self.shape, dtype=np.float32)
     buf = self.contiguous()
