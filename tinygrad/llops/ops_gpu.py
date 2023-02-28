@@ -7,7 +7,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.lazy import IMAGE
 from tinygrad.shape import ShapeTracker
-from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python   # this will go away when VALIDHACKS does
+from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
 # div is different in cl than python
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
@@ -56,9 +56,10 @@ class CLASTKernel(ASTKernel):
 
   def store(self, buf_index:int, value:List[Token]) -> None:
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
+    assert len(self.bufs[buf_index].st.views) == 1, "store has more than one view"
 
-    can_merge = (not self.bufs[buf_index].st.needs_valid() and len(self.bufs[buf_index].st.views) == 1) or "Image" in str(type(self.bufs[buf_index]._buf))
-    should_upcast = not CLANG and can_merge and self.buftokens[buf_index].can_float4()
+    # all stores can merge, since they have one view and are valid
+    should_upcast = not CLANG and self.buftokens[buf_index].can_float4()
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()

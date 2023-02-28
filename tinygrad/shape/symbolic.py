@@ -16,6 +16,8 @@ class Node:
     if b == 0: return NumNode(0)
     elif b == 1: return self
     if isinstance(self, MulNode): return MulNode(self.a, self.b*b)
+    # distribute
+    if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes])
     return MulNode(self, b)
   def __floordiv__(self, b:int):
     assert b != 0

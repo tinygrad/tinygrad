@@ -78,6 +78,21 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
   assert all(isinstance(x, int) for x in shape) and len(shape) != 0
   return View(tuple(shape), strides_for_shape(shape))
 
+def merge_views(vm2:View, vm1:View) -> Optional[View]:
+  new_strides = []
+  for s,st in zip(vm1.shape, vm1.strides):
+    this_dim = vm2.expr_node(Variable('idx', 0, s-1)*st)
+    if isinstance(this_dim, NumNode) and this_dim.b == 0:
+      new_strides.append(0)
+    elif isinstance(this_dim, Variable):
+      new_strides.append(1)
+    elif isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
+      new_strides.append(this_dim.b)
+    else:
+      if DEBUG >= 3: print("can't simplify", s, this_dim.render())
+      break
+  return View(vm1.shape, tuple(new_strides), vm2.offset + vm1.offset) if len(new_strides) == len(vm1.strides) else None
+
 class ShapeTracker:
   __slots__ = ('views')
 
@@ -106,23 +121,11 @@ class ShapeTracker:
     return idx, valid
 
   def simplify(self):
-    # TODO: can we do something if offset isn't zero?
-    if len(self.views) >= 2 and isinstance(self.views[-2], View) and self.views[-1].offset == 0:
-      new_strides = []
-      for s,st in zip(self.views[-1].shape, self.views[-1].strides):
-        this_dim = self.views[-2].expr_node(Variable('idx', 0, s-1)*st)
-        if isinstance(this_dim, NumNode) and this_dim.b == 0:
-          new_strides.append(0)
-        elif isinstance(this_dim, Variable):
-          new_strides.append(1)
-        elif isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
-          new_strides.append(this_dim.b)
-        else:
-          if DEBUG >= 3: print("can't simplify", s, this_dim.render())
-          break
-      if len(new_strides) == len(self.views[-1].strides):
-        if DEBUG >= 3: print(f"st simplify : {self.views[-2:]} -> {self.views[-1].shape} strides {new_strides}")
-        self.views = self.views[:-2] + [View(self.views[-1].shape, tuple(new_strides))]
+    if len(self.views) >= 2 and isinstance(self.views[-2], View) and isinstance(self.views[-1], View):
+      new_view = merge_views(self.views[-2], self.views[-1])
+      if new_view:
+        if DEBUG >= 3: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
+        self.views = self.views[:-2] + [new_view]
         self.simplify()
 
   def expr_idxs(self, offset=0, idxs=None):
