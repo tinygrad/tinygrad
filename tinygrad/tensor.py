@@ -13,13 +13,9 @@ class Function:
     self.device, self.parents = device, tensors
     self.needs_input_grad = [t.requires_grad for t in self.parents]
     self.requires_grad = True if any(self.needs_input_grad) else (None if any(x is None for x in self.needs_input_grad) else False)
-    self.saved_tensors : List[LazyBuffer] = []
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")
-
-  # NOTE: it doesn't hurt to save this since the ctx will be freed fast without grad
-  def save_for_backward(self, *x): self.saved_tensors.extend(x)
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:

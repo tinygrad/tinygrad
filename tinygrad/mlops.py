@@ -10,20 +10,19 @@ class Contiguous(Function):
 
 class Log(Function):
   def forward(self, x):
-    self.save_for_backward(x)
+    self.x = x
     return x.unary_op(UnaryOps.LOG)
 
   def backward(self, grad_output):
-    return grad_output.binary_op(BinaryOps.DIV, self.saved_tensors[0])
+    return grad_output.binary_op(BinaryOps.DIV, self.x)
 
 class Exp(Function):
   def forward(self, x):
-    ret = x.unary_op(UnaryOps.EXP)
-    self.save_for_backward(ret)
-    return ret
+    self.ret = x.unary_op(UnaryOps.EXP)
+    return self.ret
 
   def backward(self, grad_output):
-    return self.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output)
+    return self.ret.binary_op(BinaryOps.MUL, grad_output)
 
 # ************* reduce ops *************
 
@@ -37,33 +36,30 @@ class Sum(Function):
 
 class Max(Function):
   def forward(self, x, new_shape):
-    ret = x.reduce_op(ReduceOps.MAX, new_shape)
-    self.save_for_backward(x, ret)
-    return ret
+    self.x, self.ret = x, x.reduce_op(ReduceOps.MAX, new_shape)
+    return self.ret
 
   def backward(self, grad_output):
-    x, ret = self.saved_tensors
-
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = x.binary_op(BinaryOps.CMPEQ, ret.movement_op(MovementOps.EXPAND, x.shape))
+    max_is_1s = self.x.binary_op(BinaryOps.CMPEQ, self.ret.movement_op(MovementOps.EXPAND, self.x.shape))
 
     # sum of locations, averaged
-    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).movement_op(MovementOps.EXPAND, x.shape)
+    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).movement_op(MovementOps.EXPAND, self.x.shape)
     max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
 
-    grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, x.shape)
+    grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, self.x.shape)
     return max_is_amount.binary_op(BinaryOps.MUL, grad_output_expanded)
 
 # ************* binary ops *************
 
 class Maximum(Function):
   def forward(self, x, y):
-    ret = x.binary_op(BinaryOps.MAX, y)
-    self.save_for_backward(y, ret)
-    return ret
+    self.y, self.ret = y, x.binary_op(BinaryOps.MAX, y)
+    return self.ret
 
   def backward(self, grad_output):
-    mask = self.saved_tensors[0].binary_op(BinaryOps.CMPEQ, self.saved_tensors[1])
+    mask = self.y.binary_op(BinaryOps.CMPEQ, self.ret)
+    # TODO: if they are equal, do they split the gradient?
     return grad_output.binary_op(BinaryOps.MUL, mask.unary_op(UnaryOps.NOT)) if self.needs_input_grad[0] else None, \
            grad_output.binary_op(BinaryOps.MUL, mask) if self.needs_input_grad[1] else None
 
@@ -85,33 +81,30 @@ class Sub(Function):
 
 class Mul(Function):
   def forward(self, x, y):
-    self.save_for_backward(x, y)
+    self.x, self.y = x, y
     return x.binary_op(BinaryOps.MUL, y)
 
   def backward(self, grad_output):
-    return self.saved_tensors[1].binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
-           self.saved_tensors[0].binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
+    return self.y.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
+           self.x.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
 
 class Pow(Function):
   def forward(self, x, y):
-    ret = x.binary_op(BinaryOps.POW, y)
-    self.save_for_backward(x, y, ret)
-    return ret
+    self.x, self.y, self.ret = x, y, x.binary_op(BinaryOps.POW, y)
+    return self.ret
 
   def backward(self, grad_output):
-    x,y,powxy = self.saved_tensors
-    return grad_output.binary_op(BinaryOps.MUL, y.binary_op(BinaryOps.MUL, powxy.binary_op(BinaryOps.DIV, x))) if self.needs_input_grad[0] else None, \
-           grad_output.binary_op(BinaryOps.MUL, x.unary_op(UnaryOps.LOG).binary_op(BinaryOps.MUL, powxy)) if self.needs_input_grad[1] else None
+    return grad_output.binary_op(BinaryOps.MUL, self.y.binary_op(BinaryOps.MUL, self.ret.binary_op(BinaryOps.DIV, self.x))) if self.needs_input_grad[0] else None, \
+           grad_output.binary_op(BinaryOps.MUL, self.x.unary_op(UnaryOps.LOG).binary_op(BinaryOps.MUL, self.ret)) if self.needs_input_grad[1] else None
 
 class Div(Function):
   def forward(self, x, y):
-    self.save_for_backward(x, y)
+    self.x, self.y = x, y
     return x.binary_op(BinaryOps.DIV, y)
 
   def backward(self, grad_output):
-    x, y = self.saved_tensors
-    return grad_output.binary_op(BinaryOps.DIV, y) if self.needs_input_grad[0] else None, \
-           grad_output.unary_op(UnaryOps.NEG).binary_op(BinaryOps.MUL, x).binary_op(BinaryOps.DIV, y.binary_op(BinaryOps.MUL, y)) if self.needs_input_grad[1] else None
+    return grad_output.binary_op(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
+           grad_output.unary_op(UnaryOps.NEG).binary_op(BinaryOps.MUL, self.x).binary_op(BinaryOps.DIV, self.y.binary_op(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
 
 # ************* movement ops *************
 
@@ -142,7 +135,7 @@ class Permute(Function):
 
 class Pad(Function):
   def forward(self, x, arg):
-    self.narg = tuple((p[0], x.shape[i]+p[0]) for i,p in enumerate(arg))
+    self.narg = tuple((p[0], s+p[0]) for s,p in zip(x.shape, arg))
     return x.movement_op(MovementOps.PAD, arg)
 
   def backward(self, grad_output):
@@ -150,7 +143,7 @@ class Pad(Function):
 
 class Shrink(Function):
   def forward(self, x, arg):
-    self.narg = tuple((p[0], x.shape[i]-p[1]) for i,p in enumerate(arg))
+    self.narg = tuple((p[0], s-p[1]) for s,p in zip(x.shape, arg))
     return x.movement_op(MovementOps.SHRINK, arg)
 
   def backward(self, grad_output):
