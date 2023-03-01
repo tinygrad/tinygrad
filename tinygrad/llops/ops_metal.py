@@ -34,7 +34,6 @@ class RawMetalBuffer(RawBuffer):
 
 class MetalProgram:
   def __init__(self, name:str, prg:str):
-    if DEBUG >= 4: print("Metal compile", prg)
     if DEBUG >= 6:  # dump llvm
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       dis = subprocess.check_output(['/Users/kafka/Downloads/clang+llvm-15.0.7-arm64-apple-darwin22.0/bin/llvm-dis'], input=air)
@@ -94,5 +93,6 @@ metal_lang = GPULanguage(
 class MetalBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return RawMetalBuffer(4*prod(shape))
-  compiler = staticmethod(lambda ast, output_buffer: CLASTKernel(ast, output_buffer, metal_lang))
+  @staticmethod
+  def compile(ast, output_buffer): return CLASTKernel(ast, output_buffer, metal_lang)
   runtime = staticmethod(MetalProgram)

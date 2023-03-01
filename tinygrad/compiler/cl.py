@@ -295,9 +295,9 @@ class CLASTKernel(ASTKernel):
       assert lvalid.min == 1, "local buffer must always be valid"
       self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
       for i,acc in enumerate(accumulators):
-        self.kernel.append(self.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
+        self.kernel.append(self.lang.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
-      self.kernel.append(self.barrier+"\n")
+      self.kernel.append(self.lang.barrier+"\n")
 
       if self.upcast_in_mid_reduce:
         assert len(self.group_for_reduce) == 2
