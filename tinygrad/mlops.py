@@ -140,13 +140,21 @@ class Permute(Function):
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.PERMUTE, tuple(argsort(self.input_order)))
 
-class Slice(Function):
-  def forward(self, x, arg=None):
-    self.narg = tuple((0-p[0], x.shape[i]-p[0]) for i,p in enumerate(arg))
-    return x.slice(tuple(arg))
+class Pad(Function):
+  def forward(self, x, arg):
+    self.narg = tuple((p[0], x.shape[i]+p[0]) for i,p in enumerate(arg))
+    return x.movement_op(MovementOps.PAD, arg)
 
   def backward(self, grad_output):
-    return grad_output.slice(self.narg)
+    return grad_output.movement_op(MovementOps.SHRINK, self.narg)
+
+class Shrink(Function):
+  def forward(self, x, arg):
+    self.narg = tuple((p[0], x.shape[i]-p[1]) for i,p in enumerate(arg))
+    return x.movement_op(MovementOps.SHRINK, arg)
+
+  def backward(self, grad_output):
+    return grad_output.movement_op(MovementOps.PAD, self.narg)
 
 class Flip(Function):
   def forward(self, x, axis):

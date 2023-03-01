@@ -2,7 +2,7 @@
 from __future__ import annotations
 import math, functools, itertools
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.image import image_conv2d_decorator
@@ -25,8 +25,7 @@ class Function:
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
-    if ctx.requires_grad and not Tensor.no_grad:
-      ret._ctx = ctx    # used by autograd engine
+    if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
     return ret
 
 import tinygrad.mlops as mlops
@@ -108,7 +107,6 @@ class Tensor:
     return ret
 
   # ***** creation helper functions *****
-  # TODO: remove use of numpy here and make lazy
 
   @staticmethod
   def zeros(*shape, **kwargs): return Tensor([0], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
@@ -125,6 +123,7 @@ class Tensor:
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
 
+  # TODO: below line, remove use of numpy here and make lazy
   # TODO: requires cumsum to remove numpy
   @staticmethod
   def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
@@ -195,9 +194,16 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=argfix(axis, *args))
-  def slice(self, arg) -> Tensor: return mlops.Slice.apply(self, arg=tuple(a if a is not None else (0,s) for s,a in zip(self.shape, arg)))
+  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
+  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
 
   # ***** movement hlops *****
+
+  # NOTE: using slice is discouraged and things should migrate to pad and shrink
+  def slice(self, arg:Sequence[Optional[Tuple[int, int]]]) -> Tensor:
+    arg_ = tuple(a if a is not None else (0,s) for s,a in zip(self.shape, arg))
+    padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_))
+    return self.pad(padding).shrink(tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)))
 
   # Tensors mostly follow the normal python indexing / slicing behavior for sequences
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element

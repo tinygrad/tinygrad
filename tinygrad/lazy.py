@@ -181,12 +181,6 @@ class LazyBuffer:
     # NOTE: this reshape can only move around 1s
     return LazyBuffer(x.device, new_tmp_shape, ReduceOps, LazyOp(op, (x,), new_tmp_shape)).movement_op(MovementOps.RESHAPE, new_shape)
 
-  # syntactic sugar around PAD and SHRINK
-  # TODO: turn RESHAPE into EXPAND and CONTRACT (current EXPAND should be REPEAT)
-  def slice(self:LazyBuffer, arg):
-    padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg))
-    return self.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
-
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop
     if op == MovementOps.RESHAPE and self.shape == arg: return self
