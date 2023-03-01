@@ -53,15 +53,17 @@ class Max(Function):
 # ************* binary ops *************
 class CompareLess(Function):
   def forward(self, x, y):
-    return x.binary_op(BinaryOps.CMPLT, y)
-  def backward(self, *args, **kwargs):
-    pass
+    self.ret = x.binary_op(BinaryOps.CMPLT, y)
+    return self.ret
+  def backward(self, grad_output):
+    return grad_output.binary_op(BinaryOps.MUL, self.ret) if self.needs_input_grad[0] else None, \
+           grad_output.binary_op(BinaryOps.MUL, self.ret.unary_op(UnaryOps.NOT)) if self.needs_input_grad[1] else None
 
 class CompareEqual(Function):
   def forward(self, x, y):
     return x.binary_op(BinaryOps.CMPEQ, y)
 
-  def backward(self, *args, **kwargs):
+  def backward(self, grad_output):
     pass
 
 class Maximum(Function):

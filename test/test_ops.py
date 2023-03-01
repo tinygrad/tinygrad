@@ -59,6 +59,17 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
+  
+  def test_eq(self):
+    helper_test_op([(45,65), (45,65)], torch.eq, lambda x,y: x==y, forward_only=True)
+  def test_gt(self):
+    helper_test_op([(45,65), (45,65)], torch.gt, lambda x,y: x>y, forward_only=True)
+  def test_gte(self):
+    helper_test_op([(45,65), (45,65)], torch.ge, lambda x,y: x>=y, forward_only=True)
+  def test_lt(self):
+    helper_test_op([(45,65), (45,65)], torch.lt, lambda x,y: x<y, forward_only=True)
+  def test_lte(self):
+    helper_test_op([(45,65), (45,65)], torch.le, lambda x,y: x<=y, forward_only=True)
 
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
