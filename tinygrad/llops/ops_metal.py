@@ -102,5 +102,6 @@ class MetalASTKernel(CLASTKernel):
   runtime = staticmethod(MetalProgram)
 
 class MetalBuffer(CompiledBuffer):
-  raw_buffer = staticmethod(RawMetalBuffer)
+  @staticmethod
+  def create_raw_buffer(shape): return RawMetalBuffer(4*prod(shape))
   compiler = staticmethod(MetalASTKernel)

@@ -5,7 +5,7 @@ import hashlib
 import subprocess
 from collections import defaultdict
 from typing import Final, Dict
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, prod
 from tinygrad.ops import CompiledBuffer, RawBuffer
 import platform
 OSX = platform.system() == "Darwin"
@@ -38,5 +38,6 @@ class ClangASTKernel(CLASTKernel):
   runtime = staticmethod(ClangProgram)
 
 class ClangBuffer(CompiledBuffer):
-  raw_buffer = staticmethod(RawMallocBuffer)
+  @staticmethod
+  def create_raw_buffer(shape): return RawMallocBuffer(4*prod(shape))
   compiler = staticmethod(ClangASTKernel)

@@ -1,74 +1,100 @@
 from __future__ import annotations
+import platform
 import numpy as np
+import pyopencl as cl  # type: ignore
+from typing import Dict, Optional, Tuple, List, ClassVar, Final
+from collections import defaultdict
 from typing import Tuple, Optional, Union
-from tinygrad.helpers import prod, IMAGE, getenv
-from tinygrad.ops import UnaryOps, MovementOps, LazyOp, CompiledAST, GlobalCounters
-from tinygrad.shape import ShapeTracker
+from tinygrad.helpers import prod, IMAGE, DEBUG, getenv
+from tinygrad.ops import UnaryOps, MovementOps, LazyOp, CompiledBuffer, GlobalCounters, RawBuffer
 
-# TODO: select runtimes in a smarter way
-CUDA,METAL,CLANG = getenv("CUDA", 0), getenv("METAL", 0), getenv("CLANG", 0)
-if not CUDA and not METAL and not CLANG:
-  from tinygrad.runtime.opencl import CLBuffer, CLImage # NOTE: using CL will not work for the CUDA runtime # noqa: F401
-  from tinygrad.runtime.opencl import OpenCLProgram as GPUProgram
-else:
-  class CLImage:  # type: ignore
-    def __init__(self, shape): raise NotImplementedError("current runtime doesn't support images")
-  #if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLProgram  # type: ignore
-  #elif METAL: from tinygrad.runtime.metal import CLBuffer, CLProgram  # type: ignore
-  #elif CLANG: from tinygrad.llops.ops_clang import CLBuffer, ClangProgram as GPUProgram  # type: ignore
+OSX = platform.system() == "Darwin"
+OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
+CLCACHE = getenv("CLCACHE", 1)
+FLOAT16 = getenv("FLOAT16", 0)
 
-KOPT = getenv("KOPT", -1)
-PRINT_AST = getenv("PRINT_AST", "0")
-TEST_AST = getenv("TEST_AST", 0)
+class CL:
+  BUFFER_CACHE : ClassVar[Dict[int, List[cl.Buffer]]] = defaultdict(list)
+  cl_ctx : ClassVar[Optional[cl.Context]] = None
+  cl_queue : ClassVar[Optional[cl.CommandQueue]] = None
+  def __init__(self) -> None:
+    if CL.cl_queue is not None: return   # already initted
+    devices : List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
+    if len(devices) == 0:  # settle for CPU
+      devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
+    CL.cl_ctx = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
+    if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
+    CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 
-class GPUBuffer(CompiledAST):
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
-    super().__init__(shape, hostbuf, backing, force_create)
-    # early copy in for large buffers
-    if (self._backing is not None and self._backing.shape != (1,)) or force_create:
-      self.cl
-  
-  # TODO: refactor this to return self._buf and not import pyopencl
-  @property
-  def cl(self) -> Union[CLBuffer, CLImage]:
-    if self._buf is None:
-      self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
-    assert self._buf is not None
-    if self._backing is not None:
-      assert GlobalCounters.cache is None, f"can't copy in {self._backing.shape} while caching"
-      self._buf.copyin(self._backing)
-      self._backing = None
-    return self._buf._cl
+class CLBuffer(RawBuffer):
+  def __init__(self, size):
+    if len(CL.BUFFER_CACHE[size]) > 0:
+      self._cl = CL.BUFFER_CACHE[size].pop()
+    else:
+      # TODO: on GPU OOM, clear the cache
+      self._cl = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size)
+      GlobalCounters.mem_used += self._cl.size
 
-  # TODO: we don't always need a hostbuf
-  def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
+  def __del__(self):
+    if CLCACHE: CL.BUFFER_CACHE[self._cl.size].append(self._cl)
+    else: GlobalCounters.mem_used -= self._cl.size
 
+  def copyin(self, b:np.ndarray): cl.enqueue_copy(CL().cl_queue, self._cl, b, is_blocking=False)
+  def copyout(self, a:np.ndarray): cl.enqueue_copy(CL().cl_queue, a, self._cl, is_blocking=True)
+
+class CLImage(RawBuffer):
+  fmt : Final = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+  IMAGE : Final = True
+
+  def __init__(self, shape):
+    self._cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
+    GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
+
+  def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
+
+class CLProgram:
+  kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
+  def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False, op_estimate=0, mem_estimate=0):
+    self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else str()}" if rename else name
+    self.prg, self.options, self.argdtypes, self.op_estimate, self.mem_estimate = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes, op_estimate, mem_estimate
+    self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
+    try:
+      self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+    except cl.RuntimeError as e:
+      if DEBUG >= 3: print("FAILED TO BUILD", self.prg)
+      raise e
+    if self.argdtypes is not None:
+      self.clprg.set_scalar_arg_dtypes(self.argdtypes)
+    CLProgram.kernel_cnt[name] += 1
+  def __call__(self, *args) -> cl.Event:
+    if DEBUG >= 4: print(args[0], args[1], self.prg)
+    # print the PTX for NVIDIA. TODO: probably broken for everything else
+    if DEBUG >= 5 and not OSX: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
+    e = self.clprg(CL().cl_queue, args[0], args[1], *[x._cl for x in args[2:]])
+    if DEBUG >= 2:
+      assert CL.cl_queue is not None
+      CL.cl_queue.finish()
+      # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
+      et = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
+      GlobalCounters.time_sum += et
+    if DEBUG >= 1:
+      print(f"**CL** {GlobalCounters.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+            (str() if DEBUG <= 1 else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
+    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
+    return e
+
+from tinygrad.compiler.cl import CLASTKernel
+class OpenCLProgram(CLASTKernel):
+  kernel_prefix = "__kernel"
+  buffer_prefix = "__global "
+  smem_prefix = "__local "
+  barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
+  float4 = "(float4)"
+  gid = [f'get_global_id({i})' for i in range(3)]
+  lid = [f'get_local_id({i})' for i in range(3)]
+  runtime = staticmethod(CLProgram)
+
+class GPUBuffer(CompiledBuffer):
   @staticmethod
-  def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
-
-  def toCPU(self) -> np.ndarray:
-    cl_buf = self.contiguous()
-    cl_buf.cl   # force buffer creation, happens if it's a backed buffer that hasn't been created yet
-    cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self.movement_op(MovementOps.RESHAPE, tuple(list(self.shape)+[1])), )))
-    assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
-    data = np.empty(self.shape, dtype=np.float32)
-    assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
-    cl_buf._buf.copyout(data)
-    return data
-
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GPUBuffer]=None):
-    k = GPUProgram(ast, output_buffer)
-    if KOPT > 0:
-      from extra.kernel_search import apply_optimization
-      apply_optimization(k, ast, max_interventions=KOPT)
-    prg = k.codegen(KOPT == -1 or IMAGE == 2)
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
-    prg(*k.bufs)
-    if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
-      print(k.fxn.name)
-      k.print()
-    if TEST_AST:
-      from extra.lib_test_ast import test_ast  # type: ignore
-      test_ast(k)
-    return k.ret
+  def create_raw_buffer(shape): return CLImage(shape) if (len(shape) == 3 and shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(shape))
+  compiler = staticmethod(OpenCLProgram)

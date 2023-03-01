@@ -93,9 +93,12 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
 
-  raw_buffer = staticmethod(RawBuffer)
+  # TODO: not GPUBuffer, get name of class
+  def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
+
+  create_raw_buffer = staticmethod(RawBuffer)
   def raw(self) -> RawBuffer:
-    if self._buf is None: self._buf = self.raw_buffer(4*prod(self._base_shape))
+    if self._buf is None: self._buf = self.create_raw_buffer(self._base_shape)
     if self._backing is not None:
       assert GlobalCounters.cache is None, f"can't copy in {self._backing.shape} while caching"
       self._buf.copyin(self._backing)

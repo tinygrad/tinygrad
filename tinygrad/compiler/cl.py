@@ -228,11 +228,11 @@ class CLASTKernel(ASTKernel):
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
-  def codegen(self, opt=False) -> Callable:
+  def codegen(self) -> Callable:
     self.process()
     self.upcast_in_mid_reduce = False
     if DEBUG >= 3: self.printbufs("old:", DEBUG>=4)
-    if opt: self.hand_coded_optimizations()
+    self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):

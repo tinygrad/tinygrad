@@ -80,7 +80,7 @@ class CLProgram:
     if DEBUG >= 4: print(args[0], args[1], self.prg)
     # print the PTX for NVIDIA. TODO: probably broken for everything else
     if DEBUG >= 5 and not OSX: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
-    e = self.clprg(CL().cl_queue, *args)
+    e = self.clprg(CL().cl_queue, args[0], args[1], *[x._cl for x in args[2:]])
     if DEBUG >= 2:
       assert CL.cl_queue is not None
       CL.cl_queue.finish()
