@@ -33,7 +33,7 @@ class RawMetalBuffer(RawBuffer):
     np.copyto(a, self._as_np().reshape(a.shape))
 
 class MetalProgram:
-  def __init__(self, prg:str):
+  def __init__(self, name:str, prg:str):
     if DEBUG >= 4: print("Metal compile", prg)
     if DEBUG >= 6:  # dump llvm
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
@@ -48,7 +48,7 @@ class MetalProgram:
       options = Metal.MTLCompileOptions.alloc().init()
       self.library, err = METAL().device.newLibraryWithSource_options_error_(prg, options, None)
     assert err is None, str(err)
-    self.fxn = self.library.newFunctionWithName_(self.library.functionNames()[0])
+    self.fxn = self.library.newFunctionWithName_(name)
     # hacks to disassemble shader
     if DEBUG >= 5:
       arc, err = METAL().device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
@@ -83,19 +83,16 @@ class MetalProgram:
     else:
       METAL().mtl_buffers_in_flight.append(command_buffer)
 
-from tinygrad.compiler.cl import CLASTKernel
-class MetalASTKernel(CLASTKernel):
-  kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel"
-  buffer_prefix = "device "
-  smem_prefix = "threadgroup "
-  barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
-  float4 = "float4"
-  gid = [f"gid.{chr(120+i)}" for i in range(3)]
-  lid = [f"lid.{chr(120+i)}" for i in range(3)]
-  extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
-  runtime = staticmethod(MetalProgram)
+from tinygrad.compiler.cl import CLASTKernel, GPULanguage
+
+metal_lang = GPULanguage(
+  kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
+  barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
+  gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
+  extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
 class MetalBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return RawMetalBuffer(4*prod(shape))
-  compiler = staticmethod(MetalASTKernel)
+  compiler = staticmethod(lambda ast, output_buffer: CLASTKernel(ast, output_buffer, metal_lang))
+  runtime = staticmethod(MetalProgram)

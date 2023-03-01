@@ -1,5 +1,5 @@
 import ctypes
-import os
+import os, time
 import numpy as np
 import hashlib
 import subprocess
@@ -17,13 +17,8 @@ class RawMallocBuffer(RawBuffer):
 
 class ClangProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
-  # TODO: remove name, factor out op_estimate and mem_estimate
-  def __init__(self, name:str, prg:str, rename=True, op_estimate=0, mem_estimate=0):
-    self.name = f"{name}{('_N'+str(ClangProgram.kernel_cnt[name])) if ClangProgram.kernel_cnt[name] else str()}" if rename else name
-    ClangProgram.kernel_cnt[name] += 1
-    self.prg = prg.replace(f"{name}(", f"{self.name}(")
+  def __init__(self, name:str, prg:str):
     prg = "#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n" + prg
-    if DEBUG >= 4: print(prg)  # TODO: outside runtime!
     # TODO: is there a way to not write this to disk?
     fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if OSX else 'so'}"
     if not os.path.exists(fn):
@@ -31,13 +26,14 @@ class ClangProgram:
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
-  def __call__(self, *args): self.fxn(*[x._cl for x in args[2:]])
+  def __call__(self, *args, wait=False):
+    if wait: st = time.monotonic()
+    self.fxn(*[x._cl for x in args[2:]])
+    if wait: return time.monotonic()-st
 
 from tinygrad.compiler.cl import CLASTKernel
-class ClangASTKernel(CLASTKernel):
-  runtime = staticmethod(ClangProgram)
-
 class ClangBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return RawMallocBuffer(4*prod(shape))
-  compiler = staticmethod(ClangASTKernel)
+  compiler = staticmethod(CLASTKernel) # default options are clang
+  runtime = staticmethod(ClangProgram)
