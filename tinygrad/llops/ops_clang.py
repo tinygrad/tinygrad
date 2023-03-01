@@ -4,7 +4,7 @@ import numpy as np
 import hashlib
 import subprocess
 from collections import defaultdict
-from typing import List, Final, Dict
+from typing import Final, Dict
 from tinygrad.helpers import DEBUG
 import platform
 OSX = platform.system() == "Darwin"
@@ -16,11 +16,6 @@ class CLBuffer:
     np.copyto(a, np.ctypeslib.as_array(self._cl)[:a.size].reshape(a.shape))
 
 class CLProgram:
-  DISABLE_GLOBAL = True
-  kernel_prefix, buffer_prefix, smem_prefix, barrier = "", "", "", ""
-  gid = [f"gid[{i}]" for i in range(3)]
-  lid = [f"lid[{i}]" for i in range(3)]
-  extra_args : List[str] = []
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
   # TODO: remove name, factor out op_estimate and mem_estimate
   def __init__(self, name:str, prg:str, rename=True, op_estimate=0, mem_estimate=0):

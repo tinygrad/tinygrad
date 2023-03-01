@@ -80,10 +80,12 @@ def get_lazyop_info(ast:LazyOp): return InterpretedAST.exec_ast(map_buffers({x:I
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class CompiledAST(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledAST]=None, backing:Optional[np.ndarray]=None, force_create=False):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+    self._buf = hostbuf._buf if hostbuf is not None else None
+    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
 
   # universal for shape tracked
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))

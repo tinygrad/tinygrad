@@ -63,15 +63,7 @@ class CLImage:
 
 @functools.lru_cache(maxsize=None)
 class CLProgram:
-  kernel_prefix = "__kernel"
-  buffer_prefix = "__global "
-  smem_prefix = "__local "
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
-  barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
-  float4 = "(float4)"
-  gid = [f'get_global_id({i})' for i in range(3)]
-  lid = [f'get_local_id({i})' for i in range(3)]
-  extra_args : List[str] = []
   def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False, op_estimate=0, mem_estimate=0):
     self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else str()}" if rename else name
     self.prg, self.options, self.argdtypes, self.op_estimate, self.mem_estimate = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes, op_estimate, mem_estimate
@@ -100,3 +92,14 @@ class CLProgram:
             (str() if DEBUG <= 1 else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return e
+
+from tinygrad.compiler.cl import CLASTKernel
+class OpenCLProgram(CLASTKernel):
+  kernel_prefix = "__kernel"
+  buffer_prefix = "__global "
+  smem_prefix = "__local "
+  barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
+  float4 = "(float4)"
+  gid = [f'get_global_id({i})' for i in range(3)]
+  lid = [f'get_local_id({i})' for i in range(3)]
+  runtime = staticmethod(CLProgram)

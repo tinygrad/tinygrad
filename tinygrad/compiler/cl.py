@@ -20,7 +20,14 @@ class GPURunner:
     return self.clprg(self.global_work_size, self.local_work_size, *[x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
 
 class CLASTKernel(ASTKernel):
+  # params
+  kernel_prefix, buffer_prefix, smem_prefix, barrier = "", "", "", ""
+  gid : List[str] = []
+  lid : List[str] = []
+  extra_args : List[str] = []
+  float4 : Optional[str] = None
   runtime : ClassVar
+
   code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "((float)1.0-A)",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
@@ -42,7 +49,7 @@ class CLASTKernel(ASTKernel):
     assert len(self.bufs[buf_index].st.views) == 1, "store has more than one view"
 
     # all stores can merge, since they have one view and are valid
-    should_upcast = hasattr(self.runtime, 'float4') and self.buftokens[buf_index].can_float4()
+    should_upcast = self.float4 and self.buftokens[buf_index].can_float4()
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()
@@ -52,14 +59,14 @@ class CLASTKernel(ASTKernel):
       assert valid.min == 1, "store must always be valid"
       if should_upcast:
         for j in range(4): did_store.add(o+j)
-        v = Token(f"{self.runtime.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+        v = Token(f"{self.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
       idxy, valid = self.sts[buf_index].expr_idxs(o)
       assert valid.min == 1, "store must always be valid"
       if hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
-        self.kernel.append(f"(({self.runtime.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"(({self.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
         self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
 
@@ -71,7 +78,7 @@ class CLASTKernel(ASTKernel):
       val = self.bufs[buf_index]._backing[0]
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
-    should_upcast = hasattr(self.runtime, 'float4') and const is None and self.buftokens[buf_index].can_float4()
+    should_upcast = self.float4 and const is None and self.buftokens[buf_index].can_float4()
     tokens = []
     for o in self.buftokens[buf_index].offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
@@ -90,7 +97,7 @@ class CLASTKernel(ASTKernel):
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         elif should_upcast and can_merge:
-          ldr = Token(f"(({self.runtime.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
+          ldr = Token(f"(({self.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
         ldr = ldr if valid.min == 1 or (VALIDHACKS and hasattr(self.bufs[buf_index]._buf, "IMAGE")) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
@@ -142,7 +149,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if hasattr(self.runtime, 'float4') and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if self.float4 and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -244,15 +251,14 @@ class CLASTKernel(ASTKernel):
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    if hasattr(self.runtime, "DISABLE_GLOBAL"):
+    if len(self.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
     else:
-      MAX_OUTPUT_SHAPE = 3
-      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {self.runtime.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
-      if len(self.output_shape) > MAX_OUTPUT_SHAPE:
+      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {self.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(len(self.gid), len(self.output_shape))) if self.output_shape[-1-i] != 1]
+      if len(self.output_shape) > len(self.gid):
         # sometimes, there's more dimensions. compact all the dimensions into the first one
         # TODO: these compactions should be searchable
-        final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
+        final_dimension = len(self.output_shape)-len(self.gid)
         for i in range(final_dimension-1, -1, -1):
           self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
         self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
@@ -276,9 +282,9 @@ class CLASTKernel(ASTKernel):
       assert lvalid.min == 1, "local buffer must always be valid"
       self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
       for i,acc in enumerate(accumulators):
-        self.kernel.append(self.runtime.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
+        self.kernel.append(self.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
-      self.kernel.append(self.runtime.barrier+"\n")
+      self.kernel.append(self.barrier+"\n")
 
       if self.upcast_in_mid_reduce:
         assert len(self.group_for_reduce) == 2
@@ -304,14 +310,14 @@ class CLASTKernel(ASTKernel):
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
-    if hasattr(self.runtime, "DISABLE_GLOBAL"): self.kernel += ["}"] * len(self.output_shape)
+    if len(self.gid) == 0: self.kernel += ["}"] * len(self.output_shape)
     self.kernel.append("\n}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.runtime.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
-    self.kernel = list(self.prekernel) + [f"{self.runtime.kernel_prefix} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.runtime.extra_args)] + \
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
+    self.kernel = list(self.prekernel) + [f"{self.kernel_prefix} void {function_name}(",] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.extra_args)] + \
       [") {\n"] + self.kernel
 
     # compile kernel

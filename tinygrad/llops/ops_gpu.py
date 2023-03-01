@@ -1,34 +1,29 @@
 from __future__ import annotations
 import numpy as np
-from typing import Tuple, Optional, Union, ClassVar
+from typing import Tuple, Optional, Union
 from tinygrad.helpers import prod, IMAGE, getenv
 from tinygrad.ops import UnaryOps, MovementOps, LazyOp, CompiledAST, GlobalCounters
 from tinygrad.shape import ShapeTracker
-from tinygrad.compiler.cl import CLASTKernel
 
 # TODO: select runtimes in a smarter way
 CUDA,METAL,CLANG = getenv("CUDA", 0), getenv("METAL", 0), getenv("CLANG", 0)
 if not CUDA and not METAL and not CLANG:
-  from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+  from tinygrad.runtime.opencl import CLBuffer, CLImage # NOTE: using CL will not work for the CUDA runtime # noqa: F401
+  from tinygrad.runtime.opencl import OpenCLProgram as GPUProgram
 else:
   class CLImage:  # type: ignore
     def __init__(self, shape): raise NotImplementedError("current runtime doesn't support images")
-  if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLProgram  # type: ignore
-  elif METAL: from tinygrad.runtime.metal import CLBuffer, CLProgram  # type: ignore
-  elif CLANG: from tinygrad.runtime.clang import CLBuffer, CLProgram  # type: ignore
+  #if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLProgram  # type: ignore
+  #elif METAL: from tinygrad.runtime.metal import CLBuffer, CLProgram  # type: ignore
+  #elif CLANG: from tinygrad.llops.ops_clang import CLBuffer, ClangProgram as GPUProgram  # type: ignore
 
 KOPT = getenv("KOPT", -1)
 PRINT_AST = getenv("PRINT_AST", "0")
 TEST_AST = getenv("TEST_AST", 0)
 
-class GPUProgram(CLASTKernel):
-  runtime : ClassVar = staticmethod(CLProgram)
-
 class GPUBuffer(CompiledAST):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
-    super().__init__(shape, hostbuf)
-    self._buf : Optional[Union[CLImage, CLBuffer]] = hostbuf._buf if hostbuf is not None else None
-    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+    super().__init__(shape, hostbuf, backing, force_create)
     # early copy in for large buffers
     if (self._backing is not None and self._backing.shape != (1,)) or force_create:
       self.cl
