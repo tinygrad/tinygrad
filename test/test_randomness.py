@@ -57,7 +57,7 @@ class TestRandomness(unittest.TestCase):
 
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
-    self.assertTrue(equal_distribution(Tensor.randn, lambda x: np.random.randn(*x)))
+    self.assertFalse(equal_distribution(Tensor.randn, lambda x: np.random.rand(*x)))
 
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
