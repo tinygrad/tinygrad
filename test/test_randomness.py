@@ -9,7 +9,7 @@ def helper_test_normal(func, shape=(20, 23), alpha=0.05):
   _, p = stats.normaltest(x)
   return p >= alpha
 
-def helper_compare_distribution(tinygrad_func, numpy_func, shape=(20, 23), alpha=0.05):
+def helper_same_distribution(tinygrad_func, numpy_func, shape=(20, 23), alpha=0.05):
   Tensor.manual_seed(1337)
   np.random.seed(1337)
   x = tinygrad_func(*shape).cpu().numpy().flatten()
@@ -18,7 +18,6 @@ def helper_compare_distribution(tinygrad_func, numpy_func, shape=(20, 23), alpha
   return p >= alpha
 
 class TestRandomness(unittest.TestCase):
-
   def test_rand(self):
     self.assertFalse(helper_test_normal(Tensor.rand))
 
@@ -27,15 +26,15 @@ class TestRandomness(unittest.TestCase):
 
   def test_uniform(self):
     self.assertFalse(helper_test_normal(Tensor.uniform))
-    self.assertTrue(helper_compare_distribution(Tensor.uniform, lambda x: np.random.rand(*x) * 2 - 1))
+    self.assertTrue(helper_same_distribution(Tensor.uniform, lambda x: np.random.rand(*x) * 2 - 1))
 
   def test_scaled_uniform(self):
     self.assertFalse(helper_test_normal(Tensor.scaled_uniform))
-    self.assertTrue(helper_compare_distribution(Tensor.scaled_uniform, lambda x: (np.random.rand(*x) * 2 - 1) / math.sqrt(math.prod(x))))
+    self.assertTrue(helper_same_distribution(Tensor.scaled_uniform, lambda x: (np.random.rand(*x) * 2 - 1) / math.sqrt(math.prod(x))))
 
   def test_glorot_uniform(self):
     self.assertFalse(helper_test_normal(Tensor.glorot_uniform))
-    self.assertTrue(helper_compare_distribution(Tensor.glorot_uniform, lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
+    self.assertTrue(helper_same_distribution(Tensor.glorot_uniform, lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
 
 if __name__ == "__main__":
