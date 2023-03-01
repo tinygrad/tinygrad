@@ -1,5 +1,5 @@
-from tinygrad.helpers import prod, argsort, get_conv_args
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps
+from tinygrad.helpers import prod, argsort
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps
 from tinygrad.tensor import Function
 
 class Contiguous(Function):
@@ -157,37 +157,3 @@ class Flip(Function):
 
   def backward(self, grad_output):
     return grad_output.movement_op(MovementOps.FLIP, self.axis)
-
-# ************* processing ops *************
-
-class Conv2D(Function):
-  def forward(self, x, w, stride=1, groups=1, dilation=1, padding=0):
-    self.C = get_conv_args(x.shape, w.shape, stride, groups, dilation=dilation, padding=padding)
-    self.save_for_backward(x,w)
-    return x.processing_op(ProcessingOps.CONV, w, self.C)
-
-  def backward(self, grad_output):
-    x, w = self.saved_tensors
-    C = self.C   # conv args from the context
-    dx, dw = None, None
-
-    if self.needs_input_grad[0]:    # compute derivative of inputs using ProcessingOps.CONV (this is a transposed conv)
-      xt = grad_output
-      if C.sx > 1 or C.sy > 1:   # unstride. NOTE: this is really memory intensive for big strides. (but only when we contiguous it)
-        xt = xt.movement_op(MovementOps.RESHAPE, (grad_output.shape[0], grad_output.shape[1], grad_output.shape[2], 1, grad_output.shape[3], 1))
-        xt = xt.movement_op(MovementOps.PAD, ((0,0), (0,0), (0,0), (0,C.sy-1), (0,0), (0,C.sx-1)))
-        xt = xt.movement_op(MovementOps.RESHAPE, (xt.shape[0], xt.shape[1], xt.shape[2]*C.sy, xt.shape[4]*C.sx))
-      wt = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W)).movement_op(MovementOps.PERMUTE, (0, 2, 1, 3, 4)).movement_op(MovementOps.FLIP, (3, 4))
-      wt = wt.movement_op(MovementOps.RESHAPE, (C.groups*C.cin, C.rcout, C.H, C.W))
-      py, px = (C.H-1)*C.dy - C.py, (C.W-1)*C.dx - C.px
-      Cdx = get_conv_args(xt.shape, wt.shape, out_shape=x.shape, dilation=(C.dy, C.dx), padding=(py, px), groups=C.groups)
-      dx = xt.processing_op(ProcessingOps.CONV, wt, Cdx)
-
-    if self.needs_input_grad[1]:   # compute derivative of weights using ProcessingOps.CONV
-      xdw = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix)).movement_op(MovementOps.PERMUTE, (2, 1, 0, 3, 4))
-      xdw = xdw.movement_op(MovementOps.RESHAPE, (C.cin, C.groups*C.bs, C.iy, C.ix))
-      grad_output_dw = grad_output.movement_op(MovementOps.PERMUTE, (1,0,2,3))
-      Cdw = get_conv_args(xdw.shape, grad_output_dw.shape, out_shape=(w.shape[1], w.shape[0], w.shape[2], w.shape[3]), padding=(C.py, C.px), stride=(C.dy, C.dx), dilation=(C.sy, C.sx), groups=C.groups)
-      dw = xdw.processing_op(ProcessingOps.CONV, grad_output_dw, Cdw).movement_op(MovementOps.PERMUTE, (1,0,2,3))
-
-    return dx, dw

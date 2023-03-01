@@ -178,7 +178,6 @@ class TestComplexShapeTracker(unittest.TestCase):
 
   def test_fancy_factorize(self):
     self.st = ShapeTracker((32, 3, 3, 1))
-    self.st.strided(tuple(zip((32, 3, 3, 1), (1, 4096, 32, 1))))
     self.st.reshape((8, 4, 3, 3))
     assert len(self.st.views) == 1
 

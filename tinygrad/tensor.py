@@ -321,11 +321,6 @@ class Tensor:
     assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
     padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
 
-    # old implementation
-    if not HLOP:
-      ret = mlops.Conv2D.apply(self, weight, groups=groups, stride=stride, dilation=dilation, padding=padding)
-      return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool((H,W),stride, dilation)
 

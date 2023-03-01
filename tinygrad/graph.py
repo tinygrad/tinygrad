@@ -7,7 +7,7 @@ except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
 from typing import Dict, List, Optional
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv, DEBUG
 
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
@@ -49,13 +49,13 @@ def log_op(ret : DeviceBuffer, ast : LazyOp, show_graph : Optional[bool] = None)
   if len(inp) == 1 and inp[0] == ret:
     if nm(ret) in G.nodes: G.nodes[nm(ret)]['style'] += ', bold'
     return   # don't log self loops
-  oporder = [LoadOps, FusedOps, ProcessingOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
+  oporder = [LoadOps, FusedOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
   if DEBUG >= 3:
     print(f"{op} : {', '.join([f'{x.shape}-<{nm(x)}>' for x in inp])} -> {ret.shape}-<{nm(ret)}>")
   if show_graph:
-    top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", ProcessingOps: "#ff8080", FusedOps: "#ff8080"}
+    top_colors = {LoadOps: '#FFFF80', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", FusedOps: "#ff8080"}
     dashed = (optype == LoadOps and hasattr(ret, "_backing")) or (hasattr(ret, "st") and not ret.st.contiguous)  # type: ignore
 
     for x in inp:
