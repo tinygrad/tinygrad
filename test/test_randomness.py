@@ -1,42 +1,75 @@
 import math
 import unittest
 import numpy as np
-from scipy import stats
 from tinygrad.tensor import Tensor
 
-def helper_test_normal(func, shape=(20, 23), alpha=0.05):
-  x = func(*shape).cpu().numpy().flatten()
-  _, p = stats.normaltest(x)
-  return p >= alpha
+# https://gist.github.com/devries/11405101
+def ksprob(a):
+  fac, total, termbf = 2.0, 0.0, 0.0
+  a2 = -2.0 * a * a
+  for j in range(1, 101):
+    term = fac * math.exp(a2 * j * j)
+    total += term
+    if math.fabs(term) <= 0.001 * termbf or math.fabs(term) <= 1e-8 * total:
+      return total
+    fac = -fac
+    termbf = math.fabs(term)
+  return 1.0
 
-def helper_same_distribution(tinygrad_func, numpy_func, shape=(20, 23), alpha=0.05):
+def kstest(l1, l2):
+  n1, n2 = len(l1), len(l2)
+  l1.sort()
+  l2.sort()
+  j1, j2, d, fn1, fn2 = 0, 0, 0.0, 0.0, 0.0
+  while j1 < n1 and j2 < n2:
+    d1, d2 = l1[j1], l2[j2]
+    if d1 <= d2:
+      fn1 = (float(j1) + 1.0) / float(n1)
+      j1 += 1
+    if d2 <= d1:
+      fn2 = (float(j2) + 1.0) / float(n2)
+      j2 += 1
+    dtemp = math.fabs(fn2 - fn1)
+    if dtemp > d:
+      d = dtemp
+  ne = float(n1 * n2) / float(n1 + n2)
+  nesq = math.sqrt(ne)
+  prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
+  return prob
+
+def equal_distribution(tinygrad_func, numpy_func, shape=(20, 23), alpha=0.05):
   Tensor.manual_seed(1337)
   np.random.seed(1337)
   x = tinygrad_func(*shape).cpu().numpy().flatten()
   y = numpy_func(shape).flatten()
-  _, p = stats.kstest(x, y)
+  p = kstest(x, y)
+  return p >= alpha
+
+def normal_test(func, shape=(20, 23), alpha=0.05):
+  y = lambda x: np.random.randn(*x)
+  p = equal_distribution(func, y, shape=shape, alpha=alpha)
   return p >= alpha
 
 class TestRandomness(unittest.TestCase):
   def test_rand(self):
-    self.assertFalse(helper_test_normal(Tensor.rand))
-    self.assertTrue(helper_same_distribution(Tensor.rand, lambda x: np.random.rand(*x)))
+    self.assertFalse(normal_test(Tensor.rand))
+    self.assertTrue(equal_distribution(Tensor.rand, lambda x: np.random.rand(*x)))
 
   def test_randn(self):
-    self.assertTrue(helper_test_normal(Tensor.randn))
-    self.assertTrue(helper_same_distribution(Tensor.randn, lambda x: np.random.randn(*x)))
+    self.assertTrue(normal_test(Tensor.randn))
+    self.assertTrue(equal_distribution(Tensor.randn, lambda x: np.random.randn(*x)))
 
   def test_uniform(self):
-    self.assertFalse(helper_test_normal(Tensor.uniform))
-    self.assertTrue(helper_same_distribution(Tensor.uniform, lambda x: np.random.rand(*x) * 2 - 1))
+    self.assertFalse(normal_test(Tensor.uniform))
+    self.assertTrue(equal_distribution(Tensor.uniform, lambda x: np.random.rand(*x) * 2 - 1))
 
   def test_scaled_uniform(self):
-    self.assertFalse(helper_test_normal(Tensor.scaled_uniform))
-    self.assertTrue(helper_same_distribution(Tensor.scaled_uniform, lambda x: (np.random.rand(*x) * 2 - 1) / math.sqrt(math.prod(x))))
+    self.assertFalse(normal_test(Tensor.scaled_uniform))
+    self.assertTrue(equal_distribution(Tensor.scaled_uniform, lambda x: (np.random.rand(*x) * 2 - 1) / math.sqrt(math.prod(x))))
 
   def test_glorot_uniform(self):
-    self.assertFalse(helper_test_normal(Tensor.glorot_uniform))
-    self.assertTrue(helper_same_distribution(Tensor.glorot_uniform, lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
+    self.assertFalse(normal_test(Tensor.glorot_uniform))
+    self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
 if __name__ == "__main__":
   unittest.main()
