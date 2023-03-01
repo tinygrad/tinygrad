@@ -22,13 +22,14 @@ def numpy_conv(x,w,C):
   out = np.einsum("nGhwCHW, GkCHW -> nGkhw", tx.ravel().reshape(tx.shape), tw.ravel().reshape(tw.shape))
   return out.reshape(C.bs, C.groups*C.rcout, C.oy, C.ox)
 
-def einsum_mulacc(einsum, get_strides):
+def einsum_mulacc(einsum, get_strides, expand):
   def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
   def axes_slice(strides): return [i for i in range(len(strides)) if strides[i] != 0], tuple(slice(None) if strides[i] != 0 else 0 for i in range(len(strides)))
   def mulacc(a, b, new_shape):
     (a_axes, a_slices), (b_axes, b_slices) = axes_slice(get_strides(a)), axes_slice(get_strides(b))
     out = [i for i in range(len(new_shape)) if a.shape[i] == new_shape[i] and (i in a_axes or i in b_axes)]
-    return einsum(f"{einscripts(a_axes)}, {einscripts(b_axes)} -> {einscripts(out)}", a[a_slices], b[b_slices]).reshape(new_shape)
+    ret = einsum(f"{einscripts(a_axes)}, {einscripts(b_axes)} -> {einscripts(out)}", a[a_slices], b[b_slices])
+    return expand(ret.reshape([(1 if i not in a_axes and i not in b_axes else s) for i,s in enumerate(new_shape)]), new_shape)
   return mulacc
 
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
@@ -37,7 +38,7 @@ numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
   MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
   MovementOps.STRIDED: numpy_strided, ProcessingOps.CONV: numpy_conv,
-  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides)
+  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, lambda x,s: np.broadcast_to(x,s))
 }}
 
 class CPUBuffer(GenericExecAST):
