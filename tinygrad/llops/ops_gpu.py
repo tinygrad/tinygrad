@@ -20,8 +20,7 @@ class CL:
   def __init__(self) -> None:
     if CL.cl_queue is not None: return   # already initted
     devices : List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
-    if len(devices) == 0:  # settle for CPU
-      devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], [])
+    if len(devices) == 0: devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], []) # settle for CPU
     CL.cl_ctx = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
     if len(devices) > 1 or DEBUG >= 1: print(f"using {CL.cl_ctx.devices}")
     CL.cl_queue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
@@ -53,35 +52,22 @@ class CLImage(RawBuffer):
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
 
 class CLProgram:
-  kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
-  def __init__(self, name:str, prg:str, options:Tuple[str, ...]=tuple(), argdtypes=None, rename=True, binary=False, op_estimate=0, mem_estimate=0):
-    self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else str()}" if rename else name
-    self.prg, self.options, self.argdtypes, self.op_estimate, self.mem_estimate = prg.replace(f"{name}(", f"{self.name}(") if rename else prg, options, argdtypes, op_estimate, mem_estimate
+  def __init__(self, prg:str, binary=False):
+    self.prg = prg
     self.clprogram = cl.Program(CL().cl_ctx, CL().cl_ctx.devices, [self.prg]) if binary else cl.Program(CL().cl_ctx, self.prg)  # type: ignore
     try:
-      self.clprg = self.clprogram.build(options=list(self.options)).__getattr__(self.name)
+      self._clprg = self.clprogram.build()
     except cl.RuntimeError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", self.prg)
       raise e
-    if self.argdtypes is not None:
-      self.clprg.set_scalar_arg_dtypes(self.argdtypes)
-    CLProgram.kernel_cnt[name] += 1
-  def __call__(self, *args) -> cl.Event:
-    if DEBUG >= 4: print(args[0], args[1], self.prg)
-    # print the PTX for NVIDIA. TODO: probably broken for everything else
-    if DEBUG >= 5 and not OSX: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))
-    e = self.clprg(CL().cl_queue, args[0], args[1], *[x._cl for x in args[2:]])
-    if DEBUG >= 2:
-      assert CL.cl_queue is not None
-      CL.cl_queue.finish()
-      # NOTE: Profiling is not in ns in OS X, we multiply by a computed ratio
-      et = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
-      GlobalCounters.time_sum += et
-    if DEBUG >= 1:
-      print(f"**CL** {GlobalCounters.kernel_count:6d} {self.name:28s} args {len(args[2:]):5d}  kernels {str(args[0]):18s} {str(args[1]):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if DEBUG <= 1 else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
-    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
-    return e
+    self.clprg = self._clprg.__getattr__(self._clprg.kernel_names)
+    if DEBUG >= 5 and not OSX: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))  # print the PTX for NVIDIA. TODO: probably broken for everything else
+    if DEBUG >= 4: print(self.prg)
+  def __call__(self, global_work_size, local_work_size, *bufs, wait=False) -> Optional[float]:
+    e = self.clprg(CL().cl_queue, global_work_size, local_work_size, *[x._cl for x in bufs])
+    if wait:
+      CL().cl_queue.finish()
+      return (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
 
 from tinygrad.compiler.cl import CLASTKernel
 class OpenCLProgram(CLASTKernel):

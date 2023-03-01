@@ -1,6 +1,7 @@
 import math
+from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, Callable, ClassVar
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, GlobalCounters
 from tinygrad.compiler.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
 from tinygrad.shape import ShapeTracker
@@ -14,10 +15,16 @@ VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
 class GPURunner:
-  def __init__(self, clprg, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]]):
-    self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete = clprg, global_work_size, local_work_size, bufs_to_delete
+  def __init__(self, name, clprg, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]], op_estimate=0, mem_estimate=0):
+    self.name, self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, clprg, global_work_size, local_work_size, bufs_to_delete, op_estimate, mem_estimate
   def __call__(self, *bufs):
-    return self.clprg(self.global_work_size, self.local_work_size, *[x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
+    et = self.clprg(self.global_work_size, self.local_work_size, *[x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete], wait=DEBUG>=2)
+    if et is not None: GlobalCounters.time_sum += et
+    if DEBUG >= 1:
+      print(f"**CL** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs)-len(self.bufs_to_delete):5d}  kernels {str(self.global_work_size):18s} {str(self.local_work_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+            (str() if DEBUG <= 1 else f"tm {et/1e3:9.2f}us/{GlobalCounters.time_sum/1e6:9.2f}ms ({self.op_estimate/et:8.2f} GFLOPS)"))
+    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
+    return et
 
 class CLASTKernel(ASTKernel):
   # params
@@ -27,6 +34,9 @@ class CLASTKernel(ASTKernel):
   extra_args : List[str] = []
   float4 : Optional[str] = None
   runtime : ClassVar
+
+  # for renaming
+  kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
 
   code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "((float)1.0-A)",
@@ -315,15 +325,23 @@ class CLASTKernel(ASTKernel):
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
+    if CLASTKernel.kernel_cnt[function_name]:
+      function_name = f"{function_name}{'_N'+str(CLASTKernel.kernel_cnt[function_name])}"
+    CLASTKernel.kernel_cnt[function_name] += 1
+
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"{self.kernel_prefix} void {function_name}(",] + \
       [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.extra_args)] + \
       [") {\n"] + self.kernel
 
     # compile kernel
-    self.fxn = self.runtime(function_name, ' '.join(self.kernel), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
+    #self.fxn = self.runtime(function_name, ' '.join(self.kernel), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
+    self.fxn = self.runtime(' '.join(self.kernel))
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    return GPURunner(self.fxn, self.bufs_to_delete, self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None)
+    return GPURunner(function_name, self.fxn, self.bufs_to_delete,
+      self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
+      (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
+      op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
 
   def print(self):
     super().print()
