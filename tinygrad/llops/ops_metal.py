@@ -1,11 +1,11 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-libdispatch
+import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
 from tinygrad.ops import GlobalCounters
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.ops import CompiledBuffer, RawBuffer
-import subprocess, pathlib
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -33,8 +33,7 @@ class RawMetalBuffer(RawBuffer):
     np.copyto(a, self._as_np().reshape(a.shape))
 
 class MetalProgram:
-  def __init__(self, name:str, prg:str, op_estimate:int=0, mem_estimate:int=0):
-    self.name, self.op_estimate, self.mem_estimate = name, op_estimate, mem_estimate
+  def __init__(self, prg:str):
     if DEBUG >= 4: print("Metal compile", prg)
     if DEBUG >= 6:  # dump llvm
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
@@ -49,7 +48,7 @@ class MetalProgram:
       options = Metal.MTLCompileOptions.alloc().init()
       self.library, err = METAL().device.newLibraryWithSource_options_error_(prg, options, None)
     assert err is None, str(err)
-    self.fxn = self.library.newFunctionWithName_(name) #self.library.functionNames()[0]
+    self.fxn = self.library.newFunctionWithName_(self.library.functionNames()[0])
     # hacks to disassemble shader
     if DEBUG >= 5:
       arc, err = METAL().device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
@@ -61,12 +60,11 @@ class MetalProgram:
       _, err = arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None)
       assert err is None, str(err)
       # clone https://github.com/dougallj/applegpu.git in the root of tinygrad
-      import os
       os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
     self.pipeline_state, err = METAL().device.newComputePipelineStateWithFunction_error_(self.fxn, None)
     assert err is None, str(err)
 
-  def __call__(self, global_size, local_size, *args):
+  def __call__(self, global_size, local_size, *bufs, wait=False):
     global_size += [1] * (3-len(global_size))
     if local_size is None: local_size = [32]
     local_size += [1] * (3-len(local_size))
@@ -75,20 +73,15 @@ class MetalProgram:
     command_buffer = METAL().mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
-    for i,a in enumerate(args):
-      encoder.setBuffer_offset_atIndex_(a._cl, 0, i)
+    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._cl, 0, i)
     encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()
-    if DEBUG >= 2:
+    if wait:
       command_buffer.waitUntilCompleted()
-      et = command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
-      print(f"METAL et {et*1e6:8.2f} us  {self.name:28s} launch {str(global_size):18s} {local_size}")
-      GlobalCounters.time_sum += et
+      return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     else:
       METAL().mtl_buffers_in_flight.append(command_buffer)
-    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
-    return command_buffer
 
 from tinygrad.compiler.cl import CLASTKernel
 class MetalASTKernel(CLASTKernel):

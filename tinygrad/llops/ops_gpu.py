@@ -63,11 +63,11 @@ class CLProgram:
     self.clprg = self._clprg.__getattr__(self._clprg.kernel_names)
     if DEBUG >= 5 and not OSX: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))  # print the PTX for NVIDIA. TODO: probably broken for everything else
     if DEBUG >= 4: print(self.prg)
-  def __call__(self, global_work_size, local_work_size, *bufs, wait=False) -> Optional[float]:
-    e = self.clprg(CL().cl_queue, global_work_size, local_work_size, *[x._cl for x in bufs])
+  def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
+    e = self.clprg(CL().cl_queue, global_size, local_size, *[x._cl for x in bufs])
     if wait:
       CL().cl_queue.finish()
-      return (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
+      return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
 
 from tinygrad.compiler.cl import CLASTKernel
 class OpenCLProgram(CLASTKernel):
