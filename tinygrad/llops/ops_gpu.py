@@ -22,7 +22,7 @@ PRINT_AST = getenv("PRINT_AST", "0")
 TEST_AST = getenv("TEST_AST", 0)
 
 class GPUProgram(CLASTKernel):
-  program : ClassVar = staticmethod(CLProgram)
+  runtime : ClassVar = staticmethod(CLProgram)
 
 class GPUBuffer(CompiledAST):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):

@@ -75,7 +75,7 @@ class InterpretedAST(DeviceBuffer):  # pylint: disable=abstract-method
       return output_buffer
     else:
       return ret
-def get_lazyop_info(ast:LazyOp): return InterpretedAST.exec_ast(map_buffers({x:InterpretedAST(GenericShape(x.shape)) for x in get_buffers(ast)}, ast)).buf
+def get_lazyop_info(ast:LazyOp): return InterpretedAST.exec_ast(map_buffers({x:InterpretedAST(GenericShape(x.shape)) for x in get_buffers(ast)}, ast))._buf
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
