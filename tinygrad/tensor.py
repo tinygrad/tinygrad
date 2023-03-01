@@ -400,7 +400,7 @@ class Tensor:
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
-  def minimum(self, x): return -((-self).maximum(-x))
+  def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
@@ -434,11 +434,11 @@ class Tensor:
 
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
 
-  def layernorm(self, axis=-1, eps=1e-5):
+  def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
     y = (self - self.mean(axis=axis, keepdim=True))
     return y.div((y*y).mean(axis=axis, keepdim=True).add(eps).sqrt())
 
-  def batchnorm(self, weight:Tensor, bias:Tensor, mean:Tensor, invstd:Tensor):
+  def batchnorm(self, weight:Tensor, bias:Tensor, mean:Tensor, invstd:Tensor) -> Tensor:
     x = (self - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
     return x.mul(invstd.reshape(shape=[1, -1, 1, 1])) + bias.reshape(shape=[1, -1, 1, 1])
 

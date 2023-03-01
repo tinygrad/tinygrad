@@ -12,9 +12,9 @@ def image_conv2d_decorator(normal_conv):
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
       x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
       added_input_channels = 4 - (cin % 4)
+      w = w.pad(tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(w.shape))))
+      x = x.pad(tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(x.shape))))
       cin = cin + added_input_channels
-      w = w.slice(tuple((0, cin) if i == 2 else (0, w.shape[i]) for i in range(len(w.shape))))
-      x = x.slice(tuple((0, cin) if i == 2 else (0, x.shape[i]) for i in range(len(x.shape))))
       x = x.reshape(bs, groups*cin, iy, ix)
 
     # hack for non multiples of 4 on rcout
