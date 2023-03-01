@@ -11,9 +11,9 @@ import platform
 OSX = platform.system() == "Darwin"
 
 class RawMallocBuffer(RawBuffer):
-  def __init__(self, size): self._cl = (ctypes.c_float * (size))()
-  def copyin(self, b:np.ndarray): ctypes.memmove(self._cl, b.ctypes.data, b.size*4)
-  def copyout(self, a:np.ndarray): np.copyto(a, np.ctypeslib.as_array(self._cl)[:a.size].reshape(a.shape))
+  def __init__(self, size): self._buf = (ctypes.c_float * (size))()
+  def copyin(self, b:np.ndarray): ctypes.memmove(self._buf, b.ctypes.data, b.size*4)
+  def copyout(self, a:np.ndarray): np.copyto(a, np.ctypeslib.as_array(self._buf)[:a.size].reshape(a.shape))
 
 class ClangProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
@@ -28,7 +28,7 @@ class ClangProgram:
     self.fxn = self.lib[name]
   def __call__(self, *args, wait=False):
     if wait: st = time.monotonic()
-    self.fxn(*[x._cl for x in args[2:]])
+    self.fxn(*[x._buf for x in args[2:]])
     if wait: return time.monotonic()-st
 
 from tinygrad.compiler.gpu import GPUCodegen

@@ -1,8 +1,8 @@
 import math
 from collections import defaultdict
-from typing import Optional, List, Tuple, Dict, Set, Final, Callable, NamedTuple
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, GlobalCounters
-from tinygrad.compiler.ast import ASTKernel, Token, Types
+from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op
+from tinygrad.compiler.ast import ASTKernel, ASTRunner, Token, Types
 from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import getenv, DEBUG, prod
@@ -13,22 +13,6 @@ render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
-
-class GPURunner:
-  def __init__(self, name, prg, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]], op_estimate=0, mem_estimate=0):
-    if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_work_size, self.local_work_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_work_size, local_work_size, bufs_to_delete, op_estimate, mem_estimate
-  def build(self, runtime):
-    self.clprg = runtime(self.name, self.prg)
-    return self
-  def __call__(self, *bufs):
-    et = self.clprg(self.global_work_size, self.local_work_size, *[x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete], wait=DEBUG>=2)
-    if et is not None: GlobalCounters.time_sum_s += et
-    if DEBUG >= 1:
-      print(f"**CL** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs)-len(self.bufs_to_delete):5d}  kernels {str(self.global_work_size):18s} {str(self.local_work_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if DEBUG <= 1 else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS)"))
-    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
-    return et
 
 class GPULanguage(NamedTuple):
   kernel_prefix : str = ""; buffer_prefix : str = ""; smem_prefix : str = ""; barrier : str = ""
@@ -243,7 +227,7 @@ class GPUCodegen(ASTKernel):
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
-  def codegen(self) -> GPURunner:
+  def codegen(self) -> ASTRunner:
     self.process()
     self.upcast_in_mid_reduce = False
     if DEBUG >= 3: self.printbufs("old:", DEBUG>=4)
@@ -340,7 +324,7 @@ class GPUCodegen(ASTKernel):
       [") {\n"] + self.kernel
 
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    return GPURunner(function_name, ' '.join(self.kernel), self.bufs_to_delete,
+    return ASTRunner(function_name, ' '.join(self.kernel), self.bufs_to_delete,
       self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
       op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
