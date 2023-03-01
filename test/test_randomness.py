@@ -36,6 +36,5 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(helper_test_normal(Tensor.glorot_uniform))
     self.assertTrue(helper_same_distribution(Tensor.glorot_uniform, lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
-
 if __name__ == "__main__":
   unittest.main()
