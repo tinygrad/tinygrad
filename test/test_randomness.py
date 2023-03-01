@@ -20,9 +20,11 @@ def helper_same_distribution(tinygrad_func, numpy_func, shape=(20, 23), alpha=0.
 class TestRandomness(unittest.TestCase):
   def test_rand(self):
     self.assertFalse(helper_test_normal(Tensor.rand))
+    self.assertTrue(helper_same_distribution(Tensor.rand, lambda x: np.random.rand(*x)))
 
   def test_randn(self):
     self.assertTrue(helper_test_normal(Tensor.randn))
+    self.assertTrue(helper_same_distribution(Tensor.randn, lambda x: np.random.randn(*x)))
 
   def test_uniform(self):
     self.assertFalse(helper_test_normal(Tensor.uniform))
