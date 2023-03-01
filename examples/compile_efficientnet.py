@@ -17,14 +17,14 @@ def compile_net(run, special_names):
     cargs = []
     for i,arg in enumerate(args):
       if i in fxn.bufs_to_delete: continue
-      key = id(arg.cl)
+      key = id(arg.cl._cl)
       if key not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key], len(arg.cl)//4)
+          bufs[key] = (special_names[key], len(arg.cl._cl)//4)
         else:
-          bufs[key] = (f"buf_{bufnum}", len(arg.cl)//4)
+          bufs[key] = (f"buf_{bufnum}", len(arg.cl._cl)//4)
           bufnum += 1
-          if i > 0: bufs_to_save[bufs[key][0]] = arg.cl  # if first usage of a buffer is not an output, and it's not a special name
+          if i > 0: bufs_to_save[bufs[key][0]] = arg.cl._cl  # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
     statements.append(f"{fxn.clprg.name}({', '.join(cargs)});")
 
@@ -44,7 +44,7 @@ if __name__ == "__main__":
   the_output = run(the_input)
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
+  special_names = {id(the_input.lazydata.realized.cl._cl): "input", id(the_output.lazydata.realized.cl._cl): "outputs"}
 
   cprog, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
   # buffers (weights)
   for name,cl in bufs_to_save.items():
-    weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl)[0:len(cl)//4])])
+    weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl._cl)[0:len(cl._cl)//4])])
     cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog.append(f"float *{name} = (float *){name}_data;")
 
