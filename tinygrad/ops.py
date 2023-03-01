@@ -91,14 +91,13 @@ class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     # early copy in for large buffers
     if (self._backing is not None and self._backing.shape != (1,)) or force_create:
-      self.cl # pylint: disable=pointless-statement
+      self._load()
 
   def create(self, base_shape: Tuple[int, ...]) -> Any: raise NotImplementedError("must be implemented")
   def copyin(self, source: np.ndarray): raise NotImplementedError("must be implemented")
   def copyout(self, cl_buf: ExplicitExecAST, dest: np.ndarray): raise NotImplementedError("must be implemented")
 
-  @property
-  def cl(self) -> Any:
+  def _load(self) -> Any:
     if self._buf is None:
       self._buf = self.create(self._base_shape)
     assert self._buf is not None
@@ -109,7 +108,7 @@ class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
 
   def toCPU(self) -> np.ndarray:
     buf_contiguous = self.contiguous()
-    buf_contiguous.cl # pylint: disable=pointless-statement # force buffer creation, happens if it's a backed buffer that hasn't been created yet
+    buf_contiguous._load() # force buffer creation, happens if it's a backed buffer that hasn't been created yet
     data = np.empty(self.shape, dtype=np.float32)
     self.copyout(buf_contiguous, data)
     return data

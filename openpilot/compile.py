@@ -70,7 +70,7 @@ def compile(dat, output_fn):
     prg(*args)
 
   from extra.thneed import Thneed
-  t = Thneed(cl_cache, {k:inputs[k].lazydata.realized.cl._cl for k in inputs.keys()})
+  t = Thneed(cl_cache, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
 
   if getenv("OPTWG", 0):
     t.optimize_local_workgroup()

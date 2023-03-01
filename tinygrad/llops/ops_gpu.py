@@ -35,7 +35,7 @@ class GPURunner:
   def __init__(self, clprg:CLProgram, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]]):
     self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete = clprg, global_work_size, local_work_size, bufs_to_delete
   def __call__(self, *bufs):
-    return self.clprg(self.global_work_size, self.local_work_size, *[x.cl._cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
+    return self.clprg(self.global_work_size, self.local_work_size, *[x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
 
 class CLASTKernel(ASTKernel):
   code_for_op : Final[Dict[Op, str]] = {
@@ -350,6 +350,9 @@ class GPUBuffer(ExplicitExecAST):
     assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     cl_buf._buf.copyout(dest)
+
+  @property
+  def cl(self) -> Union[CLBuffer, CLImage]: return self._load()._cl
 
   # TODO: we don't always need a hostbuf
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
