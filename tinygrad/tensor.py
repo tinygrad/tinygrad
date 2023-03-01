@@ -404,10 +404,10 @@ class Tensor:
 
   # Comparison ops
   def __lt__(self, x): return self._broadcasted(mlops.CompareLess, x, False)
-  def __le__(self, x): return self._broadcasted(mlops.CompareLess, x, False).add(self == x)
+  def __le__(self, x): return self._broadcasted(mlops.CompareLess, x, False).add(self.eq(x))
   def __gt__(self, x): return self._broadcasted(mlops.CompareLess, x, True)
-  def __ge__(self, x): return self._broadcasted(mlops.CompareLess, x, True).add(self == x)
-  def __eq__(self, x): return self._broadcasted(mlops.CompareEqual, x, False)
+  def __ge__(self, x): return self._broadcasted(mlops.CompareLess, x, True).add(self.eq(x))
+  def eq(self, x): return self._broadcasted(mlops.CompareEqual, x, False) if isinstance(x, Tensor) else False
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
