@@ -46,17 +46,15 @@ class LLVMBuffer(ExplicitExecAST):
     ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
   }
 
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, backing:Optional[np.ndarray]=None, force_create=False):
-    super().__init__(shape, hostbuf)
-    # TODO: force alignment?
-    self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
-    if backing is not None:
-      ctypes.memmove(self._buf, backing.ctypes.data, prod(self.shape)*4)
-    #assert ctypes.addressof(self._buf) & 0x1F == 0
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[LLVMBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
+    # TODO add constant inlining and remove force_create=True & constructor
+    super().__init__(shape, hostbuf, backing, force_create=True)
+
+  def create(self, base_shape: Tuple[int, ...]): return (ctypes.c_float * (prod(base_shape)))()
+  def copyin(self, source: np.ndarray): ctypes.memmove(self._buf, source.ctypes.data, 4*prod(self.shape))
+  def copyout(self, cl_buf: ExplicitExecAST, dest: np.ndarray): ctypes.memmove(dest.ctypes.data, cl_buf._buf, 4*prod(self.shape))
 
   def __repr__(self): return f"LLVMBuffer {str(self.st)}"
-  
-  def toCPU(x): return np.ctypeslib.as_array(x.contiguous()._buf)[:prod(x.shape)].reshape(x.shape).copy()
 
   func_cache : Dict[str, Any] = {}
   @classmethod
@@ -242,5 +240,5 @@ class LLVMBuffer(ExplicitExecAST):
 
     loop_entry[-1].branch(loop_exit[-1]._block)
     loop_exit[0].ret_void()
-    LLVMBuffer.func_cache[k.key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
+    LLVMBuffer.func_cache[k.key] = LLVM().exec(module, [x.cl for x in k.bufs], k.info.flops, sum(len(x._buf) for x in k.bufs))
     return k.ret

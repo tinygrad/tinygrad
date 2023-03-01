@@ -83,10 +83,36 @@ def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(map_buffers({x:G
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, backing:Optional[np.ndarray]=None):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, backing:Optional[np.ndarray]=None, force_create=False):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+    self._buf : Any = hostbuf._buf if hostbuf is not None else None
+    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+    # early copy in for large buffers
+    if (self._backing is not None and self._backing.shape != (1,)) or force_create:
+      self.cl # pylint: disable=pointless-statement
+
+  def create(self, base_shape: Tuple[int, ...]) -> Any: raise NotImplementedError("must be implemented")
+  def copyin(self, source: np.ndarray): raise NotImplementedError("must be implemented")
+  def copyout(self, cl_buf: ExplicitExecAST, dest: np.ndarray): raise NotImplementedError("must be implemented")
+
+  @property
+  def cl(self) -> Any:
+    if self._buf is None:
+      self._buf = self.create(self._base_shape)
+    assert self._buf is not None
+    if self._backing is not None:
+      self.copyin(self._backing)
+      self._backing = None
+    return self._buf
+
+  def toCPU(self) -> np.ndarray:
+    buf_contiguous = self.contiguous()
+    buf_contiguous.cl # pylint: disable=pointless-statement # force buffer creation, happens if it's a backed buffer that hasn't been created yet
+    data = np.empty(self.shape, dtype=np.float32)
+    self.copyout(buf_contiguous, data)
+    return data
 
   # universal for shape tracked
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))

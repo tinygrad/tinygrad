@@ -35,7 +35,7 @@ class GPURunner:
   def __init__(self, clprg:CLProgram, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]]):
     self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete = clprg, global_work_size, local_work_size, bufs_to_delete
   def __call__(self, *bufs):
-    return self.clprg(self.global_work_size, self.local_work_size, *[x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
+    return self.clprg(self.global_work_size, self.local_work_size, *[x.cl._cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
 
 class CLASTKernel(ASTKernel):
   code_for_op : Final[Dict[Op, str]] = {
@@ -338,39 +338,21 @@ class CLASTKernel(ASTKernel):
       print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.sts[i])
     print(self.fxn.prg)
 
-class GPUBuffer(ExplicitExecAST):
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
-    super().__init__(shape, hostbuf)
-    self._buf : Optional[Union[CLImage, CLBuffer]] = hostbuf._buf if hostbuf is not None else None
-    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
-    # early copy in for large buffers
-    if (self._backing is not None and self._backing.shape != (1,)) or force_create:
-      self.cl
+class GPUBuffer(ExplicitExecAST):  
+  def create(self, base_shape: Tuple[int, ...]): return CLImage(base_shape) if (len(base_shape) == 3 and base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(base_shape))
   
-  # TODO: refactor this to return self._buf and not import pyopencl
-  @property
-  def cl(self) -> Union[CLBuffer, CLImage]:
-    if self._buf is None:
-      self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
-    assert self._buf is not None
-    if self._backing is not None:
-      assert GlobalCounters.cache is None, f"can't copy in {self._backing.shape} while caching"
-      self._buf.copyin(self._backing)
-      self._backing = None
-    return self._buf._cl
+  def copyin(self, source: np.ndarray): 
+    assert GlobalCounters.cache is None, f"can't copy in {source.shape} while caching"
+    self._buf.copyin(source)
+
+  def copyout(self, cl_buf: ExplicitExecAST, dest: np.ndarray):
+    cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self.movement_op(MovementOps.RESHAPE, tuple(list(self.shape)+[1])), )))
+    assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
+    assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
+    cl_buf._buf.copyout(dest)
 
   # TODO: we don't always need a hostbuf
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
-
-  def toCPU(self) -> np.ndarray:
-    cl_buf = self.contiguous()
-    cl_buf.cl   # force buffer creation, happens if it's a backed buffer that hasn't been created yet
-    cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self.movement_op(MovementOps.RESHAPE, tuple(list(self.shape)+[1])), )))
-    assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
-    data = np.empty(self.shape, dtype=np.float32)
-    assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
-    cl_buf._buf.copyout(data)
-    return data
 
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GPUBuffer]=None):

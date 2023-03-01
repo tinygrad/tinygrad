@@ -75,7 +75,7 @@ class LLVM:
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for x in bufs])(LLVM.engine.get_function_address('exec'))
 
     st = time.monotonic()
-    cfunc(*[x._buf for x in bufs])
+    cfunc(*bufs)
     et = time.monotonic() - st
     if DEBUG >= 1:
       print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
