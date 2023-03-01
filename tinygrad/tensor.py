@@ -6,7 +6,7 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
 from tinygrad.lazy import Device, LazyBuffer
 
-HLOP = getenv("HLOP", 0)
+HLOP = getenv("HLOP", 1)
 
 from tinygrad.image import image_conv2d_decorator
 

@@ -80,9 +80,13 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   new_strides = []
+  new_offset = vm2.expr_node(Variable.num(vm1.offset))
+  assert isinstance(new_offset, NumNode), "new_offset wasn't a number?!?"
   for s,st in zip(vm1.shape, vm1.strides):
-    this_dim = vm2.expr_node(Variable('idx', 0, s-1)*st)
-    if isinstance(this_dim, NumNode) and this_dim.b == 0:
+    this_dim = View(vm2.shape, vm2.strides).expr_node(Variable('idx', 0, s-1)*st)
+    if s == 1:
+      new_strides.append(0)   # all shape 1 can have stride 0
+    elif isinstance(this_dim, NumNode) and this_dim.b == 0:
       new_strides.append(0)
     elif isinstance(this_dim, Variable):
       new_strides.append(1)
@@ -91,7 +95,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
     else:
       if DEBUG >= 3: print("can't simplify", s, this_dim.render())
       break
-  return View(vm1.shape, tuple(new_strides), vm2.offset + vm1.offset) if len(new_strides) == len(vm1.strides) else None
+  return View(vm1.shape, tuple(new_strides), new_offset.b) if len(new_strides) == len(vm1.strides) else None
 
 class ShapeTracker:
   __slots__ = ('views')
