@@ -56,9 +56,9 @@ shape_fxn_for_op : Dict[Op, Callable] = {
 class InterpretedAST(DeviceBuffer):  # pylint: disable=abstract-method
   fxn_for_op : ClassVar = shape_fxn_for_op
   # TODO: use generic types here to remove __init__ in specialized classes
-  def __init__(self, lbuf:Any): self.buf, self.shape = lbuf, tuple(lbuf.shape)
+  def __init__(self, lbuf:Any): self._buf, self.shape = lbuf, tuple(lbuf.shape)
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
-  def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
+  def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self._buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self._buf, op.name.lower())(arg))
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[InterpretedAST]=None):
     if FusedOps.MULACC in cls.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
@@ -68,10 +68,10 @@ class InterpretedAST(DeviceBuffer):  # pylint: disable=abstract-method
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
-    else: ret = cls(cls.fxn_for_op[ast.op](*([x.buf for x in srcs] + ([ast.arg] if ast.arg else []))))
+    else: ret = cls(cls.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg else []))))
     if output_buffer is not None:
       assert output_buffer.shape == ret.shape
-      output_buffer.buf = ret.buf
+      output_buffer._buf = ret._buf
       return output_buffer
     else:
       return ret

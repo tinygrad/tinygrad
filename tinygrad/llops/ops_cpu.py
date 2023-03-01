@@ -35,4 +35,4 @@ class CPUBuffer(InterpretedAST):
 
   @staticmethod
   def fromCPU(x): return CPUBuffer(x)
-  def toCPU(x): return x.buf
+  def toCPU(x): return x._buf

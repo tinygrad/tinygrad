@@ -17,4 +17,4 @@ class TorchBuffer(InterpretedAST):
 
   @staticmethod
   def fromCPU(data): return TorchBuffer(torch.from_numpy(data).requires_grad_(False).to(device))
-  def toCPU(x): return x.buf.cpu().numpy()
+  def toCPU(x): return x._buf.cpu().numpy()
