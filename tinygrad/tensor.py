@@ -5,9 +5,6 @@ import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
 from tinygrad.lazy import Device, LazyBuffer
-
-HLOP = getenv("HLOP", 1)
-
 from tinygrad.image import image_conv2d_decorator
 
 # An instantiation of the Function is the Context
@@ -320,11 +317,6 @@ class Tensor:
     (bs,cin_,_,_), (cout,cin,H,W) = self.shape, weight.shape
     assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
     padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
-
-    # old implementation
-    if not HLOP:
-      ret = mlops.Conv2D.apply(self, weight, groups=groups, stride=stride, dilation=dilation, padding=padding)
-      return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool((H,W),stride, dilation)

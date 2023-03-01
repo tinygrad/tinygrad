@@ -1,10 +1,7 @@
-from tinygrad.tensor import HLOP
-from tinygrad.helpers import getenv
-
-IMAGE = getenv("IMAGE", 0)
+from tinygrad.helpers import IMAGE
 
 def image_conv2d_decorator(normal_conv):
-  if not HLOP or IMAGE == 0: return normal_conv
+  if IMAGE == 0: return normal_conv
 
   def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
