@@ -109,9 +109,9 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def fromCPU(cls, x:np.ndarray): return cls(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
-    self.contiguous()
-    data = np.empty(self.shape, dtype=np.float32)
-    self.raw().copyout(data)
+    out = self.contiguous()
+    data = np.empty(out.shape, dtype=np.float32)
+    out.raw().copyout(data)
     return data
 
   @classmethod

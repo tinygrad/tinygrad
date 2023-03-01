@@ -9,17 +9,17 @@ import subprocess, pathlib
 
 METAL_XCODE = getenv("METAL_XCODE")
 
-device = Metal.MTLCreateSystemDefaultDevice()
-mtl_queue = device.newCommandQueue()
-mtl_buffers_in_flight : List[Any] = []
-
-def sync():
-  global mtl_buffers_in_flight
-  for cbuf in mtl_buffers_in_flight: cbuf.waitUntilCompleted()
-  mtl_buffers_in_flight = []
+class METAL:
+  device = None
+  mtl_queue = None
+  mtl_buffers_in_flight : List[Any] = []
+  def __init__(self):
+    if METAL.device is not None: return
+    METAL.device = Metal.MTLCreateSystemDefaultDevice()
+    METAL.mtl_queue = METAL.device.newCommandQueue()
 
 class RawMetalBuffer(RawBuffer):
-  def __init__(self, size): self._cl = device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
+  def __init__(self, size): self._cl = METAL().device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
   def __del__(self): self._cl.release()
 
   def _as_np(self): return np.frombuffer(self._cl.contents().as_buffer(self._cl.length()), dtype=np.float32)
@@ -28,7 +28,8 @@ class RawMetalBuffer(RawBuffer):
     np.copyto(self._as_np(), b.reshape(-1).data)
 
   def copyout(self, a:np.ndarray):
-    sync()
+    for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    METAL.mtl_buffers_in_flight = []
     np.copyto(a, self._as_np().reshape(a.shape))
 
 class MetalProgram:
@@ -43,15 +44,15 @@ class MetalProgram:
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-      self.library, err = device.newLibraryWithData_error_(data, None)
+      self.library, err = METAL().device.newLibraryWithData_error_(data, None)
     else:
       options = Metal.MTLCompileOptions.alloc().init()
-      self.library, err = device.newLibraryWithSource_options_error_(prg, options, None)
+      self.library, err = METAL().device.newLibraryWithSource_options_error_(prg, options, None)
     assert err is None, str(err)
     self.fxn = self.library.newFunctionWithName_(name) #self.library.functionNames()[0]
     # hacks to disassemble shader
     if DEBUG >= 5:
-      arc, err = device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
+      arc, err = METAL().device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
       assert err is None, str(err)
       desc = Metal.MTLComputePipelineDescriptor.alloc().init()
       desc.setComputeFunction_(self.fxn)
@@ -62,7 +63,7 @@ class MetalProgram:
       # clone https://github.com/dougallj/applegpu.git in the root of tinygrad
       import os
       os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
-    self.pipeline_state, err = device.newComputePipelineStateWithFunction_error_(self.fxn, None)
+    self.pipeline_state, err = METAL().device.newComputePipelineStateWithFunction_error_(self.fxn, None)
     assert err is None, str(err)
 
   def __call__(self, global_size, local_size, *args):
@@ -71,7 +72,7 @@ class MetalProgram:
     local_size += [1] * (3-len(local_size))
 
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
-    command_buffer = mtl_queue.commandBuffer()
+    command_buffer = METAL().mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(args):
@@ -85,7 +86,7 @@ class MetalProgram:
       print(f"METAL et {et*1e6:8.2f} us  {self.name:28s} launch {str(global_size):18s} {local_size}")
       GlobalCounters.time_sum += et
     else:
-      mtl_buffers_in_flight.append(command_buffer)
+      METAL().mtl_buffers_in_flight.append(command_buffer)
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return command_buffer
 
