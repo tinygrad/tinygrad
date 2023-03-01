@@ -44,6 +44,11 @@ class Node:
         else:
           nofactor_term = Variable.sum(nofactor)//b
         return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
+      else:
+        muls = [x.b for x in nofactor if isinstance(x, MulNode)]
+        for m in muls:
+          if m > 1 and b%m == 0:
+            return (self//m)//(b//m)
     return DivNode(self, b)
   def __mod__(self, b:int):
     if b == 1: return NumNode(0)
@@ -146,6 +151,6 @@ render_python : Dict[Type, Callable] = {
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops)}%{self.b})",
   GeNode: lambda self,ops,ctx: f"({self.a.render(ops)}>={self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops)}<{self.b})",
-  SumNode: lambda self,ops,ctx: f"({'+'.join([x.render(ops) for x in self.nodes])})",
-  AndNode: lambda self,ops,ctx: f"({'&&'.join([x.render(ops) for x in self.nodes])})"
+  SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops) for x in self.nodes]))})",
+  AndNode: lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops) for x in self.nodes]))})"
 }

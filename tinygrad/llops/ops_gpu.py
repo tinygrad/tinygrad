@@ -100,6 +100,7 @@ class CLASTKernel(ASTKernel):
             idxy_test, valid_test = self.sts[buf_index].expr_idxs(o+j)
             can_merge = can_merge and valid.render() == valid_test.render()
             can_merge = can_merge and (idxy+j).render() == idxy_test.render()
+            #print((idxy+j).render(), idxy_test.render(), valid.render(), valid_test.render(), can_merge)
         if const is not None:
           ldr = const
         elif isinstance(self.bufs[buf_index]._buf, CLImage):
