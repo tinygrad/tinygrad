@@ -1,4 +1,4 @@
-from tinygrad.helpers import prod, argsort
+from tinygrad.helpers import argsort
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps
 from tinygrad.tensor import Function
 
@@ -126,9 +126,7 @@ class Expand(Function):
 
 class Reshape(Function):
   def forward(self, x, shape):
-    assert len(shape) > 0 and all(x != 0 for x in shape), f"zeros not allowed in shape {shape}"
     self.input_shape = x.shape
-    shape = tuple(-prod(x.shape) // prod(shape) if s == -1 else s for s in shape)
     return x.movement_op(MovementOps.RESHAPE, shape)
 
   def backward(self, grad_output):
