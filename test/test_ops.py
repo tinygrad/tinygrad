@@ -61,7 +61,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
   
   def test_eq(self):
-    helper_test_op([(45,65), (45,65)], torch.eq, lambda x,y: x==y, forward_only=True)
+    helper_test_op([(45,65), (45,65)], torch.eq, lambda x,y: x.eq(y), forward_only=True)
   def test_gt(self):
     helper_test_op([(45,65), (45,65)], torch.gt, lambda x,y: x>y, forward_only=True)
   def test_gte(self):
