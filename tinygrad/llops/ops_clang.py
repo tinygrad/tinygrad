@@ -31,11 +31,11 @@ class ClangProgram:
     self.fxn(*[x._cl for x in args[2:]])
     if wait: return time.monotonic()-st
 
-from tinygrad.compiler.cl import CLASTKernel
+from tinygrad.compiler.gpu import GPUCodegen
 class ClangBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return RawMallocBuffer(4*prod(shape))
   @staticmethod
   def compile(ast, output_buffer):
-    k = CLASTKernel(ast, output_buffer)
+    k = GPUCodegen(ast, output_buffer)
     return (k.codegen().build(ClangProgram), k.bufs, k.ret)

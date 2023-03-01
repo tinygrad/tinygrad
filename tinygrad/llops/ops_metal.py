@@ -82,7 +82,7 @@ class MetalProgram:
     else:
       METAL().mtl_buffers_in_flight.append(command_buffer)
 
-from tinygrad.compiler.cl import CLASTKernel, GPULanguage
+from tinygrad.compiler.gpu import GPUCodegen, GPULanguage
 
 metal_lang = GPULanguage(
   kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
@@ -95,5 +95,5 @@ class MetalBuffer(CompiledBuffer):
   def create_raw_buffer(shape): return RawMetalBuffer(4*prod(shape))
   @staticmethod
   def compile(ast, output_buffer):
-    k = CLASTKernel(ast, output_buffer, metal_lang)
+    k = GPUCodegen(ast, output_buffer, metal_lang)
     return (k.codegen().build(MetalProgram), k.bufs, k.ret)

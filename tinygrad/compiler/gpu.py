@@ -35,7 +35,7 @@ class GPULanguage(NamedTuple):
   gid : List[str] = []; lid : List[str] = []; extra_args : List[str] = []
   float4 : Optional[str] = None
 
-class CLASTKernel(ASTKernel):
+class GPUCodegen(ASTKernel):
   def __init__(self, ast:LazyOp, output_buffer=None, lang:GPULanguage=GPULanguage()):
     self.lang = lang
     super().__init__(ast, output_buffer)
@@ -132,7 +132,7 @@ class CLASTKernel(ASTKernel):
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values : List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
-    code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
+    code = GPUCodegen.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 2:
       assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
@@ -243,7 +243,7 @@ class CLASTKernel(ASTKernel):
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
-  def codegen(self) -> Callable:
+  def codegen(self) -> GPURunner:
     self.process()
     self.upcast_in_mid_reduce = False
     if DEBUG >= 3: self.printbufs("old:", DEBUG>=4)
@@ -287,7 +287,7 @@ class CLASTKernel(ASTKernel):
 
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       assert self.reduceopop is not None
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
@@ -316,9 +316,9 @@ class CLASTKernel(ASTKernel):
         if self.upcast_in_mid_reduce:
           self.kernel.append(f'float4 ld = vload4(0, &temp{i}[mid*4]);\n')
           for j in range(4):
-            self.kernel.append(CLASTKernel.code_for_op[self.reduceopop].replace('A', new_accumulators[i*4+j].tok).replace('B', f'ld.{"xyzw"[j]}')+";\n")
+            self.kernel.append(GPUCodegen.code_for_op[self.reduceopop].replace('A', new_accumulators[i*4+j].tok).replace('B', f'ld.{"xyzw"[j]}')+";\n")
         else:
-          self.kernel.append(CLASTKernel.code_for_op[self.reduceopop].replace('A', new_accumulators[i].tok).replace('B', f'temp{i}[mid]')+";\n")
+          self.kernel.append(GPUCodegen.code_for_op[self.reduceopop].replace('A', new_accumulators[i].tok).replace('B', f'temp{i}[mid]')+";\n")
       self.kernel.append("}\n")
       accumulators = new_accumulators
     
@@ -330,9 +330,9 @@ class CLASTKernel(ASTKernel):
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    if CLASTKernel.kernel_cnt[function_name]:
-      function_name = f"{function_name}{'_N'+str(CLASTKernel.kernel_cnt[function_name])}"
-    CLASTKernel.kernel_cnt[function_name] += 1
+    if GPUCodegen.kernel_cnt[function_name]:
+      function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
+    GPUCodegen.kernel_cnt[function_name] += 1
 
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"{self.lang.kernel_prefix} void {function_name}(",] + \
@@ -344,9 +344,3 @@ class CLASTKernel(ASTKernel):
       self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
       op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
-
-  def print(self):
-    super().print()
-    for i in range(len(self.bufs)):
-      print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.sts[i])
-    print(self.fxn.prg)

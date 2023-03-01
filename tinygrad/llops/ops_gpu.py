@@ -67,7 +67,7 @@ class CLProgram:
       CL().cl_queue.finish()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
 
-from tinygrad.compiler.cl import CLASTKernel, GPULanguage
+from tinygrad.compiler.gpu import GPUCodegen, GPULanguage
 
 opencl_lang = GPULanguage(
   kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
@@ -79,5 +79,5 @@ class GPUBuffer(CompiledBuffer):
   def create_raw_buffer(shape) -> RawBuffer: return CLImage(shape) if (len(shape) == 3 and shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(shape))
   @staticmethod
   def compile(ast, output_buffer):
-    k = CLASTKernel(ast, output_buffer, opencl_lang)
+    k = GPUCodegen(ast, output_buffer, opencl_lang)
     return (k.codegen().build(CLProgram), k.bufs, k.ret)
