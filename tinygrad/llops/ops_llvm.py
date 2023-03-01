@@ -5,7 +5,7 @@ from typing import Tuple, Union, Dict, Any, List, ClassVar, Optional
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape import ShapeTracker
 from tinygrad.ops import LazyOp
-from tinygrad.ast import ASTKernel
+from tinygrad.compiler.ast import ASTKernel
 import ctypes
 import numpy as np
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, CompiledAST

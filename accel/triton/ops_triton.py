@@ -14,7 +14,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExe
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.runtime.cuda import CLBuffer
-from tinygrad.ast import ASTKernel
+from tinygrad.compiler.ast import ASTKernel
 
 stream = cuda.Stream()
 

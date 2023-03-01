@@ -16,6 +16,7 @@ class CLBuffer:
     np.copyto(a, np.ctypeslib.as_array(self._cl)[:a.size].reshape(a.shape))
 
 class CLProgram:
+  DISABLE_GLOBAL = True
   kernel_prefix, buffer_prefix, smem_prefix, barrier = "", "", "", ""
   gid = [f"gid[{i}]" for i in range(3)]
   lid = [f"lid[{i}]" for i in range(3)]

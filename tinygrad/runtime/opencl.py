@@ -49,6 +49,7 @@ class CLBuffer:
 
 class CLImage:
   fmt : Final = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
+  IMAGE : Final = True
 
   def __init__(self, shape):
     self._cl = cl.Image(CL().cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
