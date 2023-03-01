@@ -3,9 +3,9 @@ from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import sys, weakref, importlib, inspect
 from weakref import WeakValueDictionary
 import numpy as np
-from tinygrad.helpers import ConvArgs, prod, DEBUG
+from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape import ShapeTracker
-from tinygrad.ops import DeviceBuffer, ExplicitExecAST, UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers, GenericExecAST
+from tinygrad.ops import DeviceBuffer, ExplicitExecAST, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.graph import log_op
 from tinygrad.helpers import getenv
 
@@ -13,8 +13,6 @@ from tinygrad.helpers import getenv
 sys.setrecursionlimit(10000)
 
 OPT = getenv("OPT", 2)
-NOCONV = getenv("NOCONV", 0)
-IMAGE = getenv("IMAGE", 0)
 LAZY = getenv("LAZY", 1)
 
 def get_buffer(name, base='tinygrad.llops'):
@@ -52,18 +50,16 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   real_srcs : Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in get_buffers(self.op)}
   if DEBUG >= 3:
     for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())):
-      if x.optype in [ProcessingOps,ReduceOps] and x.realized is None:
-        print("\nHIT", k,x, "UNFOLDABLE" if len(k.children) > 1 or len(x.children) > 1 else "")
+      if x.optype == ReduceOps and x.realized is None:
+        print("\nHIT", k,x, "UNFOLDABLE" if len(k.children) > 1 or len(x.children) > 1 else str())
         for tk in k.children: print("k", tk)
         for tx in x.children: print("x", tx)
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
-  psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype in [ProcessingOps,ReduceOps] and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+  psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape : Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if DEBUG >= 3: print("FOLDING", psrcs[0])
-    if psrcs[0][1].optype == ProcessingOps:
-      top = psrcs[0][1].op  # _ast_processingops
-    elif psrcs[0][1].optype == ReduceOps:
+    if psrcs[0][1].optype == ReduceOps:
       top = _ast_reduceops(psrcs[0][1])
     real_srcs[psrcs[0][0]] = top
     real_srcs.update({x:x for x in get_buffers(top)})  # the reduce op buffers are not modified
@@ -153,7 +149,6 @@ class LazyBuffer:
           real_src = src.realize(self.device)
           self.realized = real_src.movement_op(self.op.op, self.op.arg)
           ast = LazyOp(self.op.op, (real_src, ))
-      elif self.optype == ProcessingOps: ast = self.op   # no ast modifications for ProcessingOps
       elif self.optype == ReduceOps: ast = _ast_reduceops(self)
       elif self.optype == BinaryOps: ast = _ast_binaryops(self)
 
@@ -188,12 +183,6 @@ class LazyBuffer:
     # NOTE: this reshape can only move around 1s
     return LazyBuffer(x.device, new_tmp_shape, ReduceOps, LazyOp(op, (x,), new_tmp_shape)).movement_op(MovementOps.RESHAPE, new_shape)
 
-  # syntactic sugar around PAD and SHRINK
-  # TODO: turn RESHAPE into EXPAND and CONTRACT (current EXPAND should be REPEAT)
-  def slice(self:LazyBuffer, arg):
-    padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg))
-    return self.movement_op(MovementOps.PAD, padding).movement_op(MovementOps.SHRINK, tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg)))
-
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop
     if op == MovementOps.RESHAPE and self.shape == arg: return self
@@ -202,11 +191,10 @@ class LazyBuffer:
     local_st = ShapeTracker(self.shape).movement_op(op, arg)
 
     # instant nops
-    if local_st.contiguous and self.shape == local_st.shape and op != MovementOps.STRIDED:
-      return self
+    if local_st.contiguous and self.shape == local_st.shape: return self
 
     # two ops in a row is one op. merge them if unresolved
-    if self.realized is None and self.op.op == op and op != MovementOps.STRIDED:
+    if self.realized is None and self.op.op == op:
       # TODO: why is deleting self from children needed? shouldn't GC do it?
       self.op.src[0].children.discard(self)
       if op in [MovementOps.RESHAPE, MovementOps.EXPAND, MovementOps.SHRINK]:
@@ -266,13 +254,8 @@ class LazyBuffer:
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
-    # some strideds are actually just reshapes
-    # NOTE: due to how strided works, we have to check the parent to be contiguous also
-    if op == MovementOps.STRIDED and local_st.contiguous and self.st.contiguous:
-      return self.movement_op(MovementOps.RESHAPE, tuple(i for i,_ in arg))
-
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op not in [MovementOps.EXPAND, MovementOps.STRIDED] and (op != MovementOps.PAD or all(x.op != BinaryOps.DIV for x in get_lazyops(self.op))):
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or all(x.op != BinaryOps.DIV for x in get_lazyops(self.op))):
       return replace_with_movement_op(self.op, op, arg)
 
     # create the buffer
@@ -287,100 +270,6 @@ class LazyBuffer:
         return root.movement_op(MovementOps.RESHAPE, ret.st.shape)
 
     return ret
-
-  def processing_op(self:LazyBuffer, op:ProcessingOps, w:LazyBuffer, C:ConvArgs) -> LazyBuffer:
-    x = self
-
-    if IMAGE >= 1:
-      w = w.movement_op(MovementOps.RESHAPE, (C.groups, C.rcout, C.cin, C.H, C.W))
-      # TODO: moving the x reshape here creates more views?
-
-      # hack for non multiples of 4 on C.cin
-      if C.cin % 4 != 0 and not (C.cin == 1 and C.groups%4 == 0):
-        added_input_channels = 4 - (C.cin % 4)
-        w = w.movement_op(MovementOps.PAD, tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(w.shape))))
-        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups, C.cin, C.iy, C.ix))
-        x = x.movement_op(MovementOps.PAD, tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(x.shape))))
-        C = C._replace(cin = C.cin + added_input_channels)
-        x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.groups*C.cin, C.iy, C.ix))
-
-      # hack for non multiples of 4 on C.rcout
-      added_output_channels = 0
-      if C.rcout % 4 != 0 and not (C.rcout == 1 and C.groups%4 == 0):
-        added_output_channels = 4 - (C.rcout % 4)
-        w = w.movement_op(MovementOps.PAD, tuple((0, added_output_channels) if i == 1 else (0, 0) for i in range(len(w.shape))))
-        C = C._replace(rcout = C.rcout + added_output_channels, cout = C.groups * (C.rcout + added_output_channels))
-
-      # packed
-      x = x.movement_op(MovementOps.PERMUTE, (0,2,3,1))
-      x = x.movement_op(MovementOps.RESHAPE, (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4))
-
-      if C.cin == 1:  # depthwise
-        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.H*C.W))
-        w = w.movement_op(MovementOps.PERMUTE, (0,2,1))
-      else:
-        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4,4,C.cin//4,4,C.H,C.W))
-        w = w.movement_op(MovementOps.PERMUTE, (0,4,2,5,1,3))
-        w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H * C.cin//4 * C.W * 4, 4))
-
-      # contiguous creates the image, and early realize static weights
-      x, w = x.contiguous(), w.contiguous()
-      if get_single_root(w).realized: w.realize()
-
-      # set up the conv from (C.bs*C.iy, C.ix*C.groups*C.cin//4, 4), pad, stride, and expand
-      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.iy, C.ix, C.groups, C.cin))
-      x = x.slice(((0, x.shape[0]), (-C.py, x.shape[1]+C.py_), (-C.px, x.shape[2]+C.px_), (0, x.shape[3]), (0, x.shape[4])))
-      x = x.movement_op(MovementOps.STRIDED, (
-        (C.bs, x.shape[1]*x.shape[2]*C.groups*C.cin),
-        (C.oy, C.sy*x.shape[2]*C.groups*C.cin), (C.ox, C.sx*C.groups*C.cin),
-        (C.groups, C.cin), (1, 1), (1, 1),
-        (C.H, C.dy*x.shape[2]*C.groups*C.cin), (C.W, C.dx*C.groups*C.cin), (C.cin//4 if C.cin >= 4 else 1, 4), (4 if C.cin >= 4 else 1, 1)
-      ))
-      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.groups, C.rcout//4 if C.rcout >= 4 else 1, 4 if C.rcout >= 4 else 1, C.H, C.W, x.shape[-2], x.shape[-1]))
-      x = x.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, x.shape[-2], x.shape[-1]))
-
-      # set up the weights from (C.cout//4, C.H * C.cin//4 * C.W * 4, 4)
-      w = w.movement_op(MovementOps.RESHAPE, (C.cout//4, C.H, C.cin//4 if C.cin >= 4 else 1, C.W, 4, 4 if C.cin >= 4 else 1))
-      w = w.movement_op(MovementOps.PERMUTE, (0,4,1,3,2,5))
-      w = w.movement_op(MovementOps.RESHAPE, (1, 1, 1, C.cout//4, 4, C.H, C.W, w.shape[-2], w.shape[-1]))
-      w = w.movement_op(MovementOps.EXPAND, (C.bs, C.oy, C.ox, C.cout//4, 4, C.H, C.W, w.shape[-2], w.shape[-1]))
-
-      # now do the conv in this space and force it to be an image
-      ret = x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.oy, C.ox, C.cout//4, 4, 1, 1, 1, 1))
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs*C.oy, C.ox*C.cout//4, 4))
-      # NOTE: right now, this can't always be an image, because the tests fail when we try to access it if it was SHRINKed
-      if IMAGE >= 3: ret = ret.contiguous()  # but if IMAGE >= 3, you can do anything
-
-      # undo hack for non multiples of 4 on C.rcout
-      if added_output_channels != 0:
-        ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.groups, C.rcout))
-        ret = ret.movement_op(MovementOps.SHRINK, tuple((0, s-added_output_channels) if i == 4 else (0, s) for i,s in enumerate(ret.shape)))
-        C = C._replace(rcout = C.rcout - added_output_channels, cout = C.groups * (C.rcout - added_output_channels))
-
-      ret = ret.movement_op(MovementOps.RESHAPE, (C.bs, C.oy, C.ox, C.cout))
-      ret = ret.movement_op(MovementOps.PERMUTE, (0,3,1,2))
-      return ret
-
-    # add padding if the backend can't handle it
-    if NOCONV or (not getattr(x.dbuffer, "SUPPORTS_PADDING", False) and not (getattr(x.dbuffer, "SUPPORTS_SIMPLE_PADDING", False) and C.px == C.px_ and C.py == C.py_ and C.px >= 0 and C.py >= 0)):
-      x = x.slice(((0, x.shape[0]), (0, x.shape[1]), (-C.py, x.shape[2]+C.py_), (-C.px, x.shape[3]+C.px_)))
-      C = C._replace(px=0, px_=0, py=0, py_=0)
-
-    if NOCONV or not issubclass(x.dbuffer, GenericExecAST):
-      # universal conv, just mul and reduce
-      x = x.movement_op(MovementOps.STRIDED, (
-        (C.bs, C.groups*C.cin*x.shape[2]*x.shape[3]), (C.groups, C.cin*x.shape[2]*x.shape[3]),
-        (1, 1), (C.oy, C.sy*x.shape[3]), (C.ox, C.sx),
-        (C.cin, x.shape[2]*x.shape[3]), (C.H, C.dy*x.shape[3]), (C.W, C.dx)))
-      #if C.H <= 3 and C.W <= 3:  # max 9x the RAM overhead, this is im2col
-      #  x = x.contiguous()
-      x = x.movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
-      w = w.movement_op(MovementOps.RESHAPE, (1, C.groups, C.rcout, 1, 1, C.cin, C.H, C.W)) \
-           .movement_op(MovementOps.EXPAND, (C.bs, C.groups, C.rcout, C.oy, C.ox, C.cin, C.H, C.W))
-      return x.binary_op(BinaryOps.MUL, w).reduce_op(ReduceOps.SUM, (C.bs, C.groups, C.rcout, C.oy, C.ox, 1, 1, 1)) \
-                                          .movement_op(MovementOps.RESHAPE, (C.bs, C.cout, C.oy, C.ox))
-    else:
-      return LazyBuffer(x.device, C.out_shape, ProcessingOps, LazyOp(op, (x, w), C))
 
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape = srcs[0].device, srcs[0].shape
