@@ -11,13 +11,12 @@ from tinygrad.shape import ShapeTracker
 class UnaryOps(Enum): NOOP = auto(); NEG = auto(); EXP = auto(); LOG = auto(); NOT = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); FLIP = auto(); STRIDED = auto(); PAD = auto(); SHRINK = auto() # noqa: E702
+class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); FLIP = auto(); PAD = auto(); SHRINK = auto() # noqa: E702
 class FusedOps(Enum): MULACC = auto() # noqa: E702
-class ProcessingOps(Enum): CONV = auto() # noqa: E702
 class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto() # noqa: E702
 
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, ProcessingOps, LoadOps, FusedOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[ProcessingOps], Type[LoadOps], Type[FusedOps]]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
+OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
 
 class LazyOp(NamedTuple):
   op: Op
@@ -35,7 +34,8 @@ def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
 
 # a placeholder class to extend by the exec classes
 class DeviceBuffer:
-  shape: Any   # should be Tuple[int, ...] but ndarray and torch.tensor have incompatible types
+  _buf: Any                # underlying buffer
+  shape: Tuple[int, ...]
   @staticmethod
   def fromCPU(x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")
   def toCPU(self:DeviceBuffer) -> np.ndarray: raise NotImplementedError("must be implemented")
@@ -50,9 +50,7 @@ shape_fxn_for_op : Dict[Op, Callable] = {
   **{op:lambda self: GenericShape(self.shape, self.flops + prod(self.shape)) for op in UnaryOps},
   **{op:lambda self,y: GenericShape(self.shape, self.flops + y.flops + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: GenericShape(new_shape, self.flops + prod(self.shape)) for op in ReduceOps},
-  **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.flops), op) for op in MovementOps},
-  # https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html
-  ProcessingOps.CONV:lambda self,w,C: GenericShape(C.out_shape, 2 * (C.bs * C.cout * C.oy * C.ox) * (C.cin * C.H * C.W))}
+  **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.flops), op) for op in MovementOps}}
 
 # used in CPUBuffer and TorchBuffer
 class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
@@ -79,6 +77,18 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
       return ret
 def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(map_buffers({x:GenericExecAST(GenericShape(x.shape)) for x in get_buffers(ast)}, ast)).buf
 
+# assumes you are using ShapeTracker
+# used in GPUBuffer and LLVMBuffer
+class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
+    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
+    self.shape = self.st.shape
+    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+
+  # universal for shape tracked
+  def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
+  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
+
 class GlobalCounters:
   global_ops : ClassVar[int] = 0
   global_mem : ClassVar[int] = 0
@@ -93,15 +103,3 @@ class GlobalCounters:
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
     GlobalCounters.global_mem += mem_estimate
-
-# assumes you are using ShapeTracker
-# used in GPUBuffer and LLVMBuffer
-class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
-    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape = self.st.shape
-    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
-
-  # universal for shape tracked
-  def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
-  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)

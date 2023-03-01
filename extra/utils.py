@@ -1,7 +1,7 @@
 import pickle
 import numpy as np
 from tqdm import tqdm
-from tinygrad.tensor import Tensor
+import tempfile
 from tinygrad.helpers import prod, getenv
 
 def fetch(url):
@@ -21,10 +21,10 @@ def download_file(url, fp, skip_if_exists=False):
   r = requests.get(url, stream=True)
   assert r.status_code == 200
   progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-  with open(fp+".tmp", "wb") as f:
+  with tempfile.NamedTemporaryFile(delete=False) as f:
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
-  os.rename(fp+".tmp", fp)
+    os.rename(f.name, fp)
 
 def my_unpickle(fb0):
   key_prelookup = {}

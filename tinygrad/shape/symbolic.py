@@ -12,9 +12,13 @@ class Node:
     if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops, ctx)
     return ops[type(self)](self, ops, ctx)
   def __add__(self, b:int): return Variable.sum([self, Variable.num(b)])
+  def __sub__(self, b:int): return Variable.sum([self, Variable.num(-b)])
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
+    if isinstance(self, MulNode): return MulNode(self.a, self.b*b)
+    # distribute
+    if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes])
     return MulNode(self, b)
   def __floordiv__(self, b:int):
     assert b != 0
@@ -40,6 +44,11 @@ class Node:
         else:
           nofactor_term = Variable.sum(nofactor)//b
         return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
+      else:
+        muls = [x.b for x in nofactor if isinstance(x, MulNode)]
+        for m in muls:
+          if m > 1 and b%m == 0:
+            return (self//m)//(b//m)
     return DivNode(self, b)
   def __mod__(self, b:int):
     if b == 1: return NumNode(0)
@@ -74,9 +83,12 @@ class Node:
   def sum(nodes:List[Node]) -> Node:
     nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
     num_sum = sum([x.b for x in num_nodes])
-    # TODO: this is broken due to something with negatives mods
-    if num_sum > 0: nodes.append(NumNode(num_sum))
-    else: nodes += [NumNode(x.b) for x in num_nodes if x.b != 0]
+    # TODO: this is broken due to something with negative mods. $50 for a PR that fixes this
+    if num_sum >= 0: nodes.append(NumNode(num_sum))
+    else:
+      lte_0, rest = partition(num_nodes, lambda x: x.b <= 0)
+      nodes += [NumNode(x.b) for x in sorted(lte_0, key=lambda x:x.b) if x.b != 0]
+      if len(rest): nodes += [NumNode(sum([x.b for x in rest]))]
 
     if any([isinstance(x, SumNode) for x in nodes]):
       nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
@@ -139,6 +151,6 @@ render_python : Dict[Type, Callable] = {
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops)}%{self.b})",
   GeNode: lambda self,ops,ctx: f"({self.a.render(ops)}>={self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops)}<{self.b})",
-  SumNode: lambda self,ops,ctx: f"({'+'.join([x.render(ops) for x in self.nodes])})",
-  AndNode: lambda self,ops,ctx: f"({'&&'.join([x.render(ops) for x in self.nodes])})"
+  SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops) for x in self.nodes]))})",
+  AndNode: lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops) for x in self.nodes]))})"
 }

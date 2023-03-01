@@ -38,36 +38,40 @@ def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, moment
     invstd = (input_var + epsilon)**-0.5
     return X.batchnorm(scale, B, input_mean, invstd)
   
-# Copied from tinygrad/nn/__init__.py
-def LayerNormalization(X:Tensor, axis, affine=True, eps=1e-5):
-  X = X.layernorm(eps=eps, axis=axis)
-  # TODO: add in weight and bias if affine
-  if affine: return X
-  return X
+def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_type=1):
+  assert stash_type == 1, "only float32 is supported"
+  axis = tuple(i for i in range(axis if axis >= 0 else len(x.shape) + axis, len(x.shape)))
+  mean = x.mean(axis=axis, keepdim=True)
+  return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).pow(2).mean(axis=axis, keepdim=True).add(epsilon).sqrt().reciprocal()
 
-# Copied from tinygrad/nn/__init__.py
-def GroupNormalization(X:Tensor, num_groups, num_channels, eps=1e-5, affine=True):
-  # TODO: add in weight and bias if affine
-  X = X.reshape(X.shape[0], num_groups, -1).layernorm(eps=eps).reshape(X.shape)
-  if affine: return X
-  return X
-
-def _padding(pads=None, auto_pad="NOTSET"):
+def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
+  return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
+  
+# TODO: expand to N-D
+def _padding(X, pads=None, auto_pad="NOTSET"):
   assert auto_pad == "NOTSET"  # TODO: write this
-  return (pads[1], pads[3], pads[0], pads[2]) if pads is not None else (0,0,0,0)
+  if pads is not None:
+    return X.pad2d((pads[1], pads[3], pads[0], pads[2]))
+  else:
+    return X
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   # TODO: the padding shouldn't be counted in the average! this is causing a test failure
-  assert ceil_mode == 0 and count_include_pad == 0 and dilations == 1
-  return X.pad2d(_padding(pads, auto_pad)).avg_pool2d(kernel_shape, stride=strides)
+  assert ceil_mode == 0 and dilations == 1
+  padding_included = _padding(X, pads, auto_pad).avg_pool2d(kernel_shape, stride=strides)
+  if count_include_pad:
+    return padding_included
+  else:
+    div = _padding(Tensor.ones(*X.shape), pads, auto_pad).avg_pool2d(kernel_shape, stride=strides)
+    return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   # TODO: the padding should be infinity, not 0!
   assert ceil_mode == 0 and storage_order == 0 and dilations == 1
-  return X.pad2d(_padding(pads, auto_pad)).max_pool2d(kernel_shape, stride=strides)
+  return _padding(X, pads, auto_pad).max_pool2d(kernel_shape, stride=strides)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_padding(pads, auto_pad))
+  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
 
 # TODO: copied from tensor.py
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
@@ -92,8 +96,7 @@ def Expand(input, shape):
   # copied from _broadcasted
   x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]
   shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
-  # TODO: openpilot is broken if we actually do the expand!!
-  return input.reshape(x_shape) #.expand(shape_ret)
+  return input.reshape(x_shape).expand(shape_ret)
 
 def LRN(input, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = input.shape 
@@ -104,17 +107,22 @@ def Neg(input): return -input
 def Reciprocal(input): return input.reciprocal()
 def Sqrt(input): return input.sqrt()
 def Sign(input): return input.sign()
+def Softsign(input): return input / (1+input.abs())
 def Abs(input): return input.abs()
 def Exp(input): return input.exp()
 def Log(input): return input.log()
 def Mish(input): return input.mish()
 def HardSigmoid(input, alpha=0.2, beta=0.5): return (alpha*input + beta).clip(0, 1)
 def HardSwish(input): return input * HardSigmoid(input, 1/6, 0.5)
+def Celu(X, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
 def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def Softplus(X): return X.softplus()
 def PRelu(X, slope): return X.leakyrelu(slope)
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
-def Softmax(input, axis=-1): return input.softmax(axis)
+def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
+def Softmax_1(input, axis=1): return input.softmax(axis)
+def Softmax_13(input, axis=-1): return input.softmax(axis)
+Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
 
@@ -148,3 +156,17 @@ def Tile(input, repeats):
 
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
 def Where(condition, X, Y): return condition*X + (1-condition)*Y
+
+def ConstantOfShape(input, value=0.0):
+  shape = [int(x) for x in safe_numpy(input)]
+  return Tensor.ones(*shape) * value
+
+# this is obviously wrong, but since we don't have types, it's better than nothing
+def Cast(input, to):
+  print(f"WARNING: attempting to cast to {to}")
+  return input
+
+# NOTE: since we only have one type, this is valid!
+def CastLike(input, target_type):
+  assert isinstance(target_type, Tensor), "can only CastLike Tensor"
+  return input

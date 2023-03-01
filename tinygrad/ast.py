@@ -44,6 +44,7 @@ class ASTKernel:
 
     self.info = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
+    for b in self.bufs: b.st.simplify()
     self.ast = ast
 
     # check if the output buffer is allowed to be used
@@ -107,8 +108,11 @@ class ASTKernel:
       return cache[x]
     print_ast(self.input_ast, "ast")
 
-  def printbufs(self, prefix=""):
+  def printbufs(self, prefix="", print_shapetrackers=False):
     print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
+    if print_shapetrackers:
+      for st in self.sts:
+        print(st)
     for i in range(len(self.sts)):
       print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if i < len(self.bufs) else "FAKE")
 

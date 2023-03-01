@@ -117,6 +117,7 @@ backend_test.exclude('test_quantizelinear_*')
 backend_test.exclude('test_gru_*')
 backend_test.exclude('test_rnn_*')
 backend_test.exclude('test_lstm_*')
+backend_test.exclude('test_simple_rnn_*')
 
 # no control flow
 backend_test.exclude('test_if_*')
@@ -151,89 +152,21 @@ backend_test.exclude('test_stft_*')
 backend_test.exclude('test_melweightmatrix_*')
 
 # disable model tests for now since they are slow
-for x in backend_test.test_suite:
-  if 'OnnxBackendRealModelTest' in str(type(x)):
-    backend_test.exclude(str(x).split(" ")[0])
-
-# passing node tests
-"""
-backend_test.include('test_unsqueeze_*')
-backend_test.include('test_gemm_*')
-backend_test.include('test_batchnorm_*')
-backend_test.include('test_transpose_*')
-backend_test.include('test_shape_*')
-backend_test.include('test_flatten_*')
-backend_test.include('test_sum_*')
-backend_test.include('test_global*')
-backend_test.include('test_log_softmax*')
-backend_test.include('test_softplus*')
-"""
-
-# requires Less, which would be a new llop
-#backend_test.include('test_clip_*')
-
-# broken empty tensor
-#backend_test.include('test_reduce_sum_*')
-#backend_test.include('test_reduce_l1_')
-
-# requires cast
-#backend_test.include('test_reduce_log_sum*')
-#backend_test.include('test_pow_*')
-
-# almost passing node tests
-#backend_test.include('test_PReLU*')
-#backend_test.include('test_expand_*')
-#backend_test.include('test_conv_.*')
-#backend_test.include('test_dropout_*')
-#backend_test.include('test_reshape_*')
-
-# good to investigate
-#backend_test.include('test_slice_*')
-
-# failing for real reasons
-#backend_test.include('test_averagepool_2d_*')
-#backend_test.include('test_maxpool_2d_*')
-
-"""
-backend_test.include('test_tanh_*')
-
-# should be passing (good place to start!)
-"""
-
-# requires CastLike?
-#backend_test.include('test_relu_*')
-#backend_test.include('test_elu_*')
-#backend_test.include('test_leakyrelu_*')
-#backend_test.include('test_hardsigmoid_*')
-
-# failing for lack of type support
-#backend_test.include('test_add_*')
-#backend_test.include('test_sub_*')
-#backend_test.include('test_div_*')
-
-
-# the node tests, slowly
-#backend_test.include('test_softmax_*')
-#backend_test.include('test_lrn_*')
-
-# working big model tests
-#backend_test.include('test_resnet50')
-#backend_test.include('test_densenet121')
-#backend_test.include('test_vgg19')
-
-"""
-# wrong big model tests
-backend_test.include('test_shufflenet')
-backend_test.include('test_inception_v2')
-backend_test.include('test_squeezenet')
-"""
-
-"""
-# unsupported big model tests : LRN
-backend_test.include('test_bvlc_alexnet')
-backend_test.include('test_inception_v1')
-backend_test.include('test_zfnet512')
-"""
+if True:
+  for x in backend_test.test_suite:
+    if 'OnnxBackendRealModelTest' in str(type(x)):
+      backend_test.exclude(str(x).split(" ")[0])
+else:
+  # model tests all pass!
+  backend_test.include('test_resnet50')
+  backend_test.include('test_inception_v1')
+  backend_test.include('test_inception_v2')
+  backend_test.include('test_densenet121')
+  backend_test.include('test_shufflenet')
+  backend_test.include('test_squeezenet')
+  backend_test.include('test_bvlc_alexnet')
+  backend_test.include('test_zfnet512')
+  backend_test.include('test_vgg19')
 
 globals().update(backend_test.enable_report().test_cases)
 

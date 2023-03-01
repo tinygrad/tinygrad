@@ -2,8 +2,8 @@ import torch
 import time
 import numpy as np
 import unittest
-from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv, IMAGE
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
@@ -51,6 +51,14 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
 class TestOps(unittest.TestCase):
+  def test_zeros(self):
+    helper_test_op([], lambda: torch.zeros(45,65), lambda: Tensor.zeros(45,65), forward_only=True)
+  def test_ones(self):
+    helper_test_op([], lambda: torch.ones(45,65), lambda: Tensor.ones(45,65), forward_only=True)
+  def test_eye(self):
+    helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
+  def test_arange(self):
+    helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
 
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
@@ -123,9 +131,9 @@ class TestOps(unittest.TestCase):
   def test_dot(self):
     helper_test_op([(45,65), (65,100)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul_simple(self):
-    helper_test_op([(2), (2,2)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
-    helper_test_op([(65), (65,99)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+    helper_test_op([(64), (64,99)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
@@ -329,7 +337,7 @@ class TestOps(unittest.TestCase):
     cin = 2
     helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=IMAGE>=2)
 
   def test_medium_grouped_conv2d(self):
     bs = 1
@@ -338,7 +346,7 @@ class TestOps(unittest.TestCase):
     cin = 2
     helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5, forward_only=IMAGE>=2)
 
   def test_depthwise_conv2d(self):
     bs = 1

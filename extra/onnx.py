@@ -29,12 +29,14 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 def get_run_onnx(onnx_model):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
-    if inp.data_type in (1,10,7):
+    if inp.data_type in (1,10,6,7):
       # TODO: this is shared with below
       if len(inp.float_data) > 0:
         ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
       elif len(inp.int64_data) > 0:
         ret = Tensor(np.array(inp.int64_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
+      elif len(inp.int32_data) > 0:
+        ret = Tensor(np.array(inp.int32_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
       else:
         ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
     else:
@@ -42,7 +44,7 @@ def get_run_onnx(onnx_model):
     return ret
 
   def attribute_parse(a):
-    if a.type == 7: return tuple([int(x) for x in a.ints])
+    if a.type in [6,7]: return tuple([int(x) for x in a.ints])
     elif a.type == 4: return buffer_parse(a.t)  # TENSOR
     elif a.type == 3: return str(a.s)
     elif a.type == 2: return int(a.i)
@@ -72,8 +74,11 @@ def get_run_onnx(onnx_model):
   attribute_dict = {}
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
+  
+  onnx_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=False):
+    if getenv("DEBUGONNX"): debug = True
     input_tensors = {}
     intermediate_tensors = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
@@ -111,11 +116,8 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
       elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
       elif n.op_type == "Div":
-        if prod(inp[1].shape) == 1:
-          # due to SHUFFLE_PAD_OPS issues, this saves a kernel by taking the reciprocal of constants first, then using mul
-          ret = inp[0] * (1.0/inp[1])
-        else:
-          ret = inp[0].div(inp[1])
+        # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
+        ret = inp[0].div(inp[1])
       elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Resize":
@@ -153,7 +155,7 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        assert onnx_model.opset_import[0].version == 10
+        assert onnx_version == 10
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
@@ -163,7 +165,14 @@ def get_run_onnx(onnx_model):
         arg[axis] = (starts, ends)
         ret = inp[0].slice(arg=arg)
       elif hasattr(onnx_ops, n.op_type):
-        ret = getattr(onnx_ops, n.op_type)(*inp, **opt)
+        fxn = getattr(onnx_ops, n.op_type)
+        if isinstance(fxn, dict):
+          for k in sorted(fxn.keys()):
+            if k < onnx_version:
+              real_fxn = fxn[k]
+        else:
+          real_fxn = fxn
+        ret = real_fxn(*inp, **opt)
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
@@ -171,7 +180,7 @@ def get_run_onnx(onnx_model):
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
-      #print(ret.numpy().mean())
+      #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:
         output_tensor_names = n.output
         break

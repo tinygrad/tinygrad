@@ -4,7 +4,7 @@ import numpy as np
 from typing import List, Any
 from tinygrad.ops import GlobalCounters
 from tinygrad.helpers import prod, getenv, DEBUG
-import subprocess
+import subprocess, pathlib
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -67,9 +67,9 @@ class CLProgram:
       assert err is None, str(err)
       _, err = arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None)
       assert err is None, str(err)
-      # https://github.com/dougallj/applegpu.git
+      # clone https://github.com/dougallj/applegpu.git in the root of tinygrad
       import os
-      os.system("cd /Users/kafka/fun/m1/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
+      os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
     self.pipeline_state, err = device.newComputePipelineStateWithFunction_error_(self.fxn, None)
     assert err is None, str(err)
 

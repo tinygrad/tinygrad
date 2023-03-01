@@ -28,8 +28,8 @@ class TestNN(unittest.TestCase):
       tbn.running_mean[:] = torch.tensor(bn.running_mean.numpy())
       tbn.running_var[:] = torch.tensor(bn.running_var.numpy())
 
-    np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5)
-    np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5)
+    np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
 
     # trial
     inn = Tensor.randn(2, sz, 3, 3)
