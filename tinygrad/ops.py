@@ -115,12 +115,10 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
-    k = cls.compile(ast, output_buffer)
-    prg = k.codegen()
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
-    prg.build(cls.runtime)
-    prg(*k.bufs)
-    return k.ret
+    prg, bufs, ret = cls.compile(ast, output_buffer)
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, bufs))
+    prg(*bufs)
+    return ret
 
   # universal for shape tracked
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))

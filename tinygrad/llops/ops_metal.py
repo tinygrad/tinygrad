@@ -94,5 +94,6 @@ class MetalBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return RawMetalBuffer(4*prod(shape))
   @staticmethod
-  def compile(ast, output_buffer): return CLASTKernel(ast, output_buffer, metal_lang)
-  runtime = staticmethod(MetalProgram)
+  def compile(ast, output_buffer):
+    k = CLASTKernel(ast, output_buffer, metal_lang)
+    return (k.codegen().build(MetalProgram), k.bufs, k.ret)

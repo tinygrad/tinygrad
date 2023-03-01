@@ -35,5 +35,7 @@ from tinygrad.compiler.cl import CLASTKernel
 class ClangBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return RawMallocBuffer(4*prod(shape))
-  compile = staticmethod(CLASTKernel) # default options are clang
-  runtime = staticmethod(ClangProgram)
+  @staticmethod
+  def compile(ast, output_buffer):
+    k = CLASTKernel(ast, output_buffer)
+    return (k.codegen().build(ClangProgram), k.bufs, k.ret)

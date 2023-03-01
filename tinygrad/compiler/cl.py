@@ -18,7 +18,9 @@ class GPURunner:
   def __init__(self, name, prg, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]], op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_work_size, self.local_work_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_work_size, local_work_size, bufs_to_delete, op_estimate, mem_estimate
-  def build(self, runtime): self.clprg = runtime(self.name, self.prg)
+  def build(self, runtime):
+    self.clprg = runtime(self.name, self.prg)
+    return self
   def __call__(self, *bufs):
     et = self.clprg(self.global_work_size, self.local_work_size, *[x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete], wait=DEBUG>=2)
     if et is not None: GlobalCounters.time_sum_s += et

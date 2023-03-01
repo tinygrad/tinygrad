@@ -78,5 +78,6 @@ class GPUBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape) -> RawBuffer: return CLImage(shape) if (len(shape) == 3 and shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(shape))
   @staticmethod
-  def compile(ast, output_buffer): return CLASTKernel(ast, output_buffer, opencl_lang)
-  runtime = staticmethod(CLProgram)
+  def compile(ast, output_buffer):
+    k = CLASTKernel(ast, output_buffer, opencl_lang)
+    return (k.codegen().build(CLProgram), k.bufs, k.ret)
