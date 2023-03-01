@@ -93,9 +93,9 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
 
-  buffer_type = staticmethod(RawBuffer)
+  raw_buffer = staticmethod(RawBuffer)
   def raw(self) -> RawBuffer:
-    if self._buf is None: self._buf = self.buffer_type(4*prod(self._base_shape))
+    if self._buf is None: self._buf = self.raw_buffer(4*prod(self._base_shape))
     if self._backing is not None:
       assert GlobalCounters.cache is None, f"can't copy in {self._backing.shape} while caching"
       self._buf.copyin(self._backing)
@@ -113,7 +113,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
-    k = cls.program_type(ast, output_buffer)
+    k = cls.compiler(ast, output_buffer)
     prg = k.codegen()
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
     prg(*k.bufs)

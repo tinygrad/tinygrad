@@ -15,12 +15,12 @@ class RawMallocBuffer(RawBuffer):
   def copyin(self, b:np.ndarray): ctypes.memmove(self._cl, b.ctypes.data, b.size*4)
   def copyout(self, a:np.ndarray): np.copyto(a, np.ctypeslib.as_array(self._cl)[:a.size].reshape(a.shape))
 
-class CLProgram:
+class ClangProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
   # TODO: remove name, factor out op_estimate and mem_estimate
   def __init__(self, name:str, prg:str, rename=True, op_estimate=0, mem_estimate=0):
-    self.name = f"{name}{('_N'+str(CLProgram.kernel_cnt[name])) if CLProgram.kernel_cnt[name] else str()}" if rename else name
-    CLProgram.kernel_cnt[name] += 1
+    self.name = f"{name}{('_N'+str(ClangProgram.kernel_cnt[name])) if ClangProgram.kernel_cnt[name] else str()}" if rename else name
+    ClangProgram.kernel_cnt[name] += 1
     self.prg = prg.replace(f"{name}(", f"{self.name}(")
     prg = "#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n" + prg
     if DEBUG >= 4: print(prg)  # TODO: outside runtime!
@@ -34,9 +34,9 @@ class CLProgram:
   def __call__(self, *args): self.fxn(*[x._cl for x in args[2:]])
 
 from tinygrad.compiler.cl import CLASTKernel
-class ClangProgram(CLASTKernel):
-  runtime = staticmethod(CLProgram)
+class ClangASTKernel(CLASTKernel):
+  runtime = staticmethod(ClangProgram)
 
 class ClangBuffer(CompiledBuffer):
-  buffer_type = staticmethod(RawMallocBuffer)
-  program_type = staticmethod(ClangProgram)
+  raw_buffer = staticmethod(RawMallocBuffer)
+  compiler = staticmethod(ClangASTKernel)
