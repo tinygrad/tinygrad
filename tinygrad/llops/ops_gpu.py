@@ -3,7 +3,7 @@ import numpy as np
 import math
 from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
 from tinygrad.helpers import prod, DEBUG, IMAGE
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, CompiledAST, GlobalCounters
 from tinygrad.ast import ASTKernel, Token, Types
 from tinygrad.shape import ShapeTracker
 from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
@@ -341,7 +341,7 @@ class CLASTKernel(ASTKernel):
       print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.sts[i])
     print(self.fxn.prg)
 
-class GPUBuffer(ExplicitExecAST):
+class GPUBuffer(CompiledAST):
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
     super().__init__(shape, hostbuf)
     self._buf : Optional[Union[CLImage, CLBuffer]] = hostbuf._buf if hostbuf is not None else None

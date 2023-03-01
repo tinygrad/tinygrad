@@ -16,19 +16,17 @@ LAZY = getenv("LAZY", 1)
 
 def get_buffer(name, base='tinygrad.llops'):
   try:
-    return (name.upper(), [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.ops_{name}'), inspect.isclass) if (cname.lower() == name + "buffer")][0])
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.ops_{name}'), inspect.isclass) if (cname.lower() == name + "buffer")][0]
   except Exception as e:  # NOTE: this can't be put on one line due to mypy issue
     print(name, "backend not available", e, file=sys.stderr)
 
 class _Device:
   def __init__(self) -> None:
-    self._buffers : Dict[str, Type[DeviceBuffer]] = {x[0]:x[1] for x in [
-      get_buffer('cpu'), get_buffer('gpu'), get_buffer('llvm'), get_buffer('torch'),
-      get_buffer('triton', 'accel.triton')] if x is not None}
+    self._buffers : Dict[str, Type[DeviceBuffer]] = {x.upper():get_buffer(x) for x in ['cpu', 'gpu', 'llvm', 'torch'] if x is not None}
     self.DEFAULT : str = "CPU"
     for name in self._buffers:
       if getenv(name) == 1: self.DEFAULT = name  # note: DEFAULT can be a Device that can't be imported. better than silent use of a different device
-      self.__setattr__(name, name)
+      if self._buffers[name] is not None: self.__setattr__(name, name)
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such

@@ -53,14 +53,14 @@ shape_fxn_for_op : Dict[Op, Callable] = {
   **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.flops), op) for op in MovementOps}}
 
 # used in CPUBuffer and TorchBuffer
-class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
+class InterpretedAST(DeviceBuffer):  # pylint: disable=abstract-method
   fxn_for_op : ClassVar = shape_fxn_for_op
   # TODO: use generic types here to remove __init__ in specialized classes
   def __init__(self, lbuf:Any): self.buf, self.shape = lbuf, tuple(lbuf.shape)
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self.buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self.buf, op.name.lower())(arg))
   @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GenericExecAST]=None):
+  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[InterpretedAST]=None):
     if FusedOps.MULACC in cls.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     srcs = [cls.exec_ast(x) if isinstance(x, LazyOp) else x for x in ast.src]
@@ -75,11 +75,11 @@ class GenericExecAST(DeviceBuffer):  # pylint: disable=abstract-method
       return output_buffer
     else:
       return ret
-def get_lazyop_info(ast:LazyOp): return GenericExecAST.exec_ast(map_buffers({x:GenericExecAST(GenericShape(x.shape)) for x in get_buffers(ast)}, ast)).buf
+def get_lazyop_info(ast:LazyOp): return InterpretedAST.exec_ast(map_buffers({x:InterpretedAST(GenericShape(x.shape)) for x in get_buffers(ast)}, ast)).buf
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
-class ExplicitExecAST(DeviceBuffer):  # pylint: disable=abstract-method
+class CompiledAST(DeviceBuffer):  # pylint: disable=abstract-method
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape

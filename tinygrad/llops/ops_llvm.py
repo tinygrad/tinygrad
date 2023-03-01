@@ -8,7 +8,7 @@ from tinygrad.ops import LazyOp
 from tinygrad.ast import ASTKernel
 import ctypes
 import numpy as np
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, CompiledAST
 from tinygrad.runtime.llvm import LLVM, ir
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
 
@@ -26,7 +26,7 @@ render_llvm = {
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.and_(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx))
 }
 
-class LLVMBuffer(ExplicitExecAST):
+class LLVMBuffer(CompiledAST):
   op_lookup : ClassVar = {
     UnaryOps.NOOP: lambda builder,x: x,
     UnaryOps.NEG: lambda builder,x: builder.fneg(x, flags=('fast',)),
