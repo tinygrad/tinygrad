@@ -1,6 +1,6 @@
 import torch
 from typing import ClassVar, Dict, Callable
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, InterpretedAST, Op
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, InterpretedBuffer, Op
 from tinygrad.helpers import getenv
 from tinygrad.llops.ops_cpu import base_fxn_for_op, einsum_mulacc
 
@@ -12,7 +12,7 @@ torch_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
 }}
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
-class TorchBuffer(InterpretedAST):
+class TorchBuffer(InterpretedBuffer):
   fxn_for_op : ClassVar = torch_fxn_for_op
 
   @staticmethod

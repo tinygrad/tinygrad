@@ -22,7 +22,7 @@ def get_buffer(name, base='tinygrad.llops'):
 
 class _Device:
   def __init__(self) -> None:
-    self._buffers : Dict[str, Type[DeviceBuffer]] = {x.upper():get_buffer(x) for x in ['cpu', 'gpu', 'llvm', 'torch'] if x is not None}
+    self._buffers : Dict[str, Type[DeviceBuffer]] = {x.upper():get_buffer(x) for x in ['cpu', 'gpu', 'llvm', 'torch', 'clang'] if x is not None}
     self.DEFAULT : str = "CPU"
     for name in self._buffers:
       if getenv(name) == 1: self.DEFAULT = name  # note: DEFAULT can be a Device that can't be imported. better than silent use of a different device

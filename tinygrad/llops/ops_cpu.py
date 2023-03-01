@@ -1,7 +1,7 @@
 import numpy as np
 import operator
 from typing import ClassVar, Callable, Dict
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, InterpretedAST, Op
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, InterpretedBuffer, Op
 from tinygrad.helpers import shape_to_axis
 
 base_fxn_for_op : Dict[Op, Callable] = {
@@ -30,7 +30,7 @@ numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, np.broadcast_to)
 }}
 
-class CPUBuffer(InterpretedAST):
+class CPUBuffer(InterpretedBuffer):
   fxn_for_op : ClassVar = numpy_fxn_for_op
 
   @staticmethod

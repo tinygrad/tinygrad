@@ -17,7 +17,7 @@ class GPURunner:
   def __init__(self, clprg, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]]):
     self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete = clprg, global_work_size, local_work_size, bufs_to_delete
   def __call__(self, *bufs):
-    return self.clprg(self.global_work_size, self.local_work_size, *[x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
+    return self.clprg(self.global_work_size, self.local_work_size, *[x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
 
 class CLASTKernel(ASTKernel):
   # params

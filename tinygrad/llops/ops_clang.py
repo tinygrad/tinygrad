@@ -6,14 +6,14 @@ import subprocess
 from collections import defaultdict
 from typing import Final, Dict
 from tinygrad.helpers import DEBUG
+from tinygrad.ops import CompiledBuffer, RawBuffer
 import platform
 OSX = platform.system() == "Darwin"
 
-class CLBuffer:
+class RawMallocBuffer(RawBuffer):
   def __init__(self, size): self._cl = (ctypes.c_float * (size))()
   def copyin(self, b:np.ndarray): ctypes.memmove(self._cl, b.ctypes.data, b.size*4)
-  def copyout(self, a:np.ndarray):
-    np.copyto(a, np.ctypeslib.as_array(self._cl)[:a.size].reshape(a.shape))
+  def copyout(self, a:np.ndarray): np.copyto(a, np.ctypeslib.as_array(self._cl)[:a.size].reshape(a.shape))
 
 class CLProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
@@ -31,4 +31,12 @@ class CLProgram:
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
-  def __call__(self, *args): self.fxn(*args[2:])
+  def __call__(self, *args): self.fxn(*[x._cl for x in args[2:]])
+
+from tinygrad.compiler.cl import CLASTKernel
+class ClangProgram(CLASTKernel):
+  runtime = staticmethod(CLProgram)
+
+class ClangBuffer(CompiledBuffer):
+  buffer_type = staticmethod(RawMallocBuffer)
+  program_type = staticmethod(ClangProgram)
