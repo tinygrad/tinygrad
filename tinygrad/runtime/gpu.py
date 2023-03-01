@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Tuple, Optional, Union
 from tinygrad.helpers import prod, IMAGE, DEBUG, getenv
 from tinygrad.ops import UnaryOps, MovementOps, LazyOp, CompiledBuffer, GlobalCounters, RawBuffer
+from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 OSX = platform.system() == "Darwin"
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
@@ -66,8 +67,6 @@ class CLProgram:
     if wait:
       CL().cl_queue.finish()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
-
-from tinygrad.compiler.gpu import GPUCodegen, GPULanguage
 
 opencl_lang = GPULanguage(
   kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",

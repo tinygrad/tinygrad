@@ -1,7 +1,7 @@
 import functools, math
 from typing import ClassVar, List
 from llvmlite import ir  # type: ignore
-from tinygrad.compiler.ast import ASTKernel, ASTRunner
+from tinygrad.codegen.ast import ASTKernel, ASTRunner
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp
 from tinygrad.helpers import DEBUG, prod
 

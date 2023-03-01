@@ -2,7 +2,7 @@ import torch
 from typing import ClassVar, Dict, Callable
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, InterpretedBuffer, Op
 from tinygrad.helpers import getenv
-from tinygrad.llops.ops_cpu import base_fxn_for_op, einsum_mulacc
+from tinygrad.runtime.cpu import base_fxn_for_op, einsum_mulacc
 
 torch_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.EXP: lambda x: x.exp(), UnaryOps.LOG: lambda x: x.log(),

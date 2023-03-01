@@ -5,6 +5,7 @@ from pycuda.compiler import compile # type: ignore
 import numpy as np
 from tinygrad.helpers import DEBUG, prod
 from tinygrad.ops import CompiledBuffer, RawBuffer
+from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawCUDABuffer(RawBuffer):
   def __init__(self, size): self._cl = cuda.mem_alloc(size)
@@ -24,8 +25,6 @@ class CUDAProgram:
     assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
     global_size = [x//y for x,y in zip(global_size, local_size)]
     self.prg(*args, block=tuple(local_size), grid=tuple(global_size))
-
-from tinygrad.compiler.gpu import GPUCodegen, GPULanguage
 
 cuda_lang = GPULanguage(
   kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",

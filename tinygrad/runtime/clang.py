@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Final, Dict
 from tinygrad.helpers import DEBUG, prod
 from tinygrad.ops import CompiledBuffer, RawBuffer
+from tinygrad.codegen.gpu import GPUCodegen
 import platform
 OSX = platform.system() == "Darwin"
 
@@ -31,7 +32,6 @@ class ClangProgram:
     self.fxn(*[x._buf for x in args[2:]])
     if wait: return time.monotonic()-st
 
-from tinygrad.compiler.gpu import GPUCodegen
 class ClangBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return RawMallocBuffer(4*prod(shape))

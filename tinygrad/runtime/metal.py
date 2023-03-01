@@ -3,7 +3,7 @@ import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
-from tinygrad.ops import GlobalCounters
+from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.ops import CompiledBuffer, RawBuffer
 
@@ -81,8 +81,6 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     else:
       METAL().mtl_buffers_in_flight.append(command_buffer)
-
-from tinygrad.compiler.gpu import GPUCodegen, GPULanguage
 
 metal_lang = GPULanguage(
   kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
