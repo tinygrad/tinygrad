@@ -15,8 +15,13 @@ VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
 class GPULanguage(NamedTuple):
-  kernel_prefix : str = ""; buffer_prefix : str = ""; smem_prefix : str = ""; barrier : str = ""
-  gid : List[str] = []; lid : List[str] = []; extra_args : List[str] = []
+  kernel_prefix : str = ""
+  buffer_prefix : str = ""
+  smem_prefix : str = ""
+  barrier : str = ""
+  gid : List[str] = []
+  lid : List[str] = []
+  extra_args : List[str] = []
   float4 : Optional[str] = None
 
 class GPUCodegen(ASTKernel):

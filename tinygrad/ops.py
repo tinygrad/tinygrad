@@ -96,6 +96,8 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   # TODO: not GPUBuffer, get name of class
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
 
+  @staticmethod
+  def create_raw_buffer(shape) -> RawBuffer: raise NotImplementedError("must be implemented")
   def raw(self) -> RawBuffer:
     if self._buf is None: self._buf = self.create_raw_buffer(self._base_shape)
     if self._backing is not None:
@@ -113,6 +115,8 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     out.raw().copyout(data)
     return data
 
+  @staticmethod
+  def compile(ast, output_buffer): raise NotImplementedError("must be implemented")
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
     prg, bufs, ret = cls.compile(ast, output_buffer)

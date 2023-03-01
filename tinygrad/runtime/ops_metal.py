@@ -1,5 +1,5 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-libdispatch
-import os, subprocess, pathlib
+import os, subprocess, pathlib, functools
 import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
@@ -9,17 +9,18 @@ from tinygrad.ops import CompiledBuffer, RawBuffer
 
 METAL_XCODE = getenv("METAL_XCODE")
 
-class METAL:
-  device = None
-  mtl_queue = None
+class _METAL:
   mtl_buffers_in_flight : List[Any] = []
-  def __init__(self):
-    if METAL.device is not None: return
-    METAL.device = Metal.MTLCreateSystemDefaultDevice()
-    METAL.mtl_queue = METAL.device.newCommandQueue()
+  @functools.cached_property
+  def device(self):
+    return Metal.MTLCreateSystemDefaultDevice()
+  @functools.cached_property
+  def mtl_queue(self):
+    return METAL.device.newCommandQueue()
+METAL = _METAL()
 
 class RawMetalBuffer(RawBuffer):
-  def __init__(self, size): self._cl = METAL().device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
+  def __init__(self, size): self._cl = METAL.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
   def __del__(self): self._cl.release()
 
   def _as_np(self): return np.frombuffer(self._cl.contents().as_buffer(self._cl.length()), dtype=np.float32)
@@ -42,15 +43,15 @@ class MetalProgram:
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-      self.library, err = METAL().device.newLibraryWithData_error_(data, None)
+      self.library, err = METAL.device.newLibraryWithData_error_(data, None)
     else:
       options = Metal.MTLCompileOptions.alloc().init()
-      self.library, err = METAL().device.newLibraryWithSource_options_error_(prg, options, None)
+      self.library, err = METAL.device.newLibraryWithSource_options_error_(prg, options, None)
     assert err is None, str(err)
     self.fxn = self.library.newFunctionWithName_(name)
     # hacks to disassemble shader
     if DEBUG >= 5:
-      arc, err = METAL().device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
+      arc, err = METAL.device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None)
       assert err is None, str(err)
       desc = Metal.MTLComputePipelineDescriptor.alloc().init()
       desc.setComputeFunction_(self.fxn)
@@ -60,7 +61,7 @@ class MetalProgram:
       assert err is None, str(err)
       # clone https://github.com/dougallj/applegpu.git in the root of tinygrad
       os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
-    self.pipeline_state, err = METAL().device.newComputePipelineStateWithFunction_error_(self.fxn, None)
+    self.pipeline_state, err = METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None)
     assert err is None, str(err)
 
   def __call__(self, global_size, local_size, *bufs, wait=False):
@@ -69,7 +70,7 @@ class MetalProgram:
     local_size += [1] * (3-len(local_size))
 
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
-    command_buffer = METAL().mtl_queue.commandBuffer()
+    command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._cl, 0, i)
@@ -80,7 +81,7 @@ class MetalProgram:
       command_buffer.waitUntilCompleted()
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     else:
-      METAL().mtl_buffers_in_flight.append(command_buffer)
+      METAL.mtl_buffers_in_flight.append(command_buffer)
 
 metal_lang = GPULanguage(
   kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",

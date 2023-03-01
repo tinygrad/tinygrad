@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile # type: ignore

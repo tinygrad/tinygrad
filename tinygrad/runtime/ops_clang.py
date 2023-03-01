@@ -5,7 +5,7 @@ import hashlib
 import subprocess
 from collections import defaultdict
 from typing import Final, Dict
-from tinygrad.helpers import DEBUG, prod
+from tinygrad.helpers import prod
 from tinygrad.ops import CompiledBuffer, RawBuffer
 from tinygrad.codegen.gpu import GPUCodegen
 import platform
