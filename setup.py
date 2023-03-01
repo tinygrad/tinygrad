@@ -40,6 +40,7 @@ setup(name='tinygrad',
             "onnx~=1.13.0",
             "onnx2torch",
             "opencv-python",
+            "scipy",
         ],
       },
       include_package_data=True)
