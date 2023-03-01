@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
   # buffers (weights)
   for name,cl in bufs_to_save.items():
-    weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl._cl)[0:len(cl._cl)//4])])
+    weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl)[0:len(cl)//4])])
     cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog.append(f"float *{name} = (float *){name}_data;")
 
