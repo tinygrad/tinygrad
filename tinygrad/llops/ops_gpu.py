@@ -69,18 +69,15 @@ class CLProgram:
       CL().cl_queue.finish()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
 
-from tinygrad.compiler.cl import CLASTKernel
-class OpenCLProgram(CLASTKernel):
-  kernel_prefix = "__kernel"
-  buffer_prefix = "__global "
-  smem_prefix = "__local "
-  barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
-  float4 = "(float4)"
-  gid = [f'get_global_id({i})' for i in range(3)]
-  lid = [f'get_local_id({i})' for i in range(3)]
-  runtime = staticmethod(CLProgram)
+from tinygrad.compiler.cl import CLASTKernel, GPULanguage
+
+opencl_lang = GPULanguage(
+  kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+  barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
+  gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
 
 class GPUBuffer(CompiledBuffer):
   @staticmethod
   def create_raw_buffer(shape): return CLImage(shape) if (len(shape) == 3 and shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(shape))
-  compiler = staticmethod(OpenCLProgram)
+  compiler = staticmethod(lambda ast, output_buffer: CLASTKernel(ast, output_buffer, opencl_lang))
+  runtime = staticmethod(CLProgram)

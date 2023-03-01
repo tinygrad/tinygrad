@@ -119,6 +119,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     k = cls.compiler(ast, output_buffer)
     prg = k.codegen()
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
+    prg.build(cls.runtime)
     prg(*k.bufs)
     return k.ret
 

@@ -1,6 +1,6 @@
 import math
 from collections import defaultdict
-from typing import Optional, List, Tuple, Dict, Set, Final, Callable, ClassVar
+from typing import Optional, List, Tuple, Dict, Set, Final, Callable, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, GlobalCounters
 from tinygrad.compiler.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
@@ -15,8 +15,9 @@ VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
 class GPURunner:
-  def __init__(self, name, clprg, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]], op_estimate=0, mem_estimate=0):
-    self.name, self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, clprg, global_work_size, local_work_size, bufs_to_delete, op_estimate, mem_estimate
+  def __init__(self, name, prg, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]], op_estimate=0, mem_estimate=0):
+    self.name, self.prg, self.global_work_size, self.local_work_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_work_size, local_work_size, bufs_to_delete, op_estimate, mem_estimate
+  def build(self, runtime): self.clprg = runtime(self.prg)
   def __call__(self, *bufs):
     et = self.clprg(self.global_work_size, self.local_work_size, *[x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete], wait=DEBUG>=2)
     if et is not None: GlobalCounters.time_sum_s += et
@@ -26,14 +27,15 @@ class GPURunner:
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return et
 
-class CLASTKernel(ASTKernel):
-  # params
-  kernel_prefix, buffer_prefix, smem_prefix, barrier = "", "", "", ""
-  gid : List[str] = []
-  lid : List[str] = []
-  extra_args : List[str] = []
+class GPULanguage(NamedTuple):
+  kernel_prefix : str = ""; buffer_prefix : str = ""; smem_prefix : str = ""; barrier : str = ""
+  gid : List[str] = []; lid : List[str] = []; extra_args : List[str] = []
   float4 : Optional[str] = None
-  runtime : ClassVar
+
+class CLASTKernel(ASTKernel):
+  def __init__(self, ast:LazyOp, output_buffer=None, lang:GPULanguage=GPULanguage()):
+    self.lang = lang
+    super().__init__(ast, output_buffer)
 
   # for renaming
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
@@ -59,7 +61,7 @@ class CLASTKernel(ASTKernel):
     assert len(self.bufs[buf_index].st.views) == 1, "store has more than one view"
 
     # all stores can merge, since they have one view and are valid
-    should_upcast = self.float4 and self.buftokens[buf_index].can_float4()
+    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4()
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()
@@ -69,14 +71,14 @@ class CLASTKernel(ASTKernel):
       assert valid.min == 1, "store must always be valid"
       if should_upcast:
         for j in range(4): did_store.add(o+j)
-        v = Token(f"{self.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
       idxy, valid = self.sts[buf_index].expr_idxs(o)
       assert valid.min == 1, "store must always be valid"
       if hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
-        self.kernel.append(f"(({self.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"(({self.lang.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
         self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
 
@@ -88,7 +90,7 @@ class CLASTKernel(ASTKernel):
       val = self.bufs[buf_index]._backing[0]
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
-    should_upcast = self.float4 and const is None and self.buftokens[buf_index].can_float4()
+    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4()
     tokens = []
     for o in self.buftokens[buf_index].offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
@@ -107,7 +109,7 @@ class CLASTKernel(ASTKernel):
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         elif should_upcast and can_merge:
-          ldr = Token(f"(({self.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
+          ldr = Token(f"(({self.lang.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
         ldr = ldr if valid.min == 1 or (VALIDHACKS and hasattr(self.bufs[buf_index]._buf, "IMAGE")) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
@@ -159,7 +161,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if self.float4 and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if self.lang.float4 and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -261,14 +263,14 @@ class CLASTKernel(ASTKernel):
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    if len(self.gid) == 0:
+    if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
     else:
-      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {self.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(len(self.gid), len(self.output_shape))) if self.output_shape[-1-i] != 1]
-      if len(self.output_shape) > len(self.gid):
+      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {self.lang.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(len(self.lang.gid), len(self.output_shape))) if self.output_shape[-1-i] != 1]
+      if len(self.output_shape) > len(self.lang.gid):
         # sometimes, there's more dimensions. compact all the dimensions into the first one
         # TODO: these compactions should be searchable
-        final_dimension = len(self.output_shape)-len(self.gid)
+        final_dimension = len(self.output_shape)-len(self.lang.gid)
         for i in range(final_dimension-1, -1, -1):
           self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
         self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
@@ -320,7 +322,7 @@ class CLASTKernel(ASTKernel):
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
-    if len(self.gid) == 0: self.kernel += ["}"] * len(self.output_shape)
+    if len(self.lang.gid) == 0: self.kernel += ["}"] * len(self.output_shape)
     self.kernel.append("\n}")
 
     # kernel function definition
@@ -329,16 +331,13 @@ class CLASTKernel(ASTKernel):
       function_name = f"{function_name}{'_N'+str(CLASTKernel.kernel_cnt[function_name])}"
     CLASTKernel.kernel_cnt[function_name] += 1
 
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
-    self.kernel = list(self.prekernel) + [f"{self.kernel_prefix} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.extra_args)] + \
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
+    self.kernel = list(self.prekernel) + [f"{self.lang.kernel_prefix} void {function_name}(",] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] + \
       [") {\n"] + self.kernel
 
-    # compile kernel
-    #self.fxn = self.runtime(function_name, ' '.join(self.kernel), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
-    self.fxn = self.runtime(' '.join(self.kernel))
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    return GPURunner(function_name, self.fxn, self.bufs_to_delete,
+    return GPURunner(function_name, ' '.join(self.kernel), self.bufs_to_delete,
       self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
       op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
