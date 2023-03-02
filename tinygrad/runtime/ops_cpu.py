@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, 
 from tinygrad.helpers import shape_to_axis
 
 base_fxn_for_op : Dict[Op, Callable] = {
-  UnaryOps.NOOP: lambda x: x[:], UnaryOps.NEG: lambda x: -x, UnaryOps.NOT: lambda x: (1.0 - x),
+  UnaryOps.NEG: lambda x: -x, UnaryOps.NOT: lambda x: (1.0 - x),
   BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul, BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow,
   ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
   ReduceOps.MAX: lambda x, new_shape: (x.amax if hasattr(x, 'amax') else x.max)(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
@@ -23,7 +23,7 @@ def einsum_mulacc(einsum, get_strides, expand):
   return mulacc
 
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
-  UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x),
+  UnaryOps.NOOP: lambda x: np.ascontiguousarray(x), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x),
   BinaryOps.MAX: np.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
   MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
   MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),

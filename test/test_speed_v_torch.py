@@ -1,5 +1,8 @@
 import os
 os.environ["NVIDIA_TF32_OVERRIDE"] = "0"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
 import unittest
 import torch
 torch.set_num_threads(1)
@@ -10,7 +13,7 @@ from functools import partial
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv, DEBUG
+from tinygrad.helpers import colored, getenv, DEBUG, Timing
 from tinygrad.jit import TinyJit
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
@@ -38,6 +41,9 @@ def helper_test_speed(f1, *args):
 
     # force syncing
     [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
+
+    # L2 defeat (64 MB)
+    np.zeros((4096, 4096), dtype=np.float32) - 1
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
