@@ -65,7 +65,5 @@ class LLVMProgram:
 
 class LLVMBuffer(CompiledBuffer):
   raw_buffer_type = RawMallocBuffer
-  @staticmethod
-  def compile(ast, output_buffer):
-    k = LLVMCodegen(ast, output_buffer)
-    return (k.codegen().build(LLVMProgram), k.bufs, k.ret)
+  codegen_type = LLVMCodegen
+  runtime_type = LLVMProgram

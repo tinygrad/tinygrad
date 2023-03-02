@@ -25,9 +25,7 @@ class GPULanguage(NamedTuple):
   float4 : Optional[str] = None
 
 class GPUCodegen(ASTKernel):
-  def __init__(self, ast:LazyOp, output_buffer=None, lang:GPULanguage=GPULanguage()):
-    self.lang = lang
-    super().__init__(ast, output_buffer)
+  lang : GPULanguage = GPULanguage()
 
   # for renaming
   kernel_cnt : Final[Dict[str, int]] = defaultdict(lambda: -1)

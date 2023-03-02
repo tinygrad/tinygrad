@@ -79,15 +79,14 @@ class MetalProgram:
     else:
       METAL.mtl_buffers_in_flight.append(command_buffer)
 
-metal_lang = GPULanguage(
-  kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
-  barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
-  gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
-  extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
+class MetalCodegen(GPUCodegen):
+  lang = GPULanguage(
+    kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
+    barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
+    gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
+    extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
 class MetalBuffer(CompiledBuffer):
   raw_buffer_type = RawMetalBuffer
-  @staticmethod
-  def compile(ast, output_buffer):
-    k = GPUCodegen(ast, output_buffer, metal_lang)
-    return (k.codegen().build(MetalProgram), k.bufs, k.ret)
+  codegen_type = MetalCodegen
+  runtime_type = MetalProgram

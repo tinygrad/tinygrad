@@ -26,14 +26,13 @@ class CUDAProgram:
     global_size = [x//y for x,y in zip(global_size, local_size)]
     self.prg(*args, block=tuple(local_size), grid=tuple(global_size))
 
-cuda_lang = GPULanguage(
-  kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
-  gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
-  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
+class CUDACodegen(GPUCodegen):
+  lang = GPULanguage(
+    kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
+    lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
 class CUDABuffer(CompiledBuffer):
   raw_buffer_type = RawCUDABuffer
-  @staticmethod
-  def compile(ast, output_buffer):
-    k = GPUCodegen(ast, output_buffer, cuda_lang)
-    return (k.codegen().build(CUDAProgram), k.bufs, k.ret)
+  codegen_type = CUDACodegen
+  runtime_type = CUDAProgram

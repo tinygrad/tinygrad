@@ -33,7 +33,5 @@ class ClangProgram:
 
 class ClangBuffer(CompiledBuffer):
   raw_buffer_type = RawMallocBuffer
-  @staticmethod
-  def compile(ast, output_buffer):
-    k = GPUCodegen(ast, output_buffer)
-    return (k.codegen().build(ClangProgram), k.bufs, k.ret)
+  codegen_type = GPUCodegen   # clang is the default
+  runtime_type = ClangProgram

@@ -130,14 +130,17 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     return self.contiguous().raw().toCPU().reshape(self.shape)
 
-  @staticmethod
-  def compile(ast, output_buffer): raise NotImplementedError("must be implemented")
+  codegen_type : Any
+  runtime_type : Type
+  method_cache : Dict[str, Callable] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
-    prg, bufs, ret = cls.compile(ast, output_buffer)
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, bufs))
-    prg(*bufs)
-    return ret
+    k = cls.codegen_type(ast, output_buffer)
+    if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
+    prg = cls.method_cache[k.key]
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
+    prg(*k.bufs)
+    return k.ret
 
   # universal for shape tracked
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))

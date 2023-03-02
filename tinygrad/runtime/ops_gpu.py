@@ -75,10 +75,11 @@ class CLProgram:
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
     return None
 
-opencl_lang = GPULanguage(
-  kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
-  barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-  gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
+class CLCodegen(GPUCodegen):
+  lang = GPULanguage(
+    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
+    gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
 
 class GPUBuffer(CompiledBuffer):
   raw_buffer_type = CLBuffer
@@ -87,7 +88,5 @@ class GPUBuffer(CompiledBuffer):
   def create_raw_buffer(cls, shape, backing) -> RawBuffer:
     if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and not backing: return CLImage(shape)
     else: return super().create_raw_buffer(shape, backing)
-  @staticmethod
-  def compile(ast, output_buffer):
-    k = GPUCodegen(ast, output_buffer, opencl_lang)
-    return (k.codegen().build(CLProgram), k.bufs, k.ret)
+  codegen_type = CLCodegen
+  runtime_type = CLProgram
