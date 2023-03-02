@@ -14,15 +14,14 @@ def compile_net(run, special_names):
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(args):
-      if i in fxn.bufs_to_delete: continue
-      key = id(arg.raw())
+      key = id(arg)
       if key not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key], len(arg.raw()._buf))
+          bufs[key] = (special_names[key], len(arg._buf))
         else:
-          bufs[key] = (f"buf_{bufnum}", len(arg.raw()._buf))
+          bufs[key] = (f"buf_{bufnum}", len(arg._buf))
           bufnum += 1
-          if i > 0: bufs_to_save[bufs[key][0]] = arg.raw()  # if first usage of a buffer is not an output, and it's not a special name
+          if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
     statements.append(f"{fxn.name}({', '.join(cargs)});")
 
@@ -40,6 +39,11 @@ if __name__ == "__main__":
   the_input = Tensor.randn(1,3,224,224)
   the_output = run(the_input)
   the_output = run(the_input)
+
+  # hack to put the inputs back
+  assert len(run.input_replace) == 1
+  for (j,i),idx in run.input_replace.items():
+    run.jit_cache[j][1][i] = the_input.lazydata.realized.raw()
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   special_names = {id(the_input.lazydata.realized.raw()): "input", id(the_output.lazydata.realized.raw()): "outputs"}

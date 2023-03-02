@@ -1,8 +1,8 @@
 import math
 from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op
-from tinygrad.codegen.ast import ASTKernel, ASTRunner, Token, Types
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
+from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import getenv, DEBUG, prod

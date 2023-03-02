@@ -1,8 +1,8 @@
 import functools, math
 from typing import ClassVar, List
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.ast import ASTKernel, ASTRunner
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp
+from tinygrad.codegen.ast import ASTKernel
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, ASTRunner
 from tinygrad.helpers import DEBUG, prod
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
