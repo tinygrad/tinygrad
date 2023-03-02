@@ -3,7 +3,7 @@ import gc
 from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.llops.ops_gpu import GPUBuffer
+from tinygrad.runtime.ops_gpu import GPUBuffer
 from tinygrad.ops import GlobalCounters
 
 def print_objects():

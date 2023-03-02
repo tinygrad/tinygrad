@@ -7,7 +7,7 @@ if 'IMAGE' not in os.environ:
 os.environ['GPU'] = '1'
 os.environ['OPT'] = '2'
 from tinygrad.tensor import Tensor
-from tinygrad.llops.ops_gpu import CLImage
+from tinygrad.runtime.ops_gpu import CLImage
 from tinygrad.nn import Conv2d
 Tensor.no_grad = True
 

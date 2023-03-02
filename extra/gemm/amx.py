@@ -4,7 +4,7 @@ import time
 import sys
 np.set_printoptions(linewidth=160)
 np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
-from tinygrad.llops.ops_llvm import LLVM, LLVMBuffer, int_const
+from tinygrad.runtime.ops_llvm import LLVM, LLVMBuffer, int_const
 from llvmlite import ir  # type: ignore
 
 

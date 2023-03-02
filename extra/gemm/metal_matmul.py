@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.llops.ops_metal import CLBuffer, CLProgram
+from tinygrad.runtime.ops_metal import CLBuffer, CLProgram
 
 def benchmark(prog):
   e = prog()
