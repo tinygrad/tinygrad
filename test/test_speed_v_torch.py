@@ -34,17 +34,19 @@ def helper_test_speed(f1, *args):
   ret = None
   for _ in range(CNT):
     del ret
-    args = [(x+1).realize() if isinstance(x,Tensor) else (None if x is None else (x+1)) for x in args]  # cache defeats
+    args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]  # cache defeats
 
     # force syncing
-    [x.cpu().numpy() for x in args if x is not None]
+    [x.numpy() if isinstance(x, Tensor) else x.cpu().numpy() for x in args if x is not None]
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     if DEBUG >= 4: print("benchmark start")
     st = time.monotonic()
     ret = f1(*args)
-    ret.cpu().numpy() # not ideal, it's copying. why is this so slow in tinygrad?
+    # not ideal, it's copying (sometimes). why is this so slow in tinygrad?
+    if isinstance(ret, Tensor): ret.numpy()
+    else: ret.cpu().numpy()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
     if DEBUG >= 4: print("benchmark stop")

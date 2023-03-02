@@ -13,7 +13,7 @@ class TinyJit:
     self.input_replace : Dict[DeviceBuffer, Any]= {}
 
   def __call__(self, *args, **kwargs) -> Any:
-    if Device.DEFAULT not in ["GPU", "CLANG"]: return self.fxn(*args, **kwargs)  # only jit on the GPU
+    if Device.DEFAULT not in ["GPU", "CLANG", "METAL", "CUDA"]: return self.fxn(*args, **kwargs)  # only jit on the GPU codegen
     # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
     input_tensors = {k:cast(DeviceBuffer, v.realize().lazydata.realized)._buf for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_tensors) != 0, "no inputs to JIT"
