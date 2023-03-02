@@ -3,7 +3,7 @@ import unittest
 import networkx as nx  # type: ignore
 import numpy as np
 from tinygrad.graph import G, log_op, prune_graph
-from tinygrad.llops.ops_cpu import CPUBuffer
+from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.ops import BinaryOps, LazyOp, MovementOps, ReduceOps
 
 class TestGraph(unittest.TestCase):

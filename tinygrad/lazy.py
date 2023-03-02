@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
-import sys, weakref, importlib, inspect
+import os, sys, weakref, importlib, inspect
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape import ShapeTracker
@@ -14,21 +14,20 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 LAZY = getenv("LAZY", 1)
 
-def get_buffer(name, base='tinygrad.llops'):
+def get_buffer(name, base='tinygrad.runtime'):
   try:
-    return (name.upper(), [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.ops_{name}'), inspect.isclass) if (cname.lower() == name + "buffer")][0])
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.ops_{name}'), inspect.isclass) if (cname.lower() == name + "buffer")][0]
   except Exception as e:  # NOTE: this can't be put on one line due to mypy issue
     print(name, "backend not available", e, file=sys.stderr)
 
 class _Device:
   def __init__(self) -> None:
-    self._buffers : Dict[str, Type[DeviceBuffer]] = {x[0]:x[1] for x in [
-      get_buffer('cpu'), get_buffer('gpu'), get_buffer('llvm'), get_buffer('torch'),
-      get_buffer('triton', 'accel.triton')] if x is not None}
+    self._buffers : Dict[str, Type[DeviceBuffer]] = {x.upper():get_buffer(x) for x in 
+      [os.path.splitext(x)[0][len("ops_"):] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "runtime"))) if x.startswith("ops_")] if x is not None}
     self.DEFAULT : str = "CPU"
     for name in self._buffers:
       if getenv(name) == 1: self.DEFAULT = name  # note: DEFAULT can be a Device that can't be imported. better than silent use of a different device
-      self.__setattr__(name, name)
+      if self._buffers[name] is not None: self.__setattr__(name, name)
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such

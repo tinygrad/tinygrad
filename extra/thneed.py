@@ -4,12 +4,11 @@ import struct
 import json
 import traceback
 import numpy as np
-from tinygrad.runtime.opencl import CL
-from tinygrad.llops.ops_gpu import CLProgram, CLImage, CLBuffer
+from tinygrad.runtime.ops_gpu import CLProgram, CLImage, CLBuffer
 from tinygrad.helpers import prod, getenv
 from collections import defaultdict
 import pyopencl as cl
-from tinygrad.runtime.opencl import OSX_TIMING_RATIO
+from tinygrad.runtime.ops_gpu import CL, OSX_TIMING_RATIO
 
 DEBUGCL = getenv("DEBUGCL", 0)
 FLOAT16 = getenv("FLOAT16", 0)
@@ -75,29 +74,29 @@ class Thneed:
         if o['arg_type'] == "image2d_t":
           if 'buffer_id' in o and o['height'] == 1 and not bufs_loaded[o['buffer_id']]:
             # hack: use a image1d since we can back that with a buffer
-            buf = cl.Image(CL().cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+            buf = cl.Image(CL.cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
           else:
             # buffer isn't supported in image2d, copy buffer into image
             if 'buffer_id' in o and bufs_loaded[o['buffer_id']]:
               arr = np.zeros(bufs[o['buffer_id']].size // 2, dtype=np.float16)
               cl.enqueue_copy(q, arr, bufs[o['buffer_id']])
-              buf = cl.Image(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
+              buf = cl.Image(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
                 shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=arr)
             elif o['needs_load']:
-              buf = cl.Image(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
+              buf = cl.Image(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, tfmt,
                 shape=(o['width'], o['height']), pitches=(o['row_pitch'],), hostbuf=o['data'])
             else:
-              buf = cl.Image(CL().cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'], o['height']))
+              buf = cl.Image(CL.cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'], o['height']))
         if o['arg_type'] == "image1d_t":
           assert not o['needs_load']
           assert not bufs_loaded[o['buffer_id']]
-          buf = cl.Image(CL().cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
+          buf = cl.Image(CL.cl_ctx, mf.READ_WRITE, tfmt, shape=(o['width'],), buffer=bufs[o['buffer_id']])
       else:
         if 'data' in o:
-          buf = cl.Buffer(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=o['data'])
+          buf = cl.Buffer(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=o['data'])
         else:
           # zero out buffers
-          buf = cl.Buffer(CL().cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=b'\x00'*o['size'])
+          buf = cl.Buffer(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=b'\x00'*o['size'])
         
       bufs[o['id']] = buf
       bufs_loaded[o['id']] = 'data' in o
@@ -119,7 +118,7 @@ class Thneed:
     # load binaries
     for o in jdat['binaries']:
       nptr = ptr + o['length']
-      prgs[o['name']] = CLProgram(o['name'], weights[ptr:nptr], rename=False, binary=True)
+      prgs[o['name']] = CLProgram(o['name'], weights[ptr:nptr], binary=True)
       ptr = nptr
   
     # populate the cl_cache
@@ -194,17 +193,17 @@ class Thneed:
               })
               if needs_load:
                 data = np.empty(a.size//4, dtype=np.float32)
-                cl.enqueue_copy(CL().cl_queue, data, a, is_blocking=True)
+                cl.enqueue_copy(CL.cl_queue, data, a, is_blocking=True)
                 weights.append(data.tobytes())
             elif isinstance(a, cl.Image):
               needs_load = a in self.buffers_to_save
               row_pitch = (a.shape[0]*4*(2 if FLOAT16 else 4) + 63)//64 * 64
               size = row_pitch * a.shape[1]
               # this is *2 if float16 and *4 if float32
-              buf = cl.Buffer(CL().cl_ctx, cl.mem_flags.READ_WRITE, size=size * (2 if FLOAT16 else 1))
+              buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size=size * (2 if FLOAT16 else 1))
 
               # zero out the buffer
-              cl.enqueue_copy(CL().cl_queue, buf, b'\x00'*buf.size, is_blocking=True)
+              cl.enqueue_copy(CL.cl_queue, buf, b'\x00'*buf.size, is_blocking=True)
 
               CLProgram("from_image_strided", """
                 __kernel void from_image_strided(read_only image2d_t in, __global float4 *out, int row_pitch) {
@@ -224,7 +223,7 @@ class Thneed:
 
               if needs_load:
                 data = np.empty(size//(2 if FLOAT16 else 4), dtype=np.float32)
-                cl.enqueue_copy(CL().cl_queue, data, buf, is_blocking=True)
+                cl.enqueue_copy(CL.cl_queue, data, buf, is_blocking=True)
                 if FLOAT16: data = data.astype(np.float16)
                 weights.append(data.tobytes())
             else:
@@ -271,9 +270,9 @@ class Thneed:
     events = []
     st = time.monotonic()
     for prg, args in self.cl_cache:
-      events.append(prg.clprg(CL().cl_queue, *args))
+      events.append(prg.clprg(CL.cl_queue, *args))
     mt = time.monotonic()
-    CL().cl_queue.finish()
+    CL.cl_queue.finish()
     et = time.monotonic() - st
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 
@@ -284,7 +283,7 @@ class Thneed:
       total_runtime = 0
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
         runtime = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
-        print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us {(prg.op_estimate)/runtime:9.2f} GFLOPS {prg.options} -> {args[2].shape if hasattr(args[2], 'shape') else args[2].size}")
+        print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us {(getattr(prg, 'op_estimate', float('nan')))/runtime:9.2f} GFLOPS -> {args[2].shape if hasattr(args[2], 'shape') else args[2].size}")
         if (DEBUGCL >= 2 and getenv("PRINT_KERNEL", -1) == i) or DEBUGCL >= 3:
           print(prg.prg)
         total_runtime += runtime
@@ -321,11 +320,11 @@ class Thneed:
         # 3 runs just in case
         for i in range(3):
           try:
-            e = prg.clprg(CL().cl_queue, *args)
+            e = prg.clprg(CL.cl_queue, *args)
           except (cl.LogicError, cl.RuntimeError):
             # INVALID_WORK_GROUP_SIZE
             continue
-          CL().cl_queue.finish()
+          CL.cl_queue.finish()
           runtime = e.profile.end - e.profile.start
           #print(runtime, args[0], args[1])
           runtimes.append((runtime, local_args))

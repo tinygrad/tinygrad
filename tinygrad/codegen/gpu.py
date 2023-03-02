@@ -1,42 +1,35 @@
-from __future__ import annotations
-import numpy as np
 import math
-from typing import List, Tuple, Optional, Dict, Union, Set, Final, Callable
-from tinygrad.helpers import prod, DEBUG, IMAGE
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
-from tinygrad.ast import ASTKernel, Token, Types
-from tinygrad.shape import ShapeTracker
+from collections import defaultdict
+from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op
+from tinygrad.codegen.ast import ASTKernel, ASTRunner, Token, Types
 from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
+from tinygrad.shape import ShapeTracker
+from tinygrad.helpers import getenv, DEBUG, prod
+
 # div is different in cl than python
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
-from tinygrad.helpers import getenv
-
-# TODO: select runtimes in a smarter way
-CUDA,METAL,CLANG = getenv("CUDA", 0), getenv("METAL", 0), getenv("CLANG", 0)
-if not CUDA and not METAL and not CLANG:
-  from tinygrad.runtime.opencl import CLBuffer, CLImage, CLProgram # NOTE: using CL will not work for the CUDA runtime # noqa: F401
-else:
-  class CLImage:  # type: ignore
-    def __init__(self, shape): raise NotImplementedError("current runtime doesn't support images")
-  if CUDA: from tinygrad.runtime.cuda import CLBuffer, CLProgram  # type: ignore
-  elif METAL: from tinygrad.runtime.metal import CLBuffer, CLProgram  # type: ignore
-  elif CLANG: from tinygrad.runtime.clang import CLBuffer, CLProgram  # type: ignore
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
-KOPT = getenv("KOPT", -1)
-PRINT_AST = getenv("PRINT_AST", "0")
-TEST_AST = getenv("TEST_AST", 0)
+class GPULanguage(NamedTuple):
+  kernel_prefix : str = ""
+  buffer_prefix : str = ""
+  smem_prefix : str = ""
+  barrier : str = ""
+  gid : List[str] = []
+  lid : List[str] = []
+  extra_args : List[str] = []
+  float4 : Optional[str] = None
 
-class GPURunner:
-  def __init__(self, clprg:CLProgram, bufs_to_delete:Set[int], global_work_size:List[int], local_work_size:Optional[List[int]]):
-    self.clprg, self.global_work_size, self.local_work_size, self.bufs_to_delete = clprg, global_work_size, local_work_size, bufs_to_delete
-  def __call__(self, *bufs):
-    return self.clprg(self.global_work_size, self.local_work_size, *[x.cl for i,x in enumerate(bufs) if i not in self.bufs_to_delete])
+class GPUCodegen(ASTKernel):
+  lang : GPULanguage = GPULanguage()
 
-class CLASTKernel(ASTKernel):
+  # for renaming
+  kernel_cnt : Final[Dict[str, int]] = defaultdict(lambda: -1)
+
   code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "((float)1.0-A)",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
@@ -58,7 +51,7 @@ class CLASTKernel(ASTKernel):
     assert len(self.bufs[buf_index].st.views) == 1, "store has more than one view"
 
     # all stores can merge, since they have one view and are valid
-    should_upcast = not CLANG and self.buftokens[buf_index].can_float4()
+    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4()
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()
@@ -68,14 +61,14 @@ class CLASTKernel(ASTKernel):
       assert valid.min == 1, "store must always be valid"
       if should_upcast:
         for j in range(4): did_store.add(o+j)
-        v = Token(f"{CLProgram.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
       idxy, valid = self.sts[buf_index].expr_idxs(o)
       assert valid.min == 1, "store must always be valid"
-      if isinstance(self.bufs[buf_index]._buf, CLImage):
+      if hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
-        self.kernel.append(f"(({CLProgram.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"(({self.lang.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
         self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
 
@@ -87,7 +80,7 @@ class CLASTKernel(ASTKernel):
       val = self.bufs[buf_index]._backing[0]
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
-    should_upcast = not CLANG and const is None and self.buftokens[buf_index].can_float4()
+    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4()
     tokens = []
     for o in self.buftokens[buf_index].offsets():
       key = f"val{buf_index}_{o}" if o >= 0 else f"val{buf_index}_m{-o}"
@@ -102,14 +95,14 @@ class CLASTKernel(ASTKernel):
             #print((idxy+j).render(), idxy_test.render(), valid.render(), valid_test.render(), can_merge)
         if const is not None:
           ldr = const
-        elif isinstance(self.bufs[buf_index]._buf, CLImage):
+        elif hasattr(self.bufs[buf_index]._buf, "IMAGE"):
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         elif should_upcast and can_merge:
-          ldr = Token(f"(({CLProgram.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
+          ldr = Token(f"(({self.lang.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
-        ldr = ldr if valid.min == 1 or (VALIDHACKS and isinstance(self.bufs[buf_index]._buf, CLImage)) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
+        ldr = ldr if valid.min == 1 or (VALIDHACKS and hasattr(self.bufs[buf_index]._buf, "IMAGE")) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : 0.0f)", ldr.typ) if valid.max == 1 else Token("0.0f", ldr.typ))
         if const is not None:
           self.loaded_keys[(buf_index,o)] = ldr
         else:
@@ -122,11 +115,11 @@ class CLASTKernel(ASTKernel):
       tokens.append(self.loaded_keys[(buf_index,o)])
     return tokens
 
-  def ast_parse(self, x:Union[GPUBuffer, LazyOp], acc:List[Token], do_reduce=False) -> List[Token]:
+  def ast_parse(self, x, acc:List[Token], do_reduce=False) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values : List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
-    code = CLASTKernel.code_for_op[x.op]  # TODO: replace this with a function
+    code = GPUCodegen.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 2:
       assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
@@ -136,10 +129,10 @@ class CLASTKernel(ASTKernel):
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     # shove the axis to the end and remove 
-    if any(isinstance(buf._buf, CLImage) for buf in self.earlybufs):
+    if any(hasattr(buf._buf, "IMAGE") for buf in self.earlybufs):
       eb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
-        if isinstance(self.bufs[i]._buf, CLImage) and self.bufs[i] in self.earlybufs:
+        if hasattr(self.bufs[i]._buf, "IMAGE") and self.bufs[i] in self.earlybufs:
           valids = [self.sts[i].shape[j]%4 == 0 and self.sts[i].views[-1].strides[j] == 1 for j in range(self.shape_len)]
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
@@ -158,18 +151,18 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # are we grouping?
-    if not CLANG and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if self.lang.float4 and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      for sz in ((([1024] if METAL else []) + [256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+      for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
           self.group_for_reduce.append(sz)
           break
 
     # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    if any(isinstance(buf._buf, CLImage) for buf in self.bufs if buf not in self.earlybufs) and not self.buftokens[0].can_float4():
+    if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf not in self.earlybufs) and not self.buftokens[0].can_float4():
       lb_valids = [True] * self.shape_len
       for i in range(len(self.bufs)):
-        valids = [self.sts[i].shape[j]%4 == 0 and (self.sts[i].views[-1].strides[j] == 1 or not isinstance(self.bufs[i]._buf, CLImage) or self.bufs[i] in self.earlybufs) for j in range(self.shape_len)]
+        valids = [self.sts[i].shape[j]%4 == 0 and (self.sts[i].views[-1].strides[j] == 1 or not hasattr(self.bufs[i]._buf, "IMAGE") or self.bufs[i] in self.earlybufs) for j in range(self.shape_len)]
         lb_valids = [x and y for x,y in zip(lb_valids, valids)]
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
@@ -192,7 +185,7 @@ class CLASTKernel(ASTKernel):
     self.simplify_ones()
 
     # split to 4 float4s
-    if self.buftokens[0].can_float4() and any(isinstance(buf._buf, CLImage) for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
+    if self.buftokens[0].can_float4() and any(hasattr(buf._buf, "IMAGE") for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
         if all(st.shape[i]%4 == 0 for st in self.sts):
@@ -214,7 +207,7 @@ class CLASTKernel(ASTKernel):
         self.simplify_ones()
 
     # use more opencl indexing
-    if self.first_reduce == 2 and isinstance(self.bufs[0]._buf, CLImage):
+    if self.first_reduce == 2 and hasattr(self.bufs[0]._buf, "IMAGE"):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
         if DEBUG >= 3: print("split opencl", base_shape, self.sts[0].shape)
@@ -237,11 +230,11 @@ class CLASTKernel(ASTKernel):
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
-  def codegen(self) -> Callable:
+  def codegen(self) -> ASTRunner:
     self.process()
     self.upcast_in_mid_reduce = False
     if DEBUG >= 3: self.printbufs("old:", DEBUG>=4)
-    if KOPT == -1 or IMAGE == 2: self.hand_coded_optimizations()
+    self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -257,18 +250,17 @@ class CLASTKernel(ASTKernel):
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
 
     self.prekernel : Set[str] = set()
-    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(isinstance(buf._buf, CLImage) for buf in self.bufs) else []
+    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
-    if CLANG:
+    if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
     else:
-      MAX_OUTPUT_SHAPE = 3
-      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {CLProgram.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(MAX_OUTPUT_SHAPE, len(self.output_shape))) if self.output_shape[-1-i] != 1]
-      if len(self.output_shape) > MAX_OUTPUT_SHAPE:
+      self.kernel += [f"int idx{len(self.output_shape)-1-i} = {self.lang.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(len(self.lang.gid), len(self.output_shape))) if self.output_shape[-1-i] != 1]
+      if len(self.output_shape) > len(self.lang.gid):
         # sometimes, there's more dimensions. compact all the dimensions into the first one
         # TODO: these compactions should be searchable
-        final_dimension = len(self.output_shape)-MAX_OUTPUT_SHAPE
+        final_dimension = len(self.output_shape)-len(self.lang.gid)
         for i in range(final_dimension-1, -1, -1):
           self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
         self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
@@ -282,7 +274,7 @@ class CLASTKernel(ASTKernel):
 
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       assert self.reduceopop is not None
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {CLASTKernel.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
@@ -292,9 +284,9 @@ class CLASTKernel(ASTKernel):
       assert lvalid.min == 1, "local buffer must always be valid"
       self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
       for i,acc in enumerate(accumulators):
-        self.kernel.append(CLProgram.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
+        self.kernel.append(self.lang.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
-      self.kernel.append(CLProgram.barrier+"\n")
+      self.kernel.append(self.lang.barrier+"\n")
 
       if self.upcast_in_mid_reduce:
         assert len(self.group_for_reduce) == 2
@@ -311,86 +303,31 @@ class CLASTKernel(ASTKernel):
         if self.upcast_in_mid_reduce:
           self.kernel.append(f'float4 ld = vload4(0, &temp{i}[mid*4]);\n')
           for j in range(4):
-            self.kernel.append(CLASTKernel.code_for_op[self.reduceopop].replace('A', new_accumulators[i*4+j].tok).replace('B', f'ld.{"xyzw"[j]}')+";\n")
+            self.kernel.append(GPUCodegen.code_for_op[self.reduceopop].replace('A', new_accumulators[i*4+j].tok).replace('B', f'ld.{"xyzw"[j]}')+";\n")
         else:
-          self.kernel.append(CLASTKernel.code_for_op[self.reduceopop].replace('A', new_accumulators[i].tok).replace('B', f'temp{i}[mid]')+";\n")
+          self.kernel.append(GPUCodegen.code_for_op[self.reduceopop].replace('A', new_accumulators[i].tok).replace('B', f'temp{i}[mid]')+";\n")
       self.kernel.append("}\n")
       accumulators = new_accumulators
     
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
-    if CLANG: self.kernel += ["}"] * len(self.output_shape)
+    if len(self.lang.gid) == 0: self.kernel += ["}"] * len(self.output_shape)
     self.kernel.append("\n}")
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if isinstance(x._buf, CLImage) else (CLProgram.buffer_prefix+self.buftokens[i].decltype() + ("restrict" if CLANG else "")) for i,x in enumerate(self.bufs)]
-    self.kernel = list(self.prekernel) + [f"{CLProgram.kernel_prefix} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + CLProgram.extra_args)] + \
+    GPUCodegen.kernel_cnt[function_name] += 1
+    if GPUCodegen.kernel_cnt[function_name]:
+      function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
+
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
+    self.kernel = list(self.prekernel) + [f"{self.lang.kernel_prefix} void {function_name}(",] + \
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] + \
       [") {\n"] + self.kernel
 
-    # compile kernel
-    self.fxn = CLProgram(function_name, ' '.join(self.kernel), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    return GPURunner(self.fxn, self.bufs_to_delete, self.output_shape[::-1] if len(self.output_shape) > 0 else [1], (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None)
-
-  def print(self):
-    super().print()
-    for i in range(len(self.bufs)):
-      print(self.buftokens[i], self.bufs[i] in self.earlybufs, self.sts[i])
-    print(self.fxn.prg)
-
-class GPUBuffer(ExplicitExecAST):
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[GPUBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
-    super().__init__(shape, hostbuf)
-    self._buf : Optional[Union[CLImage, CLBuffer]] = hostbuf._buf if hostbuf is not None else None
-    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
-    # early copy in for large buffers
-    if (self._backing is not None and self._backing.shape != (1,)) or force_create:
-      self.cl
-  
-  # TODO: refactor this to return self._buf and not import pyopencl
-  @property
-  def cl(self) -> Union[CLBuffer, CLImage]:
-    if self._buf is None:
-      self._buf = CLImage(self._base_shape) if (len(self._base_shape) == 3 and self._base_shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(self._base_shape))
-    assert self._buf is not None
-    if self._backing is not None:
-      assert GlobalCounters.cache is None, f"can't copy in {self._backing.shape} while caching"
-      self._buf.copyin(self._backing)
-      self._backing = None
-    return self._buf._cl
-
-  # TODO: we don't always need a hostbuf
-  def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
-
-  @staticmethod
-  def fromCPU(x): return GPUBuffer(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
-
-  def toCPU(self) -> np.ndarray:
-    cl_buf = self.contiguous()
-    cl_buf.cl   # force buffer creation, happens if it's a backed buffer that hasn't been created yet
-    cl_buf = cl_buf if isinstance(cl_buf._buf, CLBuffer) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self.movement_op(MovementOps.RESHAPE, tuple(list(self.shape)+[1])), )))
-    assert prod(cl_buf._base_shape) == prod(self.shape), f"shape product mismatch {cl_buf._base_shape} vs {self.shape}"
-    data = np.empty(self.shape, dtype=np.float32)
-    assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
-    cl_buf._buf.copyout(data)
-    return data
-
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[GPUBuffer]=None):
-    k = CLASTKernel(ast, output_buffer)
-    if KOPT > 0:
-      from extra.kernel_search import apply_optimization
-      apply_optimization(k, ast, max_interventions=KOPT)
-    prg = k.codegen()
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
-    prg(*k.bufs)
-    if PRINT_AST == "1" or (hasattr(k, "fxn") and PRINT_AST == k.fxn.name):
-      print(k.fxn.name)
-      k.print()
-    if TEST_AST:
-      from extra.lib_test_ast import test_ast  # type: ignore
-      test_ast(k)
-    return k.ret
+    return ASTRunner(function_name, ' '.join(self.kernel), self.bufs_to_delete,
+      self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
+      (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
+      op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))

@@ -1,8 +1,8 @@
 import sys
 import numpy as np
 from typing import Dict, Type
-from tinygrad.ast import ASTKernel
-from tinygrad.llops.ops_cpu import CPUBuffer
+from tinygrad.compiler.ast import ASTKernel
+from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.ops import DeviceBuffer, map_buffers
 
 in_test = False

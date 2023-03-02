@@ -1,19 +1,12 @@
-from __future__ import annotations
-import math
-import functools
-from typing import Tuple, Union, Dict, Any, List, ClassVar, Optional
-from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape import ShapeTracker
-from tinygrad.ops import LazyOp
-from tinygrad.ast import ASTKernel
-import ctypes
-import numpy as np
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, ExplicitExecAST
-from tinygrad.runtime.llvm import LLVM, ir
+import functools, math
+from typing import ClassVar, List
+from llvmlite import ir  # type: ignore
+from tinygrad.codegen.ast import ASTKernel, ASTRunner
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp
+from tinygrad.helpers import DEBUG, prod
+
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
-
 def int_const(x): return ir.Constant(ir.IntType(64), x)
-
 render_llvm = {
   Variable: lambda self,ops,ctx: self.expr,
   NumNode: lambda self,ops,ctx: int_const(self.b),
@@ -26,7 +19,7 @@ render_llvm = {
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.and_(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx))
 }
 
-class LLVMBuffer(ExplicitExecAST):
+class LLVMCodegen(ASTKernel):
   op_lookup : ClassVar = {
     UnaryOps.NOOP: lambda builder,x: x,
     UnaryOps.NEG: lambda builder,x: builder.fneg(x, flags=('fast',)),
@@ -46,41 +39,10 @@ class LLVMBuffer(ExplicitExecAST):
     ReduceOps.MAX: ir.Constant(ir.FloatType(), -math.inf)
   }
 
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf=None, force_create=False):
-    super().__init__(shape, hostbuf)
-    # TODO: force alignment?
-    self._buf = (ctypes.c_float * (prod(self.shape)))() if hostbuf is None else hostbuf._buf
-    #assert ctypes.addressof(self._buf) & 0x1F == 0
+  def codegen(self):
+    self.process()
+    if DEBUG >= 3: self.printbufs("old:", DEBUG>=4)
 
-  def __repr__(self): return f"LLVMBuffer {str(self.st)}"
-
-  @staticmethod
-  def fromCPU(x):
-    x = x.astype(np.float32)
-    ret = LLVMBuffer(x.shape)
-    ctypes.memmove(ret._buf, x.ctypes.data, prod(ret.shape)*4)
-    return ret
-  
-  def toCPU(x): return np.ctypeslib.as_array(x.contiguous()._buf)[:prod(x.shape)].reshape(x.shape).copy()
-
-  func_cache : Dict[str, Any] = {}
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[LLVMBuffer]=None) -> LLVMBuffer:
-    k = ASTKernel(ast, output_buffer)
-
-    # cached kernel
-    if k.key in LLVMBuffer.func_cache:
-      LLVMBuffer.func_cache[k.key](*[x._buf for x in k.bufs])
-      return k.ret
-
-    # process if uncached
-    k.process()
-
-    if DEBUG >= 2:
-      print(k.ast)
-      print("old:", [x.shape for x in k.sts])
-      print("old:", [x.views[-1].strides for x in k.sts])
-    
     # this stuff can't be hand coded
     kernel_output_axis : List[int] = []
     """
@@ -119,12 +81,12 @@ class LLVMBuffer(ExplicitExecAST):
     """
 
     # the 4x4 need to go all the way at the end, even after reduce
-    output_shape = k.sts[0].shape
-    full_shape_options = [x.shape for x in k.sts if x.shape != output_shape]
+    output_shape = self.sts[0].shape
+    full_shape_options = [x.shape for x in self.sts if x.shape != output_shape]
     full_shape = output_shape if len(full_shape_options) == 0 else full_shape_options[0]
 
     full_shape = full_shape if not kernel_output_axis else full_shape[:-len(kernel_output_axis)]
-    kernel_output_dim = prod([k.sts[0].shape[a] for a in kernel_output_axis])
+    kernel_output_dim = prod([self.sts[0].shape[a] for a in kernel_output_axis])
     kernel_output_type = ir.FloatType() if kernel_output_dim == 1 else ir.VectorType(ir.FloatType(), kernel_output_dim)
 
     def get_idxs(builder, idx, buf_index):
@@ -143,7 +105,7 @@ class LLVMBuffer(ExplicitExecAST):
 
     # create llvm function
     module = ir.Module(name=__file__)
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(len(k.bufs))), name='exec')
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(len(self.bufs))), name='exec')
 
     # force llvmlite to allow us to add function attribute then add the attribute
     func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
@@ -158,13 +120,13 @@ class LLVMBuffer(ExplicitExecAST):
     loop_exit = loop_exit[::-1]
 
     # add the buffer indexing
-    idx_level = [[int_const(st.offset)] for st in k.sts]
+    idx_level = [[int_const(st.offset)] for st in self.sts]
     for i in range(len(full_shape)):
-      for j in range(len(k.bufs)):
+      for j in range(len(self.bufs)):
         # stride
         si = loop_entry[i+1].phi(ir.IntType(64), name=f"idx_{j}_{i}")
         si.add_incoming(idx_level[j][-1], loop_entry[i]._block)
-        si_ps = loop_exit[i+1].add(si, int_const(k.sts[j].views[-1].strides[i]))
+        si_ps = loop_exit[i+1].add(si, int_const(self.sts[j].views[-1].strides[i]))
         si.add_incoming(si_ps, loop_exit[i+1]._block)
         idx_level[j].append(si)
 
@@ -172,7 +134,7 @@ class LLVMBuffer(ExplicitExecAST):
     def ast_parse(builder, x, level, reduce_result=None):
       if not isinstance(x, LazyOp):
         m = kernel_output_type(ir.Undefined)
-        buf_index = k.bufs.index(x)
+        buf_index = self.bufs.index(x)
         for i, idx in enumerate(get_idxs(builder, idx_level[buf_index][level], buf_index)):
           # first view is already implictly handled
           idx, valid = x.st._expr_idx(Variable(idx, 0, prod(x.st.shape)))
@@ -195,12 +157,12 @@ class LLVMBuffer(ExplicitExecAST):
 
       m = kernel_output_type(ir.Undefined)
       if kernel_output_dim == 1:
-        return LLVMBuffer.op_lookup[x.op](builder, *values)
+        return LLVMCodegen.op_lookup[x.op](builder, *values)
       else:
         # TODO: this only has to be done for certain ops
         for i in range(kernel_output_dim):
           value = [builder.extract_element(v, int_const(i)) for v in values]
-          element = LLVMBuffer.op_lookup[x.op](builder, *value)
+          element = LLVMCodegen.op_lookup[x.op](builder, *value)
           m = builder.insert_element(m, element, int_const(i))
         return m
 
@@ -209,9 +171,9 @@ class LLVMBuffer(ExplicitExecAST):
 
     # do the early ast
     reduce_result = None
-    if k.reduceop:
-      reduce_input = ast_parse(loop_exit[-1], k.reduceop.src[0], -1)
-      phis = [LLVMBuffer.start_for_op[k.reduceop.op]]  # type: ignore
+    if self.reduceop:
+      reduce_input = ast_parse(loop_exit[-1], self.reduceop.src[0], -1)
+      phis = [LLVMCodegen.start_for_op[self.reduceop.op]]  # type: ignore
       if kernel_output_dim > 1:
         phis = [kernel_output_type(phis * kernel_output_dim)]
       for i in range(store_loop+1, len(loop_entry)):
@@ -219,16 +181,16 @@ class LLVMBuffer(ExplicitExecAST):
         val.add_incoming(phis[-1], loop_entry[i-1]._block)
         phis.append(val)
 
-      if k.reduceop.op == ReduceOps.SUM:
+      if self.reduceop.op == ReduceOps.SUM:
         reduce_result = loop_exit[-1].fadd(reduce_input, val, flags=('fast',))
-      elif k.reduceop.op == ReduceOps.MAX:
+      elif self.reduceop.op == ReduceOps.MAX:
         reduce_result = loop_exit[-1].select(loop_exit[-1].fcmp_unordered(">", val, reduce_input, flags=('fast',)), val, reduce_input, flags=('fast',))
 
       for i,phi in enumerate(phis[1:]):
         phi.add_incoming(reduce_result, loop_exit[store_loop+1+i]._block)
 
     # do the late ast
-    result = ast_parse(loop_exit[store_loop], k.ast, store_loop, reduce_result=reduce_result)
+    result = ast_parse(loop_exit[store_loop], self.ast, store_loop, reduce_result=reduce_result)
 
     # store result
     builder = loop_exit[store_loop]
@@ -247,5 +209,5 @@ class LLVMBuffer(ExplicitExecAST):
 
     loop_entry[-1].branch(loop_exit[-1]._block)
     loop_exit[0].ret_void()
-    LLVMBuffer.func_cache[k.key] = LLVM().exec(module, k.bufs, k.info.flops, sum(len(x._buf) for x in k.bufs))
-    return k.ret
+
+    return ASTRunner('exec', str(module), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))

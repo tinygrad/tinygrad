@@ -1,13 +1,12 @@
+import time, hashlib, ctypes
 from typing import ClassVar
+from tinygrad.ops import CompiledBuffer
+from tinygrad.runtime.ops_clang import RawMallocBuffer
 from tinygrad.helpers import getenv, DEBUG
-from tinygrad.ops import GlobalCounters
-import hashlib
-import time
-import ctypes
 from ctypes import CFUNCTYPE
+from tinygrad.codegen.llvm import LLVMCodegen
 
 import llvmlite.binding as llvm  # type: ignore
-from llvmlite import ir  # type: ignore
 
 class LLVM:
   target_machine : ClassVar[llvm.targets.TargetMachine] = None
@@ -15,8 +14,7 @@ class LLVM:
   optimizer : ClassVar[llvm.passmanagers.ModulePassManager] = None
 
   def __init__(self):
-    if LLVM.engine is not None:
-      return
+    if LLVM.engine is not None: return
     llvm.initialize()
     llvm.initialize_native_target()
     llvm.initialize_native_asmprinter()
@@ -46,42 +44,26 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-  # TODO: LLVMProgram
-  def exec(self, module:ir.Module, bufs, op_estimate=0, mem_estimate=0):
-    module.triple = llvm.get_process_triple()
-    module.data_layout = self.engine.target_data
-    llvm_ir = str(module)
-
-    if DEBUG >= 2:
-      print(llvm_ir)
-
-    mod = llvm.parse_assembly(llvm_ir)
-    mod.verify()
-    LLVM.optimizer.run(mod)
-    if DEBUG >= 4:
-      print("Optimized IR:")
-      print(str(mod))
-    mod.name = hashlib.sha1(llvm_ir.encode('utf-8')).hexdigest()
-    if DEBUG >= 3:
-      print(LLVM.target_machine.emit_assembly(mod))
-    LLVM.engine.add_module(mod)
+class LLVMProgram:
+  def __init__(self, name:str, prg:str, binary=False):
+    self.mod = llvm.parse_assembly(prg)
+    self.mod.verify()
+    LLVM().optimizer.run(self.mod)
+    self.mod.name = hashlib.sha1(prg.encode('utf-8')).hexdigest()
+    if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(self.mod))
+    LLVM.engine.add_module(self.mod)
     LLVM.engine.finalize_object()
+    self.fxn = LLVM.engine.get_function_address(name)
 
-    # call function (NOTE: if the types don't match, there's likely something wrong with the cache)
-    #cfunc = CFUNCTYPE(ctypes.c_int, *[type(x._buf) for x in bufs])(LLVM.engine.get_function_address('exec'))
+  def __del__(self): LLVM.engine.remove_module(self.mod)
 
-    # why is this needed without the types. fixed tests below
-    # LLVM=1 OPT=2 python3 test/test_ops.py TestOps.test_cat TestOps.test_multicat
-    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for x in bufs])(LLVM.engine.get_function_address('exec'))
-
-    st = time.monotonic()
+  def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
+    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(self.fxn)
+    if wait: st = time.monotonic()
     cfunc(*[x._buf for x in bufs])
-    et = time.monotonic() - st
-    if DEBUG >= 1:
-      print(f"**LLVM** time {et*1000:7.2f} ms  OPs {op_estimate/1e6:7.2f}M -- {(op_estimate/1e9)/et:5.2f} GFLOPS -- {mem_estimate:10d} reads -- {(mem_estimate*4/1e9)/et:5.2f} GB/s")
-    GlobalCounters.global_ops += op_estimate
-    GlobalCounters.global_mem += mem_estimate
+    if wait: return time.monotonic()-st
 
-    # we are done
-    LLVM.engine.remove_module(mod)
-    return cfunc
+class LLVMBuffer(CompiledBuffer):
+  raw_buffer_type = RawMallocBuffer
+  codegen_type = LLVMCodegen
+  runtime_type = LLVMProgram
