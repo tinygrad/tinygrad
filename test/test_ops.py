@@ -59,33 +59,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
-  
-  def test_eq(self):
-    helper_test_op([(3, 4, 5)], lambda x: x==2, lambda x: x.eq(2), forward_only=True)
-    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
-      helper_test_op(x, torch.eq, lambda x,y: x.eq(y), forward_only=True)
-  def test_gt(self):
-    helper_test_op([(3, 4, 5)], lambda x: x>2, lambda x: x>2, forward_only=True)
-    helper_test_op([(3, 4, 5)], lambda x: 2>x, lambda x: 2>x, forward_only=True)
-    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
-      helper_test_op(x, torch.gt, lambda x,y: x>y, forward_only=True)
-  def test_gte(self):
-    helper_test_op([(3, 4, 5)], lambda x: x>=2, lambda x: x>=2, forward_only=True)
-    helper_test_op([(3, 4, 5)], lambda x: 2>=x, lambda x: 2>=x, forward_only=True)
-    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
-      helper_test_op(x, torch.ge, lambda x,y: x>=y, forward_only=True)
-  def test_lt(self):
-    helper_test_op([(3, 4, 5)], lambda x: x<2, lambda x: x<2, forward_only=True)
-    helper_test_op([(3, 4, 5)], lambda x: 2<x, lambda x: 2<x, forward_only=True)
-    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
-      helper_test_op(x, torch.lt, lambda x,y: x<y, forward_only=True)
-  def test_lte(self):
-    helper_test_op([(3, 4, 5)], lambda x: x<=2, lambda x: x<=2, forward_only=True)
-    helper_test_op([(3, 4, 5)], lambda x: 2<=x, lambda x: 2<=x, forward_only=True)
-    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]: 
-      helper_test_op(x, torch.le, lambda x,y: x<=y, forward_only=True)
 
-  def test_eq_backwards(self):
+  def _test_cmp(self, fxn, reverse=True):
+    for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
+      helper_test_op(shps, fxn, fxn, forward_only=True)
+    helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0.,1,2], [2.,1,0]])
+    helper_test_op(None, lambda x,y: fxn(x,2), lambda x,y: fxn(x,2), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
+    if reverse: helper_test_op(None, lambda x,y: fxn(2,y), lambda x,y: fxn(2,y), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
+  
+  def test_cmp_eq(self): self._test_cmp(lambda x,y: x.eq(y), reverse=False)
+  def test_cmp_gt(self): self._test_cmp(lambda x,y: x>y)
+  def test_cmp_gte(self): self._test_cmp(lambda x,y: x>=y)
+  def test_cmp_lt(self): self._test_cmp(lambda x,y: x<y)
+  def test_cmp_lte(self): self._test_cmp(lambda x,y: x<=y)
+
+  def test_cmp_eq_backwards(self):
     t1 = torch.ones(4, requires_grad=True)
     t2 = torch.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (t1 == t2).sum().backward)
@@ -93,14 +81,13 @@ class TestOps(unittest.TestCase):
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1.eq(tt2)).sum().backward)
 
-  def test_lt_backwards(self):
+  def test_cmp_lt_backwards(self):
     t1 = torch.ones(4, requires_grad=True)
     t2 = torch.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (t1 < t2).sum().backward)
     tt1 = Tensor.ones(4, requires_grad=True)
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
-
 
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
