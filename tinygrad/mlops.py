@@ -55,14 +55,10 @@ class CompareLess(Function):
   def forward(self, x, y):
     self.ret = x.binary_op(BinaryOps.CMPLT, y)
     return self.ret
-
-  def backward(self): raise RuntimeError("no grad function")
   
 class CompareEqual(Function):
   def forward(self, x, y):
     return x.binary_op(BinaryOps.CMPEQ, y)
-
-  def backward(self): raise RuntimeError("no grad function")
   
 class Maximum(Function):
   def forward(self, x, y):

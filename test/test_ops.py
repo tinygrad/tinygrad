@@ -61,15 +61,37 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
   
   def test_eq(self):
-    helper_test_op([(45,65), (45,65)], torch.eq, lambda x,y: x.eq(y), forward_only=True)
+    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
+      helper_test_op(x, torch.eq, lambda x,y: x.eq(y), forward_only=True)
   def test_gt(self):
-    helper_test_op([(45,65), (45,65)], torch.gt, lambda x,y: x>y, forward_only=True)
+    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
+      helper_test_op(x, torch.gt, lambda x,y: x>y, forward_only=True)
   def test_gte(self):
-    helper_test_op([(45,65), (45,65)], torch.ge, lambda x,y: x>=y, forward_only=True)
+    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
+      helper_test_op(x, torch.ge, lambda x,y: x>=y, forward_only=True)
   def test_lt(self):
-    helper_test_op([(45,65), (45,65)], torch.lt, lambda x,y: x<y, forward_only=True)
+    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
+      helper_test_op(x, torch.lt, lambda x,y: x<y, forward_only=True)
   def test_lte(self):
-    helper_test_op([(45,65), (45,65)], torch.le, lambda x,y: x<=y, forward_only=True)
+    for x in [[(3,4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]: 
+      helper_test_op(x, torch.le, lambda x,y: x<=y, forward_only=True)
+
+  def test_eq_backwards(self):
+    t1 = torch.ones(4, requires_grad=True)
+    t2 = torch.ones(4, requires_grad=True)
+    self.assertRaises(RuntimeError, (t1 == t2).sum().backward)
+    tt1 = Tensor.ones(4, requires_grad=True)
+    tt2 = Tensor.ones(4, requires_grad=True)
+    self.assertRaises(RuntimeError, (tt1.eq(tt2)).sum().backward)
+
+  def test_lt_backwards(self):
+    t1 = torch.ones(4, requires_grad=True)
+    t2 = torch.ones(4, requires_grad=True)
+    self.assertRaises(RuntimeError, (t1 < t2).sum().backward)
+    tt1 = Tensor.ones(4, requires_grad=True)
+    tt2 = Tensor.ones(4, requires_grad=True)
+    self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
+
 
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
