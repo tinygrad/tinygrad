@@ -105,13 +105,13 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def fill_shape(*shape, fill=0, **kwargs): return Tensor([fill], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
+  def full(*shape, fill=0, **kwargs): return Tensor([fill], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor.fill_shape(*shape)
+  def zeros(*shape, **kwargs): return Tensor.full(*shape)
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor.fill_shape(*shape, fill=1)
+  def ones(*shape, **kwargs): return Tensor.full(*shape, fill=1)
 
   @staticmethod
   def zeros_like(tensor, **kwargs): return Tensor.zeros(*tensor.shape, **kwargs)
