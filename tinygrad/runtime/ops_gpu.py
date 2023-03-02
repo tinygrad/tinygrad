@@ -57,8 +57,8 @@ class CLImage(RawBuffer):
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
 
 class CLProgram:
-  def __init__(self, name:str, prg:str, binary=False):
-    self.clprogram = cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
+  def __init__(self, name:str, prg:str, binary=False, argdtypes=None):
+    self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
     try:
       self._clprg = self.clprogram.build()
     except cl.RuntimeError as e:
@@ -66,9 +66,10 @@ class CLProgram:
       raise e
     self.clprg = self._clprg.__getattr__(name)
     if DEBUG >= 5 and not OSX: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))  # print the PTX for NVIDIA. TODO: probably broken for everything else
+    if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._cl for x in bufs])
+    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._cl if isinstance(x, (CLBuffer, CLImage)) else x for x in bufs])
     if wait:
       CL.cl_queue.finish()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9

@@ -30,7 +30,7 @@ class GPUCodegen(ASTKernel):
     super().__init__(ast, output_buffer)
 
   # for renaming
-  kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
+  kernel_cnt : Final[Dict[str, int]] = defaultdict(lambda: -1)
 
   code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "((float)1.0-A)",
@@ -319,9 +319,9 @@ class GPUCodegen(ASTKernel):
 
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
+    GPUCodegen.kernel_cnt[function_name] += 1
     if GPUCodegen.kernel_cnt[function_name]:
       function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
-    GPUCodegen.kernel_cnt[function_name] += 1
 
     buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"{self.lang.kernel_prefix} void {function_name}(",] + \

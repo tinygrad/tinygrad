@@ -19,7 +19,8 @@ import numpy as np
 import tinygrad.graph as graph
 from tinygrad.ops import GlobalCounters
 
-from tinygrad.runtime.opencl import CL
+import pyopencl as cl
+from tinygrad.runtime.ops_gpu import CL
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
@@ -64,13 +65,14 @@ def compile(dat, output_fn):
   cl_cache = []
   for prg,args in model_exec.jit_cache:
     real_clprg = prg.clprg
+    setattr(real_clprg, "op_estimate", prg.op_estimate)
     used_ops += real_clprg.op_estimate
     # replace clprg with a fake program to log to cl_cache
-    prg.clprg = lambda *args: cl_cache.append((real_clprg, args))
+    prg.clprg = lambda *args, wait=False: cl_cache.append((real_clprg, list(args[0:2])+[x._cl for x in args[2:]]))
     prg(*args)
 
   from extra.thneed import Thneed
-  t = Thneed(cl_cache, {k:inputs[k].lazydata.realized.cl for k in inputs.keys()})
+  t = Thneed(cl_cache, {k:inputs[k].lazydata.realized.raw()._cl for k in inputs.keys()})
 
   if getenv("OPTWG", 0):
     t.optimize_local_workgroup()
@@ -84,7 +86,7 @@ def compile(dat, output_fn):
 
   # confirm thneed found the right output
   thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
-  CL.enqueue_copy(thneed_out, t.outputs[0], is_blocking=True)
+  cl.enqueue_copy(CL.cl_queue, thneed_out, t.outputs[0], is_blocking=True)
   np.testing.assert_allclose(thneed_out, tinygrad_out.numpy())
 
   # testing is float32 only (fix this)
@@ -102,11 +104,11 @@ def compile(dat, output_fn):
 
       # try old thneed with a different input
       for k,v in t.inputs.items():
-        CL.enqueue_copy(v, new_np_inputs[k], is_blocking=True)
+        cl.enqueue_copy(CL.cl_queue, v, new_np_inputs[k], is_blocking=True)
 
       t.run()
       old_thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
-      CL.enqueue_copy(old_thneed_out, t.outputs[0], is_blocking=True)
+      cl.enqueue_copy(CL.cl_queue, old_thneed_out, t.outputs[0], is_blocking=True)
 
       # compare thneed (rerun) with torch
       np.testing.assert_allclose(new_torch_out, old_thneed_out, atol=1e-4, rtol=1e-2)
@@ -119,11 +121,11 @@ def compile(dat, output_fn):
 
       # inputs
       for k,v in nt.inputs.items():
-        CL.enqueue_copy(v, new_np_inputs[k], is_blocking=True)
+        cl.enqueue_copy(CL.cl_queue, v, new_np_inputs[k], is_blocking=True)
 
       nt.run()
       new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
-      CL.enqueue_copy(new_thneed_out, nt.outputs[0], is_blocking=True)
+      cl.enqueue_copy(CL.cl_queue, new_thneed_out, nt.outputs[0], is_blocking=True)
 
       # compare torch to thneed
       np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
