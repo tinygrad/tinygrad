@@ -3,14 +3,14 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile # type: ignore
 import numpy as np
-from tinygrad.helpers import DEBUG, prod
-from tinygrad.ops import CompiledBuffer, RawBuffer
+from tinygrad.helpers import DEBUG
+from tinygrad.ops import CompiledBuffer, RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
-class RawCUDABuffer(RawBuffer):
-  def __init__(self, size): self._cl = cuda.mem_alloc(size)
-  def copyin(self, b:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, b, stream)
-  def copyout(self, a:np.ndarray): cuda.memcpy_dtoh(a, self._cl)
+class RawCUDABuffer(RawBufferCopyInOut):
+  def __init__(self, size): self.size, self._cl = size, cuda.mem_alloc(size)
+  def copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
+  def copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -32,8 +32,7 @@ cuda_lang = GPULanguage(
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
 class CUDABuffer(CompiledBuffer):
-  @staticmethod
-  def create_raw_buffer(shape) -> RawBuffer: return RawCUDABuffer(4*prod(shape))
+  raw_buffer_type = RawCUDABuffer
   @staticmethod
   def compile(ast, output_buffer):
     k = GPUCodegen(ast, output_buffer, cuda_lang)

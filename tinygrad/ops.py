@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar
 import functools, operator
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape import ShapeTracker
@@ -32,13 +32,35 @@ def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
   if x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
+_T = TypeVar("_T")
+class RawBuffer:
+  def __init__(self, size): raise NotImplementedError("must be implemented")
+  @classmethod
+  def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
+  def toCPU(self:RawBuffer) -> np.ndarray: raise NotImplementedError("must be implemented")
+
+class RawBufferCopyIn(RawBuffer):
+  def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
+
+  @classmethod
+  def fromCPU(cls, x:np.ndarray):
+    ret = cls(4*prod(x.shape))
+    ret.copyin(x)
+    return ret
+
+class RawBufferCopyInOut(RawBufferCopyIn):
+  size : int
+  def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
+
+  def toCPU(self) -> np.ndarray:
+    x = np.empty((self.size//4), dtype=np.float32)
+    self.copyout(x)
+    return x
+
 # a placeholder class to extend by the exec classes
-class DeviceBuffer:
+class DeviceBuffer(RawBuffer):
   _buf: Any                # underlying buffer
   shape: Tuple[int, ...]
-  @staticmethod
-  def fromCPU(x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")
-  def toCPU(self:DeviceBuffer) -> np.ndarray: raise NotImplementedError("must be implemented")
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
 
@@ -77,11 +99,6 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       return ret
 def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape)) for x in get_buffers(ast)}, ast))._buf
 
-# RawBuffer has no concept of shape
-class RawBuffer:
-  def copyin(self, b:np.ndarray): raise NotImplementedError("must be implemented")
-  def copyout(self, a:np.ndarray): raise NotImplementedError("must be implemented")
-
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
@@ -96,24 +113,22 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   # TODO: not GPUBuffer, get name of class
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
 
-  @staticmethod
-  def create_raw_buffer(shape) -> RawBuffer: raise NotImplementedError("must be implemented")
+  raw_buffer_type : Type[RawBuffer]
+  @classmethod
+  def create_raw_buffer(cls, shape, backing) -> RawBuffer:
+    assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
+    assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
+    return cls.raw_buffer_type(4*prod(shape)) if backing is None else cls.raw_buffer_type.fromCPU(backing)
   def raw(self) -> RawBuffer:
-    if self._buf is None: self._buf = self.create_raw_buffer(self._base_shape)
-    if self._backing is not None:
-      assert GlobalCounters.cache is None, f"can't copy in {self._backing.shape} while caching"
-      self._buf.copyin(self._backing)
-      self._backing = None
+    if self._buf is None: self._buf = self.create_raw_buffer(self._base_shape, self._backing)
+    self._backing = None
     return self._buf
 
   @classmethod
-  def fromCPU(cls, x:np.ndarray): return cls(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
+  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
-    out = self.contiguous()
-    data = np.empty(out.shape, dtype=np.float32)
-    out.raw().copyout(data)
-    return data
+    return self.contiguous().raw().toCPU().reshape(self.shape)
 
   @staticmethod
   def compile(ast, output_buffer): raise NotImplementedError("must be implemented")

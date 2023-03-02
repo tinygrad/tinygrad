@@ -5,16 +5,15 @@ import hashlib
 import subprocess
 from collections import defaultdict
 from typing import Final, Dict
-from tinygrad.helpers import prod
-from tinygrad.ops import CompiledBuffer, RawBuffer
+from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
 from tinygrad.codegen.gpu import GPUCodegen
 import platform
 OSX = platform.system() == "Darwin"
 
-class RawMallocBuffer(RawBuffer):
-  def __init__(self, size): self._buf = (ctypes.c_float * (size))()
-  def copyin(self, b:np.ndarray): ctypes.memmove(self._buf, b.ctypes.data, b.size*4)
-  def copyout(self, a:np.ndarray): np.copyto(a, np.ctypeslib.as_array(self._buf)[:a.size].reshape(a.shape))
+class RawMallocBuffer(RawBufferCopyIn):
+  def __init__(self, size): self._buf = (ctypes.c_float * (size//4))()
+  def copyin(self, x:np.ndarray): ctypes.memmove(self._buf, x.ctypes.data, x.size*4)
+  def toCPU(self): return np.ctypeslib.as_array(self._buf)
 
 class ClangProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
@@ -33,8 +32,7 @@ class ClangProgram:
     if wait: return time.monotonic()-st
 
 class ClangBuffer(CompiledBuffer):
-  @staticmethod
-  def create_raw_buffer(shape): return RawMallocBuffer(4*prod(shape))
+  raw_buffer_type = RawMallocBuffer
   @staticmethod
   def compile(ast, output_buffer):
     k = GPUCodegen(ast, output_buffer)

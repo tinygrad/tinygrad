@@ -4,8 +4,8 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Dict, Optional, List, ClassVar, Final
 from collections import defaultdict
-from tinygrad.helpers import prod, IMAGE, DEBUG, getenv
-from tinygrad.ops import CompiledBuffer, GlobalCounters, RawBuffer
+from tinygrad.helpers import IMAGE, DEBUG, getenv
+from tinygrad.ops import CompiledBuffer, GlobalCounters, RawBufferCopyInOut, RawBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 OSX = platform.system() == "Darwin"
@@ -26,11 +26,12 @@ class _CL:
     return cl.CommandQueue(CL.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 CL = _CL()
   
-class CLBuffer(RawBuffer):
+class CLBuffer(RawBufferCopyInOut):
   # TODO: this can be in RawBuffer generically
   BUFFER_CACHE : ClassVar[Dict[int, List[cl.Buffer]]] = defaultdict(list)
 
   def __init__(self, size):
+    self.size = size
     if len(CLBuffer.BUFFER_CACHE[size]) > 0:
       self._cl = CLBuffer.BUFFER_CACHE[size].pop()
     else:
@@ -42,8 +43,8 @@ class CLBuffer(RawBuffer):
     if CLCACHE: CLBuffer.BUFFER_CACHE[self._cl.size].append(self._cl)
     else: GlobalCounters.mem_used -= self._cl.size
 
-  def copyin(self, b:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, b, is_blocking=False)
-  def copyout(self, a:np.ndarray): cl.enqueue_copy(CL.cl_queue, a, self._cl, is_blocking=True)
+  def copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
+  def copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
 
 class CLImage(RawBuffer):
   fmt : Final = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
@@ -79,8 +80,12 @@ opencl_lang = GPULanguage(
   gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
 
 class GPUBuffer(CompiledBuffer):
-  @staticmethod
-  def create_raw_buffer(shape) -> RawBuffer: return CLImage(shape) if (len(shape) == 3 and shape[2] == 4 and IMAGE >= 2) else CLBuffer(4*prod(shape))
+  raw_buffer_type = CLBuffer
+  # override this method for image
+  @classmethod
+  def create_raw_buffer(cls, shape, backing) -> RawBuffer:
+    if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and not backing: return CLImage(shape)
+    else: return super().create_raw_buffer(shape, backing)
   @staticmethod
   def compile(ast, output_buffer):
     k = GPUCodegen(ast, output_buffer, opencl_lang)

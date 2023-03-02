@@ -5,7 +5,7 @@ import numpy as np
 from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG
-from tinygrad.ops import CompiledBuffer, RawBuffer
+from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -19,19 +19,15 @@ class _METAL:
     return METAL.device.newCommandQueue()
 METAL = _METAL()
 
-class RawMetalBuffer(RawBuffer):
-  def __init__(self, size): self._cl = METAL.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
+class RawMetalBuffer(RawBufferCopyIn):
+  def __init__(self, size): self.size, self._cl = size, METAL.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
   def __del__(self): self._cl.release()
-
   def _as_np(self): return np.frombuffer(self._cl.contents().as_buffer(self._cl.length()), dtype=np.float32)
-
-  def copyin(self, b:np.ndarray):
-    np.copyto(self._as_np(), b.reshape(-1).data)
-
-  def copyout(self, a:np.ndarray):
+  def copyin(self, x:np.ndarray): np.copyto(self._as_np(), x.reshape(-1).data)
+  def toCPU(self) -> np.ndarray:
     for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
     METAL.mtl_buffers_in_flight = []
-    np.copyto(a, self._as_np().reshape(a.shape))
+    return self._as_np()  # no copy!
 
 class MetalProgram:
   def __init__(self, name:str, prg:str):
@@ -90,8 +86,7 @@ metal_lang = GPULanguage(
   extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
 class MetalBuffer(CompiledBuffer):
-  @staticmethod
-  def create_raw_buffer(shape): return RawMetalBuffer(4*prod(shape))
+  raw_buffer_type = RawMetalBuffer
   @staticmethod
   def compile(ast, output_buffer):
     k = GPUCodegen(ast, output_buffer, metal_lang)

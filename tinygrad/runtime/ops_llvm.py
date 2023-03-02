@@ -2,7 +2,7 @@ import time, hashlib, ctypes
 from typing import ClassVar
 from tinygrad.ops import CompiledBuffer
 from tinygrad.runtime.ops_clang import RawMallocBuffer
-from tinygrad.helpers import getenv, DEBUG, prod
+from tinygrad.helpers import getenv, DEBUG
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.llvm import LLVMCodegen
 
@@ -64,8 +64,7 @@ class LLVMProgram:
     if wait: return time.monotonic()-st
 
 class LLVMBuffer(CompiledBuffer):
-  @staticmethod
-  def create_raw_buffer(shape): return RawMallocBuffer(4*prod(shape))
+  raw_buffer_type = RawMallocBuffer
   @staticmethod
   def compile(ast, output_buffer):
     k = LLVMCodegen(ast, output_buffer)
