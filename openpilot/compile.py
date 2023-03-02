@@ -60,21 +60,19 @@ def compile(dat, output_fn):
   print("kernel count:", len(model_exec.jit_cache))
   assert len(model_exec.jit_cache) <= ALLOWED_KERNEL_COUNT or ALLOWED_KERNEL_COUNT == 0, "too many kernels!"
 
+  # pull out inputs and put them in the jit cache
+  input_rawbuffers = {k:inputs[k].lazydata.realized.raw() for k in inputs.keys()}
+  for (j,i),idx in model_exec.input_replace.items(): model_exec.jit_cache[j][1][i] = input_rawbuffers[idx]
+
   # transform to CL.CACHE
   used_ops = 0
   cl_cache = []
   for prg,args in model_exec.jit_cache:
-    real_clprg = prg.clprg
-    setattr(real_clprg, "op_estimate", prg.op_estimate)
-    used_ops += real_clprg.op_estimate
-    # replace clprg with a fake program to log to cl_cache
-    prg.clprg = lambda *args, wait=False: cl_cache.append((real_clprg, list(args[0:2])+[x._cl for x in args[2:]]))
-    prg(*args)
-    # put it back
-    prg.clprg = real_clprg
+    cl_cache.append((prg.clprg, [prg.global_size, prg.local_size, *[x._cl for x in args]]))
+    used_ops += prg.op_estimate
 
   from extra.thneed import Thneed
-  t = Thneed(cl_cache, {k:inputs[k].lazydata.realized.raw()._cl for k in inputs.keys()})
+  t = Thneed(cl_cache, {k:v._cl for k,v in input_rawbuffers.items()})
 
   if getenv("OPTWG", 0):
     t.optimize_local_workgroup()

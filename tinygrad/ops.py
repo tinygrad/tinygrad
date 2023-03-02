@@ -100,18 +100,18 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape)) for x in get_buffers(ast)}, ast))._buf
 
 class ASTRunner:
-  def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_work_size:Optional[List[int]]=None, local_work_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
+  def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_work_size, self.local_work_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_work_size, local_work_size, bufs_to_delete if bufs_to_delete else set(), op_estimate, mem_estimate
+    self.name, self.prg, self.global_size, self.local_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_size, local_size, bufs_to_delete if bufs_to_delete else set(), op_estimate, mem_estimate
   def build(self, runtime):
     self.clprg = runtime(self.name, self.prg)
     return self
-  def lower(self, bufs): return [x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
+  def lower(self, bufs) -> List[RawBuffer]: return [x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
   def __call__(self, bufs):
-    et = self.clprg(self.global_work_size, self.local_work_size, *bufs, wait=DEBUG>=2)
+    et = self.clprg(self.global_size, self.local_size, *bufs, wait=DEBUG>=2)
     if et is not None: GlobalCounters.time_sum_s += et
     if DEBUG >= 1:
-      print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs)-len(self.bufs_to_delete):5d}  kernels {str(self.global_work_size):18s} {str(self.local_work_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs)-len(self.bufs_to_delete):5d}  kernels {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if DEBUG <= 1 else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return et
@@ -171,7 +171,7 @@ class GlobalCounters:
   time_sum_s : ClassVar[float] = 0.0
   kernel_count : ClassVar[int] = 0
   mem_used : ClassVar[int] = 0   # NOTE: this is not reset
-  cache : ClassVar[Optional[list]] = None
+  cache : ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
   @staticmethod
