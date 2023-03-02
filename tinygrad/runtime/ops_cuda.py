@@ -24,7 +24,14 @@ class CUDAProgram:
     global_size = global_size + [1] * (3 - len(global_size))
     assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
     global_size = [x//y for x,y in zip(global_size, local_size)]
+    if wait:
+      start, end = cuda.Event(), cuda.Event()
+      start.record()
     self.prg(*[x._cl for x in args], block=tuple(local_size), grid=tuple(global_size))
+    if wait:
+      end.record()
+      end.synchronize()
+      return start.time_till(end)*1e-3
 
 class CUDACodegen(GPUCodegen):
   lang = GPULanguage(
