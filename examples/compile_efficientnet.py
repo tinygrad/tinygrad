@@ -4,16 +4,14 @@ from extra.utils import fetch
 import ast
 
 def compile_net(run, special_names):
-  # c header
-  cprog = ["#include <stdio.h>", "#include <math.h>", "#define max(x,y) ((x>y)?x:y)"]
-
   # functions that run the net
+  functions = {}
   bufs = {}
   bufnum = 0
   statements = []
   bufs_to_save = {}
   for fxn,args in run.jit_cache:
-    cprog.append(fxn.prg)
+    functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(args):
       if i in fxn.bufs_to_delete: continue
@@ -28,7 +26,7 @@ def compile_net(run, special_names):
       cargs.append(bufs[key][0])
     statements.append(f"{fxn.name}({', '.join(cargs)});")
 
-  return cprog, statements, bufs, bufs_to_save
+  return functions, statements, bufs, bufs_to_save
 
 if __name__ == "__main__":
   model = EfficientNet(0)
@@ -46,7 +44,10 @@ if __name__ == "__main__":
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   special_names = {id(the_input.lazydata.realized.raw()): "input", id(the_output.lazydata.realized.raw()): "outputs"}
 
-  cprog, statements, bufs, bufs_to_save = compile_net(run, special_names)
+  functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
+
+  # c header
+  cprog = ["#include <stdio.h>", "#include <math.h>", "#define max(x,y) ((x>y)?x:y)"]
 
   # save the weights
   for name,cl in bufs_to_save.items():
@@ -64,6 +65,9 @@ if __name__ == "__main__":
 
   # buffers (empty + weights)
   cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len in bufs.values()] 
+
+  # the functions
+  cprog += list(functions.values())
 
   # the net
   cprog += ["void net() {"] + statements + ["}"]

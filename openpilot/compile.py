@@ -70,6 +70,8 @@ def compile(dat, output_fn):
     # replace clprg with a fake program to log to cl_cache
     prg.clprg = lambda *args, wait=False: cl_cache.append((real_clprg, list(args[0:2])+[x._cl for x in args[2:]]))
     prg(*args)
+    # put it back
+    prg.clprg = real_clprg
 
   from extra.thneed import Thneed
   t = Thneed(cl_cache, {k:inputs[k].lazydata.realized.raw()._cl for k in inputs.keys()})
