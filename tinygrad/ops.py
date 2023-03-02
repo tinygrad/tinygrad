@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
 import functools, operator
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape import ShapeTracker
@@ -99,6 +99,23 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       return ret
 def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape)) for x in get_buffers(ast)}, ast))._buf
 
+class ASTRunner:
+  def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_work_size:Optional[List[int]]=None, local_work_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
+    if DEBUG >= 4: print(prg)
+    self.name, self.prg, self.global_work_size, self.local_work_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_work_size, local_work_size, bufs_to_delete if bufs_to_delete else set(), op_estimate, mem_estimate
+  def build(self, runtime):
+    self.clprg = runtime(self.name, self.prg)
+    return self
+  def lower(self, bufs): return [x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
+  def __call__(self, bufs):
+    et = self.clprg(self.global_work_size, self.local_work_size, *bufs, wait=DEBUG>=2)
+    if et is not None: GlobalCounters.time_sum_s += et
+    if DEBUG >= 1:
+      print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs)-len(self.bufs_to_delete):5d}  kernels {str(self.global_work_size):18s} {str(self.local_work_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+            (str() if DEBUG <= 1 else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS)"))
+    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
+    return et
+
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
@@ -133,14 +150,15 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 
   codegen_type : Any
   runtime_type : Type
-  method_cache : Dict[str, Callable] = {}
+  method_cache : Dict[str, ASTRunner] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
     k = cls.codegen_type(ast, output_buffer)
     if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
     prg = cls.method_cache[k.key]
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, k.bufs))
-    prg(*k.bufs)
+    rawbufs = prg.lower(k.bufs)
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, rawbufs))
+    prg(rawbufs)
     return k.ret
 
   # universal for shape tracked
