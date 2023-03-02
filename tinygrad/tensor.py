@@ -15,7 +15,7 @@ class Function:
     self.requires_grad = True if any(self.needs_input_grad) else (None if any(x is None for x in self.needs_input_grad) else False)
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
-  def backward(self, *args, **kwargs): raise NotImplementedError(f"backward not implemented for {type(self)}")
+  def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
@@ -401,6 +401,13 @@ class Tensor:
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
+
+  # Comparison ops
+  def __lt__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, False)
+  def __le__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, False).add(self.eq(x))
+  def __gt__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, True)
+  def __ge__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, True).add(self.eq(x))
+  def eq(self, x) -> Tensor: return self._broadcasted(mlops.CompareEqual, x, False)
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
