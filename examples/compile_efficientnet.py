@@ -13,20 +13,20 @@ def compile_net(run, special_names):
   statements = []
   bufs_to_save = {}
   for fxn,args in run.jit_cache:
-    cprog.append(fxn.clprg.prg)
+    cprog.append(fxn.prg)
     cargs = []
     for i,arg in enumerate(args):
       if i in fxn.bufs_to_delete: continue
-      key = id(arg.cl)
+      key = id(arg.raw())
       if key not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key], len(arg.cl)//4)
+          bufs[key] = (special_names[key], len(arg.raw()._buf))
         else:
-          bufs[key] = (f"buf_{bufnum}", len(arg.cl)//4)
+          bufs[key] = (f"buf_{bufnum}", len(arg.raw()._buf))
           bufnum += 1
-          if i > 0: bufs_to_save[bufs[key][0]] = arg.cl  # if first usage of a buffer is not an output, and it's not a special name
+          if i > 0: bufs_to_save[bufs[key][0]] = arg.raw()  # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
-    statements.append(f"{fxn.clprg.name}({', '.join(cargs)});")
+    statements.append(f"{fxn.name}({', '.join(cargs)});")
 
   return cprog, statements, bufs, bufs_to_save
 
@@ -44,21 +44,14 @@ if __name__ == "__main__":
   the_output = run(the_input)
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
+  special_names = {id(the_input.lazydata.realized.raw()): "input", id(the_output.lazydata.realized.raw()): "outputs"}
 
   cprog, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
-  # buffers (empty)
-  cprog += [f"float {x[0]}[{x[1]}];" for x in bufs.values() if x[0] not in bufs_to_save] 
-
-  # buffers (weights)
+  # save the weights
   for name,cl in bufs_to_save.items():
-    weight = ''.join(["\\x%02X"%x for x in bytes(memoryview(cl)[0:len(cl)//4])])
+    weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
     cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
-    cprog.append(f"float *{name} = (float *){name}_data;")
-
-  # the net
-  cprog += ["void net() {"] + statements + ["}"]
 
   # image library!
   cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode('utf-8')]
@@ -68,6 +61,12 @@ if __name__ == "__main__":
   lbls = ast.literal_eval(lbls.decode('utf-8'))
   lbls = ['"'+lbls[i]+'"' for i in range(1000)]
   cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
+
+  # buffers (empty + weights)
+  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len in bufs.values()] 
+
+  # the net
+  cprog += ["void net() {"] + statements + ["}"]
 
   cprog += ["""
 int main(int argc, char* argv[]) {
@@ -101,5 +100,5 @@ int main(int argc, char* argv[]) {
   else printf("%s\\n", lbls[best_idx]);
 }"""]
 
-  # CLANG=1 GPU=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && time ./recognize docs/stable_diffusion_by_tinygrad.jpg
+  # CLANG=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/stable_diffusion_by_tinygrad.jpg
   print('\n'.join(cprog))

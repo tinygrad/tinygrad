@@ -16,7 +16,7 @@ class ASTRunner:
     et = self.clprg(self.global_work_size, self.local_work_size, *[x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete], wait=DEBUG>=2)
     if et is not None: GlobalCounters.time_sum_s += et
     if DEBUG >= 1:
-      print(f"**CL** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs)-len(self.bufs_to_delete):5d}  kernels {str(self.global_work_size):18s} {str(self.local_work_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs)-len(self.bufs_to_delete):5d}  kernels {str(self.global_work_size):18s} {str(self.local_work_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if DEBUG <= 1 else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return et
