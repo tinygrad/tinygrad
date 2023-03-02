@@ -401,13 +401,7 @@ class Tensor:
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
-
-  # Comparison ops
-  def __lt__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, False)
-  def __le__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, False).add(self.eq(x))
-  def __gt__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, True)
-  def __ge__(self, x) -> Tensor: return self._broadcasted(mlops.CompareLess, x, True).add(self.eq(x))
-  def eq(self, x) -> Tensor: return self._broadcasted(mlops.CompareEqual, x, False)
+  def eq(self, x) -> Tensor: return self._broadcasted(mlops.Equal, x, False)
 
   # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
 
@@ -432,6 +426,11 @@ class Tensor:
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
+
+  def __ge__(self, x) -> Tensor: return self.maximum(x).eq(self)
+  def __le__(self, x) -> Tensor: return self.maximum(x).eq(x)
+  def __lt__(self, x) -> Tensor: return 1.0-(self>=x)
+  def __gt__(self, x) -> Tensor: return 1.0-(self<=x)
 
   # ***** functional nn ops *****
 

@@ -69,9 +69,9 @@ class TestOps(unittest.TestCase):
   
   def test_cmp_eq(self): self._test_cmp(lambda x,y: x.eq(y), reverse=False)
   def test_cmp_gt(self): self._test_cmp(lambda x,y: x>y)
-  def test_cmp_gte(self): self._test_cmp(lambda x,y: x>=y)
+  def test_cmp_ge(self): self._test_cmp(lambda x,y: x>=y)
   def test_cmp_lt(self): self._test_cmp(lambda x,y: x<y)
-  def test_cmp_lte(self): self._test_cmp(lambda x,y: x<=y)
+  def test_cmp_le(self): self._test_cmp(lambda x,y: x<=y)
 
   def test_cmp_eq_backwards(self):
     t1 = torch.ones(4, requires_grad=True)

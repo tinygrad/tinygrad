@@ -3,13 +3,13 @@ import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
 import functools, operator
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.helpers import prod, DEBUG, getenv
 from tinygrad.shape import ShapeTracker
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 class UnaryOps(Enum): NOOP = auto(); NEG = auto(); EXP = auto(); LOG = auto(); NOT = auto() # noqa: E702
-class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto(); CMPLT = auto() # noqa: E702
+class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); FLIP = auto(); PAD = auto(); SHRINK = auto() # noqa: E702
 class FusedOps(Enum): MULACC = auto() # noqa: E702
@@ -154,8 +154,11 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
     k = cls.codegen_type(ast, output_buffer)
-    if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
-    prg = cls.method_cache[k.key]
+    if getenv("ENABLE_METHOD_CACHE"):   # TODO: this breaks the ops test!
+      if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
+      prg = cls.method_cache[k.key]
+    else:
+      prg = k.codegen().build(cls.runtime_type)
     rawbufs = prg.lower(k.bufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, rawbufs))
     prg(rawbufs)

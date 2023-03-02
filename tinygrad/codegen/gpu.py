@@ -30,13 +30,14 @@ class GPUCodegen(ASTKernel):
 
   # for renaming
   kernel_cnt : Final[Dict[str, int]] = defaultdict(lambda: -1)
+  kernel_name_cache : Final[Dict[str, str]] = {}
 
   code_for_op : Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "((float)1.0-A)",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
-    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)", BinaryOps.CMPLT: "(A<B)",
+    BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
     BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A=(A+B)", ReduceOps.MAX: "A=max(A,B)"
   }
   start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
@@ -316,19 +317,26 @@ class GPUCodegen(ASTKernel):
     if len(self.lang.gid) == 0: self.kernel += ["}"] * len(self.output_shape)
     self.kernel.append("\n}")
 
+    # concat kernel into prg
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype()+self.lang.buffer_suffix for i,x in enumerate(self.bufs)]
+    self.prg = ' '.join(list(self.prekernel) + [f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
+      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] +
+      [") {\n"] + self.kernel)
+
     # kernel function definition
     function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
-    GPUCodegen.kernel_cnt[function_name] += 1
-    if GPUCodegen.kernel_cnt[function_name]:
-      function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
 
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype()+self.lang.buffer_suffix for i,x in enumerate(self.bufs)]
-    self.kernel = list(self.prekernel) + [f"{self.lang.kernel_prefix} void {function_name}(",] + \
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] + \
-      [") {\n"] + self.kernel
+    # painfully name the function
+    if self.prg in GPUCodegen.kernel_name_cache:
+      function_name = GPUCodegen.kernel_name_cache[self.prg]
+    else:
+      GPUCodegen.kernel_cnt[function_name] += 1
+      if GPUCodegen.kernel_cnt[function_name]:
+        function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
+      GPUCodegen.kernel_name_cache[self.prg] = function_name
 
     if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
-    return ASTRunner(function_name, ' '.join(self.kernel), self.bufs_to_delete,
+    return ASTRunner(function_name, self.prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
       self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
       op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))

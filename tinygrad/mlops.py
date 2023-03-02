@@ -52,11 +52,7 @@ class Max(Function):
 
 # ************* binary ops *************
 
-class CompareLess(Function):
-  def forward(self, x, y):
-    return x.binary_op(BinaryOps.CMPLT, y)
-  
-class CompareEqual(Function):
+class Equal(Function):
   def forward(self, x, y):
     return x.binary_op(BinaryOps.CMPEQ, y)
   
