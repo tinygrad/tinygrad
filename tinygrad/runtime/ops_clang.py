@@ -6,7 +6,7 @@ import subprocess
 from collections import defaultdict
 from typing import Final, Dict
 from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
-from tinygrad.codegen.gpu import GPUCodegen
+from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 import platform
 OSX = platform.system() == "Darwin"
 
@@ -31,7 +31,10 @@ class ClangProgram:
     self.fxn(*[x._buf for x in args[2:]])
     if wait: return time.monotonic()-st
 
+class ClangCodegen(GPUCodegen):
+  lang = GPULanguage(buffer_suffix="restrict")
+
 class ClangBuffer(CompiledBuffer):
   raw_buffer_type = RawMallocBuffer
-  codegen_type = GPUCodegen   # clang is the default
+  codegen_type = ClangCodegen
   runtime_type = ClangProgram

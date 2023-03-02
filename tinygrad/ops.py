@@ -120,8 +120,9 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
     return cls.raw_buffer_type(4*prod(shape)) if backing is None else cls.raw_buffer_type.fromCPU(backing)
   def raw(self) -> RawBuffer:
-    if self._buf is None: self._buf = self.create_raw_buffer(self._base_shape, self._backing)
-    self._backing = None
+    if self._buf is None:
+      self._buf = self.create_raw_buffer(self._base_shape, self._backing)
+      self._backing = None
     return self._buf
 
   @classmethod

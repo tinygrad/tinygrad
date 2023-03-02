@@ -17,6 +17,7 @@ NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the
 class GPULanguage(NamedTuple):
   kernel_prefix : str = ""
   buffer_prefix : str = ""
+  buffer_suffix : str = ""
   smem_prefix : str = ""
   barrier : str = ""
   gid : List[str] = []
@@ -321,7 +322,7 @@ class GPUCodegen(ASTKernel):
     if GPUCodegen.kernel_cnt[function_name]:
       function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
 
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype() for i,x in enumerate(self.bufs)]
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype()+self.lang.buffer_suffix for i,x in enumerate(self.bufs)]
     self.kernel = list(self.prekernel) + [f"{self.lang.kernel_prefix} void {function_name}(",] + \
       [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] + \
       [") {\n"] + self.kernel

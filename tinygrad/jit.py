@@ -1,5 +1,6 @@
 from typing import Callable, List, Tuple, Any, Dict, cast
 import itertools
+from tinygrad.helpers import DEBUG
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters, DeviceBuffer
@@ -26,6 +27,7 @@ class TinyJit:
       self.jit_cache = GlobalCounters.cache
       GlobalCounters.cache = None
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
+      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_tensors)} inputs")
 
       # get the inputs for replacement
       for prg, args in self.jit_cache:  # pylint: disable=E1133
