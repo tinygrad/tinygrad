@@ -105,7 +105,7 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(*shape, fill=0, **kwargs): return Tensor([fill], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
+  def full(shape, fill=0, **kwargs): return Tensor([fill], **kwargs).reshape([1]*len(shape)).expand(*shape).contiguous()
 
   @staticmethod
   def zeros(*shape, **kwargs): return Tensor.full(*shape)
