@@ -1,6 +1,7 @@
 from typing import Callable, List, Tuple, Any, Dict, cast, Union
 import itertools
 from tinygrad.helpers import DEBUG, colored
+
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import GlobalCounters, CompiledBuffer, RawBuffer

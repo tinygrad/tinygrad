@@ -51,10 +51,10 @@ class Max(Function):
     return max_is_amount.binary_op(BinaryOps.MUL, grad_output_expanded)
 
 # ************* binary ops *************
+
 class CompareLess(Function):
   def forward(self, x, y):
-    self.ret = x.binary_op(BinaryOps.CMPLT, y)
-    return self.ret
+    return x.binary_op(BinaryOps.CMPLT, y)
   
 class CompareEqual(Function):
   def forward(self, x, y):
