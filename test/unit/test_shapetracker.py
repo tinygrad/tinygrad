@@ -93,14 +93,14 @@ class TestImageShapeTracker(unittest.TestCase):
       idxy, valid = st.expr_idxs(o)
       print("idxy:", idxy.render())
       print("valids:", [x.render() for x in valid.nodes])
-      out = to_image_idx(base_shape, idxy, True)
-      print(out)
-      #idx = (idxy//4)%base_shape[1]
-      #idy = (idxy//(4*base_shape[1]))%base_shape[0]
+      #out = to_image_idx(base_shape, idxy, True)
+      #print(out)
+      idx = (idxy//4)%base_shape[1]
+      idy = (idxy//(4*base_shape[1])) #%base_shape[0]
       #idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
 
-      #print("idx:", idx.render())
-      #print("idy:", idy.render())
+      print("idx:", idx.render())
+      print("idy:", idy.render())
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):

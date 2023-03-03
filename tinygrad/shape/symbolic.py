@@ -3,9 +3,15 @@ import math
 from typing import List, Dict, Callable, Type
 from tinygrad.helpers import partition, all_same
 
-# python has different behavior for negative mod and div than c
-def divn(x, a): return x//a if isinstance(x, Node) else int(x/a) 
-def modn(x, a): return x%a if isinstance(x, Node) else (-((-x)%a) if x < 0 else x%a)
+# NOTE: Python has different behavior for negative mod and floor div than c
+# symbolic matches the Python behavior, but the code is outputs is agnostic
+
+#def divn(x, a): return x//a if isinstance(x, Node) else int(x/a) 
+#def modn(x, a): return x%a if isinstance(x, Node) else (-((-x)%a) if x < 0 else x%a)
+
+#
+def divn(x, a): return x//a
+def modn(x, a): return x%a
 
 class Node:
   b: int
@@ -58,6 +64,9 @@ class Node:
         for m in muls:
           if m > 1 and b%m == 0:
             return (self//m)//(b//m)
+    if self.min < 0:
+      offset = self.min//b
+      return (self+offset*b)//b - offset
     return DivNode(self, b)
 
   def __mod__(self, b:int):
@@ -75,6 +84,7 @@ class Node:
       a = self
     if a.min >= 0 and a.max < b: return a
     if a.min == a.max: return Variable.num(modn(a.min, b))
+    if a.min < 0: return (a + ((a.min//b)*b)) % b
     return ModNode(a, b)
 
   @staticmethod
@@ -90,13 +100,7 @@ class Node:
 
     # combine any numbers inside a sum
     nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
-    num_sum = sum([x.b for x in num_nodes])
-    # TODO: these can't be merged due to image indexing. it's not clear which idx to group the offset with
-    if num_sum >= 0: nodes.append(NumNode(num_sum))
-    else:
-      lte_0, rest = partition(num_nodes, lambda x: x.b <= 0)
-      nodes += [NumNode(x.b) for x in sorted(lte_0, key=lambda x:x.b) if x.b != 0]
-      if len(rest): nodes += [NumNode(sum([x.b for x in rest]))]
+    nodes.append(NumNode(sum([x.b for x in num_nodes])))
 
     # filter 0s
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]
