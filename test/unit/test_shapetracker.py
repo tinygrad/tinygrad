@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from tinygrad.helpers import prod
 from tinygrad.shape import ShapeTracker, View, ZeroView, merge_views
+from tinygrad.shape.symbolic import Variable
 from tinygrad.codegen.gpu import to_image_idx
 
 def shapetracker_getitem(st, val):
@@ -95,8 +96,10 @@ class TestImageShapeTracker(unittest.TestCase):
       print("valids:", [x.render() for x in valid.nodes])
       #out = to_image_idx(base_shape, idxy, True)
       #print(out)
-      idx = (idxy//4)%base_shape[1]
       idy = (idxy//(4*base_shape[1])) #%base_shape[0]
+      idx = Variable.sum([idxy//4, idy*-base_shape[1]])
+
+      #idx = idxy%base_shape[1]
       #idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
 
       print("idx:", idx.render())

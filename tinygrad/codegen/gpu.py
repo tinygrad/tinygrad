@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
-from tinygrad.shape.symbolic import Node, ModNode, DivNode, render_python
+from tinygrad.shape.symbolic import Node, ModNode, DivNode, Variable, render_python
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import getenv, DEBUG, prod
 
@@ -28,7 +28,9 @@ class GPULanguage(NamedTuple):
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, validhacks=False):
   idx = (idxy//4)%base_shape[1]
   idy = (idxy//(4*base_shape[1]))%base_shape[0]
-  if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
+  #if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
+  #idy = (idxy//(4*base_shape[1]))
+  #idx = Variable.sum([idxy//4, idy*-base_shape[1]])
   return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
 class GPUCodegen(ASTKernel):

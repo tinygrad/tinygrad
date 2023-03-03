@@ -28,6 +28,7 @@ class Node:
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
+    elif self.min == self.max: return NumNode(self.min*b)
     if isinstance(self, MulNode): return MulNode(self.a, self.b*b)
     # distribute mul into sum
     if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes])
