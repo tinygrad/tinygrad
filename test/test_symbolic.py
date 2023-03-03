@@ -59,7 +59,7 @@ class TestSymbolic(unittest.TestCase):
   
   @unittest.skip("mod max is wrong")
   def test_mod_factor(self):
-    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "(((a*100)+(b*50))%100)")
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "((b*50)%100)")
 
   def test_sum_div_const(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 4, 0, 7, "a")
@@ -148,6 +148,9 @@ class TestSymbolicNumeric(unittest.TestCase):
         self.assertGreaterEqual(v.max, max(values))
 
   def test_mod_4(self): self.helper_test_numeric(lambda x: modn(x, 4))
+  def test_div_4(self): self.helper_test_numeric(lambda x: divn(x, 4))
+  def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: divn(x+1, 2))
+  def test_plus_1_mod_2(self): self.helper_test_numeric(lambda x: modn(x+1, 2))
   def test_times_2(self): self.helper_test_numeric(lambda x: x*2)
   def test_times_2_plus_3(self): self.helper_test_numeric(lambda x: x*2 + 3)
   def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: modn(x*2 + 3, 4))
