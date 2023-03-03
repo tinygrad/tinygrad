@@ -151,7 +151,7 @@ class LLVMCodegen(ASTKernel):
         return m
       if isinstance(x.op, ReduceOps):
         if reduce_result is None:
-          raise Exception("no reduce")
+          raise RuntimeError("no reduce")
         return reduce_result
       values = [ast_parse(builder, v, level, reduce_result) for v in x.src]
 

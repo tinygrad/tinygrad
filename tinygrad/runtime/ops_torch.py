@@ -16,5 +16,5 @@ class TorchBuffer(InterpretedBuffer):
   fxn_for_op : ClassVar = torch_fxn_for_op
 
   @staticmethod
-  def fromCPU(data): return TorchBuffer(torch.from_numpy(data).requires_grad_(False).to(device))
-  def toCPU(x): return x._buf.cpu().numpy()
+  def fromCPU(x): return TorchBuffer(torch.from_numpy(x).requires_grad_(False).to(device))
+  def toCPU(self): return self._buf.cpu().numpy()
