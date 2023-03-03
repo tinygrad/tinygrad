@@ -1,7 +1,7 @@
 from typing import Optional
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
-from pycuda.compiler import compile # type: ignore
+from pycuda.compiler import compile as cuda_compile # type: ignore
 import numpy as np
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import CompiledBuffer, RawBufferCopyInOut
@@ -14,7 +14,7 @@ class RawCUDABuffer(RawBufferCopyInOut):
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    if not binary: prg = compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
+    if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
     if DEBUG >= 5: print(prg)
     # TODO: name is wrong
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])

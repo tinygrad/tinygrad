@@ -46,7 +46,7 @@ class CLBuffer(RawBufferCopyInOut):
   def copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
   def copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
 
-class CLImage(RawBuffer):
+class CLImage(RawBuffer):  # pylint: disable=abstract-method
   fmt : Final = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
   IMAGE : Final = True
 

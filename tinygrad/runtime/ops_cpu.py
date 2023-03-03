@@ -23,10 +23,10 @@ def einsum_mulacc(einsum, get_strides, expand):
   return mulacc
 
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
-  UnaryOps.NOOP: lambda x: np.ascontiguousarray(x), UnaryOps.EXP: lambda x: np.exp(x), UnaryOps.LOG: lambda x: np.log(x),
+  UnaryOps.NOOP: np.ascontiguousarray, UnaryOps.EXP: np.exp, UnaryOps.LOG: np.log,
   BinaryOps.MAX: np.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
-  MovementOps.FLIP: lambda x, axis: np.flip(x, axis), MovementOps.PERMUTE: lambda x, order: x.transpose(order),
-  MovementOps.PAD: lambda x, padding: np.pad(x, padding), MovementOps.EXPAND: lambda x, new_shape: np.broadcast_to(x, new_shape),
+  MovementOps.FLIP: np.flip, MovementOps.PERMUTE: lambda x, order: x.transpose(order),
+  MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
   FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, np.broadcast_to)
 }}
 
@@ -35,4 +35,4 @@ class CPUBuffer(InterpretedBuffer):
 
   @staticmethod
   def fromCPU(x): return CPUBuffer(x)
-  def toCPU(x): return x._buf
+  def toCPU(self): return self._buf

@@ -3,7 +3,7 @@ repos:
     hooks:
       - id: pylint
         name: pylint
-        entry: pylint tinygrad/
+        entry: pylint tinygrad/ --disable=W0105
         language: system
         always_run: true
         pass_filenames: false
