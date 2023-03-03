@@ -40,7 +40,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: pylint tinygrad/ --disable=W0105,E0401
     - name: Run mypy
-      run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --warn-unreachable
+      run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
 
   testcpu:
     name: CPU Tests
