@@ -105,15 +105,15 @@ class Node:
     nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
     nodes.append(NumNode(sum([x.b for x in num_nodes])))
 
-    # combine any MulNodes that factorize
+    # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
     nodes, mul_nodes = partition(nodes, lambda x: not isinstance(x, MulNode))
+    mul_nodes += [MulNode(x, 1) for x in nodes]
     # group by equality (don't use render!)
     mul_nodes = sorted(mul_nodes, key=lambda x: x.a.render())
-    new_mul_nodes = []
+    new_nodes = []
     for k, g in itertools.groupby(mul_nodes, key=lambda x: x.a):
-      new_mul_nodes.append(k * sum(x.b for x in g))
-
-    nodes += new_mul_nodes
+      new_nodes.append(k * sum(x.b for x in g))
+    nodes = [x if not isinstance(x, MulNode) or x.b != 1 else x.a for x in new_nodes]
 
     # filter 0s
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]
@@ -132,17 +132,20 @@ class Variable(Node):
   def __init__(self, expr:str, nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
     self.expr, self.min, self.max = expr, nmin, nmax
+    assert self.min <= self.max, f"min greater than max! {self.min} {self.max}"
   def __eq__(self, b:Variable): return isinstance(b, type(self)) and self.expr == b.expr
 
 class NumNode(Node):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
+    assert self.min <= self.max, f"min greater than max! {self.min} {self.max}"
   def __eq__(self, b:NumNode): return isinstance(b, type(self)) and self.b == b.b
 
 class OpNode(Node):
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = self.minmax(a,b)
+    assert self.min <= self.max, f"min greater than max! {self.min} {self.max}"
   minmax = staticmethod(lambda a,b: (1//0, 1//0))
   def __eq__(self, b:OpNode): return isinstance(b, type(self)) and self.a == b.a and self.b == b.b
 
@@ -150,6 +153,7 @@ class RedNode(Node):
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = self.minmax(nodes)
+    assert self.min <= self.max, f"min greater than max! {self.min} {self.max}"
   minmax = staticmethod(lambda nodes: (1//0, 1//0))
   def __eq__(self, b:OpNode): return isinstance(b, type(self)) and self.nodes == b.nodes  # TODO: order doesn't matter
 
@@ -157,7 +161,7 @@ class RedNode(Node):
 
 class GeNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.min >= b), int(a.max >= b)))
 class LtNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.max < b), int(a.min < b)))
-class MulNode(OpNode): minmax = staticmethod(lambda a,b: (a.min*b, a.max*b))
+class MulNode(OpNode): minmax = staticmethod(lambda a,b: (a.min*b, a.max*b) if b >= 0 else (a.max*b, a.min*b))
 class DivNode(OpNode):
   @staticmethod
   def minmax(a, b):
@@ -172,6 +176,8 @@ class ModNode(OpNode):
   @staticmethod
   def minmax(a, b):
     assert a.min >= 0
+    #values = [x%b for x in range(a.min, a.max+1)]
+    #return min(values), max(values)
     max1, min2 = math.ceil(a.min/b)*b, math.floor(a.max/b)*b
     if max1 < min2: return (0, b-1)             # range 2 is the full distance
     if max1 > min2: return (a.min%b, a.max%b)   # range 2 doesn't exist, a.min -> a.max is smaller than a mod

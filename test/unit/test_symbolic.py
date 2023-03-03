@@ -38,6 +38,14 @@ class TestSymbolic(unittest.TestCase):
     #assert idx1+idx2 == idx2+idx1
     assert idx1+idx2 != idx2
 
+  def test_factorize(self):
+    a = Variable("a", 0, 8)
+    self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
+
+  def test_factorize_no_mul(self):
+    a = Variable("a", 0, 8)
+    self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
+
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")
 

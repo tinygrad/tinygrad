@@ -3,9 +3,9 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
-from tinygrad.shape.symbolic import Node, ModNode, DivNode, Variable, render_python
+from tinygrad.shape.symbolic import Node, ModNode, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker
-from tinygrad.helpers import getenv, DEBUG, prod
+from tinygrad.helpers import getenv, DEBUG, prod, partition
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -31,6 +31,21 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, validhacks=False):
   #if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
   idy = (idxy//(4*base_shape[1]))
   idx = (idxy//4) + (idy*-base_shape[1])
+  if validhacks:
+    print(idx.min, idx.max, idy.min, idy.max)
+    """
+    # find the ones in idx that didn't factorize and remove them
+    if isinstance(idx, SumNode):
+      unfactored, idx_nodes = partition(idx.nodes, lambda x: isinstance(x, MulNode) and x.b == -base_shape[1])
+      assert len(unfactored) <= 1
+      idx = Variable.sum(idx_nodes)
+      unfactored = (Variable.sum(unfactored) // base_shape[1])
+      idy += unfactored
+      #print(unfactored)
+      if idx.min >= base_shape[1]//2:
+        idx -= base_shape[1]
+        idy += 1
+    """
   return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
 class GPUCodegen(ASTKernel):
