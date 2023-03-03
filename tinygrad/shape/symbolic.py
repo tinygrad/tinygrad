@@ -1,7 +1,11 @@
 from __future__ import annotations
 import math
 from typing import List, Dict, Callable, Type
-from tinygrad.helpers import partition, modn, all_same
+from tinygrad.helpers import partition, all_same
+
+# python has different behavior for negative mod and div than c
+def divn(x, a): return x//a if isinstance(x, Node) else int(x/a) 
+def modn(x, a): return x%a if isinstance(x, Node) else (-((-x)%a) if x < 0 else x%a)
 
 class Node:
   b: int
@@ -11,20 +15,57 @@ class Node:
     if ops is None: ops = render_python
     if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops, ctx)
     return ops[type(self)](self, ops, ctx)
-  def __add__(self, b:int): return Variable.sum([self, Variable.num(b)])
-  def __sub__(self, b:int): return Variable.sum([self, Variable.num(-b)])
+  def __add__(self, b:int): return Variable.sum([self, Variable.num(b)]) if b != 0 else self
+  def __sub__(self, b:int): return self+-b
+  def __ge__(self, b:int): return GeNode(self, b)
+  def __lt__(self, b:int): return LtNode(self, b)
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
     if isinstance(self, MulNode): return MulNode(self.a, self.b*b)
-    # distribute
+    # distribute mul into sum
     if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes])
     return MulNode(self, b)
+
+  @staticmethod
+  def num(num:int) -> Node: return NumNode(num)
+
+  @staticmethod
+  def ands(nodes:List[Node]) -> Node:
+    if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
+    # filter 1s
+    nodes = [x for x in nodes if x.min != x.max]
+    return AndNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
+
+  @staticmethod
+  def sum(nodes:List[Node]) -> Node:
+    # expand any sums inside one sum
+    if any([isinstance(x, SumNode) for x in nodes]):
+      nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
+      for x in sum_nodes: nodes += x.nodes
+      return Variable.sum(nodes)
+
+    # combine any numbers inside a sum
+    nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
+    num_sum = sum([x.b for x in num_nodes])
+    if num_sum >= 0: nodes.append(NumNode(num_sum))
+    else:
+      # TODO: this is broken due to something with negative mods. $50 for a PR that fixes this
+      lte_0, rest = partition(num_nodes, lambda x: x.b <= 0)
+      nodes += [NumNode(x.b) for x in sorted(lte_0, key=lambda x:x.b) if x.b != 0]
+      if len(rest): nodes += [NumNode(sum([x.b for x in rest]))]
+
+    # filter 0s
+    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
+    return SumNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(0))
+
+  # *** complex ops ***
+
   def __floordiv__(self, b:int):
     assert b != 0
     if b == 1: return self
-    if isinstance(self, MulNode) and self.b%b == 0: return self.a*(self.b//b)
-    if isinstance(self, MulNode) and b%self.b == 0: return self.a//(b//self.b)
+    if isinstance(self, MulNode) and modn(self.b, b) == 0: return self.a*divn(self.b, b)
+    if isinstance(self, MulNode) and modn(b, self.b) == 0: return self.a//divn(b, self.b)
     if isinstance(self, SumNode):
       factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, (MulNode, NumNode))) and x.b%b == 0)
       nofactor = []
@@ -50,6 +91,7 @@ class Node:
           if m > 1 and b%m == 0:
             return (self//m)//(b//m)
     return DivNode(self, b)
+
   def __mod__(self, b:int):
     if b == 1: return NumNode(0)
     if isinstance(self, SumNode):
@@ -66,46 +108,6 @@ class Node:
     if a.min >= 0 and a.max < b: return a
     if a.min == a.max: return Variable.num(modn(a.min, b))
     return ModNode(a, b)
-  def __ge__(self, b:int):
-    if self.max < b: return Variable.num(0)
-    if self.min >= b: return Variable.num(1)
-    return GeNode(self, b)
-  def __lt__(self, b:int):
-    if self.max < b: return Variable.num(1)
-    if self.min >= b: return Variable.num(0)
-    return LtNode(self, b)
-
-  @staticmethod
-  def num(num:int) -> Node:
-    return NumNode(num)
-
-  @staticmethod
-  def sum(nodes:List[Node]) -> Node:
-    nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
-    num_sum = sum([x.b for x in num_nodes])
-    # TODO: this is broken due to something with negative mods. $50 for a PR that fixes this
-    if num_sum >= 0: nodes.append(NumNode(num_sum))
-    else:
-      lte_0, rest = partition(num_nodes, lambda x: x.b <= 0)
-      nodes += [NumNode(x.b) for x in sorted(lte_0, key=lambda x:x.b) if x.b != 0]
-      if len(rest): nodes += [NumNode(sum([x.b for x in rest]))]
-
-    if any([isinstance(x, SumNode) for x in nodes]):
-      nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
-      for x in sum_nodes: nodes += x.nodes
-      return Variable.sum(nodes)
-    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
-    if len(nodes) == 0: return NumNode(0)
-    elif len(nodes) == 1: return nodes[0]
-    return SumNode(nodes)
-
-  @staticmethod
-  def ands(nodes:List[Node]) -> Node:
-    if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
-    nodes = [x for x in nodes if x.min != x.max]
-    if len(nodes) == 0: return NumNode(1)
-    elif len(nodes) == 1: return nodes[0]
-    return AndNode(nodes)
 
 # 4 basic node types
 
@@ -131,12 +133,52 @@ class RedNode(Node):
 
 # operation nodes
 
+class GeNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.min >= b), int(a.max >= b)))
+class LtNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.max < b), int(a.min < b)))
 class MulNode(OpNode): minmax = staticmethod(lambda a,b: (a.min*b, a.max*b))
-class DivNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.min/b), int(a.max/b)))
-# TODO: next three could be better
-class ModNode(OpNode): minmax = staticmethod(lambda a,b: (min(max(a.min,-b+1),0),max(min(a.max,b-1),0)))
-class GeNode(OpNode): minmax = staticmethod(lambda a,b: (0,1))
-class LtNode(OpNode): minmax = staticmethod(lambda a,b: (0,1))
+class DivNode(OpNode): minmax = staticmethod(lambda a,b: (divn(a.min, b), divn(a.max, b)))
+
+# given a number in the range [amin, amax] (inclusive)
+# what are the min and max of that number after modding it by b?
+
+# aka a fast version of:
+#values = [modn(rv, b) for rv in range(amin, amax+1)]
+#return min(values), max(values)
+
+# you have 3 included ranges
+# range 1 from min1 -> max1 (smaller than a mod)
+# range 2 from max1 -> min2
+# range 3 from min2 -> max2 (smaller than a mod)
+
+def modrange_negative(amin, amax, b):
+  assert amin<0 and amax<0
+  min1, max1 = amin, math.ceil(amin/b)*b
+  min2, max2 = math.floor(amax/b)*b, amax
+  if max1 > min2: return (modn(min1, b), modn(max2, b))    # range 2 doesn't exist, min1 -> max2 is smaller than a mod
+  if max1 < min2: return (-b+1, 0)                         # range 2 is the full distance
+  if min2 == max2: return (modn(min1, b), 0)               # range 1 is the only valid
+  return (-b+1, 0)                                         # range 1 and 3 are valid
+
+def modrange_positive(amin, amax, b):
+  assert amin>=0 and amax>=0
+  min1, max1 = amin, math.ceil(amin/b)*b
+  min2, max2 = math.floor(amax/b)*b, amax
+  if max1 > min2: return (modn(min1, b), modn(max2, b))   # range 2 doesn't exist, min1 -> max2 is smaller than a mod
+  if max1 < min2: return (0, b-1)                         # range 2 is the full distance
+  if min1 == max1: return (0, modn(max2, b))              # range 3 is the only valid
+  return (0, b-1)                                         # range 1 and 3 are valid
+
+def modrange(amin, amax, b):
+  if amin < 0 and amax < 0:
+    return modrange_negative(amin, amax, b)
+  if amin >= 0 and amax >= 0:
+    return modrange_positive(amin, amax, b)
+  if amin < 0 and amax >= 0:
+    min1, max1 = modrange_negative(amin, -1, b)
+    min2, max2 = modrange_positive(0, amax, b)
+    return min(min1, min2), max(max1, max2)
+
+class ModNode(OpNode): minmax = staticmethod(lambda a,b: modrange(a.min, a.max, b))
 
 # reduce nodes
 

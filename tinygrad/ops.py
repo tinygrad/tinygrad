@@ -159,6 +159,9 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       prg = cls.method_cache[k.key]
     else:
       prg = k.codegen().build(cls.runtime_type)
+    if getenv("PRINT_AST", "") == prg.name:
+      k.print()
+      print(prg.prg)
     rawbufs = prg.lower(k.bufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, rawbufs))
     prg(rawbufs)

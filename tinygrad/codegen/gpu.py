@@ -64,8 +64,6 @@ class GPUCodegen(ASTKernel):
       if should_upcast:
         for j in range(4): did_store.add(o+j)
         v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
-      idxy, valid = self.sts[buf_index].expr_idxs(o)
-      assert valid.min == 1, "store must always be valid"
       if hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
@@ -235,7 +233,6 @@ class GPUCodegen(ASTKernel):
   def codegen(self) -> ASTRunner:
     self.process()
     self.upcast_in_mid_reduce = False
-    if DEBUG >= 3: self.printbufs("old:", DEBUG>=4)
     self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce

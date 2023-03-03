@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod
-from tinygrad.shape import ShapeTracker, ZeroView
+from tinygrad.shape import ShapeTracker, View, ZeroView
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
@@ -61,6 +61,35 @@ class TestingShapeTracker:
     print(x, y, self.st.shape, self.shape, idx.render(), valid.render())
     assert self.st.shape == self.shape
     assert x == y
+
+class TestImageShapeTracker(unittest.TestCase):
+  def test_image(self):
+    base_shape = (64, 1024, 4)
+
+    """
+    st = ShapeTracker(shape=(8, 64, 128, 3), views=[
+      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
+      ZeroView((1, 64, 128, 32, 1, 1), ((0, 1), (-1, 65), (-1, 129), (0, 32), (0, 1), (0, 1))),
+      View((8, 64, 128, 3), (4, 4160, 32, 4160), 0)])
+    offsets = [0,32,64]
+    """
+
+    st = ShapeTracker(shape=(64, 32, 8, 3, 3), views=[
+      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
+      ZeroView((1, 64, 128, 32, 1, 1), ((0, 1), (-1, 65), (-1, 129), (0, 32), (0, 1), (0, 1))),
+      View((64, 32, 8, 3, 3), (4160, 128, 4, 4160, 32), 0)])
+    offsets = [0,32,64,96]
+
+    print(st.shape)
+    for o in offsets:
+      print("offset:", o)
+      idxy, valid = st.expr_idxs(o)
+      print("idxy:", idxy.render())
+      print("valids:", [x.render() for x in valid.nodes])
+      idx = (idxy//4)%base_shape[1]
+      print("idx:", idx.render())
+      idy = (idxy//(4*base_shape[1])) #%base_shape[0]
+      print("idy:", idy.render())
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
