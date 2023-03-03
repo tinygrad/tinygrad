@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import Variable, divn, modn
+from tinygrad.shape.symbolic import Variable, NumNode
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -23,6 +23,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8)<4, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 3, 8)<3, 0, 0, "0")
     self.helper_test_variable(Variable("a", 3, 8)<2, 0, 0, "0")
+  
+  def test_mul_becomes_num(self):
+    assert isinstance(Variable("a", 2, 2)*4, NumNode)
 
   def test_equality(self):
     idx1 = Variable("idx1", 0, 3)
@@ -67,6 +70,9 @@ class TestSymbolic(unittest.TestCase):
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
+  def test_div_neg_min_max(self):
+    self.helper_test_variable(Variable("a", 0, 7) // -2, -3, 0, "((a//2)*-1)")
+
   def test_sum_div_min_max(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
 
@@ -94,6 +100,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
+
+  def test_div_div(self):
+    self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
 
   def test_distribute_mul(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
@@ -172,15 +181,15 @@ class TestSymbolicNumeric(unittest.TestCase):
         self.assertLessEqual(v.min, min(values))
         self.assertGreaterEqual(v.max, max(values))
 
-  def test_mod_4(self): self.helper_test_numeric(lambda x: modn(x, 4))
-  def test_div_4(self): self.helper_test_numeric(lambda x: divn(x, 4))
-  def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: divn(x+1, 2))
-  def test_plus_1_mod_2(self): self.helper_test_numeric(lambda x: modn(x+1, 2))
+  def test_mod_4(self): self.helper_test_numeric(lambda x: (x%4))
+  def test_div_4(self): self.helper_test_numeric(lambda x: (x//4))
+  def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: (x+1)//2)
+  def test_plus_1_mod_2(self): self.helper_test_numeric(lambda x: (x+1)%2)
   def test_times_2(self): self.helper_test_numeric(lambda x: x*2)
   def test_times_2_plus_3(self): self.helper_test_numeric(lambda x: x*2 + 3)
-  def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: modn(x*2 + 3, 4))
-  def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: divn(x*2 + 3, 4))
-  def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: modn(divn(x*2 + 3, 4), 4))
+  def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)%4)
+  def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
+  def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
 
 if __name__ == '__main__':
   unittest.main()

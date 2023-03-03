@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
-from tinygrad.shape.symbolic import Node, ModNode, MulNode, DivNode, SumNode, Variable, render_python
+from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker
 from tinygrad.helpers import getenv, DEBUG, prod, partition
 
@@ -40,9 +40,9 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
       if idx.min >= base_shape[1]//2:
         idx -= base_shape[1]
         idy += 1
-    #print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   else:
     idx = (idxy//4)%base_shape[1]
+  #print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
 class GPUCodegen(ASTKernel):
