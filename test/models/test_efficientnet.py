@@ -42,6 +42,7 @@ def preprocess(img, new=False):
 
 
 def _infer(model: EfficientNet, img, bs=1):
+  Tensor.training = False
   img = preprocess(img)
   # run the net
   if bs > 1: img = img.repeat(bs, axis=0)

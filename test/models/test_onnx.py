@@ -111,7 +111,7 @@ class TestOnnxModel(unittest.TestCase):
   def _test_model(self, dat, input_name, input_new, debug=False):
     onnx_model = onnx.load(io.BytesIO(dat))
     print("onnx loaded")
-    from test.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
+    from test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
     run_onnx = get_run_onnx(onnx_model)
 
     def run(img):

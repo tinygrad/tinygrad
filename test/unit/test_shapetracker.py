@@ -10,7 +10,7 @@ def shapetracker_getitem(st, val):
   exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
   return locals["idx"] if locals["valid"] else -1
 
-class TestingShapeTracker:
+class CheckingShapeTracker:
   def __init__(self, shape):
     self.st = ShapeTracker(shape)
     self.t = np.arange(prod(shape), dtype=np.uint8).reshape(shape)
@@ -93,7 +93,7 @@ class TestImageShapeTracker(unittest.TestCase):
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = TestingShapeTracker((1, 10))
+    self.st = CheckingShapeTracker((1, 10))
 
   def tearDown(self):
     self.st.assert_same()
@@ -236,7 +236,7 @@ class TestComplexShapeTracker(unittest.TestCase):
 
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = TestingShapeTracker((7,4))
+    self.st = CheckingShapeTracker((7,4))
 
   def tearDown(self):
     self.st.assert_same()
@@ -275,7 +275,7 @@ class TestSingleShapeTracker(unittest.TestCase):
 
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
-    self.st = TestingShapeTracker((7,4))
+    self.st = CheckingShapeTracker((7,4))
     self.apply = lambda fxn: [fxn(x) for x in [self.st]]
 
   def tearDown(self):

@@ -42,9 +42,6 @@ def helper_test_speed(f1, *args):
     # force syncing
     [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
 
-    # L2 defeat (64 MB)
-    np.zeros((4096, 4096), dtype=np.float32) - 1
-
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     if DEBUG >= 4: print("benchmark start")
