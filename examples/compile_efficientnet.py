@@ -1,3 +1,4 @@
+import struct
 from models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from extra.utils import fetch
@@ -55,8 +56,10 @@ if __name__ == "__main__":
 
   # save the weights
   for name,cl in bufs_to_save.items():
-    weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
-    cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+    b = bytes(cl._buf)
+    num = len(b) // 4
+    weights = ",".join([ str(f) for f in struct.unpack(str(num)+'f', b)])
+    cprog.append(f"static float {name}[{num}] = {{{weights}}};")
 
   # image library!
   cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode('utf-8')]
@@ -67,8 +70,10 @@ if __name__ == "__main__":
   lbls = ['"'+lbls[i]+'"' for i in range(1000)]
   cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
 
-  # buffers (empty + weights)
-  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len in bufs.values()] 
+  # empty buffers
+  # TODO move all, but the input buffer into the net function to help the compiler
+  # see https://godbolt.org/z/eozaYWveP
+  cprog += [f"float {name}[{len}];" for name,len in bufs.values() if name not in bufs_to_save]
 
   # the functions
   cprog += list(functions.values())
