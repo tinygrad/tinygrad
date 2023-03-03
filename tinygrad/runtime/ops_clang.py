@@ -22,7 +22,7 @@ class ClangProgram:
     # TODO: is there a way to not write this to disk?
     fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if OSX else 'so'}"
     if not os.path.exists(fn):
-      subprocess.check_output(['clang', '-shared', '-O2', '-Wall', '-Werror', '-std=c2x', '-lm', '-fPIC', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
+      subprocess.check_output(['clang', '-shared', '-O2', '-Wall','-Werror', '-lm', '-fPIC', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
@@ -33,7 +33,7 @@ class ClangProgram:
 
 class ClangCodegen(GPUCodegen):
   # TODO could add `static` as kernel_prefix, but we can't use -shared and DLL to test the code in __init__
-  lang = GPULanguage(buffer_suffix="restrict", kernel_prefix="[[gnu::always_inline]]")
+  lang = GPULanguage(buffer_suffix="restrict")
 
 class ClangBuffer(CompiledBuffer):
   raw_buffer_type = RawMallocBuffer
