@@ -24,6 +24,20 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8)<3, 0, 0, "0")
     self.helper_test_variable(Variable("a", 3, 8)<2, 0, 0, "0")
 
+  def test_equality(self):
+    idx1 = Variable("idx1", 0, 3)
+    idx2 = Variable("idx2", 0, 3)
+    assert idx1 == idx1
+    assert idx1 != idx2
+    assert idx1*4 == idx1*4
+    assert idx1*4 != idx1*3
+    assert idx1*4 != idx1+4
+    assert idx1*4 != idx2*4
+    assert idx1+idx2 == idx1+idx2
+    # TODO: unique ordering?
+    #assert idx1+idx2 == idx2+idx1
+    assert idx1+idx2 != idx2
+
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")
 

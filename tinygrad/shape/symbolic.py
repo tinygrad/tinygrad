@@ -1,6 +1,6 @@
 from __future__ import annotations
-import math
-from typing import List, Dict, Callable, Type
+import math, itertools
+from typing import List, Dict, Callable, Type, Union
 from tinygrad.helpers import partition, all_same
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -17,11 +17,12 @@ class Node:
   b: int
   min: int
   max: int
+  def __repr__(self): return "<"+self.render()+">"   # only use this for debugging!
   def render(self, ops=None, ctx=None):
     if ops is None: ops = render_python
     if self.min == self.max and type(self) != NumNode: return NumNode(self.min).render(ops, ctx)
     return ops[type(self)](self, ops, ctx)
-  def __add__(self, b:int): return Variable.sum([self, Variable.num(b)]) if b != 0 else self
+  def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:int): return self+-b
   def __ge__(self, b:int): return GeNode(self, b)
   def __lt__(self, b:int): return LtNode(self, b)
@@ -37,10 +38,10 @@ class Node:
   # *** complex ops ***
 
   def __floordiv__(self, b:int):
-    assert b != 0
+    assert b > 0
     if b == 1: return self
-    if isinstance(self, MulNode) and modn(self.b, b) == 0: return self.a*divn(self.b, b)
-    if isinstance(self, MulNode) and modn(b, self.b) == 0: return self.a//divn(b, self.b)
+    if isinstance(self, MulNode) and self.b % b == 0: return self.a*(self.b//b)
+    if isinstance(self, MulNode) and b % self.b == 0: return self.a//(b//self.b)
     if isinstance(self, SumNode):
       factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, (MulNode, NumNode))) and x.b%b == 0)
       nofactor = []
@@ -71,6 +72,7 @@ class Node:
     return DivNode(self, b)
 
   def __mod__(self, b:int):
+    assert b > 0
     if b == 1: return NumNode(0)
     if isinstance(self, SumNode):
       new_nodes = []
@@ -103,6 +105,16 @@ class Node:
     nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
     nodes.append(NumNode(sum([x.b for x in num_nodes])))
 
+    # combine any MulNodes that factorize
+    nodes, mul_nodes = partition(nodes, lambda x: not isinstance(x, MulNode))
+    # group by equality (don't use render!)
+    mul_nodes = sorted(mul_nodes, key=lambda x: x.a.render())
+    new_mul_nodes = []
+    for k, g in itertools.groupby(mul_nodes, key=lambda x: x.a):
+      new_mul_nodes.append(k * sum(x.b for x in g))
+
+    nodes += new_mul_nodes
+
     # filter 0s
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]
     return SumNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(0))
@@ -120,22 +132,26 @@ class Variable(Node):
   def __init__(self, expr:str, nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
     self.expr, self.min, self.max = expr, nmin, nmax
+  def __eq__(self, b:Variable): return isinstance(b, type(self)) and self.expr == b.expr
 
 class NumNode(Node):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
+  def __eq__(self, b:NumNode): return isinstance(b, type(self)) and self.b == b.b
 
 class OpNode(Node):
   def __init__(self, a:Node, b:int):
     self.a, self.b = a, b
     self.min, self.max = self.minmax(a,b)
   minmax = staticmethod(lambda a,b: (1//0, 1//0))
+  def __eq__(self, b:OpNode): return isinstance(b, type(self)) and self.a == b.a and self.b == b.b
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = self.minmax(nodes)
   minmax = staticmethod(lambda nodes: (1//0, 1//0))
+  def __eq__(self, b:OpNode): return isinstance(b, type(self)) and self.nodes == b.nodes  # TODO: order doesn't matter
 
 # operation nodes
 
@@ -157,10 +173,10 @@ class ModNode(OpNode):
   def minmax(a, b):
     assert a.min >= 0
     max1, min2 = math.ceil(a.min/b)*b, math.floor(a.max/b)*b
-    if max1 > min2: return (modn(a.min, b), modn(a.max, b))   # range 2 doesn't exist, min1 -> max2 is smaller than a mod
-    if max1 < min2: return (0, b-1)                           # range 2 is the full distance
-    if a.min == max1: return (0, modn(a.max, b))              # range 3 is the only valid
-    return (0, b-1)                                           # range 1 and 3 are valid
+    if max1 < min2: return (0, b-1)             # range 2 is the full distance
+    if max1 > min2: return (a.min%b, a.max%b)   # range 2 doesn't exist, a.min -> a.max is smaller than a mod
+    if a.min == max1: return (0, a.max%b)       # range 3 is the only valid
+    return (0, b-1)                             # range 1 and 3 are valid
 
 # reduce nodes
 

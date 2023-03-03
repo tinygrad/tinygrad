@@ -97,7 +97,7 @@ class TestImageShapeTracker(unittest.TestCase):
       #out = to_image_idx(base_shape, idxy, True)
       #print(out)
       idy = (idxy//(4*base_shape[1])) #%base_shape[0]
-      idx = Variable.sum([idxy//4, idy*-base_shape[1]])
+      idx = (idxy//4) + (idy*-base_shape[1])
 
       #idx = idxy%base_shape[1]
       #idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
