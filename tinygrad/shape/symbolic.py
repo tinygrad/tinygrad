@@ -140,49 +140,25 @@ class RedNode(Node):
 class GeNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.min >= b), int(a.max >= b)))
 class LtNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.max < b), int(a.min < b)))
 class MulNode(OpNode): minmax = staticmethod(lambda a,b: (a.min*b, a.max*b))
-class DivNode(OpNode): minmax = staticmethod(lambda a,b: (divn(a.min, b), divn(a.max, b)))
-
-# given a number in the range [amin, amax] (inclusive)
-# what are the min and max of that number after modding it by b?
-
-# aka a fast version of:
-#values = [modn(rv, b) for rv in range(amin, amax+1)]
-#return min(values), max(values)
+class DivNode(OpNode):
+  @staticmethod
+  def minmax(a, b):
+    assert a.min >= 0
+    return a.min//b, a.max//b
 
 # you have 3 included ranges
-# range 1 from min1 -> max1 (smaller than a mod)
-# range 2 from max1 -> min2
-# range 3 from min2 -> max2 (smaller than a mod)
-
-def modrange_negative(amin, amax, b):
-  assert amin<0 and amax<0
-  min1, max1 = amin, math.ceil(amin/b)*b
-  min2, max2 = math.floor(amax/b)*b, amax
-  if max1 > min2: return (modn(min1, b), modn(max2, b))    # range 2 doesn't exist, min1 -> max2 is smaller than a mod
-  if max1 < min2: return (-b+1, 0)                         # range 2 is the full distance
-  if min2 == max2: return (modn(min1, b), 0)               # range 1 is the only valid
-  return (-b+1, 0)                                         # range 1 and 3 are valid
-
-def modrange_positive(amin, amax, b):
-  assert amin>=0 and amax>=0
-  min1, max1 = amin, math.ceil(amin/b)*b
-  min2, max2 = math.floor(amax/b)*b, amax
-  if max1 > min2: return (modn(min1, b), modn(max2, b))   # range 2 doesn't exist, min1 -> max2 is smaller than a mod
-  if max1 < min2: return (0, b-1)                         # range 2 is the full distance
-  if min1 == max1: return (0, modn(max2, b))              # range 3 is the only valid
-  return (0, b-1)                                         # range 1 and 3 are valid
-
-def modrange(amin, amax, b):
-  if amin < 0 and amax < 0:
-    return modrange_negative(amin, amax, b)
-  if amin >= 0 and amax >= 0:
-    return modrange_positive(amin, amax, b)
-  if amin < 0 and amax >= 0:
-    min1, max1 = modrange_negative(amin, -1, b)
-    min2, max2 = modrange_positive(0, amax, b)
-    return min(min1, min2), max(max1, max2)
-
-class ModNode(OpNode): minmax = staticmethod(lambda a,b: modrange(a.min, a.max, b))
+# range 1 from a.min -> max1 (smaller than a mod)
+# range 2 from max1  -> min2
+# range 3 from min2  -> a.max (smaller than a mod)
+class ModNode(OpNode):
+  @staticmethod
+  def minmax(a, b):
+    assert a.min >= 0
+    max1, min2 = math.ceil(a.min/b)*b, math.floor(a.max/b)*b
+    if max1 > min2: return (modn(a.min, b), modn(a.max, b))   # range 2 doesn't exist, min1 -> max2 is smaller than a mod
+    if max1 < min2: return (0, b-1)                           # range 2 is the full distance
+    if a.min == max1: return (0, modn(a.max, b))              # range 3 is the only valid
+    return (0, b-1)                                           # range 1 and 3 are valid
 
 # reduce nodes
 
