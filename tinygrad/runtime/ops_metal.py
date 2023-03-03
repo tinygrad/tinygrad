@@ -1,6 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-libdispatch
 import os, subprocess, pathlib, functools
-import Metal, Cocoa, libdispatch # type: ignore # pylint: disable=import-error
+import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage

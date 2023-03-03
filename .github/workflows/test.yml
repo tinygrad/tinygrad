@@ -38,7 +38,7 @@ jobs:
     - name: Lint with flake8
       run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
     - name: Lint tinygrad with pylint
-      run: pylint tinygrad/ --disable=W0105
+      run: pylint tinygrad/ --disable=W0105,E0401
     - name: Run mypy
       run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --warn-unreachable
 
