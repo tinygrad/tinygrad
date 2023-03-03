@@ -27,38 +27,6 @@ class Node:
     if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes])
     return MulNode(self, b)
 
-  @staticmethod
-  def num(num:int) -> Node: return NumNode(num)
-
-  @staticmethod
-  def ands(nodes:List[Node]) -> Node:
-    if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
-    # filter 1s
-    nodes = [x for x in nodes if x.min != x.max]
-    return AndNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
-
-  @staticmethod
-  def sum(nodes:List[Node]) -> Node:
-    # expand any sums inside one sum
-    if any([isinstance(x, SumNode) for x in nodes]):
-      nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
-      for x in sum_nodes: nodes += x.nodes
-      return Variable.sum(nodes)
-
-    # combine any numbers inside a sum
-    nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
-    num_sum = sum([x.b for x in num_nodes])
-    if num_sum >= 0: nodes.append(NumNode(num_sum))
-    else:
-      # TODO: this is broken due to something with negative mods. $50 for a PR that fixes this
-      lte_0, rest = partition(num_nodes, lambda x: x.b <= 0)
-      nodes += [NumNode(x.b) for x in sorted(lte_0, key=lambda x:x.b) if x.b != 0]
-      if len(rest): nodes += [NumNode(sum([x.b for x in rest]))]
-
-    # filter 0s
-    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
-    return SumNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(0))
-
   # *** complex ops ***
 
   def __floordiv__(self, b:int):
@@ -108,6 +76,38 @@ class Node:
     if a.min >= 0 and a.max < b: return a
     if a.min == a.max: return Variable.num(modn(a.min, b))
     return ModNode(a, b)
+
+  @staticmethod
+  def num(num:int) -> Node: return NumNode(num)
+
+  @staticmethod
+  def sum(nodes:List[Node]) -> Node:
+    # expand any sums inside one sum
+    if any([isinstance(x, SumNode) for x in nodes]):
+      nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
+      for x in sum_nodes: nodes += x.nodes
+      return Variable.sum(nodes)
+
+    # combine any numbers inside a sum
+    nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
+    num_sum = sum([x.b for x in num_nodes])
+    if num_sum >= 0: nodes.append(NumNode(num_sum))
+    else:
+      # TODO: this is broken due to something with negative mods. $50 for a PR that fixes this
+      lte_0, rest = partition(num_nodes, lambda x: x.b <= 0)
+      nodes += [NumNode(x.b) for x in sorted(lte_0, key=lambda x:x.b) if x.b != 0]
+      if len(rest): nodes += [NumNode(sum([x.b for x in rest]))]
+
+    # filter 0s
+    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
+    return SumNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(0))
+
+  @staticmethod
+  def ands(nodes:List[Node]) -> Node:
+    if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
+    # filter 1s
+    nodes = [x for x in nodes if x.min != x.max]
+    return AndNode(nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
 
 # 4 basic node types
 
