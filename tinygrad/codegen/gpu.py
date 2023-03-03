@@ -25,6 +25,12 @@ class GPULanguage(NamedTuple):
   extra_args : List[str] = []
   float4 : Optional[str] = None
 
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, validhacks=False):
+  idx = (idxy//4)%base_shape[1]
+  idy = (idxy//(4*base_shape[1]))%base_shape[0]
+  if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
+  return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
+
 class GPUCodegen(ASTKernel):
   lang : GPULanguage = GPULanguage()
 
@@ -41,12 +47,6 @@ class GPUCodegen(ASTKernel):
     BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A=(A+B)", ReduceOps.MAX: "A=max(A,B)"
   }
   start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
-
-  def image_idx(self, buf_index:int, idxy:Node, validhacks=False):
-    idx = (idxy//4)%self.bufs[buf_index]._base_shape[1]
-    idy = (idxy//(4*self.bufs[buf_index]._base_shape[1]))%self.bufs[buf_index]._base_shape[0]
-    if validhacks: idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
-    return f"(int2)({idx.render(render_cl)}, {idy.render(render_cl)})"
 
   def store(self, buf_index:int, value:List[Token]) -> None:
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
@@ -66,7 +66,7 @@ class GPUCodegen(ASTKernel):
         v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
       if hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
-        self.kernel.append(f"write_imagef(data{buf_index}, {self.image_idx(buf_index, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+        self.kernel.append(f"write_imagef(data{buf_index}, {to_image_idx(self.bufs[buf_index]._base_shape, idxy)}, {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
         self.kernel.append(f"(({self.lang.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
@@ -97,7 +97,7 @@ class GPUCodegen(ASTKernel):
           ldr = const
         elif hasattr(self.bufs[buf_index]._buf, "IMAGE"):
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
-          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {self.image_idx(buf_index, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
+          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, {to_image_idx(self.bufs[buf_index]._base_shape, idxy, VALIDHACKS)}) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
         elif should_upcast and can_merge:
           ldr = Token(f"(({self.lang.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:

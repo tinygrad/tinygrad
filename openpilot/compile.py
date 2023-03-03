@@ -93,7 +93,7 @@ def compile(dat, output_fn):
   FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
     try:
-      from test.test_onnx import run_onnx_torch
+      from test.models.test_onnx import run_onnx_torch
       torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
       print(thneed_out, torch_out, "mse", np.sum((thneed_out-torch_out)**2), "max err", np.max(np.abs((thneed_out-torch_out))))
       np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)
@@ -130,8 +130,8 @@ def compile(dat, output_fn):
       # compare torch to thneed
       np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
       print("thneed self-test passed!")
-    except ModuleNotFoundError:
-      pass
+    except ModuleNotFoundError as e:
+      print(f"TEST NOT HAPPENING {e}")
 
 
 # UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 python3 openpilot/compile.py

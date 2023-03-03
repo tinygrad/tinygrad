@@ -91,9 +91,9 @@ class Node:
     # combine any numbers inside a sum
     nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
     num_sum = sum([x.b for x in num_nodes])
+    # TODO: these can't be merged due to image indexing. it's not clear which idx to group the offset with
     if num_sum >= 0: nodes.append(NumNode(num_sum))
     else:
-      # TODO: this is broken due to something with negative mods. $50 for a PR that fixes this
       lte_0, rest = partition(num_nodes, lambda x: x.b <= 0)
       nodes += [NumNode(x.b) for x in sorted(lte_0, key=lambda x:x.b) if x.b != 0]
       if len(rest): nodes += [NumNode(sum([x.b for x in rest]))]
