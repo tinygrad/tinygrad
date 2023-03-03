@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod
-from tinygrad.shape import ShapeTracker, View, ZeroView
+from tinygrad.shape import ShapeTracker, View, ZeroView, merge_views
 from tinygrad.codegen.gpu import to_image_idx
 
 def shapetracker_getitem(st, val):
@@ -74,6 +74,12 @@ class TestImageShapeTracker(unittest.TestCase):
       View((8, 64, 128, 3), (4, 4160, 32, 4160), 0)])
     offsets = [0,32,64]
     """
+
+    new_view = merge_views(
+      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
+      View((64, 32, 8, 3, 3), (4160, 128, 4, 4160, 32), 0)
+    )
+    print(new_view)
 
     st = ShapeTracker(shape=(64, 32, 8, 3, 3), views=[
       View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
