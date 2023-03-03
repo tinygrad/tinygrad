@@ -117,7 +117,6 @@ class LazyBuffer:
       x.children.add(self)
     if not LAZY:
       self.realize()
-    if DEBUG >= 4: print(f"create {self}")
 
   def __repr__(self): return f"<LB {self.shape} op:{self.op.op if self.realized is None else 'realized'}>"
 
