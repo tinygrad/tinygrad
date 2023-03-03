@@ -117,6 +117,7 @@ class Node:
 
 class Variable(Node):
   def __init__(self, expr:str, nmin:int, nmax:int):
+    assert nmin >= 0 and nmin <= nmax
     self.expr, self.min, self.max = expr, nmin, nmax
 
 class NumNode(Node):

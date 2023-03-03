@@ -86,11 +86,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
   def test_big_mod(self):
-    self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(a%10)")
-    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
+    # NOTE: we no longer support negative variables
+    #self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
+    #self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(a%10)")
+    #self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
+    #self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
 
   def test_gt_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "0")
