@@ -95,7 +95,7 @@ class TestImageShapeTracker(unittest.TestCase):
       idxy, valid = st.expr_idxs(o)
       print("idxy:", idxy.render())
       print("valids:", [x.render() for x in valid.nodes])
-      out = to_image_idx(base_shape, idxy, True)
+      out = to_image_idx(base_shape, idxy, valid, True)
       print(out)
       #idy = (idxy//(4*base_shape[1])) #%base_shape[0]
       #idx = (idxy//4) + (idy*-base_shape[1])
