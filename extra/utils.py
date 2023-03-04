@@ -1,6 +1,7 @@
 import pickle
 import numpy as np
 from tqdm import tqdm
+import shutil
 import tempfile
 from tinygrad.helpers import prod, getenv
 
@@ -25,7 +26,7 @@ def download_file(url, fp, skip_if_exists=False):
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
     f.close()
-    os.rename(f.name, fp)
+    shutil.move(f.name, fp)
 
 def my_unpickle(fb0):
   key_prelookup = {}
