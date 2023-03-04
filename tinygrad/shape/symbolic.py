@@ -1,5 +1,5 @@
 from __future__ import annotations
-import math, itertools
+import math, itertools, functools
 from typing import List, Dict, Callable, Type, Union
 from tinygrad.helpers import partition, all_same
 
@@ -22,10 +22,12 @@ class Node:
       assert type(self) == Variable  # TODO: remove this when we fix variable create
       return NumNode(self.min).render(ops, ctx)
     return ops[type(self)](self, ops, ctx)
-  def __repr__(self): return "<"+self.render()+">"   # only use this for debugging!
+  @functools.cached_property
+  def key(self) -> str: return self.render()
+  def __repr__(self): return "<"+self.key+">"
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
-    return self.render() == other.render()
+    return self.key == other.key
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:int): return self+-b
   def __ge__(self, b:int): return create_node(GeNode, self, b)
@@ -129,6 +131,7 @@ class Node:
 
 # 4 basic node types
 
+# TODO: move to Node.var
 class Variable(Node):
   def __init__(self, expr:str, nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax

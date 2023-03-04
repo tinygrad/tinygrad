@@ -37,8 +37,7 @@ class TestSymbolic(unittest.TestCase):
     assert idx1*4 != idx1+4
     assert idx1*4 != idx2*4
     assert idx1+idx2 == idx1+idx2
-    # TODO: unique ordering?
-    #assert idx1+idx2 == idx2+idx1
+    assert idx1+idx2 == idx2+idx1
     assert idx1+idx2 != idx2
 
   def test_factorize(self):
@@ -139,7 +138,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable.ands([Variable.num(1), Variable("a", 0, 1)]), 0, 1, "a")
 
   def test_mod_factor_negative(self):
-    # this is technically wrong, if b is 0 the output will be negative
     self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
     self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
 
