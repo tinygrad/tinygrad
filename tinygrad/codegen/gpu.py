@@ -240,9 +240,10 @@ class GPUCodegen(ASTKernel):
 
   def required_optimizations(self):
     for buf_index,buf in enumerate(self.bufs):
-      if hasattr(buf._buf, "IMAGE") and not self.buftokens[buf_index].can_float4():
-        axis = self.sts[buf_index].strides.index(1)
-        self.shift_to_last(axis, 4)
+      if hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and self.upcast_in_mid_reduce)):
+        axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
+        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+        self.shift_to_last(axes[0], 4)
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
 

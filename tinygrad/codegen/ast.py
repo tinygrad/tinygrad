@@ -3,7 +3,7 @@ import itertools
 from typing import List, Tuple, Optional
 from tinygrad.helpers import prod, dedup, all_same
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
-from tinygrad.shape import ShapeTracker, View, ZeroView, strides_for_shape
+from tinygrad.shape import ShapeTracker, View, strides_for_shape
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -82,7 +82,6 @@ class ASTKernel:
 
     # process
     self.sts : List[ShapeTracker] = [x.st.copy() for x in self.bufs]   # create new shapetrackers inside this kernel
-    self.simplify_views()
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
@@ -119,17 +118,6 @@ class ASTKernel:
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
-
-  def simplify_views(self):
-    for i in range(len(self.sts)):
-      if hasattr(self.bufs[i]._buf, "IMAGE"):
-        st = self.sts[i]
-        if len(st.views) == 3:
-          assert isinstance(st.views[1], ZeroView)
-          # this is correct, but VALIDHACKS breaks
-          #new_view = merge_views(st.views[0], st.views[2])
-          #self.sts[i] = ShapeTracker(new_view.shape, [new_view])
-        #assert len(self.sts[i].views) == 1
 
   def simplify_ones(self):
     # remove places where the shape is all ones
