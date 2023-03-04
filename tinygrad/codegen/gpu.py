@@ -244,12 +244,20 @@ class GPUCodegen(ASTKernel):
     if self.first_reduce < self.shape_len and end_dimension > 1 and end_dimension <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
       self.upcast()
 
+  def required_optimizations(self):
+    for buf_index,buf in enumerate(self.bufs):
+      if hasattr(buf._buf, "IMAGE") and not self.buftokens[buf_index].can_float4():
+        axis = self.sts[buf_index].strides.index(1)
+        self.shift_to_last(axis, 4)
+        self.upcast()
+
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
   def codegen(self) -> ASTRunner:
     self.process()
     self.upcast_in_mid_reduce = False
-    self.hand_coded_optimizations()
+    self.required_optimizations()
+    #self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):

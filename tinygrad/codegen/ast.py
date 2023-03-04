@@ -161,6 +161,11 @@ class ASTKernel:
       if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
       if axis is not None: st.permute(tuple(axis))
 
+  def shift_to_last(self, axis, amount):
+    self.reshape_and_permute(
+      lambda x: list(x[0:axis]) + ([x[axis]//amount, amount] if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      [i for i in range(self.shape_len+1) if i != axis+1] + [axis+1])
+
   # drops the final dimension
   def upcast(self):
     upcasted = [x.shape[-1] for x in self.sts if x.shape[-1] != 1]

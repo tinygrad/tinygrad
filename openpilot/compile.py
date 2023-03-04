@@ -68,7 +68,9 @@ def compile(dat, output_fn):
   used_ops = 0
   cl_cache = []
   for prg,args in model_exec.jit_cache:
-    setattr(prg.clprg, 'op_estimate', prg.op_estimate)   # pass this to thneed
+    # pass these to thneed
+    setattr(prg.clprg, 'op_estimate', prg.op_estimate)
+    setattr(prg.clprg, 'prg', prg.prg)
     cl_cache.append((prg.clprg, [prg.global_size, prg.local_size, *[x._cl for x in args]]))
     used_ops += prg.op_estimate
 
