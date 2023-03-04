@@ -162,7 +162,7 @@ class GPUCodegen(ASTKernel):
     # simplify (sets first_reduce)
     self.simplify_ones()
 
-    # are we grouping?
+    # are we grouping? what does this have to do with float4?
     if self.lang.float4 and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
@@ -184,6 +184,16 @@ class GPUCodegen(ASTKernel):
     # simplify (sets first_reduce)
     self.simplify_ones()
 
+    # use more opencl indexing if the output buffer is an image and we have room
+    if hasattr(self.bufs[0]._buf, "IMAGE") and self.first_reduce+len(self.group_for_reduce) < 3:
+      base_shape = self.bufs[0]._base_shape
+      if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
+        if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
+        self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
+        self.simplify_ones()
+
+    # **** below this line need to be optional and benchmarked ****
+
     # split to 4 float4s based on a heuristic
     if self.buftokens[0].can_float4() and any(hasattr(buf._buf, "IMAGE") for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
@@ -202,14 +212,6 @@ class GPUCodegen(ASTKernel):
         self.upcast()
 
         # re-simplify
-        self.simplify_ones()
-
-    # use more opencl indexing if the output buffer is an image and we have room
-    if hasattr(self.bufs[0]._buf, "IMAGE") and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0]._base_shape
-      if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
-        if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
-        self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
     # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling). no simplify needed since it's just an upcast
