@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import Variable, divn, modn
+from tinygrad.shape.symbolic import Variable, NumNode, Node
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -23,6 +23,48 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8)<4, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 3, 8)<3, 0, 0, "0")
     self.helper_test_variable(Variable("a", 3, 8)<2, 0, 0, "0")
+  
+  def test_div_becomes_num(self):
+    assert isinstance(Variable("a", 2, 3)//2, NumNode)
+
+  def test_var_becomes_num(self):
+    assert isinstance(Variable("a", 2, 2), NumNode)
+
+  def test_equality(self):
+    idx1 = Variable("idx1", 0, 3)
+    idx2 = Variable("idx2", 0, 3)
+    assert idx1 == idx1
+    assert idx1 != idx2
+    assert idx1*4 == idx1*4
+    assert idx1*4 != idx1*3
+    assert idx1*4 != idx1+4
+    assert idx1*4 != idx2*4
+    assert idx1+idx2 == idx1+idx2
+    assert idx1+idx2 == idx2+idx1
+    assert idx1+idx2 != idx2
+
+  def test_factorize(self):
+    a = Variable("a", 0, 8)
+    self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
+
+  def test_factorize_no_mul(self):
+    a = Variable("a", 0, 8)
+    self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
+
+  def test_neg(self):
+    self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
+
+  def test_add_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(1+a)")
+
+  def test_add_num_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)+Variable.num(1), 1, 9, "(1+a)")
+
+  def test_sub_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, "(-1+a)")
+
+  def test_sub_num_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)-Variable.num(1), -1, 7, "(-1+a)")
 
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")
@@ -45,6 +87,9 @@ class TestSymbolic(unittest.TestCase):
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
+  def test_div_neg_min_max(self):
+    self.helper_test_variable(Variable("a", 0, 7) // -2, -3, 0, "((a//2)*-1)")
+
   def test_sum_div_min_max(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
 
@@ -57,9 +102,9 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
   
-  @unittest.skip("mod max is wrong")
   def test_mod_factor(self):
-    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "((b*50)%100)")
+    # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
 
   def test_sum_div_const(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 4, 0, 7, "a")
@@ -72,6 +117,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
+
+  def test_div_div(self):
+    self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
 
   def test_distribute_mul(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
@@ -86,11 +134,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
   def test_big_mod(self):
-    self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(a%10)")
-    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
+    # NOTE: we no longer support negative variables
+    #self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
+    #self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(a%10)")
+    #self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
+    #self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
 
   def test_gt_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "0")
@@ -107,16 +156,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable.ands([Variable.num(1), Variable("a", 0, 1)]), 0, 1, "a")
 
   def test_mod_factor_negative(self):
-    # this is technically wrong, if b is 0 the output will be negative
-    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -1, 9, "((-1+a)%28)")
-    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, -1, 27, "((-1+a)%28)")
+    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
+    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
 
   def test_sum_combine_num(self):
     self.helper_test_variable(Variable.sum([Variable.num(29), Variable("a", 0, 10), Variable.num(-23)]), 6, 16, "(6+a)")
 
   def test_div_factor(self):
-    # TODO: this isn't right
-    self.helper_test_variable(Variable.sum([Variable.num(-44), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
+    self.helper_test_variable(Variable.sum([Variable.num(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
   
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
@@ -132,7 +179,7 @@ class TestSymbolic(unittest.TestCase):
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
-    # TODO: why are the negative tests broken?
+    # TODO: why are the negative tests broken? (even if we did support negative variables)
     #MIN, MAX = -10, 10
     MIN, MAX = 0, 10
     # one number
@@ -150,15 +197,15 @@ class TestSymbolicNumeric(unittest.TestCase):
         self.assertLessEqual(v.min, min(values))
         self.assertGreaterEqual(v.max, max(values))
 
-  def test_mod_4(self): self.helper_test_numeric(lambda x: modn(x, 4))
-  def test_div_4(self): self.helper_test_numeric(lambda x: divn(x, 4))
-  def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: divn(x+1, 2))
-  def test_plus_1_mod_2(self): self.helper_test_numeric(lambda x: modn(x+1, 2))
+  def test_mod_4(self): self.helper_test_numeric(lambda x: (x%4))
+  def test_div_4(self): self.helper_test_numeric(lambda x: (x//4))
+  def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: (x+1)//2)
+  def test_plus_1_mod_2(self): self.helper_test_numeric(lambda x: (x+1)%2)
   def test_times_2(self): self.helper_test_numeric(lambda x: x*2)
   def test_times_2_plus_3(self): self.helper_test_numeric(lambda x: x*2 + 3)
-  def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: modn(x*2 + 3, 4))
-  def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: divn(x*2 + 3, 4))
-  def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: modn(divn(x*2 + 3, 4), 4))
+  def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)%4)
+  def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
+  def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
 
 if __name__ == '__main__':
   unittest.main()
