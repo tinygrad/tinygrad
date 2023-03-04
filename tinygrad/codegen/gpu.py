@@ -257,18 +257,21 @@ class GPUCodegen(ASTKernel):
     # this shouldn't do anything if you ran the hand coded optimizations
     self.required_optimizations()
 
+    # there's sometimes ones here
+    self.simplify_ones()
+
     if DEBUG >= 2:
       ll = -1
       axis = []
       for i, rs in enumerate(self.sts[self.full_buf_index].shape):
-        st = f"{rs:3d}"
+        st = f"{rs:4d}"
         ll += len(str(st)) + 1
         color = 'blue'
         if i >= self.first_reduce:
           color = "green" if i < self.first_reduce + len(self.group_for_reduce) else "red"
         axis.append(colored(st, color))
       for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]:
-        st = f"{s:3d}"
+        st = f"{s:4d}"
         ll += len(str(st)) + 1
         axis.append(colored(st, 'magenta' if reduce else 'yellow', bright=True))
       print(' '.join(axis)+(" "*(50-max(0, ll))), end="")
