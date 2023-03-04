@@ -85,6 +85,9 @@ class ASTKernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
+    # get full shape buf index (earlybufs if there are any, otherwise output)
+    self.full_buf_index : int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
+
   def print(self):
     buf_count = -1
     op_count = -1

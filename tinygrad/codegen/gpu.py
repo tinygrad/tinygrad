@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker
-from tinygrad.helpers import getenv, DEBUG, prod, partition
+from tinygrad.helpers import getenv, DEBUG, prod, partition, colored
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -257,6 +257,29 @@ class GPUCodegen(ASTKernel):
     # this shouldn't do anything if you ran the hand coded optimizations
     self.required_optimizations()
 
+    if DEBUG >= 2:
+      ll = -1
+      axis = []
+      for i, rs in enumerate(self.sts[self.full_buf_index].shape):
+        st = f"{rs:3d}"
+        ll += len(str(st)) + 1
+        color = 'blue'
+        if i >= self.first_reduce:
+          if i < self.first_reduce + len(self.group_for_reduce):
+            color = 'green'
+          else:
+            color = 'red'
+        axis.append(colored(st, color))
+      print(' '.join(axis)+(" "*(25-max(0,ll))), end="")
+      print(' | ', end="")
+      ll = -1
+      axis = []
+      for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]:
+        st = f"{s:3d}"
+        ll += len(str(st)) + 1
+        axis.append(colored(st, 'red' if reduce else 'yellow', bright=True))
+      print(' '.join(axis)+(" "*(25-max(0, ll))), end="")
+
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))))
@@ -290,13 +313,10 @@ class GPUCodegen(ASTKernel):
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop is not None:
-      full_shape_candidates = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
-      full_shape : Tuple[int, ...] = self.sts[0].shape if len(full_shape_candidates) == 0 else full_shape_candidates[0]
-
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
-      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.sts[self.full_buf_index].shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
