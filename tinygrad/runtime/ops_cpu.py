@@ -1,8 +1,11 @@
 import numpy as np
 import operator
-from typing import ClassVar, Callable, Dict
+from typing import ClassVar, Callable, Dict, Tuple
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, InterpretedBuffer, Op
-from tinygrad.helpers import shape_to_axis
+
+def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
+  assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
+  return tuple(i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b)
 
 base_fxn_for_op : Dict[Op, Callable] = {
   UnaryOps.NEG: lambda x: -x, UnaryOps.NOT: lambda x: (1.0 - x),
