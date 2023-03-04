@@ -252,7 +252,14 @@ class GPUCodegen(ASTKernel):
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
     self.simplify_ones()
-    self.simplify_merge_adjacent()
+
+    # this is optional, but a great choice to avoid modding
+    if hasattr(self.bufs[0]._buf, "IMAGE"):
+      base_shape = self.bufs[0]._base_shape
+      if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
+        if DEBUG >= 3: print("split opencl", base_shape, self.sts[0].shape)
+        self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
+        self.simplify_ones()
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
