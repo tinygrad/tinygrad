@@ -156,7 +156,7 @@ class GPUCodegen(ASTKernel):
       if DEBUG >= 4: print(f"early merging axis {eb_valid} from {eb_valids}")
 
       # no change, we added a dimension
-      self.shift_to_last(eb_valid, 4)
+      self.shift_to(eb_valid, 4)
 
       # drop the last dimension
       self.upcast()
@@ -169,6 +169,7 @@ class GPUCodegen(ASTKernel):
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
+          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce)
           self.group_for_reduce.append(sz)
           break
 
@@ -183,13 +184,13 @@ class GPUCodegen(ASTKernel):
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
       if DEBUG >= 4: print(f"late merging axis {lb_valid} from {lb_valids}")
 
-      # no change, we added a dimension
-      self.shift_to_last(lb_valid, 4)
-
       if self.group_for_reduce and self.first_reduce <= 2:
-        self.upcast_in_mid_reduce = True
+        self.shift_to(lb_valid, 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
         self.group_for_reduce.append(4)
+        self.upcast_in_mid_reduce = True  # TODO: it's assumed this is the last grouped axis
       else:
+        # no change, we added a dimension
+        self.shift_to(lb_valid, 4)
         # drop the last dimension
         self.upcast()
 
@@ -208,7 +209,7 @@ class GPUCodegen(ASTKernel):
         if DEBUG >= 4: print(f"float4 merging axis {xb_choice} : {xb_choices}")
 
         # this leaves the last axis in place
-        self.shift_to_last(xb_choice, 4)
+        self.shift_to(xb_choice, 4)
 
         # drop the last dimension
         self.upcast()
@@ -224,15 +225,6 @@ class GPUCodegen(ASTKernel):
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
-    # group for reduce must be made the axis after the global ones
-    if len(self.group_for_reduce):
-      # with permute for memory coalesing
-      if len(self.group_for_reduce) == 2:
-        permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.shape_len, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len))
-      else:
-        permute_axis = list(range(0, self.first_reduce)) + [self.first_reduce+1, self.first_reduce] + list(range(self.first_reduce+2, self.shape_len+1))
-      self.reshape_and_permute(lambda x: list(x[0:self.first_reduce]) + [max(1, x[self.first_reduce]//self.group_for_reduce[0]), min(x[self.first_reduce], self.group_for_reduce[0])] + list(x[self.first_reduce+1:]), permute_axis)
-
     # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling)
     end_dimension = max([st.shape[-1] for st in self.sts])
     if self.first_reduce < self.shape_len and end_dimension > 1 and end_dimension <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
@@ -243,7 +235,7 @@ class GPUCodegen(ASTKernel):
       if hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and self.upcast_in_mid_reduce)):
         axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-        self.shift_to_last(axes[0], 4)
+        self.shift_to(axes[0], 4)
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
 
@@ -251,6 +243,8 @@ class GPUCodegen(ASTKernel):
   # group_for_reduce will have to be better first
   def codegen(self) -> ASTRunner:
     self.process()
+    if DEBUG >= 4: self.printbufs("old:", DEBUG>=5)
+
     self.upcast_in_mid_reduce = False
     self.hand_coded_optimizations()
 
@@ -262,7 +256,7 @@ class GPUCodegen(ASTKernel):
 
     # fancy colored shape printer
     if DEBUG >= 3:
-      axis = [(f"{rs:4d}", ("green" if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.sts[self.full_buf_index].shape)]
+      axis = [(f"{rs:4d}", ("green" if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
       axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
       print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
 
@@ -273,7 +267,7 @@ class GPUCodegen(ASTKernel):
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))))
 
     self.output_shape : Tuple[int, ...] = self.sts[0].shape[:self.first_reduce] + tuple(self.group_for_reduce)
-    assert self.sts[self.full_buf_index].shape[:len(self.output_shape)] == self.output_shape, f"output shape mismatch : {self.sts[self.full_buf_index].shape[:len(self.output_shape)]} != {self.output_shape}"
+    assert self.full_shape[:len(self.output_shape)] == self.output_shape, f"output shape mismatch : {self.full_shape[:len(self.output_shape)]} != {self.output_shape}"
     if DEBUG >= 4:
       print("output shape", self.output_shape)
       self.printbufs("new:", DEBUG>=5)
@@ -303,7 +297,7 @@ class GPUCodegen(ASTKernel):
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
-      self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.sts[self.full_buf_index].shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     

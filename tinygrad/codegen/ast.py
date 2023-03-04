@@ -122,6 +122,9 @@ class ASTKernel:
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
+  @property
+  def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape
+
   def simplify_ones(self):
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
@@ -164,10 +167,17 @@ class ASTKernel:
       if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
       if axis is not None: st.permute(tuple(axis))
 
-  def shift_to_last(self, axis, amount):
+  # axis : the axis to pull from
+  # amount : the amount to take
+  # top : if you want to pull that amount from the top
+  # insert_before : place to insert the new stuff
+  def shift_to(self, axis, amount, top=False, insert_before=None):
+    if insert_before is None: insert_before = self.shape_len
+    move_axis = axis if top else axis+1
+    if move_axis < insert_before: insert_before += 1
     self.reshape_and_permute(
-      lambda x: list(x[0:axis]) + ([x[axis]//amount, amount] if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
-      [i for i in range(self.shape_len+1) if i != axis+1] + [axis+1])
+      lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
 
   # drops the final dimension
   def upcast(self):
