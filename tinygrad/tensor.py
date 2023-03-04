@@ -156,8 +156,9 @@ class Tensor:
     def _deepwalk(node, visited, nodes):
       visited.add(node)
       if node._ctx:
-        for i in [k for k in node._ctx.parents if k not in visited]:
-          _deepwalk(i, visited, nodes)
+        for i in node._ctx.parents:
+          if i not in visited:
+            _deepwalk(i, visited, nodes)
         nodes.append(node)
       return nodes
     return _deepwalk(self, set(), [])
