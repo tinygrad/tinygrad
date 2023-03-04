@@ -156,9 +156,7 @@ class GPUCodegen(ASTKernel):
       if DEBUG >= 3: print(f"early merging axis {eb_valid} from {eb_valids}")
 
       # no change, we added a dimension
-      self.reshape_and_permute(
-        lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]),
-        [i for i in range(self.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
+      self.shift_to_last(eb_valid, 4)
 
       # drop the last dimension
       self.upcast()
@@ -186,9 +184,7 @@ class GPUCodegen(ASTKernel):
       if DEBUG >= 3: print(f"late merging axis {lb_valid} from {lb_valids}")
 
       # no change, we added a dimension
-      self.reshape_and_permute(
-        lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
-        [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
+      self.shift_to_last(lb_valid, 4)
 
       if self.group_for_reduce and self.first_reduce <= 2:
         self.upcast_in_mid_reduce = True
@@ -212,9 +208,7 @@ class GPUCodegen(ASTKernel):
         if DEBUG >= 3: print(f"float4 merging axis {xb_choice} : {xb_choices}")
 
         # this leaves the last axis in place
-        self.reshape_and_permute(
-          lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
-          [i for i in range(self.shape_len+1) if i != xb_choice+1] + [xb_choice+1])
+        self.shift_to_last(xb_choice, 4)
 
         # drop the last dimension
         self.upcast()
@@ -222,7 +216,7 @@ class GPUCodegen(ASTKernel):
         # re-simplify
         self.simplify_ones()
 
-    # use more opencl indexing
+    # use more opencl indexing if the output buffer is an image
     if self.first_reduce == 2 and hasattr(self.bufs[0]._buf, "IMAGE"):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
@@ -251,23 +245,16 @@ class GPUCodegen(ASTKernel):
         self.shift_to_last(axis, 4)
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
-    self.simplify_ones()
-
-    # this is optional, but a great choice to avoid modding
-    if hasattr(self.bufs[0]._buf, "IMAGE"):
-      base_shape = self.bufs[0]._base_shape
-      if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
-        if DEBUG >= 3: print("split opencl", base_shape, self.sts[0].shape)
-        self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
-        self.simplify_ones()
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
   def codegen(self) -> ASTRunner:
     self.process()
     self.upcast_in_mid_reduce = False
+    self.hand_coded_optimizations()
+
+    # this shouldn't do anything if you ran the hand coded optimizations
     self.required_optimizations()
-    #self.hand_coded_optimizations()
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
