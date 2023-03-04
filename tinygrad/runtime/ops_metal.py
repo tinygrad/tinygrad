@@ -1,4 +1,4 @@
-# pip3 install pyobjc-framework-Metal pyobjc-framework-libdispatch
+# pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, functools
 import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
