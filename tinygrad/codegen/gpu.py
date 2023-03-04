@@ -132,7 +132,7 @@ class GPUCodegen(ASTKernel):
     return tokens
 
   def ast_parse(self, x, acc:List[Token], do_reduce=False) -> List[Token]:
-    if not isinstance(x, LazyOp): return self.load(self.bufs.index(x))
+    if not isinstance(x, LazyOp): return self.load(self.bufs.index(x), "mid" if x is None else None)  # hack for local
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values : List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = GPUCodegen.code_for_op[x.op]  # TODO: replace this with a function
@@ -305,22 +305,16 @@ class GPUCodegen(ASTKernel):
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.sts[self.full_buf_index].shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
+      self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
     if self.group_for_reduce:
-      """
-      lidx, lvalid = self.sts[-1].expr_idxs()
-      assert lvalid.min == 1, "local buffer must always be valid"
-      self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
-      for i,acc in enumerate(accumulators):
-        #self.kernel.append(self.lang.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
-        self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
-      """
       self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs 
       self.kernel.append(self.lang.barrier+"\n")
 
       # this is used to identify the thread doing the reducing (lidx == 0) and is repeated from store
+      # must happen before the upcast
       lidx, lvalid = self.sts[-1].expr_idxs()
       assert lvalid.min == 1, "local buffer must always be valid"
 
@@ -333,25 +327,15 @@ class GPUCodegen(ASTKernel):
 
       assert self.reduceopop is not None
       self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
-      new_accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
-      for acc in new_accumulators: self.kernel.append(f"{acc.decltype()} {acc.tok} = 0.0;\n")
 
+      # second stage reduce with a new set of accumulators. TODO: this is very similar to above
+      accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
+      # TODO: do we need acc_offsets here?
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
       self.kernel.append(f"for (int mid = 0; mid < {self.sts[-1].size()}; mid++) {{\n")
-      self.load(-1, "mid")
-      self.kernel.append("}\n")
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceopop, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
 
-      """
-      self.kernel.append(f"for (int mid = 0; mid < {prod(self.group_for_reduce)//(4 if self.upcast_in_mid_reduce else 1)}; mid++) {{\n")
-      for i in range(len(new_accumulators)//(4 if self.upcast_in_mid_reduce else 1)):
-        if self.upcast_in_mid_reduce:
-          self.kernel.append(f'float4 ld = vload4(0, &temp{i}[mid*4]);\n')
-          for j in range(4):
-            self.kernel.append(GPUCodegen.code_for_op[self.reduceopop].replace('A', new_accumulators[i*4+j].tok).replace('B', f'ld.{"xyzw"[j]}')+";\n")
-        else:
-          self.kernel.append(GPUCodegen.code_for_op[self.reduceopop].replace('A', new_accumulators[i].tok).replace('B', f'temp{i}[mid]')+";\n")
       self.kernel.append("}\n")
-      """
-      accumulators = new_accumulators
     
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
