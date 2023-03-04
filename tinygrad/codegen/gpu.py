@@ -153,7 +153,7 @@ class GPUCodegen(ASTKernel):
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
       eb_valid = eb_valids.index(True)
-      if DEBUG >= 3: print(f"early merging axis {eb_valid} from {eb_valids}")
+      if DEBUG >= 4: print(f"early merging axis {eb_valid} from {eb_valids}")
 
       # no change, we added a dimension
       self.shift_to_last(eb_valid, 4)
@@ -181,7 +181,7 @@ class GPUCodegen(ASTKernel):
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
-      if DEBUG >= 3: print(f"late merging axis {lb_valid} from {lb_valids}")
+      if DEBUG >= 4: print(f"late merging axis {lb_valid} from {lb_valids}")
 
       # no change, we added a dimension
       self.shift_to_last(lb_valid, 4)
@@ -205,7 +205,7 @@ class GPUCodegen(ASTKernel):
 
       if len(xb_choices):
         xb_choice = sorted(xb_choices)[0][2]
-        if DEBUG >= 3: print(f"float4 merging axis {xb_choice} : {xb_choices}")
+        if DEBUG >= 4: print(f"float4 merging axis {xb_choice} : {xb_choices}")
 
         # this leaves the last axis in place
         self.shift_to_last(xb_choice, 4)
@@ -220,7 +220,7 @@ class GPUCodegen(ASTKernel):
     if self.first_reduce == 2 and hasattr(self.bufs[0]._buf, "IMAGE"):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
-        if DEBUG >= 3: print("split opencl", base_shape, self.sts[0].shape)
+        if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
@@ -282,9 +282,9 @@ class GPUCodegen(ASTKernel):
       self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
 
     self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
-    if DEBUG >= 3:
+    if DEBUG >= 4:
       print("output shape", self.output_shape)
-      self.printbufs("new:", DEBUG>=4)
+      self.printbufs("new:", DEBUG>=5)
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
@@ -370,7 +370,6 @@ class GPUCodegen(ASTKernel):
         function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
       GPUCodegen.kernel_name_cache[prg] = function_name
 
-    if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
       self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
