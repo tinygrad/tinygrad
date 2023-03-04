@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, all_same
 from tinygrad.shape import ShapeTracker, View, ZeroView, merge_views
-from tinygrad.shape.symbolic import Variable
 from tinygrad.codegen.gpu import to_image_idx
 
 def shapetracker_getitem(st, val):
@@ -69,14 +68,6 @@ class TestImageShapeTracker(unittest.TestCase):
     base_shape = (64, 1024, 4)
     print(base_shape)
 
-    """
-    st = ShapeTracker(shape=(8, 64, 128, 3), views=[
-      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
-      ZeroView((1, 64, 128, 32, 1, 1), ((0, 1), (-1, 65), (-1, 129), (0, 32), (0, 1), (0, 1))),
-      View((8, 64, 128, 3), (4, 4160, 32, 4160), 0)])
-    offsets = [0,32,64]
-    """
-
     new_view = merge_views(
       View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
       View((64, 32, 8, 3, 3), (4160, 128, 4, 4160, 32), 0)
@@ -90,21 +81,18 @@ class TestImageShapeTracker(unittest.TestCase):
     offsets = [0,32,64,96]
 
     print(st.shape)
+    idys = []
     for o in offsets:
       print("offset:", o)
       idxy, valid = st.expr_idxs(o)
       print("idxy:", idxy.render())
       print("valids:", [x.render() for x in valid.nodes])
-      out = to_image_idx(base_shape, idxy, valid, True)
-      print(out)
-      #idy = (idxy//(4*base_shape[1])) #%base_shape[0]
-      #idx = (idxy//4) + (idy*-base_shape[1])
+      idx, idy = to_image_idx(base_shape, idxy, valid, True)
+      idys.append(idy)
+      print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
 
-      #idx = idxy%base_shape[1]
-      #idx, idy = [x.a if isinstance(x, ModNode) and x.a.max < x.b*2 else x for x in (idx, idy)]
-
-      #print("idy:", idy.render())
-      #print("idx:", idx.render())
+    # y index shouldn't be changing
+    assert all_same(idys)
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
