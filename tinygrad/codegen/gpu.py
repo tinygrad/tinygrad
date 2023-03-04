@@ -4,7 +4,7 @@ from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
-from tinygrad.shape import ShapeTracker
+from tinygrad.shape import ShapeTracker, View
 from tinygrad.helpers import getenv, DEBUG, prod, partition, colored, mnum
 
 # div is different in cl than python
@@ -226,8 +226,7 @@ class GPUCodegen(ASTKernel):
         self.simplify_ones()
 
     # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling)
-    end_dimension = max([st.shape[-1] for st in self.sts])
-    if self.first_reduce < self.shape_len and end_dimension > 1 and end_dimension <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
+    if self.first_reduce < self.shape_len and self.full_shape[-1] > 1 and self.full_shape[-1] <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
       self.upcast()
 
   def required_optimizations(self):
@@ -256,15 +255,22 @@ class GPUCodegen(ASTKernel):
 
     # fancy colored shape printer
     if DEBUG >= 3:
-      axis = [(f"{rs:4d}", ("green" if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
+      axis = [(f"{rs:4d}", (("cyan" if self.sts[0].shape[i] != self.full_shape[i] else "green") if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
       axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
       print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       self.bufs.append(None)
-      self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))))
+      # TODO: the strides of this can be controlled
+      st = ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.buftokens[0].axis]))
+      buftoken = Token("temp", Types.FLOAT, ptr=True)
+      # manual upcast of the local
+      for _,_,r in self.buftokens[0].axis[::-1]:
+        buftoken.array(st.shape[-1], st.views[-1].strides[-1], r)
+        st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset)
+      self.sts.append(st)
+      self.buftokens.append(buftoken)
 
     self.output_shape : Tuple[int, ...] = self.sts[0].shape[:self.first_reduce] + tuple(self.group_for_reduce)
     assert self.full_shape[:len(self.output_shape)] == self.output_shape, f"output shape mismatch : {self.full_shape[:len(self.output_shape)]} != {self.output_shape}"
@@ -303,7 +309,7 @@ class GPUCodegen(ASTKernel):
     
     # middle
     if self.group_for_reduce:
-      self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()}];\n")
+      self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()*self.buftokens[-1].size()}];\n")
       self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs 
       self.kernel.append(self.lang.barrier+"\n")
 
