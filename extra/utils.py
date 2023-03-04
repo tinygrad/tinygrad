@@ -24,6 +24,7 @@ def download_file(url, fp, skip_if_exists=False):
   with tempfile.NamedTemporaryFile(delete=False) as f:
     for chunk in r.iter_content(chunk_size=16384):
       progress_bar.update(f.write(chunk))
+    f.close()
     os.rename(f.name, fp)
 
 def my_unpickle(fb0):
