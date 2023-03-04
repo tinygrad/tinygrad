@@ -117,7 +117,7 @@ class ASTKernel:
       for st in self.sts:
         print(st)
     for i in range(len(self.sts)):
-      print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if i < len(self.bufs) else "FAKE")
+      print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)

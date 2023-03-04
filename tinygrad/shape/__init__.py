@@ -24,9 +24,9 @@ class View:
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
 
-  def expr_node(self, idx=None):
+  def expr_node(self, idx=None, offset=0):
     if idx is None: idx = Variable('idx', 0, prod(self.shape))
-    ret = [Variable.num(self.offset)]
+    ret = [Variable.num(self.offset+offset)]
     acc = 1
     for d,s in self.shape_strides[::-1]:
       if d != 1 and s != 0:
@@ -109,6 +109,9 @@ class ShapeTracker:
   @property
   def offset(self) -> int: return self.views[-1].offset
 
+  # this is the real size
+  def size(self): return prod([s for s,st in zip(self.shape, self.strides) if st != 0])
+
   def _expr_idx(self, idx):
     valid = Variable.num(1)
     for v in self.views[0:-1][::-1]:
@@ -124,12 +127,13 @@ class ShapeTracker:
         self.views = self.views[:-2] + [new_view]
         self.simplify()
 
+  # TODO: arg order is reversed here
   def expr_idxs(self, offset=0, idxs=None):
     if idxs is None: idxs = [f"idx{i}" for i in range(len(self.shape))]
     return self._expr_idx(self.views[-1].expr_idxs(idxs, offset))
 
-  def expr_node(self, idx='idx'):
-    return self._expr_idx(self.views[-1].expr_node(Variable(idx, 0, prod(self.shape)-1)))
+  def expr_node(self, idx='idx', offset=0):
+    return self._expr_idx(self.views[-1].expr_node(Variable(idx, 0, prod(self.shape)-1), offset))
 
   def movement_op(self, op, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     return getattr(self, str(op).split(".")[1].lower())(arg)

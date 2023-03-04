@@ -106,7 +106,7 @@ class ASTRunner:
   def build(self, runtime):
     self.clprg = runtime(self.name, self.prg)
     return self
-  def lower(self, bufs) -> List[RawBuffer]: return [x.raw() for i,x in enumerate(bufs) if i not in self.bufs_to_delete]
+  def lower(self, bufs) -> List[RawBuffer]: return [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
   def __call__(self, bufs):
     et = self.clprg(self.global_size, self.local_size, *bufs, wait=DEBUG>=2)
     if et is not None: GlobalCounters.time_sum_s += et
