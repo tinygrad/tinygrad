@@ -167,26 +167,16 @@ class GPUCodegen(ASTKernel):
           self.group_for_reduce.append(sz)
           break
 
-    # if there's images in the latebufs, we have to make an axis the 4 storing one. this affects the kernel shape
-    if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf not in self.earlybufs) and not self.buftokens[0].can_float4():
-      lb_valids = [True] * self.shape_len
-      for i in range(len(self.bufs)):
-        valids = [self.sts[i].shape[j]%4 == 0 and (self.sts[i].views[-1].strides[j] == 1 or not hasattr(self.bufs[i]._buf, "IMAGE") or self.bufs[i] in self.earlybufs) for j in range(self.shape_len)]
-        lb_valids = [x and y for x,y in zip(lb_valids, valids)]
-      assert any(lb_valids), f"invalid op with images {lb_valids}"
-      lb_valid = lb_valids.index(True)
-      assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
-      if DEBUG >= 4: print(f"late merging axis {lb_valid} from {lb_valids}")
+    # are we upcasting in mid reduce?
+    if hasattr(self.bufs[0]._buf, "IMAGE") and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
+      axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
+      assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+      self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
+      self.group_for_reduce.append(4)
+      self.upcast_in_mid_reduce = True  # TODO: it's assumed this is the last grouped axis
 
-      if self.group_for_reduce and self.first_reduce <= 2:
-        self.shift_to(lb_valid, 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
-        self.group_for_reduce.append(4)
-        self.upcast_in_mid_reduce = True  # TODO: it's assumed this is the last grouped axis
-      else:
-        # no change, we added a dimension
-        self.shift_to(lb_valid, 4)
-        # drop the last dimension
-        self.upcast()
+    # now do everything required
+    self.required_optimizations()
 
     # simplify (sets first_reduce)
     self.simplify_ones()
@@ -231,9 +221,6 @@ class GPUCodegen(ASTKernel):
 
     self.upcast_in_mid_reduce = False
     self.hand_coded_optimizations()
-
-    # this shouldn't do anything if you ran the hand coded optimizations
-    self.required_optimizations()
 
     # there's sometimes ones here
     self.simplify_ones()
