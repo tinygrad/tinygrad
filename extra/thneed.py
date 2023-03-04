@@ -288,6 +288,7 @@ class Thneed:
           print(prg.prg)
         total_runtime += runtime
       print(f"total runtime: {total_runtime/1e6:.2f} ms   wall time: {et*1000.0:.2f} ms")
+      return total_runtime/1e9
     return et
 
   def optimize_local_workgroup(self):

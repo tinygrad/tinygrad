@@ -122,6 +122,12 @@ class ASTKernel:
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
+  @property
+  def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape
+
+  @property
+  def upcast_in_mid_reduce_axes(self): return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
+
   def simplify_ones(self):
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
@@ -164,18 +170,24 @@ class ASTKernel:
       if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
       if axis is not None: st.permute(tuple(axis))
 
-  def shift_to_last(self, axis, amount):
+  # axis : the axis to pull from
+  # amount : the amount to take
+  # top : if you want to pull that amount from the top
+  # insert_before : place to insert the new stuff
+  def shift_to(self, axis, amount, top=False, insert_before=None):
+    if insert_before is None: insert_before = self.shape_len
+    move_axis = axis if top else axis+1
+    if move_axis < insert_before: insert_before += 1
     self.reshape_and_permute(
-      lambda x: list(x[0:axis]) + ([x[axis]//amount, amount] if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
-      [i for i in range(self.shape_len+1) if i != axis+1] + [axis+1])
+      lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
 
   # drops the final dimension
   def upcast(self):
     upcasted = [x.shape[-1] for x in self.sts if x.shape[-1] != 1]
     assert len(upcasted) >= 1 and all_same(upcasted), f"can't upcast mismatch {upcasted}"
     for st,buftoken in zip(self.sts, self.buftokens):
-      if st.shape[-1] == upcasted[0]:
-        buftoken.array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
-
-    # remove the last dimension (unless it's the only dimension, then make it a 1)
-    for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset) if len(st.shape) > 1 else View((1,), (0,), st.views[-1].offset) 
+      # add last axis to the buftoken (if it's not a 1)
+      if st.shape[-1] == upcasted[0]: buftoken.array(st.shape[-1], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
+      # remove the last axis (unless it's the only dimension, then make it a 1)
+      st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset) if len(st.shape) > 1 else View((1,), (0,), st.views[-1].offset) 
