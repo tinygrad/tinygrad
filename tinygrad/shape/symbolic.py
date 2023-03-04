@@ -174,13 +174,8 @@ class ModNode(OpNode):
   @staticmethod
   def minmax(a, b):
     assert a.min >= 0
-    #values = [x%b for x in range(a.min, a.max+1)]
-    #return min(values), max(values)
-    max1, min2 = math.ceil(a.min/b)*b, math.floor(a.max/b)*b
-    if max1 < min2: return (0, b-1)             # range 2 is the full distance
-    if max1 > min2: return (a.min%b, a.max%b)   # range 2 doesn't exist, a.min -> a.max is smaller than a mod
-    if a.min == max1: return (0, a.max%b)       # range 3 is the only valid
-    return (0, b-1)                             # range 1 and 3 are valid
+    if a.max - a.min >= b or (a.min != a.max and a.min%b >= a.max%b): return (0, b-1)
+    return a.min%b, a.max%b
 
 # reduce nodes
 
