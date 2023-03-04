@@ -250,6 +250,9 @@ class GPUCodegen(ASTKernel):
         axis = self.sts[buf_index].strides.index(1)
         self.shift_to_last(axis, 4)
         self.upcast()
+        assert self.buftokens[buf_index].can_float4()
+    self.simplify_ones()
+    self.simplify_merge_adjacent()
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
