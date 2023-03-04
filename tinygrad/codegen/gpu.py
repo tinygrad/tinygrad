@@ -224,7 +224,7 @@ class GPUCodegen(ASTKernel):
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
-    # group for reduce
+    # group for reduce must be made the axis after the global ones
     if len(self.group_for_reduce):
       # with permute for memory coalesing
       if len(self.group_for_reduce) == 2:
@@ -266,36 +266,35 @@ class GPUCodegen(ASTKernel):
       axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
       print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
 
-    self.prekernel : Set[str] = set()
-    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs) else []
-
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))))
-      self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
       self.bufs.append(None)
-      self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()}];\n")
+      self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
+      self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))))
 
-    self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
+    self.output_shape : Tuple[int, ...] = self.sts[0].shape[:self.first_reduce] + tuple(self.group_for_reduce)
+    assert self.sts[self.full_buf_index].shape[:len(self.output_shape)] == self.output_shape, f"output shape mismatch : {self.sts[self.full_buf_index].shape[:len(self.output_shape)]} != {self.output_shape}"
     if DEBUG >= 4:
       print("output shape", self.output_shape)
       self.printbufs("new:", DEBUG>=5)
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
+    self.prekernel : Set[str] = set()
+    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
 
-    # output_shape[-1] is get_global_id(0)
     if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
     else:
+      # output_shape[-1] is get_global_id(0)
       self.kernel += [f"int idx{len(self.output_shape)-1-i} = {self.lang.gid[i]}; /* {self.output_shape[-1-i]} */\n" for i in range(min(len(self.lang.gid), len(self.output_shape))) if self.output_shape[-1-i] != 1]
       if len(self.output_shape) > len(self.lang.gid):
         # sometimes, there's more dimensions. compact all the dimensions into the first one
-        # TODO: these compactions should be searchable
+        # TODO: these compactions should be searchable (they sort of are with reshapes and permutes)
         final_dimension = len(self.output_shape)-len(self.lang.gid)
         for i in range(final_dimension-1, -1, -1):
           self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
-        self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
+        self.output_shape = (prod(self.output_shape[0:final_dimension+1]), ) + self.output_shape[final_dimension+1:]
         if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
@@ -310,6 +309,7 @@ class GPUCodegen(ASTKernel):
     
     # middle
     if self.group_for_reduce:
+      self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()}];\n")
       self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs 
       self.kernel.append(self.lang.barrier+"\n")
 
@@ -362,6 +362,6 @@ class GPUCodegen(ASTKernel):
       GPUCodegen.kernel_name_cache[prg] = function_name
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
-      self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
+      list(self.output_shape[::-1]) if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
       op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs if x is not None))
