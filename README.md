@@ -220,7 +220,12 @@ GRAPH=1 python3 test/test_mnist.py TestMNIST.test_sgd_onestep
 
 ### Running tests
 
+For more examples on how to run the full test suite please refer to the [CI workflow](.github/workflows/test.yml).
+
 ```bash
+python3 -m pip install -e '.[testing]'
 python3 -m pytest
+python3 -m pytest -v -k TestTrain
+python3 ./test/models/test_train.py TestTrain.test_efficientnet
 ```
 
