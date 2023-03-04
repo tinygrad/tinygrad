@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker, View
-from tinygrad.helpers import getenv, DEBUG, prod, partition, colored, mnum
+from tinygrad.helpers import getenv, DEBUG, prod, partition, colored, mnum, all_same
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -36,8 +36,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
       idx = Variable.sum(idx_nodes)
       unfactored = (Variable.sum(unfactored) // base_shape[1])
       idy += unfactored
-      # ugh really...
-      if idx.min >= base_shape[1]//2:
+      # ugh really...handtuned garbage
+      if idx.min >= (base_shape[1]*3)//4:
         idx -= base_shape[1]
         idy += 1
   else:
@@ -97,6 +97,7 @@ class GPUCodegen(ASTKernel):
       const = Token(f"({val}f)", Types.FLOAT)
     should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4()
     tokens = []
+    test_idy = []
     for o in self.buftokens[buf_index].offsets():
       key = f"val{mnum(buf_index)}_{mnum(o)}"
       if (buf_index, o) not in self.loaded_keys:
@@ -114,6 +115,7 @@ class GPUCodegen(ASTKernel):
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid, VALIDHACKS)
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
+          test_idy.append(idy.render(render_cl))
         elif should_upcast and can_merge:
           ldr = Token(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:
@@ -129,6 +131,7 @@ class GPUCodegen(ASTKernel):
           else:
             self.loaded_keys[(buf_index,o)] = Token(key, Types.FLOAT)
       tokens.append(self.loaded_keys[(buf_index,o)])
+    assert not VALIDHACKS or all_same(test_idy), f"idy changed! {test_idy}"
     return tokens
 
   def ast_parse(self, x, acc:List[Token], do_reduce=False) -> List[Token]:
