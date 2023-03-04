@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import os, time, io, pathlib, sys, traceback
+import os, time, io, pathlib, sys, traceback, tempfile
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 if os.getenv("OPT", None) is None:
@@ -145,4 +146,4 @@ if __name__ == "__main__":
     compile(dat, sys.argv[2])
   else:
     dat = fetch(OPENPILOT_MODEL)
-    compile(dat, "/tmp/output.thneed")
+    compile(dat, os.path.join(tempfile.gettempdir(), "output.thneed"))

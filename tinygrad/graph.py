@@ -1,4 +1,4 @@
-import os, atexit, itertools
+import os, tempfile, atexit, itertools
 try:
   import networkx as nx  # type: ignore
 except ImportError:
@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv, DEBUG
 
-GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
+GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", os.path.join(tempfile.gettempdir(), "net"))
 
 # **** debugging and graphing ****
 
@@ -22,6 +22,7 @@ if GRAPH:
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
     os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
+    print(f"saved {GRAPHPATH}.svg")
   atexit.register(save_graph_exit)
 
 node_count = 0
