@@ -125,6 +125,9 @@ class ASTKernel:
   @property
   def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape
 
+  @property
+  def upcast_in_mid_reduce_axes(self): return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
+
   def simplify_ones(self):
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride

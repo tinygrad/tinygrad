@@ -144,7 +144,8 @@ class GPUCodegen(ASTKernel):
 
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
-      if (not early_only or buf in self.earlybufs) and hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and self.upcast_in_mid_reduce)):
+      upcast_strides = [self.sts[buf_index].strides[i] for i in self.upcast_in_mid_reduce_axes]
+      if (not early_only or buf in self.earlybufs) and hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and (1 in upcast_strides))):
         axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
         self.shift_to(axes[0], 4)
@@ -173,7 +174,6 @@ class GPUCodegen(ASTKernel):
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
       self.group_for_reduce.append(4)
-      self.upcast_in_mid_reduce = True  # TODO: it's assumed this is the last grouped axis
 
     # now do everything required
     self.required_optimizations()
@@ -181,7 +181,7 @@ class GPUCodegen(ASTKernel):
     # simplify (sets first_reduce)
     self.simplify_ones()
 
-    # split to 4 float4s
+    # split to 4 float4s based on a heuristic
     if self.buftokens[0].can_float4() and any(hasattr(buf._buf, "IMAGE") for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
       xb_choices = []
       for i in range(self.first_reduce):
@@ -201,15 +201,15 @@ class GPUCodegen(ASTKernel):
         # re-simplify
         self.simplify_ones()
 
-    # use more opencl indexing if the output buffer is an image
-    if self.first_reduce == 2 and hasattr(self.bufs[0]._buf, "IMAGE"):
+    # use more opencl indexing if the output buffer is an image and we have room
+    if hasattr(self.bufs[0]._buf, "IMAGE") and self.first_reduce+len(self.group_for_reduce) < 3:
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
         if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
-    # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling)
+    # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling). no simplify needed since it's just an upcast
     if self.first_reduce < self.shape_len and self.full_shape[-1] > 1 and self.full_shape[-1] <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
       self.upcast()
 
@@ -219,15 +219,11 @@ class GPUCodegen(ASTKernel):
     self.process()
     if DEBUG >= 4: self.printbufs("old:", DEBUG>=5)
 
-    self.upcast_in_mid_reduce = False
     self.hand_coded_optimizations()
-
-    # there's sometimes ones here
-    self.simplify_ones()
 
     # fancy colored shape printer
     if DEBUG >= 3:
-      axis = [(f"{rs:4d}", (("cyan" if self.sts[0].shape[i] != self.full_shape[i] else "green") if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
+      axis = [(f"{rs:4d}", (("green" if i in self.upcast_in_mid_reduce_axes else "cyan") if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
       axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
       print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
 
@@ -290,12 +286,10 @@ class GPUCodegen(ASTKernel):
       lidx, lvalid = self.sts[-1].expr_idxs()
       assert lvalid.min == 1, "local buffer must always be valid"
 
-      if self.upcast_in_mid_reduce:
-        assert len(self.group_for_reduce) == 2
-        # it should be the last dimension
-        self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce+1] + [self.first_reduce+1])
+      # if any group_for_reduce items aren't reduces, upcast them here
+      for j in self.upcast_in_mid_reduce_axes:
+        self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
         self.upcast()
-        if DEBUG>=4: self.printbufs("upcast:", DEBUG>=5)
 
       assert self.reduceopop is not None
       self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
