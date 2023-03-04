@@ -260,21 +260,11 @@ class GPUCodegen(ASTKernel):
     # there's sometimes ones here
     self.simplify_ones()
 
-    if DEBUG >= 2:
-      ll = -1
-      axis = []
-      for i, rs in enumerate(self.sts[self.full_buf_index].shape):
-        st = f"{rs:4d}"
-        ll += len(str(st)) + 1
-        color = 'blue'
-        if i >= self.first_reduce:
-          color = "green" if i < self.first_reduce + len(self.group_for_reduce) else "red"
-        axis.append(colored(st, color))
-      for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]:
-        st = f"{s:4d}"
-        ll += len(str(st)) + 1
-        axis.append(colored(st, 'magenta' if reduce else 'yellow', bright=True))
-      print(' '.join(axis)+(" "*(50-max(0, ll))), end="")
+    # fancy colored shape printer
+    if DEBUG >= 3:
+      axis = [(f"{rs:4d}", ("green" if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.sts[self.full_buf_index].shape)]
+      axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
+      print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
