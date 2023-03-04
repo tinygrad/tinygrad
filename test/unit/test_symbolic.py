@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import Variable, NumNode
+from tinygrad.shape.symbolic import Variable, NumNode, Node
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -24,8 +24,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8)<3, 0, 0, "0")
     self.helper_test_variable(Variable("a", 3, 8)<2, 0, 0, "0")
   
-  def test_mul_becomes_num(self):
-    assert isinstance(Variable("a", 2, 2)*4, NumNode)
+  def test_div_becomes_num(self):
+    assert isinstance(Variable("a", 2, 3)//2, NumNode)
+
+  def test_var_becomes_num(self):
+    assert isinstance(Variable("a", 2, 2), NumNode)
 
   def test_equality(self):
     idx1 = Variable("idx1", 0, 3)
@@ -47,6 +50,21 @@ class TestSymbolic(unittest.TestCase):
   def test_factorize_no_mul(self):
     a = Variable("a", 0, 8)
     self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
+
+  def test_neg(self):
+    self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
+
+  def test_add_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(1+a)")
+
+  def test_add_num_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)+Variable.num(1), 1, 9, "(1+a)")
+
+  def test_sub_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, "(-1+a)")
+
+  def test_sub_num_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)-Variable.num(1), -1, 7, "(-1+a)")
 
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")
@@ -161,7 +179,7 @@ class TestSymbolic(unittest.TestCase):
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
-    # TODO: why are the negative tests broken?
+    # TODO: why are the negative tests broken? (even if we did support negative variables)
     #MIN, MAX = -10, 10
     MIN, MAX = 0, 10
     # one number

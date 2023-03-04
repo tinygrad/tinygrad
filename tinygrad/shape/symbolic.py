@@ -18,9 +18,7 @@ class Node:
   max: int
   def render(self, ops=None, ctx=None) -> str:
     if ops is None: ops = render_python
-    if self.min == self.max and type(self) != NumNode:
-      assert type(self) == Variable  # TODO: remove this when we fix variable create
-      return NumNode(self.min).render(ops, ctx)
+    assert isinstance(self, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
   def key(self) -> str: return self.render()
@@ -28,8 +26,9 @@ class Node:
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
+  def __neg__(self): return self*-1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
-  def __sub__(self, b:int): return self+-b
+  def __sub__(self, b:Union[Node, int]): return self+-b
   def __ge__(self, b:int): return create_node(GeNode, self, b)
   def __lt__(self, b:int): return create_node(LtNode, self, b)
   def __mul__(self, b:int):
@@ -131,10 +130,13 @@ class Node:
 
 # 4 basic node types
 
-# TODO: move to Node.var
 class Variable(Node):
-  def __init__(self, expr:str, nmin:int, nmax:int):
+  def __new__(cls, expr:str, nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
+    if nmin == nmax: return NumNode(nmin)
+    return super().__new__(cls)
+
+  def __init__(self, expr:str, nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
 
 class NumNode(Node):
