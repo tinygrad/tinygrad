@@ -265,20 +265,13 @@ class GPUCodegen(ASTKernel):
         ll += len(str(st)) + 1
         color = 'blue'
         if i >= self.first_reduce:
-          if i < self.first_reduce + len(self.group_for_reduce):
-            color = 'green'
-          else:
-            color = 'red'
+          color = "green" if i < self.first_reduce + len(self.group_for_reduce) else "red"
         axis.append(colored(st, color))
-      print(' '.join(axis)+(" "*(25-max(0,ll))), end="")
-      print(' | ', end="")
-      ll = -1
-      axis = []
       for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]:
         st = f"{s:3d}"
         ll += len(str(st)) + 1
-        axis.append(colored(st, 'red' if reduce else 'yellow', bright=True))
-      print(' '.join(axis)+(" "*(25-max(0, ll))), end="")
+        axis.append(colored(st, 'magenta' if reduce else 'yellow', bright=True))
+      print(' '.join(axis)+(" "*(50-max(0, ll))), end="")
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
