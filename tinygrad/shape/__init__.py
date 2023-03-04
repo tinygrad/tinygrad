@@ -93,7 +93,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
     elif isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
       new_strides.append(this_dim.b)
     else:
-      if DEBUG >= 3: print("can't simplify", s, this_dim.render())
+      if DEBUG >= 4: print("can't simplify", s, this_dim.render())
       break
   return View(vm1.shape, tuple(new_strides), new_offset.b) if len(new_strides) == len(vm1.strides) else None
 
@@ -128,7 +128,7 @@ class ShapeTracker:
     if len(self.views) >= 2 and isinstance(self.views[-2], View) and isinstance(self.views[-1], View):
       new_view = merge_views(self.views[-2], self.views[-1])
       if new_view:
-        if DEBUG >= 3: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
+        if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
         self.views = self.views[:-2] + [new_view]
         self.simplify()
 

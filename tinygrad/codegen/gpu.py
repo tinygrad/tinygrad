@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker
-from tinygrad.helpers import getenv, DEBUG, prod, partition
+from tinygrad.helpers import getenv, DEBUG, prod, partition, colored
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -153,12 +153,10 @@ class GPUCodegen(ASTKernel):
           eb_valids = [x and y for x,y in zip(eb_valids, valids)]
       assert any(eb_valids), f"invalid op with images {eb_valids}"
       eb_valid = eb_valids.index(True)
-      if DEBUG >= 3: print(f"early merging axis {eb_valid} from {eb_valids}")
+      if DEBUG >= 4: print(f"early merging axis {eb_valid} from {eb_valids}")
 
       # no change, we added a dimension
-      self.reshape_and_permute(
-        lambda x: list(x[0:eb_valid]) + ([x[eb_valid]//4, 4] if x[eb_valid] > 1 else [1,1]) + list(x[eb_valid+1:]),
-        [i for i in range(self.shape_len+1) if i != eb_valid+1] + [eb_valid+1])
+      self.shift_to_last(eb_valid, 4)
 
       # drop the last dimension
       self.upcast()
@@ -183,12 +181,10 @@ class GPUCodegen(ASTKernel):
       assert any(lb_valids), f"invalid op with images {lb_valids}"
       lb_valid = lb_valids.index(True)
       assert lb_valid < self.first_reduce, f"can't be in the reduce {lb_valid}"
-      if DEBUG >= 3: print(f"late merging axis {lb_valid} from {lb_valids}")
+      if DEBUG >= 4: print(f"late merging axis {lb_valid} from {lb_valids}")
 
       # no change, we added a dimension
-      self.reshape_and_permute(
-        lambda x: list(x[0:lb_valid]) + [x[lb_valid]//4, 4] + list(x[lb_valid+1:]),
-        [i for i in range(self.shape_len+1) if i != lb_valid+1] + [lb_valid+1])
+      self.shift_to_last(lb_valid, 4)
 
       if self.group_for_reduce and self.first_reduce <= 2:
         self.upcast_in_mid_reduce = True
@@ -209,12 +205,10 @@ class GPUCodegen(ASTKernel):
 
       if len(xb_choices):
         xb_choice = sorted(xb_choices)[0][2]
-        if DEBUG >= 3: print(f"float4 merging axis {xb_choice} : {xb_choices}")
+        if DEBUG >= 4: print(f"float4 merging axis {xb_choice} : {xb_choices}")
 
         # this leaves the last axis in place
-        self.reshape_and_permute(
-          lambda x: list(x[0:xb_choice]) + [x[xb_choice]//4, 4] + list(x[xb_choice+1:]),
-          [i for i in range(self.shape_len+1) if i != xb_choice+1] + [xb_choice+1])
+        self.shift_to_last(xb_choice, 4)
 
         # drop the last dimension
         self.upcast()
@@ -222,11 +216,11 @@ class GPUCodegen(ASTKernel):
         # re-simplify
         self.simplify_ones()
 
-    # use more opencl indexing
+    # use more opencl indexing if the output buffer is an image
     if self.first_reduce == 2 and hasattr(self.bufs[0]._buf, "IMAGE"):
       base_shape = self.bufs[0]._base_shape
       if all([(base_shape[0]*base_shape[1])%st.shape[0] == 0 and st.shape[0]//base_shape[0] != 0 for st in self.sts]):
-        if DEBUG >= 3: print("split opencl", base_shape, self.sts[0].shape)
+        if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
@@ -244,6 +238,15 @@ class GPUCodegen(ASTKernel):
     if self.first_reduce < self.shape_len and end_dimension > 1 and end_dimension <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
       self.upcast()
 
+  def required_optimizations(self):
+    for buf_index,buf in enumerate(self.bufs):
+      if hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and self.upcast_in_mid_reduce)):
+        axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
+        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+        self.shift_to_last(axes[0], 4)
+        self.upcast()
+        assert self.buftokens[buf_index].can_float4()
+
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
   def codegen(self) -> ASTRunner:
@@ -251,15 +254,27 @@ class GPUCodegen(ASTKernel):
     self.upcast_in_mid_reduce = False
     self.hand_coded_optimizations()
 
+    # this shouldn't do anything if you ran the hand coded optimizations
+    self.required_optimizations()
+
+    # there's sometimes ones here
+    self.simplify_ones()
+
+    # fancy colored shape printer
+    if DEBUG >= 3:
+      axis = [(f"{rs:4d}", ("green" if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.sts[self.full_buf_index].shape)]
+      axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
+      print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
+
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))))
       self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
 
     self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
-    if DEBUG >= 3:
+    if DEBUG >= 4:
       print("output shape", self.output_shape)
-      self.printbufs("new:", DEBUG>=4)
+      self.printbufs("new:", DEBUG>=5)
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
@@ -284,13 +299,10 @@ class GPUCodegen(ASTKernel):
     # early ast
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop is not None:
-      full_shape_candidates = [x.shape for x in self.sts if x.shape != self.sts[0].shape]
-      full_shape : Tuple[int, ...] = self.sts[0].shape if len(full_shape_candidates) == 0 else full_shape_candidates[0]
-
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       assert self.reduceopop is not None
       self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
-      self.kernel += [f"for (int idx{i} = 0; idx{i} < {full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
+      self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.sts[self.full_buf_index].shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)] + ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
@@ -348,7 +360,6 @@ class GPUCodegen(ASTKernel):
         function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
       GPUCodegen.kernel_name_cache[prg] = function_name
 
-    if DEBUG >= 3 and len(self.bufs_to_delete): print(f"deleting buffers {self.bufs_to_delete}")
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
       self.output_shape[::-1] if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,

@@ -85,6 +85,9 @@ class ASTKernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
+    # get full shape buf index (earlybufs if there are any, otherwise output)
+    self.full_buf_index : int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
+
   def print(self):
     buf_count = -1
     op_count = -1
@@ -161,6 +164,11 @@ class ASTKernel:
       if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
       if axis is not None: st.permute(tuple(axis))
 
+  def shift_to_last(self, axis, amount):
+    self.reshape_and_permute(
+      lambda x: list(x[0:axis]) + ([x[axis]//amount, amount] if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      [i for i in range(self.shape_len+1) if i != axis+1] + [axis+1])
+
   # drops the final dimension
   def upcast(self):
     upcasted = [x.shape[-1] for x in self.sts if x.shape[-1] != 1]
@@ -170,5 +178,5 @@ class ASTKernel:
       if st.shape[-1] == upcasted[0]:
         self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
 
-    # remove the last dimension
-    for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset)
+    # remove the last dimension (unless it's the only dimension, then make it a 1)
+    for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset) if len(st.shape) > 1 else View((1,), (0,), st.views[-1].offset) 

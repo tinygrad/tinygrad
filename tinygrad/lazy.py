@@ -46,7 +46,7 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   real_srcs : Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in get_buffers(self.op)}
-  if DEBUG >= 3:
+  if DEBUG >= 4:
     for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())):
       if x.optype == ReduceOps and x.realized is None:
         print("\nHIT", k,x, "UNFOLDABLE" if len(k.children) > 1 or len(x.children) > 1 else str())
@@ -56,7 +56,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape : Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
-    if DEBUG >= 3: print("FOLDING", psrcs[0])
+    if DEBUG >= 4: print("FOLDING", psrcs[0])
     if psrcs[0][1].optype == ReduceOps:
       top = _ast_reduceops(psrcs[0][1])
     real_srcs[psrcs[0][0]] = top
