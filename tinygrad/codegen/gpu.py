@@ -210,7 +210,8 @@ class GPUCodegen(ASTKernel):
         self.simplify_ones()
 
     # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling). no simplify needed since it's just an upcast
-    if self.first_reduce < self.shape_len and self.full_shape[-1] > 1 and self.full_shape[-1] <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
+    # NOTE: careful, this can break VALIDHACKS
+    if not self.group_for_reduce and self.first_reduce < self.shape_len and self.full_shape[-1] > 1 and self.full_shape[-1] <= 3 and (max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4 or not any(r for _,_,r in self.buftokens[self.full_buf_index].axis)):
       self.upcast()
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
