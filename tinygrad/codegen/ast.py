@@ -178,5 +178,5 @@ class ASTKernel:
       if st.shape[-1] == upcasted[0]:
         self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
 
-    # remove the last dimension
-    for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset)
+    # remove the last dimension (unless it's the only dimension, then make it a 1)
+    for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset) if len(st.shape) > 1 else View((1,), (0,), st.views[-1].offset) 
