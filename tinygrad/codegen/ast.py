@@ -173,10 +173,9 @@ class ASTKernel:
   def upcast(self):
     upcasted = [x.shape[-1] for x in self.sts if x.shape[-1] != 1]
     assert len(upcasted) >= 1 and all_same(upcasted), f"can't upcast mismatch {upcasted}"
-    for i in range(len(self.bufs)):
-      st = self.sts[i]
+    for st,buftoken in zip(self.sts, self.buftokens):
       if st.shape[-1] == upcasted[0]:
-        self.buftokens[i].array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
+        buftoken.array(upcasted[0], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
 
     # remove the last dimension (unless it's the only dimension, then make it a 1)
     for st in self.sts: st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset) if len(st.shape) > 1 else View((1,), (0,), st.views[-1].offset) 

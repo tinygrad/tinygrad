@@ -58,7 +58,7 @@ class GPUCodegen(ASTKernel):
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A=(A+B)", ReduceOps.MAX: "A=max(A,B)"
+    BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)"
   }
   start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
@@ -81,11 +81,11 @@ class GPUCodegen(ASTKernel):
       if hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
-        self.kernel.append(f"write_imagef(data{buf_index}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
-        self.kernel.append(f"(({self.lang.buffer_prefix}float4*)data{buf_index})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"(({self.lang.buffer_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
-        self.kernel.append(f"data{buf_index}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
 
   def load(self, buf_index:int) -> List[Token]:
     # constant folding
@@ -266,10 +266,14 @@ class GPUCodegen(ASTKernel):
       axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
       print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
 
+    self.prekernel : Set[str] = set()
+    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs) else []
+
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
       self.sts.append(ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce))))
       self.buftokens.append(Token("temp", Types.FLOAT, ptr=True))
+      self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{prod([s for s,st in zip(self.sts[-1].shape, self.sts[-1].strides) if st != 0])}];\n")
 
     self.output_shape = list(self.sts[0].shape[:self.first_reduce]) + self.group_for_reduce
     if DEBUG >= 4:
@@ -278,9 +282,6 @@ class GPUCodegen(ASTKernel):
 
     self.bufs_to_delete : Set[int] = set()
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
-
-    self.prekernel : Set[str] = set()
-    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs) else []
 
     # output_shape[-1] is get_global_id(0)
     if len(self.lang.gid) == 0:
@@ -307,12 +308,16 @@ class GPUCodegen(ASTKernel):
     
     # middle
     if self.group_for_reduce:
+      self.store(-1, accumulators)
+
+      """
       lidx, lvalid = self.sts[-1].expr_idxs()
       assert lvalid.min == 1, "local buffer must always be valid"
       self.kernel.append(f"int mid_idx = {lidx.render(render_cl)};\n")
       for i,acc in enumerate(accumulators):
-        self.kernel.append(self.lang.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
+        #self.kernel.append(self.lang.smem_prefix + f"{acc.decltype()} {self.buftokens[-1].tok}{i}[{prod(self.group_for_reduce)}];")
         self.kernel.append(f"{self.buftokens[-1].tok}{i}[mid_idx] = {acc.tok};\n")
+      """
       self.kernel.append(self.lang.barrier+"\n")
 
       if self.upcast_in_mid_reduce:
@@ -320,6 +325,7 @@ class GPUCodegen(ASTKernel):
         # it should be the last dimension
         self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != self.first_reduce+1] + [self.first_reduce+1])
         self.upcast()
+        if DEBUG>=4: self.printbufs("upcast:", DEBUG>=5)
 
       assert self.reduceopop is not None
       self.kernel.append("if (mid_idx == 0) {\n")
