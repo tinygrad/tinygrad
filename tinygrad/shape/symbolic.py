@@ -166,10 +166,6 @@ class DivNode(OpNode):
     assert a.min >= 0
     return a.min//b, a.max//b
 
-# you have 3 included ranges
-# range 1 from a.min -> max1 (smaller than a mod)
-# range 2 from max1  -> min2
-# range 3 from min2  -> a.max (smaller than a mod)
 class ModNode(OpNode):
   @staticmethod
   def minmax(a, b):

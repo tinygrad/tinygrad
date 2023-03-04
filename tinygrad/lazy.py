@@ -209,6 +209,7 @@ class LazyBuffer:
 
     # move permutes before reshapes if we can
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
+      # TODO: this is atrocious code
       # is contract? if so, group the axis
       def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
         out : List[List[int]] = []
