@@ -142,24 +142,18 @@ class GPUCodegen(ASTKernel):
     else:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
 
+  def required_optimizations(self, early_only=False):
+    for buf_index,buf in enumerate(self.bufs):
+      if (not early_only or buf in self.earlybufs) and hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and self.upcast_in_mid_reduce)):
+        axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
+        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+        self.shift_to(axes[0], 4)
+        self.upcast()
+        assert self.buftokens[buf_index].can_float4()
+
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
-    # shove the axis to the end and remove 
-    if any(hasattr(buf._buf, "IMAGE") for buf in self.earlybufs):
-      eb_valids = [True] * self.shape_len
-      for i in range(len(self.bufs)):
-        if hasattr(self.bufs[i]._buf, "IMAGE") and self.bufs[i] in self.earlybufs:
-          valids = [self.sts[i].shape[j]%4 == 0 and self.sts[i].views[-1].strides[j] == 1 for j in range(self.shape_len)]
-          eb_valids = [x and y for x,y in zip(eb_valids, valids)]
-      assert any(eb_valids), f"invalid op with images {eb_valids}"
-      eb_valid = eb_valids.index(True)
-      if DEBUG >= 4: print(f"early merging axis {eb_valid} from {eb_valids}")
-
-      # no change, we added a dimension
-      self.shift_to(eb_valid, 4)
-
-      # drop the last dimension
-      self.upcast()
+    self.required_optimizations(early_only=True)
 
     # simplify (sets first_reduce)
     self.simplify_ones()
@@ -228,15 +222,6 @@ class GPUCodegen(ASTKernel):
     # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling)
     if self.first_reduce < self.shape_len and self.full_shape[-1] > 1 and self.full_shape[-1] <= 3 and max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4:
       self.upcast()
-
-  def required_optimizations(self):
-    for buf_index,buf in enumerate(self.bufs):
-      if hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and self.upcast_in_mid_reduce)):
-        axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
-        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-        self.shift_to(axes[0], 4)
-        self.upcast()
-        assert self.buftokens[buf_index].can_float4()
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
