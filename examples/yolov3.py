@@ -1,6 +1,7 @@
 # https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg
-import sys
+import os
 import io
+import sys
 import time
 import math
 import cv2
@@ -404,4 +405,5 @@ if __name__ == "__main__":
   show_labels(prediction)
   prediction = process_results(prediction)
   boxes = add_boxes(np.array(Image.fromarray(img).resize((608, 608))), prediction)
-  cv2.imwrite('boxes.jpg', boxes)
+  cv2.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)), "boxes.jpg"), boxes)
+

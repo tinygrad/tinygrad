@@ -9,10 +9,13 @@ dist
 *.egg-info
 /env
 a.out
-boxes.jpg
+examples/*.jpg
+examples/*.png
+examples/
 weights/*
 pandecode.dump
 vertex.bin
 recognize*
 .idea
 disassemblers/applegpu
+openpilot/output.thneed

@@ -6,7 +6,6 @@ import gzip
 import argparse
 import math
 import re
-import tempfile
 from functools import lru_cache
 from collections import namedtuple
 
@@ -607,7 +606,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
-  parser.add_argument('--out', type=str, default=os.path.join(tempfile.gettempdir(), "rendered.png"), help="Output filename")
+  parser.add_argument('--out', type=str, default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "rendered.png"), help="Output filename")
   args = parser.parse_args()
 
   Tensor.no_grad = True

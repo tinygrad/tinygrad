@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, time, io, pathlib, sys, traceback, tempfile
+import os, time, io, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
@@ -13,6 +13,7 @@ if os.getenv("IMAGE", None) is None:
 from tinygrad.helpers import getenv
 ALLOWED_KERNEL_COUNT = getenv("ALLOWED_KERNEL_COUNT", 0)
 DEBUGCL = getenv("DEBUGCL", 0)
+FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output.thneed")
 
 import onnx
 import numpy as np
@@ -146,4 +147,4 @@ if __name__ == "__main__":
     compile(dat, sys.argv[2])
   else:
     dat = fetch(OPENPILOT_MODEL)
-    compile(dat, os.path.join(tempfile.gettempdir(), "output.thneed"))
+    compile(dat, FILENAME)
