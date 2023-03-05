@@ -3,7 +3,6 @@ import os
 import time
 import io
 import unittest
-import tempfile
 import numpy as np
 import onnx
 from extra.utils import fetch
@@ -61,11 +60,6 @@ class TestOnnxModel(unittest.TestCase):
     tinygrad_out = tinygrad_out.numpy()
     pr.disable()
     stats = pstats.Stats(pr)
-    path_prof = os.path.join(tempfile.gettempdir(), "net.prof")
-    path_svg = os.path.join(tempfile.gettempdir(), "net.svg")
-    stats.dump_stats(path_prof)
-    os.system(f"flameprof {path_prof} > {path_svg}")
-    print(f"saved {path_svg}")
     ps = stats.sort_stats(pstats.SortKey.TIME)
     ps.print_stats(30)
 
