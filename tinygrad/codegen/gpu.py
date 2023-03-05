@@ -62,6 +62,10 @@ class GPUCodegen(ASTKernel):
   }
   start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
+  def group_float4(self, grp:List[Token]) -> Token:
+    if all(g.tok.endswith(e) for g,e in zip(grp, [".x", ".y", ".z", ".w"])) and all_same([g.tok.split(".")[0] for g in grp]): return Token(grp[0].tok.split(".")[0], Types.FLOAT4)
+    else: return Token(f"{self.lang.float4}({','.join(g.tok for g in grp)})", Types.FLOAT4)
+
   def store(self, buf_index:int, value:List[Token]) -> None:
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
     assert len(self.sts[buf_index].views) == 1, "store has more than one view"
@@ -77,7 +81,7 @@ class GPUCodegen(ASTKernel):
       assert valid.min == 1, "store must always be valid"
       if should_upcast:
         for j in range(4): did_store.add(o+j)
-        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4)
+        v = self.group_float4([to_store[o+j] for j in range(4)])
       if self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
