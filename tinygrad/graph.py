@@ -8,7 +8,8 @@ from typing import Dict, List, Optional
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv, DEBUG
 
-GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", os.path.join(tempfile.gettempdir(), "net"))
+GRAPH, PRUNEGRAPH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0)
+GRAPHPATH = getenv("GRAPHPATH", "/tmp/net" if platform.system() != "Windows" else os.path.join(tempfile.gettempdir(), "net"))
 
 # **** debugging and graphing ****
 
