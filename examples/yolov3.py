@@ -1,7 +1,7 @@
 # https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg
+import sys
 import os
 import io
-import sys
 import time
 import math
 import cv2
