@@ -58,6 +58,7 @@ def optimize(runtime_type, codegen_type, ast, output_buffer):
     for _ in range(2):
       ops = None
       best, new_axis = None, None
+      global_size, local_size = None, None
       valid_axes = [None]
       while len(valid_axes):
         i = valid_axes.pop(0)
@@ -78,10 +79,11 @@ def optimize(runtime_type, codegen_type, ast, output_buffer):
           if best is None or et < best:
             best = et
             new_axis = i
+            global_size, local_size = prg.global_size, prg.local_size
         except Exception as e:
           et = float('nan')
           raise e
-        print(f"{str(axes)+' '+str(i):8s} : {colorshape} : {et*1e6:7.2f} us")
+        print(f"{str(axes)+' '+str(i):8s} : {colorshape} : {et*1e6:7.2f} us : {str(global_size):18s} {str(local_size):12s} ")
       axes += [] if new_axis is None else [new_axis]
       if new_axis is None: break
 
