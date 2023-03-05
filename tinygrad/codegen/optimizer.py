@@ -1,3 +1,42 @@
+from tinygrad.helpers import prod
+from tinygrad.runtime.ops_gpu import CL
+import pyopencl as cl
+
+def optimize_local_workgroup(prg, rawbufs):
+  MAX_WORKGROUP = CL.cl_ctx.devices[0].max_work_group_size
+  args = [prg.global_size, prg.local_size]
+  potential_locals = [None, tuple(args[1])] if args[1] is not None else [None]
+
+  # NOTE: if args[1] is not None, it may use local variables and you shouldn't change this
+  if args[1] is None and len(args[0]) == 1:
+    for l1 in [args[0][0], 1, 4, 16, MAX_WORKGROUP//4, MAX_WORKGROUP]:
+      potential_locals.append((l1,))
+
+  if args[1] is None and len(args[0]) == 2:
+    for l2 in [1, 4, 16, MAX_WORKGROUP//4, MAX_WORKGROUP]:
+      potential_locals.append((min(MAX_WORKGROUP, args[0][0]), l2))
+
+  if args[1] is None and len(args[0]) == 3:
+    for l2 in [16,args[0][1],MAX_WORKGROUP]:
+      for l3 in [4,16,args[0][2],MAX_WORKGROUP]:
+        for l1 in [max(1, MAX_WORKGROUP//(l2*l3)), args[0][0], 4, 16, MAX_WORKGROUP]:
+          if l1 > args[0][0] or l2 > args[0][1] or l3 > args[0][2]: continue
+          potential_locals.append((l1, l2, l3))
+
+  best, choice = None, None
+  for local_args in potential_locals:
+    if local_args is not None and prod(local_args) > MAX_WORKGROUP: continue
+    prg.local_size = local_args
+    try:
+      et = min([prg(rawbufs, wait=True, silent=True) for _ in range(3)])
+    except (cl.LogicError, cl.RuntimeError):
+      continue
+    if best is None or et < best:
+      best = et
+      choice = local_args
+  prg.local_size = choice
+  return best
+
 opt_key = {}
 def optimize(runtime_type, codegen_type, ast, output_buffer):
   def get():
@@ -33,7 +72,9 @@ def optimize(runtime_type, codegen_type, ast, output_buffer):
         try:
           prg = k.codegen().build(runtime_type)
           if i == None: ops = prg.op_estimate
-          et = min([prg(prg.lower(k.bufs), wait=True, silent=True) for _ in range(3)])
+          rawbufs = prg.lower(k.bufs)
+          et = optimize_local_workgroup(prg, rawbufs)
+          #et = min([prg(rawbufs, wait=True, silent=True) for _ in range(3)])
           if best is None or et < best:
             best = et
             new_axis = i

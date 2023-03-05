@@ -5,7 +5,6 @@ from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional
 import functools, operator
 from tinygrad.helpers import prod, DEBUG, getenv
 from tinygrad.shape import ShapeTracker
-from tinygrad.codegen.optimizer import optimize
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -155,6 +154,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
     if getenv("KOPT") and GlobalCounters.optimize:
+      from tinygrad.codegen.optimizer import optimize
       k = optimize(cls.runtime_type, cls.codegen_type, ast, output_buffer)
     else:
       k = cls.codegen_type(ast, output_buffer)
