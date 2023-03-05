@@ -66,7 +66,14 @@ class CLProgram:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     self.clprg = self._clprg.__getattr__(name)
-    if DEBUG >= 5 and not OSX: print(self.clprogram.get_info(cl.program_info.BINARIES)[0].decode('utf-8'))  # print the PTX for NVIDIA. TODO: probably broken for everything else
+    if DEBUG >= 5 and not OSX:
+      binary = self.clprogram.get_info(cl.program_info.BINARIES)[0]
+      if 'Adreno' in CL.cl_ctx.devices[0].name:
+        from disassemblers.adreno import disasm
+        disasm(binary)
+      else:
+        # print the PTX for NVIDIA. TODO: probably broken for everything else
+        print(binary.decode('utf-8'))
     if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
