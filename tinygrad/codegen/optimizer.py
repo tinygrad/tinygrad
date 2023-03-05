@@ -33,7 +33,7 @@ def optimize(runtime_type, codegen_type, ast, output_buffer):
         try:
           prg = k.codegen().build(runtime_type)
           if i == None: ops = prg.op_estimate
-          et = prg(prg.lower(k.bufs), wait=True, silent=True)
+          et = min([prg(prg.lower(k.bufs), wait=True, silent=True) for _ in range(3)])
           if best is None or et < best:
             best = et
             new_axis = i
@@ -45,7 +45,7 @@ def optimize(runtime_type, codegen_type, ast, output_buffer):
       if new_axis is None: break
 
     opt_key[k.key] = axes
-    print(f"best is {axes} in {et*1e6:.2f} us with {ops/et*1e-9:.2f} GFLOPS")
+    print(f"best is {axes} in {best*1e6:.2f} us with {ops/best*1e-9:.2f} GFLOPS")
     k = get()
 
   for axis in opt_key[k.key]: apply(k, axis)
