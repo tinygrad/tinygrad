@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, FusedOps, LazyOp, Op, A
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker, View
-from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same
+from tinygrad.helpers import getenv, DEBUG, dedup, prod, partition, mnum, all_same
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -78,7 +78,7 @@ class GPUCodegen(ASTKernel):
       assert valid.min == 1, "store must always be valid"
       if should_upcast:
         for j in range(4): did_store.add(o+j)
-        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4)
       if self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
@@ -272,18 +272,23 @@ class GPUCodegen(ASTKernel):
         if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
-    accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
+    accumulators : List[Token] = []
     if self.reduceop is not None:
+      if self.buftokens[0].can_float4():
+        accumulators = [Token("acc%d.%s" % (i//4, "xyzw"[i%4]), self.buftokens[0].typ) for i in self.buftokens[0].offsets()]
+        self.kernel += [f"float4 {tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for tok in dedup([x.tok.split('.')[0] for x in accumulators])]
+      else:
+        accumulators = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
+        self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
-    
+
     # middle
     if self.group_for_reduce:
       self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()*self.buftokens[-1].size()}];\n")
-      self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs 
+      self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs
       self.kernel.append(self.lang.barrier+"\n")
 
       # this is used to identify the thread doing the reducing (lidx == 0) and is repeated from store
@@ -306,7 +311,7 @@ class GPUCodegen(ASTKernel):
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(cast(LazyOp, self.reduceop).op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
 
       self.kernel.append("}\n")
-    
+
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
