@@ -61,7 +61,7 @@ class GPUCodegen(ASTKernel):
     BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)",
     FusedOps.MULACC: "A=mad(B,C,A)"
   }
-  start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY", FusedOps.MULACC: "0.0"}
+  start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
 
   def store(self, buf_index:int, value:List[Token]) -> None:
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
@@ -78,7 +78,11 @@ class GPUCodegen(ASTKernel):
       assert valid.min == 1, "store must always be valid"
       if should_upcast:
         for j in range(4): did_store.add(o+j)
-        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4)
+        # is float4
+        if all(to_store[o+j].tok.endswith(e) for j,e in enumerate([".x", ".y", ".z", ".w"])) and all_same([to_store[o+j].tok.split(".")[0] for j in range(4)]):
+          v = Token(to_store[o].tok.split(".")[0], Types.FLOAT4)
+        else:
+          v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4)
       if self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
@@ -282,7 +286,11 @@ class GPUCodegen(ASTKernel):
         self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
+      if self.reduceop.op == ReduceOps.SUM and isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL:
+        fused_reduceop = LazyOp(FusedOps.MULACC, self.reduceop.src[0].src, self.reduceop.arg)
+      else:
+        fused_reduceop = self.reduceop
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(fused_reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
 
     # middle
