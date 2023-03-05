@@ -55,7 +55,7 @@ def optimize(runtime_type, codegen_type, ast, output_buffer):
     print(f"opt {k.full_shape}")
     axes = []
 
-    for _ in range(2):
+    for _ in range(3):
       ops = None
       best, new_axis = None, None
       global_size, local_size = None, None
