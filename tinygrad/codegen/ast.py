@@ -1,7 +1,7 @@
 from enum import Enum, auto
 import itertools
 from typing import List, Tuple, Optional
-from tinygrad.helpers import prod, dedup, all_same
+from tinygrad.helpers import prod, dedup, all_same, colored
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
 from tinygrad.shape import ShapeTracker, View, strides_for_shape
 
@@ -127,6 +127,11 @@ class ASTKernel:
 
   @property
   def upcast_in_mid_reduce_axes(self): return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
+
+  def colorshape(self, pad=50) -> str:
+    axis = [(f"{rs:4d}", (("green" if i in self.upcast_in_mid_reduce_axes else "cyan") if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
+    axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
+    return ' '.join([colored(*x) for x in axis])+(" "*(pad-len(' '.join([x[0] for x in axis]))))
 
   def simplify_ones(self):
     # remove places where the shape is all ones

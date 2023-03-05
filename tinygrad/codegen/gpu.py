@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker, View
-from tinygrad.helpers import getenv, DEBUG, prod, partition, colored, mnum, all_same
+from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -228,10 +228,7 @@ class GPUCodegen(ASTKernel):
     self.hand_coded_optimizations()
 
     # fancy colored shape printer
-    if DEBUG >= 3:
-      axis = [(f"{rs:4d}", (("green" if i in self.upcast_in_mid_reduce_axes else "cyan") if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
-      axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
-      print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
+    if DEBUG >= 3: print(self.colorshape(), end="")
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
@@ -322,7 +319,7 @@ class GPUCodegen(ASTKernel):
       [") {\n"] + self.kernel)
 
     # kernel function definition
-    function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.bufs[0].shape if x != 1])
+    function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.full_shape])
 
     # painfully name the function
     if prg in GPUCodegen.kernel_name_cache:
