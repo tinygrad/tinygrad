@@ -5,6 +5,7 @@ from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional
 import functools, operator
 from tinygrad.helpers import prod, DEBUG, getenv
 from tinygrad.shape import ShapeTracker
+from tinygrad.codegen.optimizer import optimize
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -107,10 +108,10 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg)
     return self
   def lower(self, bufs) -> List[RawBuffer]: return [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
-  def __call__(self, bufs):
-    et = self.clprg(self.global_size, self.local_size, *bufs, wait=DEBUG>=2)
+  def __call__(self, bufs, wait=False, silent=False):
+    et = self.clprg(self.global_size, self.local_size, *bufs, wait=DEBUG>=2 or wait)
     if et is not None: GlobalCounters.time_sum_s += et
-    if DEBUG >= 1:
+    if DEBUG >= 1 and not silent:
       print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs):5d}  kernels {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
@@ -153,7 +154,10 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   method_cache : Dict[str, ASTRunner] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
-    k = cls.codegen_type(ast, output_buffer)
+    if getenv("KOPT") and GlobalCounters.optimize:
+      k = optimize(cls.runtime_type, cls.codegen_type, ast, output_buffer)
+    else:
+      k = cls.codegen_type(ast, output_buffer)
     if getenv("ENABLE_METHOD_CACHE"):   # TODO: this breaks the ops test!
       if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
       prg = cls.method_cache[k.key]
@@ -172,6 +176,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
 
 class GlobalCounters:
+  optimize : ClassVar[bool] = False
   global_ops : ClassVar[int] = 0
   global_mem : ClassVar[int] = 0
   time_sum_s : ClassVar[float] = 0.0

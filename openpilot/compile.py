@@ -42,7 +42,10 @@ def model_exec(run_onnx, using_graph, **inputs):
   GlobalCounters.cache = []  # don't cache pre-realize
   if using_graph: graph.GRAPH = True
   print("realizing")
-  return ret.realize()
+  GlobalCounters.optimize = True
+  myret = ret.realize()
+  GlobalCounters.optimize = False
+  return myret
 
 def compile(dat, output_fn):
   Tensor.manual_seed(1337)

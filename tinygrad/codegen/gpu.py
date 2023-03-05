@@ -155,7 +155,10 @@ class GPUCodegen(ASTKernel):
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
 
-  def hand_coded_optimizations(self):
+  def hand_coded_optimizations(self, full=False):
+    if hasattr(self, 'did_hand_coded_optimizations'): return
+    self.did_hand_coded_optimizations = True
+
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
 
@@ -193,6 +196,7 @@ class GPUCodegen(ASTKernel):
         self.simplify_ones()
 
     # **** below this line need to be optional and benchmarked ****
+    if not full: return
 
     # split to 4 float4s based on a heuristic
     if self.buftokens[0].can_float4() and any(hasattr(buf._buf, "IMAGE") for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
@@ -225,13 +229,10 @@ class GPUCodegen(ASTKernel):
     self.process()
     if DEBUG >= 4: self.printbufs("old:", DEBUG>=5)
 
-    self.hand_coded_optimizations()
+    self.hand_coded_optimizations(True)
 
     # fancy colored shape printer
-    if DEBUG >= 3:
-      axis = [(f"{rs:4d}", (("green" if i in self.upcast_in_mid_reduce_axes else "cyan") if i < self.first_reduce + len(self.group_for_reduce) else "red") if i >= self.first_reduce else "blue") for i, rs in enumerate(self.full_shape)]
-      axis += [(f"{s:4d}", 'magenta' if reduce else 'yellow') for s, _, reduce in self.buftokens[self.full_buf_index].axis[::-1]]
-      print(' '.join([colored(*x) for x in axis])+(" "*(50-len(' '.join([x[0] for x in axis])))), end="")
+    if DEBUG >= 3: print(self.colorshape(), end="")
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
