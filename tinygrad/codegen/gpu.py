@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker, View
-from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same
+from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same, dedup
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -221,8 +221,9 @@ class GPUCodegen(ASTKernel):
 
   def get_accumulators(self, name="acc") -> List[Token]:
     assert self.reduceop is not None, "no accumulators if you aren't reducing"
-    accumulators = [Token(f"{name}{i}", self.buftokens[0].typ) for i in self.buftokens[0].offsets()]
-    self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
+    should_upcast = self.lang.float4 and self.buftokens[0].can_float4()
+    accumulators = [Token(f"{name}{i//4}.{'xyzw'[i%4]}" if should_upcast else f"{name}{i}", self.buftokens[0].typ) for i in self.buftokens[0].offsets()]
+    self.kernel += [f"{'float4' if should_upcast else 'float'} {tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for tok in dedup([x.tok.split('.')[0] for x in accumulators])]
     return accumulators
 
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
@@ -300,9 +301,8 @@ class GPUCodegen(ASTKernel):
 
         self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
 
-        # second stage reduce with a new set of accumulators. TODO: this is very similar to above
+        # second stage reduce with a new set of accumulators. TODO: do we need acc_offsets here?
         accumulators = self.get_accumulators("output")
-        # TODO: do we need acc_offsets here?
         self.kernel.append(f"for (int mid = 0; mid < {self.sts[-1].size()}; mid++) {{\n")
         self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceop.op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
         self.kernel.append("}\n")
