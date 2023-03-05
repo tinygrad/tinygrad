@@ -1,7 +1,7 @@
 import math
 from collections import defaultdict
-from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
+from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple, cast
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, FusedOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker, View
@@ -58,9 +58,10 @@ class GPUCodegen(ASTKernel):
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
-    BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)"
+    BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)",
+    FusedOps.MULACC: "A=mad(B,C,A)"
   }
-  start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY"}
+  start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0", ReduceOps.MAX: "-INFINITY", FusedOps.MULACC: "0.0"}
 
   def store(self, buf_index:int, value:List[Token]) -> None:
     assert len(value) == self.buftokens[buf_index].size(), f"size mismatch {len(value)} != {self.buftokens[buf_index].size()}"
@@ -137,9 +138,11 @@ class GPUCodegen(ASTKernel):
   def ast_parse(self, x, acc:List[Token], do_reduce=False) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x), "mid" if x is None else None)  # hack for local
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
-    values : List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
+    values : List[List[Token]] = ([acc] if isinstance(x.op, (ReduceOps, FusedOps)) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = GPUCodegen.code_for_op[x.op]  # TODO: replace this with a function
-    if len(values) == 2:
+    if len(values) == 3:
+      return [Token(code.replace("A", a.tok).replace("B", b.tok).replace("C", c.tok), a.typ) for a,b,c in zip(values[0], values[1], values[2])]
+    elif len(values) == 2:
       assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
       return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
     else:
@@ -272,8 +275,7 @@ class GPUCodegen(ASTKernel):
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop is not None:
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
-      assert self.reduceopop is not None
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
@@ -294,15 +296,14 @@ class GPUCodegen(ASTKernel):
         self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
         self.upcast()
 
-      assert self.reduceopop is not None
       self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
 
       # second stage reduce with a new set of accumulators. TODO: this is very similar to above
       accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
       # TODO: do we need acc_offsets here?
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[cast(LazyOp, self.reduceop).op]};\n" for accumulator in accumulators]
       self.kernel.append(f"for (int mid = 0; mid < {self.sts[-1].size()}; mid++) {{\n")
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceopop, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(cast(LazyOp, self.reduceop).op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
 
       self.kernel.append("}\n")
     

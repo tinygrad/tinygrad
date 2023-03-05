@@ -1,8 +1,8 @@
 from enum import Enum, auto
 import itertools
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored
-from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
+from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, BinaryOps, FusedOps, get_lazyops
 from tinygrad.shape import ShapeTracker, View, strides_for_shape
 
 def get_first_reduce(shapes):
@@ -69,7 +69,11 @@ class ASTKernel:
     reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
-    self.reduceopop : Optional[ReduceOps] = self.reduceop.op if self.reduceop is not None and isinstance(self.reduceop.op, ReduceOps) else None
+
+    # FusedOp fusion
+    if self.reduceop and self.reduceop.op == ReduceOps.SUM and isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL:
+      self.reduceop = LazyOp(FusedOps.MULACC, self.reduceop.src[0].src, self.reduceop.arg)
+
     self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
 
     self.buftokens = [Token(f"data{i}", Types.FLOAT, ptr=True) for i in range(len(self.bufs))]
