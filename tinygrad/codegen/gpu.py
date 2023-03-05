@@ -1,6 +1,6 @@
 import math
 from collections import defaultdict
-from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple, cast
+from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, FusedOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
@@ -286,15 +286,12 @@ class GPUCodegen(ASTKernel):
         self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      if self.reduceop.op == ReduceOps.SUM and isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL:
-        fused_reduceop = LazyOp(FusedOps.MULACC, self.reduceop.src[0].src, self.reduceop.arg)
-      else:
-        fused_reduceop = self.reduceop
+      fused_reduceop = LazyOp(FusedOps.MULACC, self.reduceop.src[0].src, self.reduceop.arg) if self.reduceop.op == ReduceOps.SUM and isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL else self.reduceop
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(fused_reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
 
     # middle
-    if self.group_for_reduce:
+    if self.group_for_reduce and self.reduceop is not None:
       self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()*self.buftokens[-1].size()}];\n")
       self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs
       self.kernel.append(self.lang.barrier+"\n")
@@ -314,9 +311,9 @@ class GPUCodegen(ASTKernel):
       # second stage reduce with a new set of accumulators. TODO: this is very similar to above
       accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
       # TODO: do we need acc_offsets here?
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[cast(LazyOp, self.reduceop).op]};\n" for accumulator in accumulators]
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel.append(f"for (int mid = 0; mid < {self.sts[-1].size()}; mid++) {{\n")
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(cast(LazyOp, self.reduceop).op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceop.op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
 
       self.kernel.append("}\n")
 
