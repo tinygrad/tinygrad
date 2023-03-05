@@ -45,6 +45,27 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
   #print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return idx, idy
 
+def float4_can_group(grp):
+  return all(g.endswith(e) for g,e in zip(grp, [".x", ".y", ".z", ".w"])) and all_same([g.split(".")[0] for g in grp])
+
+def float4_group(grp):
+  assert float4_can_group(grp)
+  return grp.split(".")[0]
+
+def float4_factorize(values):
+  # swizzle
+  new_values = []
+  for v in values:
+    nv = []
+    for _ in range(0, len(v), 16):
+      nv += v[:16:4]
+      nv += v[1:16:4]
+      nv += v[2:16:4]
+      nv += v[3:16:4]
+      v = v[16:]
+    new_values.append(nv)
+  return new_values
+
 class GPUCodegen(ASTKernel):
   lang : GPULanguage = GPULanguage()
 
@@ -79,7 +100,7 @@ class GPUCodegen(ASTKernel):
       if should_upcast:
         for j in range(4): did_store.add(o+j)
         # is float4
-        if all(to_store[o+j].tok.endswith(e) for j,e in enumerate([".x", ".y", ".z", ".w"])) and all_same([to_store[o+j].tok.split(".")[0] for j in range(4)]):
+        if float4_can_group([to_store[o+j].tok for j in range(4)]):
           v = Token(to_store[o].tok.split(".")[0], Types.FLOAT4)
         else:
           v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4)
@@ -145,6 +166,7 @@ class GPUCodegen(ASTKernel):
     values : List[List[Token]] = ([acc] if isinstance(x.op, (ReduceOps, FusedOps)) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = GPUCodegen.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 3:
+      values = float4_factorize(values)
       return [Token(code.replace("A", a.tok).replace("B", b.tok).replace("C", c.tok), a.typ) for a,b,c in zip(values[0], values[1], values[2])]
     elif len(values) == 2:
       assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
