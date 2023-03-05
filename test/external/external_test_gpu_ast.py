@@ -8,6 +8,9 @@ from tinygrad.runtime.ops_gpu import GPUBuffer, CLProgram, CLCodegen
 from tinygrad.helpers import getenv
 from extra.lib_test_ast import test_ast
 
+import platform
+OSX = platform.system() == "Darwin"
+
 def compile_and_test_ast(ast, local_size=None):
   k = CLCodegen(ast)
   if getenv("KOPT", 0):
@@ -130,7 +133,7 @@ class TestAST(unittest.TestCase):
     op6 = LazyOp(BinaryOps.MAX, (op5,buf5,), None)
     op7 = LazyOp(BinaryOps.SUB, (op3,op6,), None)
     ast = LazyOp(MovementOps.RESHAPE, (op7,), (32, 2304, 4))
-    compile_and_test_ast(ast, (16, 16, 4))
+    compile_and_test_ast(ast, None if OSX else (16, 16, 4))
 
   # re_S32_16_6_36 is slow
   def test_1x1_6_36(self):  # 6 <- 36
