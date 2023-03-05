@@ -46,11 +46,11 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
   return idx, idy
 
 def float4_can_group(grp):
-  return all(g.endswith(e) for g,e in zip(grp, [".x", ".y", ".z", ".w"])) and all_same([g.split(".")[0] for g in grp])
+  return all(g.tok.endswith(e) for g,e in zip(grp, [".x", ".y", ".z", ".w"])) and all_same([g.tok.split(".")[0] for g in grp])
 
 def float4_group(grp):
   assert float4_can_group(grp)
-  return grp.split(".")[0]
+  return Token(grp[0].tok.split(".")[0], Types.FLOAT4)
 
 def float4_factorize(values):
   # swizzle
@@ -64,7 +64,26 @@ def float4_factorize(values):
       nv += v[3:16:4]
       v = v[16:]
     new_values.append(nv)
-  return new_values
+  a,b,c = new_values[0], new_values[1], new_values[2]
+  na,nb,nc = [], [], []
+  for i in range(0, len(a), 4):
+    if float4_can_group(a[i:i+4]):
+      na.append(float4_group(a[i:i+4]))
+      if all_same(b[i:i+4]):
+        nb.append(b[i])
+      elif float4_can_group(b[i:i+4]):
+        nb.append(float4_group(b[i:i+4]))
+      else:
+        return new_values
+      if all_same(c[i:i+4]):
+        nc.append(c[i])
+      elif float4_can_group(c[i:i+4]):
+        nc.append(float4_group(c[i:i+4]))
+      else:
+        return new_values
+    else:
+      return new_values
+  return (na, nb, nc)
 
 class GPUCodegen(ASTKernel):
   lang : GPULanguage = GPULanguage()
@@ -100,8 +119,8 @@ class GPUCodegen(ASTKernel):
       if should_upcast:
         for j in range(4): did_store.add(o+j)
         # is float4
-        if float4_can_group([to_store[o+j].tok for j in range(4)]):
-          v = Token(to_store[o].tok.split(".")[0], Types.FLOAT4)
+        if float4_can_group([to_store[o+j] for j in range(4)]):
+          v = float4_group([to_store[o+j] for j in range(4)])
         else:
           v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4)
       if self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
