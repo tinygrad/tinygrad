@@ -77,7 +77,7 @@ class GPUCodegen(ASTKernel):
       assert valid.min == 1, "store must always be valid"
       if should_upcast:
         for j in range(4): did_store.add(o+j)
-        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4) 
+        v = Token(f"{self.lang.float4}({','.join([to_store[o+j].tok for j in range(4)])})", Types.FLOAT4)
       if self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
@@ -219,6 +219,12 @@ class GPUCodegen(ASTKernel):
     if not self.group_for_reduce and self.first_reduce < self.shape_len and self.full_shape[-1] > 1 and self.full_shape[-1] <= 3 and (max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4 or not any(r for _,_,r in self.buftokens[self.full_buf_index].axis)):
       self.upcast()
 
+  def get_accumulators(self, name="acc") -> List[Token]:
+    assert self.reduceop is not None, "no accumulators if you aren't reducing"
+    accumulators = [Token(f"{name}{i}", self.buftokens[0].typ) for i in self.buftokens[0].offsets()]
+    self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
+    return accumulators
+
   # STOP WASTING TIME WITH DOING THE RESHAPES AND PERMUTES BY HAND. KERNEL SEARCH IS THE ONLY WAY IT WILL EVER BE GOOD
   # group_for_reduce will have to be better first
   def codegen(self) -> ASTRunner:
@@ -269,41 +275,38 @@ class GPUCodegen(ASTKernel):
         if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
-    accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
+    accumulators : List[Token] = []
     if self.reduceop is not None:
-      acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
+      accumulators = self.get_accumulators()
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in self.buftokens[self.full_buf_index].acc_offsets()], do_reduce=True)]
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
-    
-    # middle
-    if self.group_for_reduce and self.reduceop is not None:
-      self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()*self.buftokens[-1].size()}];\n")
-      self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs 
-      self.kernel.append(self.lang.barrier+"\n")
 
-      # this is used to identify the thread doing the reducing (lidx == 0) and is repeated from store
-      # must happen before the upcast
-      lidx, lvalid = self.sts[-1].expr_idxs()
-      assert lvalid.min == 1, "local buffer must always be valid"
+      # second stage reduce
+      if self.group_for_reduce:
+        self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()*self.buftokens[-1].size()}];\n")
+        self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs
+        self.kernel.append(self.lang.barrier+"\n")
 
-      # if any group_for_reduce items aren't reduces, upcast them here
-      for j in self.upcast_in_mid_reduce_axes:
-        self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
-        self.upcast()
+        # this is used to identify the thread doing the reducing (lidx == 0) and is repeated from store
+        # must happen before the upcast
+        lidx, lvalid = self.sts[-1].expr_idxs()
+        assert lvalid.min == 1, "local buffer must always be valid"
 
-      self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
+        # if any group_for_reduce items aren't reduces, upcast them here
+        for j in self.upcast_in_mid_reduce_axes:
+          self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
+          self.upcast()
 
-      # second stage reduce with a new set of accumulators. TODO: this is very similar to above
-      accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
-      # TODO: do we need acc_offsets here?
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
-      self.kernel.append(f"for (int mid = 0; mid < {self.sts[-1].size()}; mid++) {{\n")
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceop.op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
+        self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
 
-      self.kernel.append("}\n")
-    
+        # second stage reduce with a new set of accumulators. TODO: this is very similar to above
+        accumulators = self.get_accumulators("output")
+        # TODO: do we need acc_offsets here?
+        self.kernel.append(f"for (int mid = 0; mid < {self.sts[-1].size()}; mid++) {{\n")
+        self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceop.op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
+        self.kernel.append("}\n")
+
     # late ast
     self.store(0, self.ast_parse(self.ast, accumulators))
     if self.group_for_reduce: self.kernel.append("}")
