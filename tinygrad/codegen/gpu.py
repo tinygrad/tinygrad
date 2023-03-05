@@ -272,14 +272,13 @@ class GPUCodegen(ASTKernel):
     accumulators : List[Token] = [Token("acc%d" % i, self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
     if self.reduceop is not None:
       acc_offsets = self.buftokens[self.bufs.index(self.earlybufs[0])].acc_offsets()
-      assert self.reduceopop is not None
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]
       self.kernel += [f"{x.tok};\n" for x in self.ast_parse(self.reduceop, [accumulators[off] for off in acc_offsets], do_reduce=True)]
       self.kernel += ["}\n"] * (self.shape_len - (self.first_reduce + len(self.group_for_reduce)))
     
     # middle
-    if self.group_for_reduce:
+    if self.group_for_reduce and self.reduceop is not None:
       self.kernel.append(self.lang.smem_prefix + f"float {self.buftokens[-1].tok}[{self.sts[-1].size()*self.buftokens[-1].size()}];\n")
       self.store(-1, accumulators)  # TODO: this is assuming the local size = global size. should use lidxs 
       self.kernel.append(self.lang.barrier+"\n")
@@ -294,15 +293,14 @@ class GPUCodegen(ASTKernel):
         self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
         self.upcast()
 
-      assert self.reduceopop is not None
       self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
 
       # second stage reduce with a new set of accumulators. TODO: this is very similar to above
       accumulators = [Token(f"output{i}", self.buftokens[0].typ) for i in range(self.buftokens[0].size())]
       # TODO: do we need acc_offsets here?
-      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceopop]};\n" for accumulator in accumulators]
+      self.kernel += [f"{accumulator.decltype()} {accumulator.tok} = {GPUCodegen.start_for_op[self.reduceop.op]};\n" for accumulator in accumulators]
       self.kernel.append(f"for (int mid = 0; mid < {self.sts[-1].size()}; mid++) {{\n")
-      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceopop, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
+      self.kernel += [f"{x.tok};\n" for x in self.ast_parse(LazyOp(self.reduceop.op, (None,), self.sts[0].shape), accumulators, do_reduce=True)]
 
       self.kernel.append("}\n")
     
