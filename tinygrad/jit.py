@@ -8,10 +8,10 @@ from tinygrad.ops import GlobalCounters, CompiledBuffer, RawBuffer
 
 class TinyJit:
   def __init__(self, fxn:Callable):
-    self.fxn = fxn
-    self.cnt = 0
+    self.fxn : Callable = fxn
+    self.cnt : int = 0
     self.jit_cache : List[Tuple[Callable, Any]] = []  # TODO: Any should be List[RawBuffer], but this fails
-    self.ret = None
+    self.ret : Any = None
     self.input_replace : Dict[Tuple[int, int], Union[int, str]]= {}
 
   def __call__(self, *args, **kwargs) -> Any:

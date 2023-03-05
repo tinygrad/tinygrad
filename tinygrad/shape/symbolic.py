@@ -4,7 +4,7 @@ from typing import List, Dict, Callable, Type, Union
 from tinygrad.helpers import partition, all_same
 
 # NOTE: Python has different behavior for negative mod and floor div than c
-# symbolic matches the Python behavior, but the code is outputs is agnostic, and will never have negative numbers in div or mod
+# symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
 def create_node(typ:Type[Node], *args):
   ret = typ(*args)

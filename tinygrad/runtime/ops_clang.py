@@ -35,6 +35,4 @@ class ClangCodegen(GPUCodegen):
   lang = GPULanguage(buffer_suffix="restrict")
 
 class ClangBuffer(CompiledBuffer):
-  raw_buffer_type = RawMallocBuffer
-  codegen_type = ClangCodegen
-  runtime_type = ClangProgram
+  raw_buffer_type, codegen_type, runtime_type = RawMallocBuffer, ClangCodegen, ClangProgram

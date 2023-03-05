@@ -18,10 +18,8 @@ G = nx.DiGraph() if nx is not None else None
 cnts : Dict[OpType, int] = defaultdict(int)
 if GRAPH:
   def save_graph_exit():
-    for k,v in cnts.items():
-      print(k, v)
-    if PRUNEGRAPH:
-      prune_graph()
+    for k,v in cnts.items(): print(k, v)
+    if PRUNEGRAPH: prune_graph()
     print("saving", G)
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
@@ -61,8 +59,7 @@ def log_op(ret : DeviceBuffer, ast : LazyOp, show_graph : Optional[bool] = None)
       G.add_edge(nm(x), nm(ret), label=get_sop(op))
       if 'label' not in G.nodes[nm(x)]:
         G.nodes[nm(x)]['label'] = str(x.shape)
-    if nm(ret) not in G.nodes:
-      G.add_node(nm(ret))
+    if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
     G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape) if optype == ReduceOps else str(ret.shape)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else str())) if optype in top_colors else "#ffffff"

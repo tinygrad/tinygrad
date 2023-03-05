@@ -112,8 +112,7 @@ class LLVMCodegen(ASTKernel):
     func.attributes.add('"no-nans-fp-math"="true"')
 
     # construct the structure of the loops
-    loop_entry = [ir.IRBuilder(func.append_basic_block(name="entry"))]
-    loop_exit = []
+    loop_entry, loop_exit = [ir.IRBuilder(func.append_basic_block(name="entry"))], []
     for i,_ in enumerate(full_shape): loop_entry.append(ir.IRBuilder(func.append_basic_block(name=f"loop_{i}")))
     for i,_ in enumerate(full_shape): loop_exit.append(ir.IRBuilder(func.append_basic_block(name=f"loopexit_{len(full_shape)-1-i}")))
     loop_exit.append(ir.IRBuilder(func.append_basic_block(name="exit")))
@@ -174,8 +173,7 @@ class LLVMCodegen(ASTKernel):
     if self.reduceop:
       reduce_input = ast_parse(loop_exit[-1], self.reduceop.src[0], -1)
       phis = [LLVMCodegen.start_for_op[self.reduceop.op]]  # type: ignore
-      if kernel_output_dim > 1:
-        phis = [kernel_output_type(phis * kernel_output_dim)]
+      if kernel_output_dim > 1: phis = [kernel_output_type(phis * kernel_output_dim)]
       for i in range(store_loop+1, len(loop_entry)):
         val = loop_entry[i].phi(kernel_output_type, f"reduce_phi_{i}")
         val.add_incoming(phis[-1], loop_entry[i-1]._block)

@@ -62,8 +62,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
   for x in real_srcs.keys():
-    if real_srcs[x] is None:
-      real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape)
+    if real_srcs[x] is None: real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape)
   ast = map_buffers(real_srcs, self.op)
   return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
@@ -105,17 +104,14 @@ class LazyBuffer:
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    for x in get_buffers(op):
-      x.children.add(self)
-    if not LAZY:
-      self.realize()
+    for x in get_buffers(op): x.children.add(self)
+    if not LAZY: self.realize()
 
   def __repr__(self): return f"<LB {self.shape} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
   def realize(self:LazyBuffer, required_device=None) -> DeviceBuffer:
-    if required_device is not None:
-      assert required_device == self.device
+    assert required_device is None or required_device == self.device
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
@@ -162,8 +158,7 @@ class LazyBuffer:
   def contiguous(self:LazyBuffer) -> LazyBuffer: return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)))
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    if self.shape == tuple(new_shape):
-      return self
+    if self.shape == tuple(new_shape): return self
     reduce = list(enumerate(zip(self.shape, new_shape)))
     # move the reduce axes to the end
     x = self.movement_op(MovementOps.PERMUTE, tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n]))
@@ -224,16 +219,13 @@ class LazyBuffer:
         out.append(curr)
         if len(new_shape) == len(out) and all(prod(i) == j and len(i) >= 1 for i,j in zip(out, new_shape)):
           return out
-      contraction = get_contraction(self.op.src[0].shape, self.shape)
-      if contraction is not None:
-        numbered = []
-        start = 0
+      if contraction := get_contraction(self.op.src[0].shape, self.shape):
+        numbered, start = [], 0
         for c in contraction:
           numbered.append(list(range(start, start+len(c))))
           start += len(c)
         new_arg = []
-        for p in arg:
-          new_arg += numbered[p]
+        for p in arg: new_arg += numbered[p]
         self.op.src[0].children.discard(self)   # this changes nothing?
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
