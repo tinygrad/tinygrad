@@ -65,7 +65,7 @@ class DeviceBuffer(RawBuffer):
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
 
 # this is a quick "buffer" class for flop tracking and getting the output shape
-class GenericShape: #(NamedTuple):
+class GenericShape:
   def __init__(self, shape:Tuple[int, ...], flops:int=0): self.shape, self.flops = shape, flops
   def consume_flops(self):
     ret = self.flops
