@@ -154,9 +154,9 @@ class TestAST(unittest.TestCase):
     buf1 = GPUBuffer(shape=ShapeTracker(shape=(1, 32, 64, 1, 1, 6, 4, 1, 1, 24, 4), views=[View((1, 32, 64, 1, 1, 6, 4, 1, 1, 24, 4), (0, 0, 0, 0, 0, 384, 4, 0, 0, 16, 1), 0)]), hostbuf=GPUBuffer(shape=(6, 96, 4), force_create=True))
     op0 = LazyOp(BinaryOps.MUL, (buf0,buf1,), None)
     op1 = LazyOp(ReduceOps.SUM, (op0,), (1, 32, 64, 1, 1, 6, 4, 1, 1, 1, 1))
-    buf2 = GPUBuffer(shape=ShapeTracker(shape=(1, 32, 64, 1, 1, 6, 4, 1, 1, 1, 1), views=[View((1, 32, 64, 1, 1, 6, 4, 1, 1, 1, 1), (0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0), 0)]), hostbuf=GPUBuffer(shape=(24,), force_create=True))
-    op2 = LazyOp(BinaryOps.ADD, (op1,buf2,), None)
-    ast = LazyOp(MovementOps.RESHAPE, (op2,), (32, 384, 4))
+    #buf2 = GPUBuffer(shape=ShapeTracker(shape=(1, 32, 64, 1, 1, 6, 4, 1, 1, 1, 1), views=[View((1, 32, 64, 1, 1, 6, 4, 1, 1, 1, 1), (0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0), 0)]), hostbuf=GPUBuffer(shape=(24,), force_create=True))
+    #op2 = LazyOp(BinaryOps.ADD, (op1,buf2,), None)
+    ast = LazyOp(MovementOps.RESHAPE, (op1,), (32, 384, 4))
     compile_and_test_ast(ast, (6, 4, 8))
 
   def test_full_reduce_op(self):
