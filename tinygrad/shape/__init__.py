@@ -29,8 +29,7 @@ class View:
     ret = [Variable.num(self.offset+offset)]
     acc = 1
     for d,s in self.shape_strides[::-1]:
-      if d != 1 and s != 0:
-        ret.append(((idx//acc)%d)*s)
+      ret.append(((idx//acc)%d)*s)
       acc *= d
     return Variable.sum(ret)
 
@@ -63,8 +62,7 @@ ViewTypes = Union[View, ZeroView]
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   strides = [1]
-  for d in shape[::-1][:-1]:
-    strides = [d*strides[0]] + strides
+  for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
   return tuple(st if s != 1 else 0 for st, s in zip(strides, shape))
 
 @functools.lru_cache(maxsize=None)
@@ -73,8 +71,7 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
   return View(tuple(shape), strides_for_shape(shape))
 
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  new_strides = []
-  new_offset = vm2.expr_node(Variable.num(vm1.offset))
+  new_strides, new_offset = [], vm2.expr_node(Variable.num(vm1.offset))
   assert isinstance(new_offset, NumNode), "new_offset wasn't a number?!?"
   for s,st in zip(vm1.shape, vm1.strides):
     this_dim = View(vm2.shape, vm2.strides).expr_node(Variable('idx', 0, s-1)*st)
@@ -147,8 +144,7 @@ class ShapeTracker:
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     view = View(new_shape, strides_for_shape(new_shape))
-    if self.contiguous:
-      self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
+    if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
     else:
       # NOTE: the last view in self.views is never a ZeroView
       if (merged_view := merge_views(cast(View, self.views[-1]), view)) is not None: self.views[-1] = merged_view

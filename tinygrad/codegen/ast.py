@@ -7,8 +7,7 @@ from tinygrad.shape import ShapeTracker, View, strides_for_shape
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
-    if not all_same([x[i] for x in shapes]):
-      return i
+    if not all_same([x[i] for x in shapes]): return i
   return len(shapes[0])  # off the end
 
 # this will be removed soon anyway
@@ -89,9 +88,7 @@ class ASTKernel:
     self.full_buf_index : int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
 
   def print(self):
-    buf_count = -1
-    op_count = -1
-    cache = {}
+    buf_count, op_count, cache = -1, -1, {}
     def print_ast(x, name=None):
       nonlocal buf_count, op_count
       if x not in cache:
@@ -114,8 +111,7 @@ class ASTKernel:
   def printbufs(self, prefix="", print_shapetrackers=False):
     print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
     if print_shapetrackers:
-      for st in self.sts:
-        print(st)
+      for st in self.sts: print(st)
     for i in range(len(self.sts)):
       print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
 
@@ -158,10 +154,8 @@ class ASTKernel:
       # more can merge than this
       mergeable = all(can_merge) and i != self.first_reduce
       for j in range(len(shapes)):
-        if mergeable:
-          rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
-        else:
-          rets[j].append((shapes[j][i], strides[j][i]))
+        if mergeable: rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
+        else: rets[j].append((shapes[j][i], strides[j][i]))
 
     for i,x in enumerate(rets): self.sts[i].reshape(tuple(y[0] for y in x))
     self.first_reduce = get_first_reduce([x.shape for x in self.sts])

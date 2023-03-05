@@ -15,5 +15,4 @@ def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-DEBUG = getenv("DEBUG", 0)
-IMAGE = getenv("IMAGE", 0)
+DEBUG, IMAGE = getenv("DEBUG", 0), getenv("IMAGE", 0)

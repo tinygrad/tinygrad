@@ -27,8 +27,7 @@ class LLVM:
     # TODO: this makes compile times so much faster
     if getenv("LLVMOPT"):
       llvm.set_option(str(), '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
-      if DEBUG >= 4:
-        llvm.set_option(str(), '--debug-only=loop-vectorize')
+      if DEBUG >= 4: llvm.set_option(str(), '--debug-only=loop-vectorize')
       #llvm.set_option(str(), '--debug')
 
       # does this do anything?
@@ -64,6 +63,4 @@ class LLVMProgram:
     if wait: return time.monotonic()-st
 
 class LLVMBuffer(CompiledBuffer):
-  raw_buffer_type = RawMallocBuffer
-  codegen_type = LLVMCodegen
-  runtime_type = LLVMProgram
+  raw_buffer_type, codegen_type, runtime_type = RawMallocBuffer, LLVMCodegen, LLVMProgram

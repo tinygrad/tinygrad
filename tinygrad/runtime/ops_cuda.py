@@ -40,6 +40,4 @@ class CUDACodegen(GPUCodegen):
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
 class CUDABuffer(CompiledBuffer):
-  raw_buffer_type = RawCUDABuffer
-  codegen_type = CUDACodegen
-  runtime_type = CUDAProgram
+  raw_buffer_type, codegen_type, runtime_type = RawCUDABuffer, CUDACodegen, CUDAProgram
