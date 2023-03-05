@@ -25,10 +25,10 @@ def image_conv2d_decorator(normal_conv):
       cout = groups * rcout
       w = w.slice(tuple((0, rcout) if i == 1 else (0, w.shape[i]) for i in range(len(w.shape))))
 
-    # packed
+    # packed (note: flipping bs and iy would make the auto-padding work)
     x = x.permute(0,2,3,1).reshape(bs * iy, ix * groups * cin//4, 4)
     if cin == 1: w = w.reshape(cout//4,4,H*W).permute(0,2,1)
-    else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3).reshape(cout//4, H*cin*W, 4)
+    else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3).reshape(cout//4, H*cin//4*W*4, 4)
 
     # contiguous creates the image, and early realize static weights (TODO: don't always realize)
     x, w = x.contiguous(), w.contiguous().realize()
