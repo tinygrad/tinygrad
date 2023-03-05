@@ -8,7 +8,7 @@ FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/")
 
 if __name__ == "__main__":
   if not os.path.exists(FOLDER):
-      os.makedirs(FOLDER)
+    os.makedirs(FOLDER)
   os.chdir(FOLDER)
   if not os.path.isfile("yolov8n-seg.onnx"):
     model = YOLO("yolov8n-seg.pt")
