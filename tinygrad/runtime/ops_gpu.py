@@ -76,6 +76,9 @@ class CLProgram:
         print(binary.decode('utf-8'))
     if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
 
+  @staticmethod
+  def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
+
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
     e = self.clprg(CL.cl_queue, global_size, local_size, *[x._cl if isinstance(x, (CLBuffer, CLImage)) else x for x in bufs])
     if wait:
