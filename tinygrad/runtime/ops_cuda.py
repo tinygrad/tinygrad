@@ -14,9 +14,13 @@ class RawCUDABuffer(RawBufferCopyInOut):
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
+    try:
+      if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
+    except cuda.CompileError as e:
+      if DEBUG >= 3: print("FAILED TO BUILD", prg)
+      raise e
     if DEBUG >= 5: print(prg)
-    # TODO: name is wrong
+    # TODO: name is wrong, so we get it from the ptx using hacks
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, global_size, local_size, *args, wait=False):
