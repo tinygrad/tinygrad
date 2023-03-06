@@ -68,8 +68,7 @@ class DeviceBuffer(RawBuffer):
 class GenericShape:
   def __init__(self, shape:Tuple[int, ...], flops:int=0): self.shape, self.flops = shape, flops
   def consume_flops(self):
-    ret = self.flops
-    self.flops = 0
+    self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op : Dict[Op, Callable] = {
   **{op:lambda self: GenericShape(self.shape, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
