@@ -10,7 +10,8 @@ class TestSpecific(unittest.TestCase):
     x.conv2d(w).permute(0,2,3,1).reshape(32, 384, 4).contiguous().realize()
 
   def test_vec_mul(self):
-    x = Tensor.randn(1, 2048)
+    # this forces it to be an image...
+    x = Tensor.ones(1, 512, 4).contiguous().reshape(1, 2048)
     w = Tensor.randn(2048, 512)
     (x @ w).reshape(1, 128, 4).contiguous().realize()
 
