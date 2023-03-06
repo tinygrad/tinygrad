@@ -79,9 +79,6 @@ def compile(dat, output_fn):
   from extra.thneed import Thneed
   t = Thneed(cl_cache, {k:v._cl for k,v in input_rawbuffers.items()})
 
-  if getenv("OPTWG", 0):
-    t.optimize_local_workgroup()
-
   # save thneed (before run)
   t.save(output_fn)
 

@@ -1,4 +1,5 @@
 from tinygrad.helpers import IMAGE
+from tinygrad.lazy import get_single_root
 
 def image_conv2d_decorator(normal_conv):
   if IMAGE == 0: return normal_conv
@@ -32,8 +33,9 @@ def image_conv2d_decorator(normal_conv):
     elif cin_last: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3).reshape(cout//4, H*cin//4*W*4, 4)
     else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1).reshape(cout//4, H*cin//4*W*4, 4)
 
-    # contiguous creates the image, and early realize static weights (TODO: don't always realize)
-    x, w = x.contiguous(), w.contiguous().realize()
+    # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
+    x, w = x.contiguous(), w.contiguous()
+    if get_single_root(w.lazydata).realized: w.realize()
 
     # expand out
     rcin_hi, rcin_lo = cin//4 if cin >= 4 else 1, 4 if cin >= 4 else 1
