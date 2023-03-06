@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
-from tinygrad.shape import ShapeTracker, View, ZeroView, merge_views
+from tinygrad.shape import ShapeTracker, View, ZeroView, merge_views, get_contraction
 from tinygrad.codegen.gpu import to_image_idx
 
 def shapetracker_getitem(st, val):
@@ -19,7 +19,7 @@ class CheckingShapeTracker:
   @property
   def shape(self):
     return self.t.shape
-  
+
   def simplify(self): self.st.simplify()
 
   def reshape(self, new_shape):
@@ -223,7 +223,7 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st = ShapeTracker((64, 1024, 4))
     self.st.reshape((1, 64, 128, 32))
     self.st.permute((0, 3, 1, 2))
-    self.st.reshape((1, 32, 1, 64, 128))  
+    self.st.reshape((1, 32, 1, 64, 128))
     self.st.permute((0, 3, 4, 1, 2))
     assert self.st.contiguous
 
@@ -329,7 +329,7 @@ class TestShapeTracker(unittest.TestCase):
 
   def test_slice_1c2(self):
     self.apply(lambda x: x.shrink(((1, 2), (1, 2))))
-  
+
   def test_double_permute(self):
     self.apply(lambda x: x.permute((1, 0)))
     self.apply(lambda x: x.permute((1, 0)))
@@ -375,6 +375,29 @@ class TestShapeTracker(unittest.TestCase):
     self.test_slice_1()
     self.test_expand()
     self.test_permute()
+
+class TestGetContraction(unittest.TestCase):
+  def test_contraction(self):
+    r = get_contraction((1,2,3,4), (2,3,4))
+    self.assertEqual(r, [[0, 1], [2], [3]])
+
+    r = get_contraction((1,2,3,1,4), (1,2,3,4))
+    self.assertEqual(r, [[0], [1], [2], [3, 4]])
+
+    r = get_contraction((1,2,3,1,4,1,1), (2,3,4))
+    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
+
+    r = get_contraction((1,2,3,4), (1,2,3*4))
+    self.assertEqual(r, [[0], [1], [2, 3]])
+
+    r = get_contraction((1,2,3,4), (2,1,3,4))
+    self.assertEqual(r, None)
+
+    r = get_contraction((1,2,3,4), (1,2,3,4,1))
+    self.assertEqual(r, None)
+
+    r = get_contraction((1,2,3,4), (1,2,6,2))
+    self.assertEqual(r, None)
 
 if __name__ == '__main__':
   unittest.main()

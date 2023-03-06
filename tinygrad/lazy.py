@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import os, sys, weakref, importlib, inspect, functools
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv
-from tinygrad.shape import ShapeTracker
+from tinygrad.shape import ShapeTracker, get_contraction
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.graph import log_op
 
@@ -77,19 +77,6 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
   assert y.op in BinaryOps or y.op in UnaryOps
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
-
-def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
-  if len(new_shape) > len(old_shape): return None
-  new_shape_i : int = 0
-  shape_idx_groups : List[List[int]] = [[] for _ in range(len(new_shape))]
-  for old_shape_i, t in enumerate(old_shape):
-    if new_shape[new_shape_i] % t != 0 or prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) * t > new_shape[new_shape_i]:
-      return None
-    shape_idx_groups[new_shape_i].append(old_shape_i)
-    if prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) == new_shape[new_shape_i] and new_shape_i < len(new_shape) - 1:
-      new_shape_i += 1
-  return shape_idx_groups
-
 
 def support_weakref(x): return x
 @support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
