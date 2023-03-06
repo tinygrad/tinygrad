@@ -1,8 +1,8 @@
 from typing import Optional
+import numpy as np
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile as cuda_compile # type: ignore
-import numpy as np
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import CompiledBuffer, RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage

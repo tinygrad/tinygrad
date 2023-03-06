@@ -100,7 +100,7 @@ class LLVMCodegen(ASTKernel):
         idx_offsets = new_idx_offsets
       """
       return [builder.add(idx, int_const(i)) for i in idx_offsets]
-    
+
     # *** llvm specific below this line ***
 
     # create llvm function
@@ -195,7 +195,7 @@ class LLVMCodegen(ASTKernel):
     for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
       element = result if kernel_output_dim == 1 else builder.extract_element(result, int_const(i))
       builder.store(element, builder.gep(func.args[0], [idx], inbounds=True))
-    
+
     # add the looping
     for i,s in enumerate(full_shape):
       loop_entry[i].branch(loop_entry[i+1]._block)

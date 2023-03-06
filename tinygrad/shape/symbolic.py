@@ -21,7 +21,7 @@ class Node:
     assert isinstance(self, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
-  def key(self) -> str: return self.render()
+  def key(self) -> str: return self.render(ctx="DEBUG")
   def __repr__(self): return "<"+self.key+">"
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
@@ -179,13 +179,13 @@ class SumNode(RedNode): minmax = staticmethod(lambda nodes: (sum([x.min for x in
 class AndNode(RedNode): minmax = staticmethod(lambda nodes: (min([x.min for x in nodes]), max([x.max for x in nodes])))
 
 render_python : Dict[Type, Callable] = {
-  Variable: lambda self,ops,ctx: f"{self.expr}",
+  Variable: lambda self,ops,ctx: f"{self.expr}<{self.min},{self.max}>" if ctx == "DEBUG" else f"{self.expr}",
   NumNode: lambda self,ops,ctx: f"{self.b}",
-  MulNode: lambda self,ops,ctx: f"({self.a.render(ops)}*{self.b})",
-  DivNode: lambda self,ops,ctx: f"({self.a.render(ops)}//{self.b})",
-  ModNode: lambda self,ops,ctx: f"({self.a.render(ops)}%{self.b})",
-  GeNode: lambda self,ops,ctx: f"({self.a.render(ops)}>={self.b})",
-  LtNode: lambda self,ops,ctx: f"({self.a.render(ops)}<{self.b})",
-  SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops) for x in self.nodes]))})",
-  AndNode: lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops) for x in self.nodes]))})"
+  MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{self.b})",
+  DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
+  ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
+  GeNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}>={self.b})",
+  LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{self.b})",
+  SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
+  AndNode: lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 }

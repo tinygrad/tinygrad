@@ -55,7 +55,7 @@ class Max(Function):
 class Equal(Function):
   def forward(self, x, y):
     return x.binary_op(BinaryOps.CMPEQ, y)
-  
+
 class Maximum(Function):
   def forward(self, x, y):
     self.y, self.ret = y, x.binary_op(BinaryOps.MAX, y)

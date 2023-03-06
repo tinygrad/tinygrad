@@ -1,8 +1,8 @@
 from __future__ import annotations
+import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
-import functools, itertools, operator, random
 from tinygrad.helpers import prod, DEBUG, getenv
 from tinygrad.shape import ShapeTracker
 
@@ -68,8 +68,7 @@ class DeviceBuffer(RawBuffer):
 class GenericShape:
   def __init__(self, shape:Tuple[int, ...], flops:int=0): self.shape, self.flops = shape, flops
   def consume_flops(self):
-    ret = self.flops
-    self.flops = 0
+    self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op : Dict[Op, Callable] = {
   **{op:lambda self: GenericShape(self.shape, self.consume_flops() + prod(self.shape)) for op in UnaryOps},

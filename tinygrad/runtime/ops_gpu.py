@@ -25,7 +25,7 @@ class _CL:
   def cl_queue(self) -> cl.CommandQueue:
     return cl.CommandQueue(CL.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 CL = _CL()
-  
+
 class CLBuffer(RawBufferCopyInOut):
   # TODO: this can be in RawBuffer generically
   BUFFER_CACHE : ClassVar[Dict[int, List[cl.Buffer]]] = defaultdict(list)
@@ -97,7 +97,7 @@ class GPUBuffer(CompiledBuffer):
   # override this method for image
   @classmethod
   def create_raw_buffer(cls, shape, backing) -> RawBuffer:
-    if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and not backing: return CLImage(shape)
+    if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)
     else: return super().create_raw_buffer(shape, backing)
   codegen_type = CLCodegen
   runtime_type = CLProgram

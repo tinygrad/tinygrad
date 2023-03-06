@@ -1,14 +1,9 @@
-import ctypes
-import os, time
+import os, time, ctypes, hashlib, subprocess, platform
 import numpy as np
-import hashlib
-import subprocess
 from collections import defaultdict
 from typing import Final, Dict
 from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
-import platform
-OSX = platform.system() == "Darwin"
 
 class RawMallocBuffer(RawBufferCopyIn):
   def __init__(self, size): self._buf = (ctypes.c_float * (size//4))()
@@ -20,7 +15,7 @@ class ClangProgram:
   def __init__(self, name:str, prg:str):
     prg = "#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n" + prg
     # TODO: is there a way to not write this to disk?
-    fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if OSX else 'so'}"
+    fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if platform.system() == 'Darwin' else 'so'}"
     if not os.path.exists(fn):
       subprocess.check_output(['clang', '-shared', '-O2', '-Wall','-Werror', '-lm', '-fPIC', '-x', 'c', '-', '-o', fn+".tmp"], input=prg.encode('utf-8'))
       os.rename(fn+".tmp", fn)
