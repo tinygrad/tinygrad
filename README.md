@@ -68,7 +68,7 @@ print(y.grad)  # dz/dy
 
 ## Is tinygrad fast?
 
-Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness. Currently getting 2.2 TFLOPS on my M1 Max, and will be 8 TFLOPS once it's using the M1 Tensor Cores.
+Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
 
 ```python
 OPTLOCAL=1 GPU=1 DEBUG=3 python3 -c "from tinygrad.tensor import Tensor;
