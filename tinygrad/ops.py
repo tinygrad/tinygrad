@@ -67,7 +67,9 @@ class DeviceBuffer(RawBuffer):
 # this is a quick "buffer" class for flop tracking and getting the output shape
 class GenericShape:
   def __init__(self, shape:Tuple[int, ...], flops:int=0): self.shape, self.flops = shape, flops
-  def consume_flops(self): return (value := self.flops) or 0, setattr(self, 'flops', 0)
+  def consume_flops(self):
+    self.flops, ret = 0, self.flops
+    return ret
 shape_fxn_for_op : Dict[Op, Callable] = {
   **{op:lambda self: GenericShape(self.shape, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
   **{op:lambda self,y: GenericShape(self.shape, self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
