@@ -14,7 +14,6 @@ def _load_labels():
   labels_filename = pathlib.Path(__file__).parent / 'efficientnet/imagenet1000_clsidx_to_labels.txt'
   return ast.literal_eval(labels_filename.read_text())
 
-
 _LABELS = _load_labels()
 
 def preprocess(img, new=False):

@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.ops import LazyOp, BinaryOps, ReduceOps
-from accel.llvm.ops_llvm import LLVMBuffer
+from tinygrad.runtime.ops_llvm import LLVMBuffer
 
 class TestLLVM(unittest.TestCase):
   def test_add(self):
@@ -44,17 +44,5 @@ class TestLLVM(unittest.TestCase):
     ret = LLVMBuffer((1,1)).exec_ast(ast)
     print(ret.toCPU())
 
-
-
 if __name__ == "__main__":
   unittest.main()
-
-  """
-  ast = LazyOp(BinaryOps.ADD, (a,b))
-  ast = LazyOp(ReduceOps.SUM, (ast,), (1,1))
-  ret = LLVMBuffer((4,4)).exec_ast(ast)
-  print(ret.toCPU())
-  """
-
-
-
