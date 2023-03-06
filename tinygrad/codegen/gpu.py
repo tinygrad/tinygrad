@@ -296,6 +296,7 @@ class GPUCodegen(ASTKernel):
         for j in self.upcast_in_mid_reduce_axes:
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
+          if DEBUG >= 4: print("upcast", self.colorshape()) # NOTE: colorshape is wrong here
 
         self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")   # lidx.max works here too
 
