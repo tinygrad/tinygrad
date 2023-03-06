@@ -200,7 +200,7 @@ class GPUCodegen(ASTKernel):
 
     # **** below this line need to be optional and benchmarked ****
 
-    # potentially do a second upcast based on a heuristic. this is optional and has nothing to do with float4
+    # potentially do more upcasts of non reduce axes based on a heuristic
     while prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
@@ -216,7 +216,7 @@ class GPUCodegen(ASTKernel):
       else:
         break
 
-    # if last dim <= 5 and it's a reduce dim, upcast (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
+    # if last dim <= 5 and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
     if self.first_reduce < self.shape_len and self.full_shape[-1] <= 5 and (max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4 or not any(r for _,_,r in self.buftokens[self.full_buf_index].axis)):
       self.upcast()
 
