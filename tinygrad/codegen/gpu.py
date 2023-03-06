@@ -202,8 +202,8 @@ class GPUCodegen(ASTKernel):
 
     # **** below this line need to be optional and benchmarked ****
 
-    # potentially do a second split based on a heuristic. this is optional and has nothing to do with float4
-    if prod(self.sts[0].shape[:self.first_reduce]) >= 2048:
+    # potentially do a second upcast based on a heuristic. this is optional and has nothing to do with float4
+    if prod(self.sts[0].shape[:self.first_reduce]) >= 8192:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
