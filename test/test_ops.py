@@ -66,7 +66,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0.,1,2], [2.,1,0]])
     helper_test_op(None, lambda x,y: fxn(x,2), lambda x,y: fxn(x,2), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
     if reverse: helper_test_op(None, lambda x,y: fxn(2,y), lambda x,y: fxn(2,y), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
-  
+
   def test_cmp_eq(self): self._test_cmp(lambda x,y: x.eq(y), reverse=False)
   def test_cmp_gt(self): self._test_cmp(lambda x,y: x>y)
   def test_cmp_ge(self): self._test_cmp(lambda x,y: x>=y)
@@ -173,7 +173,7 @@ class TestOps(unittest.TestCase):
   def test_sum_simple(self):
     helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[1.,1.]])
   def test_sum_full(self):
-    helper_test_op([(10000)], lambda x: x.sum(), lambda x: x.sum())
+    helper_test_op([(16384)], lambda x: x.sum(), lambda x: x.sum())
   def test_sum_relu(self):
     helper_test_op([(3,4,5)], lambda x: x.relu().sum().relu(), lambda x: x.relu().sum().relu())
   def test_sum(self):
@@ -269,10 +269,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (0,1)), lambda x: x.flip(axis=(0,1)))
     helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (0,1,3)), lambda x: x.flip(axis=(0,1,3)))
     helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (3,)), lambda x: x.flip(axis=(3,)))
-  
+
   def test_unsqueeze(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 0), lambda x: x.unsqueeze(dim=0))
-    helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 4), lambda x: x.unsqueeze(dim=4)) 
+    helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 4), lambda x: x.unsqueeze(dim=4))
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, -1), lambda x: x.unsqueeze(dim=-1))
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, -3), lambda x: x.unsqueeze(dim=-3))
 
