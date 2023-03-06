@@ -71,11 +71,13 @@ print(y.grad)  # dz/dy
 Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
 
 ```python
-OPTLOCAL=1 GPU=1 DEBUG=3 python3 -c "from tinygrad.tensor import Tensor;
+DEBUG=3 OPTLOCAL=1 GPU=1 python3 -c "from tinygrad.tensor import Tensor;
 N = 1024; a, b = Tensor.randn(N, N), Tensor.randn(N, N);
 c = (a.reshape(N, 1, N) * b.permute(1,0).reshape(1, N, N)).sum(axis=2);
 print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
 ```
+
+Change to `DEBUG=4` to see the generated code.
 
 ## Neural networks?
 
