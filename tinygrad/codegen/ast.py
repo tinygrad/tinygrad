@@ -1,5 +1,5 @@
-from enum import Enum, auto
 import itertools
+from enum import Enum, auto
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
@@ -188,4 +188,4 @@ class ASTKernel:
       # add last axis to the buftoken (if it's not a 1)
       if st.shape[-1] == upcasted[0]: buftoken.array(st.shape[-1], st.views[-1].strides[-1], len(upcasted) != len(self.sts))
       # remove the last axis (unless it's the only dimension, then make it a 1)
-      st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset) if len(st.shape) > 1 else View((1,), (0,), st.views[-1].offset) 
+      st.views[-1] = View(st.shape[0:-1], st.views[-1].strides[0:-1], st.views[-1].offset) if len(st.shape) > 1 else View((1,), (0,), st.views[-1].offset)

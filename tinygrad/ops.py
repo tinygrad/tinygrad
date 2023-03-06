@@ -1,8 +1,8 @@
 from __future__ import annotations
+import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
-import functools, itertools, operator, random
 from tinygrad.helpers import prod, DEBUG, getenv
 from tinygrad.shape import ShapeTracker
 
