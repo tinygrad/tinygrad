@@ -166,9 +166,8 @@ class GPUCodegen(ASTKernel):
     # simplify (sets first_reduce)
     self.simplify_ones()
 
-    # are we grouping? what does this have to do with float4?
-    #if self.lang.float4 and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
-    if not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    # are we grouping? (requires local shape support)
+    if len(self.lang.lid) and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -300,7 +299,7 @@ class GPUCodegen(ASTKernel):
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
 
-        self.kernel.append(f"if ({lidx.render(render_cl)} == {lidx.max}) {{\n")
+        self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")   # lidx.max works here too
 
         # second stage reduce with a new set of accumulators. TODO: do we need acc_offsets here?
         accumulators = self.get_accumulators("output")

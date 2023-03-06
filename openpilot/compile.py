@@ -39,6 +39,7 @@ from tinygrad.jit import TinyJit
 @TinyJit
 def model_exec(run_onnx, using_graph, **inputs):
   ret = next(iter(run_onnx(inputs).values()))
+  GlobalCounters.reset()
   GlobalCounters.cache = []  # don't cache pre-realize
   if using_graph: graph.GRAPH = True
   print("realizing")
