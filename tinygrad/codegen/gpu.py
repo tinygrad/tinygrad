@@ -275,7 +275,7 @@ class GPUCodegen(ASTKernel):
         for i in range(final_dimension-1, -1, -1):
           self.kernel += [f"int idx{i} = idx{final_dimension} % {self.output_shape[i]};", f"idx{final_dimension} = idx{final_dimension} / {self.output_shape[i]};\n"]
         self.output_shape = (prod(self.output_shape[0:final_dimension+1]), ) + self.output_shape[final_dimension+1:]
-        if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
+        if DEBUG >= 4: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
     accumulators : List[Token] = []

@@ -66,6 +66,17 @@ print(x.grad)  # dz/dx
 print(y.grad)  # dz/dy
 ```
 
+## Is tinygrad fast?
+
+Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness. Currently getting 2.2 TFLOPS on my M1 Max, and will be 8 TFLOPS once it's using the M1 Tensor Cores.
+
+```python
+OPTLOCAL=1 GPU=1 DEBUG=3 python3 -c "from tinygrad.tensor import Tensor;
+N = 1024; a, b = Tensor.randn(N, N), Tensor.randn(N, N);
+c = (a.reshape(N, 1, N) * b.permute(1,0).reshape(1, N, N)).sum(axis=2);
+print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+```
+
 ## Neural networks?
 
 It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, RMSprop, and Adam implemented) from tinygrad.nn.optim, write some boilerplate minibatching code, and you have all you need.
