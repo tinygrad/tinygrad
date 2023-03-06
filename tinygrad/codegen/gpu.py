@@ -1,4 +1,4 @@
-import math
+import math, itertools
 from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
@@ -107,12 +107,10 @@ class GPUCodegen(ASTKernel):
       if (buf_index, o) not in self.loaded_keys:
         idxy, valid = self.sts[buf_index].expr_idxs(o) if idx_override is None else self.sts[buf_index].expr_node(idx_override, o)
         if should_upcast:
-          can_merge = True
-          for j in range(1,4):
-            idxy_test, valid_test = self.sts[buf_index].expr_idxs(o+j) if idx_override is None else self.sts[buf_index].expr_node(idx_override, o+j)
-            can_merge = can_merge and valid.render() == valid_test.render()
-            can_merge = can_merge and (idxy+j).render() == idxy_test.render()
-            #print((idxy+j).render(), idxy_test.render(), valid.render(), valid_test.render(), can_merge)
+          float4_index = Variable("FLOAT4_INDEX", 0, 3)
+          idxy_test, valid_test = self.sts[buf_index].expr_idxs(float4_index+o) if idx_override is None else self.sts[buf_index].expr_node(idx_override, float4_index+o)
+          can_merge = idxy_test == float4_index or (isinstance(idxy_test, SumNode) and any(x == float4_index for x in idxy_test.nodes))   # float4_index must be in there without a multiply
+          can_merge = can_merge and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()  # float4_index must not be in after divide or in valid (TODO: don't check render)
         if const is not None:
           ldr = const
         elif self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
@@ -166,8 +164,8 @@ class GPUCodegen(ASTKernel):
     # simplify (sets first_reduce)
     self.simplify_ones()
 
-    # are we grouping? what does this have to do with float4?
-    if self.lang.float4 and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    # are we grouping? (requires local shape support)
+    if len(self.lang.lid) and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -196,31 +194,27 @@ class GPUCodegen(ASTKernel):
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
 
+    # no more opt if we are grouping
+    if self.group_for_reduce: return
+
     # **** below this line need to be optional and benchmarked ****
 
-    # split to 4 float4s based on a heuristic
-    if self.buftokens[0].can_float4() and any(hasattr(buf._buf, "IMAGE") for buf in self.earlybufs) and prod(self.sts[0].shape[:self.first_reduce]) >= 2048 and not self.group_for_reduce:
+    # potentially do a second upcast based on a heuristic. this is optional and has nothing to do with float4
+    if prod(self.sts[0].shape[:self.first_reduce]) >= 1024:
       xb_choices = []
-      for i in range(self.first_reduce):
-        if all(st.shape[i]%4 == 0 for st in self.sts):
-          xb_choices.append((sum(st.views[-1].strides[i]>0 for st in self.sts), sum(st.views[-1].strides[i] for st in self.sts), i))
-
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
+        # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
+        if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].strides[axis] == 0 and not any(x[1] == 0 for x in self.buftokens[buf_index].axis) for buf_index in range(len(self.sts))):
+          xb_choices.append((sum(st.strides[axis]>0 for st in self.sts), sum(st.strides[axis] for st in self.sts), axis, upcast_amount))
       if len(xb_choices):
-        xb_choice = sorted(xb_choices)[0][2]
-        if DEBUG >= 4: print(f"float4 merging axis {xb_choice} : {xb_choices}")
-
-        # this leaves the last axis in place
-        self.shift_to(xb_choice, 4)
-
-        # drop the last dimension
+        xb_choices = sorted(xb_choices)
+        if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
+        self.shift_to(xb_choices[0][2], amount=xb_choices[0][3])
         self.upcast()
-
-        # re-simplify
         self.simplify_ones()
 
-    # if last dim <= 3 and it's a reduce dim, upcast (loop unrolling). no simplify needed since it's just an upcast
-    # NOTE: careful, this can break VALIDHACKS
-    if not self.group_for_reduce and self.first_reduce < self.shape_len and self.full_shape[-1] > 1 and self.full_shape[-1] <= 3 and (max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4 or not any(r for _,_,r in self.buftokens[self.full_buf_index].axis)):
+    # if last dim <= 5 and it's a reduce dim, upcast (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
+    if self.first_reduce < self.shape_len and self.full_shape[-1] <= 5 and (max([x.size() for i,x in enumerate(self.buftokens) if self.bufs[i] in self.earlybufs]) <= 4 or not any(r for _,_,r in self.buftokens[self.full_buf_index].axis)):
       self.upcast()
 
   def get_accumulators(self, name="acc") -> List[Token]:
@@ -303,7 +297,7 @@ class GPUCodegen(ASTKernel):
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
 
-        self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")
+        self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")   # lidx.max works here too
 
         # second stage reduce with a new set of accumulators. TODO: do we need acc_offsets here?
         accumulators = self.get_accumulators("output")
