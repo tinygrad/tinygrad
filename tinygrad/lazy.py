@@ -79,6 +79,7 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
 
 def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
+  if len(new_shape) > len(old_shape): return None
   new_shape_i : int = 0
   shape_idx_groups : List[List[int]] = [[] for _ in range(len(new_shape))]
   for old_shape_i, t in enumerate(old_shape):
