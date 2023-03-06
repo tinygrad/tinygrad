@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from typing import Tuple, Union, List, Optional, cast
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
@@ -24,9 +24,9 @@ class View:
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
 
-  def expr_node(self, idx=None, offset=0):
+  def expr_node(self, idx=None, offset:Union[Node, int]=0):
     if idx is None: idx = Variable('idx', 0, prod(self.shape))
-    ret = [Variable.num(self.offset+offset)]
+    ret = [Variable.num(self.offset)+offset]
     acc = 1
     for d,s in self.shape_strides[::-1]:
       ret.append(((idx//acc)%d)*s)
@@ -34,8 +34,8 @@ class View:
     return Variable.sum(ret)
 
   # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs, offset=0):
-    return Variable.sum([Variable.num(self.offset+offset)] + [Variable(idx, 0, sh-1)*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+  def expr_idxs(self, idxs, offset:Union[Node, int]=0):
+    return Variable.sum([Variable.num(self.offset)+offset] + [Variable(idx, 0, sh-1)*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
 class ZeroView:
   def __init__(self, old_shape:Tuple[int, ...], arg):
