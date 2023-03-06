@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
-import os, sys, weakref, importlib, inspect
+import os, sys, weakref, importlib, inspect, functools
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv
 from tinygrad.shape import ShapeTracker
@@ -77,6 +77,18 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
   assert y.op in BinaryOps or y.op in UnaryOps
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
+
+def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
+  new_shape_i : int = 0
+  shape_idx_groups : List[List[int]] = [[] for _ in range(len(new_shape))]
+  for old_shape_i, t in enumerate(old_shape):
+    if new_shape[new_shape_i] % t != 0 or prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) * t > new_shape[new_shape_i]:
+      return None
+    shape_idx_groups[new_shape_i].append(old_shape_i)
+    if prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) == new_shape[new_shape_i]:
+      new_shape_i += 1
+  return shape_idx_groups
+
 
 def support_weakref(x): return x
 @support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
@@ -204,28 +216,8 @@ class LazyBuffer:
 
     # move permutes before reshapes if we can
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
-      # TODO: this is atrocious code
-      # is contract? if so, group the axis
-      def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
-        out : List[List[int]] = []
-        curr : List[int] = []
-        for t in old_shape:
-          if len(out) >= len(new_shape): break
-          if t*prod(curr) <= new_shape[len(out)]:
-            curr.append(t)
-          else:
-            out.append(curr)
-            curr = [t]
-        out.append(curr)
-        if len(new_shape) == len(out) and all(prod(i) == j and len(i) >= 1 for i,j in zip(out, new_shape)):
-          return out
-      if contraction := get_contraction(self.op.src[0].shape, self.shape):
-        numbered, start = [], 0
-        for c in contraction:
-          numbered.append(list(range(start, start+len(c))))
-          start += len(c)
-        new_arg = []
-        for p in arg: new_arg += numbered[p]
+      if shape_idx_groups := get_contraction(old_shape, new_shape):
+        new_arg = functools.reduce(lambda r, x: r + shape_idx_groups[x], arg, [])
         self.op.src[0].children.discard(self)   # this changes nothing?
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
