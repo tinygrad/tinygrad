@@ -85,7 +85,7 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
     if new_shape[new_shape_i] % t != 0 or prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) * t > new_shape[new_shape_i]:
       return None
     shape_idx_groups[new_shape_i].append(old_shape_i)
-    if prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) == new_shape[new_shape_i]:
+    if prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) == new_shape[new_shape_i] and new_shape_i < len(new_shape) - 1:
       new_shape_i += 1
   return shape_idx_groups
 
@@ -216,7 +216,7 @@ class LazyBuffer:
 
     # move permutes before reshapes if we can
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
-      if shape_idx_groups := get_contraction(old_shape, new_shape):
+      if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
         new_arg = functools.reduce(lambda r, x: r + shape_idx_groups[x], arg, [])
         self.op.src[0].children.discard(self)   # this changes nothing?
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
