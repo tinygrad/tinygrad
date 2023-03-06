@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
-from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
+from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, NumNode, Variable, render_python
 from tinygrad.shape import ShapeTracker, View
 from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same, dedup
 
@@ -107,12 +107,16 @@ class GPUCodegen(ASTKernel):
       if (buf_index, o) not in self.loaded_keys:
         idxy, valid = self.sts[buf_index].expr_idxs(o) if idx_override is None else self.sts[buf_index].expr_node(idx_override, o)
         if should_upcast:
-          can_merge = True
-          for j in range(1,4):
-            idxy_test, valid_test = self.sts[buf_index].expr_idxs(o+j) if idx_override is None else self.sts[buf_index].expr_node(idx_override, o+j)
-            can_merge = can_merge and valid.render() == valid_test.render()
-            can_merge = can_merge and (idxy+j).render() == idxy_test.render()
-            #print((idxy+j).render(), idxy_test.render(), valid.render(), valid_test.render(), can_merge)
+          # TODO: this is too complex. symbolic should be able to do this directly
+          idxy_d4 = idxy//4
+          can_merge = isinstance(idxy_d4, (MulNode, Variable, NumNode)) or (isinstance(idxy_d4, SumNode) and all(isinstance(x, (MulNode, Variable, NumNode)) for x in idxy_d4.nodes))
+          if can_merge:
+            for j in range(1,4):
+              idxy_test, valid_test = self.sts[buf_index].expr_idxs(o+j) if idx_override is None else self.sts[buf_index].expr_node(idx_override, o+j)
+              can_merge = can_merge and valid.render() == valid_test.render()
+              can_merge = can_merge and (idxy+j).render() == idxy_test.render()
+              if not can_merge: break
+              #print((idxy+j).render(), idxy_test.render(), valid.render(), valid_test.render(), can_merge)
         if const is not None:
           ldr = const
         elif self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
