@@ -2,7 +2,7 @@ import itertools
 from enum import Enum, auto
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored
-from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops
+from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops, map_buffers
 from tinygrad.shape import ShapeTracker, View, strides_for_shape
 
 def get_first_reduce(shapes):
@@ -60,7 +60,8 @@ class ASTKernel:
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
-    self.key = f"ASTKernelKey ast={str(ast)} bufs={self.bufs}"
+    # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
+    self.key = f"ASTKernelKey ast={str(map_buffers({x:i for i,x in enumerate(self.bufs)}, ast))} bufs={self.bufs}"
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed

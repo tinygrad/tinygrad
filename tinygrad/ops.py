@@ -170,6 +170,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     k = cls.codegen_type(ast, output_buffer)
     if getenv("ENABLE_METHOD_CACHE"):   # TODO: this breaks the ops test!
       if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
+      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
       prg = cls.method_cache[k.key]
     else:
       prg = k.codegen().build(cls.runtime_type)
