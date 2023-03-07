@@ -142,6 +142,15 @@ class TestOpt(unittest.TestCase):
       d.realize()
       assert len(GlobalCounters.cache) == 1, "binop was rerun!"
 
+  def test_no_reduceop_rerun(self):
+    a = Tensor.randn(16, 16, 16)
+    with CLCache():
+      c = a.sum(2)
+      d = a.sum(2).permute(1,0)
+      c.realize()
+      d.realize()
+      assert len(GlobalCounters.cache) == 1, "reduceop was rerun!"
+
   # TODO: these permute tests should really test desired behavior, not outcomes
 
   def helper_push_permute_before_reshape(self, t, should_push=True, desired_reshape_arg=None, desired_permute_arg=None):

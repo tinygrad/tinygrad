@@ -194,6 +194,7 @@ class LazyBuffer:
       if op == MovementOps.FLIP: return self.op.src[0].movement_op(op, tuple(i for i in arg+self.op.arg if not (i in arg and i in self.op.arg)))
 
     # push permutes before reduce ops
+    # TODO: this is very dangerous! if the buffer has multiple children it will be rerun
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.optype == ReduceOps:
       # reduceops have one buffer input, permute it
       narg = tuple(self.op.arg[arg[i]] for i in range(len(arg)))
