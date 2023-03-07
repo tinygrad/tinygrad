@@ -5,6 +5,7 @@ import io
 import time
 import math
 import cv2
+import pathlib
 import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
@@ -405,5 +406,6 @@ if __name__ == "__main__":
   show_labels(prediction)
   prediction = process_results(prediction)
   boxes = add_boxes(np.array(Image.fromarray(img).resize((608, 608))), prediction)
-  cv2.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)), "boxes.jpg"), boxes)
+  os.chdir(pathlib.Path(__file__).parent)
+  cv2.imwrite("boxes.jpg", boxes)
 

@@ -1,14 +1,14 @@
 import os
+import pathlib
 from ultralytics import YOLO
 import onnx
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 
-FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/")
+FOLDER = pathlib.Path(__file__).parent.parent / "weights/"
 
 if __name__ == "__main__":
-  if not os.path.exists(FOLDER):
-    os.makedirs(FOLDER)
+  FOLDER.mkdir(parents=False, exist_ok=True)
   os.chdir(FOLDER)
   if not os.path.isfile("yolov8n-seg.onnx"):
     model = YOLO("yolov8n-seg.pt")
