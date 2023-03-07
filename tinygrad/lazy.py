@@ -255,16 +255,20 @@ class LazyBuffer:
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or all(x.op != BinaryOps.DIV for x in get_lazyops(self.op))):
+    # both EXPAND and PAD make things bigger, so don't push them!
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and op != MovementOps.PAD:
+      #(op != MovementOps.PAD or all(x.op != BinaryOps.DIV for x in get_lazyops(self.op))):
       ret = replace_with_movement_op(self.op, op, arg)
 
       # add alias for reshape
       if op == MovementOps.RESHAPE:
-        alias = LazyBuffer(self.device, ShapeTracker(ret.st).movement_op(MovementOps.RESHAPE, self.shape), MovementOps, LazyOp(MovementOps.RESHAPE, (ret, ), self.shape))
-        ret.aliases.append(alias)  # so it will be deallocated when ret is
-        ret.alts.append(LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg)))
-        LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
-      return ret
+        #alias = LazyBuffer(self.device, ShapeTracker(ret.st).movement_op(MovementOps.RESHAPE, self.shape), MovementOps, LazyOp(MovementOps.RESHAPE, (ret, ), self.shape))
+        #ret.aliases.append(alias)  # so it will be deallocated when ret is
+        #ret.alts.append(LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg)))
+        #LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
+        pass
+      else:
+        return ret
 
     # create the buffer
     ret = LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg))
