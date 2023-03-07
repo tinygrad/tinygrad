@@ -4,7 +4,7 @@ import os, sys, weakref, importlib, inspect, functools
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv
 from tinygrad.shape import ShapeTracker, get_contraction
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.ops import InterpretedBuffer, DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.graph import log_op
 
 # lazy can recurse a lot
@@ -159,7 +159,10 @@ class LazyBuffer:
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this?
   @staticmethod
   def fromCPU(x, device) -> LazyBuffer: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
-  def toCPU(self): return self.realize().toCPU()
+  def toCPU(self):
+    ret = self.realize().toCPU()
+    log_op(InterpretedBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
+    return ret
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
@@ -167,12 +170,7 @@ class LazyBuffer:
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
-    reduce = list(enumerate(zip(self.shape, new_shape)))
-    # move the reduce axes to the end
-    x = self.movement_op(MovementOps.PERMUTE, tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n]))
-    new_tmp_shape = tuple([n for _,(s,n) in reduce if s == n] + [n for _,(s,n) in reduce if s != n])
-    # NOTE: this reshape can only move around 1s
-    return LazyBuffer(x.device, new_tmp_shape, ReduceOps, LazyOp(op, (x,), new_tmp_shape)).movement_op(MovementOps.RESHAPE, new_shape)
+    return LazyBuffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape))
 
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop

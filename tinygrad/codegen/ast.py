@@ -79,13 +79,21 @@ class ASTKernel:
     assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
     assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
 
+    # get full shape buf index (earlybufs if there are any, otherwise output)
+    self.full_buf_index : int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
+
     # process
     self.sts : List[ShapeTracker] = [x.st.copy() for x in self.bufs]   # create new shapetrackers inside this kernel
+
+    # move all reduce axes to the end
+    reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
+    permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
+    self.reshape_and_permute(None, permute)
+
+    # simplify
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
-    # get full shape buf index (earlybufs if there are any, otherwise output)
-    self.full_buf_index : int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
 
   def print(self):
     buf_count, op_count, cache = -1, -1, {}
