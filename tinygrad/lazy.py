@@ -156,7 +156,7 @@ class LazyBuffer:
     assert isinstance(self.realized, Device._buffers[self.device])
     return self.realized
 
-  # TODO: this is making a copy!
+  # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this?
   @staticmethod
   def fromCPU(x, device) -> LazyBuffer: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
   def toCPU(self): return self.realize().toCPU()
