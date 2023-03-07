@@ -132,66 +132,48 @@ class TestOpt(unittest.TestCase):
       print(img_conv)
       assert len(GlobalCounters.cache) == 2, "optimizer didn't fold conv/relu"
 
-  def helper_push_permute_before_reshape(self, t, should_push=True, desired_reshape_arg=None, desired_permute_arg=None):
-    if PUSH_PERMUTES and should_push:
-      assert t.lazydata.op.src[0].op.op == MovementOps.PERMUTE, 'Permute should be pushed before reshape'
-      assert t.lazydata.op.src[0].op.arg == desired_permute_arg, f'Pushed permute arg should be {desired_permute_arg}'
-      assert t.lazydata.op.op == MovementOps.RESHAPE, 'Reshape should be after permute'
-      assert t.lazydata.op.arg == desired_reshape_arg, f'Reshape arg should be {desired_reshape_arg}'
-    else:
-      assert t.lazydata.op.src[0].op.op == MovementOps.RESHAPE, 'Reshape should before permute'
-      assert t.lazydata.op.op == MovementOps.PERMUTE, 'Permute should be after reshape'
+  def test_permute_was_pushed(self):
+    a = Tensor.randn(16, 16, 16)
+    with CLCache():
+      c = a.sum(2)
+      d = c.permute(1,0).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3)
+    if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
+  def test_permute_was_pushed_though_contract_reshape(self):
+    a = Tensor.randn(4, 4, 4, 4, 4)
+    with CLCache():
+      c = a.sum(-1)
+      d = c.reshape(16,16).permute(1,0).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,16).transpose(1,0), d.numpy(), rtol=1e-3)
+    if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  def test_push_permute_before_reshape(self):
-    t = Tensor.ones(1,2,3,4)
-    t = t.reshape(1,2,3*4).permute(2,1,0)
-    self.helper_push_permute_before_reshape(t, should_push=True, desired_reshape_arg=(12,2,1), desired_permute_arg=(2,3,1,0))
+  @unittest.skip("expansion can't push contract with 1s permute yet")
+  def test_permute_was_pushed_though_contractw1s_reshape(self):
+    a = Tensor.randn(4, 4, 4, 4, 4)
+    with CLCache():
+      c = a.sum(-1)
+      d = c.reshape(16,1,16).permute(2,1,0).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,1,16).transpose(2,1,0), d.numpy(), rtol=1e-3)
+    if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-    t = Tensor.ones(1,2,3,4)
-    t = t.reshape(3,1,2,4).permute(3,2,1,0)
-    self.helper_push_permute_before_reshape(t, should_push=False)
-
-    t = Tensor.ones(1,2,3,1,4,1)
-    t = t.reshape(1,2,3*4).permute(2,1,0)
-    self.helper_push_permute_before_reshape(t, should_push=True, desired_reshape_arg=(12,2,1), desired_permute_arg=(2,3,4,5,1,0))
-
-    t = Tensor.ones(1,2,3,4)
-    t = t.reshape(1,2,3,1,4).permute(4,3,2,1,0)
-    self.helper_push_permute_before_reshape(t, should_push=False)
-
-
-  def test_push_permute_before_reduce(self):
-    t = Tensor.ones(1,2,3,4)
-    t = t.sum(axis=2).permute(2,1,0)
-    if PUSH_PERMUTES:
-      assert t.lazydata.op.src[0].op.src[0].op.op == MovementOps.PERMUTE, 'Permute should be pushed before reduce'
-      assert t.lazydata.op.src[0].op.src[0].op.arg == (3,1,0,2), 'Pushed permute arg error'
-      assert t.lazydata.op.src[0].op.op == ReduceOps.SUM, 'Sum should be after permute'
-      assert t.lazydata.op.src[0].op.arg == (4,2,1,1), 'Sum arg error'
-      assert t.lazydata.op.op == MovementOps.RESHAPE, 'Reshape should be after Sum'
-      assert t.lazydata.op.arg == (4,2,1), 'Reshape arg error'
-    else:
-      assert t.lazydata.op.src[0].op.src[0].op.op == ReduceOps.SUM, 'Sum should be the first'
-      assert t.lazydata.op.src[0].op.src[0].op.arg == (1,2,4,1), 'Sum arg error'
-      assert t.lazydata.op.src[0].op.op == MovementOps.RESHAPE, 'Reshape should be after sum'
-      assert t.lazydata.op.src[0].op.arg == (1,2,4), 'Reshape arg error'
-      assert t.lazydata.op.op == MovementOps.PERMUTE, 'Permute should be after Reshape'
-      assert t.lazydata.op.arg == (2,1,0), 'Permute arg error'
-
-  def test_push_permute_before_expand(self):
-    t = Tensor.ones(1,2,3,4)
-    t = t.expand(2,2,3,4).permute(3,2,1,0)
-    if PUSH_PERMUTES:
-      assert t.lazydata.op.src[0].op.op == MovementOps.PERMUTE, 'Permute should be pushed before reduce'
-      assert t.lazydata.op.src[0].op.arg == (3,2,1,0), 'Pushed permute arg error'
-      assert t.lazydata.op.op == MovementOps.EXPAND, 'Expand should be after permute'
-      assert t.lazydata.op.arg == (4,3,2,2), 'Expand arg error'
-    else:
-      assert t.lazydata.op.src[0].op.op == MovementOps.EXPAND, 'Expand should be the first'
-      assert t.lazydata.op.src[0].op.arg == (2,2,3,4), 'Expand arg error'
-      assert t.lazydata.op.op == MovementOps.PERMUTE, 'Permute should be after expand'
-      assert t.lazydata.op.arg == (3,2,1,0), 'Permute arg error'
+  @unittest.skip("expansion can't push expand permute yet")
+  def test_permute_was_pushed_through_expand_reshape(self):
+    if not PUSH_PERMUTES: return
+    a = Tensor.randn(16, 16, 16)
+    with CLCache():
+      c = a.sum(2)
+      d = c.reshape(4,4,4,4).permute(2,3,0,1).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3)
+    if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
 if __name__ == '__main__':
   unittest.main()
