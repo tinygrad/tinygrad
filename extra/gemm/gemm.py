@@ -16,9 +16,9 @@ if __name__ == "__main__":
   #print(f"{flop / 1e9:.2f} GFLOP")
 
   for i in range(4):
-    st = time.monotonic()
+    st = time.perf_counter()
     C = A @ B.T
-    et = time.monotonic()
+    et = time.perf_counter()
     s = et-st
     print(f"{flop/s * 1e-9:.2f} GFLOP/S, {s*1e3:.2f} ms")
   

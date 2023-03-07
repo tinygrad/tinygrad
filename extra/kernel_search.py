@@ -84,11 +84,11 @@ def run_and_time(k,cnt=3,local_override=None):
   prog = k.codegen()
   ret = []
   for i in range(cnt):
-    t1 = time.monotonic_ns()
+    t1 = time.perf_counter_ns()
     if local_override: prog.local_work_size = local_override
     e = prog(*k.bufs)
     e.wait()
-    t4 = time.monotonic_ns()
+    t4 = time.perf_counter_ns()
     t2, t3 = e.profile.start * OSX_TIMING_RATIO, e.profile.end * OSX_TIMING_RATIO
     #print(*[f"{(x-t1)*1e-3:7.2f} us" for x in [t1, t2, t3, t4]])  # TODO: this may be wrong on non OS X
     #assert t1 < t2 < t3 < t4, "timings not in order"

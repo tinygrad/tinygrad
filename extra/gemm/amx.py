@@ -168,9 +168,9 @@ cfunc = LLVM().exec(module, bufs, N**3 * 2)
 
 times = []
 for i in range(50):
-  st = time.monotonic()
+  st = time.perf_counter()
   cfunc(*[x._buf for x in bufs])
-  et = time.monotonic() - st
+  et = time.perf_counter() - st
   times.append(et)
 
 print(f"{min(times)*1000:.2f} ms min time, {np.median(times)*1000:.2f} ms median time")

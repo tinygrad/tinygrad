@@ -58,9 +58,9 @@ class LLVMProgram:
 
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(self.fxn)
-    if wait: st = time.monotonic()
+    if wait: st = time.perf_counter()
     cfunc(*[x._buf for x in bufs])
-    if wait: return time.monotonic()-st
+    if wait: return time.perf_counter()-st
 
 class LLVMBuffer(CompiledBuffer):
   raw_buffer_type, codegen_type, runtime_type = RawMallocBuffer, LLVMCodegen, LLVMProgram

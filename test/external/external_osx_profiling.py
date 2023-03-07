@@ -12,15 +12,15 @@ prg = CLProgram("test", """__kernel void test(__global float *a, __global float 
 }""")
 prg.clprg(CL.cl_queue, [N,], None, a._cl, b._cl, c._cl)
 
-t1 = time.monotonic_ns()
+t1 = time.perf_counter_ns()
 e1 = prg.clprg(CL.cl_queue, [N,], None, a._cl, b._cl, c._cl)
 CL.cl_queue.finish()  # type: ignore
-t2 = time.monotonic_ns()
+t2 = time.perf_counter_ns()
 time.sleep(3)
-t3 = time.monotonic_ns()
+t3 = time.perf_counter_ns()
 e2 = prg.clprg(CL.cl_queue, [N,], None, a._cl, b._cl, c._cl)
 CL.cl_queue.finish()  # type: ignore
-t4 = time.monotonic_ns()
+t4 = time.perf_counter_ns()
 
 print(e1.profile.queued)
 print(e1.profile.submit)

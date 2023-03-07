@@ -22,9 +22,9 @@ class ClangProgram:
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
   def __call__(self, *args, wait=False):
-    if wait: st = time.monotonic()
+    if wait: st = time.perf_counter()
     self.fxn(*[x._buf for x in args[2:]])
-    if wait: return time.monotonic()-st
+    if wait: return time.perf_counter()-st
 
 class ClangCodegen(GPUCodegen):
   lang = GPULanguage(buffer_suffix="restrict")

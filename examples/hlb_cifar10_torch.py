@@ -89,12 +89,12 @@ def train_cifar():
       outs = model(Xt).detach().cpu().numpy().argmax(axis=1)
       correct = outs == Yt.detach().cpu().numpy().argmin(axis=1)
       print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%")
-    st = time.monotonic()
+    st = time.perf_counter()
     loss = train_step_jitted(model, optimizer, X, Y)
-    et = time.monotonic()
+    et = time.perf_counter()
     X, Y = fetch_batch(X_train, Y_train, BS=BS)  # do this here
     loss_cpu = loss.detach().cpu().item()
-    cl = time.monotonic()
+    cl = time.perf_counter()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss")
 
 if __name__ == "__main__":

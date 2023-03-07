@@ -73,9 +73,9 @@ if __name__ == "__main__":
       _ = cap.grab() # discard one frame to circumvent capture buffering
       ret, frame = cap.read()
       img = Image.fromarray(frame[:, :, [2,1,0]])
-      lt = time.monotonic_ns()
+      lt = time.perf_counter_ns()
       out, retimg = infer(model, img)
-      print(f"{(time.monotonic_ns()-lt)*1e-6:7.2f} ms", np.argmax(out), np.max(out), lbls[np.argmax(out)])
+      print(f"{(time.perf_counter_ns()-lt)*1e-6:7.2f} ms", np.argmax(out), np.max(out), lbls[np.argmax(out)])
       SCALE = 3
       simg = cv2.resize(retimg, (224*SCALE, 224*SCALE))
       retimg = cv2.cvtColor(simg, cv2.COLOR_RGB2BGR)

@@ -268,12 +268,12 @@ class Thneed:
 
   def run(self):
     events = []
-    st = time.monotonic()
+    st = time.perf_counter()
     for prg, args in self.cl_cache:
       events.append(prg.clprg(CL.cl_queue, *args))
-    mt = time.monotonic()
+    mt = time.perf_counter()
     CL.cl_queue.finish()
-    et = time.monotonic() - st
+    et = time.perf_counter() - st
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 
     if DEBUGCL >= 2:

@@ -17,13 +17,13 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
 
-  st = time.monotonic()
+  st = time.perf_counter()
   out = torch_fxn(*ts)
-  torch_fp = time.monotonic() - st
+  torch_fp = time.perf_counter() - st
 
-  st = time.monotonic()
+  st = time.perf_counter()
   ret = tinygrad_fxn(*tst).realize()
-  tinygrad_fp = time.monotonic() - st
+  tinygrad_fp = time.perf_counter() - st
 
   def compare(s, x,y,atol,rtol):
     if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch {x.shape} != {y.shape}"
@@ -36,14 +36,14 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY:
-    st = time.monotonic()
+    st = time.perf_counter()
     out.square().mean().backward()
-    torch_fbp = time.monotonic() - st
+    torch_fbp = time.perf_counter() - st
 
-    st = time.monotonic()
+    st = time.perf_counter()
     ret.square().mean().backward()
     for tt in tst: tt.grad.realize()
-    tinygrad_fbp = time.monotonic() - st
+    tinygrad_fbp = time.perf_counter() - st
 
     for i, (t, tt) in enumerate(zip(ts, tst)):
       compare(f"backward pass tensor {i}", tt.grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)

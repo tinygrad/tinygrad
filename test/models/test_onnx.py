@@ -41,13 +41,13 @@ class TestOnnxModel(unittest.TestCase):
 
     for _ in range(7):
       inputs = get_inputs()
-      st = time.monotonic()
+      st = time.perf_counter()
       tinygrad_out = run_onnx(inputs)['outputs']
-      mt = time.monotonic()
+      mt = time.perf_counter()
       tinygrad_out.realize()
-      mt2 = time.monotonic()
+      mt2 = time.perf_counter()
       tinygrad_out = tinygrad_out.numpy()
-      et = time.monotonic()
+      et = time.perf_counter()
       print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
     import cProfile
@@ -80,15 +80,15 @@ class TestOnnxModel(unittest.TestCase):
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
 
-    st = time.monotonic()
+    st = time.perf_counter()
     print("****** run onnx ******")
     tinygrad_out = run_onnx(inputs)['outputs']
-    mt = time.monotonic()
+    mt = time.perf_counter()
     print("****** realize ******")
     tinygrad_out.realize()
-    mt2 = time.monotonic()
+    mt2 = time.perf_counter()
     tinygrad_out = tinygrad_out.numpy()
-    et = time.monotonic()
+    et = time.perf_counter()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
     Tensor.no_grad = True
