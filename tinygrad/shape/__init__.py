@@ -203,13 +203,21 @@ class ShapeTracker:
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
-  if len(new_shape) > len(old_shape): return None
-  new_shape_i : int = 0
-  shape_idx_groups : List[List[int]] = [[] for _ in range(len(new_shape))]
-  for old_shape_i, t in enumerate(old_shape):
-    if new_shape[new_shape_i] % t != 0 or prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) * t > new_shape[new_shape_i]:
-      return None
-    shape_idx_groups[new_shape_i].append(old_shape_i)
-    if prod([old_shape[x] for x in shape_idx_groups[new_shape_i]]) == new_shape[new_shape_i] and new_shape_i < len(new_shape) - 1:
-      new_shape_i += 1
-  return shape_idx_groups
+  # Pre-allocate all groups.
+  axis_groups : List[List[int]] = [[] for _ in range(len(new_shape))]
+  # Index for new_shape and axis_groups.
+  i : int = 0
+  old_shape_i : int = 0
+  while old_shape_i < len(old_shape):
+    # 1s exist in new_shape only will lead to empty axes group creations.
+    if new_shape[i] == 1 and old_shape[old_shape_i] != 1:
+      if i < len(new_shape) - 1: i += 1
+    else:
+      if new_shape[i] % old_shape[old_shape_i]  != 0 or prod([old_shape[x] for x in axis_groups[i]]) * old_shape[old_shape_i]  > new_shape[i]:
+        return None
+      axis_groups[i].append(old_shape_i)
+      # Move to next axes group if total size of all dimensions match.
+      if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i]:
+        if i < len(new_shape) - 1: i += 1
+      old_shape_i += 1
+  return axis_groups
