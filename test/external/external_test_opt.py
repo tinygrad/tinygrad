@@ -132,6 +132,18 @@ class TestOpt(unittest.TestCase):
       print(img_conv)
       assert len(GlobalCounters.cache) == 2, "optimizer didn't fold conv/relu"
 
+  def test_no_binop_rerun(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      c = a*b
+      d = (a*b).reshape(16, 16, 1)
+      c.realize()
+      d.realize()
+      assert len(GlobalCounters.cache) == 1, "binop was rerun!"
+
+  # TODO: these permute tests should really test desired behavior, not outcomes
+
   def helper_push_permute_before_reshape(self, t, should_push=True, desired_reshape_arg=None, desired_permute_arg=None):
     if PUSH_PERMUTES and should_push:
       assert t.lazydata.op.src[0].op.op == MovementOps.PERMUTE, 'Permute should be pushed before reshape'
@@ -141,7 +153,6 @@ class TestOpt(unittest.TestCase):
     else:
       assert t.lazydata.op.src[0].op.op == MovementOps.RESHAPE, 'Reshape should before permute'
       assert t.lazydata.op.op == MovementOps.PERMUTE, 'Permute should be after reshape'
-
 
   def test_push_permute_before_reshape(self):
     t = Tensor.ones(1,2,3,4)
