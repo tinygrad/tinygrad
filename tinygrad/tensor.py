@@ -4,7 +4,7 @@ import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
-from tinygrad.lazy import Device, LazyBuffer
+from tinygrad.lazy import Device, LazyBuffer, LazyLazyBuffer
 from tinygrad.image import image_conv2d_decorator
 
 # An instantiation of the Function is the Context
@@ -43,6 +43,8 @@ class Tensor:
     if isinstance(data, np.ndarray):
       data = data if data.shape else data.reshape((1,))
       self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
+    elif isinstance(data, LazyLazyBuffer):
+      self.lazydata = LazyBuffer.fromCPU(data, device)
     elif isinstance(data, LazyBuffer):
       self.lazydata = data
     else:
@@ -132,11 +134,11 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, device=Device.DEFAULT, **kwargs) -> Tensor: return Tensor(LazyBuffer.fromCPULazy(lambda: Tensor._rng.random(size=shape, dtype=np.float32), shape, device), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyLazyBuffer(lambda shape: Tensor._rng.random(size=shape, dtype=np.float32), shape), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, device=Device.DEFAULT, **kwargs) -> Tensor: return Tensor(LazyBuffer.fromCPULazy(lambda: Tensor._rng.standard_normal(size=shape, dtype=np.float32), shape, device), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyLazyBuffer(lambda shape: Tensor._rng.standard_normal(size=shape, dtype=np.float32), shape), **kwargs)
 
   # ***** rng hlops *****
 

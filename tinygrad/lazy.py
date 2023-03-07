@@ -78,6 +78,11 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   assert y.op in BinaryOps or y.op in UnaryOps
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
 
+class LazyLazyBuffer:
+  def __init__(self, fxn, shape): self.fxn, self.shape = fxn, shape
+  def __call__(self): return self.fxn(self.shape)
+  def copy(self): return self
+
 def support_weakref(x): return x
 @support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
 class LazyBuffer:
@@ -115,7 +120,7 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        self.realized = Device._buffers[self.device].fromCPU(self.op.arg() if callable(self.op.arg) else self.op.arg)  # lazy lazy buffers
+        self.realized = Device._buffers[self.device].fromCPU(self.op.arg() if isinstance(self.op.arg, LazyLazyBuffer) else self.op.arg)
         ast = LazyOp(self.op.op, tuple())
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
@@ -148,9 +153,6 @@ class LazyBuffer:
     assert self.realized.shape == self.shape, f"shape mismatch on realize {self.realized.shape} vs {self.shape}"
     assert isinstance(self.realized, Device._buffers[self.device])
     return self.realized
-
-  @staticmethod
-  def fromCPULazy(fxn, shape, device) -> LazyBuffer: return LazyBuffer(device, shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), fxn))
 
   # TODO: this is making a copy!
   @staticmethod
