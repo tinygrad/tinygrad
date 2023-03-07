@@ -405,4 +405,3 @@ if __name__ == "__main__":
   prediction = process_results(prediction)
   boxes = add_boxes(np.array(Image.fromarray(img).resize((608, 608))), prediction)
   cv2.imwrite("boxes.jpg", boxes)
-
