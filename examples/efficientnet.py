@@ -89,7 +89,7 @@ if __name__ == "__main__":
       img = Image.open(io.BytesIO(fetch(url)))
     else:
       img = Image.open(url)
-    st = time.time()
+    st = time.perf_counter_ns()
     out, _ = infer(model, img)
     print(np.argmax(out), np.max(out), lbls[np.argmax(out)])
-    print(f"did inference in {(time.time()-st):2f}")
+    print(f"did inference in {(time.perf_counter_ns()-st)*1e-6:.2f} ms")
