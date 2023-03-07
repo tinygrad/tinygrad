@@ -19,9 +19,9 @@ class ConvNeXt:
   def __init__(self, in_chans=3, num_classes=1000, depths=[3, 3, 9, 3], dims=[96, 192, 384, 768]):
     self.downsample_layers = [
       [Conv2d(in_chans, dims[0], kernel_size=4, stride=4), LayerNorm((dims[0], 1, 1), eps=1e-6)],
-      *[[LayerNorm((dims[i], 1, 1), eps=1e-6), Conv2d(dims[i], dims[i+1], kernel_size=2, stride=2)] for i in range(3)]
+      *[[LayerNorm((dims[i], 1, 1), eps=1e-6), Conv2d(dims[i], dims[i+1], kernel_size=2, stride=2)] for i in range(len(dims)-1)]
     ]
-    self.stages = [[Block(dims[i]) for _ in range(depths[i])] for i in range(4)]
+    self.stages = [[Block(dims[i]) for _ in range(depths[i])] for i in range(len(dims))]
     self.norm = LayerNorm(dims[-1])
     self.head = Linear(dims[-1], num_classes)
 

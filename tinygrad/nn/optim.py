@@ -8,9 +8,8 @@ class Optimizer:
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
-    self.params : List[Tensor] = [x.assign(x.contiguous()) for x in params if x.requires_grad]
-    self.buffers : List[Tensor] = [x.assign(x.contiguous()) for x in params if not x.requires_grad]   # buffers are still realized
-    #self.realize()
+    self.params : List[Tensor] = [x for x in params if x.requires_grad]
+    self.buffers : List[Tensor] = [x for x in params if not x.requires_grad]   # buffers are still realized
 
   # TODO: this probably shouldn't change the gradients, just the ones used by the optimizer
   def clipnorm(self, amount=1):
