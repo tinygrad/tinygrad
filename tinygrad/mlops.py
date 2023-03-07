@@ -135,7 +135,7 @@ class Permute(Function):
     return x.movement_op(MovementOps.PERMUTE, order)
 
   def backward(self, grad_output):
-    return grad_output.movement_op(MovementOps.PERMUTE, tuple(argsort(self.input_order)))
+    return grad_output.movement_op(MovementOps.PERMUTE, argsort(self.input_order))
 
 class Pad(Function):
   def forward(self, x, arg):

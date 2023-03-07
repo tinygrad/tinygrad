@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
+from tinygrad.helpers import getenv
 from models.efficientnet import EfficientNet
 from models.vit import ViT
 from tinygrad.tensor import Tensor
@@ -54,7 +55,7 @@ car_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/car.jpg')
 class TestEfficientNet(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.model = EfficientNet(number=0)
+    cls.model = EfficientNet(number=getenv("NUM"))
     cls.model.load_from_pretrained()
 
   @classmethod

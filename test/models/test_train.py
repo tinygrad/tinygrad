@@ -5,6 +5,7 @@ from tinygrad.nn import optim
 from tinygrad.tensor import Device
 from tinygrad.helpers import getenv
 from extra.training import train
+from models.convnext import ConvNeXt
 from models.efficientnet import EfficientNet
 from models.transformer import Transformer
 from models.vit import ViT
@@ -24,18 +25,32 @@ def train_one_step(model,X,Y):
   et = time.time()-st
   print("done in %.2f ms" % (et*1000.))
 
+def check_gc():
+  if Device.DEFAULT == "GPU":
+    from extra.introspection import print_objects
+    assert print_objects() == 0
+
 class TestTrain(unittest.TestCase):
+  def test_convnext(self):
+    model = ConvNeXt(depths=[1], dims=[16])
+    X = np.zeros((BS,3,224,224), dtype=np.float32)
+    Y = np.zeros((BS), dtype=np.int32)
+    train_one_step(model,X,Y)
+    check_gc()
+
   def test_efficientnet(self):
     model = EfficientNet(0)
     X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
+    check_gc()
 
   def test_vit(self):
     model = ViT()
     X = np.zeros((BS,3,224,224), dtype=np.float32)
     Y = np.zeros((BS,), dtype=np.int32)
     train_one_step(model,X,Y)
+    check_gc()
 
   def test_transformer(self):
     # this should be small GPT-2, but the param count is wrong
@@ -44,10 +59,7 @@ class TestTrain(unittest.TestCase):
     X = np.zeros((BS,6), dtype=np.float32)
     Y = np.zeros((BS,6), dtype=np.int32)
     train_one_step(model,X,Y)
-
-    if Device.DEFAULT == "GPU":
-      from extra.introspection import print_objects
-      assert print_objects() == 0
+    check_gc()
 
   def test_resnet(self):
     X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
@@ -56,6 +68,7 @@ class TestTrain(unittest.TestCase):
       model = resnet_v()
       model.load_from_pretrained()
       train_one_step(model, X, Y)
+    check_gc()
 
   def test_bert(self):
     # TODO: write this

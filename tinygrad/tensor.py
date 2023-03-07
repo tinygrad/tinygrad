@@ -4,7 +4,7 @@ import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
-from tinygrad.lazy import Device, LazyBuffer
+from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray
 from tinygrad.image import image_conv2d_decorator
 
 # An instantiation of the Function is the Context
@@ -40,7 +40,7 @@ class Tensor:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
-    if isinstance(data, np.ndarray):
+    if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
       self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
     elif isinstance(data, LazyBuffer):
@@ -79,7 +79,7 @@ class Tensor:
 
   def assign(self, x) -> Tensor:
     if not isinstance(x, Tensor): x = Tensor(x)
-    assert self.shape == x.shape
+    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
@@ -132,11 +132,11 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(Tensor._rng.random(size=shape, dtype=np.float32), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape: Tensor._rng.random(size=shape, dtype=np.float32), shape), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(Tensor._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape: Tensor._rng.standard_normal(size=shape, dtype=np.float32), shape), **kwargs)
 
   # ***** rng hlops *****
 
@@ -325,7 +325,7 @@ class Tensor:
     padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
 
     # conv2d is a pooling op (with padding)
-    x = self.pad2d(padding_)._pool((H,W),stride, dilation)
+    x = self.pad2d(padding_)._pool((H,W), stride, dilation)
 
     oy, ox, rcout = x.shape[2], x.shape[3], cout//groups
     # NOTE: we do this expand explicitly so the permute isn't pushed in the binop
