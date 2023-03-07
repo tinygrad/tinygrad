@@ -1,4 +1,4 @@
-import os, tempfile, atexit, itertools
+import os, tempfile, platform, atexit, itertools
 try:
   import networkx as nx  # type: ignore
 except ImportError:
