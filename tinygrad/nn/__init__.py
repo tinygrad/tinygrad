@@ -43,7 +43,7 @@ class Conv2d:
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else (kernel_size[0], kernel_size[1])
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
     self.weight = Tensor.glorot_uniform(out_channels, in_channels//groups, self.kernel_size[0], self.kernel_size[1])
-    self.bias = Tensor.zeros(out_channels).contiguous() if bias else None
+    self.bias = Tensor.zeros(out_channels) if bias else None
 
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
@@ -51,7 +51,7 @@ class Conv2d:
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
     self.weight = Tensor.glorot_uniform(out_features, in_features)
-    self.bias = Tensor.zeros(out_features).contiguous() if bias else None
+    self.bias = Tensor.zeros(out_features) if bias else None
 
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)

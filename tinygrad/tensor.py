@@ -132,7 +132,7 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, device=Device.DEFAULT, **kwargs) -> Tensor:return Tensor(LazyBuffer.fromCPULazy(lambda: Tensor._rng.random(size=shape, dtype=np.float32), shape, device), **kwargs)
+  def rand(*shape, device=Device.DEFAULT, **kwargs) -> Tensor: return Tensor(LazyBuffer.fromCPULazy(lambda: Tensor._rng.random(size=shape, dtype=np.float32), shape, device), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod

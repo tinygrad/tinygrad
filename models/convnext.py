@@ -30,15 +30,31 @@ class ConvNeXt:
       x = x.sequential(downsample).sequential(stage)
     return x.mean([-2, -1]).sequential([self.norm, self.head])
 
+# *** model definition is done ***
+
+versions = {
+  "tiny": {"depths": [3, 3, 9, 3], "dims": [96, 192, 384, 768]},
+  "small": {"depths": [3, 3, 27, 3], "dims": [96, 192, 384, 768]},
+  "base": {"depths": [3, 3, 9, 3], "dims": [128, 256, 512, 1024]},
+  "tiny": {"depths": [3, 3, 9, 3], "dims": [96, 192, 384, 768]},
+  "large": {"depths": [3, 3, 27, 3], "dims": [192, 384, 768, 1536]},
+  "xlarge": {"depths": [3, 3, 27, 3], "dims": [256, 512, 1024, 2048]}
+}
+
+def get_model(version, load_weights=False):
+  model = ConvNeXt(**versions[version])
+  if load_weights:
+    from extra.utils import fetch, fake_torch_load, get_child
+    weights = fake_torch_load(fetch(f'https://dl.fbaipublicfiles.com/convnext/convnext_{version}_1k_224_ema.pth'))['model']
+    for k,v in weights.items():
+      mv = get_child(model, k)
+      mv.assign(v.reshape(mv.shape)).realize()
+  return model
+
 if __name__ == "__main__":
-  model = ConvNeXt()
+  model = get_model("tiny", True)
 
-  from extra.utils import fetch, fake_torch_load, get_child
-  weights = fake_torch_load(fetch('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth'))['model']
-  for k,v in weights.items():
-    mv = get_child(model, k)
-    mv.assign(v.reshape(mv.shape)).realize()
-
+  # load image
   from test.models.test_efficientnet import chicken_img, preprocess, _LABELS
   img = Tensor(preprocess(chicken_img))
 
