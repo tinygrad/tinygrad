@@ -197,6 +197,36 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3)
     assert cache_len == 1, "permute wasn't pushed!"
 
+  def test_layernorm(self):
+    a = Tensor.randn(16, 16, 16)
+    ln = nn.LayerNorm(16)
+    with CLCache():
+      ln(a).realize()
+      cache_len = len(GlobalCounters.cache)
+    assert cache_len == 3, "layernorm too many ops"
+
+  def test_layernorm_permute(self):
+    dim = 16
+    a = Tensor.randn(1, 16, 8, 8)
+    dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)
+    ln = nn.LayerNorm(dim, eps=1e-6)
+    with CLCache():
+      ln(dwconv(a).permute(0, 2, 3, 1)).realize()
+      cache_len = len(GlobalCounters.cache)
+    assert cache_len == 4, "conv/permute/layernorm too many ops"
+
+  def test_layernorm_permute_linear(self):
+    dim = 16
+    a = Tensor.randn(1, 16, 8, 8)
+    dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # why don't i need avoid here?
+    ln = nn.LayerNorm(dim, eps=1e-6)
+    linear = nn.Linear(dim, dim, bias=False)
+    linear.weight.assign(Tensor.ones(*linear.weight.shape))  # avoid random init op (why do i need this!)
+    with CLCache():
+      linear(ln(dwconv(a).permute(0, 2, 3, 1))).realize()
+      cache_len = len(GlobalCounters.cache)
+    assert cache_len == 5, "conv/permute/layernorm too many ops"
+
   # TODO: these permute tests should really test desired behavior, not outcomes. see test_permute_was_pushed
 
   """

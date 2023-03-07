@@ -37,9 +37,12 @@ PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # check aliases to see if we already realized this
+  print("do alts match?", self.alts, self)
   for alt in self.alts:
     root = get_movementroot(alt)
+    print(root.alts)
     if root.realized: return alt
+    print("no!", root)
 
   print("_ast_reduceops", self, self.aliases)
   # TODO: this can also corealize a binary op after the reduce, not just before
@@ -144,10 +147,13 @@ class LazyBuffer:
       elif self.optype == MovementOps:
         src = self.op.src[0]
 
-        # fuse RESHAPE and ReduceOps
+        # fuse RESHAPE and ReduceOps (why? image stuff?)
         if False and src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
+          print("THIS", src)
           # it's okay to add a RESHAPE to the ast here
-          ast = LazyOp(MovementOps.RESHAPE, (_ast_reduceops(src), ), self.op.arg)
+          reduce_ast = _ast_reduceops(src)
+          print(src, src.alts, reduce_ast)
+          ast = LazyOp(MovementOps.RESHAPE, (reduce_ast, ), self.op.arg)
         else:
           # movement ops aren't an AST, just run them
           real_src = src.realize(self.device)
@@ -161,9 +167,8 @@ class LazyBuffer:
 
       # run the ast if we still have to, and log the op
       if isinstance(ast, LazyBuffer):
-        _ast = ast.op if not ast.realized else None
         self.realized = ast.realize()
-        ast = _ast
+        ast = None
 
       if self.realized is None:
         ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
@@ -228,9 +233,9 @@ class LazyBuffer:
 
       # add alias of the non permuted so reduce isn't rerun
       alias = LazyBuffer(self.device, ShapeTracker(ret.st).movement_op(MovementOps.PERMUTE, argsort(self.op.arg)), MovementOps, LazyOp(MovementOps.PERMUTE, (ret, ), argsort(self.op.arg)))
-      ret.aliases.append(alias)  # so it will be deallocated when ret is
+      #ret.aliases.append(alias)  # so it will be deallocated when ret is
       ret.alts.append(LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg)))
-      LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
+      #LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
       return ret
 
     # some permutes are actually just reshapes

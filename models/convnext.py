@@ -1,5 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, LayerNorm, Linear
+from tinygrad.helpers import getenv
 
 class Block:
   def __init__(self, dim):
@@ -12,7 +13,7 @@ class Block:
   def __call__(self, x:Tensor):
     return x + x.sequential([
       self.dwconv, lambda x: x.permute(0, 2, 3, 1), self.norm,
-      self.pwconv1, Tensor.gelu, self.pwconv2, lambda x: (self.gamma * x).permute(0, 3, 1, 2)
+      self.pwconv1, Tensor.relu if getenv("RELU") else Tensor.gelu, self.pwconv2, lambda x: (self.gamma * x).permute(0, 3, 1, 2)
     ])
 
 class ConvNeXt:
