@@ -145,5 +145,4 @@ if __name__ == "__main__":
     compile(dat, sys.argv[2])
   else:
     dat = fetch(OPENPILOT_MODEL)
-    os.chdir(pathlib.Path(__file__).parent)
     compile(dat, "output.thneed")

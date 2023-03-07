@@ -704,8 +704,6 @@ if __name__ == "__main__":
   from PIL import Image
   im = Image.fromarray(dat)
   print(f"saving {args.out}")
-  os.chdir(pathlib.Path(__file__).parent)
   im.save(args.out)
-
-  # open image.
+  # Open image.
   im.show()

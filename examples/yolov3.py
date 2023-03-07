@@ -1,11 +1,9 @@
 # https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg
 import sys
-import os
 import io
 import time
 import math
 import cv2
-import pathlib
 import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
@@ -406,6 +404,5 @@ if __name__ == "__main__":
   show_labels(prediction)
   prediction = process_results(prediction)
   boxes = add_boxes(np.array(Image.fromarray(img).resize((608, 608))), prediction)
-  os.chdir(pathlib.Path(__file__).parent)
   cv2.imwrite("boxes.jpg", boxes)
 
