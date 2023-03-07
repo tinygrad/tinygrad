@@ -39,11 +39,7 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # check aliases to see if we already realized this
   for alt in self.alts:
     root = get_movementroot(alt)
-    if root.realized: #return alt.op
-      return alt
-      #return LazyOp(UnaryOps.NOOP, (alt,), None)
-    #print(alt, root)
-    #print("get_movementroot", self, root, root.realized, alias)
+    if root.realized: return alt
 
   print("_ast_reduceops", self, self.aliases)
   # TODO: this can also corealize a binary op after the reduce, not just before
@@ -54,6 +50,11 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(self:LazyBuffer) -> LazyOp:
+  # check aliases to see if we already realized this
+  for alt in self.alts:
+    root = get_movementroot(alt)
+    if root.realized: return alt
+
   real_srcs : Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in get_buffers(self.op)}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
@@ -160,15 +161,15 @@ class LazyBuffer:
 
       # run the ast if we still have to, and log the op
       if isinstance(ast, LazyBuffer):
-        _ast = ast.op
+        _ast = ast.op if not ast.realized else None
         self.realized = ast.realize()
         ast = _ast
-        print(ast)
 
       if self.realized is None:
         ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
         self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
-      log_op(self.realized, ast)
+
+      if ast: log_op(self.realized, ast)
 
     assert self.realized.shape == self.shape, f"shape mismatch on realize {self.realized.shape} vs {self.shape}"
     assert isinstance(self.realized, Device._buffers[self.device])
@@ -256,6 +257,7 @@ class LazyBuffer:
       if op == MovementOps.RESHAPE:
         alias = LazyBuffer(self.device, ShapeTracker(ret.st).movement_op(MovementOps.RESHAPE, self.shape), MovementOps, LazyOp(MovementOps.RESHAPE, (ret, ), self.shape))
         ret.aliases.append(alias)  # so it will be deallocated when ret is
+        ret.alts.append(LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg)))
         LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
       return ret
 

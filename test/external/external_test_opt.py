@@ -163,17 +163,6 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy().transpose(1,0), d.numpy())
     assert cache_len == 1, "reduceop was rerun!"
 
-  def test_permute_was_pushed(self):
-    if not PUSH_PERMUTES: return
-    a = Tensor.randn(16, 16, 16)
-    with CLCache():
-      c = a.sum(2)
-      d = c.permute(1,0).contiguous()
-      d.realize()
-      cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3)
-    assert cache_len == 1, "permute wasn't pushed!"
-
   def test_no_reduceop_rerun_alt(self):
     a = Tensor.randn(16, 16, 16)
     with CLCache():
@@ -185,8 +174,32 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0))
     assert cache_len == 1, "reduceop was rerun!"
 
-  # TODO: these permute tests should really test desired behavior, not outcomes
+  def test_permute_was_pushed(self):
+    if not PUSH_PERMUTES: return
+    a = Tensor.randn(16, 16, 16)
+    with CLCache():
+      c = a.sum(2)
+      d = c.permute(1,0).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3)
+    assert cache_len == 1, "permute wasn't pushed!"
 
+  @unittest.skip("expansion can't push permute yet")
+  def test_permute_was_pushed_through_reshape(self):
+    if not PUSH_PERMUTES: return
+    a = Tensor.randn(16, 16, 16)
+    with CLCache():
+      c = a.sum(2)
+      d = c.reshape(4,4,4,4).permute(2,3,0,1).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3)
+    assert cache_len == 1, "permute wasn't pushed!"
+
+  # TODO: these permute tests should really test desired behavior, not outcomes. see test_permute_was_pushed
+
+  """
   def helper_push_permute_before_reshape(self, t, should_push=True, desired_reshape_arg=None, desired_permute_arg=None):
     if PUSH_PERMUTES and should_push:
       assert t.lazydata.op.src[0].op.op == MovementOps.PERMUTE, 'Permute should be pushed before reshape'
@@ -245,6 +258,7 @@ class TestOpt(unittest.TestCase):
       assert t.lazydata.op.src[0].op.arg == (2,2,3,4), 'Expand arg error'
       assert t.lazydata.op.op == MovementOps.PERMUTE, 'Permute should be after expand'
       assert t.lazydata.op.arg == (3,2,1,0), 'Permute arg error'
+  """
 
 if __name__ == '__main__':
   unittest.main()
