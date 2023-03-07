@@ -142,8 +142,18 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  @unittest.skip("expansion can't push permute yet")
-  def test_permute_was_pushed_through_reshape(self):
+  def test_permute_was_pushed_though_contract_reshape(self):
+    a = Tensor.randn(4, 4, 4, 4, 4)
+    with CLCache():
+      c = a.sum(-1)
+      d = c.reshape(16,16).permute(1,0).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,16).transpose(1,0), d.numpy(), rtol=1e-3)
+    if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
+
+  @unittest.skip("expansion can't push expand permute yet")
+  def test_permute_was_pushed_through_expand_reshape(self):
     if not PUSH_PERMUTES: return
     a = Tensor.randn(16, 16, 16)
     with CLCache():
