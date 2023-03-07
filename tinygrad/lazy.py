@@ -36,6 +36,16 @@ PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
+  # check aliases to see if we already realized this
+  for alt in self.alts:
+    root = get_movementroot(alt)
+    if root.realized: #return alt.op
+      return alt
+      #return LazyOp(UnaryOps.NOOP, (alt,), None)
+    #print(alt, root)
+    #print("get_movementroot", self, root, root.realized, alias)
+
+  print("_ast_reduceops", self, self.aliases)
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
   if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
@@ -111,6 +121,7 @@ class LazyBuffer:
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     self.aliases : List[LazyBuffer] = []  # to prevent GC
+    self.alts : List[LazyBuffer] = []     # for checking on realize to prevent work
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
@@ -133,7 +144,7 @@ class LazyBuffer:
         src = self.op.src[0]
 
         # fuse RESHAPE and ReduceOps
-        if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
+        if False and src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
           # it's okay to add a RESHAPE to the ast here
           ast = LazyOp(MovementOps.RESHAPE, (_ast_reduceops(src), ), self.op.arg)
         else:
@@ -148,6 +159,12 @@ class LazyBuffer:
       del self.op
 
       # run the ast if we still have to, and log the op
+      if isinstance(ast, LazyBuffer):
+        _ast = ast.op
+        self.realized = ast.realize()
+        ast = _ast
+        print(ast)
+
       if self.realized is None:
         ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
         self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
@@ -171,6 +188,14 @@ class LazyBuffer:
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
+    """
+    reduce = list(enumerate(zip(self.shape, new_shape)))
+    # move the reduce axes to the end
+    x = self.movement_op(MovementOps.PERMUTE, tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n]))
+    new_tmp_shape = tuple([n for _,(s,n) in reduce if s == n] + [n for _,(s,n) in reduce if s != n])
+    # NOTE: this reshape can only move around 1s
+    return LazyBuffer(x.device, new_tmp_shape, ReduceOps, LazyOp(op, (x,), new_tmp_shape)).movement_op(MovementOps.RESHAPE, new_shape)
+    """
     return LazyBuffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape))
 
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
@@ -193,8 +218,8 @@ class LazyBuffer:
       if op == MovementOps.FLIP: return self.op.src[0].movement_op(op, tuple(i for i in arg+self.op.arg if not (i in arg and i in self.op.arg)))
 
     # push permutes before reduce ops
-    # TODO: this is very dangerous! if the buffer has multiple children it will be rerun
-    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.optype == ReduceOps:
+    # TODO: this is very dangerous! if the buffer ever gets multiple children it will be rerun
+    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.optype == ReduceOps and len(self.children) == 0:
       # reduceops have one buffer input, permute it
       src, rop = self.op.src[0], self.op.op
       src.children.discard(self)
@@ -203,6 +228,7 @@ class LazyBuffer:
       # add alias of the non permuted so reduce isn't rerun
       alias = LazyBuffer(self.device, ShapeTracker(ret.st).movement_op(MovementOps.PERMUTE, argsort(self.op.arg)), MovementOps, LazyOp(MovementOps.PERMUTE, (ret, ), argsort(self.op.arg)))
       ret.aliases.append(alias)  # so it will be deallocated when ret is
+      ret.alts.append(LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg)))
       LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
       return ret
 
@@ -224,7 +250,14 @@ class LazyBuffer:
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
     if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or all(x.op != BinaryOps.DIV for x in get_lazyops(self.op))):
-      return replace_with_movement_op(self.op, op, arg)
+      ret = replace_with_movement_op(self.op, op, arg)
+
+      # add alias for reshape
+      if op == MovementOps.RESHAPE:
+        alias = LazyBuffer(self.device, ShapeTracker(ret.st).movement_op(MovementOps.RESHAPE, self.shape), MovementOps, LazyOp(MovementOps.RESHAPE, (ret, ), self.shape))
+        ret.aliases.append(alias)  # so it will be deallocated when ret is
+        LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
+      return ret
 
     # create the buffer
     ret = LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg))

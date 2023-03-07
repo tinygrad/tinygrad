@@ -142,6 +142,16 @@ class TestOpt(unittest.TestCase):
       d.realize()
       assert len(GlobalCounters.cache) == 1, "binop was rerun!"
 
+  def test_no_binop_rerun_alt(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      c = (a*b).reshape(16, 16, 1)
+      d = a*b
+      c.realize()
+      d.realize()
+      assert len(GlobalCounters.cache) == 1, "binop was rerun!"
+
   def test_no_reduceop_rerun(self):
     a = Tensor.randn(16, 16, 16)
     with CLCache():
@@ -152,6 +162,17 @@ class TestOpt(unittest.TestCase):
       cache_len = len(GlobalCounters.cache)
     np.testing.assert_allclose(c.numpy().transpose(1,0), d.numpy())
     assert cache_len == 1, "reduceop was rerun!"
+
+  def test_permute_was_pushed(self):
+    if not PUSH_PERMUTES: return
+    a = Tensor.randn(16, 16, 16)
+    with CLCache():
+      c = a.sum(2)
+      d = c.permute(1,0).contiguous()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3)
+    assert cache_len == 1, "permute wasn't pushed!"
 
   def test_no_reduceop_rerun_alt(self):
     a = Tensor.randn(16, 16, 16)
