@@ -325,13 +325,13 @@ class GPUCodegen(ASTKernel):
       [") {\n"] + self.kernel)
 
     # kernel function definition
-    function_name = ("re_S" if self.reduceop else "ew_S") + '_'.join([str(x) for x in self.full_shape])
+    function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
 
     # painfully name the function
     if prg in GPUCodegen.kernel_name_cache: function_name = GPUCodegen.kernel_name_cache[prg]
     else:
       GPUCodegen.kernel_cnt[function_name] += 1
-      if GPUCodegen.kernel_cnt[function_name]: function_name = f"{function_name}{'_N'+str(GPUCodegen.kernel_cnt[function_name])}"
+      if GPUCodegen.kernel_cnt[function_name]: function_name = f"{function_name}{'n'+str(GPUCodegen.kernel_cnt[function_name])}"
       GPUCodegen.kernel_name_cache[prg] = function_name
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,

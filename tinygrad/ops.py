@@ -152,6 +152,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     return cls.raw_buffer_type(4*prod(shape)) if backing is None else cls.raw_buffer_type.fromCPU(backing)
   def raw(self) -> RawBuffer:
     if self._buf is None:
+      if DEBUG >= 4 and self._backing is not None: print(f"**** copy in {self._backing.shape} to {type(self)}")
       self._buf = self.create_raw_buffer(self._base_shape, self._backing)
       self._backing = None
     return self._buf
@@ -160,6 +161,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
+    if DEBUG >= 3: print(f"**** copy out {self.shape}")
     return self.contiguous().raw().toCPU().reshape(self.shape)
 
   codegen_type : Any
