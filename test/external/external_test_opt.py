@@ -149,7 +149,20 @@ class TestOpt(unittest.TestCase):
       d = a.sum(2).permute(1,0)
       c.realize()
       d.realize()
-      assert len(GlobalCounters.cache) == 1, "reduceop was rerun!"
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(c.numpy().transpose(1,0), d.numpy())
+    assert cache_len == 1, "reduceop was rerun!"
+
+  def test_no_reduceop_rerun_alt(self):
+    a = Tensor.randn(16, 16, 16)
+    with CLCache():
+      c = a.sum(2).permute(1,0)
+      d = a.sum(2)
+      c.realize()
+      d.realize()
+      cache_len = len(GlobalCounters.cache)
+    np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0))
+    assert cache_len == 1, "reduceop was rerun!"
 
   # TODO: these permute tests should really test desired behavior, not outcomes
 

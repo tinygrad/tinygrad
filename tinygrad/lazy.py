@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import os, sys, weakref, importlib, inspect, functools
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import prod, getenv, argsort
 from tinygrad.shape import ShapeTracker, get_contraction
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.graph import log_op
@@ -110,6 +110,7 @@ class LazyBuffer:
     self.device, self.dbuffer = device, Device._buffers[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
+    self.aliases = []
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
@@ -197,11 +198,14 @@ class LazyBuffer:
     # TODO: this is very dangerous! if the buffer has multiple children it will be rerun
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.optype == ReduceOps:
       # reduceops have one buffer input, permute it
-      narg = tuple(self.op.arg[arg[i]] for i in range(len(arg)))
       src, rop = self.op.src[0], self.op.op
       src.children.discard(self)
-      del self  # TODO: why doesn't this delete remove it from the children
-      return src.movement_op(op, arg).reduce_op(rop, narg)
+      ret = src.movement_op(op, arg).reduce_op(rop, tuple(self.op.arg[arg[i]] for i in range(len(arg))))
+      # add the post-permute alternative to the cache so it isn't rerun
+      #alias = LazyBuffer(self.device, self.shape, MovementOps, LazyOp(MovementOps.PERMUTE, (ret, ), argsort(self.op.arg)))
+      #ret.aliases.append(alias)  # so it will be deallocated when ret is
+      #LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
+      return ret
 
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and local_st.contiguous: return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
