@@ -80,7 +80,7 @@ class Tensor:
   def assign(self, x) -> Tensor:
     if not isinstance(x, Tensor): x = Tensor(x)
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
-    assert not x.requires_grad  # self requires_grad is okay?
+    #assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
     self.lazydata = x.lazydata
