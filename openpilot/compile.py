@@ -84,7 +84,7 @@ def compile(dat, output_fn):
 
   print(f"buffers to save: {len(t.buffers_to_save)}, inputs: {list(t.inputs.keys())}, outputs: {t.outputs}")
   runtime = t.run()
-  print(f"network using {used_ops/1e9:.2f} GOPS with runtime {runtime*1e3:.2f} ms that's {used_ops/runtime*1e-9:.2f} GFLOPS")
+  print(f"network using {used_ops/1e9:.2f} GOPS with runtime {runtime*1e-6:.2f} ms that's {used_ops/runtime:.2f} GFLOPS")
 
   # confirm thneed found the right output
   thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)

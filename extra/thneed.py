@@ -268,17 +268,17 @@ class Thneed:
 
   def run(self):
     events = []
-    st = time.perf_counter()
+    st = time.perf_counter_ns()
     for prg, args in self.cl_cache:
       events.append(prg.clprg(CL.cl_queue, *args))
-    mt = time.perf_counter()
+    mt = time.perf_counter_ns()
     CL.cl_queue.finish()
-    et = time.perf_counter() - st
-    print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
+    et = time.perf_counter_ns() - st
+    print(f"submit in {(mt-st)*1e-6:.2f} ms, total runtime is {et*1e-6:.2f} ms")
 
     if DEBUGCL >= 2:
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
-        print(f"{i:3d} {prg.name:20s} " + "queued @ %5.2f ms, submit @ %5.2fms, start @ %5.2f ms, end @ %5.2f ms" % tuple((x*OSX_TIMING_RATIO - st*1e9)/1e6 for x in [e.profile.queued, e.profile.submit, e.profile.start, e.profile.end]))
+        print(f"{i:3d} {prg.name:20s} " + "queued @ %5.2f ms, submit @ %5.2fms, start @ %5.2f ms, end @ %5.2f ms" % tuple((x*OSX_TIMING_RATIO - st)*1e-6 for x in [e.profile.queued, e.profile.submit, e.profile.start, e.profile.end]))
     if DEBUGCL >= 1:
       total_runtime = 0
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
@@ -287,6 +287,6 @@ class Thneed:
         if hasattr(prg, 'prg') and ((DEBUGCL >= 2 and getenv("PRINT_KERNEL", -1) == i) or DEBUGCL >= 3):
           print(prg.prg)
         total_runtime += runtime
-      print(f"total runtime: {total_runtime/1e6:.2f} ms   wall time: {et*1000.0:.2f} ms")
+      print(f"total runtime: {total_runtime/1e6:.2f} ms   wall time: {et*1e-6:.2f} ms")
       return total_runtime/1e9
     return et

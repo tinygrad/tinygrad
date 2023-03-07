@@ -168,12 +168,12 @@ cfunc = LLVM().exec(module, bufs, N**3 * 2)
 
 times = []
 for i in range(50):
-  st = time.perf_counter()
+  st = time.perf_counter_ns()
   cfunc(*[x._buf for x in bufs])
-  et = time.perf_counter() - st
+  et = time.perf_counter_ns() - st
   times.append(et)
 
-print(f"{min(times)*1000:.2f} ms min time, {np.median(times)*1000:.2f} ms median time")
+print(f"{min(times)*1e-6:.2f} ms min time, {np.median(times)*1e-6:.2f} ms median time")
 print("%.2f GB/s" % ((N*N*4*1e-9)/min(times)))
 
 print(c.toCPU().astype(np.int64)[:sn.shape[0]])

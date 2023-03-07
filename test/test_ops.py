@@ -17,13 +17,13 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
 
-  st = time.perf_counter()
+  st = time.perf_counter_ns()
   out = torch_fxn(*ts)
-  torch_fp = time.perf_counter() - st
+  torch_fp = time.perf_counter_ns() - st
 
-  st = time.perf_counter()
+  st = time.perf_counter_ns()
   ret = tinygrad_fxn(*tst).realize()
-  tinygrad_fp = time.perf_counter() - st
+  tinygrad_fp = time.perf_counter_ns() - st
 
   def compare(s, x,y,atol,rtol):
     if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch {x.shape} != {y.shape}"
@@ -36,19 +36,19 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY:
-    st = time.perf_counter()
+    st = time.perf_counter_ns()
     out.square().mean().backward()
-    torch_fbp = time.perf_counter() - st
+    torch_fbp = time.perf_counter_ns() - st
 
-    st = time.perf_counter()
+    st = time.perf_counter_ns()
     ret.square().mean().backward()
     for tt in tst: tt.grad.realize()
-    tinygrad_fbp = time.perf_counter() - st
+    tinygrad_fbp = time.perf_counter_ns() - st
 
     for i, (t, tt) in enumerate(zip(ts, tst)):
       compare(f"backward pass tensor {i}", tt.grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
 
-  print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
+  print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1e-6, tinygrad_fp*1e-6, torch_fbp*1e-6, tinygrad_fbp*1e-6), end="")
 
 class TestOps(unittest.TestCase):
   def test_zeros(self):

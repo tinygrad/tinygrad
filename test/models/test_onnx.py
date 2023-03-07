@@ -41,14 +41,14 @@ class TestOnnxModel(unittest.TestCase):
 
     for _ in range(7):
       inputs = get_inputs()
-      st = time.perf_counter()
+      st = time.perf_counter_ns()
       tinygrad_out = run_onnx(inputs)['outputs']
-      mt = time.perf_counter()
+      mt = time.perf_counter_ns()
       tinygrad_out.realize()
-      mt2 = time.perf_counter()
+      mt2 = time.perf_counter_ns()
       tinygrad_out = tinygrad_out.numpy()
-      et = time.perf_counter()
-      print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+      et = time.perf_counter_ns()
+      print(f"ran openpilot model in {(et-st)*1e-6:.2f} ms, waited {(mt2-mt)*1e-6:.2f} ms for realize, {(et-mt2)*1e-6:.2f} ms for GPU queue")
 
     import cProfile
     import pstats
@@ -80,16 +80,16 @@ class TestOnnxModel(unittest.TestCase):
     }
     inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
 
-    st = time.perf_counter()
+    st = time.perf_counter_ns()
     print("****** run onnx ******")
     tinygrad_out = run_onnx(inputs)['outputs']
-    mt = time.perf_counter()
+    mt = time.perf_counter_ns()
     print("****** realize ******")
     tinygrad_out.realize()
-    mt2 = time.perf_counter()
+    mt2 = time.perf_counter_ns()
     tinygrad_out = tinygrad_out.numpy()
-    et = time.perf_counter()
-    print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+    et = time.perf_counter_ns()
+    print(f"ran openpilot model in {(et-st)*1e-6:.2f} ms, waited {(mt2-mt)*1e-6:.2f} ms for realize, {(et-mt2)*1e-6:.2f} ms for GPU queue")
 
     Tensor.no_grad = True
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()

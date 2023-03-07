@@ -31,13 +31,13 @@ if __name__ == "__main__":
   Tensor.no_grad = not BACKWARD
   for i in trange(CNT):
     GlobalCounters.reset()
-    cpy = time.perf_counter()
+    cpy = time.perf_counter_ns()
     x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
     y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
 
     # TODO: replace with TinyJit
     if i < 3 or not CLCACHE:
-      st = time.perf_counter()
+      st = time.perf_counter_ns()
       out = model.forward(x_train)
       loss = out.log_softmax().mul(y_train).mean()
       if i == 2 and CLCACHE: GlobalCounters.cache = []
@@ -45,15 +45,15 @@ if __name__ == "__main__":
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-      mt = time.perf_counter()
+      mt = time.perf_counter_ns()
       loss.realize()
       for p in parameters:
         p.realize()
-      et = time.perf_counter()
+      et = time.perf_counter_ns()
     else:
-      st = mt = time.perf_counter()
-      for prg, args in cl_cache: prg(*args)
-      et = time.perf_counter()
+      st = mt = time.perf_counter_ns()
+      for prg, args in cl_cache: prg(args)
+      et = time.perf_counter_ns()
 
     if i == 2 and CLCACHE:
       cl_cache = GlobalCounters.cache
@@ -61,6 +61,6 @@ if __name__ == "__main__":
 
     mem_used = GlobalCounters.mem_used
     loss_cpu = loss.detach().numpy()[0]
-    cl = time.perf_counter()
+    cl = time.perf_counter_ns()
 
-    print(f"{(st-cpy)*1000.0:7.2f} ms cpy,  {(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+    print(f"{(st-cpy)*1e-6:7.2f} ms cpy,  {(cl-st)*1e-6:7.2f} ms run, {(mt-st)*1e-6:7.2f} ms build, {(et-mt)*1e-6:7.2f} ms realize, {(cl-et)*1e-6:7.2f} ms CL, {loss_cpu:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops/(cl-st):9.2f} GFLOPS")

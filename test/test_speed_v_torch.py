@@ -45,12 +45,12 @@ def helper_test_speed(f1, *args):
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     if DEBUG >= 4: print("benchmark start")
-    st = time.perf_counter()
+    st = time.perf_counter_ns()
     ret = f1(*args)
     # not ideal, it's copying (sometimes). why is this so slow in tinygrad?
     if isinstance(ret, Tensor) or str(torch_device) == "cpu": ret.numpy()
     else: ret.cpu().numpy()
-    et = (time.perf_counter() - st) * 1000
+    et = (time.perf_counter_ns() - st) * 1e-6
     ets.append(et)
     if DEBUG >= 4: print("benchmark stop")
     if GlobalCounters.global_ops:
