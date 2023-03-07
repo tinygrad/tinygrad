@@ -4,7 +4,7 @@ import os, sys, weakref, importlib, inspect, functools
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, argsort
 from tinygrad.shape import ShapeTracker, get_contraction
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.ops import InterpretedBuffer, DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.graph import log_op
 
 # lazy can recurse a lot
@@ -110,7 +110,7 @@ class LazyBuffer:
     self.device, self.dbuffer = device, Device._buffers[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
-    self.aliases = []
+    self.aliases : List[LazyBuffer] = []  # to prevent GC
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
@@ -160,7 +160,10 @@ class LazyBuffer:
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this?
   @staticmethod
   def fromCPU(x, device) -> LazyBuffer: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
-  def toCPU(self): return self.realize().toCPU()
+  def toCPU(self):
+    ret = self.realize().toCPU()
+    log_op(InterpretedBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
+    return ret
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
@@ -168,12 +171,7 @@ class LazyBuffer:
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
-    reduce = list(enumerate(zip(self.shape, new_shape)))
-    # move the reduce axes to the end
-    x = self.movement_op(MovementOps.PERMUTE, tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n]))
-    new_tmp_shape = tuple([n for _,(s,n) in reduce if s == n] + [n for _,(s,n) in reduce if s != n])
-    # NOTE: this reshape can only move around 1s
-    return LazyBuffer(x.device, new_tmp_shape, ReduceOps, LazyOp(op, (x,), new_tmp_shape)).movement_op(MovementOps.RESHAPE, new_shape)
+    return LazyBuffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape))
 
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop
@@ -201,10 +199,11 @@ class LazyBuffer:
       src, rop = self.op.src[0], self.op.op
       src.children.discard(self)
       ret = src.movement_op(op, arg).reduce_op(rop, tuple(self.op.arg[arg[i]] for i in range(len(arg))))
-      # add the post-permute alternative to the cache so it isn't rerun
-      #alias = LazyBuffer(self.device, self.shape, MovementOps, LazyOp(MovementOps.PERMUTE, (ret, ), argsort(self.op.arg)))
-      #ret.aliases.append(alias)  # so it will be deallocated when ret is
-      #LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
+
+      # add alias of the non permuted so reduce isn't rerun
+      alias = LazyBuffer(self.device, ShapeTracker(ret.st).movement_op(MovementOps.PERMUTE, argsort(self.op.arg)), MovementOps, LazyOp(MovementOps.PERMUTE, (ret, ), argsort(self.op.arg)))
+      ret.aliases.append(alias)  # so it will be deallocated when ret is
+      LazyBuffer.lazycache[(self.device, self.optype, get_weakop(self.op))] = alias
       return ret
 
     # some permutes are actually just reshapes

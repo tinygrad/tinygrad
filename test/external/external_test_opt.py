@@ -193,7 +193,6 @@ class TestOpt(unittest.TestCase):
     t = t.reshape(1,2,3,1,4).permute(4,3,2,1,0)
     self.helper_push_permute_before_reshape(t, should_push=False)
 
-
   def test_push_permute_before_reduce(self):
     t = Tensor.ones(1,2,3,4)
     t = t.sum(axis=2).permute(2,1,0)
