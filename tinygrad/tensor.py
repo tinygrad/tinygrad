@@ -79,7 +79,7 @@ class Tensor:
 
   def assign(self, x) -> Tensor:
     if not isinstance(x, Tensor): x = Tensor(x)
-    assert self.shape == x.shape
+    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
@@ -132,11 +132,11 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(Tensor._rng.random(size=shape, dtype=np.float32), **kwargs)
+  def rand(*shape, device=Device.DEFAULT, **kwargs) -> Tensor:return Tensor(LazyBuffer.fromCPULazy(lambda: Tensor._rng.random(size=shape, dtype=np.float32), shape, device), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(Tensor._rng.standard_normal(size=shape, dtype=np.float32), **kwargs)
+  def randn(*shape, device=Device.DEFAULT, **kwargs) -> Tensor: return Tensor(LazyBuffer.fromCPULazy(lambda: Tensor._rng.standard_normal(size=shape, dtype=np.float32), shape, device), **kwargs)
 
   # ***** rng hlops *****
 
@@ -325,7 +325,7 @@ class Tensor:
     padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
 
     # conv2d is a pooling op (with padding)
-    x = self.pad2d(padding_)._pool((H,W),stride, dilation)
+    x = self.pad2d(padding_)._pool((H,W), stride, dilation)
 
     oy, ox, rcout = x.shape[2], x.shape[3], cout//groups
     # NOTE: we do this expand explicitly so the permute isn't pushed in the binop

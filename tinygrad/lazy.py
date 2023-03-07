@@ -115,7 +115,7 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        self.realized = Device._buffers[self.device].fromCPU(self.op.arg)
+        self.realized = Device._buffers[self.device].fromCPU(self.op.arg() if callable(self.op.arg) else self.op.arg)  # lazy lazy buffers
         ast = LazyOp(self.op.op, tuple())
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
@@ -149,6 +149,10 @@ class LazyBuffer:
     assert isinstance(self.realized, Device._buffers[self.device])
     return self.realized
 
+  @staticmethod
+  def fromCPULazy(fxn, shape, device) -> LazyBuffer: return LazyBuffer(device, shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), fxn))
+
+  # TODO: this is making a copy!
   @staticmethod
   def fromCPU(x, device) -> LazyBuffer: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()))
   def toCPU(self): return self.realize().toCPU()
