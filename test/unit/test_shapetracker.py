@@ -414,6 +414,12 @@ class TestGetContraction(unittest.TestCase):
     r = get_contraction((1,2,3,4), (1,2,3,4,1))
     self.assertEqual(r, [[0], [1], [2], [3], []])
 
+    r = get_contraction((14,1,384,14,1,1,1,1), (1,14,384,14))
+    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7]])
+
+    r = get_contraction((14,1,384,1,14,1,1,1,1), (1,14,384,14))
+    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7,8]])
+
     r = get_contraction((512, 512), (1, 1, 512, 1, 1, 1, 1, 512))
     self.assertEqual(r, [[], [], [0], [], [], [], [], [1]])
 
