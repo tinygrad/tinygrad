@@ -133,6 +133,7 @@ class LazyBuffer:
         src = self.op.src[0]
 
         # fuse RESHAPE and ReduceOps
+        # NOTE: this is sort of a hack for IMAGE, otherwise it shouldn't matter
         if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
           # it's okay to add a RESHAPE to the ast here
           ast = LazyOp(MovementOps.RESHAPE, (_ast_reduceops(src), ), self.op.arg)

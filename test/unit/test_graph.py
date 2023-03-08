@@ -41,8 +41,8 @@ class TestGraph(unittest.TestCase):
     RG.add_node(0, label="(4, 4)")
     RG.add_node(1, label="(1, 1)")
     RG.add_node(2, label="{(4, 4), (1, 1)}\n(1, 1)")
-    RG.add_edge(0, 2, label="RE.AD.SU")
-    RG.add_edge(1, 2, label="RE.AD.SU")
+    RG.add_edge(0, 2, label="RES.ADD.SUM")
+    RG.add_edge(1, 2, label="RES.ADD.SUM")
 
     log_op(ret, ast, show_graph=True)
     self.helper_compare_graph(RG)
