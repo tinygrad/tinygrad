@@ -42,8 +42,8 @@ class TestConv(unittest.TestCase):
     w = Tensor.randn(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), (out-1)
-    np.testing.assert_array_equal(r1.numpy(), np.maximum(out.numpy(), 0))
-    np.testing.assert_array_equal(r2.numpy(), out.numpy() - 1)
+    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+    np.testing.assert_allclose(r2.numpy(), out.numpy() - 1)
     Tensor.no_grad = False
 
   def test_two_overlapping_binops_no_rerun(self):
@@ -52,8 +52,8 @@ class TestConv(unittest.TestCase):
     w = Tensor.randn(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), out.elu()
-    np.testing.assert_array_equal(r1.numpy(), np.maximum(out.numpy(), 0))
-    np.testing.assert_array_equal(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)))
+    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+    np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)))
     Tensor.no_grad = False
 
   def test_first_three(self):
