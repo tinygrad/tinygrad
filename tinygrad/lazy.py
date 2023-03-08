@@ -33,6 +33,7 @@ Device = _Device()
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ELEMENTWISE_OPS, MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2, OPT>=2
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
+SHUFFLE_PAD_OPS = OPT>=4  # no longer makes wrong outputs since div isn't allowed, but still unadvisable
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
@@ -217,7 +218,7 @@ class LazyBuffer:
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or all(x.op != BinaryOps.DIV for x in get_lazyops(self.op))):
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or (SHUFFLE_PAD_OPS and all(x.op != BinaryOps.DIV for x in get_lazyops(self.op)))):
       return replace_with_movement_op(self.op, op, arg)
 
     # create the buffer
