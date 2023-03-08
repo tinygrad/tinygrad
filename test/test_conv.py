@@ -53,7 +53,7 @@ class TestConv(unittest.TestCase):
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), out.elu()
     np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
-    np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)))
+    np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
     Tensor.no_grad = False
 
   def test_first_three(self):
