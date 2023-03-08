@@ -51,7 +51,7 @@ class CLImage(RawBuffer):  # pylint: disable=abstract-method
   IMAGE : Final = True
 
   def __init__(self, shape):
-    self._cl = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
+    self.size, self._cl = shape, cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
     GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
 
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height

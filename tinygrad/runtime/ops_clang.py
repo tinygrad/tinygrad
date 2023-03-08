@@ -6,7 +6,7 @@ from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawMallocBuffer(RawBufferCopyIn):
-  def __init__(self, size): self._buf = (ctypes.c_float * (size//4))()
+  def __init__(self, size): self.size, self._buf = size, (ctypes.c_float * (size//4))()
   def copyin(self, x:np.ndarray): ctypes.memmove(self._buf, x.ctypes.data, x.size*4)
   def toCPU(self): return np.ctypeslib.as_array(self._buf)
 

@@ -11,15 +11,14 @@ from tinygrad.runtime.ops_gpu import GPUBuffer
 from tinygrad.runtime.ops_cpu import CPUBuffer
 
 def atan2_op(a:DeviceBuffer, b:DeviceBuffer) -> DeviceBuffer:
-  assert prod(a.shape) == prod(b.shape)
+  assert prod(a.shape) == prod(b.shape) and type(a) == type(b), "shape or type mismatch"
   if isinstance(a, GPUBuffer):
     ret = GPUBuffer(a.shape)
-    prg = ASTRunner("atan2", """
+    ASTRunner("atan2", """
       __kernel void atan2(global float *c, global float *a, global float *b) {
         int idx = get_global_id(0);
         c[idx] = atan2(a[idx], b[idx]);
-      }""", global_size=[prod(ret.shape)]).build(GPUBuffer.runtime_type)
-    prg(prg.lower([ret, a, b]))
+      }""", global_size=[prod(ret.shape)]).build(GPUBuffer.runtime_type)([ret, a.contiguous(), b.contiguous()])
     return ret
   elif isinstance(a, CPUBuffer):
     return CPUBuffer(np.arctan2(a._buf, b._buf))
@@ -37,7 +36,7 @@ from tinygrad.tensor import Function
 class ATan2(Function):
   def forward(self, a, b):
     self.a, self.b = a, b
-    ast = LazyOp(LoadOps.CUSTOM, (a.contiguous(), b.contiguous()), atan2_op)
+    ast = LazyOp(LoadOps.CUSTOM, (a, b), atan2_op)
     return LazyBuffer(a.device, a.shape, LoadOps, ast)
   def backward(self, grad_output):
     denom = (self.a.binary_op(BinaryOps.MUL, self.a)).binary_op(BinaryOps.ADD, self.b.binary_op(BinaryOps.MUL, self.b))
@@ -74,4 +73,17 @@ if __name__ == "__main__":
   assert ta.grad is not None and tb.grad is not None, "torch didn't compute gradients"
   np.testing.assert_allclose(a.grad.numpy(), ta.grad.numpy(), atol=1e-5)
   np.testing.assert_allclose(b.grad.numpy(), tb.grad.numpy(), atol=1e-5)
+
+  # custom ops even work in the JIT!
+  from tinygrad.jit import TinyJit
+
+  @TinyJit
+  def jitted_atan2(a, b):
+    return ATan2.apply(a, b).realize()
+
+  for i in range(5):
+    a = Tensor.randn(4,4,requires_grad=True).permute(1,0)
+    b = Tensor.randn(4,4,requires_grad=True).permute(1,0)
+    c = jitted_atan2(a, b)
+    np.testing.assert_allclose(c.numpy(), np.arctan2(a.numpy(), b.numpy()), atol=1e-5)
 

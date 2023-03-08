@@ -34,6 +34,7 @@ def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
 
 _T = TypeVar("_T")
 class RawBuffer:
+  size : int
   def __init__(self, size): raise NotImplementedError("must be implemented")
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
@@ -49,7 +50,6 @@ class RawBufferCopyIn(RawBuffer):
     return ret
 
 class RawBufferCopyInOut(RawBufferCopyIn):
-  size : int
   def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   def toCPU(self) -> np.ndarray:
@@ -108,27 +108,38 @@ class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_size, local_size, bufs_to_delete if bufs_to_delete else set(), op_estimate, mem_estimate
+
   def build(self, runtime):
     self.clprg = runtime(self.name, self.prg)
     return self
-  def timeit(self, bufs, local_override=None) -> float:
-    try: return self.clprg(self.global_size, local_override if local_override is not None else self.local_size, *bufs, wait=True)
-    except Exception: return float('inf')
-  def optimize_local_size(self, bufs) -> List[int]:
-    assert self.global_size is not None, "needs a global size to optimize local size"
-    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
-    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-    return min([(self.timeit(bufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
-  def lower(self, bufs) -> List[RawBuffer]: return [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
-  def __call__(self, bufs):
-    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(bufs)
-    if et := self.clprg(self.global_size, self.local_size, *bufs, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
+
+  def __call__(self, bufs:List[CompiledBuffer]) -> Optional[float]:
+    rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
+    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self.rawcall, rawbufs))
+    return self.rawcall(rawbufs)
+
+  def rawcall(self, rawbufs:List[RawBuffer]) -> Optional[float]:
+    if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
     if DEBUG >= 1:
-      print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(bufs):5d}  kernels {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(rawbufs):5d}  kernels {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
     return et
+
+  def timeit(self, rawbufs:List[RawBuffer], local_override=None) -> float:
+    try: return self.clprg(self.global_size, local_override if local_override is not None else self.local_size, *rawbufs, wait=True)
+    except Exception: return float('inf')
+
+  def optimize_local_size(self, rawbufs:List[RawBuffer]) -> List[int]:
+    assert self.global_size is not None, "needs a global size to optimize local size"
+    if any(x == rawbufs[0] for x in rawbufs[1:]):  # this is an assignment, replace the output buffer
+      output_replacement = type(rawbufs[0])(rawbufs[0].size)
+      rawbufs = [output_replacement if x == rawbufs[0] else x for x in rawbufs]
+    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
+    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
+    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
+    return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
@@ -179,9 +190,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if getenv("PRINT_AST", "") == prg.name:
       k.print()
       print(prg.prg)
-    rawbufs = prg.lower(k.bufs)
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, rawbufs))
-    prg(rawbufs)
+    prg(k.bufs)
     return k.ret
 
   # universal for shape tracked
