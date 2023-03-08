@@ -129,6 +129,10 @@ class LazyBuffer:
         real_src = self.op.src[0].realize(self.device)
         self.realized = real_src.contiguous()
         ast = LazyOp(self.op.op, (real_src, ))
+      elif self.op.op == LoadOps.CUSTOM:
+        real_srcs = tuple(x.realize(self.device) for x in self.op.src)
+        self.realized = self.op.arg(*real_srcs)
+        ast = LazyOp(self.op.op, real_srcs)
       elif self.optype == MovementOps:
         src = self.op.src[0]
 
