@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import tempfile
 from tinygrad.helpers import prod, getenv
+from tinygrad.ops import GlobalCounters
 
 def fetch(url):
   if url.startswith("/"):
@@ -37,7 +38,8 @@ def my_unpickle(fb0):
       assert prod(args[2]) == obj_size
       if getenv("METAL"):
         from tinygrad.runtime.ops_metal import MetalBuffer
-        ret = MetalBuffer(args[2])
+        ret = MetalBuffer(args[2], dtype=storage_type)
+        ret.raw()  # force the allocation
       else:
         ret = np.zeros(args[2], dtype=storage_type)
       key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
@@ -83,7 +85,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
       ret = my_unpickle(myfile)
     if load_weights:
       for k,v in (t:=tqdm(ret[1].items())):
-        t.set_description(f"loading {k} shape:{v[3]}")
+        t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB shape:{v[3]}")
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           if getenv("METAL"):
             # TODO: make this lazy
