@@ -252,8 +252,11 @@ class Tensor:
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Tuple[int, ...]): return self.slice(((0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])))
-  # TODO: this is totally not transpose
-  def transpose(self, order=(1,0)) -> Tensor: return self.permute(order=order)
+  def transpose(self, ax1=1, ax2=0) -> Tensor:
+    order = list(range(len(self.shape)))
+    order[ax1], order[ax2] = order[ax2], order[ax1]
+    return self.permute(order)
+  #def transpose(self, order=(1,0)) -> Tensor: return self.permute(order=order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
   # ***** reduce ops *****
@@ -348,10 +351,10 @@ class Tensor:
 
     # NOTE: with NHWC we can remove the transposes
     # bs x groups*cin x H x W
-    cx = self.transpose(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
+    cx = self.permute(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
     # groups*cout x cin x H, W
-    cw = w.transpose(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
-    return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).transpose(order=order)
+    cw = w.permute(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
+    return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).permute(order=order)
 
   # ***** mlops (unary) *****
 
@@ -363,6 +366,7 @@ class Tensor:
 
   def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)
+  def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()

@@ -144,9 +144,9 @@ class ASTRunner:
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype=np.float32):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape = self.st.shape
+    self.shape, self.dtype = self.st.shape, dtype
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
@@ -157,14 +157,14 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 
   raw_buffer_type : Type[RawBuffer]
   @classmethod
-  def create_raw_buffer(cls, shape, backing) -> RawBuffer:
+  def create_raw_buffer(cls, shape, backing, dtype) -> RawBuffer:
     assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
     assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
-    return cls.raw_buffer_type(4*prod(shape)) if backing is None else cls.raw_buffer_type.fromCPU(backing)
+    return cls.raw_buffer_type(np.dtype(dtype).itemsize*prod(shape)) if backing is None else cls.raw_buffer_type.fromCPU(backing)
   def raw(self) -> RawBuffer:
     if self._buf is None:
       if DEBUG >= 4 and self._backing is not None: print(f"**** copy in {self._backing.shape} to {type(self)}")
-      self._buf = self.create_raw_buffer(self._base_shape, self._backing)
+      self._buf = self.create_raw_buffer(self._base_shape, self._backing, self.dtype)
       self._backing = None
     return self._buf
 

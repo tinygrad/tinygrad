@@ -46,6 +46,7 @@ def get_model(version, load_weights=False):
     from extra.utils import fetch, fake_torch_load, get_child
     weights = fake_torch_load(fetch(f'https://dl.fbaipublicfiles.com/convnext/convnext_{version}_1k_224_ema.pth'))['model']
     for k,v in weights.items():
+      if '.inner_attention.rope.freqs' in k: continue  # no rope today
       mv = get_child(model, k)
       mv.assign(v.reshape(mv.shape)).realize()
   return model

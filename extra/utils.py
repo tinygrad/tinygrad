@@ -31,12 +31,15 @@ def my_unpickle(fb0):
   key_prelookup = {}
   class HackTensor:
     def __new__(cls, *args):
-      #print(args)
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
 
       assert prod(args[2]) == obj_size
-      ret = np.zeros(args[2], dtype=storage_type)
+      if getenv("METAL"):
+        from tinygrad.runtime.ops_metal import MetalBuffer
+        ret = MetalBuffer(args[2])
+      else:
+        ret = np.zeros(args[2], dtype=storage_type)
       key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
       return ret
 
@@ -73,18 +76,22 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def fake_torch_load_zipped(fb0, load_weights=True):
+def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
-    with myzip.open('archive/data.pkl') as myfile:
+    with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
-      for k,v in ret[1].items():
-        with myzip.open(f'archive/data/{k}') as myfile:
-          if v[2].dtype == "object":
-            print(f"issue assigning object on {k}")
-            continue
-          np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
+      for k,v in (t:=tqdm(ret[1].items())):
+        t.set_description(f"loading {k} shape:{v[3]}")
+        with myzip.open(f'{base_name}/data/{k}') as myfile:
+          if getenv("METAL"):
+            # TODO: make this lazy
+            myfile.readinto(v[2].raw()._buffer())
+          else:
+            if v[2].dtype == "object":
+              continue
+            np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
   return ret[0]
 
 def fake_torch_load(b0):

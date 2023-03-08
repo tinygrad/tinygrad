@@ -96,8 +96,8 @@ class GPUBuffer(CompiledBuffer):
   raw_buffer_type = CLBuffer
   # override this method for image
   @classmethod
-  def create_raw_buffer(cls, shape, backing) -> RawBuffer:
-    if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)
-    else: return super().create_raw_buffer(shape, backing)
+  def create_raw_buffer(cls, shape, backing, dtype) -> RawBuffer:
+    if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)  # TODO: add dtype to image
+    else: return super().create_raw_buffer(shape, backing, dtype)
   codegen_type = CLCodegen
   runtime_type = CLProgram
