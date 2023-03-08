@@ -113,13 +113,13 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg)
     return self
 
-  def __call__(self, bufs:List[CompiledBuffer]) -> Optional[float]:
+  def exec(self, bufs:List[CompiledBuffer]) -> Optional[float]:
     rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self.rawcall, rawbufs))
-    return self.rawcall(rawbufs)
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
+    return self(rawbufs)
 
-  def rawcall(self, rawbufs:List[RawBuffer]) -> Optional[float]:
+  def __call__(self, rawbufs:List[RawBuffer]) -> Optional[float]:
     if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
     if DEBUG >= 1:
       print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(rawbufs):5d}  kernels {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
@@ -190,7 +190,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if getenv("PRINT_AST", "") == prg.name:
       k.print()
       print(prg.prg)
-    prg(k.bufs)
+    prg.exec(k.bufs)
     return k.ret
 
   # universal for shape tracked

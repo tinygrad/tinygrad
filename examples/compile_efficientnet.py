@@ -41,7 +41,7 @@ if __name__ == "__main__":
   the_output = run(the_input)
 
   # hack to put the inputs back
-  assert len(run.input_replace) == 1
+  assert len(run.input_replace) == 1, f"didn't get one input to replace {run.input_replace}"
   for (j,i),idx in run.input_replace.items():
     run.jit_cache[j][1][i] = the_input.lazydata.realized.raw()
 
@@ -68,7 +68,7 @@ if __name__ == "__main__":
   cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
 
   # buffers (empty + weights)
-  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len in bufs.values()] 
+  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len in bufs.values()]
 
   # the functions
   cprog += list(functions.values())

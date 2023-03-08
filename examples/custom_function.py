@@ -18,7 +18,7 @@ def atan2_op(a:DeviceBuffer, b:DeviceBuffer) -> DeviceBuffer:
       __kernel void atan2(global float *c, global float *a, global float *b) {
         int idx = get_global_id(0);
         c[idx] = atan2(a[idx], b[idx]);
-      }""", global_size=[prod(ret.shape)]).build(GPUBuffer.runtime_type)([ret, a.contiguous(), b.contiguous()])
+      }""", global_size=[prod(ret.shape)]).build(GPUBuffer.runtime_type).exec([ret, a.contiguous(), b.contiguous()])
     return ret
   elif isinstance(a, CPUBuffer):
     return CPUBuffer(np.arctan2(a._buf, b._buf))
