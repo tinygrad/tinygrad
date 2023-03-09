@@ -173,12 +173,12 @@ class DeepDeterministicPolicyGradient:
     for param, target_param in zip(
         optim.get_parameters(self.actor), optim.get_parameters(self.target_actor)
     ):
-      target_param.assign(param * tau + target_param * (1.0 - tau))
+      target_param.assign(param.detach() * tau + target_param * (1.0 - tau))
 
     for param, target_param in zip(
         optim.get_parameters(self.critic), optim.get_parameters(self.target_critic)
     ):
-      target_param.assign(param * tau + target_param * (1.0 - tau))
+      target_param.assign(param.detach() * tau + target_param * (1.0 - tau))
 
   def choose_action(self, state: Tensor, evaluate: bool = False) -> NDArray:
     mu = self.actor.forward(state, self.max_action)
