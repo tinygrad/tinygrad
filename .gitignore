@@ -16,3 +16,4 @@ vertex.bin
 recognize*
 .idea
 disassemblers/applegpu
+*.prof

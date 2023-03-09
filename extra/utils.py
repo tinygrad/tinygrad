@@ -2,6 +2,7 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 import tempfile
+import concurrent.futures
 from tinygrad.helpers import prod, getenv
 from tinygrad.ops import GlobalCounters
 
@@ -84,7 +85,6 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
-      import concurrent
       def load_weight(k, v):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           myfile.readinto(v[2].raw()._buffer())

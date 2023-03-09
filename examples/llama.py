@@ -29,14 +29,12 @@ class RMSNorm:
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, B):
-  a = A[:, :, :, :, 0:1]
-  c = B[:, :, :, :, 0:1]
-  b = A[:, :, :, :, 1:2]
-  d = B[:, :, :, :, 1:2]
+  assert len(A.shape) == 5 and len(B.shape) == 5
+  a,b = A[:, :, :, :, 0:1], A[:, :, :, :, 1:2]
+  c,d = B[:, :, :, :, 0:1], B[:, :, :, :, 1:2]
   ro = a*c - b*d
   co = a*d + b*c
-  ret = ro.cat(co, dim=-1)
-  return ret
+  return ro.cat(co, dim=-1)
 
 def apply_rotary_emb(xq, xk, freqs_cis):
   assert freqs_cis.shape[1] == xq.shape[1] and freqs_cis.shape[1] == xk.shape[1], "freqs_cis shape mismatch"
@@ -76,8 +74,7 @@ class Attention:
     if mask is not None:
       scores = scores + mask
     scores = scores.softmax()  # this is casted to float
-    output = scores.matmul(values).transpose(1,2).reshape(bsz, seqlen, -1)
-
+    output = scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.wo(output)
 
 class FeedForward:
@@ -160,6 +157,7 @@ if __name__ == "__main__":
   parser.add_argument('--prompt', type=str, default="Hello.", help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
+  parser.add_argument('--timing', action='store_true', help="Print timing per token")
   args = parser.parse_args()
 
   toks = [sp_model.bos_id()] + sp_model.encode(args.prompt)
@@ -190,15 +188,17 @@ if __name__ == "__main__":
     onehot = np.zeros((1, len(toks)-start_pos, VOCAB_SIZE))
     onehot[0,range(len(toks)-start_pos),toks[start_pos:]] = 1
 
-    #with Timing("ran model in "):
-    logits = model(Tensor(onehot), start_pos).realize()
-    if args.temperature < 1e-6:
-      # so close to 0 we use argmax
-      tok = int(logits.numpy().argmax())
-    else:
-      probs = (logits / args.temperature).softmax()
-      probs = probs.numpy().flatten()
-      tok = int(np.random.choice(len(probs), p=probs))
+    if args.timing: print("")
+    with Timing("ran model in ", enabled=args.timing):
+      logits = model(Tensor(onehot), start_pos).realize()
+    with Timing("sync in ", enabled=args.timing):
+      if args.temperature < 1e-6:
+        # so close to 0 we use argmax
+        tok = int(logits.numpy().argmax())
+      else:
+        probs = (logits / args.temperature).softmax()
+        probs = probs.numpy().flatten()
+        tok = int(np.random.choice(len(probs), p=probs))
 
     # use the kv cache
     start_pos = len(toks)
