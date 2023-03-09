@@ -76,7 +76,7 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
 
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
-  mem = save_mem*4*1e-6
+  mem = save_mem*1e-6
   print(f"{prefix}{name:40s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:7.2f} MOPS {mem:7.2f} MB")
   prefix = " "
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-4, rtol=1e-3)
@@ -86,7 +86,7 @@ class TestSpeed(unittest.TestCase):
     global prefix
     prefix = " " if prefix is None else ""
     return super().setUp()
-  
+
   def test_sub(self):
     def f(a, b): return a-b
     helper_test_generic_square('sub', 4096, f, f)
@@ -116,7 +116,7 @@ class TestSpeed(unittest.TestCase):
       # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
       def f(a, b): return a.permute(1,0).contiguous()
       helper_test_generic_square('permute', N, f, f, onearg=True)
-    
+
   def test_double_permute(self):
     N = 64
     torch.manual_seed(0)
@@ -167,7 +167,7 @@ class TestSpeed(unittest.TestCase):
     def f1(a, b): return a@b.T
     def f2(a, b): return (a.reshape(N, 1, N).expand(N, N, N) * b.reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled', N, f1, f2)
-  
+
   def test_gemm_unrolled_permute_l(self):
     N = 512
     def f1(a, b): return a.T@b.T

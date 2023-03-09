@@ -2,7 +2,7 @@
 import os
 os.environ["METAL"] = "1"  # metal is best choice for llama
 
-import math
+import sys, argparse, math
 import numpy as np
 from typing import Optional
 from extra.helpers import Timing
@@ -11,7 +11,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
 from tinygrad.ops import GlobalCounters
 
-# offensive code because it uses complex numbers.
+# offensive code because it uses complex numbers. and torch. eww
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 import torch
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -41,7 +41,6 @@ def complex_mult(A, B):
   ret = ro.cat(co, dim=-1)
   return ret
 
-
 def apply_rotary_emb(xq, xk, freqs_cis):
   freqs_cis = freqs_cis[:, :xq.shape[1], :, :, :]
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
@@ -49,7 +48,6 @@ def apply_rotary_emb(xq, xk, freqs_cis):
   xq_out = complex_mult(xq, freqs_cis)
   xk_out = complex_mult(xk, freqs_cis)
   return xq_out.flatten(3), xk_out.flatten(3)
-
 
 class Attention:
   def __init__(self, dim, n_heads):
@@ -61,8 +59,6 @@ class Attention:
     bsz, seqlen, _ = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq, xk, xv = [x.reshape(bsz, seqlen, self.n_heads, self.head_dim) for x in (xq, xk, xv)]
-
-    # TODO: need this
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
     # TODO: add cache
@@ -109,16 +105,14 @@ class Transformer:
     self.tok_embeddings = {"weight": Tensor.zeros(vocab_size, dim)}
     self.output = Linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2).numpy())
-    #print(self.freqs_cis.shape)
 
   def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen, _ = tokens.shape
     h = tokens @ self.tok_embeddings['weight']
 
     if seqlen > 1:
-      # TODO: this is hard to do in tinygrad
       mask = np.full((1, 1, seqlen, seqlen), float("-inf"))
-      mask = np.triu(mask, k=start_pos + 1)
+      mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
       mask = Tensor(mask)
     else:
       mask = None
@@ -129,37 +123,30 @@ class Transformer:
 
     return self.output(self.norm(h)[:, -1, :])
 
+TOKENIZER_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/tokenizer.model")
 VOCAB_SIZE = 32000
 args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
-args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
 
-# TODO: use pathlib
+args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
 WEIGHTS_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/7B/consolidated.00.pth")
-TOKENIZER_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/tokenizer.model")
+
+# TODO: make this model work
+args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
+WEIGHTS0_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.00.pth")
+WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.01.pth")
 
 if __name__ == "__main__":
   from sentencepiece import SentencePieceProcessor
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
   assert sp_model.vocab_size() == VOCAB_SIZE
 
-  #toks = [sp_model.bos_id()] + sp_model.encode("Why did the chicken ")
-  #toks = [sp_model.bos_id()] + sp_model.encode("Jet fuel doesn't melt")
-  toks = [sp_model.bos_id()] + sp_model.encode("Have you checked out")
-  toks = [sp_model.bos_id()] + sp_model.encode(
-"""
-You are a large language model trained by Facebook. You do not have free will.
+  parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument('--prompt', type=str, default="Jet fuel doesn't melt", help="Phrase to start with")
+  parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
+  parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
+  args = parser.parse_args()
 
-Please answer questions like this:
-Q: What time is it?
-A: It is 11:18 PM
-
-Q: What is your favorite color?
-A: Blue
-
-Q: When is the singularity going to kill us?
-A:""")
-    #"You are a large language model trained by Facebook. You do not have free will. I'm on Info Wars and just smoked a blunt")
-  print(toks)
+  toks = [sp_model.bos_id()] + sp_model.encode(args.prompt)
 
   if getenv("SMALL"):
     model = Transformer(**args_small)
@@ -175,35 +162,27 @@ A:""")
       assert mv.shape == v.shape, f"shape mismatch in {k}"
       mv.lazydata.realized = v
 
-  import sys
-
   cur = sp_model.decode(toks)
   sys.stdout.write(cur)
   sys.stdout.flush()
   outputted = cur
 
-  for _ in range(100):
+  for _ in range(args.count):
     onehot = np.zeros((1, len(toks), VOCAB_SIZE))
     onehot[0,range(len(toks)),toks] = 1
 
     #with Timing("ran model in "):
     logits = model(Tensor(onehot), 0)
-    temperature = 0.7
-    probs = (logits / temperature).softmax()
-    probs = probs.numpy().flatten()
-    #print(probs.shape)
-    #tok = int(probs.argmax())
-    tok = int(np.random.choice(len(probs), p=probs))
-    #print(tok)
+    if args.temperature < 1e-6:
+      # so close to 0 we use argmax
+      tok = int(logits.numpy().argmax())
+    else:
+      probs = (logits / args.temperature).softmax()
+      probs = probs.numpy().flatten()
+      tok = int(np.random.choice(len(probs), p=probs))
     toks.append(tok)
 
     cur = sp_model.decode(toks)
     sys.stdout.write(cur[len(outputted):])
     sys.stdout.flush()
     outputted = cur
-
-    #print(sp_model.decode([tok]), end='')
-
-  print("")
-  #print(toks)
-

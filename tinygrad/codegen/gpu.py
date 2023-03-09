@@ -1,4 +1,5 @@
 import math, itertools
+import numpy as np
 from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
@@ -169,7 +170,7 @@ class GPUCodegen(ASTKernel):
     # are we grouping? (requires local shape support)
     if len(self.lang.lid) and not self.buftokens[0].can_float4() and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+      for sz in (([1024, 256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
           self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce)
           self.group_for_reduce.append(sz)
@@ -338,4 +339,4 @@ class GPUCodegen(ASTKernel):
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
       list(self.output_shape[::-1]) if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
-      op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs if x is not None))
+      op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape)*np.dtype(x.dtype).itemsize for x in self.bufs if x is not None))
