@@ -12,15 +12,11 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
 from tinygrad.ops import GlobalCounters
 
-# offensive code because it uses complex numbers. and torch. eww
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
-import torch
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-  freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))
-  t = torch.arange(end, device=freqs.device)
-  freqs = torch.outer(t, freqs).float()
-  freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
-  return torch.view_as_real(freqs_cis).reshape(1, end, 1, dim//2, 2)
+  freqs = 1.0 / (theta ** (np.arange(0, dim, 2)[:(dim // 2)] / dim))
+  freqs = np.outer(np.arange(end), freqs)
+  return np.stack([np.cos(freqs), np.sin(freqs)], axis=-1).reshape(1, end, 1, dim//2, 2)
 
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
@@ -64,7 +60,6 @@ class Attention:
 
     if start_pos == 0:
       keys, values = xk, xv
-      #print(self.cache_k.shape, self.cache_v.shape)
     else:
       assert hasattr(self, 'cache_k'), "no cache"
       assert start_pos == self.cache_k.shape[1] and start_pos == self.cache_v.shape[1], "cache is wrong shape"
@@ -115,7 +110,7 @@ class Transformer:
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = {"weight": Tensor.zeros(vocab_size, dim)}
     self.output = Linear(dim, vocab_size, bias=False)
-    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2).numpy())
+    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
   def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen, _ = tokens.shape
