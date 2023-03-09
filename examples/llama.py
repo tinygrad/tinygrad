@@ -4,6 +4,7 @@ os.environ["METAL"] = "1"  # metal is best choice for llama
 
 import sys, argparse, math
 import numpy as np
+np.set_printoptions(linewidth=200)
 from typing import Optional
 from extra.helpers import Timing
 from tinygrad.helpers import getenv
@@ -42,7 +43,7 @@ def complex_mult(A, B):
   return ret
 
 def apply_rotary_emb(xq, xk, freqs_cis):
-  freqs_cis = freqs_cis[:, :xq.shape[1], :, :, :]
+  assert freqs_cis.shape[1] == xq.shape[1] and freqs_cis.shape[1] == xk.shape[1], "freqs_cis shape mismatch"
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
   xq_out = complex_mult(xq, freqs_cis)
@@ -66,17 +67,19 @@ class Attention:
       #print(self.cache_k.shape, self.cache_v.shape)
     else:
       assert hasattr(self, 'cache_k'), "no cache"
-      assert start_pos == self.cache_k.shape[1], "cache is wrong shape"
+      assert start_pos == self.cache_k.shape[1] and start_pos == self.cache_v.shape[1], "cache is wrong shape"
+      assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
       keys, values = self.cache_k.cat(xk, dim=1), self.cache_v.cat(xv, dim=1)
 
     # save the cache
-    self.cache_k, self.cache_v = keys, values
+    self.cache_k, self.cache_v = keys.realize(), values.realize()
 
     xq = xq.transpose(1, 2)
     keys = keys.transpose(1, 2)
     values = values.transpose(1, 2)
     scores = xq.matmul(keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-    if mask is not None: scores = scores + mask
+    if mask is not None:
+      scores = scores + mask
     scores = scores.softmax()  # this is casted to float
     output = scores.matmul(values).transpose(1,2).reshape(bsz, seqlen, -1)
 
@@ -118,6 +121,14 @@ class Transformer:
     _bsz, seqlen, _ = tokens.shape
     h = tokens @ self.tok_embeddings['weight']
 
+    # get only the part we are using
+    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen]
+
+    # WTF!!! This changes the output, and fixes the kv caching. Most serious tinygrad bug in a while.
+    # It is not fixed by disabling the method cache.
+    # TODO: P0. Fix this bug. An offset is likely getting lost somewhere.
+    freqs_cis.realize()
+
     if seqlen > 1:
       mask = np.full((1, 1, seqlen, seqlen), float("-inf"))
       mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
@@ -127,7 +138,7 @@ class Transformer:
 
     for layer in self.layers:
       h.realize()  # TODO: why do i need this?
-      h = layer(h, start_pos, self.freqs_cis, mask)
+      h = layer(h, start_pos, freqs_cis, mask)
 
     return self.output(self.norm(h)[:, -1, :])
 
@@ -150,7 +161,7 @@ if __name__ == "__main__":
   assert sp_model.vocab_size() == VOCAB_SIZE
 
   parser = argparse.ArgumentParser(description='Run LLaMA', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  # (with temperature=0): Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin.
+  # (with temperature=0): Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
   parser.add_argument('--prompt', type=str, default="Hello.", help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
@@ -183,7 +194,7 @@ if __name__ == "__main__":
     onehot[0,range(len(toks)-start_pos),toks[start_pos:]] = 1
 
     #with Timing("ran model in "):
-    logits = model(Tensor(onehot), start_pos)
+    logits = model(Tensor(onehot), start_pos).realize()
     if args.temperature < 1e-6:
       # so close to 0 we use argmax
       tok = int(logits.numpy().argmax())
@@ -192,8 +203,8 @@ if __name__ == "__main__":
       probs = probs.numpy().flatten()
       tok = int(np.random.choice(len(probs), p=probs))
 
-    # use the cache (broken)
-    #start_pos = len(toks)
+    # use the kv cache
+    start_pos = len(toks)
 
     # add the new token
     toks.append(tok)
