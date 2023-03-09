@@ -16,10 +16,10 @@ from tinygrad.ops import GlobalCounters
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 import torch
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-  freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-  t = torch.arange(end, device=freqs.device)  # type: ignore
-  freqs = torch.outer(t, freqs).float()  # type: ignore
-  freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+  freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))
+  t = torch.arange(end, device=freqs.device)
+  freqs = torch.outer(t, freqs).float()
+  freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
   return torch.view_as_real(freqs_cis).reshape(1, end, 1, dim//2, 2)
 
 class RMSNorm:
@@ -188,7 +188,9 @@ if __name__ == "__main__":
   sys.stdout.flush()
 
   start_pos = 0
-  for _ in range(args.count):
+  for i in range(args.count):
+    if i == 2: GlobalCounters.optimize_local = False   # disable opt local after first few runs
+
     # this allows the embedding to work in tinygrad
     onehot = np.zeros((1, len(toks)-start_pos, VOCAB_SIZE))
     onehot[0,range(len(toks)-start_pos),toks[start_pos:]] = 1

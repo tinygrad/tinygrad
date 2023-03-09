@@ -115,7 +115,7 @@ class ASTRunner:
 
   def exec(self, bufs:List[CompiledBuffer]) -> Optional[float]:
     rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
-    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
+    if GlobalCounters.optimize_local and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
@@ -206,6 +206,7 @@ class GlobalCounters:
   kernel_count : ClassVar[int] = 0
   mem_used : ClassVar[int] = 0   # NOTE: this is not reset
   cache : ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
+  optimize_local : ClassVar[bool] = getenv("OPTLOCAL")
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
   @staticmethod
