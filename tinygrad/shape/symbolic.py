@@ -1,5 +1,5 @@
 from __future__ import annotations
-import math, itertools, functools
+import math, functools
 from typing import List, Dict, Callable, Type, Union
 from tinygrad.helpers import partition, all_same
 
@@ -110,11 +110,14 @@ class Node:
     nodes.append(NumNode(sum([x.b for x in num_nodes])))
 
     # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
+    # TODO: this is super slow! 25% of the time in llama
+    """
     nodes, mul_nodes = partition(nodes, lambda x: not isinstance(x, MulNode))
     mul_nodes += [MulNode(x, 1) for x in nodes]
     mul_nodes = sorted(mul_nodes, key=lambda x: x.a.render()) # group by equality (ugh, uses render!)
     new_nodes = [k * sum(x.b for x in g) for k, g in itertools.groupby(mul_nodes, key=lambda x: x.a)]
     nodes = [x if not isinstance(x, MulNode) or x.b != 1 else x.a for x in new_nodes]
+    """
 
     # filter 0s
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]

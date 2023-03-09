@@ -7,7 +7,7 @@ import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional
 from extra.helpers import Timing
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEBUG
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
 from tinygrad.ops import GlobalCounters
@@ -189,7 +189,8 @@ if __name__ == "__main__":
     onehot[0,range(len(toks)-start_pos),toks[start_pos:]] = 1
 
     if args.timing: print("")
-    with Timing("ran model in ", enabled=args.timing):
+    st = GlobalCounters.time_sum_s
+    with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
       logits = model(Tensor(onehot), start_pos).realize()
     with Timing("sync in ", enabled=args.timing):
       if args.temperature < 1e-6:
