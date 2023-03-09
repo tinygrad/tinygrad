@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os
+os.environ["METAL"] = "1"  # metal is best choice for llama
+
 import math
 import numpy as np
 from typing import Optional
@@ -93,26 +95,37 @@ args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
 
 # TODO: use pathlib
-FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/7B/consolidated.00.pth")
+WEIGHTS_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/7B/consolidated.00.pth")
+TOKENIZER_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/tokenizer.model")
 
 if __name__ == "__main__":
+  from sentencepiece import SentencePieceProcessor
+  sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
+  assert sp_model.vocab_size() == VOCAB_SIZE
+
+  toks = sp_model.encode("Why did the chicken ")
+
   if getenv("SMALL"):
     model = Transformer(**args_small)
   else:
     model = Transformer(**args_7B)
 
     from extra.utils import fake_torch_load_zipped, get_child
-    weights = fake_torch_load_zipped(open(FILENAME, "rb"), load_weights=getenv("WEIGHTS"), base_name="consolidated")
+    weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
     for k,v in weights.items():
       if '.inner_attention.rope.freqs' in k: continue  # no rope today
       mv = get_child(model, k)
       assert mv.shape == v.shape, f"shape mismatch in {k}"
       mv.lazydata.realized = v
 
-  onehot = np.zeros((1, 16, VOCAB_SIZE))
-  onehot[0,:,393] = 1
+  for _ in range(3):
+    onehot = np.zeros((1, len(toks), VOCAB_SIZE))
+    onehot[0,range(len(toks)),toks] = 1
 
-  with Timing("ran model in "):
-    out = model(Tensor(onehot), 0).numpy()
-    print(out.argmax(axis=-1))
+    with Timing("ran model in "):
+      out = model(Tensor(onehot), 0).numpy()
+      tok = int(out.argmax(axis=-1)[-1])
+      toks.append(tok)
+
+  print(sp_model.decode(toks))
 
