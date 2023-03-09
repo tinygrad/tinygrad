@@ -14,7 +14,7 @@ def shapetracker_getitem(st, val):
 class CheckingShapeTracker:
   def __init__(self, shape):
     self.st = ShapeTracker(shape)
-    self.t = np.arange(prod(shape), dtype=np.int).reshape(shape)
+    self.t = np.arange(prod(shape), dtype=np.int32).reshape(shape)
 
   @property
   def shape(self):
