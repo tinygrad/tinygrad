@@ -3,6 +3,7 @@ import os
 import math
 import numpy as np
 from typing import Optional
+from extra.helpers import Timing
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
@@ -111,5 +112,7 @@ if __name__ == "__main__":
   onehot = np.zeros((1, 16, VOCAB_SIZE))
   onehot[0,:,393] = 1
 
-  out = model(Tensor(onehot), 0).numpy()
+  with Timing("ran model in "):
+    out = model(Tensor(onehot), 0).numpy()
+    print(out.argmax(axis=-1))
 

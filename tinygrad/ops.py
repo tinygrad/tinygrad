@@ -183,7 +183,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
     k = cls.codegen_type(ast, output_buffer)
-    if getenv("ENABLE_METHOD_CACHE"):   # TODO: this breaks the ops test!
+    if getenv("ENABLE_METHOD_CACHE", 1):  # method cache is now the default
       if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
       elif DEBUG >= 4: print(f"method cache hit : {k.key}")
       prg = cls.method_cache[k.key]
