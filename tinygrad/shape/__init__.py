@@ -182,7 +182,7 @@ class ShapeTracker:
 
   def shrink(self, arg : Tuple[Tuple[int, int], ...]) -> ShapeTracker:
     assert isinstance(arg, tuple)
-    assert len(arg) == len(self.shape)
+    assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
     self._resize(arg)
     return self
 
