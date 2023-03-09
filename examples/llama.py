@@ -61,8 +61,16 @@ class Attention:
     xq, xk, xv = [x.reshape(bsz, seqlen, self.n_heads, self.head_dim) for x in (xq, xk, xv)]
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
-    # TODO: add cache
-    keys, values = xk, xv
+    if start_pos == 0:
+      keys, values = xk, xv
+      #print(self.cache_k.shape, self.cache_v.shape)
+    else:
+      assert hasattr(self, 'cache_k'), "no cache"
+      assert start_pos == self.cache_k.shape[1], "cache is wrong shape"
+      keys, values = self.cache_k.cat(xk, dim=1), self.cache_v.cat(xv, dim=1)
+
+    # save the cache
+    self.cache_k, self.cache_v = keys, values
 
     xq = xq.transpose(1, 2)
     keys = keys.transpose(1, 2)
@@ -136,12 +144,14 @@ WEIGHTS0_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..
 WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.01.pth")
 
 if __name__ == "__main__":
+  # pip3 install sentencepiece
   from sentencepiece import SentencePieceProcessor
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
   assert sp_model.vocab_size() == VOCAB_SIZE
 
-  parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--prompt', type=str, default="Jet fuel doesn't melt", help="Phrase to start with")
+  parser = argparse.ArgumentParser(description='Run LLaMA', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  # (with temperature=0): Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin.
+  parser.add_argument('--prompt', type=str, default="Hello.", help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   args = parser.parse_args()
@@ -162,17 +172,18 @@ if __name__ == "__main__":
       assert mv.shape == v.shape, f"shape mismatch in {k}"
       mv.lazydata.realized = v
 
-  cur = sp_model.decode(toks)
-  sys.stdout.write(cur)
+  outputted = sp_model.decode(toks)
+  sys.stdout.write(outputted)
   sys.stdout.flush()
-  outputted = cur
 
+  start_pos = 0
   for _ in range(args.count):
-    onehot = np.zeros((1, len(toks), VOCAB_SIZE))
-    onehot[0,range(len(toks)),toks] = 1
+    # this allows the embedding to work in tinygrad
+    onehot = np.zeros((1, len(toks)-start_pos, VOCAB_SIZE))
+    onehot[0,range(len(toks)-start_pos),toks[start_pos:]] = 1
 
     #with Timing("ran model in "):
-    logits = model(Tensor(onehot), 0)
+    logits = model(Tensor(onehot), start_pos)
     if args.temperature < 1e-6:
       # so close to 0 we use argmax
       tok = int(logits.numpy().argmax())
@@ -180,8 +191,14 @@ if __name__ == "__main__":
       probs = (logits / args.temperature).softmax()
       probs = probs.numpy().flatten()
       tok = int(np.random.choice(len(probs), p=probs))
+
+    # use the cache (broken)
+    #start_pos = len(toks)
+
+    # add the new token
     toks.append(tok)
 
+    # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
     cur = sp_model.decode(toks)
     sys.stdout.write(cur[len(outputted):])
     sys.stdout.flush()
