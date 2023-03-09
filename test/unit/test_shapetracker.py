@@ -14,7 +14,7 @@ def shapetracker_getitem(st, val):
 class CheckingShapeTracker:
   def __init__(self, shape):
     self.st = ShapeTracker(shape)
-    self.t = np.arange(prod(shape), dtype=np.uint8).reshape(shape)
+    self.t = np.arange(prod(shape), dtype=np.int).reshape(shape)
 
   @property
   def shape(self):
@@ -42,6 +42,10 @@ class CheckingShapeTracker:
     self.st.shrink(arg)
     self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
 
+  def pad(self, arg):
+    self.st.pad(arg)
+    self.t = np.pad(self.t, arg, constant_values=-1)
+
   def stride(self, arg):
     self.st.stride(arg)
     self.t = self.t[tuple([slice(None, None, x) for x in arg])]
@@ -61,7 +65,7 @@ class CheckingShapeTracker:
     idx, valid = self.st.expr_node()
     print(x, y, self.st.shape, self.shape, idx.render(), valid.render())
     assert self.st.shape == self.shape
-    assert x == y
+    assert x == y, f"mismatch {x} {y}"
 
 class TestImageShapeTracker(unittest.TestCase):
   def test_image(self):
@@ -141,14 +145,6 @@ class TestSimplifyingShapeTracker(unittest.TestCase):
 
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
-
-class TestZeroViewShapeTracker(unittest.TestCase):
-  def test_pad(self):
-    self.st = ShapeTracker((4, 4))
-    self.st.pad(((1, 1), (1, 1)))
-    assert self.st.shape == (6,6)
-    compareZv = ZeroView((4,4), ((-1,5), (-1,5)))
-    assert str(self.st.views[1]) == str(compareZv)
 
 class TestComplexShapeTracker(unittest.TestCase):
   def test_add_1s(self):
@@ -291,6 +287,17 @@ class TestShapeTracker(unittest.TestCase):
     self.test_permute()
     self.apply(lambda x: x.reshape((prod(self.st.shape), )))
 
+  def test_simple_pad(self):
+    self.st.pad(((1,1), (1,1)))
+
+  def test_pad_shrink(self):
+    self.st.pad(((1,1), (1,1)))
+    self.st.shrink(((0,4), (0,4)))
+
+  def test_shrink_pad(self):
+    self.st.shrink(((0,4), (0,4)))
+    self.st.pad(((1,1), (1,1)))
+
   def test_reshape(self):
     new_shape = self.st.shape[::-1]
     self.apply(lambda x: x.reshape(new_shape))
@@ -401,7 +408,7 @@ class TestGetContraction(unittest.TestCase):
 
     r = get_contraction((2,1,3,4), (1,2,3,4))
     self.assertEqual(r, [[], [0], [1, 2], [3]])
- 
+
     r = get_contraction((1,2,3,4), (2*3*4,1,1,1))
     self.assertEqual(r, [[0, 1, 2, 3], [], [], []])
 

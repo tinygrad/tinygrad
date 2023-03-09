@@ -3,13 +3,14 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
-from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, Variable, render_python
+from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, Variable, render_python
 from tinygrad.shape import ShapeTracker, View
 from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same, dedup
 
 # div is different in cl than python
 render_cl = render_python.copy()
-render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops)}/{self.b})"
+render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
+render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 
 VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass

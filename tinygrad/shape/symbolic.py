@@ -187,5 +187,5 @@ render_python : Dict[Type, Callable] = {
   GeNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}>={self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{self.b})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
-  AndNode: lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
+  AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 }
