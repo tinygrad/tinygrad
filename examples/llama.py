@@ -37,7 +37,7 @@ def complex_mult(A, B):
   b = A[:, :, :, :, 1:2]
   d = B[:, :, :, :, 1:2]
   ro = a*c - b*d
-  co = a*d - b+c
+  co = a*d + b*c
   ret = ro.cat(co, dim=-1)
   return ret
 
