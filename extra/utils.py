@@ -39,7 +39,7 @@ def my_unpickle(fb0):
       if getenv("METAL"):
         from tinygrad.runtime.ops_metal import MetalBuffer
         ret = MetalBuffer(args[2], dtype=storage_type)
-        ret.raw()  # force the allocation
+        #ret.raw()  # force the allocation
       else:
         ret = np.zeros(args[2], dtype=storage_type)
       key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
@@ -84,6 +84,20 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
+      import concurrent
+      def load_weight(k, v):
+        with myzip.open(f'{base_name}/data/{k}') as myfile:
+          myfile.readinto(v[2].raw()._buffer())
+
+      # 2 seems fastest
+      with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(load_weight, k, v):k for k,v in ret[1].items()}
+        for future in (t:=tqdm(concurrent.futures.as_completed(futures), total=len(futures))):
+          k = futures[future]
+          t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+
+
+      """
       for k,v in (t:=tqdm(ret[1].items())):
         t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB shape:{v[3]}")
         with myzip.open(f'{base_name}/data/{k}') as myfile:
@@ -94,6 +108,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
             if v[2].dtype == "object":
               continue
             np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
+      """
   return ret[0]
 
 def fake_torch_load(b0):

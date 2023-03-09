@@ -9,6 +9,17 @@ from extra.helpers import Timing
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
+from tinygrad.ops import GlobalCounters
+
+# offensive code because it uses complex numbers.
+# https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
+import torch
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+  freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+  t = torch.arange(end, device=freqs.device)  # type: ignore
+  freqs = torch.outer(t, freqs).float()  # type: ignore
+  freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+  return torch.view_as_real(freqs_cis)
 
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
@@ -71,11 +82,13 @@ class TransformerBlock:
     return out
 
 class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size):
+  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
     self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for i in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = {"weight": Tensor.zeros(vocab_size, dim)}
     self.output = Linear(dim, vocab_size)
+    self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2).numpy())
+    #print(self.freqs_cis.shape)
 
   def __call__(self, tokens:Tensor, start_pos:int):
     h = tokens @ self.tok_embeddings['weight']
@@ -103,7 +116,8 @@ if __name__ == "__main__":
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
   assert sp_model.vocab_size() == VOCAB_SIZE
 
-  toks = sp_model.encode("Why did the chicken ")
+  toks = [sp_model.bos_id()] + sp_model.encode("Why did the chicken ")
+  print(toks)
 
   if getenv("SMALL"):
     model = Transformer(**args_small)
@@ -111,7 +125,8 @@ if __name__ == "__main__":
     model = Transformer(**args_7B)
 
     from extra.utils import fake_torch_load_zipped, get_child
-    weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
+    with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/et_ns*1e3:.2f} MB/s"):
+      weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
     for k,v in weights.items():
       if '.inner_attention.rope.freqs' in k: continue  # no rope today
       mv = get_child(model, k)
@@ -127,5 +142,6 @@ if __name__ == "__main__":
       tok = int(out.argmax(axis=-1)[-1])
       toks.append(tok)
 
+  print(toks)
   print(sp_model.decode(toks))
 
