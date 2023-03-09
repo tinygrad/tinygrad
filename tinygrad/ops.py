@@ -125,6 +125,7 @@ class ASTRunner:
       print(f"**** {GlobalCounters.kernel_count:4d} {self.name:20s} args {len(rawbufs):5d}  kernels {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS)"))
     GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
+    if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
 
   def timeit(self, rawbufs:List[RawBuffer], local_override=None) -> float:
@@ -144,9 +145,10 @@ class ASTRunner:
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype=np.float32):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:type=np.float32):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape, self.dtype = self.st.shape, dtype
+    self.shape = self.st.shape
+    self.dtype : type = hostbuf.dtype if hostbuf is not None else dtype
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing

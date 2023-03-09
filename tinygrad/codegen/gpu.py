@@ -88,7 +88,7 @@ class GPUCodegen(ASTKernel):
         idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
         self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
       elif v.typ == Types.FLOAT4:
-        self.kernel.append(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
+        self.kernel.append(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}{self.buftokens[buf_index].decltype(upcasted=True)}){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
         self.kernel.append(f"{self.buftokens[buf_index].tok}[{(idxy//(4 if v.typ == Types.FLOAT4 else 1)).render(render_cl)}] = {v.tok};\n")
 
@@ -120,9 +120,9 @@ class GPUCodegen(ASTKernel):
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
           test_idy.append(idy.render(render_cl))
         elif should_upcast and can_merge:
-          ldr = Token(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
+          ldr = Token(f"(float4)(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}{self.buftokens[buf_index].decltype(upcasted=True)}){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:
-          ldr = Token(f"{self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
+          ldr = Token(f"(float){self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
         invalid = self.group_float4([Token("0.0f", Types.FLOAT)]*4) if ldr.typ == Types.FLOAT4 else Token("0.0f", Types.FLOAT)
         ldr = ldr if valid.min == 1 or (VALIDHACKS and hasattr(self.bufs[buf_index]._buf, "IMAGE")) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : {invalid.tok})", ldr.typ) if valid.max == 1 else invalid)
         if const is not None:

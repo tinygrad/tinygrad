@@ -1,4 +1,5 @@
 import itertools
+import numpy as np
 from enum import Enum, auto
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored
@@ -11,7 +12,7 @@ def get_first_reduce(shapes):
   return len(shapes[0])  # off the end
 
 # this will be removed soon anyway
-class Types(Enum): FLOAT = auto(); FLOAT4 = auto() # noqa: E702
+class Types(Enum): FLOAT = auto(); FLOAT4 = auto(); HALF = auto(); HALF4 = auto() # noqa: E702
 class Token:
   def __init__(self, tok:str, typ:Types, ptr:bool=False):
     assert isinstance(tok, str)
@@ -21,12 +22,13 @@ class Token:
   def size(self): return prod([x[0] for x in self.axis])
   def offsets(self): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.axis[::-1]])] if len(self.axis) else [0]
   def can_float4(self): return any(a[0:2] == (4,1) for a in self.axis)
+  def upcast_type(self): return {Types.FLOAT: Types.FLOAT4, Types.HALF: Types.HALF4}[self.typ]
   # TODO: this is sort of a hack, it gets the accumulator indices
   def acc_offsets(self):
     if len(self.axis) == 0: return [0]
     acc_strides = [x*(1-self.axis[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.axis[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.axis[::-1])])]
-  def decltype(self): return ('float' if self.typ == Types.FLOAT else 'float4') + ('*' if self.ptr else str())
+  def decltype(self, upcasted=False): return {Types.FLOAT:'float', Types.FLOAT4:'float4', Types.HALF:'half', Types.HALF4:'half4'}[self.upcast_type() if upcasted else self.typ] + ('*' if self.ptr else str())
   def __repr__(self): return f"<{self.typ}{'*' if self.ptr else str()} {self.tok}{f'[{self.axis}]' if len(self.axis) else str()}>"
 
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
@@ -71,7 +73,7 @@ class ASTKernel:
     self.reduceop = reduceops[0] if reduceops else None
     self.earlybufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
 
-    self.buftokens = [Token(f"data{i}", Types.FLOAT, ptr=True) for i in range(len(self.bufs))]
+    self.buftokens = [Token(f"data{i}", Types.HALF if buf.dtype == np.float16 else Types.FLOAT, ptr=True) for i,buf in enumerate(self.bufs)]
     self.group_for_reduce : List[int] = []
 
     # check valid AST kernel

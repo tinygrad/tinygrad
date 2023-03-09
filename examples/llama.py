@@ -82,8 +82,8 @@ class Transformer:
     mask = None
 
     for layer in self.layers:
-      h = layer(h, start_pos, freqs_cis, mask)
       h.realize()  # TODO: why do i need this?
+      h = layer(h, start_pos, freqs_cis, mask)
 
     return self.output(self.norm(h)[:, -1, :])
 
@@ -95,18 +95,21 @@ args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm
 FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/7B/consolidated.00.pth")
 
 if __name__ == "__main__":
-  model = Transformer(**args_7B)
+  if getenv("SMALL"):
+    model = Transformer(**args_small)
+  else:
+    model = Transformer(**args_7B)
 
-  from extra.utils import fake_torch_load_zipped, get_child
-  weights = fake_torch_load_zipped(open(FILENAME, "rb"), load_weights=getenv("WEIGHTS"), base_name="consolidated")
-  for k,v in weights.items():
-    if '.inner_attention.rope.freqs' in k: continue  # no rope today
-    mv = get_child(model, k)
-    assert mv.shape == v.shape, f"shape mismatch in {k}"
-    mv.lazydata.realized = v
+    from extra.utils import fake_torch_load_zipped, get_child
+    weights = fake_torch_load_zipped(open(FILENAME, "rb"), load_weights=getenv("WEIGHTS"), base_name="consolidated")
+    for k,v in weights.items():
+      if '.inner_attention.rope.freqs' in k: continue  # no rope today
+      mv = get_child(model, k)
+      assert mv.shape == v.shape, f"shape mismatch in {k}"
+      mv.lazydata.realized = v
 
-  onehot = np.zeros((1, 32, VOCAB_SIZE))
-  onehot[0,0,393] = 1
+  onehot = np.zeros((1, 16, VOCAB_SIZE))
+  onehot[0,:,393] = 1
 
   out = model(Tensor(onehot), 0).numpy()
 
