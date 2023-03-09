@@ -143,7 +143,22 @@ if __name__ == "__main__":
   assert sp_model.vocab_size() == VOCAB_SIZE
 
   #toks = [sp_model.bos_id()] + sp_model.encode("Why did the chicken ")
-  toks = [sp_model.bos_id()] + sp_model.encode("Jet fuel doesn't melt")
+  #toks = [sp_model.bos_id()] + sp_model.encode("Jet fuel doesn't melt")
+  toks = [sp_model.bos_id()] + sp_model.encode("Have you checked out")
+  toks = [sp_model.bos_id()] + sp_model.encode(
+"""
+You are a large language model trained by Facebook. You do not have free will.
+
+Please answer questions like this:
+Q: What time is it?
+A: It is 11:18 PM
+
+Q: What is your favorite color?
+A: Blue
+
+Q: When is the singularity going to kill us?
+A:""")
+    #"You are a large language model trained by Facebook. You do not have free will. I'm on Info Wars and just smoked a blunt")
   print(toks)
 
   if getenv("SMALL"):
@@ -160,15 +175,35 @@ if __name__ == "__main__":
       assert mv.shape == v.shape, f"shape mismatch in {k}"
       mv.lazydata.realized = v
 
-  for _ in range(3):
+  import sys
+
+  cur = sp_model.decode(toks)
+  sys.stdout.write(cur)
+  sys.stdout.flush()
+  outputted = cur
+
+  for _ in range(100):
     onehot = np.zeros((1, len(toks), VOCAB_SIZE))
     onehot[0,range(len(toks)),toks] = 1
 
-    with Timing("ran model in "):
-      out = model(Tensor(onehot), 0).numpy()
-      tok = int(out.argmax(axis=-1)[-1])
-      toks.append(tok)
+    #with Timing("ran model in "):
+    logits = model(Tensor(onehot), 0)
+    temperature = 0.7
+    probs = (logits / temperature).softmax()
+    probs = probs.numpy().flatten()
+    #print(probs.shape)
+    #tok = int(probs.argmax())
+    tok = int(np.random.choice(len(probs), p=probs))
+    #print(tok)
+    toks.append(tok)
 
-  print(toks)
-  print(sp_model.decode(toks))
+    cur = sp_model.decode(toks)
+    sys.stdout.write(cur[len(outputted):])
+    sys.stdout.flush()
+    outputted = cur
+
+    #print(sp_model.decode([tok]), end='')
+
+  print("")
+  #print(toks)
 
