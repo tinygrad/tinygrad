@@ -104,10 +104,10 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
-    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for i in range(n_layers)]
+    self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = {"weight": Tensor.zeros(vocab_size, dim)}
-    self.output = Linear(dim, vocab_size)
+    self.output = Linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2).numpy())
     #print(self.freqs_cis.shape)
 
@@ -142,7 +142,8 @@ if __name__ == "__main__":
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
   assert sp_model.vocab_size() == VOCAB_SIZE
 
-  toks = [sp_model.bos_id()] + sp_model.encode("Why did the chicken ")
+  #toks = [sp_model.bos_id()] + sp_model.encode("Why did the chicken ")
+  toks = [sp_model.bos_id()] + sp_model.encode("Jet fuel doesn't melt")
   print(toks)
 
   if getenv("SMALL"):
