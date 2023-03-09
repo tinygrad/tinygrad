@@ -19,7 +19,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
   t = torch.arange(end, device=freqs.device)  # type: ignore
   freqs = torch.outer(t, freqs).float()  # type: ignore
   freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-  return torch.view_as_real(freqs_cis)
+  return torch.view_as_real(freqs_cis).reshape(1, end, 1, dim//2, 2)
 
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
@@ -29,6 +29,27 @@ class RMSNorm:
   def __call__(self, x:Tensor):
     # TODO: convert to float?
     return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
+
+# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
+def complex_mult(A, B):
+  a = A[:, :, :, :, 0:1]
+  c = B[:, :, :, :, 0:1]
+  b = A[:, :, :, :, 1:2]
+  d = B[:, :, :, :, 1:2]
+  ro = a*c - b*d
+  co = a*d - b+c
+  ret = ro.cat(co, dim=-1)
+  return ret
+
+
+def apply_rotary_emb(xq, xk, freqs_cis):
+  freqs_cis = freqs_cis[:, :xq.shape[1], :, :, :]
+  xq = xq.reshape(*xq.shape[0:-1], -1, 2)
+  xk = xk.reshape(*xk.shape[0:-1], -1, 2)
+  xq_out = complex_mult(xq, freqs_cis)
+  xk_out = complex_mult(xk, freqs_cis)
+  return xq_out.flatten(3), xk_out.flatten(3)
+
 
 class Attention:
   def __init__(self, dim, n_heads):
@@ -42,7 +63,7 @@ class Attention:
     xq, xk, xv = [x.reshape(bsz, seqlen, self.n_heads, self.head_dim) for x in (xq, xk, xv)]
 
     # TODO: need this
-    #xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+    xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
     # TODO: add cache
     keys, values = xk, xv
@@ -91,15 +112,20 @@ class Transformer:
     #print(self.freqs_cis.shape)
 
   def __call__(self, tokens:Tensor, start_pos:int):
+    _bsz, seqlen, _ = tokens.shape
     h = tokens @ self.tok_embeddings['weight']
 
-    # TODO: write this
-    freqs_cis = None
-    mask = None
+    if seqlen > 1:
+      # TODO: this is hard to do in tinygrad
+      mask = np.full((1, 1, seqlen, seqlen), float("-inf"))
+      mask = np.triu(mask, k=start_pos + 1)
+      mask = Tensor(mask)
+    else:
+      mask = None
 
     for layer in self.layers:
       h.realize()  # TODO: why do i need this?
-      h = layer(h, start_pos, freqs_cis, mask)
+      h = layer(h, start_pos, self.freqs_cis, mask)
 
     return self.output(self.norm(h)[:, -1, :])
 
