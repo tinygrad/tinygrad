@@ -17,7 +17,7 @@ class ViT:
 
   def patch_embed(self, x):
     x = x.conv2d(*self.embedding, stride=16)
-    x = x.reshape(shape=(x.shape[0], x.shape[1], -1)).transpose(order=(0,2,1))
+    x = x.reshape(shape=(x.shape[0], x.shape[1], -1)).permute(order=(0,2,1))
     return x
 
   def forward(self, x):
