@@ -267,6 +267,8 @@ class GPUCodegen(ASTKernel):
     self.prekernel : Set[str] = set()
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
 
+    #self.prekernel.add("#pragma OPENCL EXTENSION cl_khr_fp16 : enable\n")
+
     if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
     else:

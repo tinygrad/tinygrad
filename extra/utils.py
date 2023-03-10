@@ -88,12 +88,19 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithr
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            if Device.DEFAULT in ["METAL", "CLANG"]:
-              # Metal and clang allow direct reading
+            if Device.DEFAULT in ["METAL", "CLANG", "LLVM"]:
+              # Metal/clang/llvm allow direct reading
               myfile.readinto(v[2].raw()._buffer())
             elif Device.DEFAULT == "CPU":
-              # numpy
+              # numpy direct reading
               myfile.readinto(v[2]._buf.data)
+            elif Device.DEFAULT == "TORCH":
+              # torch "direct" reading
+              myfile.readinto(v[2]._buf.numpy().data)
+            elif Device.DEFAULT == "GPU":
+              # GPU doesn't support direct reading
+              dat = myfile.read(prod(v[2].shape) * np.dtype(v[2].dtype).itemsize)
+              v[2].raw().copyin(dat)
             else:
               raise NotImplementedError(f"no read in for {Device.DEFAULT}")
 
