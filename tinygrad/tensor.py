@@ -61,7 +61,7 @@ class Tensor:
     self._ctx : Optional[Function] = None
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} {self.dtype} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
@@ -446,6 +446,11 @@ class Tensor:
     # TODO: why is this going through numpy?
     _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+
+  # ***** cast ops *****
+
+  # TODO: this is a hack, but if we add float(0), it will become a float. need real casting support
+  def float(self): return self + Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad)
 
 # register functions to move between devices
 for device in Device._buffers:

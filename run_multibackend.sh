@@ -9,3 +9,5 @@ echo "********* CLANG *********"
 CLANG=1 python3 $@
 echo "********* LLVM *********"
 LLVM=1 python3 $@
+echo "********* TORCH *********"
+TORCH=1 python3 $@

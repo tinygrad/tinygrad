@@ -5,9 +5,10 @@ from tinygrad.tensor import Tensor, dtypes
 class TestDtype(unittest.TestCase):
   def test_half_to_np(self):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
-    np_a = a.numpy()
-    print(np_a, np_a.dtype)
-    assert np_a.dtype == np.float16
+    print(a)
+    na = a.numpy()
+    print(na, na.dtype, a.lazydata.realized)
+    assert na.dtype == np.float16
 
   def test_half_add(self):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
@@ -15,6 +16,14 @@ class TestDtype(unittest.TestCase):
     c = a+b
     print(c.numpy())
     assert c.dtype == dtypes.float16
+
+  def test_upcast_float(self):
+    # NOTE: there's no downcasting support
+    a = Tensor([1,2,3,4], dtype=dtypes.float16).float()
+    print(a)
+    na = a.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.float32
 
   def test_half_add_upcast(self):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
