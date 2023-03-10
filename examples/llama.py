@@ -8,6 +8,7 @@ import numpy as np
 np.set_printoptions(linewidth=200)
 from hexdump import hexdump
 from typing import Optional
+from pathlib import Path
 from extra.helpers import Timing
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.tensor import Tensor
@@ -137,19 +138,20 @@ class Transformer:
     return self.output(self.norm(h)[:, -1, :])
 
 # **** files and arguments ****
-
-TOKENIZER_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/tokenizer.model")
+p = Path('.')
+weights_dir = (p.absolute() / 'weights' / 'LLAMA' )
+TOKENIZER_FILENAME = (weights_dir / 'tokenizer.model').resolve().as_posix()
 VOCAB_SIZE = 32000
 
 args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
 
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/7B/consolidated.00.pth")
+WEIGHTS_FILENAME = (weights_dir / '7B'/ 'consolidated.00.pth').resolve().as_posix()
 
 # TODO: make this model work
 args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS0_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.00.pth")
-WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.01.pth")
+WEIGHTS0_FILENAME = (weights_dir / '13B' / 'consolidated.00.pth').resolve().as_posix()
+WEIGHTS1_FILENAME = (weights_dir / '13B' / 'consolidated.01.pth').resolve().as_posix()
 
 # **** helper functions ****
 
