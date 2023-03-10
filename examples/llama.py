@@ -160,25 +160,34 @@ if __name__ == "__main__":
   assert sp_model.vocab_size() == VOCAB_SIZE
 
   parser = argparse.ArgumentParser(description='Run LLaMA', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  # (with temperature=0): Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
-  parser.add_argument('--prompt', type=str, default="Hello.", help="Phrase to start with")
+  # test: python3.11 examples/llama.py --prompt="Hello." --temperature=0
+  # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
+  parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
+
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
+  parser.add_argument('--large', action='store_true', help="Use the 13B model instead of the 7B one")
   args = parser.parse_args()
+  chatbot = args.prompt == None
 
-  def sample(logits):
-    if args.temperature < 1e-6:
-      # so close to 0 we use argmax
-      return int(logits.numpy().argmax())
-    else:
-      probs = (logits / args.temperature).softmax()
-      probs = probs.numpy().flatten()
-      return int(np.random.choice(len(probs), p=probs))
+  # load model
+  model = Transformer(**args_7B)
+
+  from extra.utils import fake_torch_load_zipped, get_child
+  with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+    weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
+  for k,v in weights.items():
+    if '.inner_attention.rope.freqs' in k: continue  # no rope today
+    mv = get_child(model, k)
+    assert mv.shape == v.shape, f"shape mismatch in {k}"
+    mv.lazydata.realized = v
+
+  # *** prompt engineers work here ****
 
   examples = {
     "What is your name?": "Hi! My name is Stacy. I'm a rapper with bipolar disorder.",
-    #"french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
+    "french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
     #"Can you multiply a matrix using Python?": "```def matmul(a, b): return a@b```",
     #"What is bigger, the moon or the sun?": "The sun is bigger than the moon.",
     #"What is 7+9?": "7 plus 9 is equal to 16",
@@ -186,7 +195,7 @@ if __name__ == "__main__":
 
   user_delim = "\nUser: "
   resp_delim = "Stacy: "
-  end_delim = " [END]\n"
+  end_delim = " [EOS]\n"
 
   #You are also an expert programmer who has won 7 USAMO medals and 6 Google CodeJams.
   pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
@@ -198,38 +207,41 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
 <CHAT LOG>
 """ + ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
 
-  # load model
-  if getenv("SMALL"):
-    model = Transformer(**args_small)
+  # *** prompt engineers stop here ****
+
+  if chatbot:
+    # encode pre prompt
+    toks = [sp_model.bos_id()] + sp_model.encode(pre_prompt)
+
+    # prepare kv cache for chat bot
+    logits = model(onehot_encode(toks), 0).realize()
+    start_pos = len(toks)
   else:
-    model = Transformer(**args_7B)
-
-    from extra.utils import fake_torch_load_zipped, get_child
-    with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/et_ns*1e3:.2f} MB/s"):
-      weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
-    for k,v in weights.items():
-      if '.inner_attention.rope.freqs' in k: continue  # no rope today
-      mv = get_child(model, k)
-      assert mv.shape == v.shape, f"shape mismatch in {k}"
-      mv.lazydata.realized = v
-
-  toks = [sp_model.bos_id()] + sp_model.encode(pre_prompt)
-
-  # prepare kv cache
-  logits = model(onehot_encode(toks), 0).realize()
-  start_pos = len(toks)
-  # don't append the guess
+    # non chat bot mode
+    toks = [sp_model.bos_id()] + sp_model.encode(args.prompt)
+    start_pos = 0
 
   # print prompt
   outputted = sp_model.decode(toks)
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
+  # TODO: sampler is meh
+  def sample(logits):
+    if args.temperature < 1e-6:
+      # so close to 0 we use argmax
+      return int(logits.numpy().argmax())
+    else:
+      probs = (logits / args.temperature).softmax()
+      probs = probs.numpy().flatten()
+      return int(np.random.choice(len(probs), p=probs))
+
   # chatbot loop
   while 1:
-    # add tokens from user
-    user_prompt = user_delim + input(user_delim) + "\n"
-    outputted += user_prompt
+    # add tokens from user in chatbot mode
+    if chatbot:
+      user_prompt = user_delim + input(user_delim) + "\n"
+      outputted += user_prompt
 
     new_toks = [sp_model.bos_id()] + sp_model.encode(outputted)
     assert toks == new_toks[:len(toks)]
@@ -238,8 +250,12 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
 
     last_break = len(outputted)
     for i in range(args.count):
-      logits = model(onehot_encode(toks[start_pos:]), start_pos)
-      tok = sample(logits)
+      if args.timing: print("")
+      st = GlobalCounters.time_sum_s
+      with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
+        logits = model(onehot_encode(toks[start_pos:]), start_pos).realize()
+      with Timing("sync in ", enabled=args.timing):
+        tok = sample(logits)
 
       # use the kv cache
       start_pos = len(toks)
@@ -254,6 +270,6 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
       outputted = cur
 
       # stop after you have your answer
-      #if 'A: ' in outputted[last_break:] and outputted.endswith("\n"): break
-      if outputted.endswith(end_delim): break
+      if chatbot and outputted.endswith(end_delim): break
+    if not chatbot: break
 
