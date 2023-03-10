@@ -204,15 +204,16 @@ if __name__ == "__main__":
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
       if 'rope.freqs' in k: continue  # no rope today
       mv = get_child(model, k)
+      w0, w1 = v, weights1[k]
 
       # if the weight is copied across models, it's simple
       # TODO: assert they are the same
-      if v.shape == mv.shape:
-        mv.lazydata.realized = v
+      if w0.shape == mv.shape:
+        mv.lazydata.realized = w0
+        w0._buf = None
         continue
 
       # we have to concatenate them, create tensors
-      w0, w1 = v, weights1[k]
       w0t = Tensor.empty(*w0.shape)
       w1t = Tensor.empty(*w1.shape)
       w0t.lazydata.realized = w0
@@ -230,6 +231,9 @@ if __name__ == "__main__":
       # rug the small tensor pieces
       w0._buf = None
       w1._buf = None
+
+    del weights0
+    del weights1
   else:
     model = Transformer(**args_7B)
     with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
@@ -241,6 +245,8 @@ if __name__ == "__main__":
       mv = get_child(model, k)
       assert mv.shape == v.shape, f"shape mismatch in {k}, {mv.shape} != {v.shape}"
       mv.lazydata.realized = v
+
+    del weights
 
   # *** prompt engineers work here ****
 
@@ -280,8 +286,8 @@ After you are done speaking, output [EOS]. You are not the User.
       "What is your name?": "I'm am an AI version of George Hotz.",
       "What's the complexity of matrix multiplication?": "O(n^3), though it can be faster with things like Strassen's algorithm",
       "What's a buffer overflow?": "I assume you mean a stack buffer overflow. That's when the stack is too small for the data being copied to it, and the data corrupts things beyond the buffer",
-      "How many weights do you have?": "I am based off LLaMA trained by Facebook. You are the 7B weight version",
-      "What is swap memory?": "It's when the memory is about to overflow and unused memory is freed and stored on disk"
+      "How many weights do you have?": "I am based off LLaMA trained by Facebook. I'm the 7B weight version",
+      "What is swap memory?": "It is when the memory is about to overflow and unused memory is freed and stored on disk"
     }
 
     user_delim = "\nUser: "

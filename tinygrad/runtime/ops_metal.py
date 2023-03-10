@@ -5,7 +5,7 @@ import numpy as np
 from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG
-from tinygrad.ops import CompiledBuffer, RawBufferCopyIn, GlobalCounters
+from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -21,11 +21,11 @@ METAL = _METAL()
 
 class RawMetalBuffer(RawBufferCopyIn):
   def __init__(self, size):
-    self.size, self._cl = size, METAL.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
-    GlobalCounters.mem_used += self.size  # TODO: this should be global
+    super().__init__(size)
+    self._cl = METAL.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
   def __del__(self):
     self._cl.release()
-    GlobalCounters.mem_used -= self.size  # TODO: this should be global
+    super().__del__()
   def _buffer(self): return self._cl.contents().as_buffer(self._cl.length())
   def _as_np(self, dtype=np.float32): return np.frombuffer(self._buffer(), dtype=dtype)
   def copyin(self, x:np.ndarray): np.copyto(self._as_np(), x.reshape(-1).data)

@@ -33,12 +33,16 @@ def map_buffers(real_srcs, x:LazyOp) -> LazyOp:
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
 _T = TypeVar("_T")
-class RawBuffer:
-  size : int
-  def __init__(self, size): raise NotImplementedError("must be implemented")
+class Copyable:
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
-  def toCPU(self:RawBuffer) -> np.ndarray: raise NotImplementedError("must be implemented")
+  def toCPU(self:Copyable) -> np.ndarray: raise NotImplementedError("must be implemented")
+
+class RawBuffer(Copyable):  # pylint: disable=abstract-method
+  def __init__(self, size:int):
+    self.size : int = size
+    GlobalCounters.mem_used += self.size
+  def __del__(self): GlobalCounters.mem_used -= self.size
 
 class RawBufferCopyIn(RawBuffer):
   def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
@@ -58,7 +62,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     return x
 
 # a placeholder class to extend by the exec classes
-class DeviceBuffer(RawBuffer):
+class DeviceBuffer(Copyable):
   _buf: Any                # underlying buffer
   shape: Tuple[int, ...]
   @classmethod

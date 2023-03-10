@@ -30,7 +30,7 @@ class CLBuffer(RawBufferCopyInOut):
   # TODO: this can be in RawBuffer generically
   BUFFER_CACHE : ClassVar[Dict[int, List[cl.Buffer]]] = defaultdict(list)
 
-  def __init__(self, size):
+  def __init__(self, size):  # pylint: disable=super-init-not-called
     self.size = size
     if len(CLBuffer.BUFFER_CACHE[size]) > 0:
       self._cl = CLBuffer.BUFFER_CACHE[size].pop()
@@ -50,7 +50,7 @@ class CLImage(RawBuffer):  # pylint: disable=abstract-method
   fmt : Final = cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT)
   IMAGE : Final = True
 
-  def __init__(self, shape):
+  def __init__(self, shape):  # pylint: disable=super-init-not-called
     self.size, self._cl = shape, cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, CLImage.fmt, shape=(shape[1], shape[0]))
     GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
 
