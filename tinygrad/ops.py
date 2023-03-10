@@ -84,7 +84,7 @@ shape_fxn_for_op : Dict[Op, Callable] = {
 class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   fxn_for_op : ClassVar = shape_fxn_for_op
   # TODO: use generic types here to remove __init__ in specialized classes
-  def __init__(self, lbuf:Any): self._buf, self.shape = lbuf, tuple(lbuf.shape)
+  def __init__(self, lbuf:Any): self._buf, self.dtype, self.shape = lbuf, lbuf.dtype, tuple(lbuf.shape)
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self._buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self._buf, op.name.lower())(arg))
   @classmethod
