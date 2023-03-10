@@ -138,7 +138,7 @@ class Transformer:
     return self.output(self.norm(h)[:, -1, :])
 
 # **** files and arguments ****
-p = Path('.')
+p = Path('examples/llama.py')
 weights_dir = (p.absolute() / 'weights' / 'LLaMA' )
 TOKENIZER_FILENAME = (weights_dir / 'tokenizer.model').resolve().as_posix()
 VOCAB_SIZE = 32000
