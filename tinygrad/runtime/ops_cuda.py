@@ -8,9 +8,9 @@ from tinygrad.ops import CompiledBuffer, RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawCUDABuffer(RawBufferCopyInOut):
-  def __init__(self, size):
-    super().__init__(size)
-    self._cl = cuda.mem_alloc(size)
+  def __init__(self, size, dtype):
+    super().__init__(size, dtype)
+    self._cl = cuda.mem_alloc(self._memsz)
   def copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
   def copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
 

@@ -3,7 +3,7 @@ import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
-from tinygrad.helpers import prod, DEBUG, getenv
+from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
 from tinygrad.shape import ShapeTracker
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -39,17 +39,19 @@ class Copyable:
   def toCPU(self:Copyable) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBuffer(Copyable):  # pylint: disable=abstract-method
-  def __init__(self, size:int):
+  def __init__(self, size:int, dtype:DType):
     self.size : int = size
-    GlobalCounters.mem_used += self.size
-  def __del__(self): GlobalCounters.mem_used -= self.size
+    self.dtype : DType = dtype
+    self._memsz : int = size*dtype.itemsize
+    GlobalCounters.mem_used += self._memsz
+  def __del__(self): GlobalCounters.mem_used -= self.size*self._memsz
 
 class RawBufferCopyIn(RawBuffer):
   def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod
   def fromCPU(cls, x:np.ndarray):
-    ret = cls(4*prod(x.shape))
+    ret = cls(prod(x.shape), dtypes.from_np(x))
     ret.copyin(x)
     return ret
 
@@ -57,7 +59,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
   def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   def toCPU(self) -> np.ndarray:
-    x = np.empty((self.size//4), dtype=np.float32)
+    x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
     self.copyout(x)
     return x
 
@@ -139,7 +141,7 @@ class ASTRunner:
   def optimize_local_size(self, rawbufs:List[RawBuffer]) -> List[int]:
     assert self.global_size is not None, "needs a global size to optimize local size"
     if any(x == rawbufs[0] for x in rawbufs[1:]):  # this is an assignment, replace the output buffer
-      output_replacement = type(rawbufs[0])(rawbufs[0].size)
+      output_replacement = type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype)
       rawbufs = [output_replacement if x == rawbufs[0] else x for x in rawbufs]
     MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
     local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
@@ -149,32 +151,34 @@ class ASTRunner:
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
+    self.dtype = dtype
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
 
   # TODO: not GPUBuffer, get name of class
+  # TODO: needs dtype
   def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
 
   raw_buffer_type : Type[RawBuffer]
   @classmethod
-  def create_raw_buffer(cls, shape, backing) -> RawBuffer:
+  def create_raw_buffer(cls, shape:Tuple[int, ...], backing:Optional[np.ndarray], dtype:DType) -> RawBuffer:
     assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
     assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
-    return cls.raw_buffer_type(4*prod(shape)) if backing is None else cls.raw_buffer_type.fromCPU(backing)
+    return cls.raw_buffer_type(prod(shape), dtype) if backing is None else cls.raw_buffer_type.fromCPU(backing)
   def raw(self) -> RawBuffer:
     if self._buf is None:
       if DEBUG >= 4 and self._backing is not None: print(f"**** copy in {self._backing.shape} to {type(self)}")
-      self._buf = self.create_raw_buffer(self._base_shape, self._backing)
+      self._buf = self.create_raw_buffer(self._base_shape, self._backing, self.dtype)
       self._backing = None
     return self._buf
 
   @classmethod
-  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
+  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.ravel())
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     if DEBUG >= 3: print(f"**** copy out {self.shape}")

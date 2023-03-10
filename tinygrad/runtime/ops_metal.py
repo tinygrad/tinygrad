@@ -4,7 +4,7 @@ import Metal, Cocoa, libdispatch # type: ignore
 import numpy as np
 from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
-from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.helpers import prod, getenv, DEBUG, DType
 from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
 
 METAL_XCODE = getenv("METAL_XCODE")
@@ -20,14 +20,14 @@ class _METAL:
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferCopyIn):
-  def __init__(self, size):
-    super().__init__(size)
-    self._cl = METAL.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
+  def __init__(self, size:int, dtype:DType):
+    super().__init__(size, dtype)
+    self._cl = METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
   def __del__(self):
     self._cl.release()
     super().__del__()
   def _buffer(self): return self._cl.contents().as_buffer(self._cl.length())
-  def _as_np(self, dtype=np.float32): return np.frombuffer(self._buffer(), dtype=dtype)
+  def _as_np(self): return np.frombuffer(self._buffer(), dtype=self.dtype.np)
   def copyin(self, x:np.ndarray): np.copyto(self._as_np(), x.reshape(-1).data)
   def toCPU(self) -> np.ndarray:
     for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()

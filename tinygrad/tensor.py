@@ -3,8 +3,8 @@ from __future__ import annotations
 import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
-from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray, DType, dtype
+from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten, DType, dtypes
+from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray
 from tinygrad.image import image_conv2d_decorator, image_dot_decorator
 
 # An instantiation of the Function is the Context
@@ -33,7 +33,7 @@ class Tensor:
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
 
-  def __init__(self, data, device=Device.DEFAULT, dtype:DType=dtype.float32, requires_grad:Optional[bool]=None):
+  def __init__(self, data, device=Device.DEFAULT, dtype:DType=dtypes.float32, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
       data = np.array(data, dtype=dtype.np)
     elif isinstance(data, LazyBuffer) and data.device != device:
