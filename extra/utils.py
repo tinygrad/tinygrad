@@ -78,7 +78,7 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):
+def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=False):
   if Device.DEFAULT == "CUDA": multithreaded = False  # multithreaded doesn't work with CUDA
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
@@ -96,8 +96,15 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithr
               # numpy direct reading
               myfile.readinto(v[2]._buf.data)
             elif Device.DEFAULT == "TORCH":
-              # torch "direct" reading
-              myfile.readinto(v[2]._buf.numpy().data)
+              if v[2]._buf.device == "cpu":
+                # torch "direct" reading into CPU
+                myfile.readinto(v[2]._buf.numpy().data)
+              else:
+                # torch slow reading into non CPU
+                import torch
+                npd = {torch.float16: np.float16, torch.float32: np.float32}[v[2]._buf.dtype]
+                dat = myfile.read(prod(v[2].shape) * np.dtype(npd).itemsize)
+                v[2]._buf = torch.frombuffer(dat, dtype=v[2]._buf.dtype, requires_grad=False).to(device=v[2]._buf.device)
             elif Device.DEFAULT in ["GPU", "CUDA"]:
               # GPU and CUDA don't support direct reading
               dat = myfile.read(prod(v[2].shape) * np.dtype(v[2].dtype).itemsize)
