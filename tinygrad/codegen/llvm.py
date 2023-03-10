@@ -208,4 +208,4 @@ class LLVMCodegen(ASTKernel):
     loop_entry[-1].branch(loop_exit[-1]._block)
     loop_exit[0].ret_void()
 
-    return ASTRunner('exec', str(module), op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs))
+    return ASTRunner('exec', str(module), op_estimate=self.info.flops, mem_estimate=sum(4*prod(x._base_shape) for x in self.bufs))

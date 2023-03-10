@@ -338,4 +338,4 @@ class GPUCodegen(ASTKernel):
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
       list(self.output_shape[::-1]) if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
-      op_estimate=self.info.flops, mem_estimate=sum(prod(x._base_shape) for x in self.bufs if x is not None))
+      op_estimate=self.info.flops, mem_estimate=sum(4*prod(x._base_shape) for x in self.bufs if x is not None))
