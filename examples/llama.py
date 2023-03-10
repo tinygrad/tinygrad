@@ -144,7 +144,7 @@ VOCAB_SIZE = 32000
 args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
 
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_FILENAME = script_dir / "../weights/LLaMA/7B/consolidated.00.pth")
+WEIGHTS_FILENAME = script_dir / "../weights/LLaMA/7B/consolidated.00.pth"
 
 # TODO: make this model work
 args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
