@@ -159,8 +159,8 @@ class LazyBuffer:
         self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
       log_op(self.realized, ast)
 
-    assert self.realized.shape == self.shape, f"shape mismatch on realize {self.realized.shape} vs {self.shape}"
-    assert isinstance(self.realized, Device._buffers[self.device])
+    assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
+    assert isinstance(self.realized, Device._buffers[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     return self.realized
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this?
