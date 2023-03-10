@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
+from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type, NamedTuple
 import os, sys, weakref, importlib, inspect, functools
+import numpy as np
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv
 from tinygrad.shape import ShapeTracker, get_contraction
@@ -29,6 +30,17 @@ class _Device:
       if getenv(name) == 1: self.DEFAULT = name  # note: DEFAULT can be a Device that can't be imported. better than silent use of a different device
       if self._buffers[name] is not None: self.__setattr__(name, name)
 Device = _Device()
+
+# **** tinygrad now supports dtypes! *****
+
+class DType(NamedTuple):
+  name : str
+  itemsize : int
+  np : type  # TODO: someday this will be removed with the "remove numpy" project
+
+class dtype:
+  float16 = half = DType("half", 2, np.float16)
+  float32 = float = DType("float", 4, np.float32)
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_UNARY_OPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1

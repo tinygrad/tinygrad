@@ -4,7 +4,7 @@ import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
-from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray
+from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray, DType, dtype
 from tinygrad.image import image_conv2d_decorator, image_dot_decorator
 
 # An instantiation of the Function is the Context
@@ -33,16 +33,16 @@ class Tensor:
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
 
-  def __init__(self, data, device=Device.DEFAULT, requires_grad:Optional[bool]=None):
+  def __init__(self, data, device=Device.DEFAULT, dtype:DType=dtype.float32, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
-      data = np.array(data, dtype=np.float32)
+      data = np.array(data, dtype=dtype.np)
     elif isinstance(data, LazyBuffer) and data.device != device:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
-      self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
+      self.lazydata = LazyBuffer.fromCPU(data.astype(dtype.np), device)
     elif isinstance(data, LazyBuffer):
       self.lazydata = data
     else:
@@ -55,6 +55,9 @@ class Tensor:
     # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad : Optional[bool] = requires_grad
 
+    # all tensors have a (tinygrad) dtype
+    self.dtype : DType = dtype
+
     # internal variables used for autograd graph construction
     self._ctx : Optional[Function] = None
 
@@ -63,10 +66,6 @@ class Tensor:
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
-
-  # dtype handling was very broken. it's always float32 now
-  @property
-  def dtype(self) -> type: return np.float32
 
   @property
   def device(self) -> str: return self.lazydata.device
@@ -442,7 +441,8 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
-    _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    # TODO: why is this going through numpy?
+    _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
 # register functions to move between devices
