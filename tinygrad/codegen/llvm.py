@@ -1,4 +1,5 @@
 import functools, math
+import numpy as np
 from typing import ClassVar, List
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.ast import ASTKernel
@@ -105,7 +106,8 @@ class LLVMCodegen(ASTKernel):
 
     # create llvm function
     module = ir.Module(name=__file__)
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(len(self.bufs))), name='exec')
+    dtypes = [ir.HalfType() if buf.dtype == np.float16 else ir.FloatType() for buf in self.bufs]
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in dtypes]), name='exec')
 
     # force llvmlite to allow us to add function attribute then add the attribute
     func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
@@ -143,9 +145,10 @@ class LLVMCodegen(ASTKernel):
             # this always does the load, so we have it load *0 if the arg won't be used
             # TODO: would control flow be faster?
             aug_idx = builder.select(valid, idx, int_const(0))
-            element = builder.select(valid, builder.load(builder.gep(func.args[buf_index], [aug_idx], inbounds=True)), ir.Constant(ir.FloatType(), 0))
+            element = builder.select(valid, builder.load(builder.gep(func.args[buf_index], [aug_idx], inbounds=True)), ir.Constant(dtypes[buf_index], 0))
           else:
             element = builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
+          if dtypes[buf_index] == ir.HalfType(): element = builder.fpext(element, ir.FloatType())
           m = element if kernel_output_dim == 1 else builder.insert_element(m, element, int_const(i))
         return m
       if isinstance(x.op, ReduceOps):
