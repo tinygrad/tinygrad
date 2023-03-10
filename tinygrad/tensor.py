@@ -5,7 +5,7 @@ import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
 from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray
-from tinygrad.image import image_conv2d_decorator
+from tinygrad.image import image_conv2d_decorator, image_dot_decorator
 
 # An instantiation of the Function is the Context
 class Function:
@@ -252,8 +252,10 @@ class Tensor:
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Tuple[int, ...]): return self.slice(((0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])))
-  # TODO: this is totally not transpose
-  def transpose(self, order=(1,0)) -> Tensor: return self.permute(order=order)
+  def transpose(self, ax1=1, ax2=0) -> Tensor:
+    order = list(range(len(self.shape)))
+    order[ax1], order[ax2] = order[ax2], order[ax1]
+    return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
   # ***** reduce ops *****
@@ -335,23 +337,11 @@ class Tensor:
     ret = (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
+  @image_dot_decorator
   def dot(self, w:Tensor) -> Tensor:
-    # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
-    cin, cout = w.shape[-2], w.shape[-1]
-    out_shape_t = self.shape[0:-2] + (cout,-1)
-    if len(self.shape) > 1:
-      order = tuple(range(len(self.shape)-2)) + (len(self.shape)-1, len(self.shape)-2)
-    else:
-      order, out_shape_t = (0,), (cout, )
-    worder = tuple(range(len(w.shape)-2)) + (len(w.shape)-1, len(w.shape)-2)
-
-    # NOTE: with NHWC we can remove the transposes
-    # bs x groups*cin x H x W
-    cx = self.transpose(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
-    # groups*cout x cin x H, W
-    cw = w.transpose(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
-    return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).transpose(order=order)
+    x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
+    w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
+    return (x*w).sum(-1).reshape(*x.shape[0:-2], -1)
 
   # ***** mlops (unary) *****
 
@@ -363,6 +353,7 @@ class Tensor:
 
   def __neg__(self): return 0.0-self
   def sqrt(self): return self.pow(0.5)
+  def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()

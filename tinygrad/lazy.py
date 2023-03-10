@@ -21,6 +21,7 @@ def get_buffer(name, base='tinygrad.runtime'):
 
 class _Device:
   def __init__(self) -> None:
+    # TODO: make this dynamic to when you try to access the _buffers
     self._buffers : Dict[str, Type[DeviceBuffer]] = {x.upper():get_buffer(x) for x in
       [os.path.splitext(x)[0][len("ops_"):] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "runtime"))) if x.startswith("ops_")] if x is not None}
     self.DEFAULT : str = "CPU"
