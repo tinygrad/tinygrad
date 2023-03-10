@@ -67,26 +67,28 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 class DeviceBuffer(Copyable):
   _buf: Any                # underlying buffer
   shape: Tuple[int, ...]
+  dtype: DType
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
 
 # this is a quick "buffer" class for flop tracking and getting the output shape
 class GenericShape:
-  def __init__(self, shape:Tuple[int, ...], flops:int=0): self.shape, self.flops = shape, flops
+  def __init__(self, shape:Tuple[int, ...], dtype:DType, flops:int=0): self.shape, self.dtype, self.flops = shape, dtype, flops
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op : Dict[Op, Callable] = {
-  **{op:lambda self: GenericShape(self.shape, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
-  **{op:lambda self,y: GenericShape(self.shape, self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
-  **{op:lambda self,new_shape: GenericShape(new_shape, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
-  **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.consume_flops()), op) for op in MovementOps}}
+  **{op:lambda self: GenericShape(self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
+  **{op:lambda self,y: GenericShape(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
+  **{op:lambda self,new_shape: GenericShape(new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
+  **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
+def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape, x.dtype)) for x in get_buffers(ast)}, ast))._buf
 
 # used in CPUBuffer and TorchBuffer
 class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   fxn_for_op : ClassVar = shape_fxn_for_op
   # TODO: use generic types here to remove __init__ in specialized classes
-  def __init__(self, lbuf:Any): self._buf, self.shape = lbuf, tuple(lbuf.shape)
+  def __init__(self, lbuf:Any): self._buf, self.shape, self.dtype = lbuf, tuple(lbuf.shape), lbuf.dtype
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self._buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self._buf, op.name.lower())(arg))
   @classmethod
@@ -103,12 +105,11 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     else: ret = cls(cls.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg else []))))
     context[ast] = ret
     if output_buffer is not None:
-      assert output_buffer.shape == ret.shape
+      assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
       output_buffer._buf = ret._buf
       return output_buffer
     else:
       return ret
-def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape)) for x in get_buffers(ast)}, ast))._buf
 
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
@@ -155,6 +156,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
     self.dtype = dtype
+    assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
@@ -169,6 +171,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def create_raw_buffer(cls, shape:Tuple[int, ...], backing:Optional[np.ndarray], dtype:DType) -> RawBuffer:
     assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
     assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
+    if DEBUG >= 4: print(f"create raw buffer {shape} {dtype} backed:{backing is not None}")
     return cls.raw_buffer_type(prod(shape), dtype) if backing is None else cls.raw_buffer_type.fromCPU(backing)
   def raw(self) -> RawBuffer:
     if self._buf is None:
@@ -178,7 +181,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     return self._buf
 
   @classmethod
-  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.ravel())
+  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.ravel(), dtype=dtypes.from_np(x))
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     if DEBUG >= 3: print(f"**** copy out {self.shape}")

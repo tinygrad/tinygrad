@@ -21,12 +21,13 @@ DEBUG, IMAGE = getenv("DEBUG", 0), getenv("IMAGE", 0)
 # **** tinygrad now supports dtypes! *****
 
 class DType(NamedTuple):
-  name : str
   itemsize : int
+  name : str
   np : type  # TODO: someday this will be removed with the "remove numpy" project
+  def __repr__(self): return f"dtypes.{self.name}"
 
 class dtypes:
-  float16 = half = DType("half", 2, np.float16)
-  float32 = float = DType("float", 4, np.float32)
+  float16 = half = DType(2, "half", np.float16)
+  float32 = float = DType(4, "float", np.float32)
   @staticmethod
   def from_np(x:np.ndarray) -> DType: return {"float16": dtypes.float16, "float32": dtypes.float32}[str(x.dtype)]

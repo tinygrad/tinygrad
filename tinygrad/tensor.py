@@ -32,17 +32,19 @@ class Tensor:
   __deletable__ = ('_ctx',)
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
+  default_type : DType = dtypes.float32
 
-  def __init__(self, data, device=Device.DEFAULT, dtype:DType=dtypes.float32, requires_grad:Optional[bool]=None):
+  def __init__(self, data, device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
-      data = np.array(data, dtype=dtype.np)
+      data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
       # TODO: this has to realize, it shouldn't have to
-      data = data.realize().toCPU()
+      #data = data.realize().toCPU()
+      raise RuntimeError("cross device LazyBuffer tensor creation isn't supported")
 
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
-      self.lazydata = LazyBuffer.fromCPU(data.astype(dtype.np), device)
+      self.lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
     elif isinstance(data, LazyBuffer):
       self.lazydata = data
     else:
@@ -55,9 +57,6 @@ class Tensor:
     # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad : Optional[bool] = requires_grad
 
-    # all tensors have a (tinygrad) dtype
-    self.dtype : DType = dtype
-
     # internal variables used for autograd graph construction
     self._ctx : Optional[Function] = None
 
@@ -69,6 +68,9 @@ class Tensor:
 
   @property
   def device(self) -> str: return self.lazydata.device
+
+  @property
+  def dtype(self) -> DType: return self.lazydata.dtype
 
   # ***** data handlers ****
 
