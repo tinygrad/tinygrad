@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import tempfile
 import concurrent.futures
+from collections import defaultdict
 from tinygrad.helpers import prod, getenv
 from tinygrad.ops import GlobalCounters
 
@@ -30,20 +31,20 @@ def download_file(url, fp, skip_if_exists=False):
     os.rename(f.name, fp)
 
 def my_unpickle(fb0):
-  key_prelookup = {}
+  key_prelookup = defaultdict(list)
   class HackTensor:
     def __new__(cls, *args):
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
 
-      assert prod(args[2]) == obj_size
+      #assert prod(args[2]) == obj_size, f"size mimatch in {args[2]}, {prod(args[2])} != {obj_size}"
       if getenv("METAL"):
         from tinygrad.runtime.ops_metal import MetalBuffer
         ret = MetalBuffer(args[2], dtype=storage_type)
         #ret.raw()  # force the allocation
       else:
         ret = np.zeros(args[2], dtype=storage_type)
-      key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
+      key_prelookup[obj_key].append((storage_type, obj_size, ret, args[2], args[3]))
       return ret
 
   class HackParameter:
@@ -82,12 +83,20 @@ def my_unpickle(fb0):
 def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
+    #print(myzip.filelist)
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
-      def load_weight(k, v):
+      def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
-          myfile.readinto(v[2].raw()._buffer())
+          for v in vv:
+            ret = myfile.readinto(v[2].raw()._buffer())
+          assert myfile.tell() == np.dtype(v[0]).itemsize * v[1], "didn't read the whole file"
+
+      """
+      for k,v in tqdm(ret[1].items()):
+        load_weight(k,v)
+      """
 
       # 2 seems fastest
       with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -95,7 +104,6 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
         for future in (t:=tqdm(concurrent.futures.as_completed(futures), total=len(futures))):
           k = futures[future]
           t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
-
 
       """
       for k,v in (t:=tqdm(ret[1].items())):
