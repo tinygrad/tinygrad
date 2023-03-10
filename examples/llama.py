@@ -139,7 +139,7 @@ class Transformer:
 
 # **** files and arguments ****
 p = Path('.')
-weights_dir = (p.absolute() / 'weights' / 'LLAMA' )
+weights_dir = (p.absolute() / 'weights' / 'LLaMA' )
 TOKENIZER_FILENAME = (weights_dir / 'tokenizer.model').resolve().as_posix()
 VOCAB_SIZE = 32000
 
