@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pip3 install sentencepiece pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os
 os.environ["METAL"] = "1"  # metal is best choice for llama
 
@@ -19,15 +20,6 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
   freqs = np.outer(np.arange(end), freqs)
   return np.stack([np.cos(freqs), np.sin(freqs)], axis=-1).reshape(1, end, 1, dim//2, 2)
 
-class RMSNorm:
-  def __init__(self, dim, eps=1e-6):
-    self.eps = eps
-    self.weight = Tensor.ones(dim)
-
-  def __call__(self, x:Tensor):
-    # TODO: convert to float?
-    return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
-
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, B):
   assert len(A.shape) == 5 and len(B.shape) == 5
@@ -44,6 +36,15 @@ def apply_rotary_emb(xq, xk, freqs_cis):
   xq_out = complex_mult(xq, freqs_cis)
   xk_out = complex_mult(xk, freqs_cis)
   return xq_out.flatten(3), xk_out.flatten(3)
+
+class RMSNorm:
+  def __init__(self, dim, eps=1e-6):
+    self.eps = eps
+    self.weight = Tensor.ones(dim)
+
+  def __call__(self, x:Tensor):
+    # TODO: convert to float?
+    return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
 
 class Attention:
   def __init__(self, dim, n_heads):
@@ -135,8 +136,11 @@ class Transformer:
 
     return self.output(self.norm(h)[:, -1, :])
 
+# **** files and arguments ****
+
 TOKENIZER_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/tokenizer.model")
 VOCAB_SIZE = 32000
+
 args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
 
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
@@ -147,14 +151,26 @@ args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "nor
 WEIGHTS0_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.00.pth")
 WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.01.pth")
 
+# **** helper functions ****
+
 def onehot_encode(toks):
   # this allows the embedding to work in tinygrad
   onehot = np.zeros((1, len(toks), VOCAB_SIZE))
   onehot[0,range(len(toks)),toks] = 1
   return Tensor(onehot)
 
+def sample(logits, temperature):
+  if temperature < 1e-6:
+    # so close to 0 we use argmax
+    return int(logits.numpy().argmax())
+  else:
+    probs = (logits / temperature).softmax()
+    probs = probs.numpy().flatten()
+    return int(np.random.choice(len(probs), p=probs))
+
+# **** main code ****
+
 if __name__ == "__main__":
-  # pip3 install sentencepiece
   from sentencepiece import SentencePieceProcessor
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
   assert sp_model.vocab_size() == VOCAB_SIZE
@@ -213,8 +229,9 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
     # encode pre prompt
     toks = [sp_model.bos_id()] + sp_model.encode(pre_prompt)
 
-    # prepare kv cache for chat bot
-    logits = model(onehot_encode(toks), 0).realize()
+    print("Preparing KV cache for chatbot...")
+    with Timing():
+      model(onehot_encode(toks), 0).realize()  # NOTE: output logits are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -226,15 +243,6 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
-  # TODO: sampler is meh
-  def sample(logits):
-    if args.temperature < 1e-6:
-      # so close to 0 we use argmax
-      return int(logits.numpy().argmax())
-    else:
-      probs = (logits / args.temperature).softmax()
-      probs = probs.numpy().flatten()
-      return int(np.random.choice(len(probs), p=probs))
 
   # chatbot loop
   while 1:
@@ -255,7 +263,7 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
       with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
         logits = model(onehot_encode(toks[start_pos:]), start_pos).realize()
       with Timing("sync in ", enabled=args.timing):
-        tok = sample(logits)
+        tok = sample(logits, args.temperature)
 
       # use the kv cache
       start_pos = len(toks)
