@@ -197,6 +197,7 @@ class LLVMCodegen(ASTKernel):
     builder = loop_exit[store_loop]
     for i, idx in enumerate(get_idxs(builder, idx_level[0][store_loop], 0)):
       element = result if kernel_output_dim == 1 else builder.extract_element(result, int_const(i))
+      if func_dtypes[0] != ir.FloatType(): element = builder.fptrunc(element, func_dtypes[0])
       builder.store(element, builder.gep(func.args[0], [idx], inbounds=True))
 
     # add the looping
