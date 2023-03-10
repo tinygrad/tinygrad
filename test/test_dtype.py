@@ -1,7 +1,12 @@
 import unittest
 import numpy as np
+from tinygrad.helpers import getenv
+from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
 
+# for GPU, cl_khr_fp16 isn't supported
+# for LLVM, it segfaults because it can't link to the casting function
+@unittest.skipIf(getenv("CI") and Device.DEFAULT in ["GPU", "LLVM"], "float16 broken in some CI backends")
 class TestDtype(unittest.TestCase):
   def test_half_to_np(self):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
