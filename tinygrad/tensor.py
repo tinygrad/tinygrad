@@ -453,5 +453,5 @@ class Tensor:
 
 # register functions to move between devices
 for device in Device._buffers:
-  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device.upper()))
-  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device.upper()))
+  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
+  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))

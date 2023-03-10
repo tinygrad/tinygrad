@@ -73,7 +73,7 @@ class DeviceBuffer(Copyable):
 
 # this is a quick "buffer" class for flop tracking and getting the output shape
 class GenericShape:
-  def __init__(self, shape:Tuple[int, ...], dtype:DType, flops:int=0): self.shape, self.dtype, self.flops = shape, dtype, flops
+  def __init__(self, shape:Tuple[int, ...], dtype:DType=dtypes.float32, flops:int=0): self.shape, self.dtype, self.flops = shape, dtype, flops
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
