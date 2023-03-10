@@ -25,6 +25,7 @@ class GPULanguage(NamedTuple):
   lid : List[str] = []
   extra_args : List[str] = []
   float4 : Optional[str] = None
+  half_prekernel : Optional[str] = None
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -265,6 +266,8 @@ class GPUCodegen(ASTKernel):
     self.loaded_keys : Dict[Tuple[int,int], Token] = {}
     self.prekernel : Set[str] = set()
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
+
+    if self.lang.half_prekernel: self.prekernel.add(self.lang.half_prekernel+"\n")
 
     if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]

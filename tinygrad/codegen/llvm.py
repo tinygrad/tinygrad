@@ -3,7 +3,7 @@ from typing import ClassVar, List
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.ast import ASTKernel
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, ASTRunner
-from tinygrad.helpers import DEBUG, prod
+from tinygrad.helpers import DEBUG, prod, dtypes
 
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
@@ -105,7 +105,8 @@ class LLVMCodegen(ASTKernel):
 
     # create llvm function
     module = ir.Module(name=__file__)
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.FloatType().as_pointer()]*(len(self.bufs))), name='exec')
+    func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType()}[buf.dtype] for buf in self.bufs]
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 
     # force llvmlite to allow us to add function attribute then add the attribute
     func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
@@ -143,9 +144,11 @@ class LLVMCodegen(ASTKernel):
             # this always does the load, so we have it load *0 if the arg won't be used
             # TODO: would control flow be faster?
             aug_idx = builder.select(valid, idx, int_const(0))
-            element = builder.select(valid, builder.load(builder.gep(func.args[buf_index], [aug_idx], inbounds=True)), ir.Constant(ir.FloatType(), 0))
+            element = builder.select(valid, builder.load(builder.gep(func.args[buf_index], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[buf_index], 0))
           else:
             element = builder.load(builder.gep(func.args[buf_index], [idx], inbounds=True))
+          # upcast
+          if func_dtypes[buf_index] != ir.FloatType(): element = builder.fpext(element, ir.FloatType())
           m = element if kernel_output_dim == 1 else builder.insert_element(m, element, int_const(i))
         return m
       if isinstance(x.op, ReduceOps):

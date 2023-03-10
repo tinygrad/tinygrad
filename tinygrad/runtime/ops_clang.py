@@ -17,7 +17,7 @@ class RawMallocBuffer(RawBufferCopyIn):
 class ClangProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
   def __init__(self, name:str, prg:str):
-    prg = "#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n" + prg
+    prg = "#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define half __fp16\n" + prg
     # TODO: is there a way to not write this to disk?
     fn = f"/tmp/clang_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if platform.system() == 'Darwin' else 'so'}"
     if not os.path.exists(fn):

@@ -57,7 +57,7 @@ class LLVMProgram:
   def __del__(self): LLVM.engine.remove_module(self.mod)
 
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
-    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.POINTER(ctypes.c_float) for _ in bufs])(self.fxn)
+    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
     if wait: st = time.monotonic()
     cfunc(*[x._buf for x in bufs])
     if wait: return time.monotonic()-st
