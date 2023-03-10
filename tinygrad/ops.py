@@ -87,7 +87,6 @@ def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({
 # used in CPUBuffer and TorchBuffer
 class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   fxn_for_op : ClassVar = shape_fxn_for_op
-  # TODO: use generic types here to remove __init__ in specialized classes
   def __init__(self, lbuf:Any): self._buf, self.shape, self.dtype = lbuf, tuple(lbuf.shape), lbuf.dtype
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self._buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self._buf, op.name.lower())(arg))
@@ -164,7 +163,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 
   # TODO: not GPUBuffer, get name of class
   # TODO: needs dtype
-  def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
+  def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__})))" if self._backing is not None else ", force_create=True))")
 
   raw_buffer_type : Type[RawBuffer]
   @classmethod
@@ -199,7 +198,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       prg = cls.method_cache[k.key]
     else:
       prg = k.codegen().build(cls.runtime_type)
-    if getenv("PRINT_AST", "") == prg.name:
+    if getenv("PRINT_AST", "") == prg.name or getenv("PRINT_AST", "") == "1":
       k.print()
       print(prg.prg)
     prg.exec(k.bufs)

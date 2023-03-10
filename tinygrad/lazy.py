@@ -72,9 +72,9 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
 
 class LazyNumpyArray:
-  def __init__(self, fxn, shape): self.fxn, self.shape = fxn, shape
-  def __call__(self): return self.fxn(self.shape)
-  def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape)
+  def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
+  def __call__(self): return self.fxn(self.shape, self.dtype)
+  def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
   def copy(self): return self
   def astype(self, typ): return self
 

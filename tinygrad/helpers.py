@@ -30,4 +30,4 @@ class dtypes:
   float16 = half = DType(2, "half", np.float16)
   float32 = float = DType(4, "float", np.float32)
   @staticmethod
-  def from_np(x:np.ndarray) -> DType: return {"float16": dtypes.float16, "float32": dtypes.float32}[str(x.dtype)]
+  def from_np(x:np.ndarray) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]

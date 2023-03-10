@@ -39,8 +39,7 @@ class Tensor:
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
       # TODO: this has to realize, it shouldn't have to
-      #data = data.realize().toCPU()
-      raise RuntimeError("cross device LazyBuffer tensor creation isn't supported")
+      data = data.realize().toCPU()
 
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
@@ -133,11 +132,11 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape: Tensor._rng.random(size=shape, dtype=np.float32), shape), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape, dtype: Tensor._rng.random(size=shape, dtype=dtype), shape, np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape: Tensor._rng.standard_normal(size=shape, dtype=np.float32), shape), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape, dtype: Tensor._rng.standard_normal(size=shape, dtype=dtype), shape, np.float32), **kwargs)
 
   # ***** rng hlops *****
 
@@ -450,7 +449,7 @@ class Tensor:
   # ***** cast ops *****
 
   # TODO: this is a hack, but if we add float(0), it will become a float. need real casting support
-  def float(self): return self + Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad)
+  def float(self) -> Tensor: return self.add(Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad))
 
 # register functions to move between devices
 for device in Device._buffers:
