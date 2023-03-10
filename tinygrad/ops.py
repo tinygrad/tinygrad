@@ -94,7 +94,7 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if context is None: context = dict()
     if ast in context: return context[ast]
     srcs = [cls.exec_ast(x, context=context) if isinstance(x, LazyOp) else x for x in ast.src]
-    if DEBUG >= 4 or (not isinstance(srcs[0], GenericShape) and DEBUG >= 3): print("exec_ast", ast.op, [x.shape for x in srcs], ast.arg)
+    if DEBUG >= 4 or (not isinstance(srcs[0]._buf, GenericShape) and DEBUG >= 3): print("exec_ast", ast.op, [x.shape for x in srcs], ast.arg)
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
