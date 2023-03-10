@@ -26,6 +26,7 @@ class GPULanguage(NamedTuple):
   lid : List[str] = []
   extra_args : List[str] = []
   float4 : Optional[str] = None
+  half_prekernel : Optional[str] = None
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -101,7 +102,9 @@ class GPUCodegen(ASTKernel):
       val = self.bufs[buf_index]._backing[0]
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
-    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4()
+    #should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4()
+    # TODO: this upcast is crashing compilers! you likely have to declare the buffer the big type
+    should_upcast = self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE") and const is None
     tokens = []
     test_idy = []
     for o in self.buftokens[buf_index].offsets():
@@ -267,7 +270,7 @@ class GPUCodegen(ASTKernel):
     self.prekernel : Set[str] = set()
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
 
-    #self.prekernel.add("#pragma OPENCL EXTENSION cl_khr_fp16 : enable\n")
+    if self.lang.half_prekernel: self.prekernel.add(self.lang.half_prekernel+"\n")
 
     if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
