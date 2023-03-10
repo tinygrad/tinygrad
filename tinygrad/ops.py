@@ -94,7 +94,7 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if context is None: context = dict()
     if ast in context: return context[ast]
     srcs = [cls.exec_ast(x, context=context) if isinstance(x, LazyOp) else x for x in ast.src]
-    if DEBUG >= 4: print("exec_ast", ast.op, [x.shape for x in srcs], ast.arg)
+    if DEBUG >= 4 or (not isinstance(srcs[0], GenericShape) and DEBUG >= 3): print("exec_ast", ast.op, [x.shape for x in srcs], ast.arg)
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
@@ -119,7 +119,7 @@ class ASTRunner:
 
   def exec(self, bufs:List[CompiledBuffer]) -> Optional[float]:
     rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
-    if GlobalCounters.optimize_local and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
+    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
@@ -175,6 +175,8 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     return self._buf
 
   @classmethod
+  def empty(cls, shape, dtype): return cls(shape=shape, dtype=dtype)
+  @classmethod
   def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
@@ -210,7 +212,6 @@ class GlobalCounters:
   kernel_count : ClassVar[int] = 0
   mem_used : ClassVar[int] = 0   # NOTE: this is not reset
   cache : ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
-  optimize_local : ClassVar[bool] = getenv("OPTLOCAL")
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
   @staticmethod

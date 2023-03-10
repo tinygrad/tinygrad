@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from typing import ClassVar, Dict, Callable
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, InterpretedBuffer, Op
 from tinygrad.helpers import getenv
@@ -15,6 +16,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if geten
 class TorchBuffer(InterpretedBuffer):
   fxn_for_op : ClassVar = torch_fxn_for_op
 
+  @classmethod
+  def empty(cls, shape, dtype): return cls(torch.empty(shape, dtype={np.float32: torch.float32, np.float16:torch.float16}[dtype]))
   @staticmethod
   def fromCPU(x): return TorchBuffer(torch.from_numpy(x).requires_grad_(False).to(device))
   def toCPU(self): return self._buf.cpu().numpy()

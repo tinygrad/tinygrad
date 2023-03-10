@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # pip3 install sentencepiece pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os
-os.environ["METAL"] = "1"  # metal is best choice for llama
-
 import sys, argparse, math
 import numpy as np
 np.set_printoptions(linewidth=200)
-from hexdump import hexdump
 from typing import Optional
-from extra.helpers import Timing
+
 from tinygrad.helpers import getenv, DEBUG
+from tinygrad.lazy import Device
+if Device.DEFAULT == "CPU" and not getenv("CPU"): Device.DEFAULT = "METAL"
+
+from extra.helpers import Timing
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
 from tinygrad.ops import GlobalCounters

@@ -29,7 +29,7 @@ class ClangProgram:
     if wait: return time.monotonic()-st
 
 class ClangCodegen(GPUCodegen):
-  lang = GPULanguage(buffer_suffix="restrict")
+  lang = GPULanguage(buffer_suffix=" restrict")
 
 class ClangBuffer(CompiledBuffer):
   raw_buffer_type, codegen_type, runtime_type = RawMallocBuffer, ClangCodegen, ClangProgram

@@ -36,6 +36,8 @@ numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
 class CPUBuffer(InterpretedBuffer):
   fxn_for_op : ClassVar = numpy_fxn_for_op
 
-  @staticmethod
-  def fromCPU(x): return CPUBuffer(x)
+  @classmethod
+  def empty(cls, shape, dtype): return cls(np.empty(shape, dtype))
+  @classmethod
+  def fromCPU(cls, x): return cls(x)
   def toCPU(self): return self._buf
