@@ -177,10 +177,10 @@ if __name__ == "__main__":
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
   assert sp_model.vocab_size() == VOCAB_SIZE
 
-  parser = argparse.ArgumentParser(description='Run LLaMA', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser = argparse.ArgumentParser(description='Run LLaMA 7B in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   # test: python3.11 examples/llama.py --prompt="Hello." --temperature=0
   # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
-  parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with")
+  parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
   parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
 
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
@@ -189,17 +189,59 @@ if __name__ == "__main__":
   args = parser.parse_args()
   chatbot = args.prompt == None
 
-  # load model
-  model = Transformer(**args_7B)
-
+  # load model (you have to find the weights yourself)
   from extra.utils import fake_torch_load_zipped, get_child
-  with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
-    weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
-  for k,v in weights.items():
-    if '.inner_attention.rope.freqs' in k: continue  # no rope today
-    mv = get_child(model, k)
-    assert mv.shape == v.shape, f"shape mismatch in {k}"
-    mv.lazydata.realized = v
+
+  if args.large:
+    model = Transformer(**args_13B)
+    with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+      weights0 = fake_torch_load_zipped(open(WEIGHTS0_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated.00")
+      weights1 = fake_torch_load_zipped(open(WEIGHTS1_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated.01")
+    # eww, this makes a copy
+    print("concatenating weights")
+    from tqdm import tqdm
+    for k,v in (t := tqdm(weights0.items())):
+      assert GlobalCounters.mem_used/1e9 < 28, "used over 28 GB"
+      t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+      if 'rope.freqs' in k: continue  # no rope today
+      mv = get_child(model, k)
+
+      # if the weight is copied across models, it's simple
+      # TODO: assert they are the same
+      if v.shape == mv.shape:
+        mv.lazydata.realized = v
+        continue
+
+      # we have to concatenate them, create tensors
+      w0, w1 = v, weights1[k]
+      w0t = Tensor.empty(*w0.shape)
+      w1t = Tensor.empty(*w1.shape)
+      w0t.lazydata.realized = w0
+      w1t.lazydata.realized = w1
+
+      # terrible hacks. force create the output buffer as float16
+      from tinygrad.runtime.ops_metal import MetalBuffer
+      mv.lazydata.realized = MetalBuffer(mv.shape, dtype=w0.dtype)
+
+      if w0.shape[0] != mv.shape[0]: mv.assign(w0t.cat(w1t, dim=0))
+      elif w0.shape[1] != mv.shape[1]: mv.assign(w0t.cat(w1t, dim=1))
+      else: raise RuntimeError("what axis mismatch?")
+      mv.realize()
+
+      # rug the small tensor pieces
+      w0._buf = None
+      w1._buf = None
+  else:
+    model = Transformer(**args_7B)
+    with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+      weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
+
+    # assign weights
+    for k,v in weights.items():
+      if '.inner_attention.rope.freqs' in k: continue  # no rope today
+      mv = get_child(model, k)
+      assert mv.shape == v.shape, f"shape mismatch in {k}, {mv.shape} != {v.shape}"
+      mv.lazydata.realized = v
 
   # *** prompt engineers work here ****
 
@@ -244,7 +286,6 @@ You are verbose, honest, and accurate when you answer questions, but sometimes y
   outputted = sp_model.decode(toks)
   sys.stdout.write(outputted)
   sys.stdout.flush()
-
 
   # chatbot loop
   while 1:
