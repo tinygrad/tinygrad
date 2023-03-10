@@ -88,10 +88,11 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithr
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            if Device.DEFAULT == "METAL":
-              # Metal allows direct reading
+            if Device.DEFAULT in ["METAL", "CLANG"]:
+              # Metal and clang allow direct reading
               myfile.readinto(v[2].raw()._buffer())
             elif Device.DEFAULT == "CPU":
+              # numpy
               myfile.readinto(v[2]._buf.data)
             else:
               raise NotImplementedError(f"no read in for {Device.DEFAULT}")
@@ -103,6 +104,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithr
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
           futures = {executor.submit(load_weight, k, v):k for k,v in ret[1].items()}
           for future in (t:=tqdm(concurrent.futures.as_completed(futures), total=len(futures))):
+            if future.exception() is not None: raise future.exception()
             k = futures[future]
             t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
       else:
