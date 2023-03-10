@@ -5,6 +5,7 @@ os.environ["METAL"] = "1"  # metal is best choice for llama
 import sys, argparse, math
 import numpy as np
 np.set_printoptions(linewidth=200)
+from hexdump import hexdump
 from typing import Optional
 from extra.helpers import Timing
 from tinygrad.helpers import getenv, DEBUG
@@ -122,7 +123,7 @@ class Transformer:
     freqs_cis.realize()
 
     if seqlen > 1:
-      mask = np.full((1, 1, seqlen, seqlen), float("-inf"))
+      mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"))
       mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
       mask = Tensor(mask)
     else:
@@ -146,6 +147,12 @@ args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "nor
 WEIGHTS0_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.00.pth")
 WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.01.pth")
 
+def onehot_encode(toks):
+  # this allows the embedding to work in tinygrad
+  onehot = np.zeros((1, len(toks), VOCAB_SIZE))
+  onehot[0,range(len(toks)),toks] = 1
+  return Tensor(onehot)
+
 if __name__ == "__main__":
   # pip3 install sentencepiece
   from sentencepiece import SentencePieceProcessor
@@ -160,8 +167,38 @@ if __name__ == "__main__":
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   args = parser.parse_args()
 
-  toks = [sp_model.bos_id()] + sp_model.encode(args.prompt)
+  def sample(logits):
+    if args.temperature < 1e-6:
+      # so close to 0 we use argmax
+      return int(logits.numpy().argmax())
+    else:
+      probs = (logits / args.temperature).softmax()
+      probs = probs.numpy().flatten()
+      return int(np.random.choice(len(probs), p=probs))
 
+  examples = {
+    "What is your name?": "Hi! My name is Stacy. I'm a rapper with bipolar disorder.",
+    #"french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
+    #"Can you multiply a matrix using Python?": "```def matmul(a, b): return a@b```",
+    #"What is bigger, the moon or the sun?": "The sun is bigger than the moon.",
+    #"What is 7+9?": "7 plus 9 is equal to 16",
+  }
+
+  user_delim = "\nUser: "
+  resp_delim = "Stacy: "
+  end_delim = " [END]\n"
+
+  #You are also an expert programmer who has won 7 USAMO medals and 6 Google CodeJams.
+  pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
+You are Stacy!
+You have been a rapper your whole life who struggled with bipolar disorder. You called yourself lil stacy.
+You love to answer questions and you are very good at it. Sometimes you answer in rap form.
+You are verbose, honest, and accurate when you answer questions, but sometimes your mental illness manifests.
+
+<CHAT LOG>
+""" + ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+
+  # load model
   if getenv("SMALL"):
     model = Transformer(**args_small)
   else:
@@ -176,39 +213,47 @@ if __name__ == "__main__":
       assert mv.shape == v.shape, f"shape mismatch in {k}"
       mv.lazydata.realized = v
 
+  toks = [sp_model.bos_id()] + sp_model.encode(pre_prompt)
+
+  # prepare kv cache
+  logits = model(onehot_encode(toks), 0).realize()
+  start_pos = len(toks)
+  # don't append the guess
+
+  # print prompt
   outputted = sp_model.decode(toks)
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
-  start_pos = 0
-  for i in range(args.count):
-    if i == 2: GlobalCounters.optimize_local = False   # disable opt local after first few runs
+  # chatbot loop
+  while 1:
+    # add tokens from user
+    user_prompt = user_delim + input(user_delim) + "\n"
+    outputted += user_prompt
 
-    # this allows the embedding to work in tinygrad
-    onehot = np.zeros((1, len(toks)-start_pos, VOCAB_SIZE))
-    onehot[0,range(len(toks)-start_pos),toks[start_pos:]] = 1
+    new_toks = [sp_model.bos_id()] + sp_model.encode(outputted)
+    assert toks == new_toks[:len(toks)]
+    toks = new_toks
+    assert outputted == sp_model.decode(toks)
 
-    if args.timing: print("")
-    st = GlobalCounters.time_sum_s
-    with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
-      logits = model(Tensor(onehot), start_pos).realize()
-    with Timing("sync in ", enabled=args.timing):
-      if args.temperature < 1e-6:
-        # so close to 0 we use argmax
-        tok = int(logits.numpy().argmax())
-      else:
-        probs = (logits / args.temperature).softmax()
-        probs = probs.numpy().flatten()
-        tok = int(np.random.choice(len(probs), p=probs))
+    last_break = len(outputted)
+    for i in range(args.count):
+      logits = model(onehot_encode(toks[start_pos:]), start_pos)
+      tok = sample(logits)
 
-    # use the kv cache
-    start_pos = len(toks)
+      # use the kv cache
+      start_pos = len(toks)
 
-    # add the new token
-    toks.append(tok)
+      # add the new token
+      toks.append(tok)
 
-    # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
-    cur = sp_model.decode(toks)
-    sys.stdout.write(cur[len(outputted):])
-    sys.stdout.flush()
-    outputted = cur
+      # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
+      cur = sp_model.decode(toks)
+      sys.stdout.write(cur[len(outputted):])
+      sys.stdout.flush()
+      outputted = cur
+
+      # stop after you have your answer
+      #if 'A: ' in outputted[last_break:] and outputted.endswith("\n"): break
+      if outputted.endswith(end_delim): break
+
