@@ -2,7 +2,7 @@
 # pip3 install sentencepiece pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os
 os.environ["METAL"] = "1"  # metal is best choice for llama
-
+import pathlib
 import sys, argparse, math
 import numpy as np
 np.set_printoptions(linewidth=200)
@@ -137,19 +137,19 @@ class Transformer:
     return self.output(self.norm(h)[:, -1, :])
 
 # **** files and arguments ****
-
-TOKENIZER_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/tokenizer.model")
+script_file = pathlib.Path(__file__).parent
+TOKENIZER_FILENAME = script_file / "../weights/LLaMA/tokenizer.model"
 VOCAB_SIZE = 32000
 
 args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
 
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/7B/consolidated.00.pth")
+WEIGHTS_FILENAME = script_file / "../weights/LLaMA/7B/consolidated.00.pth")
 
 # TODO: make this model work
 args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS0_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.00.pth")
-WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.01.pth")
+WEIGHTS0_FILENAME = script_file / "../weights/LLaMA/13B/consolidated.00.pth"
+WEIGHTS1_FILENAME = script_file / "../weights/LLaMA/13B/consolidated.01.pth"
 
 # **** helper functions ****
 
