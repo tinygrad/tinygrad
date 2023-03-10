@@ -221,8 +221,7 @@ if __name__ == "__main__":
       w1t.lazydata.realized = w1
 
       # terrible hacks. force create the output buffer as float16
-      from tinygrad.runtime.ops_metal import MetalBuffer
-      mv.lazydata.realized = MetalBuffer(mv.shape, dtype=w0.dtype)
+      mv.lazydata.realized = Device._buffers[Device.DEFAULT].empty(mv.shape, dtype=w0.dtype)
 
       if w0.shape[0] != mv.shape[0]: mv.assign(w0t.cat(w1t, dim=0))
       elif w0.shape[1] != mv.shape[1]: mv.assign(w0t.cat(w1t, dim=1))
