@@ -79,6 +79,7 @@ def my_unpickle(fb0):
   return MyPickle(fb0).load(), key_prelookup
 
 def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):
+  if Device.DEFAULT == "CUDA": multithreaded = False  # multithreaded doesn't work with CUDA
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
     #print(myzip.filelist)
@@ -97,8 +98,8 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithr
             elif Device.DEFAULT == "TORCH":
               # torch "direct" reading
               myfile.readinto(v[2]._buf.numpy().data)
-            elif Device.DEFAULT == "GPU":
-              # GPU doesn't support direct reading
+            elif Device.DEFAULT in ["GPU", "CUDA"]:
+              # GPU and CUDA don't support direct reading
               dat = myfile.read(prod(v[2].shape) * np.dtype(v[2].dtype).itemsize)
               v[2].raw().copyin(dat)
             else:
