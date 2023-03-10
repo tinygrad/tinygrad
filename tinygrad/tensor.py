@@ -446,6 +446,6 @@ class Tensor:
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
 # register functions to move between devices
-for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
-  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
-  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))
+for device in Device._buffers:
+  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device.upper()))
+  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device.upper()))

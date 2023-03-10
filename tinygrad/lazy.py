@@ -13,21 +13,12 @@ sys.setrecursionlimit(10000)
 OPT = getenv("OPT", 2)
 LAZY = getenv("LAZY", 1)
 
-def get_buffer(name, base='tinygrad.runtime'):
-  try:
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.ops_{name}'), inspect.isclass) if (cname.lower() == name + "buffer")][0]
-  except Exception as e:  # NOTE: this can't be put on one line due to mypy issue
-    print(name, "backend not available", e, file=sys.stderr)
-
 class _Device:
   def __init__(self) -> None:
-    # TODO: make this dynamic to when you try to access the _buffers
-    self._buffers : Dict[str, Type[DeviceBuffer]] = {x.upper():get_buffer(x) for x in
-      [os.path.splitext(x)[0][len("ops_"):] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "runtime"))) if x.startswith("ops_")] if x is not None}
-    self.DEFAULT : str = "CPU"
-    for name in self._buffers:
-      if getenv(name) == 1: self.DEFAULT = name  # note: DEFAULT can be a Device that can't be imported. better than silent use of a different device
-      if self._buffers[name] is not None: self.__setattr__(name, name)
+    self._buffers = {y.upper():y for y in [os.path.splitext(x)[0][len("ops_"):] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "runtime"))) if x.startswith("ops_")]}
+    self.DEFAULT : str = functools.reduce(lambda val, ele: val if getenv(val) == 1 else ele, self._buffers, "CPU")
+  @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{self._buffers[x]}'), inspect.isclass) if (cname.lower() == self._buffers[x] + "buffer")][0]
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -109,7 +100,7 @@ class LazyBuffer:
     self.shape, self.optype, self.op = self.st.shape, optype, op
     self.realized : Optional[DeviceBuffer] = None
     self.output_buffer : Optional[DeviceBuffer] = None
-    self.device, self.dbuffer = device, Device._buffers[device]
+    self.device, self.dbuffer = device, Device[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
@@ -124,7 +115,7 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        self.realized = Device._buffers[self.device].fromCPU(self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
+        self.realized = Device[self.device].fromCPU(self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
         ast = LazyOp(self.op.op, tuple())
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
@@ -160,7 +151,7 @@ class LazyBuffer:
       log_op(self.realized, ast)
 
     assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
-    assert isinstance(self.realized, Device._buffers[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+    assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     return self.realized
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this?

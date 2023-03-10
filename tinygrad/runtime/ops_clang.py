@@ -12,7 +12,7 @@ class RawMallocBuffer(RawBufferCopyIn):
     self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
   def _buffer(self): return self._buf
   def copyin(self, x:np.ndarray): ctypes.memmove(self._buf, x.ctypes.data, x.size*np.dtype(x.dtype).itemsize)
-  def toCPU(self): return np.ctypeslib.as_array(self._buf)
+  def toCPU(self): return np.frombuffer(self._buf, dtype=self.dtype.np)
 
 class ClangProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
