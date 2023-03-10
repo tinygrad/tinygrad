@@ -9,6 +9,7 @@ class RawMallocBuffer(RawBufferCopyIn):
   def __init__(self, size):
     super().__init__(size)
     self._buf = (ctypes.c_float * (size//4))()
+  def _buffer(self): return self._buf
   def copyin(self, x:np.ndarray): ctypes.memmove(self._buf, x.ctypes.data, x.size*4)
   def toCPU(self): return np.ctypeslib.as_array(self._buf)
 
@@ -29,7 +30,7 @@ class ClangProgram:
     if wait: return time.monotonic()-st
 
 class ClangCodegen(GPUCodegen):
-  lang = GPULanguage(buffer_suffix="restrict")
+  lang = GPULanguage(buffer_suffix=" restrict")
 
 class ClangBuffer(CompiledBuffer):
   raw_buffer_type, codegen_type, runtime_type = RawMallocBuffer, ClangCodegen, ClangProgram

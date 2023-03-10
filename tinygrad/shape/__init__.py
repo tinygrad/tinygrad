@@ -70,6 +70,7 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
   assert all(isinstance(x, int) for x in shape) and len(shape) != 0
   return View(tuple(shape), strides_for_shape(shape))
 
+@functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   new_strides, new_offset = [], vm2.expr_node(Variable.num(vm1.offset))
   assert isinstance(new_offset, NumNode), "new_offset wasn't a number?!?"
