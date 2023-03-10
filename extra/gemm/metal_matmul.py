@@ -1,16 +1,10 @@
 import numpy as np
-from tinygrad.runtime.ops_metal import CLBuffer, CLProgram
-
-def benchmark(prog):
-  e = prog()
-  e.waitUntilCompleted()
-  return (e.GPUEndTime() - e.GPUStartTime())*1e9
-def mb(prog, N=10): return min([benchmark(prog) for _ in range(N)])
+from tinygrad.runtime.ops_metal import RawMetalBuffer, MetalProgram
 
 N = 2048
-a = CLBuffer(N*N*4)
-b = CLBuffer(N*N*4)
-c = CLBuffer(N*N*4)
+a = RawMetalBuffer(N*N*4)
+b = RawMetalBuffer(N*N*4)
+c = RawMetalBuffer(N*N*4)
 
 nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)
 nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)
@@ -23,7 +17,7 @@ c.copyin(nc)
 
 FLOPS = N*N*N*2
 
-prog = CLProgram("test", f"""
+prog = MetalProgram("test", f"""
 #include <metal_stdlib>
 #include <metal_simdgroup_matrix>  // Available from Metal version 2.3 released with OS X 11.0+
 using namespace metal;
@@ -92,12 +86,12 @@ kernel void test(device float *a, device const float *data1, device const float 
     }}
   }}
 }}""")
-tm = mb(lambda: prog([N*N//(2*4*4)], [4*32], a._cl, b._cl, c._cl))
+tm = min([prog([N*N//(2*4*4)], [4*32], a, b, c, wait=True) for _ in range(10)])
 na = a.toCPU().reshape(N,N)
 comp = nb@nc
 if N <= 32:
   print(na)
   print(comp)
-print(f"{N*N:10d} {tm*1e-3:9.2f} us, would be {FLOPS/tm:.2f} GFLOPS matmul")
+print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:.2f} GFLOPS matmul")
 np.testing.assert_allclose(na, comp, atol=1e-3)
 

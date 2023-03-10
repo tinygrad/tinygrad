@@ -1,5 +1,26 @@
-from tinygrad.helpers import IMAGE
+from tinygrad.helpers import IMAGE, prod
 from tinygrad.lazy import get_single_root
+
+def image_dot_decorator(normal_dot):
+  if IMAGE == 0: return normal_dot
+  def image_dot(self, w):
+    # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
+    bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
+    cin, cout = w.shape[-2], w.shape[-1]
+    out_shape_t = self.shape[0:-2] + (cout,-1)
+    if len(self.shape) > 1:
+      order = tuple(range(len(self.shape)-2)) + (len(self.shape)-1, len(self.shape)-2)
+    else:
+      order, out_shape_t = (0,), (cout, )
+    worder = tuple(range(len(w.shape)-2)) + (len(w.shape)-1, len(w.shape)-2)
+
+    # NOTE: with NHWC we can remove the transposes
+    # bs x groups*cin x H x W
+    cx = self.permute(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
+    # groups*cout x cin x H, W
+    cw = w.permute(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
+    return cx.conv2d(cw, groups=groups).reshape(shape=out_shape_t).permute(order=order)
+  return image_dot
 
 def image_conv2d_decorator(normal_conv):
   if IMAGE == 0: return normal_conv
