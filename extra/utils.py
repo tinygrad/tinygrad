@@ -78,8 +78,8 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=False):
-  if Device.DEFAULT == "CUDA": multithreaded = False  # multithreaded doesn't work with CUDA
+def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):
+  if Device.DEFAULT in ["TORCH", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
     #print(myzip.filelist)
