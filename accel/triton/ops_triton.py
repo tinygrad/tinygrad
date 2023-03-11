@@ -11,7 +11,7 @@ import triton.language as tl  # type: ignore # noqa: F401
 
 from typing import Union, Tuple, Optional, Dict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ExplicitExecAST, GlobalCounters
-from tinygrad.shape import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.runtime.cuda import CLBuffer
 from tinygrad.compiler.ast import ASTKernel
@@ -57,7 +57,7 @@ class TritonASTKernel(ASTKernel):
     self.kernel = ["@triton.jit"]
     self.kernel.append("def fxn("+','.join(f"data{i}" for i in range(len(self.bufs)))+"):")
 
-    self.output_shape = list(self.sts[0].shape[:self.first_reduce]) 
+    self.output_shape = list(self.sts[0].shape[:self.first_reduce])
 
     # copied from ops_gpu
     # TODO CUDA only supports a grid of (2^31-1, 65535, 65535), that results in invalid kernel launches for some shapes, so flattern the grid for now.
@@ -70,7 +70,7 @@ class TritonASTKernel(ASTKernel):
       self.output_shape = [prod(self.output_shape[0:final_dimension+1])] + list(self.output_shape[final_dimension+1:])
       if DEBUG >= 3: print(f"replaced output shape with {self.output_shape}")
     elif len(self.output_shape) == 0: self.output_shape = [1]
-    
+
     if self.reduceop:
       full_shape = [st.shape for st in self.sts if st.shape != self.sts[0].shape]
       full_shape = self.sts[0].shape if len(full_shape) == 0 else full_shape[0]

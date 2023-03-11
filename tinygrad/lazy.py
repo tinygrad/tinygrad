@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import os, sys, weakref, importlib, inspect, functools
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray
-from tinygrad.shape import ShapeTracker, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import InterpretedBuffer, DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.graph import log_op
 

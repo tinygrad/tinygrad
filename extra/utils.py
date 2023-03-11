@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyNumpyArray, Device
-from tinygrad.shape import strides_for_shape
+from tinygrad.shape.shapetracker import strides_for_shape
 
 def fetch(url):
   if url.startswith("/"):

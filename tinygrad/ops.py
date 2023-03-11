@@ -4,7 +4,7 @@ import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set, Final
 from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
-from tinygrad.shape import ShapeTracker, MovementOps
+from tinygrad.shape.shapetracker import ShapeTracker, MovementOps
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly

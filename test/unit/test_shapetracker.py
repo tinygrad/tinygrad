@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
-from tinygrad.shape import ShapeTracker, View, ZeroView, merge_views, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, View, ZeroView, merge_views, get_contraction
 from tinygrad.codegen.gpu import to_image_idx
 
 def shapetracker_getitem(st, val):

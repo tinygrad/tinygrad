@@ -4,7 +4,7 @@ from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple, ClassVar
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, Variable, render_python
-from tinygrad.shape import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same, dedup, dtypes
 
 # div is different in cl than python

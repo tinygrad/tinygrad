@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.ops import LazyOp, ReduceOps, BinaryOps, UnaryOps, MovementOps
-from tinygrad.shape import ShapeTracker, View, ZeroView
+from tinygrad.shape.shapetracker import ShapeTracker, View, ZeroView
 from tinygrad.runtime.ops_gpu import GPUBuffer, CLProgram, CLCodegen
 #from tinygrad.runtime.ops_metal import MetalBuffer as GPUBuffer, MetalProgram as CLProgram, MetalCodegen as CLCodegen
 from tinygrad.helpers import getenv
