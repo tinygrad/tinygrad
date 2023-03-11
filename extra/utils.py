@@ -45,7 +45,7 @@ def my_unpickle(fb0):
         if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {args[2]}")
         ret = None
       else:
-        ret = Tensor(LazyNumpyArray(None, tuple(args[2]), storage_type))
+        ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(args[2]), storage_type))
       key_prelookup[obj_key].append((storage_type, obj_size, ret, args[2], args[3]))
       return ret
 
