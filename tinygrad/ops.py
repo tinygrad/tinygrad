@@ -4,14 +4,13 @@ import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
 from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
-from tinygrad.shape import ShapeTracker
+from tinygrad.shape import ShapeTracker, MovementOps
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 class UnaryOps(Enum): NOOP = auto(); NEG = auto(); EXP = auto(); LOG = auto(); NOT = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); FLIP = auto(); PAD = auto(); SHRINK = auto() # noqa: E702
 class FusedOps(Enum): MULACC = auto() # noqa: E702
 class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto(); TOCPU = auto(); CUSTOM = auto() # noqa: E702
 
@@ -54,6 +53,11 @@ class RawBufferCopyIn(RawBuffer):
     ret = cls(prod(x.shape), dtypes.from_np(x))
     ret.copyin(x)
     return ret
+
+class RawBufferMapped(RawBufferCopyIn):
+  def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
+  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=self.dtype.np)
+  def copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
 class RawBufferCopyInOut(RawBufferCopyIn):
   def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
@@ -130,7 +134,9 @@ class ASTRunner:
     if DEBUG >= 1:
       print(f"*** {GlobalCounters.kernel_count:4d} {self.name:20s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS, {self.mem_estimate/(et*1e9):6.2f} GB/s)"))
-    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
+    GlobalCounters.kernel_count += 1
+    GlobalCounters.global_ops += self.op_estimate
+    GlobalCounters.global_mem += self.mem_estimate
     if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
 
@@ -216,8 +222,3 @@ class GlobalCounters:
   cache : ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
-  @staticmethod
-  def log_kernel(op_estimate:int, mem_estimate:int):
-    GlobalCounters.kernel_count += 1
-    GlobalCounters.global_ops += op_estimate
-    GlobalCounters.global_mem += mem_estimate

@@ -29,9 +29,9 @@ def einsum_mulacc(einsum, get_strides, expand):
 numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.NOOP: np.ascontiguousarray, UnaryOps.EXP: np.exp, UnaryOps.LOG: np.log,
   BinaryOps.MAX: np.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
-  MovementOps.FLIP: np.flip, MovementOps.PERMUTE: lambda x, order: x.transpose(order),
-  MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
-  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, np.broadcast_to)
+  MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
+  MovementOps.STRIDE: lambda x, arg: x.__getitem__(tuple(slice(None, None, i) for i in arg)),
+  FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, np.broadcast_to),
 }}
 
 class CPUBuffer(InterpretedBuffer):

@@ -155,8 +155,8 @@ class Shrink(Function):
 
 class Flip(Function):
   def forward(self, x, axis):
-    self.axis = axis
-    return x.movement_op(MovementOps.FLIP, axis)
+    self.arg = tuple(-1 if i in axis else 1 for i in range(len(x.shape)))
+    return x.movement_op(MovementOps.STRIDE, self.arg)
 
   def backward(self, grad_output):
-    return grad_output.movement_op(MovementOps.FLIP, self.axis)
+    return grad_output.movement_op(MovementOps.STRIDE, self.arg)

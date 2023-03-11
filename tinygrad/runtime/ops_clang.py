@@ -1,18 +1,15 @@
 import os, time, ctypes, hashlib, subprocess, platform
-import numpy as np
 from collections import defaultdict
 from typing import Final, Dict
 from tinygrad.helpers import dtypes, DType
-from tinygrad.ops import CompiledBuffer, RawBufferCopyIn
+from tinygrad.ops import CompiledBuffer, RawBufferMapped
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
-class RawMallocBuffer(RawBufferCopyIn):
+class RawMallocBuffer(RawBufferMapped):
   def __init__(self, size, dtype : DType):
     super().__init__(size, dtype)
     self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
-  def _buffer(self): return self._buf
-  def copyin(self, x:np.ndarray): ctypes.memmove(self._buf, x.ctypes.data, x.size*np.dtype(x.dtype).itemsize)
-  def toCPU(self): return np.frombuffer(self._buf, dtype=self.dtype.np)
+  def _buffer(self): return memoryview(self._buf)
 
 class ClangProgram:
   kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
