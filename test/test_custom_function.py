@@ -4,7 +4,7 @@
 import unittest
 import numpy as np
 from typing import Optional, Tuple
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
@@ -16,6 +16,7 @@ from tinygrad.runtime.ops_cpu import CPUBuffer
 def atan2_gpu(a:CompiledBuffer, b:CompiledBuffer) -> CompiledBuffer:
   from tinygrad.runtime.ops_gpu import GPUBuffer
   assert type(a) == GPUBuffer and type(b) == GPUBuffer, "gpu function requires GPUBuffers"
+  assert a.dtype == b.dtype and a.dtype == dtypes.float32, "gpu function only supports float32"
   ret = GPUBuffer(a.shape)
   ASTRunner("atan2", """
     __kernel void atan2(global float *c, global float *a, global float *b) {
@@ -40,7 +41,7 @@ class ATan2(Function):
     assert prod(a.shape) == prod(b.shape) and a.device == b.device, "shape or device mismatch"
     self.a, self.b = a, b
     ast = LazyOp(LoadOps.CUSTOM, (a, b), {"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device])
-    return LazyBuffer(a.device, a.shape, LoadOps, ast)
+    return LazyBuffer(a.device, a.shape, LoadOps, ast, max(a.dtype, b.dtype))
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.binary_op(BinaryOps.MUL, self.a)).binary_op(BinaryOps.ADD, self.b.binary_op(BinaryOps.MUL, self.b))
     return grad_output.binary_op(BinaryOps.MUL, self.b.binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \
