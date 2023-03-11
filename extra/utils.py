@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import tempfile
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyNumpyArray
@@ -42,7 +42,7 @@ def my_unpickle(fb0):
       assert prod(args[2]) == obj_size
 
       if storage_type not in [np.float16, np.float32]:
-        print(f"unsupported type {storage_type} on {obj_key} with shape {args[2]}")
+        if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {args[2]}")
         ret = None
       else:
         ret = Tensor(LazyNumpyArray(None, tuple(args[2]), storage_type))
