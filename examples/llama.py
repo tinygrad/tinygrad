@@ -243,14 +243,13 @@ if __name__ == "__main__":
     with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
       weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1), base_name="consolidated")
 
-      # assign weights
-      for k,v in (t := tqdm(weights.items())):
-        t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB  assigning {k}")
-        if '.inner_attention.rope.freqs' in k: continue  # no rope today
-        mv = get_child(model, k)
-        assert mv.shape == v.shape, f"shape mismatch in {k}, {mv.shape} != {v.shape}"
-        mv.assign(v).realize()
-        #mv.lazydata.realized = v
+    # assign weights (should be free)
+    for k,v in weights.items():
+      if '.inner_attention.rope.freqs' in k: continue  # no rope today
+      mv = get_child(model, k)
+      assert mv.shape == v.shape, f"shape mismatch in {k}, {mv.shape} != {v.shape}"
+      mv.assign(v).realize()
+      #mv.lazydata.realized = v
 
     del weights
 

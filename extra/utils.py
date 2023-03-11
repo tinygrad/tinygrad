@@ -2,7 +2,11 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 import tempfile
+from collections import defaultdict
 from tinygrad.helpers import prod, getenv
+from tinygrad.ops import GlobalCounters
+from tinygrad.tensor import Tensor
+from tinygrad.lazy import LazyNumpyArray
 
 def fetch(url):
   if url.startswith("/"):
@@ -28,16 +32,20 @@ def download_file(url, fp, skip_if_exists=False):
     os.rename(f.name, fp)
 
 def my_unpickle(fb0):
-  key_prelookup = {}
+  key_prelookup = defaultdict(list)
   class HackTensor:
     def __new__(cls, *args):
       #print(args)
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
+      if storage_type not in [np.float16, np.float32]:
+        print(f"unsupported type {storage_type} on {obj_key}")
+        return None
 
       assert prod(args[2]) == obj_size
-      ret = np.zeros(args[2], dtype=storage_type)
-      key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
+      #ret = np.zeros(args[2], dtype=storage_type)
+      ret = Tensor(LazyNumpyArray(None, tuple(args[2]), storage_type))
+      key_prelookup[obj_key].append((storage_type, obj_size, ret, args[2], args[3]))
       return ret
 
   class HackParameter:
@@ -79,12 +87,23 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
-      for k,v in tqdm(ret[1].items()):
+      def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
-          if v[2].dtype == "object":
-            print(f"issue assigning object on {k}")
-            continue
-          np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
+          for v in vv:
+            t = v[2]
+            # ["METAL", "CLANG", "LLVM"] support readinto for more speed
+            # this needs real APIs
+            if t.device in ["METAL", "CLANG", "LLVM"]:
+              del t.lazydata.op
+              t.lazydata.realized = t.lazydata.dbuffer(t.shape, dtype=t.dtype)
+              myfile.readinto(t.lazydata.realized.raw()._buffer())
+            else:
+              lna = t.lazydata.op.arg
+              lna.fxn = lambda lna: np.frombuffer(myfile.read(), lna.dtype).reshape(lna.shape)
+              t.realize()
+      for k,v in (t := tqdm(ret[1].items())):
+        t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+        load_weight(k,v)
   return ret[0]
 
 def fake_torch_load(b0):
