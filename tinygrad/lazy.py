@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import os, sys, weakref, importlib, inspect, functools
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes
+from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray
 from tinygrad.shape import ShapeTracker, get_contraction
 from tinygrad.ops import InterpretedBuffer, DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.graph import log_op
@@ -70,13 +70,6 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
   assert y.op in BinaryOps or y.op in UnaryOps
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
-
-class LazyNumpyArray:
-  def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
-  def __call__(self): return self.fxn(self)
-  def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
-  def copy(self): return self
-  def astype(self, typ): return self
 
 def support_weakref(x): return x
 @support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class

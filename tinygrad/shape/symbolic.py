@@ -6,12 +6,6 @@ from tinygrad.helpers import partition, all_same
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
-def create_node(typ:Type[Node], *args):
-  ret = typ(*args)
-  assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {typ} {args}"
-  if ret.min == ret.max: return NumNode(ret.min)
-  return ret
-
 class Node:
   b: int
   min: int
@@ -29,14 +23,14 @@ class Node:
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:Union[Node, int]): return self+-b
-  def __ge__(self, b:int): return create_node(GeNode, self, b)
-  def __lt__(self, b:int): return create_node(LtNode, self, b)
+  def __ge__(self, b:int): return create_opnode(GeNode, self, b)
+  def __lt__(self, b:int): return create_opnode(LtNode, self, b)
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
     if isinstance(self, MulNode): return self.a*(self.b*b) # two muls is one mul
     if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
-    return create_node(MulNode, self, b)
+    return create_opnode(MulNode, self, b)
 
   # *** complex ops ***
 
@@ -74,7 +68,7 @@ class Node:
     if self.min < 0:
       offset = self.min//b
       return (self+offset*b)//b - offset
-    return create_node(DivNode, self, b)
+    return create_opnode(DivNode, self, b)
 
   def __mod__(self, b:int):
     assert b > 0
@@ -92,7 +86,7 @@ class Node:
       a = self
     if a.min >= 0 and a.max < b: return a
     if a.min < 0: return (a + ((a.min//b)*b)) % b
-    return create_node(ModNode, a, b)
+    return create_opnode(ModNode, a, b)
 
   @staticmethod
   def num(num:int) -> Node: return NumNode(num)
@@ -119,7 +113,7 @@ class Node:
 
     # filter 0s
     nodes = [x for x in nodes if x.min != 0 or x.max != 0]
-    return create_node(SumNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(0))
+    return create_rednode(SumNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(0))
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
@@ -127,7 +121,7 @@ class Node:
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
-    return create_node(AndNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
+    return create_rednode(AndNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
 
 # 4 basic node types
 
@@ -144,40 +138,44 @@ class NumNode(Node):
   def __init__(self, num:int):
     self.b, self.min, self.max = num, num, num
 
+def create_node(ret:Node):
+  assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
+  if ret.min == ret.max: return NumNode(ret.min)
+  return ret
+
 class OpNode(Node):
-  def __init__(self, a:Node, b:int):
-    self.a, self.b = a, b
-    self.min, self.max = self.minmax(a,b)
-  minmax = staticmethod(lambda a,b: (1//0, 1//0))
+  def __init__(self, a:Node, b:int): self.a, self.b = a, b
+
+class GeNode(OpNode): pass
+class LtNode(OpNode): pass
+class MulNode(OpNode): pass
+class DivNode(OpNode): pass
+class ModNode(OpNode): pass
+
+def create_opnode(typ:Type[OpNode], a:Node, b:int):
+  ret = typ(a, b)
+  if typ == GeNode: ret.min, ret.max = int(a.min >= b), int(a.max >= b)
+  elif typ == LtNode: ret.min, ret.max = int(a.max < b), int(a.min < b)
+  elif typ == MulNode: ret.min, ret.max = (a.min*b, a.max*b) if b >= 0 else (a.max*b, a.min*b)
+  elif typ == DivNode:
+    assert a.min >= 0
+    ret.min, ret.max = a.min//b, a.max//b
+  elif typ == ModNode:
+    assert a.min >= 0
+    ret.min, ret.max = (0, b-1) if a.max - a.min >= b or (a.min != a.max and a.min%b >= a.max%b) else (a.min%b, a.max%b)
+  return create_node(ret)
 
 class RedNode(Node):
-  def __init__(self, nodes:List[Node]):
-    self.nodes = nodes
-    self.min, self.max = self.minmax(nodes)
-  minmax = staticmethod(lambda nodes: (1//0, 1//0))
+  def __init__(self, nodes:List[Node]): self.nodes = nodes
 
-# operation nodes
+class SumNode(RedNode): pass
+class AndNode(RedNode): pass
 
-class GeNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.min >= b), int(a.max >= b)))
-class LtNode(OpNode): minmax = staticmethod(lambda a,b: (int(a.max < b), int(a.min < b)))
-class MulNode(OpNode): minmax = staticmethod(lambda a,b: (a.min*b, a.max*b) if b >= 0 else (a.max*b, a.min*b))
-class DivNode(OpNode):
-  @staticmethod
-  def minmax(a, b):
-    assert a.min >= 0
-    return a.min//b, a.max//b
-
-class ModNode(OpNode):
-  @staticmethod
-  def minmax(a, b):
-    assert a.min >= 0
-    if a.max - a.min >= b or (a.min != a.max and a.min%b >= a.max%b): return (0, b-1)
-    return a.min%b, a.max%b
-
-# reduce nodes
-
-class SumNode(RedNode): minmax = staticmethod(lambda nodes: (sum([x.min for x in nodes]), sum([x.max for x in nodes])))
-class AndNode(RedNode): minmax = staticmethod(lambda nodes: (min([x.min for x in nodes]), max([x.max for x in nodes])))
+def create_rednode(typ:Type[RedNode], nodes:List[Node]):
+  ret = typ(nodes)
+  if typ == SumNode: ret.min, ret.max = (sum([x.min for x in nodes]), sum([x.max for x in nodes]))
+  elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
+  return create_node(ret)
 
 render_python : Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}<{self.min},{self.max}>" if ctx == "DEBUG" else f"{self.expr}",

@@ -3,8 +3,8 @@ from __future__ import annotations
 import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten, DType, dtypes
-from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray
+from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.image import image_conv2d_decorator, image_dot_decorator
 
 # An instantiation of the Function is the Context
@@ -32,7 +32,7 @@ class Tensor:
   __deletable__ = ('_ctx',)
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
-  default_type : DType = dtypes.float32
+  default_type : ClassVar[DType] = dtypes.float32
 
   def __init__(self, data, device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
@@ -222,7 +222,7 @@ class Tensor:
       if isinstance(s, int) and not (-sz <= s < sz):
         raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
       new_slice.append((s%sz, s%sz+1) if isinstance(s, int) else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
-    for s,sz in zip(val, [self.shape[i-1] for i in itertools.accumulate([s is not None for s in val])]):  # Shape depends on slices + positions of Nones
+    for s,sz in zip(val, [self.shape[i-1] for i in itertools.accumulate([int(s is not None) for s in val])]):  # Shape depends on slices + positions of Nones
       if not isinstance(s, int):
         new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
@@ -252,7 +252,7 @@ class Tensor:
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Tuple[int, ...]): return self.slice(((0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])))
+  def pad2d(self, padding:Union[List[int], Tuple[int, ...]]): return self.slice(((0,self.shape[0]), (0,self.shape[1]), (-padding[2],self.shape[2]+padding[3]), (-padding[0],self.shape[3]+padding[1])))
   def transpose(self, ax1=1, ax2=0) -> Tensor:
     order = list(range(len(self.shape)))
     order[ax1], order[ax2] = order[ax2], order[ax1]

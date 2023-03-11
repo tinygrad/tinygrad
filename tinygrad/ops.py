@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set, Final
 from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
 from tinygrad.shape import ShapeTracker, MovementOps
 
@@ -123,7 +123,7 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg)
     return self
 
-  def exec(self, bufs:List[CompiledBuffer]) -> Optional[float]:
+  def exec(self, bufs:List[Optional[CompiledBuffer]]) -> Optional[float]:
     rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
@@ -170,7 +170,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 
   def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__}), dtype={self.dtype}), dtype={self.dtype})" if self._backing is not None else f", force_create=True, dtype={self.dtype}), dtype={self.dtype})")
 
-  raw_buffer_type : Type[RawBuffer]
+  raw_buffer_type : ClassVar[Type[RawBuffer]]
   @classmethod
   def create_raw_buffer(cls, shape:Tuple[int, ...], backing:Optional[np.ndarray], dtype:DType) -> RawBuffer:
     assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
@@ -191,13 +191,14 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if DEBUG >= 3: print(f"**** copy out {self.shape}")
     return self.contiguous().raw().toCPU().reshape(self.shape)
 
-  codegen_type : Any
-  runtime_type : Type
-  method_cache : Dict[str, ASTRunner] = {}
+  codegen_type : ClassVar[Any]
+  runtime_type : ClassVar[Type]
+
+  method_cache : Final[Dict[str, ASTRunner]] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
     k = cls.codegen_type(ast, output_buffer)
-    if getenv("ENABLE_METHOD_CACHE"):   # TODO: this breaks the ops test!
+    if getenv("ENABLE_METHOD_CACHE", "1"):  # this is the default now
       if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.runtime_type)
       elif DEBUG >= 4: print(f"method cache hit : {k.key}")
       prg = cls.method_cache[k.key]

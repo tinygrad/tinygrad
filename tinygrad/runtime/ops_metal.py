@@ -1,7 +1,7 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, functools
 import Metal, Cocoa, libdispatch # type: ignore
-from typing import List, Any
+from typing import List, Any, Final
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
 from tinygrad.ops import CompiledBuffer, RawBufferMapped
@@ -9,12 +9,12 @@ from tinygrad.ops import CompiledBuffer, RawBufferMapped
 METAL_XCODE = getenv("METAL_XCODE")
 
 class _METAL:
-  mtl_buffers_in_flight : List[Any] = []
+  mtl_buffers_in_flight : Final[List[Any]] = []
   @functools.cached_property
-  def device(self):
+  def device(self) -> Any:
     return Metal.MTLCreateSystemDefaultDevice()
   @functools.cached_property
-  def mtl_queue(self):
+  def mtl_queue(self) -> Any:
     return METAL.device.newCommandQueue()
 METAL = _METAL()
 
@@ -27,7 +27,7 @@ class RawMetalBuffer(RawBufferMapped):
     super().__del__()
   def _buffer(self):
     for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
-    METAL.mtl_buffers_in_flight = []
+    METAL.mtl_buffers_in_flight.clear()
     return self._cl.contents().as_buffer(self._cl.length())
 
 def unwrap(x):
@@ -85,4 +85,6 @@ class MetalCodegen(GPUCodegen):
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
 class MetalBuffer(CompiledBuffer):
-  raw_buffer_type, codegen_type, runtime_type = RawMetalBuffer, MetalCodegen, MetalProgram
+  raw_buffer_type = RawMetalBuffer
+  codegen_type = MetalCodegen
+  runtime_type = MetalProgram

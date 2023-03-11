@@ -38,7 +38,7 @@ def get_sop(op : List[Op]):
   return str(len(op))
 
 def log_op(ret : DeviceBuffer, ast : LazyOp, show_graph : Optional[bool] = None):
-  if show_graph is None: show_graph = GRAPH
+  if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
   op : List[Op] = [x.op for x in get_lazyops(ast)]
   inp : List[DeviceBuffer] = get_buffers(ast)

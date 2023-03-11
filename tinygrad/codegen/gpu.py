@@ -1,6 +1,6 @@
 import math, itertools
 from collections import defaultdict
-from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple
+from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple, ClassVar, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, Variable, render_python
@@ -48,10 +48,10 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
   return idx, idy
 
 class GPUCodegen(ASTKernel):
-  lang : GPULanguage = GPULanguage()
+  lang : ClassVar[GPULanguage] = GPULanguage()
 
   # for renaming
-  kernel_cnt : Final[Dict[str, int]] = defaultdict(lambda: -1)
+  kernel_cnt : Final[DefaultDict[str, int]] = defaultdict(int)
   kernel_name_cache : Final[Dict[str, str]] = {}
 
   code_for_op : Final[Dict[Op, str]] = {
@@ -335,7 +335,7 @@ class GPUCodegen(ASTKernel):
     if prg in GPUCodegen.kernel_name_cache: function_name = GPUCodegen.kernel_name_cache[prg]
     else:
       GPUCodegen.kernel_cnt[function_name] += 1
-      if GPUCodegen.kernel_cnt[function_name]: function_name = f"{function_name}{'n'+str(GPUCodegen.kernel_cnt[function_name])}"
+      if GPUCodegen.kernel_cnt[function_name] > 1: function_name = f"{function_name}{'n'+str(GPUCodegen.kernel_cnt[function_name]-1)}"
       GPUCodegen.kernel_name_cache[prg] = function_name
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
