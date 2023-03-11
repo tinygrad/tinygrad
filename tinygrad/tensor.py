@@ -63,6 +63,9 @@ class Tensor:
   def __repr__(self):
     return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
+  # Python has a non moving GC, so this should be okay
+  def __hash__(self): return id(self)
+
   @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
 
@@ -424,8 +427,8 @@ class Tensor:
   def __le__(self, x) -> Tensor: return self.maximum(x).eq(x)
   def __lt__(self, x) -> Tensor: return 1.0-(self>=x)
   def __gt__(self, x) -> Tensor: return 1.0-(self<=x)
-  def __eq__(self, x) -> Tensor: return self.eq(x) # type: ignore
-  def __hash__(self): return id(self)
+  def __eq__(self, x) -> Tensor: return self.eq(x)  # type: ignore # mypy things this should be a bool
+
   # ***** functional nn ops *****
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
