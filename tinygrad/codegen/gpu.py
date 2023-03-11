@@ -51,7 +51,7 @@ class GPUCodegen(ASTKernel):
   lang : ClassVar[GPULanguage] = GPULanguage()
 
   # for renaming
-  kernel_cnt : Final[DefaultDict[str, int]] = defaultdict(int)
+  kernel_cnt : Final[DefaultDict[str, int]] = defaultdict(lambda: -1)
   kernel_name_cache : Final[Dict[str, str]] = {}
 
   code_for_op : Final[Dict[Op, str]] = {
@@ -334,8 +334,8 @@ class GPUCodegen(ASTKernel):
     # painfully name the function
     if prg in GPUCodegen.kernel_name_cache: function_name = GPUCodegen.kernel_name_cache[prg]
     else:
-      if GPUCodegen.kernel_cnt[function_name]: function_name = f"{function_name}{'n'+str(GPUCodegen.kernel_cnt[function_name])}"
       GPUCodegen.kernel_cnt[function_name] += 1
+      if GPUCodegen.kernel_cnt[function_name]: function_name = f"{function_name}{'n'+str(GPUCodegen.kernel_cnt[function_name])}"
       GPUCodegen.kernel_name_cache[prg] = function_name
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
