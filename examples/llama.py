@@ -249,7 +249,6 @@ if __name__ == "__main__":
       mv = get_child(model, k)
       assert mv.shape == v.shape, f"shape mismatch in {k}, {mv.shape} != {v.shape}"
       mv.assign(v).realize()
-      #mv.lazydata.realized = v
 
     del weights
 

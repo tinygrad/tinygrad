@@ -146,6 +146,9 @@ class EfficientNet:
 
     b0 = fake_torch_load(fetch(model_urls[self.number]))
     for k,v in b0.items():
+      if v is None:
+        print("missing weight", k)
+        continue
       for cat in ['_conv_head', '_conv_stem', '_depthwise_conv', '_expand_conv', '_fc', '_project_conv', '_se_reduce', '_se_expand']:
         if cat in k:
           k = k.replace('.bias', '_bias')
@@ -153,9 +156,9 @@ class EfficientNet:
 
       #print(k, v.shape)
       mv = get_child(self, k)
-      vnp = v.astype(np.float32)
-      vnp = vnp if k != '_fc' else vnp.T
-      vnp = vnp if vnp.shape != () else np.array([vnp])
+      vnp = v #.astype(np.float32)
+      vnp = vnp if k != '_fc' else vnp.transpose()
+      #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
         mv.assign(vnp)

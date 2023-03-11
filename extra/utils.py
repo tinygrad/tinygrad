@@ -7,6 +7,7 @@ from tinygrad.helpers import prod, getenv
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyNumpyArray
+from tinygrad.shape import strides_for_shape
 
 def fetch(url):
   if url.startswith("/"):
@@ -38,13 +39,13 @@ def my_unpickle(fb0):
       #print(args)
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
-      if storage_type not in [np.float16, np.float32]:
-        print(f"unsupported type {storage_type} on {obj_key}")
-        return None
-
       assert prod(args[2]) == obj_size
-      #ret = np.zeros(args[2], dtype=storage_type)
-      ret = Tensor(LazyNumpyArray(None, tuple(args[2]), storage_type))
+
+      if storage_type not in [np.float16, np.float32]:
+        print(f"unsupported type {storage_type} on {obj_key} with shape {args[2]}")
+        ret = None
+      else:
+        ret = Tensor(LazyNumpyArray(None, tuple(args[2]), storage_type))
       key_prelookup[obj_key].append((storage_type, obj_size, ret, args[2], args[3]))
       return ret
 
@@ -81,6 +82,31 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
+def load_single_weight(t:Tensor, myfile, shape, strides):
+  assert t.shape == shape
+  if any(s != 1 and st1 != st2 for s, st1, st2 in zip(shape, strides_for_shape(shape), strides)):
+    # slow path
+    np_array = np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), t.dtype.np).reshape(t.shape)
+    real_strides = tuple([x*t.dtype.itemsize for x in strides]) # numpy stores its strides in bytes
+    np_array.strides = real_strides
+
+    lna = t.lazydata.op.arg
+    lna.fxn = lambda _: np_array
+    t.realize()
+    return
+
+  # ["METAL", "CLANG", "LLVM"] support readinto for more speed
+  # this needs real APIs
+  if t.device in ["METAL", "CLANG", "LLVM"]:
+    del t.lazydata.op
+    t.lazydata.realized = t.lazydata.dbuffer(t.shape, dtype=t.dtype)
+    myfile.readinto(t.lazydata.realized.raw()._buffer())
+  else:
+    lna = t.lazydata.op.arg
+    lna.fxn = lambda lna: np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), lna.dtype).reshape(lna.shape)
+    t.realize()
+  assert strides_for_shape(shape) == strides, f"stride mismatch {strides_for_shape(shape)} != {strides} on shape {shape}"
+
 def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
@@ -90,17 +116,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            t = v[2]
-            # ["METAL", "CLANG", "LLVM"] support readinto for more speed
-            # this needs real APIs
-            if t.device in ["METAL", "CLANG", "LLVM"]:
-              del t.lazydata.op
-              t.lazydata.realized = t.lazydata.dbuffer(t.shape, dtype=t.dtype)
-              myfile.readinto(t.lazydata.realized.raw()._buffer())
-            else:
-              lna = t.lazydata.op.arg
-              lna.fxn = lambda lna: np.frombuffer(myfile.read(), lna.dtype).reshape(lna.shape)
-              t.realize()
+            load_single_weight(v[2], myfile, v[3], v[4])
       for k,v in (t := tqdm(ret[1].items())):
         t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
         load_weight(k,v)
@@ -127,19 +143,19 @@ def fake_torch_load(b0):
   key_lookup = pickle.load(fb0)
   key_real = [None] * len(key_lookup)
   for k,v in key_prelookup.items():
-    key_real[key_lookup.index(k)] = v
+    assert len(v) == 1
+    key_real[key_lookup.index(k)] = v[0]
 
   # read in the actual data
-  for storage_type, obj_size, np_array, np_shape, np_strides in key_real:
+  for storage_type, obj_size, tensor, np_shape, np_strides in key_real:
     ll = struct.unpack("Q", fb0.read(8))[0]
-    assert ll == obj_size
-    bytes_size = {np.float32: 4, np.int64: 8}[storage_type]
-    mydat = fb0.read(ll * bytes_size)
-    np.copyto(np_array, np.frombuffer(mydat, storage_type).reshape(np_shape))
-
-    # numpy stores its strides in bytes
-    real_strides = tuple([x*bytes_size for x in np_strides])
-    np_array.strides = real_strides
+    assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
+    if tensor is None:
+      # fake read
+      bytes_size = {np.float32: 4, np.int64: 8}[storage_type]
+      fb0.read(ll * bytes_size)
+    else:
+      load_single_weight(tensor, fb0, np_shape, np_strides)
 
   return ret
 
