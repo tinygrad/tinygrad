@@ -163,7 +163,7 @@ class ResBlock:
     self.out_layers = [
       GroupNorm(32, out_channels),
       Tensor.silu,
-      lambda x: x,
+      lambda x: x,  # needed for weights loading code to work
       Conv2d(out_channels, out_channels, 3, padding=1)
     ]
     self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else lambda x: x
@@ -213,7 +213,7 @@ class FeedForward:
   def __init__(self, dim, mult=4):
     self.net = [
       GEGLU(dim, dim*mult),
-      lambda x: x,
+      lambda x: x,  # needed for weights loading code to work
       Linear(dim*mult, dim)
     ]
 
