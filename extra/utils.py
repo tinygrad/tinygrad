@@ -2,7 +2,8 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 import tempfile
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import prod, getenv, dtypes
+from typing import Optional
 
 def fetch(url):
   if url.startswith("/"):
@@ -27,6 +28,14 @@ def download_file(url, fp, skip_if_exists=False):
     f.close()
     os.rename(f.name, fp)
 
+from tinygrad.tensor import Tensor
+from tinygrad.lazy import LazyNumpyArray
+_hack : Optional[np.ndarray] = None
+def fetch_weight(shape, dtype):
+  assert prod(shape) == prod(_hack.shape)
+  assert dtype == _hack.dtype
+  return _hack.reshape(shape)
+
 def my_unpickle(fb0):
   key_prelookup = {}
   class HackTensor:
@@ -34,9 +43,13 @@ def my_unpickle(fb0):
       #print(args)
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
+      if storage_type not in [np.float16, np.float32]:
+        print(f"unsupported type {storage_type} on {obj_key}")
+        return None
 
       assert prod(args[2]) == obj_size
-      ret = np.zeros(args[2], dtype=storage_type)
+      ret = Tensor(LazyNumpyArray(fetch_weight, tuple(args[2]), storage_type))
+      #ret = np.zeros(args[2], dtype=storage_type)
       key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
       return ret
 
@@ -74,17 +87,19 @@ def my_unpickle(fb0):
   return MyPickle(fb0).load(), key_prelookup
 
 def fake_torch_load_zipped(fb0, load_weights=True):
+  global _hack
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
     with myzip.open('archive/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
-      for k,v in ret[1].items():
+      for k,v in tqdm(ret[1].items()):
         with myzip.open(f'archive/data/{k}') as myfile:
           if v[2].dtype == "object":
             print(f"issue assigning object on {k}")
             continue
-          np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
+          _hack = np.frombuffer(myfile.read(), v[2].dtype.np)
+          v[2].realize()  # this calls fetch_weight, which reads from _hack
   return ret[0]
 
 def fake_torch_load(b0):
