@@ -61,7 +61,7 @@ class Tensor:
     self._ctx : Optional[Function] = None
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} {self.dtype} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
