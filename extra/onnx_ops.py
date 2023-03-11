@@ -130,7 +130,7 @@ def Less(x, y): return (x<y).numpy().astype(bool)
 def LessOrEqual(x, y): return (x<=y).numpy().astype(bool)
 def Greater(x, y): return (x>y).numpy().astype(bool)
 def GreaterOrEqual(x, y): return (x>=y).numpy().astype(bool)
-def Equal(x, y): return (x.eq(y)).numpy().astype(bool)
+def Equal(x, y): return (x==y).numpy().astype(bool)
 
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return -functools.reduce(Tensor.maximum, [-x for x in data_0])
