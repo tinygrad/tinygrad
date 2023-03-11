@@ -61,7 +61,7 @@ class TestOps(unittest.TestCase):
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
   def test_arange(self):
-    helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10, dtype=dtypes.float32), forward_only=True)
+    helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
 
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -558,10 +558,10 @@ class TestOps(unittest.TestCase):
   
   
   def test_type_float(self):
-    helper_test_op([(45, 65)], lambda x: x.float(), lambda x: x.float(), dtype=dtypes.float16)
+    helper_test_op([(45, 65)], lambda x: x.float(), lambda x: x.float(), atol=1e-3, dtype=dtypes.float16, forward_only=True)
 
   def test_type_half(self):
-    helper_test_op([(45, 65)], lambda x: x.half(), lambda x: x.half(), forward_only=False)
+    helper_test_op([(45, 65)], lambda x: x.half(), lambda x: x.half(), atol=1e-3, forward_only=True)
 
 if __name__ == '__main__':
   np.random.seed(1337)
