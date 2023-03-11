@@ -159,14 +159,9 @@ class ShapeTracker:
     self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset)
     return self
 
-  # TODO: this is a special case of slice with strides, remove it
-  # though it's nice that it can't change size
-  def flip(self, axis : Tuple[int, ...]) -> ShapeTracker:
-    return self.stride(tuple(-1 if i in axis else 1 for i in range(len((self.shape)))))
-
   # *** under this line are not invertible ***
 
-  def _resize(self, arg : Tuple[Tuple[int, int], ...]):
+  def _unsafe_resize(self, arg : Tuple[Tuple[int, int], ...]):
     offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
     self.views[-1] = View(tuple(y-x for x,y in arg), self.strides, self.offset+offset)
 
@@ -176,7 +171,7 @@ class ShapeTracker:
     if all(b==0 and e==0 for b,e in arg): return self   # ZeroView is expensive if we don't need it
     zvarg = tuple((-b,s+e) for s,(b,e) in zip(self.shape, arg))
     zeroview = ZeroView(self.shape, zvarg)
-    self._resize(zvarg)
+    self._unsafe_resize(zvarg)
     # if we add a ZeroView, we add another (stock) view also for modding
     self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
     return self
@@ -184,7 +179,7 @@ class ShapeTracker:
   def shrink(self, arg : Tuple[Tuple[int, int], ...]) -> ShapeTracker:
     assert isinstance(arg, tuple)
     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
-    self._resize(arg)
+    self._unsafe_resize(arg)
     return self
 
   def expand(self, new_shape : Tuple[int, ...]) -> ShapeTracker:
@@ -195,7 +190,7 @@ class ShapeTracker:
     self.views[-1] = View(new_shape, strides, self.offset)
     return self
 
-  # TODO: combine with flip? this is more generic than we need
+  # except for the negative case, you can build this from the others
   def stride(self, mul : Tuple[int, ...]) -> ShapeTracker:
     assert isinstance(mul, tuple)
     assert all(isinstance(x, int) for x in mul)
