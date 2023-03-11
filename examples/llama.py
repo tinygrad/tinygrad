@@ -4,7 +4,7 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 import os
-import sys, argparse, math
+import sys, argparse, math, platform
 import numpy as np
 from tqdm import tqdm
 np.set_printoptions(linewidth=200)
@@ -13,8 +13,8 @@ from typing import Optional
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
 
-# this is broken?
-#if Device.DEFAULT == "CPU" and not getenv("CPU"): Device.DEFAULT = "METAL"
+# on mac, we make METAL the default
+if platform.system() == "Darwin" and Device.DEFAULT == "CPU" and not getenv("CPU"): Device.DEFAULT = "METAL"
 
 from extra.helpers import Timing
 from tinygrad.tensor import Tensor
@@ -178,6 +178,7 @@ def sample(logits, temperature):
 # **** main code ****
 
 if __name__ == "__main__":
+  print(f"using {Device.DEFAULT} backend")
   from sentencepiece import SentencePieceProcessor
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
   assert sp_model.vocab_size() == VOCAB_SIZE
