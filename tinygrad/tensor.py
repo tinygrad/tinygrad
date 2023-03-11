@@ -456,7 +456,7 @@ class Tensor:
   def half(self) -> Tensor: return self.type(dtypes.float16)
   def type(self, dtype:Optional[DType]=None): 
     if dtype is None or self.dtype == dtype: return self
-    return Tensor(self.detach().numpy(), device=self.device, dtype=dtype, requires_grad=self.requires_grad)
+    return Tensor(self.numpy(), device=self.device, dtype=dtype, requires_grad=self.requires_grad)
 
 
 # register functions to move between devices
