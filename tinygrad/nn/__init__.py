@@ -59,8 +59,8 @@ class Linear:
 class GroupNorm:
   def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
     self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
-    self.weight : Optional[Tensor] = Tensor.ones(num_channels) if affine else None
-    self.bias : Optional[Tensor] = Tensor.zeros(num_channels) if affine else None
+    self.weight: Optional[Tensor] = Tensor.ones(num_channels) if affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(num_channels) if affine else None
 
   def __call__(self, x:Tensor):
     # reshape for layernorm to work as group norm

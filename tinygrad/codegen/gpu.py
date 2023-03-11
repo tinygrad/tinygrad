@@ -16,16 +16,16 @@ VALIDHACKS = getenv("VALIDHACKS", 0)    # TODO: remove the need for this
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
 class GPULanguage(NamedTuple):
-  kernel_prefix : str = ""
-  buffer_prefix : str = ""
-  buffer_suffix : str = ""
-  smem_prefix : str = ""
-  barrier : str = ""
-  gid : List[str] = []
-  lid : List[str] = []
-  extra_args : List[str] = []
-  float4 : Optional[str] = None
-  half_prekernel : Optional[str] = None
+  kernel_prefix: str = ""
+  buffer_prefix: str = ""
+  buffer_suffix: str = ""
+  smem_prefix: str = ""
+  barrier: str = ""
+  gid: List[str] = []
+  lid: List[str] = []
+  extra_args: List[str] = []
+  float4: Optional[str] = None
+  half_prekernel: Optional[str] = None
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -48,13 +48,13 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
   return idx, idy
 
 class GPUCodegen(ASTKernel):
-  lang : ClassVar[GPULanguage] = GPULanguage()
+  lang: ClassVar[GPULanguage] = GPULanguage()
 
   # for renaming
-  kernel_cnt : Final[DefaultDict[str, int]] = defaultdict(int)
-  kernel_name_cache : Final[Dict[str, str]] = {}
+  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
+  kernel_name_cache: Final[Dict[str, str]] = {}
 
-  code_for_op : Final[Dict[Op, str]] = {
+  code_for_op: Final[Dict[Op, str]] = {
     UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "(1.0f-A)",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
@@ -62,7 +62,7 @@ class GPUCodegen(ASTKernel):
     BinaryOps.DIV: "(A/B)", BinaryOps.POW: "pow(A,B)", BinaryOps.CMPEQ: "(A==B)",
     BinaryOps.MAX: "max(A,B)", ReduceOps.SUM: "A+=B", ReduceOps.MAX: "A=max(A,B)"
   }
-  start_for_op : Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0f", ReduceOps.MAX: "-INFINITY"}
+  start_for_op: Final[Dict[Op, str]] = {ReduceOps.SUM: "0.0f", ReduceOps.MAX: "-INFINITY"}
 
   def group_float4(self, grp:List[Token]) -> Token:
     if all(g.tok.endswith(e) for g,e in zip(grp, [".x", ".y", ".z", ".w"])) and all_same([g.tok.split(".")[0] for g in grp]): return Token(grp[0].tok.split(".")[0], Types.FLOAT4)
@@ -142,7 +142,7 @@ class GPUCodegen(ASTKernel):
   def ast_parse(self, x, acc:List[Token], do_reduce=False) -> List[Token]:
     if not isinstance(x, LazyOp): return self.load(self.bufs.index(x), "mid" if x is None else None)  # hack for local
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
-    values : List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
+    values: List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = GPUCodegen.code_for_op[x.op]  # TODO: replace this with a function
     if len(values) == 2:
       assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
@@ -256,16 +256,16 @@ class GPUCodegen(ASTKernel):
       self.sts.append(st)
       self.buftokens.append(buftoken)
 
-    self.output_shape : Tuple[int, ...] = self.sts[0].shape[:self.first_reduce] + tuple(self.group_for_reduce)
+    self.output_shape: Tuple[int, ...] = self.sts[0].shape[:self.first_reduce] + tuple(self.group_for_reduce)
     assert self.full_shape[:len(self.output_shape)] == self.output_shape, f"output shape mismatch : {self.full_shape[:len(self.output_shape)]} != {self.output_shape}"
     if DEBUG >= 4:
       print("output shape", self.output_shape)
       self.printbufs("new:", DEBUG>=5)
 
-    self.bufs_to_delete : Set[int] = set()
-    self.loaded_keys : Dict[Tuple[int,int], Token] = {}
-    self.prekernel : Set[str] = set()
-    self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
+    self.bufs_to_delete: Set[int] = set()
+    self.loaded_keys: Dict[Tuple[int,int], Token] = {}
+    self.prekernel: Set[str] = set()
+    self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
 
     if self.lang.half_prekernel: self.prekernel.add(self.lang.half_prekernel+"\n")
 
@@ -284,7 +284,7 @@ class GPUCodegen(ASTKernel):
         if DEBUG >= 4: print(f"replaced output shape with {self.output_shape}")
 
     # early ast
-    accumulators : List[Token] = []
+    accumulators: List[Token] = []
     if self.reduceop is not None:
       accumulators = self.get_accumulators()
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.full_shape[i]}; idx{i}++) {{\n" for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len)]

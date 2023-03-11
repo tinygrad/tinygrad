@@ -14,7 +14,7 @@ FLOAT16 = getenv("FLOAT16", 0)
 class _CL:
   @functools.cached_property
   def cl_ctx(self) -> cl.Context:
-    devices : List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
+    devices: List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0: devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], []) # settle for CPU
     if len(devices) > 1 or DEBUG >= 1: print(f"using {devices[getenv('CL_DEVICE', 0)]}")
     return cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
@@ -32,7 +32,7 @@ class CLBuffer(RawBufferCopyInOut):
   def copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
 
 class CLImage(RawBuffer):  # pylint: disable=abstract-method
-  IMAGE : Final = True
+  IMAGE: Final = True
   def __init__(self, shape, dtype=dtypes.float16 if getenv("FLOAT16") else dtypes.float32):  # pylint: disable=super-init-not-called
     fmt = cl.ImageFormat(cl.channel_order.RGBA, {dtypes.float16: cl.channel_type.HALF_FLOAT, dtypes.float32: cl.channel_type.FLOAT}[dtype])
     self.size, self.dtype, self._cl = shape, dtype, cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(shape[1], shape[0]))

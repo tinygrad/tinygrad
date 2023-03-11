@@ -30,9 +30,9 @@ import tinygrad.mlops as mlops
 
 class Tensor:
   __deletable__ = ('_ctx',)
-  training : ClassVar[bool] = False
-  no_grad : ClassVar[bool] = False
-  default_type : ClassVar[DType] = dtypes.float32
+  training: ClassVar[bool] = False
+  no_grad: ClassVar[bool] = False
+  default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data, device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
@@ -51,14 +51,14 @@ class Tensor:
       raise RuntimeError(f"can't create Tensor from {data}")
 
     # tensors have gradients, buffers do not
-    self.grad : Optional[Tensor] = None
+    self.grad: Optional[Tensor] = None
 
     # NOTE: this can be in three states. False and None: no gradient, True: gradient
     # None (the default) will be updated to True if it's put in an optimizer
-    self.requires_grad : Optional[bool] = requires_grad
+    self.requires_grad: Optional[bool] = requires_grad
 
     # internal variables used for autograd graph construction
-    self._ctx : Optional[Function] = None
+    self._ctx: Optional[Function] = None
 
   def __repr__(self):
     return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -128,7 +128,7 @@ class Tensor:
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
 
-  _rng : ClassVar[np.random.Generator] = np.random.default_rng()
+  _rng: ClassVar[np.random.Generator] = np.random.default_rng()
   @staticmethod
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
@@ -262,7 +262,7 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
-    axis_ : List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
+    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
     ret = fxn.apply(self, new_shape=tuple(1 if i in axis_ else self.shape[i] for i in range(len(self.shape))))
@@ -445,7 +445,7 @@ class Tensor:
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
     # TODO: why is this going through numpy?
-    _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
+    _mask: np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
   # ***** cast ops *****

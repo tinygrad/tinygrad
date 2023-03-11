@@ -8,7 +8,7 @@ def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
   return tuple(i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b)
 
-base_fxn_for_op : Dict[Op, Callable] = {
+base_fxn_for_op: Dict[Op, Callable] = {
   UnaryOps.NEG: lambda x: -x, UnaryOps.NOT: lambda x: (1.0 - x),
   BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul, BinaryOps.DIV: operator.truediv, BinaryOps.POW: operator.pow,
   ReduceOps.SUM: lambda x, new_shape: x.sum(shape_to_axis(x.shape, new_shape), keepdims=True) if tuple(x.shape) != tuple(new_shape) else x[:],
@@ -26,7 +26,7 @@ def einsum_mulacc(einsum, get_strides, expand):
     return expand(ret.reshape([(1 if i not in a_axes and i not in b_axes else s) for i,s in enumerate(new_shape)]), new_shape)
   return mulacc
 
-numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
+numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   UnaryOps.NOOP: np.ascontiguousarray, UnaryOps.EXP: np.exp, UnaryOps.LOG: np.log,
   BinaryOps.MAX: np.maximum, BinaryOps.CMPEQ: lambda x,y: (x==y).astype(np.float32),
   MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
@@ -35,7 +35,7 @@ numpy_fxn_for_op : Dict[Op, Callable] = {**base_fxn_for_op, **{
 }}
 
 class CPUBuffer(InterpretedBuffer):
-  fxn_for_op : ClassVar = numpy_fxn_for_op
+  fxn_for_op: ClassVar = numpy_fxn_for_op
   to_tinygrad_dtype = staticmethod(dtypes.from_np)
 
   @staticmethod

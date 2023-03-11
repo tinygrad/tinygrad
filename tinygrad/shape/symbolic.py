@@ -177,7 +177,7 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
   return create_node(ret)
 
-render_python : Dict[Type, Callable] = {
+render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}<{self.min},{self.max}>" if ctx == "DEBUG" else f"{self.expr}",
   NumNode: lambda self,ops,ctx: f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{self.b})",

@@ -4,7 +4,7 @@ from tinygrad.ops import CompiledBuffer, RawBufferMapped
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype : DType):
+  def __init__(self, size, dtype: DType):
     super().__init__(size, dtype)
     self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
   def _buffer(self): return memoryview(self._buf)
