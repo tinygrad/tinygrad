@@ -437,18 +437,18 @@ class CLIPEncoder:
 
 class CLIPTextEmbeddings:
   def __init__(self):
-    self.position_ids = Tensor.empty(1, 77)  # what is this?
+    #self.position_ids = Tensor.empty(1, 77)  # what is this?
     self.token_embedding = {"weight": Tensor.empty(49408, 768)}
     self.position_embedding = {"weight": Tensor.empty(77, 768)}
 
   def __call__(self, input_ids, position_ids):
     # TODO: actually support batches
-    inputs = np.zeros((1, len(input_ids), 49408))
-    positions = np.zeros((1, len(position_ids), 77))
+    inputs = np.zeros((1, len(input_ids), 49408), dtype=np.float32)
+    positions = np.zeros((1, len(position_ids), 77), dtype=np.float32)
     for i,x in enumerate(input_ids): inputs[0][i][x] = 1
     for i,x in enumerate(position_ids): positions[0][i][x] = 1
     inputs_embeds = Tensor(inputs, device=self.token_embedding['weight'].device) @ self.token_embedding['weight']
-    position_embeddings = Tensor(positions, device=self.position_embedding['weight'].device) @ self.position_embedding['weight'] 
+    position_embeddings = Tensor(positions, device=self.position_embedding['weight'].device) @ self.position_embedding['weight']
     return inputs_embeds + position_embeddings
 
 class CLIPTextTransformer:
@@ -625,10 +625,10 @@ if __name__ == "__main__":
     except (AttributeError, KeyError, IndexError):
       #traceback.print_exc()
       w = None
-    #print(f"{str(v.shape):30s}", w.shape if w is not None else w, k)
+    #print(f"{str(v.shape):30s}" if v is not None else v, w.shape if w is not None else w, k)
     if w is not None:
-      assert w.shape == v.shape
-      w.assign(v.astype(np.float32))
+      assert w.shape == v.shape and w.dtype == v.dtype
+      w.assign(v)
 
   # run through CLIP to get context
 
