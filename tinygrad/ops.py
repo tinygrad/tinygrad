@@ -159,11 +159,10 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+    assert self._backing is None or dtypes.from_np(self._backing) == dtype, f"backing dtype {dtypes.from_np(self._backing)} != {dtype}"
     if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
 
-  # TODO: not GPUBuffer, get name of class
-  # TODO: needs dtype
-  def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__})))" if self._backing is not None else ", force_create=True))")
+  def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__}), dtype={self.dtype}), dtype={self.dtype})" if self._backing is not None else f", force_create=True, dtype={self.dtype}), dtype={self.dtype})")
 
   raw_buffer_type : Type[RawBuffer]
   @classmethod
@@ -206,7 +205,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
 
   # universal for shape tracked
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
-  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), self)
+  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), hostbuf=self, dtype=self.dtype)
 
 class GlobalCounters:
   global_ops : ClassVar[int] = 0

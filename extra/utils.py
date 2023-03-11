@@ -73,14 +73,14 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def fake_torch_load_zipped(fb0, load_weights=True):
+def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
-    with myzip.open('archive/data.pkl') as myfile:
+    with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
-      for k,v in ret[1].items():
-        with myzip.open(f'archive/data/{k}') as myfile:
+      for k,v in tqdm(ret[1].items()):
+        with myzip.open(f'{base_name}/data/{k}') as myfile:
           if v[2].dtype == "object":
             print(f"issue assigning object on {k}")
             continue
