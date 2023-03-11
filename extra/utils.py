@@ -6,7 +6,7 @@ from collections import defaultdict
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import LazyNumpyArray
+from tinygrad.lazy import LazyNumpyArray, Device
 from tinygrad.shape import strides_for_shape
 
 def fetch(url):
@@ -114,7 +114,9 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype):
     lna.fxn = lambda lna: np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), lna.dtype).reshape(lna.shape)
     t.realize()
 
-def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
+def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):
+  if Device.DEFAULT in ["TORCH", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH
+
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
     with myzip.open(f'{base_name}/data.pkl') as myfile:
@@ -124,9 +126,19 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
             load_single_weight(v[2], myfile, v[3], v[4], v[0])
-      for k,v in (t := tqdm(ret[1].items())):
-        t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
-        load_weight(k,v)
+      if multithreaded:
+        import concurrent.futures
+        # 2 seems fastest
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+          futures = {executor.submit(load_weight, k, v):k for k,v in ret[1].items()}
+          for future in (t:=tqdm(concurrent.futures.as_completed(futures), total=len(futures))):
+            if future.exception() is not None: raise future.exception()
+            k = futures[future]
+            t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+      else:
+        for k,v in (t := tqdm(ret[1].items())):
+          t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+          load_weight(k,v)
   return ret[0]
 
 def fake_torch_load(b0):

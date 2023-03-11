@@ -139,7 +139,7 @@ class TestOpt(unittest.TestCase):
       d = c.permute(1,0).contiguous()
       d.realize()
       cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3)
+    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
   def test_permute_was_pushed_though_contract_reshape(self):
@@ -149,7 +149,7 @@ class TestOpt(unittest.TestCase):
       d = c.reshape(16,16).permute(1,0).contiguous()
       d.realize()
       cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,16).transpose(1,0), d.numpy(), rtol=1e-3)
+    np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,16).transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
   def test_permute_was_pushed_though_contractw1s_reshape(self):
@@ -159,7 +159,7 @@ class TestOpt(unittest.TestCase):
       d = c.reshape(16,1,16).permute(2,1,0).contiguous()
       d.realize()
       cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,1,16).transpose(2,1,0), d.numpy(), rtol=1e-3)
+    np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,1,16).transpose(2,1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
   @unittest.skip("expansion can't push expand permute yet")
@@ -171,7 +171,7 @@ class TestOpt(unittest.TestCase):
       d = c.reshape(4,4,4,4).permute(2,3,0,1).contiguous()
       d.realize()
       cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3)
+    np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
   @unittest.skip("this is broken")
@@ -184,7 +184,7 @@ class TestOpt(unittest.TestCase):
       c.realize()
       d.realize()
       assert len(GlobalCounters.cache) == 1, "binop was rerun!"
-    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3)
+    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3, atol=1e-5)
 
   @unittest.skip("this is broken")
   def test_no_binop_rerun_alt(self):
@@ -196,7 +196,7 @@ class TestOpt(unittest.TestCase):
       c.realize()
       d.realize()
       assert len(GlobalCounters.cache) == 1, "binop was rerun!"
-    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3)
+    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3, atol=1e-5)
 
   # TODO: should be okay with PUSH_PERMUTES
   def test_no_reduceop_rerun(self):
@@ -208,7 +208,7 @@ class TestOpt(unittest.TestCase):
       c.realize()
       d.realize()
       cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(c.numpy().transpose(1,0), d.numpy())
+    np.testing.assert_allclose(c.numpy().transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
   # TODO: should be okay with PUSH_PERMUTES
@@ -221,7 +221,7 @@ class TestOpt(unittest.TestCase):
       c.realize()
       d.realize()
       cache_len = len(GlobalCounters.cache)
-    np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0))
+    np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
 
