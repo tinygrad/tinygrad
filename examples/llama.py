@@ -187,7 +187,7 @@ if __name__ == "__main__":
   # test: python3.11 examples/llama.py --prompt="Hello." --temperature=0
   # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
   parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
-  parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
+  parser.add_argument('--count', type=int, default=1000, help="Max number of tokens to generate")
   parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
 
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
