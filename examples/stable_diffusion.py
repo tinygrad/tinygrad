@@ -627,7 +627,7 @@ if __name__ == "__main__":
       w = None
     #print(f"{str(v.shape):30s}" if v is not None else v, w.shape if w is not None else w, k)
     if w is not None:
-      assert w.shape == v.shape and w.dtype.np == v.dtype, f"shape or dtype mismatch. {w.shape} != {v.shape} or {w.dtype.np} != {v.dtype}"
+      assert w.shape == v.shape and w.dtype == v.dtype, f"shape or dtype mismatch. {w.shape} != {v.shape} or {w.dtype} != {v.dtype}"
       w.assign(v)
 
   # run through CLIP to get context

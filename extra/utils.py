@@ -82,8 +82,14 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def load_single_weight(t:Tensor, myfile, shape, strides):
-  assert t.shape == shape
+def load_single_weight(t:Tensor, myfile, shape, strides, dtype):
+  bytes_size = np.dtype(dtype).itemsize
+  if t is None:
+    myfile.seek(prod(shape) * bytes_size, 1)
+    return
+
+  assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
+  assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
   if any(s != 1 and st1 != st2 for s, st1, st2 in zip(shape, strides_for_shape(shape), strides)):
     # slow path
     np_array = np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), t.dtype.np).reshape(t.shape)
@@ -105,7 +111,6 @@ def load_single_weight(t:Tensor, myfile, shape, strides):
     lna = t.lazydata.op.arg
     lna.fxn = lambda lna: np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), lna.dtype).reshape(lna.shape)
     t.realize()
-  assert strides_for_shape(shape) == strides, f"stride mismatch {strides_for_shape(shape)} != {strides} on shape {shape}"
 
 def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
   import zipfile
@@ -116,7 +121,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive"):
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            load_single_weight(v[2], myfile, v[3], v[4])
+            load_single_weight(v[2], myfile, v[3], v[4], v[0])
       for k,v in (t := tqdm(ret[1].items())):
         t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
         load_weight(k,v)
@@ -150,12 +155,7 @@ def fake_torch_load(b0):
   for storage_type, obj_size, tensor, np_shape, np_strides in key_real:
     ll = struct.unpack("Q", fb0.read(8))[0]
     assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
-    if tensor is None:
-      # fake read
-      bytes_size = {np.float32: 4, np.int64: 8}[storage_type]
-      fb0.read(ll * bytes_size)
-    else:
-      load_single_weight(tensor, fb0, np_shape, np_strides)
+    load_single_weight(tensor, fb0, np_shape, np_strides)
 
   return ret
 
