@@ -155,7 +155,7 @@ def fake_torch_load(b0):
   for storage_type, obj_size, tensor, np_shape, np_strides in key_real:
     ll = struct.unpack("Q", fb0.read(8))[0]
     assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
-    load_single_weight(tensor, fb0, np_shape, np_strides)
+    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type)
 
   return ret
 
