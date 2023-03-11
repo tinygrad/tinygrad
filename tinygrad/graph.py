@@ -13,7 +13,7 @@ GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), gete
 # **** debugging and graphing ****
 
 G = nx.DiGraph() if nx is not None else None
-cnts : Dict[OpType, int] = defaultdict(int)
+cnts: Dict[OpType, int] = defaultdict(int)
 if GRAPH:
   def save_graph_exit():
     for k,v in cnts.items(): print(k, v)
@@ -32,16 +32,16 @@ def nm(x):
     node_count += 1
   return x.node_id
 
-def get_sop(op : List[Op]):
+def get_sop(op: List[Op]):
   if len(op) <= 2: return '.'.join([str(y).split(".")[1] for y in op][::-1])
   if len(op) <= 4: return '.'.join([str(y).split(".")[1][0:3] for y in op][::-1])
   return str(len(op))
 
-def log_op(ret : DeviceBuffer, ast : LazyOp, show_graph : Optional[bool] = None):
+def log_op(ret: DeviceBuffer, ast: LazyOp, show_graph: Optional[bool] = None):
   if show_graph is None: show_graph = GRAPH
   if not DEBUG and not show_graph: return
-  op : List[Op] = [x.op for x in get_lazyops(ast)]
-  inp : List[DeviceBuffer] = get_buffers(ast)
+  op: List[Op] = [x.op for x in get_lazyops(ast)]
+  inp: List[DeviceBuffer] = get_buffers(ast)
   if len(inp) == 1 and inp[0] == ret:
     if show_graph and nm(ret) in G.nodes: G.nodes[nm(ret)]['style'] += ', bold'
     return   # don't log self loops

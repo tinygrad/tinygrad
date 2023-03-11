@@ -21,9 +21,9 @@ DEBUG, IMAGE = getenv("DEBUG", 0), getenv("IMAGE", 0)
 # **** tinygrad now supports dtypes! *****
 
 class DType(NamedTuple):
-  itemsize : int
-  name : str
-  np : type  # TODO: someday this will be removed with the "remove numpy" project
+  itemsize: int
+  name: str
+  np: type  # TODO: someday this will be removed with the "remove numpy" project
   def __repr__(self): return f"dtypes.{self.name}"
 
 class dtypes:

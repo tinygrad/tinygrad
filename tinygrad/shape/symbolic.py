@@ -22,7 +22,7 @@ class Node:
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
   def __repr__(self): return f"<{self.key}>"
-  def __eq__(self, other:object) -> bool: return self.key == other.key if isinstance(other, Node) else NotImplemented
+  def __eq__(self, other:object): return self.key == other.key if isinstance(other, Node) else NotImplemented
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:Union[Node, int]): return self+-b
@@ -173,7 +173,7 @@ class ModNode(OpNode):
 class SumNode(RedNode): minmax = staticmethod(lambda nodes: (sum([x.min for x in nodes]), sum([x.max for x in nodes])))
 class AndNode(RedNode): minmax = staticmethod(lambda nodes: (min([x.min for x in nodes]), max([x.max for x in nodes])))
 
-render_python : Dict[Type, Callable] = {
+render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}<{self.min},{self.max}>" if ctx == "DEBUG" else f"{self.expr}",
   NumNode: lambda self,ops,ctx: f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{self.b})",

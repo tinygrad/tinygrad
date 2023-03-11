@@ -78,7 +78,7 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   # TODO: mask should be a boolean tensor
   if not training_mode: return data, Tensor.ones(*data.shape)  # if mask is requested as output it will contain all ones.
   if seed is not None: Tensor.manual_seed(seed)
-  _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-ratio, size=data.shape), dtype=data.dtype)
+  _mask: np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-ratio, size=data.shape), dtype=data.dtype)
   mask = Tensor(_mask, requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 

@@ -16,7 +16,7 @@ LAZY = getenv("LAZY", 1)
 class _Device:
   def __init__(self) -> None:
     self._buffers = {y.upper():y for y in [os.path.splitext(x)[0][len("ops_"):] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "runtime"))) if x.startswith("ops_")]}
-    self.DEFAULT : str = functools.reduce(lambda val, ele: val if getenv(val) == 1 else ele, self._buffers, "CPU")
+    self.DEFAULT: str = functools.reduce(lambda val, ele: val if getenv(val) == 1 else ele, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, x: str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f"tinygrad.runtime.ops_{self._buffers[x]}"), inspect.isclass) if (cname.lower() == f"{self._buffers[x]}buffer")][0]
 Device = _Device()
@@ -37,10 +37,10 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(self:LazyBuffer) -> LazyOp:
-  real_srcs : Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in get_buffers(self.op)}
+  real_srcs: Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in get_buffers(self.op)}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
-  psrcs : List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
-  intermediate_shape : Tuple[int, ...] = self.shape
+  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+  intermediate_shape: Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if psrcs[0][1].optype == ReduceOps:
       top = _ast_reduceops(psrcs[0][1])
@@ -82,7 +82,7 @@ def support_weakref(x): return x
 @support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
 class LazyBuffer:
   __deletable__ = ('op',)
-  lazycache : ClassVar[WeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer]] = WeakValueDictionary()
+  lazycache: ClassVar[WeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer]] = WeakValueDictionary()
   def __new__(cls, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp, dtype:DType):
     # fromcpu aren't cached
     if optype == LoadOps and op.op == LoadOps.FROMCPU:
@@ -98,11 +98,11 @@ class LazyBuffer:
       return  # cache hit, we return and don't reinit
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape, self.optype, self.op, self.dtype = self.st.shape, optype, op, dtype
-    self.realized : Optional[DeviceBuffer] = None
-    self.output_buffer : Optional[DeviceBuffer] = None
+    self.realized: Optional[DeviceBuffer] = None
+    self.output_buffer: Optional[DeviceBuffer] = None
     self.device, self.dbuffer = device, Device[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children : weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
+    self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
@@ -210,7 +210,7 @@ class LazyBuffer:
     # move permutes before reshapes if we can
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
       if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
-        new_arg : List[int] = functools.reduce(lambda r, x: r + shape_idx_groups[x], arg, [])
+        new_arg: List[int] = functools.reduce(lambda r, x: r + shape_idx_groups[x], arg, [])
         self.op.src[0].children.discard(self)   # this changes nothing?
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
