@@ -55,6 +55,11 @@ class RawBufferCopyIn(RawBuffer):
     ret.copyin(x)
     return ret
 
+class RawBufferMapped(RawBufferCopyIn):
+  def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
+  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=self.dtype.np)
+  def copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
+
 class RawBufferCopyInOut(RawBufferCopyIn):
   def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
@@ -130,7 +135,9 @@ class ASTRunner:
     if DEBUG >= 1:
       print(f"*** {GlobalCounters.kernel_count:4d} {self.name:20s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS, {self.mem_estimate/(et*1e9):6.2f} GB/s)"))
-    GlobalCounters.log_kernel(self.op_estimate, self.mem_estimate)
+    GlobalCounters.kernel_count += 1
+    GlobalCounters.global_ops += self.op_estimate
+    GlobalCounters.global_mem += self.mem_estimate
     if getenv("EARLY_STOPPING") and GlobalCounters.kernel_count == getenv("EARLY_STOPPING"): exit(0)
     return et
 
@@ -216,8 +223,3 @@ class GlobalCounters:
   cache : ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
-  @staticmethod
-  def log_kernel(op_estimate:int, mem_estimate:int):
-    GlobalCounters.kernel_count += 1
-    GlobalCounters.global_ops += op_estimate
-    GlobalCounters.global_mem += mem_estimate
