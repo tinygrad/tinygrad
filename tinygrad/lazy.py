@@ -16,7 +16,7 @@ LAZY = getenv("LAZY", 1)
 class _Device:
   def __init__(self) -> None:
     self._buffers = {y.upper():y for y in [os.path.splitext(x)[0][len("ops_"):] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "runtime"))) if x.startswith("ops_")]}
-    self.DEFAULT : str = functools.reduce(lambda val, ele: val if getenv(val) == 1 else ele, self._buffers, "CPU")
+    self.DEFAULT : str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{self._buffers[x]}'), inspect.isclass) if (cname.lower() == self._buffers[x] + "buffer")][0]
 Device = _Device()
@@ -73,7 +73,7 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
 
 class LazyNumpyArray:
   def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
-  def __call__(self): return self.fxn(self.shape, self.dtype)
+  def __call__(self): return self.fxn(self)
   def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
   def copy(self): return self
   def astype(self, typ): return self

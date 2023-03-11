@@ -133,11 +133,11 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape, dtype: Tensor._rng.random(size=shape, dtype=dtype), shape, np.float32), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape, dtype: Tensor._rng.standard_normal(size=shape, dtype=dtype), shape, np.float32), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # ***** rng hlops *****
 

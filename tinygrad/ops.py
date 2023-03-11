@@ -44,7 +44,7 @@ class RawBuffer(Copyable):  # pylint: disable=abstract-method
     self.dtype : DType = dtype
     self._memsz : int = size*dtype.itemsize
     GlobalCounters.mem_used += self._memsz
-  def __del__(self): GlobalCounters.mem_used -= self.size*self._memsz
+  def __del__(self): GlobalCounters.mem_used -= self._memsz
 
 class RawBufferCopyIn(RawBuffer):
   def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
