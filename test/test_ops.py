@@ -67,7 +67,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x,y: fxn(x,2), lambda x,y: fxn(x,2), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
     if reverse: helper_test_op(None, lambda x,y: fxn(2,y), lambda x,y: fxn(2,y), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
 
-  def test_cmp_eq(self): self._test_cmp(lambda x,y: x.eq(y), reverse=False)
+  def test_cmp_eq(self): self._test_cmp(lambda x,y: x==y, reverse=False)
   def test_cmp_gt(self): self._test_cmp(lambda x,y: x>y)
   def test_cmp_ge(self): self._test_cmp(lambda x,y: x>=y)
   def test_cmp_lt(self): self._test_cmp(lambda x,y: x<y)
