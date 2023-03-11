@@ -452,11 +452,10 @@ class Tensor:
 
   # ***** cast ops *****
 
-  # TODO: this is a hack, but if we add float(0), it will become a float. need real casting support
-  def float(self) -> Tensor: return self.type(dtypes.float32) # self.add(Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad))
+  def float(self) -> Tensor: return self.type(dtypes.float32)
   def half(self) -> Tensor: return self.type(dtypes.float16)
   def type(self, dtype:Optional[DType]=None): 
-    if dtype == None or self.dtype == dtype: return self
+    if dtype is None or self.dtype == dtype: return self
     return Tensor(self.detach().numpy(), device=self.device, dtype=dtype, requires_grad=self.requires_grad)
 
 
