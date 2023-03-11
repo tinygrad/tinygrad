@@ -90,7 +90,7 @@ class Tensor:
     self.lazydata = x.lazydata
     return self
 
-  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
+  def detach(self): return Tensor(self.lazydata, dtype=self.dtype, device=self.device, requires_grad=False)
   def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
 
   # TODO: if things are realized this won't work
@@ -171,14 +171,13 @@ class Tensor:
 
     # fill in the first grad with one
     # this is "implicit gradient creation"
-    self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
-
+    self.grad = Tensor.ones(*self.shape, dtype=self.dtype, device=self.device, requires_grad=False)
     for t0 in reversed(self.deepwalk()):
       if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
-      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+      grads = [Tensor(g, dtype=self.dtype, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
@@ -383,7 +382,7 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    x,y = [Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
+    x,y = [Tensor([t], dtype=self.dtype, device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
@@ -454,7 +453,12 @@ class Tensor:
   # ***** cast ops *****
 
   # TODO: this is a hack, but if we add float(0), it will become a float. need real casting support
-  def float(self) -> Tensor: return self.add(Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad))
+  def float(self) -> Tensor: return self.type(dtypes.float32) # self.add(Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad))
+  def half(self) -> Tensor: return self.type(dtypes.float16)
+  def type(self, dtype:Optional[DType]=None): 
+    if dtype == None or self.dtype == dtype: return self
+    return Tensor(self.detach().numpy(), device=self.device, dtype=dtype, requires_grad=self.requires_grad)
+
 
 # register functions to move between devices
 for device in Device._buffers:
