@@ -94,8 +94,6 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   return View(vm1.shape, tuple(new_strides), new_offset.b) if len(new_strides) == len(vm1.strides) else None
 
 class ShapeTracker:
-  dispatch : Dict[MovementOps, Callable]
-
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
     self.views : List[ViewTypes] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
@@ -204,11 +202,11 @@ class ShapeTracker:
 
   def movement_op(self, op, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
     assert isinstance(arg, tuple) and (len(arg) == len(self.shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.shape}"
-    ShapeTracker.dispatch[op](self, arg)
+    dispatch[op](self, arg)
     return self
 
-# populate dispatch
-ShapeTracker.dispatch = {op:getattr(ShapeTracker, "_"+str(op).split(".")[1].lower()) for op in MovementOps}
+dispatch : Dict[MovementOps, Callable] = {MovementOps.RESHAPE: ShapeTracker._reshape, MovementOps.EXPAND: ShapeTracker._expand, MovementOps.PAD: ShapeTracker._pad,
+                                          MovementOps.SHRINK: ShapeTracker._shrink, MovementOps.PERMUTE: ShapeTracker._permute, MovementOps.STRIDE: ShapeTracker._stride}
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
