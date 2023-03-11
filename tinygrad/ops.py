@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set, Final
+from typing import Union, Type, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set, Final
 from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
 from tinygrad.shape import ShapeTracker, MovementOps
 
@@ -17,12 +17,9 @@ class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto(); TOCPU = auto(); CUST
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
 
-class LazyOp(NamedTuple):
-  op: Op
-  # Any == Union[LazyOp, LazyBuffer, DeviceBuffer]
-  src: Tuple[Any, ...]  # type: ignore
-  arg: Any = None
-  # TODO: add dest to support multiple outputs
+# was a NamedTuple, but typeguard didn't like that
+class LazyOp:
+  def __init__(self, op:Op, src:Tuple[Any, ...], arg:Any = None): self.op, self.src, self.arg = op, src, arg
 
 # Any == Union[LazyBuffer, DeviceBuffer]
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
@@ -123,7 +120,7 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg)
     return self
 
-  def exec(self, bufs:List[CompiledBuffer]) -> Optional[float]:
+  def exec(self, bufs:List[Optional[CompiledBuffer]]) -> Optional[float]:
     rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))

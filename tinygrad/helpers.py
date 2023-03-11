@@ -26,8 +26,15 @@ class DType(NamedTuple):
   np : type  # TODO: someday this will be removed with the "remove numpy" project
   def __repr__(self): return f"dtypes.{self.name}"
 
+class LazyNumpyArray:
+  def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
+  def __call__(self): return self.fxn(self)
+  def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
+  def copy(self): return self
+  def astype(self, typ): return self
+
 class dtypes:
   float16 : Final[DType] = DType(2, "half", np.float16)
   float32 : Final[DType] = DType(4, "float", np.float32)
   @staticmethod
-  def from_np(x:np.ndarray) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]
+  def from_np(x:Union[LazyNumpyArray, np.ndarray]) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]
