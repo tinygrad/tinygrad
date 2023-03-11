@@ -1,6 +1,4 @@
 import os, time, ctypes, hashlib, subprocess, platform
-from collections import defaultdict
-from typing import Final, Dict
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import CompiledBuffer, RawBufferMapped
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
@@ -12,7 +10,6 @@ class RawMallocBuffer(RawBufferMapped):
   def _buffer(self): return memoryview(self._buf)
 
 class ClangProgram:
-  kernel_cnt : Final[Dict[str, int]] = defaultdict(int)
   def __init__(self, name:str, prg:str):
     prg = "#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define half __fp16\n" + prg
     # TODO: is there a way to not write this to disk?
