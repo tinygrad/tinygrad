@@ -9,7 +9,7 @@ from tinygrad.ops import CompiledBuffer, RawBufferMapped
 METAL_XCODE = getenv("METAL_XCODE")
 
 class _METAL:
-  mtl_buffers_in_flight : Final[List[Any]] = []
+  mtl_buffers_in_flight: Final[List[Any]] = []
   @functools.cached_property
   def device(self) -> Any:
     return Metal.MTLCreateSystemDefaultDevice()

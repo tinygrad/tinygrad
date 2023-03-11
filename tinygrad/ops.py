@@ -39,9 +39,9 @@ class Copyable:
 
 class RawBuffer(Copyable):  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType):
-    self.size : int = size
-    self.dtype : DType = dtype
-    self._memsz : int = size*dtype.itemsize
+    self.size: int = size
+    self.dtype: DType = dtype
+    self._memsz: int = size*dtype.itemsize
     GlobalCounters.mem_used += self._memsz
   def __del__(self): GlobalCounters.mem_used -= self._memsz
 
@@ -81,7 +81,7 @@ class GenericShape:
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
-shape_fxn_for_op : Dict[Op, Callable] = {
+shape_fxn_for_op: Dict[Op, Callable] = {
   **{op:lambda self: GenericShape(self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
   **{op:lambda self,y: GenericShape(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: GenericShape(new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
@@ -90,7 +90,7 @@ def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({
 
 # used in CPUBuffer and TorchBuffer
 class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  fxn_for_op : ClassVar = shape_fxn_for_op
+  fxn_for_op: ClassVar = shape_fxn_for_op
   def __init__(self, lbuf:Any): self._buf, self.shape, self.dtype = lbuf, tuple(lbuf.shape), self.to_tinygrad_dtype(lbuf) if hasattr(self, 'to_tinygrad_dtype') else lbuf.dtype
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self._buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self._buf, op.name.lower())(arg))
@@ -162,15 +162,15 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     self.shape = self.st.shape
     self.dtype = dtype
     assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"
-    self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
+    self._base_shape: Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
-    self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
+    self._backing: Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     assert self._backing is None or dtypes.from_np(self._backing) == dtype, f"backing dtype {dtypes.from_np(self._backing)} != {dtype}"
     if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
 
   def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__}), dtype={self.dtype}), dtype={self.dtype})" if self._backing is not None else f", force_create=True, dtype={self.dtype}), dtype={self.dtype})")
 
-  raw_buffer_type : ClassVar[Type[RawBuffer]]
+  raw_buffer_type: ClassVar[Type[RawBuffer]]
   @classmethod
   def create_raw_buffer(cls, shape:Tuple[int, ...], backing:Optional[np.ndarray], dtype:DType) -> RawBuffer:
     assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
@@ -191,10 +191,10 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if DEBUG >= 3: print(f"**** copy out {self.shape}")
     return self.contiguous().raw().toCPU().reshape(self.shape)
 
-  codegen_type : ClassVar[Any]
-  runtime_type : ClassVar[Type]
+  codegen_type: ClassVar[Any]
+  runtime_type: ClassVar[Type]
 
-  method_cache : Final[Dict[str, ASTRunner]] = {}
+  method_cache: Final[Dict[str, ASTRunner]] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
     k = cls.codegen_type(ast, output_buffer)
@@ -215,11 +215,11 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), hostbuf=self, dtype=self.dtype)
 
 class GlobalCounters:
-  global_ops : ClassVar[int] = 0
-  global_mem : ClassVar[int] = 0
-  time_sum_s : ClassVar[float] = 0.0
-  kernel_count : ClassVar[int] = 0
-  mem_used : ClassVar[int] = 0   # NOTE: this is not reset
-  cache : ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
+  global_ops: ClassVar[int] = 0
+  global_mem: ClassVar[int] = 0
+  time_sum_s: ClassVar[float] = 0.0
+  kernel_count: ClassVar[int] = 0
+  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None

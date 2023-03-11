@@ -9,9 +9,9 @@ from tinygrad.codegen.llvm import LLVMCodegen
 import llvmlite.binding as llvm  # type: ignore
 
 class LLVM:
-  target_machine : ClassVar[llvm.targets.TargetMachine] = None
-  engine : ClassVar[llvm.executionengine.ExecutionEngine] = None
-  optimizer : ClassVar[llvm.passmanagers.ModulePassManager] = None
+  target_machine: ClassVar[llvm.targets.TargetMachine] = None
+  engine: ClassVar[llvm.executionengine.ExecutionEngine] = None
+  optimizer: ClassVar[llvm.passmanagers.ModulePassManager] = None
 
   def __init__(self):
     if LLVM.engine is not None: return
