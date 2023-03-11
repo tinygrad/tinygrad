@@ -25,6 +25,7 @@ class GPULanguage(NamedTuple):
   lid : List[str] = []
   extra_args : List[str] = []
   float4 : Optional[str] = None
+  half_prekernel : Optional[str] = None
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -266,6 +267,8 @@ class GPUCodegen(ASTKernel):
     self.prekernel : Set[str] = set()
     self.kernel : List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
 
+    if self.lang.half_prekernel: self.prekernel.add(self.lang.half_prekernel+"\n")
+
     if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
     else:
@@ -320,7 +323,7 @@ class GPUCodegen(ASTKernel):
     self.kernel.append("\n}")
 
     # concat kernel into prg
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype()+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
     prg = ' '.join(list(self.prekernel) + [f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
       [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] +
       [") {\n"] + self.kernel)

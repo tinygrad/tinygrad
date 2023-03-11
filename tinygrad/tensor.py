@@ -3,7 +3,7 @@ from __future__ import annotations
 import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten
+from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten, DType, dtypes
 from tinygrad.lazy import Device, LazyBuffer, LazyNumpyArray
 from tinygrad.image import image_conv2d_decorator, image_dot_decorator
 
@@ -32,18 +32,20 @@ class Tensor:
   __deletable__ = ('_ctx',)
   training : ClassVar[bool] = False
   no_grad : ClassVar[bool] = False
+  default_type : DType = dtypes.float32
 
-  def __init__(self, data, device=Device.DEFAULT, requires_grad:Optional[bool]=None):
+  def __init__(self, data, device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
-      data = np.array(data, dtype=np.float32)
+      data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
-      self.lazydata = LazyBuffer.fromCPU(data.astype(np.float32), device)
+      self.lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
     elif isinstance(data, LazyBuffer):
+      assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data
     else:
       raise RuntimeError(f"can't create Tensor from {data}")
@@ -64,12 +66,11 @@ class Tensor:
   @property
   def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
 
-  # dtype handling was very broken. it's always float32 now
-  @property
-  def dtype(self) -> type: return np.float32
-
   @property
   def device(self) -> str: return self.lazydata.device
+
+  @property
+  def dtype(self) -> DType: return self.lazydata.dtype
 
   # ***** data handlers ****
 
@@ -132,11 +133,11 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape: Tensor._rng.random(size=shape, dtype=np.float32), shape), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape, dtype: Tensor._rng.random(size=shape, dtype=dtype), shape, np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape: Tensor._rng.standard_normal(size=shape, dtype=np.float32), shape), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda shape, dtype: Tensor._rng.standard_normal(size=shape, dtype=dtype), shape, np.float32), **kwargs)
 
   # ***** rng hlops *****
 
@@ -442,10 +443,16 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
-    _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=self.dtype)
+    # TODO: why is this going through numpy?
+    _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
     return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
 
+  # ***** cast ops *****
+
+  # TODO: this is a hack, but if we add float(0), it will become a float. need real casting support
+  def float(self) -> Tensor: return self.add(Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad))
+
 # register functions to move between devices
-for device in [device for device in Device._buffers.keys() if device[0] != "_"]:
+for device in Device._buffers:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))

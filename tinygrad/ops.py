@@ -3,7 +3,7 @@ import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set
-from tinygrad.helpers import prod, DEBUG, getenv
+from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
 from tinygrad.shape import ShapeTracker
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -39,17 +39,19 @@ class Copyable:
   def toCPU(self:Copyable) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBuffer(Copyable):  # pylint: disable=abstract-method
-  def __init__(self, size:int):
+  def __init__(self, size:int, dtype:DType):
     self.size : int = size
-    GlobalCounters.mem_used += self.size
-  def __del__(self): GlobalCounters.mem_used -= self.size
+    self.dtype : DType = dtype
+    self._memsz : int = size*dtype.itemsize
+    GlobalCounters.mem_used += self._memsz
+  def __del__(self): GlobalCounters.mem_used -= self.size*self._memsz
 
 class RawBufferCopyIn(RawBuffer):
   def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod
   def fromCPU(cls, x:np.ndarray):
-    ret = cls(4*prod(x.shape))
+    ret = cls(prod(x.shape), dtypes.from_np(x))
     ret.copyin(x)
     return ret
 
@@ -57,7 +59,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
   def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   def toCPU(self) -> np.ndarray:
-    x = np.empty((self.size//4), dtype=np.float32)
+    x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
     self.copyout(x)
     return x
 
@@ -65,26 +67,27 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 class DeviceBuffer(Copyable):
   _buf: Any                # underlying buffer
   shape: Tuple[int, ...]
+  dtype: DType
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
 
 # this is a quick "buffer" class for flop tracking and getting the output shape
 class GenericShape:
-  def __init__(self, shape:Tuple[int, ...], flops:int=0): self.shape, self.flops = shape, flops
+  def __init__(self, shape:Tuple[int, ...], dtype:DType=dtypes.float32, flops:int=0): self.shape, self.dtype, self.flops = shape, dtype, flops
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
 shape_fxn_for_op : Dict[Op, Callable] = {
-  **{op:lambda self: GenericShape(self.shape, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
-  **{op:lambda self,y: GenericShape(self.shape, self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
-  **{op:lambda self,new_shape: GenericShape(new_shape, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
-  **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.consume_flops()), op) for op in MovementOps}}
+  **{op:lambda self: GenericShape(self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
+  **{op:lambda self,y: GenericShape(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
+  **{op:lambda self,new_shape: GenericShape(new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
+  **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
+def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape, x.dtype)) for x in get_buffers(ast)}, ast))._buf
 
 # used in CPUBuffer and TorchBuffer
 class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   fxn_for_op : ClassVar = shape_fxn_for_op
-  # TODO: use generic types here to remove __init__ in specialized classes
-  def __init__(self, lbuf:Any): self._buf, self.shape = lbuf, tuple(lbuf.shape)
+  def __init__(self, lbuf:Any): self._buf, self.shape, self.dtype = lbuf, tuple(lbuf.shape), self.to_tinygrad_dtype(lbuf) if hasattr(self, 'to_tinygrad_dtype') else lbuf.dtype
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self._buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self._buf, op.name.lower())(arg))
   @classmethod
@@ -101,12 +104,11 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     else: ret = cls(cls.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg else []))))
     context[ast] = ret
     if output_buffer is not None:
-      assert output_buffer.shape == ret.shape
+      assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
       output_buffer._buf = ret._buf
       return output_buffer
     else:
       return ret
-def get_lazyop_info(ast:LazyOp): return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape)) for x in get_buffers(ast)}, ast))._buf
 
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
@@ -139,7 +141,7 @@ class ASTRunner:
   def optimize_local_size(self, rawbufs:List[RawBuffer]) -> List[int]:
     assert self.global_size is not None, "needs a global size to optimize local size"
     if any(x == rawbufs[0] for x in rawbufs[1:]):  # this is an assignment, replace the output buffer
-      output_replacement = type(rawbufs[0])(rawbufs[0].size)
+      output_replacement = type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype)
       rawbufs = [output_replacement if x == rawbufs[0] else x for x in rawbufs]
     MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
     local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
@@ -149,32 +151,36 @@ class ASTRunner:
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
 class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False):
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape = self.st.shape
+    self.dtype = dtype
+    assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"
     self._base_shape : Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None
     self._backing : Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
 
   # TODO: not GPUBuffer, get name of class
-  def __repr__(self): return f"GPUBuffer(shape={self.st}, hostbuf=GPUBuffer(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.float32)))" if self._backing else ", force_create=True))")
+  # TODO: needs dtype
+  def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__})))" if self._backing is not None else ", force_create=True))")
 
   raw_buffer_type : Type[RawBuffer]
   @classmethod
-  def create_raw_buffer(cls, shape, backing) -> RawBuffer:
+  def create_raw_buffer(cls, shape:Tuple[int, ...], backing:Optional[np.ndarray], dtype:DType) -> RawBuffer:
     assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
     assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
-    return cls.raw_buffer_type(4*prod(shape)) if backing is None else cls.raw_buffer_type.fromCPU(backing)
+    if DEBUG >= 4: print(f"create raw buffer {shape} {dtype} backed:{backing is not None}")
+    return cls.raw_buffer_type(prod(shape), dtype) if backing is None else cls.raw_buffer_type.fromCPU(backing)
   def raw(self) -> RawBuffer:
     if self._buf is None:
       if DEBUG >= 4 and self._backing is not None: print(f"**** copy in {self._backing.shape} to {type(self)}")
-      self._buf = self.create_raw_buffer(self._base_shape, self._backing)
+      self._buf = self.create_raw_buffer(self._base_shape, self._backing, self.dtype)
       self._backing = None
     return self._buf
 
   @classmethod
-  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.view(np.ndarray).astype(np.float32).ravel())
+  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.ravel(), dtype=dtypes.from_np(x))
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     if DEBUG >= 3: print(f"**** copy out {self.shape}")
@@ -192,7 +198,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       prg = cls.method_cache[k.key]
     else:
       prg = k.codegen().build(cls.runtime_type)
-    if getenv("PRINT_AST", "") == prg.name:
+    if getenv("PRINT_AST", "") == prg.name or getenv("PRINT_AST", "") == "1":
       k.print()
       print(prg.prg)
     prg.exec(k.bufs)

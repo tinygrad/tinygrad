@@ -8,9 +8,9 @@ from tinygrad.ops import CompiledBuffer, RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawCUDABuffer(RawBufferCopyInOut):
-  def __init__(self, size):
-    super().__init__(size)
-    self._cl = cuda.mem_alloc(size)
+  def __init__(self, size, dtype):
+    super().__init__(size, dtype)
+    self._cl = cuda.mem_alloc(self._memsz)
   def copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
   def copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
 
@@ -42,6 +42,7 @@ class CUDAProgram:
 class CUDACodegen(GPUCodegen):
   lang = GPULanguage(
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    half_prekernel = "#include <cuda_fp16.h>",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 

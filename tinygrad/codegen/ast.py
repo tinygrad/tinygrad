@@ -1,7 +1,7 @@
 import itertools
 from enum import Enum, auto
 from typing import List, Tuple
-from tinygrad.helpers import prod, dedup, all_same, colored
+from tinygrad.helpers import prod, dedup, all_same, colored, dtypes
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops, map_buffers
 from tinygrad.shape import ShapeTracker, View, strides_for_shape
 
@@ -26,7 +26,7 @@ class Token:
     if len(self.axis) == 0: return [0]
     acc_strides = [x*(1-self.axis[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.axis[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.axis[::-1])])]
-  def decltype(self): return ('float' if self.typ == Types.FLOAT else 'float4') + ('*' if self.ptr else str())
+  def decltype(self, dtype=dtypes.float32): return (dtype.name if self.typ == Types.FLOAT else f'{dtype.name}4') + ('*' if self.ptr else str())
   def __repr__(self): return f"<{self.typ}{'*' if self.ptr else str()} {self.tok}{f'[{self.axis}]' if len(self.axis) else str()}>"
 
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
@@ -55,8 +55,9 @@ class ASTKernel:
           break
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
-    self.ret = output_buffer if output_buffer else type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True)
-    self.bufs = ([type(self.ret)(self.info.shape, hostbuf=self.ret)] if output_shape else [self.ret]) + self.bufs
+    self.ret = output_buffer if output_buffer else type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True, dtype=self.info.dtype)
+    assert self.ret.dtype == self.info.dtype, f"return dtype {self.ret.dtype} != {self.info.dtype}"
+    self.bufs = ([type(self.ret)(self.info.shape, hostbuf=self.ret, dtype=self.info.dtype)] if output_shape else [self.ret]) + self.bufs
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -121,7 +122,7 @@ class ASTKernel:
     if print_shapetrackers:
       for st in self.sts: print(st)
     for i in range(len(self.sts)):
-      print(prefix, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
+      print(prefix, self.bufs[i].dtype, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)

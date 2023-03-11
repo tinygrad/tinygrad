@@ -1,5 +1,6 @@
 import os, math, functools
-from typing import Tuple, Union, List
+import numpy as np
+from typing import Tuple, Union, List, NamedTuple
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
@@ -16,3 +17,17 @@ def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 DEBUG, IMAGE = getenv("DEBUG", 0), getenv("IMAGE", 0)
+
+# **** tinygrad now supports dtypes! *****
+
+class DType(NamedTuple):
+  itemsize : int
+  name : str
+  np : type  # TODO: someday this will be removed with the "remove numpy" project
+  def __repr__(self): return f"dtypes.{self.name}"
+
+class dtypes:
+  float16 = half = DType(2, "half", np.float16)
+  float32 = float = DType(4, "float", np.float32)
+  @staticmethod
+  def from_np(x:np.ndarray) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]
