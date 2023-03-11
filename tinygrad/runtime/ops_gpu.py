@@ -81,7 +81,7 @@ class GPUBuffer(CompiledBuffer):
   # override this method for image
   @classmethod
   def create_raw_buffer(cls, shape, backing, dtype) -> RawBuffer:
-    if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)
+    if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)   # NOTE: this is a hack. we don't pass in the dtype here, it's controlled by the FLOAT16 env var
     else: return super().create_raw_buffer(shape, backing, dtype)
   codegen_type = CLCodegen
   runtime_type = CLProgram

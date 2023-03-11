@@ -1,4 +1,4 @@
-# this can be constructed from a cl_cache or loaded from a thneed file 
+# this can be constructed from a cl_cache or loaded from a thneed file
 import time
 import struct
 import json
@@ -26,7 +26,7 @@ class Thneed:
       for a in args[3:]:
         nodes[a]['out_edges'].append(args[2])
         nodes[args[2]]['in_edges'].append(a)
-    
+
     # get buffers to save
     self.buffers_to_save = set()
     self.outputs = []
@@ -35,7 +35,7 @@ class Thneed:
         self.buffers_to_save.add(n)
       if len(nodes[n]['out_edges']) == 0:
         self.outputs.append(n)
-  
+
     fake_inputs = []
     for k,n in self.inputs.items():
       if n in self.buffers_to_save:
@@ -97,7 +97,7 @@ class Thneed:
         else:
           # zero out buffers
           buf = cl.Buffer(CL.cl_ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=b'\x00'*o['size'])
-        
+
       bufs[o['id']] = buf
       bufs_loaded[o['id']] = 'data' in o
       # if it's loaded, it's saved
@@ -114,13 +114,13 @@ class Thneed:
         print("FAILED", k)
         traceback.print_exc()
         exit(0)
-    
+
     # load binaries
     for o in jdat['binaries']:
       nptr = ptr + o['length']
       prgs[o['name']] = CLProgram(o['name'], weights[ptr:nptr], binary=True)
       ptr = nptr
-  
+
     # populate the cl_cache
     for i,k in enumerate(jdat['kernels']):
       kernel = prgs[k['name']]
@@ -166,7 +166,7 @@ class Thneed:
         jdat['binaries'].append({"name":prg.name, "length":len(binary[0])})
         binaries.append(binary[0])
         saved_binaries.add(prg.name)
-      
+
       # get the args from the kernel, some need the data saved
       targs, args_size = [], []
       argdtypes = prg.argdtypes if prg.argdtypes is not None else [None]*(len(args)-2)
@@ -196,6 +196,7 @@ class Thneed:
                 cl.enqueue_copy(CL.cl_queue, data, a, is_blocking=True)
                 weights.append(data.tobytes())
             elif isinstance(a, cl.Image):
+              assert a.format == cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT), "wrong type"
               needs_load = a in self.buffers_to_save
               row_pitch = (a.shape[0]*4*(2 if FLOAT16 else 4) + 63)//64 * 64
               size = row_pitch * a.shape[1]
@@ -244,7 +245,7 @@ class Thneed:
         "local_work_size": [1 for _ in args[0]] if args[1] is None else args[1],
         "num_args": len(args)-2,
         "args": targs,
-        "args_size": args_size 
+        "args_size": args_size
       })
 
     jdat['outputs'] = [{
