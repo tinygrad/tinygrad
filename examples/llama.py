@@ -191,6 +191,7 @@ if __name__ == "__main__":
 
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
+  parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
   parser.add_argument('--large', action='store_true', help="Use the 13B model instead of the 7B one")
   args = parser.parse_args()
   chatbot = args.prompt == None
@@ -342,6 +343,10 @@ After you are done speaking, output [EOS]. You are not the User.
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
+  if args.profile:
+    import cProfile, pstats
+    profiler = cProfile.Profile()
+
   # chatbot loop
   while 1:
     # add tokens from user in chatbot mode
@@ -356,6 +361,8 @@ After you are done speaking, output [EOS]. You are not the User.
 
     last_break = len(outputted)
     for i in range(args.count):
+      if args.profile and i == 2: profiler.enable()
+
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
       with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
@@ -379,3 +386,7 @@ After you are done speaking, output [EOS]. You are not the User.
       if chatbot and outputted.endswith(end_delim): break
     if not chatbot: break
 
+  if args.profile:
+    profiler.disable()
+    stats = pstats.Stats(profiler)
+    stats.dump_stats('out.prof')
