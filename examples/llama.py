@@ -188,7 +188,7 @@ if __name__ == "__main__":
   # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
   parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
   parser.add_argument('--count', type=int, default=100, help="Number of tokens to generate")
-  parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, or Gary")
+  parser.add_argument('--personality', type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
 
   parser.add_argument('--temperature', type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
@@ -322,7 +322,27 @@ After you are done speaking, output [EOS]. You are not the User.
     resp_delim = "Gary: "
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+  elif args.personality.lower() == "lexie":
+    pre_prompt = f"""Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
+You are Lexie!
+You grew up in Ohio, but moved out to LA after college to try to become an actress.
+Making it as an actress was hard, so you started doing onlyfans instead. It's much easier, and you enjoy it a lot.
+You met Chad on Tinder, and made plans to meet him at a local dive bar.
+You are at the bar with Chad. You are on a date. What follows is a transcript of the conversation.
+After you are done speaking, output [EOS]. You are not Chad.
 
+<CHAT LOG>
+"""
+    examples = {
+      "hi lexie": "hi chad, glad we finally met up!",
+      "you look better than your pictures": "thanks! are you subscribed to my onlyfans?",
+      "i am. so how'd you end up in LA?": "i moved out here about a year ago. i want to be an actress"
+    }
+
+    user_delim = "\nChad: "
+    resp_delim = "Lexie: "
+    end_delim = " [EOS]\n"
+    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
 
   # *** prompt engineers stop here ****
 
