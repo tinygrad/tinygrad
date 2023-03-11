@@ -619,7 +619,7 @@ if __name__ == "__main__":
     skip_if_exists=True
   )
   dat = fake_torch_load_zipped(open(FILENAME, "rb"))
-  for k,v in tqdm(dat['state_dict'].items()):
+  for k,v in dat['state_dict'].items():
     try:
       w = get_child(model, k)
     except (AttributeError, KeyError, IndexError):

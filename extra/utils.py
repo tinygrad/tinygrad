@@ -64,6 +64,8 @@ def my_unpickle(fb0):
         return np.float32
       if name == 'LongStorage':
         return np.int64
+      if name == 'IntStorage':
+        return np.int32
       if name == 'HalfStorage':
         return np.float16
       if module == "torch._utils":
