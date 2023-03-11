@@ -9,8 +9,7 @@ from tinygrad.helpers import partition, all_same
 def create_node(typ:Type[Node], *args):
   ret = typ(*args)
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {typ} {args}"
-  if ret.min == ret.max: return NumNode(ret.min)
-  return ret
+  return NumNode(ret.min) if ret.min == ret.max else ret
 
 class Node:
   b: int
@@ -22,10 +21,8 @@ class Node:
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
-  def __repr__(self): return "<"+self.key+">"
-  def __eq__(self, other:object) -> bool:
-    if not isinstance(other, Node): return NotImplemented
-    return self.key == other.key
+  def __repr__(self): return f"<{self.key}>"
+  def __eq__(self, other:object) -> bool: return self.key == other.key if isinstance(other, Node) else NotImplemented
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:Union[Node, int]): return self+-b
@@ -91,8 +88,7 @@ class Node:
     else:
       a = self
     if a.min >= 0 and a.max < b: return a
-    if a.min < 0: return (a + ((a.min//b)*b)) % b
-    return create_node(ModNode, a, b)
+    return (a + ((a.min//b)*b)) % b if a.min < 0 else create_node(ModNode, a, b)
 
   @staticmethod
   def num(num:int) -> Node: return NumNode(num)
@@ -133,8 +129,7 @@ class Node:
 class Variable(Node):
   def __new__(cls, expr:str, nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
-    if nmin == nmax: return NumNode(nmin)
-    return super().__new__(cls)
+    return NumNode(nmin) if nmin == nmax else super().__new__(cls)
 
   def __init__(self, expr:str, nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax

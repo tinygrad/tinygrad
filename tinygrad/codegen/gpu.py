@@ -132,7 +132,7 @@ class GPUCodegen(ASTKernel):
           self.kernel.append(f"{ldr.decltype()} {key} = {ldr.tok};\n")
           if should_upcast and can_merge:
             for j in range(4):
-              self.loaded_keys[(buf_index,o+j)] = Token(key+f'.{"xyzw"[j]}', Types.FLOAT)
+              self.loaded_keys[(buf_index,o+j)] = Token(f"{key}.{'xyzw'[j]}", Types.FLOAT)
           else:
             self.loaded_keys[(buf_index,o)] = Token(key, Types.FLOAT)
       tokens.append(self.loaded_keys[(buf_index,o)])
@@ -144,11 +144,10 @@ class GPUCodegen(ASTKernel):
     if isinstance(x.op, ReduceOps) and not do_reduce: return acc
     values : List[List[Token]] = ([acc] if isinstance(x.op, ReduceOps) else []) + [self.ast_parse(v, acc, do_reduce) for v in x.src]
     code = GPUCodegen.code_for_op[x.op]  # TODO: replace this with a function
-    if len(values) == 2:
-      assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
-      return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
-    else:
+    if len(values) != 2:
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
+    assert len(values[0]) == len(values[1]) and values[0][0].typ == values[1][0].typ, f"values mismatch {values}"
+    return [Token(code.replace("A", a.tok).replace("B", b.tok), a.typ) for a,b in zip(values[0], values[1])]
 
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):

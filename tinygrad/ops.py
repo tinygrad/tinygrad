@@ -102,14 +102,12 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
     else: ret = cls(cls.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg else []))))
-    context[ast] = ret
-    if output_buffer is not None:
-      assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
-      output_buffer._buf = ret._buf
-      return output_buffer
-    else:
-      return ret
-
+    context[ast] = ret  
+    if output_buffer is None: return ret
+    assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
+    output_buffer._buf = ret._buf
+    return output_buffer
+  
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
@@ -144,7 +142,7 @@ class ASTRunner:
       output_replacement = type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype)
       rawbufs = [output_replacement if x == rawbufs[0] else x for x in rawbufs]
     MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
+    local_dims = [[x for x in {sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP} if x<=sz] for sz in self.global_size]
     local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
     return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 

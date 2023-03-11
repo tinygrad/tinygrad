@@ -215,7 +215,7 @@ class Tensor:
   def __getitem__(self, val):
     def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))  # Fix negative idxs, clamp to [0,N]
     new_slice, new_shape = [], []
-    val = [val] if not isinstance(val, (list, tuple)) else val
+    val = val if isinstance(val, (list, tuple)) else [val]
     assert sum(s is not None for s in val) <= len(self.shape)
     assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
     for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
@@ -380,7 +380,7 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    x,y = [Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
+    x,y = [t if isinstance(t, Tensor) else Tensor([t], device=self.device, requires_grad=False) for t in ([other, self] if reverse else [self, other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))

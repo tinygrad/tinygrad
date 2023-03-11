@@ -119,8 +119,7 @@ class ShapeTracker:
 
   def simplify(self):
     if len(self.views) >= 2 and isinstance(self.views[-2], View) and isinstance(self.views[-1], View):
-      new_view = merge_views(self.views[-2], self.views[-1])
-      if new_view:
+      if new_view := merge_views(self.views[-2], self.views[-1]):
         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
         self.views = self.views[:-2] + [new_view]
         self.simplify()
@@ -146,16 +145,15 @@ class ShapeTracker:
 
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
-    else:
-      # NOTE: the last view in self.views is never a ZeroView
-      if (merged_view := merge_views(cast(View, self.views[-1]), view)) is not None: self.views[-1] = merged_view
-      else: self.views.append(view)
+    # NOTE: the last view in self.views is never a ZeroView
+    elif (merged_view := merge_views(cast(View, self.views[-1]), view)) is None: self.views.append(view)
+    else: self.views[-1] = merged_view
     return self
 
   def permute(self, axis : Tuple[int, ...]) -> ShapeTracker:
     assert isinstance(axis, tuple)
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
+    assert (len(set(axis)) == len(axis) == len(self.shape)), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset)
     return self
 
@@ -221,7 +219,6 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
         return None
       axis_groups[i].append(old_shape_i)
       # Move to next axes group if total size of all dimensions match.
-      if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i]:
-        if i < len(new_shape) - 1: i += 1
+      if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i] and i < len(new_shape) - 1: i += 1
       old_shape_i += 1
   return axis_groups

@@ -160,13 +160,11 @@ class LLVMCodegen(ASTKernel):
       m = kernel_output_type(ir.Undefined)
       if kernel_output_dim == 1:
         return LLVMCodegen.op_lookup[x.op](builder, *values)
-      else:
-        # TODO: this only has to be done for certain ops
-        for i in range(kernel_output_dim):
-          value = [builder.extract_element(v, int_const(i)) for v in values]
-          element = LLVMCodegen.op_lookup[x.op](builder, *value)
-          m = builder.insert_element(m, element, int_const(i))
-        return m
+      for i in range(kernel_output_dim): # TODO: this only has to be done for certain ops
+        value = [builder.extract_element(v, int_const(i)) for v in values]
+        element = LLVMCodegen.op_lookup[x.op](builder, *value)
+        m = builder.insert_element(m, element, int_const(i))
+      return m
 
     # add the ast + final store
     store_loop = output_shape.index(1) if 1 in output_shape else -1

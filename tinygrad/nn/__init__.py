@@ -79,5 +79,4 @@ class LayerNorm:
 
   def __call__(self, x:Tensor):
     x = x.layernorm(eps=self.eps, axis=self.axis)
-    if not self.elementwise_affine: return x
-    return x * self.weight + self.bias
+    return x * self.weight + self.bias if self.elementwise_affine else x
