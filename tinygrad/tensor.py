@@ -424,7 +424,7 @@ class Tensor:
   def __le__(self, x) -> Tensor: return self.maximum(x).eq(x)
   def __lt__(self, x) -> Tensor: return 1.0-(self>=x)
   def __gt__(self, x) -> Tensor: return 1.0-(self<=x)
-  def __eq__(self, x) -> Tensor: return self.eq(x)
+  def __eq__(self, x) -> Tensor: return self.eq(x) # type: ignore - expects bool but returning tensor here
   def __hash__(self): return id(self)
   # ***** functional nn ops *****
 
