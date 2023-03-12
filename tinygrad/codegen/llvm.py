@@ -137,7 +137,7 @@ class LLVMCodegen(ASTKernel):
         buf_index = self.bufs.index(x)
         for i, idx in enumerate(get_idxs(builder, idx_level[buf_index][level], buf_index)):
           # first view is already implictly handled
-          idx, valid = x.st._expr_idx(Variable(idx, 0, prod(x.st.shape)))
+          idx, valid = self.sts[buf_index]._expr_idx(Variable(idx, 0, prod(self.sts[buf_index].shape)))
           idx = idx.render(render_llvm, builder)
           if valid.min == 0:
             valid = valid.render(render_llvm, builder)
