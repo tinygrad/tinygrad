@@ -76,7 +76,7 @@ def my_unpickle(fb0):
       else:
         if module.startswith('pytorch_lightning'): return Dummy
         try:
-          return super().find_class(self, module, name)
+          return super().find_class(module, name)
         except Exception:
           return Dummy
 
