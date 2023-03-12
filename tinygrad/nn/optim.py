@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List
+from typing import List, Dict, Optional
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -79,12 +79,13 @@ class Adam(Optimizer):
       t.assign(t.detach() - a * self.m[i].div(self.v[i].sqrt() + self.eps))
     self.realize([self.t] + self.m + self.v)
 
-def get_parameters(obj) -> List[Tensor]:
-  parameters: List[Tensor] = []
-  if isinstance(obj, Tensor):
-    parameters.append(obj)
+def get_state_dict(obj, arg:Optional[List[str]]=None, _params:Optional[Dict[str, Tensor]]=None) -> Dict[str, Tensor]:
+  if arg is None or _params is None: arg, _params = [], {}
+  if isinstance(obj, Tensor): _params['.'.join(arg)] = obj
+  elif hasattr(obj, '__dict__'): get_state_dict(obj.__dict__, arg, _params)
   elif isinstance(obj, (list, tuple)):
-    for x in obj: parameters.extend(get_parameters(x))
-  elif hasattr(obj, '__dict__'):
-    for v in obj.__dict__.values(): parameters.extend(get_parameters(v))
-  return parameters
+    for i,x in enumerate(obj): get_state_dict(x, arg+[str(i)], _params)
+  elif isinstance(obj, dict):
+    for k,v in obj.items(): get_state_dict(v, arg+[k], _params)
+  return _params
+def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
