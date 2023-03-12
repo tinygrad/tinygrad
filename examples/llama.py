@@ -253,9 +253,7 @@ if __name__ == "__main__":
     # assign weights (should be free)
     for k,v in weights.items():
       if '.inner_attention.rope.freqs' in k: continue  # no rope today
-      mv = state_dict[k]
-      assert mv.shape == v.shape, f"shape mismatch in {k}, {mv.shape} != {v.shape}"
-      mv.assign(v).realize()
+      state_dict[k].assign(v).realize()
 
     del weights
 

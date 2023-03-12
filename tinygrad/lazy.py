@@ -1,10 +1,11 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
-import os, sys, weakref, importlib, inspect, functools
+import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.ops import InterpretedBuffer, DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.graph import log_op
 
 # lazy can recurse a lot
@@ -15,7 +16,8 @@ LAZY = getenv("LAZY", 1)
 
 class _Device:
   def __init__(self) -> None:
-    self._buffers = {y.upper():y for y in [os.path.splitext(x)[0][len("ops_"):] for x in sorted(os.listdir(os.path.join(os.path.dirname(os.path.realpath(__file__)), "runtime"))) if x.startswith("ops_")]}
+    #self._buffers = {y.upper():y for y in [x.stem[len("ops_"):] for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]}
+    self._buffers = {y.upper():y for y in [x.stem[len("ops_"):] for x in (pathlib.Path("/Users/kafka/fun/tinygrad/tinygrad/lazy.py").parent/"runtime").iterdir() if x.stem.startswith("ops_")]}
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{self._buffers[x]}'), inspect.isclass) if (cname.lower() == self._buffers[x] + "buffer")][0]
@@ -71,8 +73,8 @@ def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tu
   assert y.op in BinaryOps or y.op in UnaryOps
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
 
-def support_weakref(x): return x
-@support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
+def non_native_class(x): return x
+@non_native_class  # needed for mypyc, this prevents LazyBuffer from becoming a native class
 class LazyBuffer:
   __deletable__ = ('op',)
   lazycache: ClassVar[WeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer]] = WeakValueDictionary()
@@ -155,7 +157,7 @@ class LazyBuffer:
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
     ret = self.realize().toCPU()
-    log_op(InterpretedBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
+    log_op(CPUBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
     return ret.copy()
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
@@ -206,9 +208,8 @@ class LazyBuffer:
     # move permutes before reshapes if we can
     if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
       if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
-        new_arg: List[int] = functools.reduce(lambda r, x: r + shape_idx_groups[x], arg, [])
         self.op.src[0].children.discard(self)   # this changes nothing?
-        return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(new_arg)) \
+        return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(flatten(shape_idx_groups[i] for i in arg))) \
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
