@@ -114,11 +114,11 @@ class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
     self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
-    self.tok_embeddings = {"weight": Tensor.zeros(vocab_size, dim)}
+    self.tok_embeddings = {"weight": Tensor.glorot_uniform(vocab_size, dim)}
     self.output = Linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
-  def __call__(self, tokens:Tensor, start_pos:int):
+  def __call__(self, tokens:Tensor, start_pos:int, early_realize_freqs_cis:bool=True):
     _bsz, seqlen, _ = tokens.shape
     h = tokens @ self.tok_embeddings['weight']
 
@@ -128,7 +128,7 @@ class Transformer:
     # WTF!!! This changes the output, and fixes the kv caching. Most serious tinygrad bug in a while.
     # It is not fixed by disabling the method cache.
     # TODO: P0. Fix this bug. An offset is likely getting lost somewhere.
-    freqs_cis.realize()
+    if early_realize_freqs_cis: freqs_cis.realize()
 
     if seqlen > 1:
       mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)
@@ -160,9 +160,9 @@ WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..
 
 # **** helper functions ****
 
-def onehot_encode(toks):
+def onehot_encode(toks, vocab_size=VOCAB_SIZE):
   # this allows the embedding to work in tinygrad
-  onehot = np.zeros((1, len(toks), VOCAB_SIZE), dtype=np.float32)
+  onehot = np.zeros((1, len(toks), vocab_size), dtype=np.float32)
   onehot[0,range(len(toks)),toks] = 1
   return Tensor(onehot)
 
@@ -178,6 +178,8 @@ def sample(logits, temperature):
 # **** main code ****
 
 if __name__ == "__main__":
+  Tensor.no_grad = True
+
   print(f"using {Device.DEFAULT} backend")
   from sentencepiece import SentencePieceProcessor
   sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)

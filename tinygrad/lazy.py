@@ -151,10 +151,12 @@ class LazyBuffer:
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this?
   @staticmethod
   def fromCPU(x, device) -> LazyBuffer: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
+
+  # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
     ret = self.realize().toCPU()
     log_op(InterpretedBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
-    return ret
+    return ret.copy()
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
