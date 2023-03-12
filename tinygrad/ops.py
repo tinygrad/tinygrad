@@ -86,9 +86,7 @@ shape_fxn_for_op: Dict[Op, Callable] = {
   **{op:lambda self,y: GenericShape(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: GenericShape(new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
   **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
-def get_lazyop_info(ast:LazyOp) -> GenericShape:
-  buffer_map = {x:InterpretedBuffer(GenericShape(x.shape, x.dtype)) for x in get_buffers(ast)}
-  return InterpretedBuffer.exec_ast(map_buffers(buffer_map, ast))._buf
+def get_lazyop_info(ast:LazyOp) -> GenericShape: return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape, x.dtype)) for x in get_buffers(ast)}, ast))._buf
 
 # used in CPUBuffer and TorchBuffer
 class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
