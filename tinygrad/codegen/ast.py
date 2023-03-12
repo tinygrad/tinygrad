@@ -41,9 +41,7 @@ class ASTKernel:
     else:
       output_shape = None
 
-    self.info: GenericShape = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
-    for b in self.bufs: b.st.simplify()
     self.ast = ast
 
     # check if the output buffer is allowed to be used
@@ -53,6 +51,9 @@ class ASTKernel:
         if a._buf == output_buffer._buf and not a.st.contiguous:
           output_buffer = None
           break
+
+    # fetch lazyop info (this can be cached!)
+    self.info: GenericShape = get_lazyop_info(ast)
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
     self.ret = output_buffer if output_buffer else type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True, dtype=self.info.dtype)
@@ -85,6 +86,7 @@ class ASTKernel:
 
     # process
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]   # create new shapetrackers inside this kernel
+    for st in self.sts: st.simplify()
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
