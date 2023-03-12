@@ -23,6 +23,7 @@ class Optimizer:
 
   def realize(self, extra=None):
     # TODO: corealize
+    # NOTE: in extra is too late for most of the params due to issues with assign
     for p in extra + self.params + self.buffers if extra is not None else self.params + self.buffers:
       p.realize()
 
@@ -36,25 +37,26 @@ class SGD(Optimizer):
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      g = t.grad
+      g = t.grad.realize()
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)
+        self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g * self.lr)
     self.realize(self.b)
 
 class RMSprop(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, decay=0.9, eps=1e-8):
+  def __init__(self, params: List[Tensor], lr=0.001, alpha=0.99, eps=1e-8):
     super().__init__(params)
-    self.lr, self.decay, self.eps = lr, decay, eps
+    self.lr, self.alpha, self.eps = lr, alpha, eps
 
     self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
 
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      self.v[i].assign(self.decay * self.v[i] + (1.0 - self.decay) * (t.grad * t.grad))
-      t.assign(t.detach() - (t.grad * self.lr).div(self.v[i].sqrt() + self.eps))
+      g = t.grad.realize()
+      self.v[i].assign(self.alpha * self.v[i] + (1.0 - self.alpha) * (g * g)).realize()
+      t.assign(t.detach() - (g * self.lr).div(self.v[i].sqrt() + self.eps))
     self.realize(self.v)
 
 class Adam(Optimizer):
@@ -67,12 +69,13 @@ class Adam(Optimizer):
     self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
 
   def step(self) -> None:
-    self.t = self.t + 1
+    self.t.assign(self.t + 1).realize()
     a = self.lr * ((1.0 - self.b2**self.t)**0.5) / (1.0 - self.b1**self.t)
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
-      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
+      g = t.grad.realize()
+      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g).realize()
+      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).realize()
       t.assign(t.detach() - a * self.m[i].div(self.v[i].sqrt() + self.eps))
     self.realize([self.t] + self.m + self.v)
 

@@ -112,7 +112,7 @@ class TestMNIST(unittest.TestCase):
   def test_rmsprop(self):
     np.random.seed(1337)
     model = TinyBobNet()
-    optimizer = optim.RMSprop(model.parameters(), lr=0.0002)
+    optimizer = optim.RMSprop(model.parameters(), lr=0.0002, alpha=0.9)
     train(model,  X_train, Y_train, optimizer, steps=400)
     assert evaluate(model, X_test, Y_test) > 0.95
 
