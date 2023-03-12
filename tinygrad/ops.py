@@ -94,7 +94,7 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def __init__(self, lbuf:Any):
     self._buf: Any = lbuf
     self.shape: Tuple[int, ...] = tuple(lbuf.shape)
-    self.dtype: DType = self.to_tinygrad_dtype(lbuf) if hasattr(self, 'to_tinygrad_dtype') else lbuf.dtype
+    self.dtype: DType = self.to_tinygrad_dtype() if hasattr(self, 'to_tinygrad_dtype') else lbuf.dtype
     # NOTE: this is overcounting the memory used, as reshapes and stuff are aliases
     self._memsz = (prod(self.shape) * self.dtype.itemsize) if not isinstance(lbuf, GenericShape) else 0
     GlobalCounters.mem_used += self._memsz

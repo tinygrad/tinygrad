@@ -22,7 +22,7 @@ def atan2_gpu(a:CompiledBuffer, b:CompiledBuffer) -> CompiledBuffer:
     __kernel void atan2(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[prod(ret.shape)]).build(GPUBuffer.runtime_type).exec([ret, a.contiguous(), b.contiguous()])
+    }""", global_size=[prod(ret.shape)]).build(GPUBuffer.spec.runtime).exec([ret, a.contiguous(), b.contiguous()])
   return ret
 
 def atan2_cpu(a:CPUBuffer, b:CPUBuffer) -> CPUBuffer:
