@@ -110,8 +110,11 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype):
     t.lazydata.realized = t.lazydata.dbuffer(t.shape, dtype=t.dtype)
     myfile.readinto(t.lazydata.realized.raw()._buffer())
   else:
-    lna = t.lazydata.op.arg
-    lna.fxn = lambda lna: np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), lna.dtype).reshape(lna.shape)
+    def _read(lna):
+      ret = np.empty(lna.shape, dtype=lna.dtype)
+      myfile.readinto(ret.data)
+      return ret
+    t.lazydata.op.arg.fxn = _read
     t.realize()
 
 def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):

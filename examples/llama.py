@@ -13,8 +13,10 @@ from typing import Optional
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
 
-# on mac, we make METAL the default
-if platform.system() == "Darwin" and Device.DEFAULT == "CPU" and not getenv("CPU"): Device.DEFAULT = "METAL"
+# on mac, we make METAL the default. otherwise we make the GPU the default if we have one
+if not getenv("CPU") and Device.DEFAULT == "CPU":
+  if platform.system() == "Darwin" and Device["METAL"] is not None: Device.DEFAULT = "METAL"
+  elif Device["GPU"] is not None: Device.DEFAULT = "GPU"
 
 from extra.helpers import Timing
 from tinygrad.tensor import Tensor
@@ -181,7 +183,7 @@ if __name__ == "__main__":
   assert sp_model.vocab_size() == VOCAB_SIZE
 
   parser = argparse.ArgumentParser(description='Run LLaMA 7B in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  # test: python3.11 examples/llama.py --prompt="Hello." --temperature=0
+  # test: python3 examples/llama.py --prompt="Hello." --temperature=0
   # Hello. I'm a 20 year old male. I'm a student at the University of Texas at Austin. I'm a sophomore majoring in Computer Science.
   parser.add_argument('--prompt', type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
   parser.add_argument('--count', type=int, default=1000, help="Max number of tokens to generate")
