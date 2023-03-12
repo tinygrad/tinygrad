@@ -14,6 +14,7 @@ class TestDtype(unittest.TestCase):
     na = a.numpy()
     print(na, na.dtype, a.lazydata.realized)
     assert na.dtype == np.float16
+    np.testing.assert_allclose(na, [1,2,3,4])
 
   def test_half_add(self):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
@@ -21,6 +22,7 @@ class TestDtype(unittest.TestCase):
     c = a+b
     print(c.numpy())
     assert c.dtype == dtypes.float16
+    np.testing.assert_allclose(c.numpy(), [2,4,6,8])
 
   def test_upcast_float(self):
     # NOTE: there's no downcasting support
@@ -29,6 +31,7 @@ class TestDtype(unittest.TestCase):
     na = a.numpy()
     print(na, na.dtype)
     assert na.dtype == np.float32
+    np.testing.assert_allclose(na, [1,2,3,4])
 
   def test_half_add_upcast(self):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
@@ -36,6 +39,7 @@ class TestDtype(unittest.TestCase):
     c = a+b
     print(c.numpy())
     assert c.dtype == dtypes.float32
+    np.testing.assert_allclose(c.numpy(), [2,4,6,8])
 
 if __name__ == '__main__':
   unittest.main()
