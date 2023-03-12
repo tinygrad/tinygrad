@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List, Dict, Optional
+from typing import List, Dict
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -31,7 +31,7 @@ class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, nesterov=False):
     super().__init__(params)
     self.lr, self.momentum, self.nesterov = lr, momentum, nesterov
-    self.b = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params] if self.momentum else []
+    self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
@@ -49,7 +49,7 @@ class RMSprop(Optimizer):
     super().__init__(params)
     self.lr, self.alpha, self.eps = lr, alpha, eps
 
-    self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
 
   def step(self) -> None:
     for i, t in enumerate(self.params):
@@ -65,8 +65,8 @@ class Adam(Optimizer):
     # NOTE: self.t is a tensor so Adam can be jitted
     self.lr, self.b1, self.b2, self.eps, self.t = lr, b1, b2, eps, Tensor([0], requires_grad=False).realize()
 
-    self.m = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
-    self.v = [Tensor.zeros(*t.shape, device=params[0].device, requires_grad=False) for t in self.params]
+    self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
 
   def step(self) -> None:
     self.t.assign(self.t + 1).realize()
@@ -79,13 +79,13 @@ class Adam(Optimizer):
       t.assign(t.detach() - a * self.m[i].div(self.v[i].sqrt() + self.eps))
     self.realize([self.t] + self.m + self.v)
 
-def get_state_dict(obj, arg:Optional[List[str]]=None, _params:Optional[Dict[str, Tensor]]=None) -> Dict[str, Tensor]:
-  if arg is None or _params is None: arg, _params = [], {}
-  if isinstance(obj, Tensor): _params['.'.join(arg)] = obj
-  elif hasattr(obj, '__dict__'): get_state_dict(obj.__dict__, arg, _params)
-  elif isinstance(obj, (list, tuple)):
-    for i,x in enumerate(obj): get_state_dict(x, arg+[str(i)], _params)
+def get_state_dict(obj, prefix:str='') -> Dict[str, Tensor]:
+  if isinstance(obj, Tensor): return {prefix.strip('.'):obj}
+  if hasattr(obj, '__dict__'): return get_state_dict(obj.__dict__, prefix)
+  state_dict = {}
+  if isinstance(obj, (list, tuple)):
+    for i,x in enumerate(obj): state_dict.update(get_state_dict(x, f"{prefix}{str(i)}."))
   elif isinstance(obj, dict):
-    for k,v in obj.items(): get_state_dict(v, arg+[k], _params)
-  return _params
+    for k,v in obj.items(): state_dict.update(get_state_dict(v, f"{prefix}{str(k)}."))
+  return state_dict
 def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
