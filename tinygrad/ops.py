@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, itertools, operator, random
+import functools, itertools, operator, random, ctypes
 import numpy as np
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set, Final
@@ -58,6 +58,13 @@ class RawBufferMapped(RawBufferCopyIn):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=self.dtype.np)
   def copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
+
+# this one is simple enough that i moved it out of the runtimes
+class RawMallocBuffer(RawBufferMapped):
+  def __init__(self, size, dtype: DType):
+    super().__init__(size, dtype)
+    self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
+  def _buffer(self): return memoryview(self._buf)
 
 class RawBufferCopyInOut(RawBufferCopyIn):
   def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")

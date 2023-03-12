@@ -1,13 +1,6 @@
 import os, time, ctypes, hashlib, subprocess, platform
-from tinygrad.helpers import dtypes, DType
-from tinygrad.ops import CompiledBuffer, RawBufferMapped, Specialized
+from tinygrad.ops import CompiledBuffer, Specialized, RawMallocBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
-
-class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType):
-    super().__init__(size, dtype)
-    self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
-  def _buffer(self): return memoryview(self._buf)
 
 class ClangProgram:
   def __init__(self, name:str, prg:str):

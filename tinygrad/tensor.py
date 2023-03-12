@@ -3,9 +3,8 @@ from __future__ import annotations
 import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from tinygrad.lazy import Device, LazyBuffer
-from tinygrad.nn.image import image_conv2d_decorator, image_dot_decorator
 
 # An instantiation of the Function is the Context
 class Function:
@@ -324,7 +323,6 @@ class Tensor:
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
   def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).max(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
 
-  @image_conv2d_decorator
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_,_,_), (cout,cin,H,W) = self.shape, weight.shape
     assert cin*groups == cin_, f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({cin*groups} vs. {cin_})"
@@ -341,7 +339,6 @@ class Tensor:
     ret = (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
-  @image_dot_decorator
   def dot(self, w:Tensor) -> Tensor:
     x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
     w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
@@ -460,3 +457,9 @@ class Tensor:
 for device in Device._buffers:
   setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
   setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))
+
+# if IMAGE>0 we install these replacement functions in Tensor (hack!)
+from tinygrad.nn.image import image_conv2d, image_dot
+if IMAGE:
+  setattr(Tensor, "conv2d", image_conv2d)
+  setattr(Tensor, "dot", image_dot)
