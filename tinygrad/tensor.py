@@ -90,7 +90,7 @@ class Tensor:
     self.lazydata = x.lazydata
     return self
 
-  def detach(self): return Tensor(self.lazydata, dtype=self.dtype, device=self.device, requires_grad=False)
+  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
   def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
 
   # TODO: if things are realized this won't work
@@ -171,13 +171,13 @@ class Tensor:
 
     # fill in the first grad with one
     # this is "implicit gradient creation"
-    self.grad = Tensor.ones(*self.shape, dtype=self.dtype, device=self.device, requires_grad=False)
+    self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
     for t0 in reversed(self.deepwalk()):
       if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
       grads = t0._ctx.backward(t0.grad.lazydata)
-      grads = [Tensor(g, dtype=self.dtype, device=self.device, requires_grad=False) if g is not None else None
+      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
