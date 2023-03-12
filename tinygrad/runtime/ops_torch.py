@@ -15,7 +15,7 @@ torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
 class TorchBuffer(InterpretedBuffer):
   fxn_for_op: ClassVar = torch_fxn_for_op
-  to_tinygrad_dtype = staticmethod(lambda lbuf: {torch.float16: dtypes.float16, torch.float32: dtypes.float32}[lbuf.dtype])
+  def to_tinygrad_dtype(self): return {torch.float16: dtypes.float16, torch.float32: dtypes.float32}[self._buf.dtype]
 
   @staticmethod
   def fromCPU(x): return TorchBuffer(torch.from_numpy(x).requires_grad_(False).to(device))

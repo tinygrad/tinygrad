@@ -210,7 +210,7 @@ dispatch: Dict[MovementOps, Callable] = {MovementOps.RESHAPE: ShapeTracker._resh
                                          MovementOps.SHRINK: ShapeTracker._shrink, MovementOps.PERMUTE: ShapeTracker._permute, MovementOps.STRIDE: ShapeTracker._stride}
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
+def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Optional[List[List[int]]]:
   # Pre-allocate all groups.
   axis_groups: List[List[int]] = [[] for _ in range(len(new_shape))]
   # Index for new_shape and axis_groups.
@@ -221,7 +221,7 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]):
     if new_shape[i] == 1 and old_shape[old_shape_i] != 1:
       if i < len(new_shape) - 1: i += 1
     else:
-      if new_shape[i] % old_shape[old_shape_i]  != 0 or prod([old_shape[x] for x in axis_groups[i]]) * old_shape[old_shape_i]  > new_shape[i]:
+      if new_shape[i] % old_shape[old_shape_i] != 0 or prod([old_shape[x] for x in axis_groups[i]]) * old_shape[old_shape_i] > new_shape[i]:
         return None
       axis_groups[i].append(old_shape_i)
       # Move to next axes group if total size of all dimensions match.

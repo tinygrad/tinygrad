@@ -2,7 +2,7 @@ import itertools
 from enum import Enum, auto
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored, dtypes
-from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops, map_buffers
+from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops, map_buffers, GenericShape, ASTRunner
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
 
 def get_first_reduce(shapes):
@@ -41,7 +41,7 @@ class ASTKernel:
     else:
       output_shape = None
 
-    self.info = get_lazyop_info(ast)
+    self.info: GenericShape = get_lazyop_info(ast)
     self.bufs = dedup(get_buffers(ast))
     for b in self.bufs: b.st.simplify()
     self.ast = ast
@@ -123,6 +123,8 @@ class ASTKernel:
       for st in self.sts: print(st)
     for i in range(len(self.sts)):
       print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
+
+  def codegen(self) -> ASTRunner: raise NotImplementedError("need a codegen")
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)

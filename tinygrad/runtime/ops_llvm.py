@@ -1,6 +1,6 @@
 import time, hashlib, ctypes
 from typing import ClassVar
-from tinygrad.ops import CompiledBuffer
+from tinygrad.ops import CompiledBuffer, Specialized
 from tinygrad.runtime.ops_clang import RawMallocBuffer
 from tinygrad.helpers import getenv, DEBUG
 from ctypes import CFUNCTYPE
@@ -63,4 +63,4 @@ class LLVMProgram:
     if wait: return time.monotonic()-st
 
 class LLVMBuffer(CompiledBuffer):
-  raw_buffer_type, codegen_type, runtime_type = RawMallocBuffer, LLVMCodegen, LLVMProgram
+  spec = Specialized(RawMallocBuffer, LLVMCodegen, LLVMProgram)

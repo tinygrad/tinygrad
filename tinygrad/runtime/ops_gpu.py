@@ -1,10 +1,10 @@
 from __future__ import annotations
-import platform, functools
+import platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List, Final
 from tinygrad.helpers import IMAGE, DEBUG, getenv, dtypes
-from tinygrad.ops import CompiledBuffer, GlobalCounters, RawBufferCopyInOut, RawBuffer
+from tinygrad.ops import CompiledBuffer, GlobalCounters, RawBufferCopyInOut, RawBuffer, Specialized
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 OSX = platform.system() == "Darwin"
@@ -12,16 +12,12 @@ OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.p
 FLOAT16 = getenv("FLOAT16", 0)
 
 class _CL:
-  @functools.cached_property
-  def cl_ctx(self) -> cl.Context:
+  def __init__(self):
     devices: List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0: devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], []) # settle for CPU
     if len(devices) > 1 or DEBUG >= 1: print(f"using {devices[getenv('CL_DEVICE', 0)]}")
-    return cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
-
-  @functools.cached_property
-  def cl_queue(self) -> cl.CommandQueue:
-    return cl.CommandQueue(CL.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
+    self.cl_ctx: cl.Context = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
+    self.cl_queue: cl.CommandQueue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 CL = _CL()
 
 class CLBuffer(RawBufferCopyInOut):
@@ -39,7 +35,7 @@ class CLImage(RawBuffer):  # pylint: disable=abstract-method
     GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
 
-@functools.lru_cache(maxsize=None)
+#@functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None):
     self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
@@ -77,11 +73,8 @@ class CLCodegen(GPUCodegen):
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
 
 class GPUBuffer(CompiledBuffer):
-  raw_buffer_type = CLBuffer
+  spec = Specialized(CLBuffer, CLCodegen, CLProgram)
   # override this method for image
-  @classmethod
-  def create_raw_buffer(cls, shape, backing, dtype) -> RawBuffer:
+  def create_raw_buffer(self, shape, backing, dtype) -> RawBuffer:
     if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)   # NOTE: this is a hack. we don't pass in the dtype here, it's controlled by the FLOAT16 env var
     else: return super().create_raw_buffer(shape, backing, dtype)
-  codegen_type = CLCodegen
-  runtime_type = CLProgram
