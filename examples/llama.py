@@ -8,7 +8,7 @@ import sys, argparse, math, platform
 import numpy as np
 from tqdm import tqdm
 np.set_printoptions(linewidth=200)
-from typing import Optional
+from typing import Optional, Tuple
 
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
@@ -22,6 +22,7 @@ from extra.helpers import Timing
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
 from tinygrad.ops import GlobalCounters
+from tinygrad.jit import TinyJit
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -38,8 +39,8 @@ def complex_mult(A, B):
   co = a*d + b*c
   return ro.cat(co, dim=-1)
 
-def apply_rotary_emb(xq, xk, freqs_cis):
-  assert freqs_cis.shape[1] == xq.shape[1] and freqs_cis.shape[1] == xk.shape[1], "freqs_cis shape mismatch"
+def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
+  assert freqs_cis.shape[1] == xq.shape[1] and freqs_cis.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
   xq_out = complex_mult(xq, freqs_cis)
@@ -61,12 +62,15 @@ class Attention:
     self.n_heads = n_heads
     self.head_dim = dim // n_heads
 
-  def __call__(self, x, start_pos, freqs_cis, mask):
-    bsz, seqlen, _ = x.shape
+  def prepare_attention(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq, xk, xv = [x.reshape(bsz, seqlen, self.n_heads, self.head_dim) for x in (xq, xk, xv)]
+    xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], self.n_heads, self.head_dim) for x in (xq, xk, xv)]
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+    return xq, xk, xv
 
+  def inner_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, start_pos:int, mask:Optional[Tensor]) -> Tensor:
+    bsz, seqlen, _, _ = xq.shape
+    # kv caching!
     if start_pos == 0:
       keys, values = xk, xv
     else:
@@ -85,7 +89,12 @@ class Attention:
     if mask is not None:
       scores = scores + mask
     scores = scores.softmax()  # this is casted to float
-    output = scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1)
+    return scores.matmul(values).transpose(1, 2).reshape(bsz, seqlen, -1)
+
+  # NOTE: this is not called
+  def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
+    xq, xk, xv = self.prepare_attention(x, freqs_cis)
+    output = self.inner_attention(xq, xk, xv, start_pos, mask)
     return self.wo(output)
 
 class FeedForward:
@@ -97,7 +106,7 @@ class FeedForward:
     self.w2 = Linear(hidden_dim, dim, bias=False)
     self.w3 = Linear(dim, hidden_dim, bias=False)
 
-  def __call__(self, x):
+  def __call__(self, x:Tensor) -> Tensor:
     return self.w2(self.w1(x).silu() * self.w3(x))
 
 class TransformerBlock:
@@ -106,11 +115,25 @@ class TransformerBlock:
     self.feed_forward = FeedForward(dim, 4*dim, multiple_of)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
+    if getenv("JIT"):
+      self._pre = TinyJit(self.pre)
+      self._post = TinyJit(self.post)
+    else:
+      self._pre, self._post = self.pre, self.post
+
+  def pre(self, x:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+    xq, xk, xv = self.attention.prepare_attention(self.attention_norm(x), freqs_cis)
+    return xq.realize(), xk.realize(), xv.realize()
+
+  def post(self, x:Tensor, output:Tensor) -> Tensor:
+    h = x + self.attention.wo(output)
+    return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
   def __call__(self, x:Tensor, start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor]):
-    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    out = h + self.feed_forward(self.ffn_norm(h))
-    return out
+    xq, xk, xv = self._pre(x, freqs_cis)
+    # inner_attention can't be jitted because it's dynamic based on start_pos
+    output = self.attention.inner_attention(xq, xk, xv, start_pos, mask)
+    return self._post(x, output)
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
@@ -124,8 +147,8 @@ class Transformer:
     _bsz, seqlen, _ = tokens.shape
     h = tokens @ self.tok_embeddings['weight']
 
-    # get only the part we are using
-    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen]
+    # get only the part we are using. making it contiguous avoids more kernel calls
+    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
 
     if seqlen > 1:
       mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)

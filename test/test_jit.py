@@ -38,5 +38,18 @@ class TestJit(unittest.TestCase):
       else:
         np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
 
+  def test_method_jit(self):
+    class Fun:
+      def __init__(self):
+        self.a = Tensor.randn(10, 10)
+      @TinyJit
+      def __call__(self, b:Tensor) -> Tensor:
+        return (self.a+b).realize()
+    fun = Fun()
+    for _ in range(5):
+      b = Tensor.randn(10, 10)
+      c = fun(b)
+      np.testing.assert_equal(c.numpy(), fun.a.numpy()+b.numpy())
+
 if __name__ == '__main__':
   unittest.main()
