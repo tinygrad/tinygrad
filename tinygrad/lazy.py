@@ -1,13 +1,12 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
-import sys, weakref, importlib, inspect, functools
+import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.graph import log_op
-from tinygrad.runtime import supported_runtimes
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -17,10 +16,10 @@ LAZY = getenv("LAZY", 1)
 
 class _Device:
   def __init__(self) -> None:
-    self._buffers = {y.upper():y for y in supported_runtimes}
+    self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{self._buffers[x]}'), inspect.isclass) if (cname.lower() == self._buffers[x] + "buffer")][0]
+  def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}'), inspect.isclass) if (cname.lower() == x.lower() + "buffer")][0]
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such

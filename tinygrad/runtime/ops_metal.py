@@ -1,7 +1,7 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
-from typing import List, Any, Final
+from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
 from tinygrad.ops import CompiledBuffer, RawBufferMapped, Specialized
@@ -9,16 +9,10 @@ from tinygrad.ops import CompiledBuffer, RawBufferMapped, Specialized
 METAL_XCODE = getenv("METAL_XCODE")
 
 class _METAL:
-  mtl_buffers_in_flight: Final[List[Any]] = []
-  def metal_init(self):
-    if not hasattr(self, '_device'):
-      self._device = Metal.MTLCreateSystemDefaultDevice()
-      self._mtl_queue = self._device.newCommandQueue()
-    return self
-  @property
-  def device(self) -> Any: return self.metal_init()._device
-  @property
-  def mtl_queue(self) -> Any: return self.metal_init()._mtl_queue
+  def __init__(self):
+    self.mtl_buffers_in_flight: List[Any] = []
+    self.device = Metal.MTLCreateSystemDefaultDevice()
+    self.mtl_queue = self.device.newCommandQueue()
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):

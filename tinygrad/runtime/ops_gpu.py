@@ -12,18 +12,12 @@ OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.p
 FLOAT16 = getenv("FLOAT16", 0)
 
 class _CL:
-  def cl_init(self):
-    if not hasattr(self, '_cl_ctx'):
-      devices: List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
-      if len(devices) == 0: devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], []) # settle for CPU
-      if len(devices) > 1 or DEBUG >= 1: print(f"using {devices[getenv('CL_DEVICE', 0)]}")
-      self._cl_ctx: cl.Context = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
-      self._cl_queue: cl.CommandQueue = cl.CommandQueue(self._cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
-    return self
-  @property
-  def cl_ctx(self) -> cl.Context: return self.cl_init()._cl_ctx
-  @property
-  def cl_queue(self) -> cl.CommandQueue: return self.cl_init()._cl_queue
+  def __init__(self):
+    devices: List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
+    if len(devices) == 0: devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], []) # settle for CPU
+    if len(devices) > 1 or DEBUG >= 1: print(f"using {devices[getenv('CL_DEVICE', 0)]}")
+    self.cl_ctx: cl.Context = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
+    self.cl_queue: cl.CommandQueue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 CL = _CL()
 
 class CLBuffer(RawBufferCopyInOut):
