@@ -74,8 +74,9 @@ def my_unpickle(fb0):
         elif name == "_rebuild_parameter":
           return HackParameter
       else:
+        if module.startswith('pytorch_lightning'): return Dummy
         try:
-          return pickle.Unpickler.find_class(self, module, name)
+          return super().find_class(module, name)
         except Exception:
           return Dummy
 
