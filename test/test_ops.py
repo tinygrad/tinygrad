@@ -546,6 +546,13 @@ class TestOps(unittest.TestCase):
   def test_matvec(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z, atol=1e-4)
 
+  # this was the failure in llama early realizing freqs_cis
+  def test_double_slice(self):
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][1:2])
+    helper_test_op([(4,4)], lambda x: x[1:3][1:2])
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)

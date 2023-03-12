@@ -118,17 +118,12 @@ class Transformer:
     self.output = Linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
-  def __call__(self, tokens:Tensor, start_pos:int, early_realize_freqs_cis:bool=True):
+  def __call__(self, tokens:Tensor, start_pos:int):
     _bsz, seqlen, _ = tokens.shape
     h = tokens @ self.tok_embeddings['weight']
 
     # get only the part we are using
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen]
-
-    # WTF!!! This changes the output, and fixes the kv caching. Most serious tinygrad bug in a while.
-    # It is not fixed by disabling the method cache.
-    # TODO: P0. Fix this bug. An offset is likely getting lost somewhere.
-    if early_realize_freqs_cis: freqs_cis.realize()
 
     if seqlen > 1:
       mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)
