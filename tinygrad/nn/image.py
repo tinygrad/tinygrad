@@ -24,7 +24,6 @@ def image_dot_decorator(normal_dot):
 
 def image_conv2d_decorator(normal_conv):
   if IMAGE == 0: return normal_conv
-
   def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     rcout = cout//groups

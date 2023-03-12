@@ -5,7 +5,7 @@ import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from tinygrad.lazy import Device, LazyBuffer
-from tinygrad.image import image_conv2d_decorator, image_dot_decorator
+from tinygrad.nn.image import image_conv2d_decorator, image_dot_decorator
 
 # An instantiation of the Function is the Context
 class Function:
