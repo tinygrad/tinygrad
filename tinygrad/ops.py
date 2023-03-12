@@ -22,7 +22,7 @@ class LazyOp(NamedTuple):
   # Any == Union[LazyOp, LazyBuffer, DeviceBuffer]
   src: Tuple[Any, ...]  # type: ignore
   arg: Any = None
-  # TODO: add dest to support multiple outputs
+  # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
 
 # Any == Union[LazyBuffer, DeviceBuffer]
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])

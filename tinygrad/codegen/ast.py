@@ -1,7 +1,7 @@
 import itertools
 from enum import Enum, auto
 from typing import List, Tuple
-from tinygrad.helpers import prod, dedup, all_same, colored, dtypes
+from tinygrad.helpers import prod, dedup, all_same, colored, DType
 from tinygrad.ops import LazyOp, MovementOps, get_lazyop_info, get_buffers, ReduceOps, get_lazyops, map_buffers, GenericShape, ASTRunner
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
 
@@ -26,7 +26,7 @@ class Token:
     if len(self.axis) == 0: return [0]
     acc_strides = [x*(1-self.axis[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.axis[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.axis[::-1])])]
-  def decltype(self, dtype=dtypes.float32): return (dtype.name if self.typ == Types.FLOAT else f'{dtype.name}4') + ('*' if self.ptr else str())
+  def decltype(self, dtype:DType): return (dtype.name if self.typ == Types.FLOAT else f'{dtype.name}4') + ('*' if self.ptr else str())
   def __repr__(self): return f"<{self.typ}{'*' if self.ptr else str()} {self.tok}{f'[{self.axis}]' if len(self.axis) else str()}>"
 
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops

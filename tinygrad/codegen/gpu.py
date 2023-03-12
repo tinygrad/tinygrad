@@ -129,7 +129,8 @@ class GPUCodegen(ASTKernel):
         if const is not None:
           self.loaded_keys[(buf_index,o)] = ldr
         else:
-          self.kernel.append(f"{ldr.decltype()} {key} = {ldr.tok};\n")
+          # NOTE: we always do compute in float32
+          self.kernel.append(f"{ldr.decltype(dtypes.float32)} {key} = {ldr.tok};\n")
           if should_upcast and can_merge:
             for j in range(4):
               self.loaded_keys[(buf_index,o+j)] = Token(key+f'.{"xyzw"[j]}', Types.FLOAT)
