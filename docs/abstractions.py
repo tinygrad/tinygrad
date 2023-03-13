@@ -357,7 +357,7 @@ print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 assert a.contiguous == True
 
 # %%
-# == Example: Variable (in tinygrad/shape/symbolic.py, code 7/10) ==
+# == Example: Variable (in tinygrad/shape/symbolic.py, code 6/10) ==
 
 # Under the hood, ShapeTracker is powered by a small symbolic algebra library
 from tinygrad.shape.symbolic import Variable
