@@ -170,7 +170,7 @@ class ASTKernel:
         if mergeable: rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
         else: rets[j].append((shapes[j][i], strides[j][i]))
 
-    for i,x in enumerate(rets): self.sts[i]._reshape(tuple(y[0] for y in x))
+    for i,x in enumerate(rets): self.sts[i].reshape(tuple(y[0] for y in x))
     self.first_reduce = get_first_reduce([x.shape for x in self.sts])
 
   # this should be aware of the three parts to the shape
@@ -179,8 +179,8 @@ class ASTKernel:
   #  * the size outputted by each kernel
   def reshape_and_permute(self, new_shape_fxn, axis):
     for st in self.sts:
-      if new_shape_fxn is not None: st._reshape(tuple(new_shape_fxn(st.shape)))
-      if axis is not None: st._permute(tuple(axis))
+      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
+      if axis is not None: st.permute(tuple(axis))
 
   # axis : the axis to pull from
   # amount : the amount to take
