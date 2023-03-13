@@ -36,7 +36,6 @@ class CLImage(RawBuffer):  # pylint: disable=abstract-method
     GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
 
-#@functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None):
     self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore

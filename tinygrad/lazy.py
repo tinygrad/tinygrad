@@ -109,8 +109,8 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        self.realized = Device[self.device].fromCPU(self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
-        ast = LazyOp(self.op.op, tuple())
+        # resolve LazyNumpyArray
+        ast = LazyOp(self.op.op, tuple(), self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
         self.realized = real_src.contiguous()

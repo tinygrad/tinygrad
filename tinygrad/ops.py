@@ -29,7 +29,7 @@ class LazyOp(NamedTuple):
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
-  if x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
+  if len(real_srcs) and x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
 # a placeholder class to extend by the exec classes
@@ -40,12 +40,6 @@ class DeviceBuffer:
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
-
-  # TODO: remove this, exec_ast should be
-  #  1. not a classmethod
-  #  2. also function as fromCPU
-  @classmethod
-  def fromCPU(cls, x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")
 
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
@@ -124,8 +118,6 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       self._backing = None
     return self._buf
 
-  @classmethod
-  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.ravel(), dtype=dtypes.from_np(x))
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     if DEBUG >= 3: print(f"**** copy out {self.shape}")
@@ -134,6 +126,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   method_cache: Final[Dict[str, ASTRunner]] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
+    if ast.op == LoadOps.FROMCPU: return cls(ast.arg.shape, backing=ast.arg.ravel(), dtype=dtypes.from_np(ast.arg))
     k = cls.spec.codegen(ast, output_buffer)
     if getenv("ENABLE_METHOD_CACHE", 1):  # this is the default now
       if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.spec.runtime)

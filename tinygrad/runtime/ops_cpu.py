@@ -2,7 +2,7 @@ import numpy as np
 import operator
 from typing import ClassVar, Callable, Dict, Tuple
 from tinygrad.helpers import dtypes
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, Op
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, LoadOps, Op
 from tinygrad.interpreted import InterpretedBuffer
 
 def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -33,12 +33,10 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, i) for i in arg)],
   FusedOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy()), lambda x: x.strides, np.broadcast_to),
+  LoadOps.FROMCPU: lambda arg: arg
 }}
 
 class CPUBuffer(InterpretedBuffer):
   fxn_for_op: ClassVar[Dict[Op, Callable]] = numpy_fxn_for_op
   def to_tinygrad_dtype(self): return dtypes.from_np(self._buf)
-
-  @staticmethod
-  def fromCPU(x): return CPUBuffer(x)
   def toCPU(self): return self._buf

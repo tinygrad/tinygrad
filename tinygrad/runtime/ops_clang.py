@@ -14,6 +14,7 @@ class ClangProgram:
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
+
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     self.fxn(*[x._buf for x in args])

@@ -16,6 +16,8 @@ shape_fxn_for_op: Dict[Op, Callable] = {
   **{op:lambda self,y: GenericShape(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: GenericShape(new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
   **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
+
+# this runs the LazyOp and gives you the output shape/dtype and flop count
 def get_lazyop_info(ast:LazyOp) -> GenericShape: return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape, x.dtype)) for x in get_buffers(ast)}, ast))._buf
 
 # used in CPUBuffer and TorchBuffer
@@ -26,7 +28,7 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     self.shape: Tuple[int, ...] = tuple(lbuf.shape)
     self.dtype: DType = self.to_tinygrad_dtype() if hasattr(self, 'to_tinygrad_dtype') else lbuf.dtype
     # NOTE: this is overcounting the memory used, as reshapes and stuff are aliases
-    self._memsz = (prod(self.shape) * self.dtype.itemsize) if not isinstance(lbuf, GenericShape) else 0
+    self._memsz = (prod(self.shape) * self.dtype.itemsize) if not isinstance(self, InterpretedBuffer) else 0
     GlobalCounters.mem_used += self._memsz
   def __del__(self): GlobalCounters.mem_used -= self._memsz
   def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
@@ -37,15 +39,15 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
-    if ast in context: return context[ast]
+    if not created_context and ast in context: return context[ast]
     srcs = [cls.exec_ast(x, context=context) if isinstance(x, LazyOp) else x for x in ast.src]
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
-    else: ret = cls(cls.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg else []))))
-    if DEBUG >= 4 or (not isinstance(srcs[0]._buf, GenericShape) and DEBUG >= 3):
+    else: ret = cls(cls.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
+    if DEBUG >= 4 or (not isinstance(cls, InterpretedBuffer) and DEBUG >= 3):
       print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
-    context[ast] = ret
+    if not created_context: context[ast] = ret
     if output_buffer is not None:
       assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
       output_buffer._buf = ret._buf
