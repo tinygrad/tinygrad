@@ -2,7 +2,7 @@
 Welcome to the tinygrad documentation
 =================
 
-this file will take you on a whirlwind journey from a Tensor to a Byte
+this file will take you on a whirlwind journey from a Tensor all the way down
 tinygrad has been aggressively refactored in the 2.5 years it's been worked on.
 what you see here is a refined library (with more refining to go still!)
 
@@ -11,23 +11,21 @@ this documentation will help with entry points and understanding the abstraction
 """
 
 # %%
-# == Boilerplate imports (typing mostly) ==
+# == Boilerplate imports for typing ==
 from __future__ import annotations
 from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List
 from enum import Enum, auto
 from abc import ABC
-import numpy as np
-import torch
 
 # %%
 # == Example: Tensor 2+3 ==
-# Let's trace an addition down through the layers of abstraction.
-# We will be using the clang backend
+# let's trace an addition down through the layers of abstraction.
 
+# we will be using the clang backend
 from tinygrad.lazy import Device
 Device.DEFAULT = "CLANG"
 
-# first, 2+3 as a Tensor
+# first, 2+3 as a Tensor, the highest level
 from tinygrad.tensor import Tensor
 a = Tensor([2])
 b = Tensor([3])
@@ -37,7 +35,7 @@ assert result.numpy()[0] == 5.
 
 # %%
 # == Tensor (in tinygrad/tensor.py, code 8/10) ==
-# it's worth just reading tinygrad/tensor.py. it's pretty beautiful
+# it's worth reading tinygrad/tensor.py. it's pretty beautiful
 import tinygrad.mlops as mlops
 
 # this is the good old familiar Tensor class
@@ -52,7 +50,7 @@ class Tensor:
   # this is where the data (and other tensor properties) actually live
   lazydata: LazyBuffer
 
-  # high level ops (hlops) are defined here. example: relu
+  # high level ops (hlops) are defined on this class. example: relu
   def relu(self): return self.maximum(0)
 
   # log is an mlop, this is the wrapper function in Tensor
@@ -88,8 +86,7 @@ class LazyBuffer:
   realized: Optional[DeviceBuffer]
 
 # LazyOp (in tinygrad/ops.py, code 4/10)
-# they form an Abstract Syntax Tree for a single GPU kernel
-# LazyOp is an AST node that defines:
+# in a tree they form an Abstract Syntax Tree for a single GPU kernel
 class LazyOp:
   op: Op                                       # the type of the compute
   src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
@@ -164,6 +161,8 @@ class DeviceBuffer(ABC):
 # InterpretedBuffers are a lot simpler than CompiledBuffers
 # they are used to implement the CPU(numpy) and TORCH(torch) backends
 # it's worth reading CPUBuffer (in tinygrad/runtime/ops_cpu.py, code 8/10)
+import numpy as np
+import torch
 class InterpretedBuffer(DeviceBuffer):
   # this is where the data actually lives
   # finally some classes you recognize!

@@ -23,7 +23,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8)<4, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 3, 8)<3, 0, 0, "0")
     self.helper_test_variable(Variable("a", 3, 8)<2, 0, 0, "0")
-  
+
   def test_div_becomes_num(self):
     assert isinstance(Variable("a", 2, 3)//2, NumNode)
 
@@ -101,7 +101,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
-  
+
   def test_mod_factor(self):
     # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
@@ -126,7 +126,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_mul_sum(self):
     self.helper_test_variable(Variable.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
-  
+
   def test_sum_0(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)]), 0, 7, "a")
 
@@ -164,7 +164,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_factor(self):
     self.helper_test_variable(Variable.sum([Variable.num(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
-  
+
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 
@@ -176,6 +176,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_remove(self):
     self.helper_test_variable(Variable.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
+
+  def test_div_numerator_negative(self):
+    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

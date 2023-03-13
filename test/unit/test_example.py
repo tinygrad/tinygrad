@@ -1,6 +1,8 @@
 import unittest
+import numpy as np
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import dtypes
 
 def multidevice_test(fxn):
   def ret(self):

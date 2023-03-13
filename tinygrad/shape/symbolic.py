@@ -34,14 +34,14 @@ class Node:
 
   # *** complex ops ***
 
-  def __floordiv__(self, b:int):
+  def __floordiv__(self, b:int, factoring_allowed=True):
     assert b != 0
     if b < 0: return (self//-b)*-1
     if b == 1: return self
     if isinstance(self, DivNode): return self.a//(self.b*b) # two divs is one div
     if isinstance(self, MulNode) and self.b % b == 0: return self.a*(self.b//b)
     if isinstance(self, MulNode) and b % self.b == 0: return self.a//(b//self.b)
-    if isinstance(self, SumNode):
+    if isinstance(self, SumNode) and factoring_allowed:
       factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, (MulNode, NumNode))) and x.b%b == 0)
       nofactor = []
       # ugh, i doubt this is universally right
@@ -65,9 +65,11 @@ class Node:
         for m in muls:
           if m > 1 and b%m == 0:
             return (self//m)//(b//m)
+    # the numerator of div is not allowed to be negative
     if self.min < 0:
       offset = self.min//b
-      return (self+offset*b)//b - offset
+      # factor out an "offset" to make the numerator positive. don't allowing factoring again
+      return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
     return create_opnode(DivNode, self, b)
 
   def __mod__(self, b:int):

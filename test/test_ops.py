@@ -218,6 +218,10 @@ class TestOps(unittest.TestCase):
   def test_scalar_rsub(self):
     helper_test_op([(45,65)], lambda x: 2-x, lambda x: 2-x)
 
+  def test_flip_eye_crash(self):
+    helper_test_op([], lambda: (torch.eye(10)@torch.eye(10).flip(0)),
+                       lambda: (Tensor.eye(10)@Tensor.eye(10).flip(0)), forward_only=True)
+
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:

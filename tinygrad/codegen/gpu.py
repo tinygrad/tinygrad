@@ -268,7 +268,7 @@ class GPUCodegen(ASTKernel):
     self.prekernel: Set[str] = set()
     self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
 
-    if self.lang.half_prekernel: self.prekernel.add(self.lang.half_prekernel+"\n")
+    if self.lang.half_prekernel and any(x.dtype == dtypes.float16 for x in self.bufs): self.prekernel.add(self.lang.half_prekernel+"\n")
 
     if len(self.lang.gid) == 0:
       self.kernel += [f"for (int idx{i} = 0; idx{i} < {self.output_shape[i]}; idx{i}++) {{\n" for i in range(0, len(self.output_shape))]
