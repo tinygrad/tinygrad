@@ -384,5 +384,4 @@ print(expr.min, expr.max)  # 0 20
 # this is just "(a*2)"
 # since b only has a range from 0-10, it can't affect the output
 
-
 # %%
