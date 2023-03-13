@@ -2,7 +2,8 @@ import numpy as np
 import operator
 from typing import ClassVar, Callable, Dict, Tuple
 from tinygrad.helpers import dtypes
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, InterpretedBuffer, Op
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, Op
+from tinygrad.interpreted import InterpretedBuffer
 
 def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
