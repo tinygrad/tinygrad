@@ -1,10 +1,11 @@
 from __future__ import annotations
-import functools, itertools, operator, random, ctypes
+import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set, Final
-from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, Set, Final
+from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes, GlobalCounters
 from tinygrad.shape.shapetracker import ShapeTracker, MovementOps
+from tinygrad.runtime.lib import RawBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -31,56 +32,20 @@ def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
   if x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
-_T = TypeVar("_T")
-class Copyable:
-  @classmethod
-  def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
-  def toCPU(self:Copyable) -> np.ndarray: raise NotImplementedError("must be implemented")
-
-class RawBuffer(Copyable):  # pylint: disable=abstract-method
-  def __init__(self, size:int, dtype:DType):
-    self.size: int = size
-    self.dtype: DType = dtype
-    self._memsz: int = size*dtype.itemsize
-    GlobalCounters.mem_used += self._memsz
-  def __del__(self): GlobalCounters.mem_used -= self._memsz
-
-class RawBufferCopyIn(RawBuffer):
-  def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
-
-  @classmethod
-  def fromCPU(cls, x:np.ndarray):
-    ret = cls(prod(x.shape), dtypes.from_np(x))
-    ret.copyin(x)
-    return ret
-
-class RawBufferMapped(RawBufferCopyIn):
-  def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
-  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=self.dtype.np)
-  def copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
-
-# this one is simple enough that i moved it out of the runtimes
-class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType):
-    super().__init__(size, dtype)
-    self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
-  def _buffer(self): return memoryview(self._buf)
-
-class RawBufferCopyInOut(RawBufferCopyIn):
-  def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
-
-  def toCPU(self) -> np.ndarray:
-    x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
-    self.copyout(x)
-    return x
-
 # a placeholder class to extend by the exec classes
-class DeviceBuffer(Copyable):
+class DeviceBuffer:
   _buf: Any                # underlying buffer
   shape: Tuple[int, ...]
   dtype: DType
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
+  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
+
+  # TODO: remove this, exec_ast should be
+  #  1. not a classmethod
+  #  2. also function as fromCPU
+  @classmethod
+  def fromCPU(cls, x:np.ndarray) -> DeviceBuffer: raise NotImplementedError("must be implemented")
 
 # this is a quick "buffer" class for flop tracking and getting the output shape
 class GenericShape:
@@ -234,12 +199,3 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), hostbuf=self, dtype=self.dtype)
 
-class GlobalCounters:
-  global_ops: ClassVar[int] = 0
-  global_mem: ClassVar[int] = 0
-  time_sum_s: ClassVar[float] = 0.0
-  kernel_count: ClassVar[int] = 0
-  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
-  cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
-  @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None

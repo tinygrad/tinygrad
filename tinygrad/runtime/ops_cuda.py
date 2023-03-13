@@ -4,7 +4,8 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import CompiledBuffer, RawBufferCopyInOut, Specialized
+from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawCUDABuffer(RawBufferCopyInOut):

@@ -4,7 +4,8 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List, Final
 from tinygrad.helpers import IMAGE, DEBUG, getenv, dtypes
-from tinygrad.ops import CompiledBuffer, GlobalCounters, RawBufferCopyInOut, RawBuffer, Specialized
+from tinygrad.ops import CompiledBuffer, GlobalCounters, Specialized
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 OSX = platform.system() == "Darwin"

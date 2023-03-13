@@ -4,7 +4,8 @@ import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
-from tinygrad.ops import CompiledBuffer, RawBufferMapped, Specialized
+from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.runtime.lib import RawBufferMapped
 
 METAL_XCODE = getenv("METAL_XCODE")
 

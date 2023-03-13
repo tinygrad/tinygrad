@@ -1,5 +1,6 @@
 import os, time, ctypes, hashlib, subprocess, platform
-from tinygrad.ops import CompiledBuffer, Specialized, RawMallocBuffer
+from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class ClangProgram:
