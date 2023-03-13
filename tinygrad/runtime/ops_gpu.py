@@ -25,8 +25,8 @@ class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     super().__init__(size, dtype)
     self._cl = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, self._memsz)
-  def copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
-  def copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
+  def _copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
+  def _copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
 
 class CLImage(RawBuffer):  # pylint: disable=abstract-method
   IMAGE: Final = True

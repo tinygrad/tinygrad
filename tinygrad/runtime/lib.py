@@ -11,23 +11,25 @@ class RawBuffer:  # pylint: disable=abstract-method
     self._memsz: int = size*dtype.itemsize
     GlobalCounters.mem_used += self._memsz
   def __del__(self): GlobalCounters.mem_used -= self._memsz
+
+  # NOTE: this interface allows for 0 copy
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):
-  def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
+  def _copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod
   def fromCPU(cls, x:np.ndarray):
     ret = cls(prod(x.shape), dtypes.from_np(x))
-    ret.copyin(x)
+    ret._copyin(x)
     return ret
 
 class RawBufferMapped(RawBufferCopyIn):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=self.dtype.np)
-  def copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
+  def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
 # this one is simple enough that i moved it out of the runtimes
 class RawMallocBuffer(RawBufferMapped):
@@ -37,9 +39,9 @@ class RawMallocBuffer(RawBufferMapped):
   def _buffer(self): return memoryview(self._buf)
 
 class RawBufferCopyInOut(RawBufferCopyIn):
-  def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
+  def _copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   def toCPU(self) -> np.ndarray:
     x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
-    self.copyout(x)
+    self._copyout(x)
     return x

@@ -12,8 +12,8 @@ class RawCUDABuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     super().__init__(size, dtype)
     self._cl = cuda.mem_alloc(self._memsz)
-  def copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
-  def copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
+  def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
+  def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
