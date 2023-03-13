@@ -8,7 +8,7 @@ from tinygrad.shape.shapetracker import ShapeTracker, MovementOps
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
-class UnaryOps(Enum): NOOP = auto(); NEG = auto(); EXP = auto(); LOG = auto(); NOT = auto() # noqa: E702
+class UnaryOps(Enum): NOOP = auto(); EXP = auto(); LOG = auto(); NEG = auto(); NOT = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class FusedOps(Enum): MULACC = auto() # noqa: E702
@@ -182,9 +182,9 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   spec: ClassVar[Specialized]
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):
-    self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape = self.st.shape
-    self.dtype = dtype
+    self.st: ShapeTracker= shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
+    self.shape: Tuple[int, ...] = self.st.shape
+    self.dtype: DType = dtype
     assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"
     self._base_shape: Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
     self._buf = hostbuf._buf if hostbuf is not None else None

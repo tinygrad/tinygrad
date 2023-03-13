@@ -33,7 +33,7 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data, device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -42,12 +42,15 @@ class Tensor:
 
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
-      self.lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
+      lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
     elif isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      self.lazydata = data
+      lazydata = data
     else:
       raise RuntimeError(f"can't create Tensor from {data}")
+
+    # this is set once we are here
+    self.lazydata: LazyBuffer = lazydata
 
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
@@ -66,10 +69,10 @@ class Tensor:
   def __hash__(self): return id(self)
 
   @property
-  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
+  def device(self) -> str: return self.lazydata.device
 
   @property
-  def device(self) -> str: return self.lazydata.device
+  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
 
   @property
   def dtype(self) -> DType: return self.lazydata.dtype

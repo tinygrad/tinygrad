@@ -35,7 +35,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
 }}
 
 class CPUBuffer(InterpretedBuffer):
-  fxn_for_op: ClassVar = numpy_fxn_for_op
+  fxn_for_op: ClassVar[Dict[Op, Callable]] = numpy_fxn_for_op
   def to_tinygrad_dtype(self): return dtypes.from_np(self._buf)
 
   @staticmethod

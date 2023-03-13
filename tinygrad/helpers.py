@@ -1,6 +1,7 @@
 import os, math, functools
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator
+ShapeType = Tuple[int, ...]
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
