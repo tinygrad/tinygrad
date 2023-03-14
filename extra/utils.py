@@ -83,7 +83,8 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
     myfile.seek(prod(shape) * bytes_size, 1)
     return
 
-  myfile.seek(storage_offset * bytes_size, 1)
+  bytes_offset = storage_offset * bytes_size
+  myfile.seek(bytes_offset, 1)  # NOTE: ignored by mmap path
 
   assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
   assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
@@ -108,7 +109,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
   else:
     def _mmap(lna):
       assert myfile._compress_type == 0, "compressed data can't be mmaped"
-      return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start, shape=lna.shape)
+      return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
     def _read(lna):
       ret = np.empty(lna.shape, dtype=lna.dtype)
       myfile.readinto(ret.data)
@@ -117,11 +118,12 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
     else: t.lazydata.op.arg.fxn = _read
     t.realize()
 
-def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):
+def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
   if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
 
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
+    base_name = myzip.namelist()[0].split('/', 1)[0]
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
