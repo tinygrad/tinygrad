@@ -36,7 +36,7 @@ def download_file(url, fp, skip_if_exists=False):
 def my_unpickle(fb0):
   key_prelookup = defaultdict(list)
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
-    #print(args)
+    #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     ident, storage_type, obj_key, location, obj_size = storage[0:5]
     assert ident == 'storage'
     assert prod(size) <= (obj_size - storage_offset)
@@ -84,7 +84,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
     return
 
   bytes_offset = storage_offset * bytes_size
-  myfile.seek(bytes_offset, 1)  # NOTE: ignored by mmap path
+  myfile.seek(bytes_offset)
 
   assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
   assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
@@ -115,6 +115,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
       return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
     def _read(lna):
       ret = np.empty(lna.shape, dtype=lna.dtype)
+      myfile.seek(bytes_offset)
       myfile.readinto(ret.data)
       return ret
     if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
