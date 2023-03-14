@@ -35,28 +35,25 @@ def download_file(url, fp, skip_if_exists=False):
 
 def my_unpickle(fb0):
   key_prelookup = defaultdict(list)
-  class HackTensor:
-    def __new__(cls, storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
-      #print(args)
-      ident, storage_type, obj_key, location, obj_size = storage[0:5]
-      assert ident == 'storage'
-      assert prod(size) <= (obj_size - storage_offset)
+  def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
+    #print(args)
+    ident, storage_type, obj_key, location, obj_size = storage[0:5]
+    assert ident == 'storage'
+    assert prod(size) <= (obj_size - storage_offset)
 
-      if storage_type not in [np.float16, np.float32]:
-        if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {size}")
-        ret = None
-      else:
-        ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(size), storage_type))
-      key_prelookup[obj_key].append((storage_type, obj_size, ret, size, stride, storage_offset))
-      return ret
+    if storage_type not in [np.float16, np.float32]:
+      if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {size}")
+      ret = None
+    else:
+      ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(size), storage_type))
+    key_prelookup[obj_key].append((storage_type, obj_size, ret, size, stride, storage_offset))
+    return ret
 
-  class HackParameter:
-    def __new__(cls, *args):
-      #print(args)
-      pass
-
-  class Dummy:
+  def _rebuild_parameter(*args):
+    #print(args)
     pass
+
+  class Dummy: pass
 
   class MyPickle(pickle.Unpickler):
     def find_class(self, module, name):
@@ -66,8 +63,8 @@ def my_unpickle(fb0):
       if name == 'IntStorage': return np.int32
       if name == 'HalfStorage': return np.float16
       if module == "torch._utils":
-        if name == "_rebuild_tensor_v2": return HackTensor
-        if name == "_rebuild_parameter": return HackParameter
+        if name == "_rebuild_tensor_v2": return _rebuild_tensor_v2
+        if name == "_rebuild_parameter": return _rebuild_parameter
       else:
         if module.startswith('pytorch_lightning'): return Dummy
         try:
