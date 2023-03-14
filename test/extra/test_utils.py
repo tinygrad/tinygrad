@@ -22,11 +22,18 @@ class TestUtils(unittest.TestCase):
     import torch
     import numpy as np
     import tempfile
+    class LayerWithOffset(torch.nn.Module):
+        def __init__(self):
+            super(LayerWithOffset, self).__init__()
+            self.param = torch.nn.Parameter(
+              torch.randn(16).as_strided([4], [1], storage_offset=5)
+            )
 
     for isfloat16 in [True, False]:
       model = torch.nn.Sequential(
           torch.nn.Linear(4, 8),
           torch.nn.Linear(8, 3),
+          LayerWithOffset()
       )
       if isfloat16: model = model.half()
 
