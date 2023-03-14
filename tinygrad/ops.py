@@ -1,10 +1,11 @@
 from __future__ import annotations
-import functools, itertools, operator, random, ctypes
+import functools, itertools, operator, random
 import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Callable, Dict, TypeVar, Set, Final
-from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes
+from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Dict, Set, Final
+from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes, GlobalCounters
 from tinygrad.shape.shapetracker import ShapeTracker, MovementOps
+from tinygrad.runtime.lib import RawBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -28,107 +29,17 @@ class LazyOp(NamedTuple):
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
-  if x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
+  if len(real_srcs) and x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
-_T = TypeVar("_T")
-class Copyable:
-  @classmethod
-  def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
-  def toCPU(self:Copyable) -> np.ndarray: raise NotImplementedError("must be implemented")
-
-class RawBuffer(Copyable):  # pylint: disable=abstract-method
-  def __init__(self, size:int, dtype:DType):
-    self.size: int = size
-    self.dtype: DType = dtype
-    self._memsz: int = size*dtype.itemsize
-    GlobalCounters.mem_used += self._memsz
-  def __del__(self): GlobalCounters.mem_used -= self._memsz
-
-class RawBufferCopyIn(RawBuffer):
-  def copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
-
-  @classmethod
-  def fromCPU(cls, x:np.ndarray):
-    ret = cls(prod(x.shape), dtypes.from_np(x))
-    ret.copyin(x)
-    return ret
-
-class RawBufferMapped(RawBufferCopyIn):
-  def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
-  def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=self.dtype.np)
-  def copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
-
-# this one is simple enough that i moved it out of the runtimes
-class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType):
-    super().__init__(size, dtype)
-    self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
-  def _buffer(self): return memoryview(self._buf)
-
-class RawBufferCopyInOut(RawBufferCopyIn):
-  def copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
-
-  def toCPU(self) -> np.ndarray:
-    x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
-    self.copyout(x)
-    return x
-
 # a placeholder class to extend by the exec classes
-class DeviceBuffer(Copyable):
+class DeviceBuffer:
   _buf: Any                # underlying buffer
   shape: Tuple[int, ...]
   dtype: DType
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
-
-# this is a quick "buffer" class for flop tracking and getting the output shape
-class GenericShape:
-  def __init__(self, shape:Tuple[int, ...], dtype:DType=dtypes.float32, flops:int=0): self.shape, self.dtype, self.flops = shape, dtype, flops
-  def consume_flops(self):
-    self.flops, ret = 0, self.flops
-    return ret
-shape_fxn_for_op: Dict[Op, Callable] = {
-  **{op:lambda self: GenericShape(self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
-  **{op:lambda self,y: GenericShape(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
-  **{op:lambda self,new_shape: GenericShape(new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
-  **{op:functools.partial(lambda mop,self,arg: GenericShape(ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
-def get_lazyop_info(ast:LazyOp) -> GenericShape: return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape, x.dtype)) for x in get_buffers(ast)}, ast))._buf
-
-# used in CPUBuffer and TorchBuffer
-class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  fxn_for_op: ClassVar = shape_fxn_for_op
-  def __init__(self, lbuf:Any):
-    self._buf: Any = lbuf
-    self.shape: Tuple[int, ...] = tuple(lbuf.shape)
-    self.dtype: DType = self.to_tinygrad_dtype() if hasattr(self, 'to_tinygrad_dtype') else lbuf.dtype
-    # NOTE: this is overcounting the memory used, as reshapes and stuff are aliases
-    self._memsz = (prod(self.shape) * self.dtype.itemsize) if not isinstance(lbuf, GenericShape) else 0
-    GlobalCounters.mem_used += self._memsz
-  def __del__(self): GlobalCounters.mem_used -= self._memsz
-  def contiguous(self): return type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
-  def movement_op(self, op:MovementOps, arg=None): return type(self)(self.fxn_for_op[op](self._buf, arg)) if op in self.fxn_for_op else type(self)(getattr(self._buf, op.name.lower())(arg))
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[InterpretedBuffer]=None, context=None):
-    if FusedOps.MULACC in cls.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
-    created_context = context is None
-    if context is None: context = dict()
-    if ast in context: return context[ast]
-    srcs = [cls.exec_ast(x, context=context) if isinstance(x, LazyOp) else x for x in ast.src]
-    if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
-    if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
-    if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
-    else: ret = cls(cls.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg else []))))
-    if DEBUG >= 4 or (not isinstance(srcs[0]._buf, GenericShape) and DEBUG >= 3):
-      print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
-    context[ast] = ret
-    if output_buffer is not None:
-      assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
-      output_buffer._buf = ret._buf
-      return output_buffer
-    else:
-      return ret
+  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
@@ -207,8 +118,6 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       self._backing = None
     return self._buf
 
-  @classmethod
-  def fromCPU(cls, x:np.ndarray) -> CompiledBuffer: return cls(x.shape, backing=x.ravel(), dtype=dtypes.from_np(x))
   def toCPU(self) -> np.ndarray:
     assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
     if DEBUG >= 3: print(f"**** copy out {self.shape}")
@@ -217,6 +126,7 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   method_cache: Final[Dict[str, ASTRunner]] = {}
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
+    if ast.op == LoadOps.FROMCPU: return cls(ast.arg.shape, backing=ast.arg.ravel(), dtype=dtypes.from_np(ast.arg))
     k = cls.spec.codegen(ast, output_buffer)
     if getenv("ENABLE_METHOD_CACHE", 1):  # this is the default now
       if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.spec.runtime)
@@ -234,12 +144,3 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), hostbuf=self, dtype=self.dtype)
 
-class GlobalCounters:
-  global_ops: ClassVar[int] = 0
-  global_mem: ClassVar[int] = 0
-  time_sum_s: ClassVar[float] = 0.0
-  kernel_count: ClassVar[int] = 0
-  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
-  cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
-  @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None

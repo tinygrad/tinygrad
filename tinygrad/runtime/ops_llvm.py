@@ -1,9 +1,10 @@
 import time, hashlib, ctypes
 from typing import ClassVar
-from tinygrad.ops import CompiledBuffer, Specialized, RawMallocBuffer
+from tinygrad.ops import CompiledBuffer, Specialized
 from tinygrad.helpers import getenv, DEBUG
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.llvm import LLVMCodegen
+from tinygrad.runtime.lib import RawMallocBuffer
 
 import llvmlite.binding as llvm  # type: ignore
 

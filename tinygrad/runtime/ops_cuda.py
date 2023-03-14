@@ -4,15 +4,16 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import CompiledBuffer, RawBufferCopyInOut, Specialized
+from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawCUDABuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     super().__init__(size, dtype)
     self._cl = cuda.mem_alloc(self._memsz)
-  def copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
-  def copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
+  def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
+  def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):

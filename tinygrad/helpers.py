@@ -1,7 +1,8 @@
 import os, math, functools
 import numpy as np
-from typing import Tuple, Union, List, NamedTuple, Final, Iterator
+from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
+# NOTE: helpers is not allowed to import from anything else in tinygrad
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
@@ -39,3 +40,13 @@ class dtypes:
   float32: Final[DType] = DType(4, "float", np.float32)
   @staticmethod
   def from_np(x:Union[LazyNumpyArray, np.ndarray]) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]
+
+class GlobalCounters:
+  global_ops: ClassVar[int] = 0
+  global_mem: ClassVar[int] = 0
+  time_sum_s: ClassVar[float] = 0.0
+  kernel_count: ClassVar[int] = 0
+  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
+  @staticmethod
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None

@@ -216,7 +216,7 @@ class Tensor:
   #   - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
   # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
   # - Empty slices are not allowed
-  # - Strides other than 1 are not allowedå
+  # - Strides other than 1 are not allowed
   def __getitem__(self, val):
     def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))  # Fix negative idxs, clamp to [0,N]
     new_slice, new_shape = [], []

@@ -14,8 +14,8 @@ class TestGraph(unittest.TestCase):
     assert nx.is_isomorphic(G, RG, node_match=lambda x,y: x["label"] == y["label"], edge_match=lambda x,y: x["label"] == y["label"] if "label" in y else True)
 
   def test_add_graph(self):
-    a = CPUBuffer.fromCPU(np.ones((4,4), dtype=np.float32))
-    b = CPUBuffer.fromCPU(np.ones((4,4), dtype=np.float32))
+    a = CPUBuffer(np.ones((4,4), dtype=np.float32))
+    b = CPUBuffer(np.ones((4,4), dtype=np.float32))
     ast = LazyOp(BinaryOps.ADD, (a,b))
     ret = CPUBuffer(np.ones((4,4), dtype=np.float32))
 
@@ -30,8 +30,8 @@ class TestGraph(unittest.TestCase):
     self.helper_compare_graph(RG)
 
   def test_add_sum_graph(self):
-    a = CPUBuffer.fromCPU(np.ones((4,4), dtype=np.float32))
-    b = CPUBuffer.fromCPU(np.ones((1,1), dtype=np.float32))
+    a = CPUBuffer(np.ones((4,4), dtype=np.float32))
+    b = CPUBuffer(np.ones((1,1), dtype=np.float32))
     op0 = LazyOp(MovementOps.RESHAPE, (b,), (4, 4))
     op1 = LazyOp(BinaryOps.ADD, (a,op0))
     ast = LazyOp(ReduceOps.SUM, (op1,), (1,1))
@@ -48,12 +48,12 @@ class TestGraph(unittest.TestCase):
     self.helper_compare_graph(RG)
 
   def test_add_graph_prune(self):
-    a = CPUBuffer.fromCPU(np.ones((1,1), dtype=np.float32))
+    a = CPUBuffer(np.ones((1,1), dtype=np.float32))
     ast = LazyOp(MovementOps.RESHAPE, (a,), (4, 4))
     ret = CPUBuffer(np.ones((4,4), dtype=np.float32))
     log_op(ret, ast, show_graph=True)
 
-    b = CPUBuffer.fromCPU(np.ones((4,4), dtype=np.float32))
+    b = CPUBuffer(np.ones((4,4), dtype=np.float32))
     ast = LazyOp(BinaryOps.ADD, (ret,b))
     ret = CPUBuffer(np.ones((4,4), dtype=np.float32))
     log_op(ret, ast, show_graph=True)

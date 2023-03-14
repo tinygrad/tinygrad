@@ -278,7 +278,7 @@ result = Tensor([2]) + Tensor([3])
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 GlobalCounters.cache = []    # enables the cache
 result.realize()             # create the program and runs it
 cache_saved = GlobalCounters.cache

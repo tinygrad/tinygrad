@@ -4,7 +4,8 @@ import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List, Final
 from tinygrad.helpers import IMAGE, DEBUG, getenv, dtypes
-from tinygrad.ops import CompiledBuffer, GlobalCounters, RawBufferCopyInOut, RawBuffer, Specialized
+from tinygrad.ops import CompiledBuffer, GlobalCounters, Specialized
+from tinygrad.runtime.lib import RawBufferCopyInOut, RawBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 OSX = platform.system() == "Darwin"
@@ -24,8 +25,8 @@ class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     super().__init__(size, dtype)
     self._cl = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, self._memsz)
-  def copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
-  def copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
+  def _copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
+  def _copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
 
 class CLImage(RawBuffer):  # pylint: disable=abstract-method
   IMAGE: Final = True
@@ -35,7 +36,6 @@ class CLImage(RawBuffer):  # pylint: disable=abstract-method
     GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
 
-#@functools.lru_cache(maxsize=None)
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None):
     self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore

@@ -1,5 +1,6 @@
 import os, time, ctypes, hashlib, subprocess, platform
-from tinygrad.ops import CompiledBuffer, Specialized, RawMallocBuffer
+from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class ClangProgram:
@@ -13,6 +14,7 @@ class ClangProgram:
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name]
+
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
     self.fxn(*[x._buf for x in args])

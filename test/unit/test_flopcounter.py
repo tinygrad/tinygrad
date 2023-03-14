@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.ops import InterpretedBuffer, GenericShape, LazyOp, BinaryOps, get_lazyop_info
+from tinygrad.ops import LazyOp, BinaryOps
+from tinygrad.interpreted import get_lazyop_info, InterpretedBuffer, GenericShape
 
 class TestFlopCounter(unittest.TestCase):
   def test_flops_add(self):
@@ -34,6 +35,6 @@ class TestFlopCounter(unittest.TestCase):
     op2 = LazyOp(BinaryOps.ADD, (op0,op1,), None)
     info = get_lazyop_info(op2)
     self.assertEqual(info.flops, 12)
-  
+
 if __name__ == '__main__':
   unittest.main()
