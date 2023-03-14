@@ -13,7 +13,7 @@ this documentation will help with entry points and understanding the abstraction
 # %%
 # == Boilerplate imports for typing ==
 from __future__ import annotations
-from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List
+from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List, ClassVar
 from enum import Enum, auto
 from abc import ABC
 
@@ -170,7 +170,7 @@ class InterpretedBuffer(DeviceBuffer):
 
   # the compute itself is defined here. these functions are called with _buf
   # here's a UnaryOp and BinaryOp from CPUBuffer(InterpretedBuffer)
-  fxn_for_op: Dict[Op, Callable] = {UnaryOps.EXP: lambda x: np.exp(x), BinaryOps.ADD: lambda x,y: x+y}
+  fxn_for_op: ClassVar[Dict[Op, Callable]] = {UnaryOps.EXP: lambda x: np.exp(x), BinaryOps.ADD: lambda x,y: x+y}
 
   # NOTE: exec_ast should not need to be overridden!
   # The actual method lives in tinygrad/ops.py
