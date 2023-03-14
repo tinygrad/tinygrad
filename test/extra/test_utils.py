@@ -26,7 +26,7 @@ class TestUtils(unittest.TestCase):
       def __init__(self):
         super(LayerWithOffset, self).__init__()
         self.param = torch.nn.Parameter(
-          torch.randn(16).as_strided([4], [1], storage_offset=5)
+          torch.randn(16).as_strided([2, 2], [2, 3], storage_offset=5)
         )
 
     for isfloat16 in [True, False]:

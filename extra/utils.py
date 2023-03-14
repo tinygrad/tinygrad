@@ -90,9 +90,12 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
   assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
   if any(s != 1 and st1 != st2 for s, st1, st2 in zip(shape, strides_for_shape(shape), strides)):
     # slow path
-    np_array = np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), t.dtype.np).reshape(t.shape)
-    real_strides = tuple([x*t.dtype.itemsize for x in strides]) # numpy stores its strides in bytes
-    np_array.strides = real_strides
+    buffer_size = sum(strides[i]*t.dtype.itemsize * (shape[i] - 1) for i in range(len(shape)))
+    buffer_size += t.dtype.itemsize
+    np_array = np.frombuffer(myfile.read(buffer_size), t.dtype.np)
+
+    np_array = np.lib.stride_tricks.as_strided(
+      np_array, shape=shape, strides=[i*t.dtype.itemsize for i in strides])
 
     lna = t.lazydata.op.arg
     lna.fxn = lambda _: np_array
