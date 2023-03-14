@@ -45,7 +45,7 @@ def infer(model, img):
   """
 
   # run the net
-  out = _infer(model, Tensor(img)).numpy()
+  out = _infer(model, Tensor(img.astype("float32"))).numpy()
 
   # if you want to look at the outputs
   """
