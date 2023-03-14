@@ -36,18 +36,18 @@ def download_file(url, fp, skip_if_exists=False):
 def my_unpickle(fb0):
   key_prelookup = defaultdict(list)
   class HackTensor:
-    def __new__(cls, *args):
+    def __new__(cls, storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
       #print(args)
-      ident, storage_type, obj_key, location, obj_size = args[0][0:5]
+      ident, storage_type, obj_key, location, obj_size = storage[0:5]
       assert ident == 'storage'
-      assert prod(args[2]) == obj_size
+      assert prod(size) <= (obj_size - storage_offset)
 
       if storage_type not in [np.float16, np.float32]:
-        if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {args[2]}")
+        if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {size}")
         ret = None
       else:
-        ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(args[2]), storage_type))
-      key_prelookup[obj_key].append((storage_type, obj_size, ret, args[2], args[3]))
+        ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(size), storage_type))
+      key_prelookup[obj_key].append((storage_type, obj_size, ret, size, stride, storage_offset))
       return ret
 
   class HackParameter:
@@ -61,19 +61,13 @@ def my_unpickle(fb0):
   class MyPickle(pickle.Unpickler):
     def find_class(self, module, name):
       #print(module, name)
-      if name == 'FloatStorage':
-        return np.float32
-      if name == 'LongStorage':
-        return np.int64
-      if name == 'IntStorage':
-        return np.int32
-      if name == 'HalfStorage':
-        return np.float16
+      if name == 'FloatStorage': return np.float32
+      if name == 'LongStorage': return np.int64
+      if name == 'IntStorage': return np.int32
+      if name == 'HalfStorage': return np.float16
       if module == "torch._utils":
-        if name == "_rebuild_tensor_v2":
-          return HackTensor
-        elif name == "_rebuild_parameter":
-          return HackParameter
+        if name == "_rebuild_tensor_v2": return HackTensor
+        if name == "_rebuild_parameter": return HackParameter
       else:
         if module.startswith('pytorch_lightning'): return Dummy
         try:
@@ -86,11 +80,13 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def load_single_weight(t:Tensor, myfile, shape, strides, dtype, mmap_allowed=False):
+def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False):
   bytes_size = np.dtype(dtype).itemsize
   if t is None:
     myfile.seek(prod(shape) * bytes_size, 1)
     return
+
+  myfile.seek(storage_offset * bytes_size, 1)
 
   assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
   assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
@@ -135,7 +131,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithr
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            load_single_weight(v[2], myfile, v[3], v[4], v[0], mmap_allowed=True)
+            load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
       if multithreaded:
         import concurrent.futures
         # 2 seems fastest
@@ -176,10 +172,10 @@ def fake_torch_load(b0):
     key_real[key_lookup.index(k)] = v[0]
 
   # read in the actual data
-  for storage_type, obj_size, tensor, np_shape, np_strides in key_real:
+  for storage_type, obj_size, tensor, np_shape, np_strides, storage_offset in key_real:
     ll = struct.unpack("Q", fb0.read(8))[0]
     assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
-    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type)
+    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type, storage_offset)
 
   return ret
 
