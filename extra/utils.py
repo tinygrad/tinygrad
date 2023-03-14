@@ -117,8 +117,6 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
       return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
     def _read(lna):
       ret = np.empty(lna.shape, dtype=lna.dtype)
-      if storage_offset is not None:
-        myfile.seek(bytes_offset)
       myfile.readinto(ret.data)
       return ret
     if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
