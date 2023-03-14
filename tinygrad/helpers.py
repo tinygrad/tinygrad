@@ -37,6 +37,5 @@ class LazyNumpyArray:
 class dtypes:
   float16: Final[DType] = DType(2, "half", np.float16)
   float32: Final[DType] = DType(4, "float", np.float32)
-  int64: Final[DType] = DType(8, "int64", np.int64)
   @staticmethod
-  def from_np(x:Union[LazyNumpyArray, np.ndarray]) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32, np.dtype(np.int64): dtypes.int64}[np.dtype(x.dtype)]
+  def from_np(x:Union[LazyNumpyArray, np.ndarray]) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]
