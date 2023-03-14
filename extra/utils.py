@@ -83,8 +83,10 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
     myfile.seek(prod(shape) * bytes_size, 1)
     return
 
-  bytes_offset = storage_offset * bytes_size
-  myfile.seek(bytes_offset)
+  bytes_offset = 0
+  if storage_offset is not None:
+    bytes_offset = storage_offset * bytes_size
+    myfile.seek(bytes_offset)
 
   assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
   assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
@@ -115,7 +117,8 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
       return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
     def _read(lna):
       ret = np.empty(lna.shape, dtype=lna.dtype)
-      myfile.seek(bytes_offset)
+      if storage_offset is not None:
+        myfile.seek(bytes_offset)
       myfile.readinto(ret.data)
       return ret
     if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
@@ -178,7 +181,8 @@ def fake_torch_load(b0):
   for storage_type, obj_size, tensor, np_shape, np_strides, storage_offset in key_real:
     ll = struct.unpack("Q", fb0.read(8))[0]
     assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
-    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type, storage_offset)
+    assert storage_offset == 0, "not implemented"
+    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type, None)
 
   return ret
 
