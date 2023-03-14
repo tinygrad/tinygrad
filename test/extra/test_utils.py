@@ -23,17 +23,17 @@ class TestUtils(unittest.TestCase):
     import numpy as np
     import tempfile
     class LayerWithOffset(torch.nn.Module):
-        def __init__(self):
-            super(LayerWithOffset, self).__init__()
-            self.param = torch.nn.Parameter(
-              torch.randn(16).as_strided([4], [1], storage_offset=5)
-            )
+      def __init__(self):
+        super(LayerWithOffset, self).__init__()
+        self.param = torch.nn.Parameter(
+          torch.randn(16).as_strided([4], [1], storage_offset=5)
+        )
 
     for isfloat16 in [True, False]:
       model = torch.nn.Sequential(
-          torch.nn.Linear(4, 8),
-          torch.nn.Linear(8, 3),
-          LayerWithOffset()
+        torch.nn.Linear(4, 8),
+        torch.nn.Linear(8, 3),
+        LayerWithOffset()
       )
       if isfloat16: model = model.half()
 
@@ -43,11 +43,11 @@ class TestUtils(unittest.TestCase):
         model2 = fake_torch_load_zipped(path)
 
       for name, a in model.state_dict().items():
-          b = model2[name]
-          a, b = a.numpy(), b.numpy()
-          assert a.shape == b.shape
-          assert a.dtype == b.dtype
-          assert np.array_equal(a, b)
+        b = model2[name]
+        a, b = a.numpy(), b.numpy()
+        assert a.shape == b.shape
+        assert a.dtype == b.dtype
+        assert np.array_equal(a, b)
 
 
 if __name__ == '__main__':
