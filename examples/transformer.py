@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-import os
 import numpy as np
 import random
 
-from tinygrad.tensor import Device
-from extra.utils import get_parameters
+from tinygrad.nn.optim import Adam, get_parameters
 from extra.training import train, evaluate
 from models.transformer import Transformer
-from tinygrad.nn.optim import Adam
 
 # dataset idea from https://github.com/karpathy/minGPT/blob/master/play_math.ipynb
 def make_dataset():
@@ -22,13 +19,10 @@ def make_dataset():
   ds_Y = np.copy(ds[:, 1:])
   ds_X_train, ds_X_test = ds_X[0:8000], ds_X[8000:]
   ds_Y_train, ds_Y_test = ds_Y[0:8000], ds_Y[8000:]
-
   return ds_X_train, ds_Y_train, ds_X_test, ds_Y_test
 
-from tinygrad.nn.optim import Adam
 if __name__ == "__main__":
   model = Transformer(10, 6, 2, 128, 4, 32)
-
   X_train, Y_train, X_test, Y_test = make_dataset()
   lr = 0.003
   for i in range(10):

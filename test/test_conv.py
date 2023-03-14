@@ -38,22 +38,22 @@ class TestConv(unittest.TestCase):
 
   def test_two_binops_no_rerun(self):
     Tensor.no_grad = True
-    x = Tensor.ones(1,12,128,256)
-    w = Tensor.ones(32,12,3,3)
+    x = Tensor.randn(1,12,128,256)
+    w = Tensor.randn(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), (out-1)
-    r1.numpy(), r2.numpy()
+    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+    np.testing.assert_allclose(r2.numpy(), out.numpy() - 1)
     Tensor.no_grad = False
-    # TODO: make this a real test
 
   def test_two_overlapping_binops_no_rerun(self):
     Tensor.no_grad = True
-    x = Tensor.ones(1,12,128,256)
-    w = Tensor.ones(32,12,3,3)
+    x = Tensor.randn(1,12,128,256)
+    w = Tensor.randn(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), out.elu()
-    r1.numpy(), r2.numpy()
-    # TODO: make this a real test
+    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+    np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
     Tensor.no_grad = False
 
   def test_first_three(self):

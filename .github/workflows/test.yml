@@ -14,34 +14,33 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Install SLOCCount
       run: sudo apt-get install sloccount
     - name: Check <1000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
   linter:
-    name: Linter
+    name: Linters
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install pylint flake8
-        pip install -e .
+      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
-      run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E304,E502,E701,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
+      run: flake8 tinygrad/ --indent-size=2 --select=F,E112,E113,E203,E304,E502,E702,E703,E71,E72,E731,W191,W6 --statistics -j4
     - name: Lint tinygrad with pylint
       run: pylint tinygrad/
+    - name: Run mypy
+      run: mypy tinygrad/ --ignore-missing-imports --check-untyped-defs --explicit-package-bases --warn-unreachable
 
   testcpu:
     name: CPU Tests
@@ -49,19 +48,51 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
-    - name: Update packages
-      run: sudo apt-get update
+      uses: actions/checkout@v3
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: LAZY=0 python -m pytest -s -v
-    - name: Run Pytest (lazy)
-      run: LAZY=1 python -m pytest -s -v
+      run: python -m pytest -s -v -n=auto
+
+  testimagenet:
+    name: ImageNet to C Compile Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e .
+    - name: Compile EfficientNet to C
+      run: CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
+    - name: Compile C to native
+      run: clang -O2 recognize.c -lm -o recognize
+    - name: Test EfficientNet
+      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+
+  testllvm:
+    name: LLVM Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install Dependencies
+      run: pip install -e '.[llvm,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run Pytest
+      run: ENABLE_METHOD_CACHE=1 LLVM=1 python -m pytest -s -v -n=auto
 
   testtorch:
     name: Torch Tests
@@ -69,19 +100,15 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
-    - name: Update packages
-      run: sudo apt-get update
+      uses: actions/checkout@v3
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: LAZY=0 TORCH=1 python -m pytest -s -v
-    - name: Run Pytest (lazy)
-      run: LAZY=1 TORCH=1 python -m pytest -s -v
+      run: TORCH=1 python -m pytest -s -v -n=auto
 
   testgpu:
     name: GPU Tests
@@ -89,7 +116,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: |
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -99,15 +126,17 @@ jobs:
       #run: sudo apt-get install -y pocl-opencl-icd
       run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]'
-    - name: Run Optimizer Test
-      run: OPT=2 GPU=1 python test/external_test_opt.py
+      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run Optimizer Test (OPT 2 and 3)
+      run: |
+        OPT=2 GPU=1 python test/external/external_test_opt.py
+        OPT=3 GPU=1 python test/external/external_test_opt.py
     - name: Run Pytest (default)
-      run: OPT=1 GPU=1 python -m pytest -s -v
+      run: GPU=1 python -m pytest -s -v -n=auto
 
   testopencl:
     name: openpilot (OpenCL) Test
@@ -115,7 +144,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Update packages
       run: |
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
@@ -125,32 +154,30 @@ jobs:
       #run: sudo apt-get install -y pocl-opencl-icd
       run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]'
-    - name: Test OPENCL ops
-      run: OPT=2 OPENCL=1 python3 test/test_ops.py
+      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test GPU IMAGE ops
+      run: GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model
       run: |
-        ALLOWED_KERNEL_COUNT=206 FLOAT16=1 UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
-        UNSAFE_FLOAT4=1 DEBUGCL=1 python3 openpilot/compile.py
+        ALLOWED_KERNEL_COUNT=197 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
+        DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
+        VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
 
-  testmypy:
-    name: Mypy Tests
+  # disabled, this test is flaky
+  testdocker:
+    name: Docker Test
     runs-on: ubuntu-latest
+    if: ${{ false }}
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v2
-    - name: Update packages
-      run: sudo apt-get update
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: pip install -e '.[testing]'
-    - name: Run mypy
-      run: mypy tinygrad/
+      uses: actions/checkout@v3
+    - name: Build Docker
+      run: docker build -t tinygrad -f test/Dockerfile .
+    - name: Test Docker
+      run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"

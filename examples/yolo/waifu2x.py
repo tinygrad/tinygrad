@@ -172,7 +172,7 @@ class Vgg7:
         tile_t = Tensor(tile)
         tile_fwd_t = self.forward(tile_t)
         # Replace tile.
-        image_out[:, :, out_y:out_y + out_h, out_x:out_x + out_w] = tile_fwd_t.data
+        image_out[:, :, out_y:out_y + out_h, out_x:out_x + out_w] = tile_fwd_t.numpy()
 
     return image_out
 

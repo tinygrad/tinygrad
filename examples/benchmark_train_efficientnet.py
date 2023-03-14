@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-import os
+import gc
 import time
 from tqdm import trange
 from models.efficientnet import EfficientNet
-import tinygrad.nn.optim as optim
+from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
-from tinygrad.llops.ops_gpu import CL
+from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import getenv
 
-import gc
 def tensors_allocated():
-  return sum([isinstance(x, Tensor) for x in gc.get_objects()])
+  return sum(isinstance(x, Tensor) for x in gc.get_objects())
 
-NUM = int(os.getenv("NUM", 2))
-BS = int(os.getenv("BS", 8))
-CNT = int(os.getenv("CNT", 10))
-BACKWARD = int(os.getenv("BACKWARD", 0))
-TRAINING = int(os.getenv("TRAINING", 1))
-ADAM = int(os.getenv("ADAM", 0))
+NUM = getenv("NUM", 2)
+BS = getenv("BS", 8)
+CNT = getenv("CNT", 10)
+BACKWARD = getenv("BACKWARD", 0)
+TRAINING = getenv("TRAINING", 1)
+ADAM = getenv("ADAM", 0)
+CLCACHE = getenv("CLCACHE", 0)
 
 if __name__ == "__main__":
   print(f"NUM:{NUM} BS:{BS} CNT:{CNT}")
@@ -29,29 +30,37 @@ if __name__ == "__main__":
   Tensor.training = TRAINING
   Tensor.no_grad = not BACKWARD
   for i in trange(CNT):
+    GlobalCounters.reset()
     cpy = time.monotonic()
     x_train = Tensor.randn(BS, 3, 224, 224, requires_grad=False).realize()
     y_train = Tensor.randn(BS, 1000, requires_grad=False).realize()
 
-    st = time.monotonic()
-    out = model.forward(x_train)
-    loss = out.logsoftmax().mul(y_train).mean()
-    if BACKWARD:
-      optimizer.zero_grad()
-      loss.backward()
-      optimizer.step()
-    mt = time.monotonic()
-    loss.realize()
-    for p in parameters:
-      p.realize()
-    et = time.monotonic()
-    mem_used = CL.mem_used
-    loss = loss.detach().cpu().data[0]
+    # TODO: replace with TinyJit
+    if i < 3 or not CLCACHE:
+      st = time.monotonic()
+      out = model.forward(x_train)
+      loss = out.log_softmax().mul(y_train).mean()
+      if i == 2 and CLCACHE: GlobalCounters.cache = []
+      if BACKWARD:
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+      mt = time.monotonic()
+      loss.realize()
+      for p in parameters:
+        p.realize()
+      et = time.monotonic()
+    else:
+      st = mt = time.monotonic()
+      for prg, args in cl_cache: prg(*args)
+      et = time.monotonic()
+
+    if i == 2 and CLCACHE:
+      cl_cache = GlobalCounters.cache
+      GlobalCounters.cache = None
+
+    mem_used = GlobalCounters.mem_used
+    loss_cpu = loss.detach().numpy()[0]
     cl = time.monotonic()
 
-    print(f"{(st-cpy)*1000.0:7.2f} ms cpy,  {(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used")
-
-
-
-
-
+    print(f"{(st-cpy)*1000.0:7.2f} ms cpy,  {(cl-st)*1000.0:7.2f} ms run, {(mt-st)*1000.0:7.2f} ms build, {(et-mt)*1000.0:7.2f} ms realize, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {tensors_allocated():4d} tensors, {mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")

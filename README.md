@@ -6,6 +6,8 @@
 
 ![Unit Tests](https://github.com/geohot/tinygrad/workflows/Unit%20Tests/badge.svg)
 
+[![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
+
 For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
 This may not be the best deep learning framework, but it is a deep learning framework.
@@ -16,13 +18,25 @@ Due to its extreme simplicity, it aims to be the easiest framework to add new ac
 
 We are working on support for the Apple Neural Engine and the Google TPU in the `accel/` folder. Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blindingly fast. Now, it is slow.
 
+This project is maintained by [tiny corp](https://tinygrad.org/).
+
 ### Installation
 
 ```bash
 git clone https://github.com/geohot/tinygrad.git
 cd tinygrad
-python3 setup.py develop
+python3 -m pip install -e .
 ```
+
+### Contributing
+
+There's a lot of interest in tinygrad lately. Here's some guidelines for contributing:
+
+* Bugfixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
+* If you don't understand the code you are changing, don't change it!
+* All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
+* Features are welcome. Though if you are adding a feature, you need to include tests.
+* Improving test coverage is great, with reliable non brittle tests.
 
 ### Example
 
@@ -34,8 +48,8 @@ y = Tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
-print(x.grad)  # dz/dx
-print(y.grad)  # dz/dy
+print(x.grad.numpy())  # dz/dx
+print(y.grad.numpy())  # dz/dy
 ```
 
 ### Same example in torch
@@ -51,6 +65,19 @@ z.backward()
 print(x.grad)  # dz/dx
 print(y.grad)  # dz/dy
 ```
+
+## Is tinygrad fast?
+
+Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
+
+```python
+DEBUG=3 OPTLOCAL=1 GPU=1 python3 -c "from tinygrad.tensor import Tensor;
+N = 1024; a, b = Tensor.randn(N, N), Tensor.randn(N, N);
+c = (a.reshape(N, 1, N) * b.permute(1,0).reshape(1, N, N)).sum(axis=2);
+print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+```
+
+Change to `DEBUG=4` to see the generated code.
 
 ## Neural networks?
 
@@ -68,7 +95,7 @@ class TinyBobNet:
     self.l2 = Tensor.uniform(128, 10)
 
   def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).logsoftmax()
+    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
 
 model = TinyBobNet()
 optim = optim.SGD([model.l1, model.l2], lr=0.001)
@@ -115,14 +142,13 @@ hlops are syntactic sugar around mlops. They support most things torch does.
 
 ### mlops
 
-mlops are mid level ops, there's 15 of them. They understand memory allocation and derivatives
+mlops are mid level ops. They understand derivatives. They are very simple.
 
 ```
-Relu, Log, Exp                          # unary ops
-Sum, Max                                # reduce ops (with axis argument)
-Add, Sub, Mul, Pow                      # binary ops (no broadcasting, use expand)
-Reshape, Permute, Slice, Expand, Flip   # movement ops
-Conv2D(NCHW)                            # processing op (Matmul is also Conv2D)
+Log, Exp                                       # unary ops
+Sum, Max                                       # reduce ops (with axis argument)
+Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, use expand)
+Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
 ```
 
 You no longer need to write mlops for a new accelerator
@@ -132,15 +158,13 @@ You no longer need to write mlops for a new accelerator
 The autodiff stuff is all in mlops now so you can focus on the raw operations
 
 ```
-Buffer                                                     # class of memory on this device
-unary_op  (RELU, EXP, LOG, NEG, SIGN)                      # A -> A
-reduce_op (SUM, MAX)                                       # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ)                 # A + B -> C (all the same size)
-movement_op (RESHAPE, PERMUTE, PAD, SHRINK, EXPAND, FLIP)  # A -> B (different size)
-processing_op (CONV)                                       # A + B -> C
+Buffer                                                       # class of memory on this device
+unary_op  (NOOP, NEG, NOT, EXP, LOG)                         # A -> A
+reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
+binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)              # A + A -> A (all the same size)
+movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
+fused_op [[optional]] (MULACC)                               # A * A -> B
 ```
-
-When tinygrad moves to lazy evaluation, optimizations will happen here.
 
 ## ImageNet inference
 
@@ -162,9 +186,9 @@ PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
 ### tinygrad supports Stable Diffusion!
 
-Run `TORCH=1 python3 examples/stable_diffusion.py`
+You might need to download the [weight](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt) of Stable Diffusion and put it into weights/
 
-(or without torch: `OPT=2 OPENCL=1 python3 examples/stable_diffusion.py`)
+Run `GPU=1 python3 examples/stable_diffusion.py`
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg">
@@ -209,7 +233,12 @@ GRAPH=1 python3 test/test_mnist.py TestMNIST.test_sgd_onestep
 
 ### Running tests
 
+For more examples on how to run the full test suite please refer to the [CI workflow](.github/workflows/test.yml).
+
 ```bash
+python3 -m pip install -e '.[testing]'
 python3 -m pytest
+python3 -m pytest -v -k TestTrain
+python3 ./test/models/test_train.py TestTrain.test_efficientnet
 ```
 

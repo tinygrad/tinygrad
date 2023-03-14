@@ -3,11 +3,11 @@ import gc
 from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.llops.ops_gpu import CL, GPUBuffer
-#from tinygrad.llops.ops_opencl import CLImage, OpenCLBuffer
+from tinygrad.runtime.ops_gpu import GPUBuffer
+from tinygrad.ops import GlobalCounters
 
 def print_objects():
-  gc.collect()
+  #gc.collect()
   tensors = [x for x in gc.get_objects() if isinstance(x, Tensor)]
   tensor_ram_used = sum([prod(x.shape)*4 for x in tensors])
   lazybuffers = [x for x in gc.get_objects() if isinstance(x, LazyBuffer)]
@@ -15,7 +15,7 @@ def print_objects():
   realized_buffers = [x.realized for x in lazybuffers if x.realized]
   gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
 
-  print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {CL.mem_used/1e9:.2f} GB")
+  print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {GlobalCounters.mem_used/1e9:.2f} GB")
   print(f"{len(lazybuffers)} lazybuffers {len(realized_buffers)} realized, {len(gpubuffers)} GPU buffers")
   print(f"{len(gpubuffers_orphaned)} GPU buffers are orphaned")
 
@@ -24,9 +24,10 @@ def print_objects():
     bb = gc.get_referrers(tb)
     for b in bb:
       if b is not gpubuffers and b is not gpubuffers_orphaned:
-        print(tb, "reference", type(b),len(b), str(b)[0:150])
+        print(tb, "\nreference", type(b), len(b), str(b)[0:150])
         for x in gc.get_referrers(b):
-          print(str(x)[0:100])
+          print("double reference", str(x)[0:100])
+        print("\n")
     if cnt == 10:
       break
     cnt += 1
@@ -35,11 +36,13 @@ def print_objects():
     if getattr(x, '_buf', None): del x._buf
     if getattr(x, '_image', None): del x._image
 
+  return len(gpubuffers_orphaned)
+
 """
 import gc
 
 def print_ram():
-  print(CL.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
+  print(GlobalCounters.mem_used/1e9, sum([prod(x.shape)*4 for x in gc.get_objects() if isinstance(x, Tensor)])/1e9)
   img_count = sum([x.is_image() for x in gc.get_objects() if isinstance(x, OpenCLBuffer)])
   print("img_count", img_count)
   buffer_bytes = sum([x.cl.size for x in gc.get_objects() if isinstance(x, CLBuffer)])

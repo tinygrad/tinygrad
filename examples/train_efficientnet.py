@@ -1,57 +1,51 @@
-import os
 import traceback
 import time
+from multiprocessing import Process, Queue
 import numpy as np
-from models.efficientnet import EfficientNet
-from tinygrad.tensor import Tensor
-from extra.utils import get_parameters
 from tqdm import trange
-from tinygrad.nn import BatchNorm2D
-import tinygrad.nn.optim as optim
+from tinygrad.nn import optim
+from tinygrad.helpers import getenv
+from tinygrad.tensor import Tensor
 from datasets import fetch_cifar
+from datasets.imagenet import fetch_batch
+from models.efficientnet import EfficientNet
 
 class TinyConvNet:
   def __init__(self, classes=10):
     conv = 3
     inter_chan, out_chan = 8, 16   # for speed
     self.c1 = Tensor.uniform(inter_chan,3,conv,conv)
-    #self.bn1 = BatchNorm2D(inter_chan)
     self.c2 = Tensor.uniform(out_chan,inter_chan,conv,conv)
-    #self.bn2 = BatchNorm2D(out_chan)
     self.l1 = Tensor.uniform(out_chan*6*6, classes)
 
   def forward(self, x):
     x = x.conv2d(self.c1).relu().max_pool2d()
-    #x = self.bn1(x)
     x = x.conv2d(self.c2).relu().max_pool2d()
-    #x = self.bn2(x)
     x = x.reshape(shape=[x.shape[0], -1])
     return x.dot(self.l1)
 
 if __name__ == "__main__":
-  IMAGENET = os.getenv("IMAGENET") is not None
+  IMAGENET = getenv("IMAGENET")
   classes = 1000 if IMAGENET else 10
 
-  TINY = os.getenv("TINY") is not None
-  TRANSFER = os.getenv("TRANSFER") is not None
+  TINY = getenv("TINY")
+  TRANSFER = getenv("TRANSFER")
   if TINY:
     model = TinyConvNet(classes)
   elif TRANSFER:
-    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=True)
+    model = EfficientNet(getenv("NUM", 0), classes, has_se=True)
     model.load_from_pretrained()
   else:
-    model = EfficientNet(int(os.getenv("NUM", "0")), classes, has_se=False)
+    model = EfficientNet(getenv("NUM", 0), classes, has_se=False)
 
-  parameters = get_parameters(model)
+  parameters = optim.get_parameters(model)
   print("parameter count", len(parameters))
   optimizer = optim.Adam(parameters, lr=0.001)
 
-  BS, steps = int(os.getenv("BS", "64" if TINY else "16")), int(os.getenv("STEPS", "2048"))
-  print("training with batch size %d for %d steps" % (BS, steps))
+  BS, steps = getenv("BS", 64 if TINY else 16), getenv("STEPS", 2048)
+  print(f"training with batch size {BS} for {steps} steps")
 
   if IMAGENET:
-    from datasets.imagenet import fetch_batch
-    from multiprocessing import Process, Queue
     def loader(q):
       while 1:
         try:
@@ -81,7 +75,7 @@ if __name__ == "__main__":
     y = np.zeros((BS,classes), np.float32)
     y[range(y.shape[0]),Y] = -classes
     y = Tensor(y, requires_grad=False)
-    loss = out.logsoftmax().mul(y).mean()
+    loss = out.log_softmax().mul(y).mean()
 
     optimizer.zero_grad()
 
@@ -93,11 +87,9 @@ if __name__ == "__main__":
     optimizer.step()
     opt_time = (time.time()-st)*1000.0
 
-    #print(out.cpu().data)
-
     st = time.time()
-    loss = loss.cpu().data
-    cat = np.argmax(out.cpu().data, axis=1)
+    loss = loss.cpu().numpy()
+    cat = np.argmax(out.cpu().numpy(), axis=1)
     accuracy = (cat == Y).mean()
     finish_time = (time.time()-st)*1000.0
 

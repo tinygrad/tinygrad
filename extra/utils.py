@@ -1,41 +1,53 @@
-from tinygrad.tensor import Tensor
 import pickle
 import numpy as np
-from tinygrad.helpers import prod
+from tqdm import tqdm
+import tempfile, platform
+from collections import defaultdict
+from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.ops import GlobalCounters
+from tinygrad.tensor import Tensor
+from tinygrad.lazy import LazyNumpyArray, Device
+from tinygrad.shape.shapetracker import strides_for_shape
+OSX = platform.system() == "Darwin"
 
 def fetch(url):
   if url.startswith("/"):
     with open(url, "rb") as f:
-      dat = f.read()
-    return dat
-  import requests, os, hashlib, tempfile
+      return f.read()
+  import os, hashlib, tempfile
   fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
-  if os.path.isfile(fp) and os.stat(fp).st_size > 0 and os.getenv("NOCACHE", None) is None:
-    with open(fp, "rb") as f:
-      dat = f.read()
-  else:
-    print("fetching %s" % url)
-    r = requests.get(url)
-    assert r.status_code == 200
-    dat = r.content
-    with open(fp+".tmp", "wb") as f:
-      f.write(dat)
-    os.rename(fp+".tmp", fp)
-  return dat
+  download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
+  with open(fp, "rb") as f:
+    return f.read()
 
-from tinygrad.nn.optim import get_parameters
+def download_file(url, fp, skip_if_exists=False):
+  import requests, os
+  if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
+    return
+  r = requests.get(url, stream=True)
+  assert r.status_code == 200
+  progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
+  with tempfile.NamedTemporaryFile(delete=False) as f:
+    for chunk in r.iter_content(chunk_size=16384):
+      progress_bar.update(f.write(chunk))
+    f.close()
+    os.rename(f.name, fp)
 
 def my_unpickle(fb0):
-  key_prelookup = {}
+  key_prelookup = defaultdict(list)
   class HackTensor:
     def __new__(cls, *args):
       #print(args)
       ident, storage_type, obj_key, location, obj_size = args[0][0:5]
       assert ident == 'storage'
-
       assert prod(args[2]) == obj_size
-      ret = np.zeros(args[2], dtype=storage_type)
-      key_prelookup[obj_key] = (storage_type, obj_size, ret, args[2], args[3])
+
+      if storage_type not in [np.float16, np.float32]:
+        if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {args[2]}")
+        ret = None
+      else:
+        ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(args[2]), storage_type))
+      key_prelookup[obj_key].append((storage_type, obj_size, ret, args[2], args[3]))
       return ret
 
   class HackParameter:
@@ -53,6 +65,8 @@ def my_unpickle(fb0):
         return np.float32
       if name == 'LongStorage':
         return np.int64
+      if name == 'IntStorage':
+        return np.int32
       if name == 'HalfStorage':
         return np.float16
       if module == "torch._utils":
@@ -61,8 +75,9 @@ def my_unpickle(fb0):
         elif name == "_rebuild_parameter":
           return HackParameter
       else:
+        if module.startswith('pytorch_lightning'): return Dummy
         try:
-          return pickle.Unpickler.find_class(self, module, name)
+          return super().find_class(module, name)
         except Exception:
           return Dummy
 
@@ -71,18 +86,69 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def fake_torch_load_zipped(fb0, load_weights=True):
+def load_single_weight(t:Tensor, myfile, shape, strides, dtype, mmap_allowed=False):
+  bytes_size = np.dtype(dtype).itemsize
+  if t is None:
+    myfile.seek(prod(shape) * bytes_size, 1)
+    return
+
+  assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
+  assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
+  if any(s != 1 and st1 != st2 for s, st1, st2 in zip(shape, strides_for_shape(shape), strides)):
+    # slow path
+    np_array = np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), t.dtype.np).reshape(t.shape)
+    real_strides = tuple([x*t.dtype.itemsize for x in strides]) # numpy stores its strides in bytes
+    np_array.strides = real_strides
+
+    lna = t.lazydata.op.arg
+    lna.fxn = lambda _: np_array
+    t.realize()
+    return
+
+  # ["METAL", "CLANG", "LLVM"] support readinto for more speed
+  # ["GPU", "CUDA"] use _mmap since they have to copy in to the GPU anyway
+  # this needs real APIs
+  if t.device in ["METAL", "CLANG", "LLVM"]:
+    del t.lazydata.op
+    t.lazydata.realized = t.lazydata.dbuffer(t.shape, dtype=t.dtype)
+    myfile.readinto(t.lazydata.realized.raw()._buffer())
+  else:
+    def _mmap(lna):
+      assert myfile._compress_type == 0, "compressed data can't be mmaped"
+      return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start, shape=lna.shape)
+    def _read(lna):
+      ret = np.empty(lna.shape, dtype=lna.dtype)
+      myfile.readinto(ret.data)
+      return ret
+    if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
+    else: t.lazydata.op.arg.fxn = _read
+    t.realize()
+
+def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):
+  if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
+
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
-    with myzip.open('archive/data.pkl') as myfile:
+    with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
-      for k,v in ret[1].items():
-        with myzip.open(f'archive/data/{k}') as myfile:
-          if v[2].dtype == "object":
-            print(f"issue assigning object on {k}")
-            continue
-          np.copyto(v[2], np.frombuffer(myfile.read(), v[2].dtype).reshape(v[3]))
+      def load_weight(k, vv):
+        with myzip.open(f'{base_name}/data/{k}') as myfile:
+          for v in vv:
+            load_single_weight(v[2], myfile, v[3], v[4], v[0], mmap_allowed=True)
+      if multithreaded:
+        import concurrent.futures
+        # 2 seems fastest
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+          futures = {executor.submit(load_weight, k, v):k for k,v in ret[1].items()}
+          for future in (t:=tqdm(concurrent.futures.as_completed(futures), total=len(futures))):
+            if future.exception() is not None: raise future.exception()
+            k = futures[future]
+            t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+      else:
+        for k,v in (t := tqdm(ret[1].items())):
+          t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+          load_weight(k,v)
   return ret[0]
 
 def fake_torch_load(b0):
@@ -106,19 +172,14 @@ def fake_torch_load(b0):
   key_lookup = pickle.load(fb0)
   key_real = [None] * len(key_lookup)
   for k,v in key_prelookup.items():
-    key_real[key_lookup.index(k)] = v
+    assert len(v) == 1
+    key_real[key_lookup.index(k)] = v[0]
 
   # read in the actual data
-  for storage_type, obj_size, np_array, np_shape, np_strides in key_real:
+  for storage_type, obj_size, tensor, np_shape, np_strides in key_real:
     ll = struct.unpack("Q", fb0.read(8))[0]
-    assert ll == obj_size
-    bytes_size = {np.float32: 4, np.int64: 8}[storage_type]
-    mydat = fb0.read(ll * bytes_size)
-    np.copyto(np_array, np.frombuffer(mydat, storage_type).reshape(np_shape))
-
-    # numpy stores its strides in bytes
-    real_strides = tuple([x*bytes_size for x in np_strides])
-    np_array.strides = real_strides
+    assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
+    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type)
 
   return ret
 

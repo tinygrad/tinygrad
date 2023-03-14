@@ -3,6 +3,7 @@ notebooks
 .*.swp
 .*.swo
 *.pyc
+*.so
 build
 dist
 *.egg-info
@@ -10,3 +11,9 @@ dist
 a.out
 boxes.jpg
 weights/*
+pandecode.dump
+vertex.bin
+recognize*
+.idea
+disassemblers/applegpu
+*.prof

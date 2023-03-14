@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.nn import BatchNorm2D
+from tinygrad.nn import BatchNorm2d
 from extra.utils import fetch, fake_torch_load, get_child
 
 class MBConvBlock:
@@ -9,7 +9,7 @@ class MBConvBlock:
     oup = expand_ratio * input_filters
     if expand_ratio != 1:
       self._expand_conv = Tensor.glorot_uniform(oup, input_filters, 1, 1)
-      self._bn0 = BatchNorm2D(oup, track_running_stats=track_running_stats)
+      self._bn0 = BatchNorm2d(oup, track_running_stats=track_running_stats)
     else:
       self._expand_conv = None
 
@@ -20,7 +20,7 @@ class MBConvBlock:
       self.pad = [(kernel_size-1)//2]*4
 
     self._depthwise_conv = Tensor.glorot_uniform(oup, 1, kernel_size, kernel_size)
-    self._bn1 = BatchNorm2D(oup, track_running_stats=track_running_stats)
+    self._bn1 = BatchNorm2d(oup, track_running_stats=track_running_stats)
 
     self.has_se = has_se
     if self.has_se:
@@ -31,7 +31,7 @@ class MBConvBlock:
       self._se_expand_bias = Tensor.zeros(oup)
 
     self._project_conv = Tensor.glorot_uniform(output_filters, oup, 1, 1)
-    self._bn2 = BatchNorm2D(output_filters, track_running_stats=track_running_stats)
+    self._bn2 = BatchNorm2d(output_filters, track_running_stats=track_running_stats)
 
   def __call__(self, inputs):
     x = inputs
@@ -82,7 +82,7 @@ class EfficientNet:
 
     out_channels = round_filters(32)
     self._conv_stem = Tensor.glorot_uniform(out_channels, input_channels, 3, 3)
-    self._bn0 = BatchNorm2D(out_channels, track_running_stats=track_running_stats)
+    self._bn0 = BatchNorm2d(out_channels, track_running_stats=track_running_stats)
     blocks_args = [
       [1, 3, (1,1), 1, 32, 16, 0.25],
       [2, 3, (2,2), 6, 16, 24, 0.25],
@@ -116,7 +116,7 @@ class EfficientNet:
     in_channels = round_filters(320)
     out_channels = round_filters(1280)
     self._conv_head = Tensor.glorot_uniform(out_channels, in_channels, 1, 1)
-    self._bn1 = BatchNorm2D(out_channels, track_running_stats=track_running_stats)
+    self._bn1 = BatchNorm2d(out_channels, track_running_stats=track_running_stats)
     if has_fc_output:
       self._fc = Tensor.glorot_uniform(out_channels, classes)
       self._fc_bias = Tensor.zeros(classes)
@@ -146,6 +146,7 @@ class EfficientNet:
 
     b0 = fake_torch_load(fetch(model_urls[self.number]))
     for k,v in b0.items():
+      if k.endswith("num_batches_tracked"): continue
       for cat in ['_conv_head', '_conv_stem', '_depthwise_conv', '_expand_conv', '_fc', '_project_conv', '_se_reduce', '_se_expand']:
         if cat in k:
           k = k.replace('.bias', '_bias')
@@ -153,9 +154,9 @@ class EfficientNet:
 
       #print(k, v.shape)
       mv = get_child(self, k)
-      vnp = v.astype(np.float32)
-      vnp = vnp if k != '_fc' else vnp.T
-      vnp = vnp if vnp.shape != () else np.array([vnp])
+      vnp = v #.astype(np.float32)
+      vnp = vnp if k != '_fc' else vnp.transpose()
+      #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
         mv.assign(vnp)
