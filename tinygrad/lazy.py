@@ -19,7 +19,7 @@ class _Device:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}'), inspect.isclass) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -114,11 +114,11 @@ class LazyBuffer:
       elif self.op.op == LoadOps.CONTIGUOUS:
         real_src = self.op.src[0].realize(self.device)
         self.realized = real_src.contiguous()
-        ast = LazyOp(self.op.op, (real_src, ))
+        #ast = LazyOp(self.op.op, (real_src, ))
       elif self.op.op == LoadOps.CUSTOM:
         real_srcs = tuple(x.realize(self.device) for x in self.op.src)
         self.realized = self.op.arg(*real_srcs)
-        ast = LazyOp(self.op.op, real_srcs)
+        #ast = LazyOp(self.op.op, real_srcs)
       elif self.optype == MovementOps:
         src = self.op.src[0]
 
@@ -129,23 +129,29 @@ class LazyBuffer:
           ast = LazyOp(MovementOps.RESHAPE, (_ast_reduceops(src), ), self.op.arg)
         else:
           # movement ops aren't an AST, just run them
-          real_src = src.realize(self.device)
-          self.realized = real_src.movement_op(self.op.op, self.op.arg)
-          ast = LazyOp(self.op.op, (real_src, ))
+          src.realize(self.device)
+          self.realized = src.realized
+          #real_src = src.realize(self.device)
+          #self.realized = real_src.movement_op(self.op.op, self.op.arg)
+          #ast = LazyOp(self.op.op, (real_src, ))
       elif self.optype == ReduceOps: ast = _ast_reduceops(self)
       elif self.optype == BinaryOps: ast = _ast_binaryops(self)
+
+      # run the ast if we still have to, and log the op
+      if self.realized is None:
+        for x in get_buffers(ast): x.realize(self.device)
+        #ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
+        #self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
+
+        self.realized = self.dbuffer.exec_ast(ast, output_buffer=self)
 
       # no need to keep the op after realization
       del self.op
 
-      # run the ast if we still have to, and log the op
-      if self.realized is None:
-        ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
-        self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
-      log_op(self.realized, ast)
+      log_op(self, ast)
 
-    assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
-    assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+    #assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
+    #assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
     return self.realized
 
@@ -155,8 +161,8 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
-    ret = self.realize().toCPU()
-    log_op(CPUBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
+    ret = self.realize().toCPU().reshape(self.shape)
+    #log_op(CPUBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
     return ret.copy()
 
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)

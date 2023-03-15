@@ -73,7 +73,9 @@ class GPUCodegen(ASTKernel):
     assert len(self.sts[buf_index].views) == 1, "store has more than one view"
 
     # all stores can merge, since they have one view and are valid
-    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
+    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16) # or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
+    #IMAGE = hasattr(self.bufs[buf_index]._buf, "IMAGE")
+    IMAGE = False
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()
@@ -84,7 +86,7 @@ class GPUCodegen(ASTKernel):
       if should_upcast:
         for j in range(4): did_store.add(o+j)
         v = self.group_float4([to_store[o+j] for j in range(4)])
-      if self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
+      if self.bufs[buf_index] is not None and IMAGE:
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
         self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
@@ -96,11 +98,15 @@ class GPUCodegen(ASTKernel):
   def load(self, buf_index:int, idx_override:Optional[str]=None) -> List[Token]:
     # constant folding
     const = None
+    """
     if self.bufs[buf_index] is not None and self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
       val = self.bufs[buf_index]._backing[0]
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
+    """
+    #IMAGE = hasattr(self.bufs[buf_index]._buf, "IMAGE")
+    IMAGE = False
     should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
     tokens = []
     test_idy = []
@@ -115,7 +121,7 @@ class GPUCodegen(ASTKernel):
           can_merge = can_merge and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()  # float4_index must not be in after divide or in valid (TODO: don't check render)
         if const is not None:
           ldr = const
-        elif self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
+        elif self.bufs[buf_index] is not None and IMAGE:
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid, VALIDHACKS)
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
@@ -125,7 +131,7 @@ class GPUCodegen(ASTKernel):
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
         invalid = self.group_float4([Token("0.0f", Types.FLOAT)]*4) if ldr.typ == Types.FLOAT4 else Token("0.0f", Types.FLOAT)
-        ldr = ldr if valid.min == 1 or (VALIDHACKS and hasattr(self.bufs[buf_index]._buf, "IMAGE")) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : {invalid.tok})", ldr.typ) if valid.max == 1 else invalid)
+        ldr = ldr if valid.min == 1 or (VALIDHACKS and IMAGE) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : {invalid.tok})", ldr.typ) if valid.max == 1 else invalid)
         if const is not None:
           self.loaded_keys[(buf_index,o)] = ldr
         else:
@@ -152,6 +158,7 @@ class GPUCodegen(ASTKernel):
       return [Token(code.replace("A", a.tok), a.typ) for a in values[0]]
 
   def required_optimizations(self, early_only=False):
+    """
     for buf_index,buf in enumerate(self.bufs):
       upcast_strides = [self.sts[buf_index].strides[i] for i in self.upcast_in_mid_reduce_axes]
       if (not early_only or buf in self.earlybufs) and hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and (1 in upcast_strides))):
@@ -160,6 +167,8 @@ class GPUCodegen(ASTKernel):
         self.shift_to(axes[0], 4)
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
+    """
+    pass
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
@@ -178,7 +187,8 @@ class GPUCodegen(ASTKernel):
           break
 
     # are we upcasting in mid reduce?
-    if hasattr(self.bufs[0]._buf, "IMAGE") and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
+    #if hasattr(self.bufs[0]._buf, "IMAGE") and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
+    if not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
       axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
@@ -191,12 +201,14 @@ class GPUCodegen(ASTKernel):
     self.simplify_ones()
 
     # use more opencl indexing if the output buffer is an image and we have room
+    """
     if hasattr(self.bufs[0]._buf, "IMAGE") and self.first_reduce+len(self.group_for_reduce) < 3:
       base_shape = self.bufs[0]._base_shape
       if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
         if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
+    """
 
     # no more opt if we are grouping
     if self.group_for_reduce: return
@@ -266,7 +278,8 @@ class GPUCodegen(ASTKernel):
     self.bufs_to_delete: Set[int] = set()
     self.loaded_keys: Dict[Tuple[int,int], Token] = {}
     self.prekernel: Set[str] = set()
-    self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
+    #self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
+    self.kernel: List[str] = []
 
     if self.lang.half_prekernel and any(x.dtype == dtypes.float16 for x in self.bufs if x is not None): self.prekernel.add(self.lang.half_prekernel+"\n")
 
@@ -324,7 +337,8 @@ class GPUCodegen(ASTKernel):
     self.kernel.append("\n}")
 
     # concat kernel into prg
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
+    #buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if False else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
     prg = ' '.join(list(self.prekernel) + [f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
       [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] +
       [") {\n"] + self.kernel)
@@ -342,4 +356,5 @@ class GPUCodegen(ASTKernel):
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
       list(self.output_shape[::-1]) if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
-      op_estimate=self.info.flops, mem_estimate=sum(x.dtype.itemsize*prod(x._base_shape) for x in self.bufs if x is not None))
+      op_estimate=self.info.flops,# mem_estimate=sum(x.dtype.itemsize*prod(x._base_shape) for x in self.bufs if x is not None))
+      mem_estimate=0)

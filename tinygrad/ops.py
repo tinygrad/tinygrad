@@ -5,7 +5,7 @@ from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Dict, Set, Final
 from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes, GlobalCounters
 from tinygrad.shape.shapetracker import ShapeTracker, MovementOps
-from tinygrad.runtime.lib import RawBuffer
+from tinygrad.runtime.lib import RawBuffer, Runtime
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -51,7 +51,8 @@ class ASTRunner:
     return self
 
   def exec(self, bufs:List[Optional[CompiledBuffer]]) -> Optional[float]:
-    rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
+    #rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
+    rawbufs = [x.realized for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
@@ -82,6 +83,37 @@ class ASTRunner:
     return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
 from tinygrad.codegen.ast import ASTKernel
+
+class Compiled:
+  def __init__(self, buffer: Type[RawBuffer], codegen: Type[ASTKernel], runtime: Type[Runtime]):
+    self.buffer, self.codegen, self.runtime = buffer, codegen, runtime
+    self.method_cache: Dict[str, ASTRunner] = {}
+
+  def exec_ast(self, ast:LazyOp, output_buffer:LazyBuffer):
+    if ast.op == LoadOps.FROMCPU: return self.buffer.fromCPU(ast.arg)
+    #k = self.codegen(ast, output_buffer)
+    k = self.codegen(ast, output_buffer)
+
+    if False and getenv("ENABLE_METHOD_CACHE", 1):  # this is the default now
+      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.spec.runtime)
+      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
+      prg = self.method_cache[k.key]
+    else:
+      #prg = k.codegen().build(self.spec.runtime)
+      prg = k.codegen().build(self.runtime)
+
+    if getenv("PRINT_AST", "") == prg.name or getenv("PRINT_AST", "") == "1":
+      k.print()
+      print(prg.prg)
+
+    # create the output memory
+    output_buffer.realized = self.buffer(prod(output_buffer.shape), output_buffer.dtype)
+
+    prg.exec(k.bufs)
+    return output_buffer.realized
+    #return k.ret
+
+"""
 class Specialized(NamedTuple):
   raw_buffer: Type[RawBuffer]
   codegen: Type[ASTKernel]
@@ -143,4 +175,5 @@ class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
   # universal for shape tracked
   def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
   def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), hostbuf=self, dtype=self.dtype)
+"""
 

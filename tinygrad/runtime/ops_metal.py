@@ -4,7 +4,8 @@ import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
-from tinygrad.ops import CompiledBuffer, Specialized
+#from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
 METAL_XCODE = getenv("METAL_XCODE")
@@ -82,5 +83,8 @@ class MetalCodegen(GPUCodegen):
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
-class MetalBuffer(CompiledBuffer):
-  spec = Specialized(RawMetalBuffer, MetalCodegen, MetalProgram)
+MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram)
+
+#class MetalBuffer(CompiledBuffer):
+#  spec = Specialized(RawMetalBuffer, MetalCodegen, MetalProgram)
+

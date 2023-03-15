@@ -45,3 +45,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
     self._copyout(x)
     return x
+
+class Runtime:
+  def __init__(self, name:str, prg:str): raise NotImplementedError("must be implemented")
+  def __call__(self, global_size, local_size, *bufs, wait=False): raise NotImplementedError("must be implemented")

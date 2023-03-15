@@ -42,24 +42,28 @@ class ASTKernel:
     else:
       output_shape = None
 
-    self.bufs = dedup(get_buffers(ast))
+    #print(output_buffer)
+    self.bufs = [output_buffer] + dedup(get_buffers(ast))
     self.ast = ast
 
     # check if the output buffer is allowed to be used
     # if it's aliased, don't use it
+    """
     if output_buffer is not None:
       for a in self.bufs:
         if a._buf == output_buffer._buf and not a.st.contiguous:
           output_buffer = None
           break
+    """
 
     # fetch lazyop info (this can be cached!)
     self.info: GenericShape = get_lazyop_info(ast)
+    #print(self.info.dtype, self.info.flops)
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
-    self.ret = output_buffer if output_buffer else type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True, dtype=self.info.dtype)
-    assert self.ret.dtype == self.info.dtype, f"return dtype {self.ret.dtype} != {self.info.dtype}"
-    self.bufs = ([type(self.ret)(self.info.shape, hostbuf=self.ret, dtype=self.info.dtype)] if output_shape else [self.ret]) + self.bufs
+    #self.ret = output_buffer if output_buffer else type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True, dtype=self.info.dtype)
+    #assert self.ret.dtype == self.info.dtype, f"return dtype {self.ret.dtype} != {self.info.dtype}"
+    #self.bufs = ([type(self.ret)(self.info.shape, hostbuf=self.ret, dtype=self.info.dtype)] if output_shape else [self.ret]) + self.bufs
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -125,7 +129,8 @@ class ASTKernel:
     if print_shapetrackers:
       for st in self.sts: print(st)
     for i in range(len(self.sts)):
-      print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
+      #print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
+      print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views))
 
   def codegen(self) -> ASTRunner: raise NotImplementedError("need a codegen")
 
