@@ -84,7 +84,7 @@ class CompiledBuffer:
   spec: ClassVar[Specialized]
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):
-    self.st: ShapeTracker= shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
+    self.st: ShapeTracker = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape: Tuple[int, ...] = self.st.shape
     self.dtype: DType = dtype
     assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"

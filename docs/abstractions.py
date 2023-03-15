@@ -13,7 +13,7 @@ this documentation will help with entry points and understanding the abstraction
 # %%
 # == Boilerplate imports for typing ==
 from __future__ import annotations
-from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List
+from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List, ClassVar
 from enum import Enum, auto
 from abc import ABC
 
@@ -170,7 +170,7 @@ class InterpretedBuffer(DeviceBuffer):
 
   # the compute itself is defined here. these functions are called with _buf
   # here's a UnaryOp and BinaryOp from CPUBuffer(InterpretedBuffer)
-  fxn_for_op: Dict[Op, Callable] = {UnaryOps.EXP: lambda x: np.exp(x), BinaryOps.ADD: lambda x,y: x+y}
+  fxn_for_op: ClassVar[Dict[Op, Callable]] = {UnaryOps.EXP: lambda x: np.exp(x), BinaryOps.ADD: lambda x,y: x+y}
 
   # NOTE: exec_ast should not need to be overridden!
   # The actual method lives in tinygrad/ops.py
@@ -225,7 +225,7 @@ class Runtime(ABC):
 # RawMallocBuffer is the simplest concrete version of RawBuffer (in tinygrad/ops.py)
 # it's used for the CLANG and LLVM backends
 # it's just malloc(size * dtype.itemsize)
-from tinygrad.ops import RawMallocBuffer
+from tinygrad.runtime.lib import RawMallocBuffer
 
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang

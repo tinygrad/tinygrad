@@ -72,7 +72,7 @@ def train_generator(optimizer, data_fake):
 if __name__ == "__main__":
   # data for training and validation
   images_real = np.vstack(fetch_mnist()[::2])
-  ds_noise = Tensor(np.random.randn(64, 128), requires_grad=False)
+  ds_noise = Tensor.randn(64, 128, requires_grad=False)
   # parameters
   epochs, batch_size, k = 300, 512, 1
   sample_interval = epochs // 10
@@ -92,10 +92,10 @@ if __name__ == "__main__":
     for _ in range(n_steps):
       data_real = make_batch(images_real)
       for step in range(k):  # Try with k = 5 or 7.
-        noise = Tensor(np.random.randn(batch_size,128))
+        noise = Tensor.randn(batch_size, 128)
         data_fake = generator.forward(noise).detach()
         loss_d += train_discriminator(optim_d, data_real, data_fake)
-      noise = Tensor(np.random.randn(batch_size,128))
+      noise = Tensor.randn(batch_size, 128)
       data_fake = generator.forward(noise)
       loss_g += train_generator(optim_g, data_fake)
     if (epoch + 1) % sample_interval == 0:
