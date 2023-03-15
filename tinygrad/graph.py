@@ -4,7 +4,7 @@ try:
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 from tinygrad.interpreted import InterpretedBuffer
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv, DEBUG
