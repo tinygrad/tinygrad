@@ -20,26 +20,17 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 class LazyOp(NamedTuple):
   op: Op
-  # Any == Union[LazyOp, LazyBuffer, DeviceBuffer]
+  # Any == Union[LazyOp, LazyBuffer, RawBuffer]
   src: Tuple[Any, ...]  # type: ignore
   arg: Any = None
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
 
-# Any == Union[LazyBuffer, DeviceBuffer]
+# Any == Union[LazyBuffer, RawBuffer]
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
   if len(real_srcs) and x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
-
-# a placeholder class to extend by the exec classes
-class DeviceBuffer:
-  _buf: Any                # underlying buffer
-  shape: Tuple[int, ...]
-  dtype: DType
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
-  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
@@ -89,7 +80,7 @@ class Specialized(NamedTuple):
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
-class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
+class CompiledBuffer:  # pylint: disable=abstract-method
   spec: ClassVar[Specialized]
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):

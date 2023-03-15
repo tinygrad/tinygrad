@@ -5,7 +5,7 @@ except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
 from typing import Dict, List, Optional
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
+from tinygrad.ops import RawBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.helpers import getenv, DEBUG
 
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
@@ -37,11 +37,12 @@ def get_sop(op: List[Op]):
   if len(op) <= 4: return '.'.join([str(y).split(".")[1][0:3] for y in op][::-1])
   return str(len(op))
 
-def log_op(ret: DeviceBuffer, ast: LazyOp, show_graph: Optional[bool] = None):
+# TODO: can ret be an InterpretedBuffer?
+def log_op(ret: RawBuffer, ast: LazyOp, show_graph: Optional[bool] = None):
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
   op: List[Op] = [x.op for x in get_lazyops(ast)]
-  inp: List[DeviceBuffer] = get_buffers(ast)
+  inp: List[RawBuffer] = get_buffers(ast)
   if len(inp) == 1 and inp[0] == ret:
     if show_graph and nm(ret) in G.nodes: G.nodes[nm(ret)]['style'] += ', bold'
     return   # don't log self loops
