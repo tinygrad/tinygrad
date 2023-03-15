@@ -225,7 +225,7 @@ class Runtime(ABC):
 # RawMallocBuffer is the simplest concrete version of RawBuffer (in tinygrad/ops.py)
 # it's used for the CLANG and LLVM backends
 # it's just malloc(size * dtype.itemsize)
-from tinygrad.ops import RawMallocBuffer
+from tinygrad.runtime.lib import RawMallocBuffer
 
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang
