@@ -35,45 +35,36 @@ def download_file(url, fp, skip_if_exists=False):
 
 def my_unpickle(fb0):
   key_prelookup = defaultdict(list)
-  class HackTensor:
-    def __new__(cls, *args):
-      #print(args)
-      ident, storage_type, obj_key, location, obj_size = args[0][0:5]
-      assert ident == 'storage'
-      assert prod(args[2]) == obj_size
+  def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
+    #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
+    ident, storage_type, obj_key, location, obj_size = storage[0:5]
+    assert ident == 'storage'
+    assert prod(size) <= (obj_size - storage_offset)
 
-      if storage_type not in [np.float16, np.float32]:
-        if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {args[2]}")
-        ret = None
-      else:
-        ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(args[2]), storage_type))
-      key_prelookup[obj_key].append((storage_type, obj_size, ret, args[2], args[3]))
-      return ret
+    if storage_type not in [np.float16, np.float32]:
+      if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {size}")
+      ret = None
+    else:
+      ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(size), storage_type))
+    key_prelookup[obj_key].append((storage_type, obj_size, ret, size, stride, storage_offset))
+    return ret
 
-  class HackParameter:
-    def __new__(cls, *args):
-      #print(args)
-      pass
-
-  class Dummy:
+  def _rebuild_parameter(*args):
+    #print(args)
     pass
+
+  class Dummy: pass
 
   class MyPickle(pickle.Unpickler):
     def find_class(self, module, name):
       #print(module, name)
-      if name == 'FloatStorage':
-        return np.float32
-      if name == 'LongStorage':
-        return np.int64
-      if name == 'IntStorage':
-        return np.int32
-      if name == 'HalfStorage':
-        return np.float16
+      if name == 'FloatStorage': return np.float32
+      if name == 'LongStorage': return np.int64
+      if name == 'IntStorage': return np.int32
+      if name == 'HalfStorage': return np.float16
       if module == "torch._utils":
-        if name == "_rebuild_tensor_v2":
-          return HackTensor
-        elif name == "_rebuild_parameter":
-          return HackParameter
+        if name == "_rebuild_tensor_v2": return _rebuild_tensor_v2
+        if name == "_rebuild_parameter": return _rebuild_parameter
       else:
         if module.startswith('pytorch_lightning'): return Dummy
         try:
@@ -86,19 +77,27 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def load_single_weight(t:Tensor, myfile, shape, strides, dtype, mmap_allowed=False):
+def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False):
   bytes_size = np.dtype(dtype).itemsize
   if t is None:
     myfile.seek(prod(shape) * bytes_size, 1)
     return
 
+  bytes_offset = 0
+  if storage_offset is not None:
+    bytes_offset = storage_offset * bytes_size
+    myfile.seek(bytes_offset)
+
   assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
   assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
   if any(s != 1 and st1 != st2 for s, st1, st2 in zip(shape, strides_for_shape(shape), strides)):
     # slow path
-    np_array = np.frombuffer(myfile.read(prod(t.shape) * t.dtype.itemsize), t.dtype.np).reshape(t.shape)
-    real_strides = tuple([x*t.dtype.itemsize for x in strides]) # numpy stores its strides in bytes
-    np_array.strides = real_strides
+    buffer_size = sum(strides[i]*t.dtype.itemsize * (shape[i] - 1) for i in range(len(shape)))
+    buffer_size += t.dtype.itemsize
+    np_array = np.frombuffer(myfile.read(buffer_size), t.dtype.np)
+
+    np_array = np.lib.stride_tricks.as_strided(
+      np_array, shape=shape, strides=[i*t.dtype.itemsize for i in strides])
 
     lna = t.lazydata.op.arg
     lna.fxn = lambda _: np_array
@@ -115,7 +114,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, mmap_allowed=Fal
   else:
     def _mmap(lna):
       assert myfile._compress_type == 0, "compressed data can't be mmaped"
-      return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start, shape=lna.shape)
+      return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
     def _read(lna):
       ret = np.empty(lna.shape, dtype=lna.dtype)
       myfile.readinto(ret.data)
@@ -124,18 +123,19 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, mmap_allowed=Fal
     else: t.lazydata.op.arg.fxn = _read
     t.realize()
 
-def fake_torch_load_zipped(fb0, load_weights=True, base_name="archive", multithreaded=True):
+def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
   if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
 
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
+    base_name = myzip.namelist()[0].split('/', 1)[0]
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       ret = my_unpickle(myfile)
     if load_weights:
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            load_single_weight(v[2], myfile, v[3], v[4], v[0], mmap_allowed=True)
+            load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
       if multithreaded:
         import concurrent.futures
         # 2 seems fastest
@@ -176,10 +176,11 @@ def fake_torch_load(b0):
     key_real[key_lookup.index(k)] = v[0]
 
   # read in the actual data
-  for storage_type, obj_size, tensor, np_shape, np_strides in key_real:
+  for storage_type, obj_size, tensor, np_shape, np_strides, storage_offset in key_real:
     ll = struct.unpack("Q", fb0.read(8))[0]
     assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
-    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type)
+    assert storage_offset == 0, "not implemented"
+    load_single_weight(tensor, fb0, np_shape, np_strides, storage_type, None)
 
   return ret
 
