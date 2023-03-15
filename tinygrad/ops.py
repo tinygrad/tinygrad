@@ -80,7 +80,7 @@ class Specialized(NamedTuple):
 
 # assumes you are using ShapeTracker
 # used in GPUBuffer and LLVMBuffer
-class CompiledBuffer:  # pylint: disable=abstract-method
+class CompiledBuffer:
   spec: ClassVar[Specialized]
 
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):
@@ -89,7 +89,7 @@ class CompiledBuffer:  # pylint: disable=abstract-method
     self.dtype: DType = dtype
     assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"
     self._base_shape: Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
-    self._buf = hostbuf._buf if hostbuf is not None else None
+    self._buf: Any = hostbuf._buf if hostbuf is not None else None
     self._backing: Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
     assert self._backing is None or dtypes.from_np(self._backing) == dtype, f"backing dtype {dtypes.from_np(self._backing)} != {dtype}"
     if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()

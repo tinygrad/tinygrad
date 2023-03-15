@@ -103,7 +103,7 @@ class LazyBuffer:
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'}>"
 
-  # this produces a device buffer
+  # this produces a raw buffer
   def realize(self:LazyBuffer, required_device=None) -> RawBuffer:
     assert required_device is None or required_device == self.device
     if self.realized is None:
