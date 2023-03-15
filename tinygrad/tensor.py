@@ -43,6 +43,9 @@ class Tensor:
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
       lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
+    elif isinstance(data, LazyBuffer):
+      assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
+      lazydata = data
     else:
       raise RuntimeError(f"can't create Tensor from {data}")
 

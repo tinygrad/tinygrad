@@ -1,7 +1,6 @@
 import ctypes
 import numpy as np
 from typing import TypeVar, Type, Optional, Tuple
-from tinygrad.ops import LazyOp
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
 
 _T = TypeVar("_T")
@@ -13,8 +12,6 @@ class RawBuffer:
     self._memsz: int = size*dtype.itemsize
     GlobalCounters.mem_used += self._memsz
   def __del__(self): GlobalCounters.mem_used -= self._memsz
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
   # NOTE: this interface allows for 0 copy
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
