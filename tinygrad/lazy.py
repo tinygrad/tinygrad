@@ -4,7 +4,7 @@ import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.ops import RawBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.ops import CompiledBuffer, RawBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.graph import log_op
 
@@ -104,7 +104,7 @@ class LazyBuffer:
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a raw buffer
-  def realize(self:LazyBuffer, required_device=None) -> RawBuffer:
+  def realize(self:LazyBuffer, required_device=None) -> Union[RawBuffer, CompiledBuffer]:
     assert required_device is None or required_device == self.device
     if self.realized is None:
       # get real ops first
@@ -142,7 +142,6 @@ class LazyBuffer:
       if self.realized is None:
         ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
         self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
-      print(f"self.realized is {type(self.realized)}")
       log_op(self.realized, ast)
 
     assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
