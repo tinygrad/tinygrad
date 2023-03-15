@@ -2,7 +2,6 @@
 from __future__ import annotations
 import math, functools, itertools
 import numpy as np
-from tinygrad.interpreted import InterpretedBuffer
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from tinygrad.lazy import Device, LazyBuffer
