@@ -4,7 +4,7 @@ import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
-from tinygrad.lazy import Device, LazyBuffer
+from tinygrad.lazy import Device, Buffer
 
 # An instantiation of the Function is the Context
 class Function:
@@ -33,23 +33,23 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[list, Buffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
-    elif isinstance(data, LazyBuffer) and data.device != device:
+    elif isinstance(data, Buffer) and data.device != device:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
-      data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
-    elif isinstance(data, LazyBuffer):
+      data = Buffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
+    elif isinstance(data, Buffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     else:
       raise RuntimeError(f"can't create Tensor from {data}")
 
     # this is set once we are here
-    self.data: LazyBuffer = data
+    self.data: Buffer = data
 
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
