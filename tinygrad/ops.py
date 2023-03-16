@@ -90,7 +90,7 @@ class Compiled:
     self.method_cache: Dict[str, ASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output_buffer:LazyBuffer):
-    if ast.op == LoadOps.FROMCPU: return self.buffer.fromCPU(ast.arg)
+    if ast.op == LoadOps.FROMCPU: return self.buffer.fromCPU(ast.arg())
     #k = self.codegen(ast, output_buffer)
     k = self.codegen(ast, output_buffer)
 

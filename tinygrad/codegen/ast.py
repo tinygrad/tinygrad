@@ -35,17 +35,9 @@ class ASTKernel:
   def __init__(self, ast:LazyOp, output_buffer=None):
     self.input_ast = ast
 
-    # if the AST ends with a RESHAPE, we remove it and create the buffer accordingly
-    #assert ast.op not in MovementOps, "can't exec MovementOps here"
-
-    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op
+    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     if ast.op == MovementOps.RESHAPE: ast = ast.src[0]
 
-      #self.output_shape = ast.arg
-    #else:
-    #  self.output_shape = None
-
-    #print(output_buffer)
     self.bufs = [output_buffer] + dedup(get_buffers(ast))
     self.ast = ast
 
@@ -86,8 +78,8 @@ class ASTKernel:
 
     # check valid AST kernel
     assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
-    #assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
-    #assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
+    assert all_same([x.shape for x in self.bufs[1:] if x not in self.earlybufs]), "all latebufs must have the same shape"
+    assert all_same([len(x.shape) for x in self.bufs[1:]]), "all bufs must have the same shape size"
 
     # get full shape buf index (earlybufs if there are any, otherwise output)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
@@ -96,8 +88,9 @@ class ASTKernel:
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]   # create new shapetrackers inside this kernel
     for st in self.sts: st.simplify()
 
-    # hack reshape output
+    # make the output buffer shape correct in here
     if self.reduceop is not None: self.sts[0].reshape(self.reduceop.arg)
+    else: self.sts[0].reshape([x.shape for x in self.bufs[1:] if x not in self.earlybufs][0])
 
     #if self.output_shape is not None:
       #self.sts[0].reshape(self.output_shape)
@@ -141,8 +134,7 @@ class ASTKernel:
     if print_shapetrackers:
       for st in self.sts: print(st)
     for i in range(len(self.sts)):
-      #print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
-      print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views))
+      print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), self.bufs[i].realized if self.bufs[i] is not None else "FAKE")
 
   def codegen(self) -> ASTRunner: raise NotImplementedError("need a codegen")
 

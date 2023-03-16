@@ -5,6 +5,7 @@ from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, LazyConst
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.interpreted import InterpretedBuffer
 from tinygrad.runtime.ops_cpu import CPUBuffer
 from tinygrad.graph import log_op
 
@@ -109,14 +110,14 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        # resolve LazyNumpyArray
-        ast = LazyOp(self.op.op, tuple(), self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
+        # don't resolve LazyNumpyArray here, do it in the devices
+        ast = LazyOp(self.op.op, tuple(), self.op.arg)
       elif self.op.op == LoadOps.CONST:
         self.realized = LazyConst(self.op.arg, self.dtype)
         ast = self.op
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device)
-        if self.op.src[0].st.contiguous and not isinstance(realized, LazyConst) and realized.size == prod(self.shape):
+        if self.op.src[0].st.contiguous and not isinstance(realized, (InterpretedBuffer, LazyConst)) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
           self.realized = realized
           ast = self.op
@@ -128,8 +129,10 @@ class LazyBuffer:
         self.realized = self.op.arg(*real_srcs)
         #ast = LazyOp(self.op.op, real_srcs)
       elif self.optype == MovementOps:
-        self.realized = self.op.src[0].realize()  # movementops don't do anything, copy the data
-        assert self.realized is not None, "movementop didn't realize?"
+        # InterpretedBuffers run the MovementOp, CompiledBuffers don't. Move this?
+        if not isinstance(self.dbuffer, type(InterpretedBuffer)):
+          self.realized = self.op.src[0].realize()  # movementops don't do anything, copy the data
+          assert self.realized is not None, "movementop didn't realize?"
         ast = self.op
 
         # fuse RESHAPE and ReduceOps
@@ -156,6 +159,16 @@ class LazyBuffer:
         #ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
         #self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
 
+        # check if we can reuse the output buffer
+        # if it's aliased, don't use it
+        # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+        """
+        if output_buffer is not None:
+          for a in self.bufs:
+            if a._buf == output_buffer._buf and not a.st.contiguous:
+              output_buffer = None
+              break
+        """
 
         #print(type(ast), ast)
         self.realized = self.dbuffer.exec_ast(ast, output_buffer=self)
@@ -165,16 +178,19 @@ class LazyBuffer:
 
       log_op(self, ast)
 
-    #assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
-    #assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+    if isinstance(self.dbuffer, type(InterpretedBuffer)):
+      assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
+      assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+    else:
+      assert isinstance(self.realized, Device[self.device].buffer), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
     return self.realized
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
-  def fromCPU(x, device) -> LazyBuffer:
+  def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
     # constant folding moved here
-    if prod(x.shape) == 1: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.CONST, tuple(), x.ravel()[0]), dtypes.from_np(x))
+    if False and prod(x.shape) == 1: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.CONST, tuple(), x().ravel()[0]), dtypes.from_np(x))
     else: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?

@@ -4,7 +4,7 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
@@ -47,5 +47,4 @@ class CUDACodegen(GPUCodegen):
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
-class CUDABuffer(CompiledBuffer):
-  spec = Specialized(RawCUDABuffer, CUDACodegen, CUDAProgram)
+CUDABuffer = Compiled(RawCUDABuffer, CUDACodegen, CUDAProgram)

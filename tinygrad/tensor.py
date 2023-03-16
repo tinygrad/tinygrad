@@ -40,7 +40,12 @@ class Tensor:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
-    if isinstance(data, (np.ndarray, LazyNumpyArray)):
+    # all ndarrays are lazy now
+    if isinstance(data, np.ndarray): data = LazyNumpyArray(data, data.shape, data.dtype)
+
+    # by here, it's either LazyNumpyArray or LazyBuffer
+    # TODO: it should all be LazyBuffer I think
+    if isinstance(data, LazyNumpyArray):
       data = data if data.shape else data.reshape((1,))
       lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
     elif isinstance(data, LazyBuffer):

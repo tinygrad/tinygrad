@@ -40,7 +40,7 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-    srcs = [cls.exec_ast(x, context=context) if isinstance(x, LazyOp) else x for x in ast.src]
+    srcs = [cls.exec_ast(x, context=context) if isinstance(x, LazyOp) else (x.realized if not isinstance(x, InterpretedBuffer) else x) for x in ast.src]
     if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
     if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
     if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
@@ -48,9 +48,13 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
     if DEBUG >= 4 or (not isinstance(cls, InterpretedBuffer) and DEBUG >= 3):
       print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
+    return ret
+
+    """
     if output_buffer is not None:
       assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
       output_buffer._buf = ret._buf
       return output_buffer
     else:
       return ret
+    """
