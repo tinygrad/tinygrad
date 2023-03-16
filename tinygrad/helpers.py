@@ -23,11 +23,12 @@ DEBUG, IMAGE = getenv("DEBUG", 0), getenv("IMAGE", 0)
 # **** tinygrad now supports dtypes! *****
 
 class DType(NamedTuple):
+  priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
   np: type  # TODO: someday this will be removed with the "remove numpy" project
   arg: Optional[Any] = None  # arbitrary arg for the dtype, used in image for the shape
-  def __repr__(self): return f"dtypes.{self.name}" + f"({self.arg})" if self.arg is not None else ""
+  def __repr__(self): return f"dtypes.{self.name}" + (f"({self.arg})" if self.arg is not None else "")
 
 class LazyNumpyArray:
   def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
@@ -37,8 +38,8 @@ class LazyNumpyArray:
   def astype(self, typ): return LazyNumpyArray(self.fxn, self.shape, typ)
 
 class dtypes:
-  float16: Final[DType] = DType(2, "half", np.float16)
-  float32: Final[DType] = DType(4, "float", np.float32)
+  float16: Final[DType] = DType(0, 2, "half", np.float16)
+  float32: Final[DType] = DType(1, 4, "float", np.float32)
   @staticmethod
   def from_np(x:Union[LazyNumpyArray, np.ndarray]) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]
 

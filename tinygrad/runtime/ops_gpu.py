@@ -2,10 +2,10 @@ from __future__ import annotations
 import platform
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import Optional, List, Final
-from tinygrad.helpers import DEBUG, getenv, dtypes, GlobalCounters
+from typing import Optional, List
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.ops import Compiled
-from tinygrad.runtime.lib import RawBufferCopyInOut, RawBuffer
+from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 OSX = platform.system() == "Darwin"
@@ -23,10 +23,22 @@ CL = _CL()
 
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
-  def __init__(self, size, dtype): super().__init__(size, dtype, cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size * dtype.itemsize))
-  def _copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._buf, x, is_blocking=False)
-  def _copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._buf, is_blocking=True)
+  def __init__(self, size, dtype):
+    if dtype.name.startswith("image"):
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
+      buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.arg[1], dtype.arg[0]))
+      size = buf.row_pitch * buf.height
+    else:
+      buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size * dtype.itemsize)
+    super().__init__(size, dtype, buf)
+  def _copyin(self, x:np.ndarray):
+    assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
+    cl.enqueue_copy(CL.cl_queue, self._buf, x, is_blocking=False)
+  def _copyout(self, x:np.ndarray):
+    assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
+    cl.enqueue_copy(CL.cl_queue, x, self._buf, is_blocking=True)
 
+"""
 class CLImage(RawBuffer):  # pylint: disable=abstract-method
   IMAGE: Final = True
   def __init__(self, shape, dtype=dtypes.float16 if getenv("FLOAT16") else dtypes.float32):  # pylint: disable=super-init-not-called
@@ -34,6 +46,7 @@ class CLImage(RawBuffer):  # pylint: disable=abstract-method
     self.size, self.dtype, self._cl = shape, dtype, cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(shape[1], shape[0]))
     GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
+"""
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None):
@@ -58,7 +71,7 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._buf if isinstance(x, (CLBuffer, CLImage)) else x for x in bufs])
+    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._buf if isinstance(x, CLBuffer) else x for x in bufs])
     if wait:
       CL.cl_queue.finish()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9

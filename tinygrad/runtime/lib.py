@@ -5,7 +5,7 @@ from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
-  def __init__(self, size:int, dtype:DType, buf:Any):
+  def __init__(self, size:int, dtype:DType, buf:Any=None):
     self.size: int = size
     self.dtype: DType = dtype
     self._buf = buf
@@ -45,8 +45,4 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     self._copyout(x)
     return x
 
-class RawConst(RawBuffer):  # pylint: disable=abstract-method
-  def __init__(self, value, dtype):
-    self.value = value
-    super().__init__(1, dtype)
-
+class RawConst(RawBuffer): pass  # pylint: disable=abstract-method

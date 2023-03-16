@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar
+from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, cast
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
@@ -111,7 +111,7 @@ class LazyBuffer:
       if self.op.op == LoadOps.FROMCPU:
         # constant fold
         #if prod(self.op.arg.shape) == 1:
-        #  self.realized = RawConst(self.op.arg().reshape(1)[0], self.dtype)
+        #  self.realized = RawConst(1, self.dtype, self.op.arg().reshape(1)[0])
         #else:
         self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
         ast = LazyOp(self.op.op, tuple(), self.op.arg)
@@ -271,7 +271,7 @@ class LazyBuffer:
     return ret
 
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
-  out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs)
+  out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs) if op != UnaryOps.CAST else cast(DType, arg)
 
   # push all contiguous to the end of BinaryOps. kernels 198 -> 196
   if PUSH_CONTIGUOUS and any(x.realized is None and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):

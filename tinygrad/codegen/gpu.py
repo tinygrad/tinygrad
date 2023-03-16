@@ -87,8 +87,8 @@ class GPUCodegen(ASTKernel):
         v = self.group_float4([to_store[o+j] for j in range(4)])
       if self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image'):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
-        idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
-        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+        idx, idy = to_image_idx(self.bufs[buf_index].dtype.arg, idxy, valid)
+        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index].dtype} */\n")
       elif v.typ == Types.FLOAT4:
         self.kernel.append(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
@@ -100,7 +100,7 @@ class GPUCodegen(ASTKernel):
     if self.bufs[buf_index] is not None and isinstance(self.bufs[buf_index].realized, RawConst):
       # bufs_to_delete can be removed, just ignore RawConst at runtime
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
-      val = self.bufs[buf_index].realized.value
+      val = self.bufs[buf_index].realized._buf
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
 
@@ -130,8 +130,8 @@ class GPUCodegen(ASTKernel):
           ldr = const
         elif self.bufs[buf_index] is not None and is_image:
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
-          idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid, VALIDHACKS)
-          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
+          idx, idy = to_image_idx(self.bufs[buf_index].dtype.arg, idxy, valid, VALIDHACKS)
+          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index].dtype} */", Types.FLOAT4)
           test_idy.append(idy.render(render_cl))
         elif should_upcast and can_merge:
           ldr = Token(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
@@ -170,6 +170,7 @@ class GPUCodegen(ASTKernel):
       if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.name.startswith('image') and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and (1 in upcast_strides))):
         axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+        assert self.sts[buf_index].shape[axes[0]]%4 == 0, f"axis:{axes[0]} in buffer {buf_index} is not a multiple of 4, {self.sts[buf_index].shape}"
         self.shift_to(axes[0], 4)
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
@@ -285,8 +286,7 @@ class GPUCodegen(ASTKernel):
     self.bufs_to_delete: Set[int] = set()
     self.loaded_keys: Dict[Tuple[int,int], Token] = {}
     self.prekernel: Set[str] = set()
-    #self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
-    self.kernel: List[str] = []
+    self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(buf.dtype.name.startswith("image") for buf in self.bufs if buf is not None) else []
 
     if self.lang.half_prekernel and any(x.dtype == dtypes.float16 for x in self.bufs if x is not None): self.prekernel.add(self.lang.half_prekernel+"\n")
 
