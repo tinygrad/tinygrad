@@ -102,8 +102,7 @@ class ASTKernel:
     #if self.output_shape is not None:
       #self.sts[0].reshape(self.output_shape)
 
-
-    print([x.shape for x in self.sts])
+    #print([x.shape for x in self.sts])
     #assert all_same(x.shape for i,x in enumerate(self.sts))
 
     # move all reduce axes to the end

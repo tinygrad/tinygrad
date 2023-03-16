@@ -112,9 +112,10 @@ class LazyBuffer:
         # resolve LazyNumpyArray
         ast = LazyOp(self.op.op, tuple(), self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
       elif self.op.op == LoadOps.CONTIGUOUS:
-        if self.st.contiguous and prod(self.op.src[0].shape) == prod(self.shape):
+        realized = self.op.src[0].realize(self.device)
+        if self.op.src[0].st.contiguous and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
-          self.realized = self.op.src[0].realize(self.device)
+          self.realized = realized
           ast = self.op
         else:
           # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS
@@ -172,8 +173,10 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
-    ret = self.realize().toCPU().reshape(self.shape)
-    #log_op(CPUBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
+    ret = self.contiguous().realize().toCPU().reshape(self.shape)
+    # TODO: this might be copying extra from the CPU
+    # the size mismatch is if it's been cut
+    #ret = self.contiguous().realize().toCPU()[:prod(self.shape)].reshape(self.shape)
     return ret.copy()
 
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg)

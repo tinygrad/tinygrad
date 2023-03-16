@@ -186,13 +186,16 @@ class GPUCodegen(ASTKernel):
           self.group_for_reduce.append(sz)
           break
 
-    # are we upcasting in mid reduce?
+    # are we upcasting in mid reduce? (only for images)
     #if hasattr(self.bufs[0]._buf, "IMAGE") and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
-    if not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
+    """
+    if not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
       axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-      self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
-      self.group_for_reduce.append(4)
+      if self.sts[0].shape[axes[0]]%4 == 0:
+        self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
+        self.group_for_reduce.append(4)
+    """
 
     # now do everything required
     self.required_optimizations()
