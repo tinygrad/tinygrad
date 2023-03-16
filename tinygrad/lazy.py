@@ -70,7 +70,7 @@ def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movement
 def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
   if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
   assert y.op in BinaryOps or y.op in UnaryOps
-  return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
+  return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src], arg=y.arg)   # type: ignore
 
 def support_weakref(x): return x
 @support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
@@ -110,8 +110,8 @@ class LazyBuffer:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
         # constant fold
-        #if prod(self.op.arg.shape) == 1 and False:
-        #  self.realized = RawConst(self.op.arg, self.dtype)
+        #if prod(self.op.arg.shape) == 1:
+        #  self.realized = RawConst(self.op.arg().reshape(1)[0], self.dtype)
         #else:
         self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
         ast = LazyOp(self.op.op, tuple(), self.op.arg)
@@ -183,7 +183,7 @@ class LazyBuffer:
     #  assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
     #  assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     #else:
-    assert isinstance(self.realized, Device[self.device].buffer), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+    assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
     return self.realized
 

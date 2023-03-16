@@ -23,11 +23,9 @@ CL = _CL()
 
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
-  def __init__(self, size, dtype):
-    super().__init__(size, dtype)
-    self._cl = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, self._memsz)
-  def _copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
-  def _copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
+  def __init__(self, size, dtype): super().__init__(size, dtype, cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size * dtype.itemsize))
+  def _copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._buf, x, is_blocking=False)
+  def _copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._buf, is_blocking=True)
 
 class CLImage(RawBuffer):  # pylint: disable=abstract-method
   IMAGE: Final = True
@@ -60,7 +58,7 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._cl if isinstance(x, (CLBuffer, CLImage)) else x for x in bufs])
+    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._buf if isinstance(x, (CLBuffer, CLImage)) else x for x in bufs])
     if wait:
       CL.cl_queue.finish()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9

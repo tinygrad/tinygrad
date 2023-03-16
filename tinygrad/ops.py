@@ -97,12 +97,8 @@ class Interpreted:
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
     srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
-    #if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
-    #if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
-    #if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
-    #else:
     ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
-    #if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
+    if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     return ret
 
@@ -113,7 +109,8 @@ class FlopCounter:
     return ret
 from tinygrad.shape.shapetracker import ShapeTracker
 shape_fxn_for_op: Dict[Op, Callable] = {
-  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps},
+  UnaryOps.CAST: lambda self,dtype: (self.shape, dtype, self.consume_flops() + prod(self.shape)),
+  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
   **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
   **{op:functools.partial(lambda mop,self,arg: (ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
@@ -132,8 +129,6 @@ class Compiled:
     # all movementops do nothing in a Compiled buffer!
     if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
 
-    #if ast.op == LoadOps.FROMCPU: return self.buffer.fromCPU(ast.arg())
-    #k = self.codegen(ast, output_buffer)
     k = self.codegen(ast, output_buffer)
 
     # this is broken in the new stuff
@@ -150,73 +145,8 @@ class Compiled:
       print(prg.prg)
 
     # create the output memory
+    # TODO: this can be done in lazy.py
     output_buffer.realized = self.buffer(prod(output_buffer.shape), output_buffer.dtype)
 
     prg.exec(k.bufs)
     return output_buffer.realized
-    #return k.ret
-
-"""
-class Specialized(NamedTuple):
-  raw_buffer: Type[RawBuffer]
-  codegen: Type[ASTKernel]
-  runtime: Type
-
-# assumes you are using ShapeTracker
-# used in GPUBuffer and LLVMBuffer
-class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  spec: ClassVar[Specialized]
-
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):
-    self.st: ShapeTracker = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape: Tuple[int, ...] = self.st.shape
-    self.dtype: DType = dtype
-    assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"
-    self._base_shape: Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
-    self._buf = hostbuf._buf if hostbuf is not None else None
-    self._backing: Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
-    assert self._backing is None or dtypes.from_np(self._backing) == dtype, f"backing dtype {dtypes.from_np(self._backing)} != {dtype}"
-    if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
-
-  def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__}), dtype={self.dtype}), dtype={self.dtype})" if self._backing is not None else f", force_create=True, dtype={self.dtype}), dtype={self.dtype})")
-
-  def create_raw_buffer(self, shape:Tuple[int, ...], backing:Optional[np.ndarray], dtype:DType) -> RawBuffer:
-    assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
-    assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
-    if DEBUG >= 4: print(f"create raw buffer {shape} {dtype} backed:{backing is not None}")
-    return self.spec.raw_buffer(prod(shape), dtype) if backing is None else self.spec.raw_buffer.fromCPU(backing)
-
-  def raw(self) -> RawBuffer:
-    if self._buf is None:
-      if DEBUG >= 4 and self._backing is not None: print(f"**** copy in {self._backing.shape} to {type(self)}")
-      self._buf = self.create_raw_buffer(self._base_shape, self._backing, self.dtype)
-      self._backing = None
-    return self._buf
-
-  def toCPU(self) -> np.ndarray:
-    assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
-    if DEBUG >= 3: print(f"**** copy out {self.shape}")
-    return self.contiguous().raw().toCPU().reshape(self.shape)
-
-  method_cache: Final[Dict[str, ASTRunner]] = {}
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
-    if ast.op == LoadOps.FROMCPU: return cls(ast.arg.shape, backing=ast.arg.ravel(), dtype=dtypes.from_np(ast.arg))
-    k = cls.spec.codegen(ast, output_buffer)
-    if getenv("ENABLE_METHOD_CACHE", 1):  # this is the default now
-      if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.spec.runtime)
-      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
-      prg = cls.method_cache[k.key]
-    else:
-      prg = k.codegen().build(cls.spec.runtime)
-    if getenv("PRINT_AST", "") == prg.name or getenv("PRINT_AST", "") == "1":
-      k.print()
-      print(prg.prg)
-    prg.exec(k.bufs)
-    return k.ret
-
-  # universal for shape tracked
-  def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
-  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), hostbuf=self, dtype=self.dtype)
-"""
-

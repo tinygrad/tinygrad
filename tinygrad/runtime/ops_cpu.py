@@ -36,9 +36,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
 }}
 
 class RawNumpyBuffer(RawBuffer):
-  def __init__(self, buf:np.ndarray):
-    super().__init__(prod(buf.shape), dtypes.from_np(buf))
-    self._buf = buf
+  def __init__(self, buf:np.ndarray): super().__init__(prod(buf.shape), dtypes.from_np(buf), buf)
   @classmethod
   def fromCPU(cls, x): return cls(x)
   def toCPU(self): return self._buf

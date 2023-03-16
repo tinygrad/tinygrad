@@ -17,9 +17,7 @@ torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
 }}
 
 class RawTorchBuffer(RawBuffer):
-  def __init__(self, buf:torch.Tensor):
-    super().__init__(prod(buf.shape), {torch.float16: dtypes.float16, torch.float32: dtypes.float32}[buf.dtype])
-    self._buf = buf
+  def __init__(self, buf:torch.Tensor): super().__init__(prod(buf.shape), {torch.float16: dtypes.float16, torch.float32: dtypes.float32}[buf.dtype], buf)
   @classmethod
   def fromCPU(cls, x): return cls(torch.from_numpy(x).requires_grad_(False).to(device))
   def toCPU(self): return self._buf.cpu().numpy()

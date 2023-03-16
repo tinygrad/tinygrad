@@ -18,16 +18,14 @@ class _METAL:
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType):
-    super().__init__(size, dtype)
-    self._cl = METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def __init__(self, size:int, dtype:DType): super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
-    self._cl.release()
+    self._buf.release()
     super().__del__()
   def _buffer(self):
     for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
     METAL.mtl_buffers_in_flight.clear()
-    return self._cl.contents().as_buffer(self._cl.length())
+    return self._buf.contents().as_buffer(self._buf.length())
 
 def unwrap(x):
   ret, err = x
@@ -66,7 +64,7 @@ class MetalProgram:
     command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._cl, 0, i)
+    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
     encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()
