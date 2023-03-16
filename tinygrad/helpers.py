@@ -26,7 +26,8 @@ class DType(NamedTuple):
   itemsize: int
   name: str
   np: type  # TODO: someday this will be removed with the "remove numpy" project
-  def __repr__(self): return f"dtypes.{self.name}"
+  arg: Optional[Any] = None  # arbitrary arg for the dtype, used in image for the shape
+  def __repr__(self): return f"dtypes.{self.name}" + f"({self.arg})" if self.arg is not None else ""
 
 class LazyNumpyArray:
   def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype

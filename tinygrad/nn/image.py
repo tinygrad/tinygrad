@@ -1,4 +1,4 @@
-from tinygrad.helpers import prod, IMAGE
+from tinygrad.helpers import prod, IMAGE, DType
 from tinygrad.lazy import get_single_root
 
 def image_dot(self, w):
@@ -49,6 +49,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1).reshape(cout//4, H*cin//4*W*4, 4)
 
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
+  if IMAGE >= 2: x,w = x.cast(DType(2, "image_half", None, arg=x.shape)), w.cast(DType(2, "image_half", None, arg=w.shape))
   x, w = x.contiguous(), w.contiguous()
   if get_single_root(w.lazydata).realized: w.realize()
 
@@ -75,7 +76,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
   # the conv!
   ret = (x*w).sum((-4, -3, -2, -1)).reshape(bs*oy, ox*cout//4, 4)
-  if IMAGE >= 3: ret = ret.contiguous()
+  if IMAGE >= 3: ret = ret.cast(DType(2, "image_half", None, arg=ret.shape)).contiguous()
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:

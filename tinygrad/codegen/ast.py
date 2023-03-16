@@ -36,11 +36,14 @@ class ASTKernel:
     self.input_ast = ast
 
     # if the AST ends with a RESHAPE, we remove it and create the buffer accordingly
-    if ast.op == MovementOps.RESHAPE:
-      output_shape = ast.arg
-      ast = ast.src[0]
-    else:
-      output_shape = None
+    #assert ast.op not in MovementOps, "can't exec MovementOps here"
+
+    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op
+    if ast.op == MovementOps.RESHAPE: ast = ast.src[0]
+
+      #self.output_shape = ast.arg
+    #else:
+    #  self.output_shape = None
 
     #print(output_buffer)
     self.bufs = [output_buffer] + dedup(get_buffers(ast))
@@ -83,8 +86,8 @@ class ASTKernel:
 
     # check valid AST kernel
     assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
-    assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
-    assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
+    #assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
+    #assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
 
     # get full shape buf index (earlybufs if there are any, otherwise output)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
@@ -92,6 +95,16 @@ class ASTKernel:
     # process
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]   # create new shapetrackers inside this kernel
     for st in self.sts: st.simplify()
+
+    # hack reshape output
+    if self.reduceop is not None: self.sts[0].reshape(self.reduceop.arg)
+
+    #if self.output_shape is not None:
+      #self.sts[0].reshape(self.output_shape)
+
+
+    print([x.shape for x in self.sts])
+    #assert all_same(x.shape for i,x in enumerate(self.sts))
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))

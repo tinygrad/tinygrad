@@ -8,6 +8,13 @@ class Contiguous(Function):
   def forward(self, x): return x.contiguous()
   def backward(self, grad_output): return grad_output
 
+class Cast(Function):
+  def forward(self, x, dtype):
+    self.input_dtype = x.dtype
+    return x.cast(dtype)
+  def backward(self, grad_output):
+    return grad_output.cast(self.input_dtype)
+
 # ************* unary ops *************
 
 class Log(Function):

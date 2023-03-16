@@ -3,8 +3,9 @@ import platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List, Final
-from tinygrad.helpers import IMAGE, DEBUG, getenv, dtypes
-from tinygrad.ops import CompiledBuffer, GlobalCounters, Specialized
+from tinygrad.helpers import IMAGE, DEBUG, getenv, dtypes, GlobalCounters
+#from tinygrad.ops import CompiledBuffer, GlobalCounters, Specialized
+from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
@@ -72,9 +73,13 @@ class CLCodegen(GPUCodegen):
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
 
+GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram)
+
+"""
 class GPUBuffer(CompiledBuffer):
   spec = Specialized(CLBuffer, CLCodegen, CLProgram)
   # override this method for image
   def create_raw_buffer(self, shape, backing, dtype) -> RawBuffer:
     if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)   # NOTE: this is a hack. we don't pass in the dtype here, it's controlled by the FLOAT16 env var
     else: return super().create_raw_buffer(shape, backing, dtype)
+"""

@@ -112,18 +112,25 @@ class LazyBuffer:
         # resolve LazyNumpyArray
         ast = LazyOp(self.op.op, tuple(), self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
       elif self.op.op == LoadOps.CONTIGUOUS:
-        real_src = self.op.src[0].realize(self.device)
-        self.realized = real_src.contiguous()
-        #ast = LazyOp(self.op.op, (real_src, ))
+        if self.st.contiguous and prod(self.op.src[0].shape) == prod(self.shape):
+          # no need to run an AST, this is already contiguous
+          self.realized = self.op.src[0].realize(self.device)
+          ast = self.op
+        else:
+          # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS
+          ast = LazyOp(UnaryOps.NOOP, self.op.src)
       elif self.op.op == LoadOps.CUSTOM:
         real_srcs = tuple(x.realize(self.device) for x in self.op.src)
         self.realized = self.op.arg(*real_srcs)
         #ast = LazyOp(self.op.op, real_srcs)
       elif self.optype == MovementOps:
-        src = self.op.src[0]
+        self.realized = self.op.src[0].realize()  # movementops don't do anything, copy the data
+        assert self.realized is not None, "movementop didn't realize?"
+        ast = self.op
 
         # fuse RESHAPE and ReduceOps
         # NOTE: this is sort of a hack for IMAGE, otherwise it shouldn't matter
+        """
         if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
           # it's okay to add a RESHAPE to the ast here
           ast = LazyOp(MovementOps.RESHAPE, (_ast_reduceops(src), ), self.op.arg)
@@ -134,8 +141,10 @@ class LazyBuffer:
           #real_src = src.realize(self.device)
           #self.realized = real_src.movement_op(self.op.op, self.op.arg)
           #ast = LazyOp(self.op.op, (real_src, ))
+        """
+
       elif self.optype == ReduceOps: ast = _ast_reduceops(self)
-      elif self.optype == BinaryOps: ast = _ast_binaryops(self)
+      elif self.optype == BinaryOps: ast = _ast_binaryops(self)  # ISSUE: this can include a reshape
 
       # run the ast if we still have to, and log the op
       if self.realized is None:
@@ -143,6 +152,8 @@ class LazyBuffer:
         #ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
         #self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
 
+
+        #print(type(ast), ast)
         self.realized = self.dbuffer.exec_ast(ast, output_buffer=self)
 
       # no need to keep the op after realization
@@ -165,6 +176,7 @@ class LazyBuffer:
     #log_op(CPUBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
     return ret.copy()
 
+  def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg)
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
   def contiguous(self:LazyBuffer) -> LazyBuffer: return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)), self.dtype)
@@ -234,7 +246,7 @@ class LazyBuffer:
 
     return ret
 
-def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
+def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
   out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs)
 
   # push all contiguous to the end of BinaryOps. kernels 198 -> 196
@@ -246,10 +258,10 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffe
         new_srcs.append(x.op.src[0])
       else:
         new_srcs.append(x)
-    return elementwise_op(op, *new_srcs).contiguous()
+    return elementwise_op(op, *new_srcs, arg=arg).contiguous()
 
   if MERGE_ELEMENTWISE_OPS or (MERGE_UNARY_OPS and len(set(srcs)) == 1):
     # remove the buffers from any (childless) BinaryOps that feed into this
     srcs = tuple(x.op if x.optype == BinaryOps and len(x.children) == 0 and x.realized is None else x for x in srcs)  # type: ignore
 
-  return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs), out_dtype)
+  return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs, arg), out_dtype)
