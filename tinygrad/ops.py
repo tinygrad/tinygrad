@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, itertools, operator, random
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Set
+from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Set, Callable
 from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer
@@ -85,13 +85,37 @@ class ASTRunner:
 
 from tinygrad.codegen.ast import ASTKernel
 
+class Interpreted:
+  def __init__(self, buffer: Type[RawBuffer], fxn_for_op: Dict[Op, Callable]):
+    self.buffer = buffer
+    self.fxn_for_op = fxn_for_op
+
+  def exec_ast(self, ast:LazyOp, output_buffer=None, context=None):
+    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
+    created_context = context is None
+    if context is None: context = dict()
+    if not created_context and ast in context: return context[ast]
+    srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else x.realized for x in ast.src]
+    #if ast.op in BinaryOps: assert srcs[0].shape == srcs[1].shape, f"BinaryOps shape mismatch {srcs[0].shape} != {srcs[1].shape}"
+    #if ast.op in ReduceOps: assert all(r == n or n == 1 for r,n in zip(srcs[0].shape, ast.arg)), f"ReduceOps can't reduce {srcs[0].shape} -> {ast.arg}"
+    #if ast.op in MovementOps: ret = srcs[0].movement_op(ast.op, ast.arg)
+    #else:
+    ret = self.buffer(self.fxn_for_op[ast.op](*([x._buf for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
+    #if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
+    if not created_context: context[ast] = ret
+    return ret
+
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], codegen: Type[ASTKernel], runtime):
     self.buffer, self.codegen, self.runtime = buffer, codegen, runtime
     self.method_cache: Dict[str, ASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output_buffer):
-    if ast.op == LoadOps.FROMCPU: return self.buffer.fromCPU(ast.arg())
+    # all movementops do nothing in a Compiled buffer!
+    if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
+
+    #if ast.op == LoadOps.FROMCPU: return self.buffer.fromCPU(ast.arg())
     #k = self.codegen(ast, output_buffer)
     k = self.codegen(ast, output_buffer)
 

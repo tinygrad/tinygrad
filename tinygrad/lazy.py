@@ -110,6 +110,7 @@ class LazyBuffer:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
         # don't resolve LazyNumpyArray here, do it in the devices
+        self.realized = self.dbuffer.buffer.fromCPU(self.op.arg())
         ast = LazyOp(self.op.op, tuple(), self.op.arg)
       elif self.op.op == LoadOps.CONST:
         self.realized = RawConst(self.op.arg, self.dtype)
@@ -129,9 +130,9 @@ class LazyBuffer:
         #ast = LazyOp(self.op.op, real_srcs)
       elif self.optype == MovementOps:
         # InterpretedBuffers run the MovementOp, CompiledBuffers don't. Move this?
-        if not isinstance(self.dbuffer, type(InterpretedBuffer)):
-          self.realized = self.op.src[0].realize()  # movementops don't do anything, copy the data
-          assert self.realized is not None, "movementop didn't realize?"
+        #if not isinstance(self.dbuffer, type(InterpretedBuffer)):
+        #  self.realized = self.op.src[0].realize()  # movementops don't do anything, copy the data
+        #  assert self.realized is not None, "movementop didn't realize?"
         ast = self.op
 
         # fuse RESHAPE and ReduceOps

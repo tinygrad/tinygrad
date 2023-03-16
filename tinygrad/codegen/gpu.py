@@ -112,7 +112,7 @@ class GPUCodegen(ASTKernel):
       const = Token(f"({val}f)", Types.FLOAT)
     """
     #IMAGE = hasattr(self.bufs[buf_index]._buf, "IMAGE")
-    is_image = self.bufs[buf_index].dtype.name.startswith('image')
+    is_image = self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image')
     #should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
     should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16)
     tokens = []
