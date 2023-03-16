@@ -83,7 +83,7 @@ Change to `DEBUG=4` to see the generated code.
 
 It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, RMSprop, and Adam implemented) from tinygrad.nn.optim, write some boilerplate minibatching code, and you have all you need.
 
-### Neural network example (from test/test_mnist.py)
+### Neural network example (from test/models/test_mnist.py)
 
 ```python
 from tinygrad.tensor import Tensor
@@ -227,7 +227,7 @@ tinygrad will always be below 1000 lines. If it isn't, we will revert commits un
 * Purple edge is intermediates created in the forward
 
 ```bash
-GRAPH=1 python3 test/test_mnist.py TestMNIST.test_sgd_onestep
+GRAPH=1 python3 test/models/test_mnist.py TestMNIST.test_sgd_onestep
 # requires dot, outputs /tmp/net.svg
 ```
 
