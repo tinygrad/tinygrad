@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
+from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
@@ -19,7 +19,7 @@ class _Device:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Type[Union[Compiled, Interpreted]]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  def __getitem__(self, x:str) -> Union[Compiled, Interpreted]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -92,7 +92,7 @@ class LazyBuffer:
       return  # cache hit, we return and don't reinit
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape, self.optype, self.op, self.dtype = self.st.shape, optype, op, dtype
-    self.realized: Optional[Union[RawBuffer, InterpretedBuffer]] = None
+    self.realized: Optional[RawBuffer] = None
     #self.output_buffer: Optional[DeviceBuffer] = None
     self.device, self.dbuffer = device, Device[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
@@ -104,17 +104,17 @@ class LazyBuffer:
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
-  def realize(self:LazyBuffer, required_device=None) -> Union[Compiled, InterpretedBuffer]:
+  def realize(self:LazyBuffer, required_device=None) -> RawBuffer:
     assert required_device is None or required_device == self.device
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        # don't resolve LazyNumpyArray here, do it in the devices
-        self.realized = self.dbuffer.buffer.fromCPU(self.op.arg())
+        # constant fold
+        #if prod(self.op.arg.shape) == 1 and False:
+        #  self.realized = RawConst(self.op.arg, self.dtype)
+        #else:
+        self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
         ast = LazyOp(self.op.op, tuple(), self.op.arg)
-      elif self.op.op == LoadOps.CONST:
-        self.realized = RawConst(self.op.arg, self.dtype)
-        ast = self.op
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device)
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
@@ -171,7 +171,7 @@ class LazyBuffer:
         """
 
         #print(type(ast), ast)
-        self.realized = self.dbuffer.exec_ast(ast, output_buffer=self)
+        self.realized = Device[self.device].exec_ast(ast, output_buffer=self)
 
       # no need to keep the op after realization
       del self.op
@@ -190,9 +190,7 @@ class LazyBuffer:
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
   def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
-    # constant folding moved here
-    if False and prod(x.shape) == 1: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.CONST, tuple(), x().ravel()[0]), dtypes.from_np(x))
-    else: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
+    return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):

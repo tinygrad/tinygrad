@@ -1,6 +1,6 @@
 import torch
 from typing import Dict, Callable
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, LoadOps, Op, Interpreted
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, Op, Interpreted
 from tinygrad.helpers import getenv, dtypes, prod
 from tinygrad.runtime.ops_cpu import base_fxn_for_op, einsum_mulacc
 from tinygrad.runtime.lib import RawBuffer
@@ -21,7 +21,7 @@ class RawTorchBuffer(RawBuffer):
     super().__init__(prod(buf.shape), {torch.float16: dtypes.float16, torch.float32: dtypes.float32}[buf.dtype])
     self._buf = buf
   @classmethod
-  def fromCPU(cls, arg): return cls(torch.from_numpy(arg).requires_grad_(False).to(device))
+  def fromCPU(cls, x): return cls(torch.from_numpy(x).requires_grad_(False).to(device))
   def toCPU(self): return self._buf.cpu().numpy()
 TorchBuffer = Interpreted(RawTorchBuffer, torch_fxn_for_op)
 

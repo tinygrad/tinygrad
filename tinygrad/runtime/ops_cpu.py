@@ -1,8 +1,8 @@
 import numpy as np
 import operator
-from typing import ClassVar, Callable, Dict, Tuple
+from typing import Callable, Dict, Tuple
 from tinygrad.helpers import dtypes, prod
-from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, LoadOps, Op, Interpreted
+from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, ReduceOps, FusedOps, Op, Interpreted
 from tinygrad.runtime.lib import RawBuffer
 
 def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
