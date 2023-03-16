@@ -33,16 +33,16 @@ def atan2_cpu(a:CPUBuffer, b:CPUBuffer) -> CPUBuffer:
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
 from tinygrad.ops import ASTRunner, LazyOp, LoadOps, BinaryOps, UnaryOps
-from tinygrad.lazy import Buffer
+from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Function
 
 class ATan2(Function):
-  def forward(self, a:Buffer, b:Buffer) -> Buffer:
+  def forward(self, a:LazyBuffer, b:LazyBuffer) -> LazyBuffer:
     assert prod(a.shape) == prod(b.shape) and a.device == b.device, "shape or device mismatch"
     self.a, self.b = a, b
     ast = LazyOp(LoadOps.CUSTOM, (a, b), {"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device])
-    return Buffer(a.device, a.shape, LoadOps, ast, max(a.dtype, b.dtype))
-  def backward(self, grad_output:Buffer) -> Tuple[Optional[Buffer], Optional[Buffer]]:
+    return LazyBuffer(a.device, a.shape, LoadOps, ast, max(a.dtype, b.dtype))
+  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.binary_op(BinaryOps.MUL, self.a)).binary_op(BinaryOps.ADD, self.b.binary_op(BinaryOps.MUL, self.b))
     return grad_output.binary_op(BinaryOps.MUL, self.b.binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \
            grad_output.binary_op(BinaryOps.MUL, self.a.unary_op(UnaryOps.NEG).binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[1] else None

@@ -20,12 +20,12 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 class LazyOp(NamedTuple):
   op: Op
-  # Any == Union[LazyOp, Buffer, RawBuffer]
+  # Any == Union[LazyOp, LazyBuffer, RawBuffer]
   src: Tuple[Any, ...]  # type: ignore
   arg: Any = None
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
 
-# Any == Union[Buffer, RawBuffer]
+# Any == Union[LazyBuffer, RawBuffer]
 def get_buffers(op:LazyOp) -> List[Any]: return functools.reduce(operator.add, [get_buffers(x) if isinstance(x, LazyOp) else [x] for x in op.src], [])
 def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add, [get_lazyops(x) for x in op.src if isinstance(x, LazyOp)], [op])
 def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:

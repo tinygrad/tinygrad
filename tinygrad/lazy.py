@@ -29,7 +29,7 @@ PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
 SHUFFLE_PAD_OPS = OPT>=4  # no longer makes wrong outputs since div isn't allowed, but still unadvisable
 
 # **** realize functions ****
-def _ast_reduceops(self:Buffer) -> LazyOp:
+def _ast_reduceops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also corealize a binary op after the reduce, not just before
   src = self.op.src[0]
   if MERGE_ELEMENTWISE_INTO_REDUCE and src.realized is None and src.optype == BinaryOps and len(src.children) <= 1:
@@ -37,10 +37,10 @@ def _ast_reduceops(self:Buffer) -> LazyOp:
   return LazyOp(self.op.op, (src,), self.op.arg)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
-def _ast_binaryops(self:Buffer) -> LazyOp:
-  real_srcs: Dict[Buffer, Union[None, LazyOp, Buffer]] = {x:None for x in get_buffers(self.op)}
+def _ast_binaryops(self:LazyBuffer) -> LazyOp:
+  real_srcs: Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in get_buffers(self.op)}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
-  psrcs: List[Tuple[Buffer, Buffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     if psrcs[0][1].optype == ReduceOps:
@@ -63,28 +63,28 @@ def _ast_binaryops(self:Buffer) -> LazyOp:
 # **** lazy operations ****
 
 def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
-def get_single_root(root:Buffer) -> Buffer: return get_single_root(root.op.src[0]) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
-def get_movementroot(root:Buffer, allow_contiguous=False) -> Buffer: return get_movementroot(root.op.src[0], allow_contiguous) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
-def get_movementroot_contiguous(x:Buffer) -> Buffer: return get_movementroot_contiguous(x.op.src[0]) if x.realized is None and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
+def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.op.src[0]) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
+def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(root.op.src[0], allow_contiguous) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
+def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(x.op.src[0]) if x.realized is None and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
-def replace_with_movement_op(y:Union[LazyOp, Buffer], op:MovementOps, arg:Tuple[Any, ...]) -> Buffer:
-  if isinstance(y, Buffer): return y.movement_op(op, arg)
+def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
+  if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
   assert y.op in BinaryOps or y.op in UnaryOps
   return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src])   # type: ignore
 
 def support_weakref(x): return x
-@support_weakref  # needed for mypyc, this prevents Buffer from becoming a native class
-class Buffer:
+@support_weakref  # needed for mypyc, this prevents LazyBuffer from becoming a native class
+class LazyBuffer:
   __deletable__ = ('op',)
-  lazycache: ClassVar[WeakValueDictionary[Tuple[str, DType, OpType, LazyOp], Buffer]] = WeakValueDictionary()
+  lazycache: ClassVar[WeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer]] = WeakValueDictionary()
   def __new__(cls, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp, dtype:DType):
     # fromcpu aren't cached
     if optype == LoadOps and op.op == LoadOps.FROMCPU:
       return super().__new__(cls)
     wop = (device, dtype, optype, get_weakop(op))   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
     # NOTE: we need "ret" to prevent the new buffer from being immediately deleted
-    if wop not in Buffer.lazycache: Buffer.lazycache[wop] = ret = super().__new__(cls)
-    else: ret = Buffer.lazycache[wop]
+    if wop not in LazyBuffer.lazycache: LazyBuffer.lazycache[wop] = ret = super().__new__(cls)
+    else: ret = LazyBuffer.lazycache[wop]
     return ret
 
   def __init__(self, device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp, dtype:DType):
@@ -96,8 +96,8 @@ class Buffer:
     self.output_buffer: Optional[RawBuffer] = None
     self.device, self.dbuffer = device, Device[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children: weakref.WeakSet[Buffer] = weakref.WeakSet()
-    # NOTE: op should be read only after construction of Buffer
+    self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
+    # NOTE: op should be read only after construction of LazyBuffer
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
 
@@ -151,7 +151,7 @@ class Buffer:
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
-  def fromCPU(x, device) -> Buffer: return Buffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
+  def fromCPU(x, device) -> LazyBuffer: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
@@ -159,15 +159,15 @@ class Buffer:
     log_op(CPUBuffer(ret), LazyOp(LoadOps.TOCPU, (self.realized,), None))
     return ret.copy()
 
-  def unary_op(self:Buffer, op:UnaryOps) -> Buffer: return elementwise_op(op, self)
-  def binary_op(self:Buffer, op:BinaryOps, y:Buffer) -> Buffer: return elementwise_op(op, self, y)
-  def contiguous(self:Buffer) -> Buffer: return Buffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)), self.dtype)
+  def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
+  def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
+  def contiguous(self:LazyBuffer) -> LazyBuffer: return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)), self.dtype)
 
-  def reduce_op(self:Buffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> Buffer:
+  def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
-    return Buffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape), self.dtype)
+    return LazyBuffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape), self.dtype)
 
-  def movement_op(self:Buffer, op:MovementOps, arg:Tuple[Any, ...]) -> Buffer:
+  def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop
     if op == MovementOps.RESHAPE and self.shape == arg: return self
 
@@ -205,7 +205,7 @@ class Buffer:
       return self.op.src[0].movement_op(MovementOps.PERMUTE, arg).movement_op(MovementOps.EXPAND, tuple(self.op.arg[a] for a in arg))
 
     # move permutes before reshapes if we can
-    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], Buffer):
+    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
       if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
         self.op.src[0].children.discard(self)   # this changes nothing?
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(flatten(shape_idx_groups[i] for i in arg))) \
@@ -216,7 +216,7 @@ class Buffer:
       return replace_with_movement_op(self.op, op, arg)
 
     # create the buffer
-    ret = Buffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg), self.dtype)
+    ret = LazyBuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg), self.dtype)
 
     # if the ShapeTracker becomes contiguous, replace the whole thing with a reshape (or nothing if shapes match)
     # NOTE: if ret is in the cache, it can already be realized
@@ -228,7 +228,7 @@ class Buffer:
 
     return ret
 
-def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:Buffer) -> Buffer:
+def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer) -> LazyBuffer:
   out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs)
 
   # push all contiguous to the end of BinaryOps. kernels 198 -> 196
@@ -246,4 +246,4 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:Buffer) -> Buffer:
     # remove the buffers from any (childless) BinaryOps that feed into this
     srcs = tuple(x.op if x.optype == BinaryOps and len(x.children) == 0 and x.realized is None else x for x in srcs)  # type: ignore
 
-  return Buffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs), out_dtype)
+  return LazyBuffer(out_device, out_shape, BinaryOps, LazyOp(op, srcs), out_dtype)

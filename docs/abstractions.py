@@ -48,7 +48,7 @@ class Tensor:
   _ctx: Optional[Function]
 
   # this is where the data (and other tensor properties) actually live
-  data: Buffer
+  data: LazyBuffer
 
   # high level ops (hlops) are defined on this class. example: relu
   def relu(self): return self.maximum(0)
@@ -62,26 +62,26 @@ class Tensor:
 # you can differentiate the world using the chain rule
 class Function:
   # example types of forward and backward
-  def forward(self, x:Buffer) -> Buffer: pass
-  def backward(self, x:Buffer) -> Buffer: pass
+  def forward(self, x:LazyBuffer) -> LazyBuffer: pass
+  def backward(self, x:LazyBuffer) -> LazyBuffer: pass
 
 # %%
-# == Buffer (in tinygrad/lazy.py, code 5/10) ==
+# == LazyBuffer (in tinygrad/lazy.py, code 5/10) ==
 from tinygrad.helpers import DType
 
 # this is where the properties live that you thought were a part of Tensor
-# Buffer is like a Tensor without derivatives, at the mlop layer
-class Buffer:
+# LazyBuffer is like a Tensor without derivatives, at the mlop layer
+class LazyBuffer:
   # these three define the "type" of the buffer, and they are returned as Tensor properties
   device: str
   shape: Tuple[int, ...]
   dtype: DType
 
-  # if the Buffer is unrealized, it has a LazyOp
-  # this LazyOp describes the computation needed to realize this Buffer
+  # if the lazybuffer is unrealized, it has a LazyOp
+  # this LazyOp describes the computation needed to realize this LazyBuffer
   op: Optional[LazyOp]
 
-  # if the Buffer is realized, it has a DeviceBuffer
+  # if the LazyBuffer is realized, it has a DeviceBuffer
   # we will come back to DeviceBuffers later, first we'll explore the LazyOp
   realized: Optional[DeviceBuffer]
 
@@ -89,7 +89,7 @@ class Buffer:
 # in a tree they form an Abstract Syntax Tree for a single GPU kernel
 class LazyOp:
   op: Op                                       # the type of the compute
-  src: Tuple[Union[LazyOp, Buffer], ...]   # the sources
+  src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
   arg: Optional[Any] = None                    # and an optional static argument
 
 # there's currently 20 Ops you have to implement for an accelerator.
@@ -107,7 +107,7 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps]
 # it's beyond the scope of this tutorial, but you can read the file if interested
 
 # %%
-# == Example: Buffer for 2+3 ==
+# == Example: LazyBuffer for 2+3 ==
 
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LazyOp, BinaryOps, LoadOps
@@ -124,31 +124,46 @@ assert lazyop.op == BinaryOps.ADD
 assert len(lazyop.src) == 2
 
 # the first source is the 2, it comes from the CPU
-# the source is a Buffer, since FROMCPU cannot be folded into LazyOp ASTs
+# the source is a LazyBuffer, since FROMCPU cannot be folded into LazyOp ASTs
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 print(lazyop.src[0].op)
 assert lazyop.src[0].op.op == LoadOps.FROMCPU
 assert lazyop.src[0].op.arg[0] == [2], "the arg of the FROMCPU LazyOP is the [2.]"
-assert result.data.realized is None, "the Buffer is not realized yet"
+assert result.data.realized is None, "the LazyBuffer is not realized yet"
 
-# now we realize the Buffer
+# now we realize the LazyBuffer
 result.data.realize()
-assert result.data.realized is not None, "the Buffer is realized!"
+assert result.data.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
 assert 'ClangBuffer' in str(type(result.data.realized))
 # getting ahead of ourselves, but we can copy the DeviceBuffer toCPU
 assert result.data.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
 
 # %%
-# == InterpretedBuffer (in tinygrad/ops.py, code 4/10) ==
+# == DeviceBuffer (in tinygrad/ops.py, code 4/10) ==
 
-# device buffers come in two flavors, InterpretedBuffer and CompiledBuffer
+# DeviceBuffer is an abstract class to be implemented for each Device backend
+class DeviceBuffer(ABC):
+  # these two are straightforward.
+  # unlike LazyBuffer, there's no need for device, since that's contained in the concrete type
+  shape: Tuple[int, ...]
+  dtype: DType
+
+  # this is the magic method that "fills" a DeviceBuffer and does all the math in tinygrad
+  # NOTE: fromCPU no longer exists here, it's just a one LoadOps AST, LoadOps.FROMCPU
+  def exec_ast(self, ast:LazyOp): raise NotImplementedError("must be implemented")
+
+  # however, toCPU still exists. it will raise a RuntimeException if exec_ast has never been called
+  # it copies out the underlying to the CPU, and will do any sync operations
+  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
+
+# DeviceBuffers come in two flavors, InterpretedBuffer and CompiledBuffer
 # InterpretedBuffers are a lot simpler than CompiledBuffers
 # they are used to implement the CPU(numpy) and TORCH(torch) backends
 # it's worth reading CPUBuffer (in tinygrad/runtime/ops_cpu.py, code 8/10)
 import numpy as np
 import torch
-class InterpretedBuffer:
+class InterpretedBuffer(DeviceBuffer):
   # this is where the data actually lives
   # finally some classes you recognize!
   _buf: Union[np.ndarray, torch.Tensor]
@@ -168,7 +183,7 @@ class InterpretedBuffer:
 
 # however, all the magic of tinygrad will come from CompiledBuffer
 # this is used for the GPU(opencl), CUDA, METAL, CLANG, and LLVM backends
-class CompiledBuffer:
+class CompiledBuffer(DeviceBuffer):
   # this is where the data actually lives, same as InterpretedBuffer
   # a RawBuffer is just raw (typed) memory on the Device in question
   _buf: RawBuffer
