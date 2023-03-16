@@ -4,8 +4,8 @@ import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.ops import Compiled, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
-from tinygrad.interpreted import InterpretedBuffer
+from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+#from tinygrad.interpreted import InterpretedBuffer
 from tinygrad.runtime.lib import RawConst, RawBuffer
 
 # lazy can recurse a lot
@@ -19,7 +19,7 @@ class _Device:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Type[Union[Compiled, InterpretedBuffer]]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  def __getitem__(self, x:str) -> Type[Union[Compiled, Interpreted]]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -117,7 +117,7 @@ class LazyBuffer:
         ast = self.op
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device)
-        if self.op.src[0].st.contiguous and not isinstance(realized, (InterpretedBuffer, RawConst)) and realized.size == prod(self.shape):
+        if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
           self.realized = realized
           ast = self.op
@@ -179,11 +179,11 @@ class LazyBuffer:
       from tinygrad.graph import log_op
       log_op(self, ast)
 
-    if isinstance(self.realized, InterpretedBuffer):
-      assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
-      assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
-    else:
-      assert isinstance(self.realized, Device[self.device].buffer), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+    #if isinstance(self.realized, InterpretedBuffer):
+    #  assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
+    #  assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+    #else:
+    assert isinstance(self.realized, Device[self.device].buffer), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
     return self.realized
 

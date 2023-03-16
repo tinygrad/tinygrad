@@ -2,9 +2,9 @@ import itertools
 from enum import Enum, auto
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored, DType
-from tinygrad.ops import LazyOp, MovementOps, get_buffers, ReduceOps, get_lazyops, map_buffers, ASTRunner
+from tinygrad.ops import LazyOp, MovementOps, get_buffers, ReduceOps, get_lazyops, map_buffers, ASTRunner, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
-from tinygrad.interpreted import get_lazyop_info, GenericShape
+#from tinygrad.interpreted import get_lazyop_info, GenericShape
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -52,7 +52,7 @@ class ASTKernel:
     """
 
     # fetch lazyop info (this can be cached!)
-    self.info: GenericShape = get_lazyop_info(ast)
+    self.info = get_lazyop_info(ast)
     #print(self.info.dtype, self.info.flops)
 
     # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer

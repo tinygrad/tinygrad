@@ -1,3 +1,4 @@
+"""
 from __future__ import annotations
 from typing import Tuple, Any, ClassVar, Optional, Callable, Dict
 import functools
@@ -49,3 +50,4 @@ class InterpretedBuffer:  # pylint: disable=abstract-method
       print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     return ret
+"""
