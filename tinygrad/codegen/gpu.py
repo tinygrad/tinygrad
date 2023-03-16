@@ -88,7 +88,7 @@ class GPUCodegen(ASTKernel):
       if self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image'):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
         idx, idy = to_image_idx(self.bufs[buf_index].dtype.arg, idxy, valid)
-        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index].dtype} */\n")
+        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index].dtype.arg} */\n")
       elif v.typ == Types.FLOAT4:
         self.kernel.append(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
@@ -131,7 +131,7 @@ class GPUCodegen(ASTKernel):
         elif self.bufs[buf_index] is not None and is_image:
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
           idx, idy = to_image_idx(self.bufs[buf_index].dtype.arg, idxy, valid, VALIDHACKS)
-          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index].dtype} */", Types.FLOAT4)
+          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index].dtype.arg} */", Types.FLOAT4)
           test_idy.append(idy.render(render_cl))
         elif should_upcast and can_merge:
           ldr = Token(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
