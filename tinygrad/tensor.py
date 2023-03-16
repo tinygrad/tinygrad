@@ -19,7 +19,7 @@ class Function:
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
-    ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
+    ret = Tensor(ctx.forward(*[t.data for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
     return ret
 
@@ -42,15 +42,14 @@ class Tensor:
 
     if isinstance(data, (np.ndarray, LazyNumpyArray)):
       data = data if data.shape else data.reshape((1,))
-      lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
+      data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
     elif isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      lazydata = data
     else:
       raise RuntimeError(f"can't create Tensor from {data}")
 
     # this is set once we are here
-    self.lazydata: LazyBuffer = lazydata
+    self.data: LazyBuffer = data
 
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
@@ -63,47 +62,47 @@ class Tensor:
     self._ctx: Optional[Function] = None
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+    return f"<Tensor {self.data if self.data.realized is None else self.data.realized!r} with grad {(self.grad.data if self.grad else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
 
   @property
-  def device(self) -> str: return self.lazydata.device
+  def device(self) -> str: return self.data.device
 
   @property
-  def shape(self) -> Tuple[int, ...]: return self.lazydata.shape
+  def shape(self) -> Tuple[int, ...]: return self.data.shape
 
   @property
-  def dtype(self) -> DType: return self.lazydata.dtype
+  def dtype(self) -> DType: return self.data.dtype
 
   # ***** data handlers ****
 
   def realize(self) -> Tensor:
-    self.lazydata.realize()
+    self.data.realize()
     return self
 
   def assign(self, x) -> Tensor:
     if not isinstance(x, Tensor): x = Tensor(x)
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
-    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
-    if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
-    self.lazydata = x.lazydata
+    if DEBUG >= 4: print(f"assign {self.data} <- {x.data}")
+    if self.data.realized is not None and not getenv("DISALLOW_ASSIGN"): x.data.output_buffer = self.data.realized
+    self.data = x.data
     return self
 
-  def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
+  def detach(self): return Tensor(self.data, device=self.device, requires_grad=False)
+  def numpy(self) -> np.ndarray: return self.data.toCPU()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
-    assert self.lazydata.realized is None
-    self.lazydata.device = device
+    assert self.data.realized is None
+    self.data.device = device
     if self.grad:
-      self.grad.lazydata.device = device
+      self.grad.data.device = device
 
   def to(self, device:str):
-    ret = Tensor(self.lazydata, device)
+    ret = Tensor(self.data, device)
     if self.grad:
       ret.grad = self.grad.to(device)
     return ret
@@ -179,7 +178,7 @@ class Tensor:
       if not any(x.requires_grad for x in t0._ctx.parents):
         continue
       assert (t0.grad is not None)
-      grads = t0._ctx.backward(t0.grad.lazydata)
+      grads = t0._ctx.backward(t0.grad.data)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):

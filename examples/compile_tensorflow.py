@@ -37,7 +37,7 @@ def compile_onnx_model(onnx_model):
   the_output = run(the_input)
   the_output = run(the_input)
 
-  special_names = {id(the_input.lazydata.realized.cl): "input", id(the_output.lazydata.realized.cl): "outputs"}
+  special_names = {id(the_input.data.realized.cl): "input", id(the_output.data.realized.cl): "outputs"}
   cprog, statements, bufs, bufs_to_save = compile_net(run, special_names)
   cprog = ["#include <string.h>", "#include <stdio.h>", "#include <stdlib.h>"] + cprog
 

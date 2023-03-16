@@ -43,10 +43,10 @@ if __name__ == "__main__":
   # hack to put the inputs back
   assert len(run.input_replace) == 1, f"didn't get one input to replace {run.input_replace}"
   for (j,i),idx in run.input_replace.items():
-    run.jit_cache[j][1][i] = the_input.lazydata.realized.raw()
+    run.jit_cache[j][1][i] = the_input.data.realized.raw()
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  special_names = {id(the_input.lazydata.realized.raw()): "input", id(the_output.lazydata.realized.raw()): "outputs"}
+  special_names = {id(the_input.data.realized.raw()): "input", id(the_output.data.realized.raw()): "outputs"}
 
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
