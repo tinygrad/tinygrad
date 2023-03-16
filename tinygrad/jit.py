@@ -4,7 +4,7 @@ from tinygrad.helpers import DEBUG, colored
 
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters, CompiledBuffer, RawBuffer
+from tinygrad.ops import GlobalCounters, RawBuffer
 
 class TinyJit:
   def __init__(self, fxn:Callable):

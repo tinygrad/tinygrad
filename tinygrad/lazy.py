@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
+from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, LazyConst
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.runtime.ops_cpu import CPUBuffer
@@ -111,9 +111,12 @@ class LazyBuffer:
       if self.op.op == LoadOps.FROMCPU:
         # resolve LazyNumpyArray
         ast = LazyOp(self.op.op, tuple(), self.op.arg() if isinstance(self.op.arg, LazyNumpyArray) else self.op.arg)
+      elif self.op.op == LoadOps.CONST:
+        self.realized = LazyConst(self.op.arg, self.dtype)
+        ast = self.op
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device)
-        if self.op.src[0].st.contiguous and realized.size == prod(self.shape):
+        if self.op.src[0].st.contiguous and not isinstance(realized, LazyConst) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
           self.realized = realized
           ast = self.op
@@ -169,7 +172,10 @@ class LazyBuffer:
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
-  def fromCPU(x, device) -> LazyBuffer: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
+  def fromCPU(x, device) -> LazyBuffer:
+    # constant folding moved here
+    if prod(x.shape) == 1: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.CONST, tuple(), x.ravel()[0]), dtypes.from_np(x))
+    else: return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x))
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):

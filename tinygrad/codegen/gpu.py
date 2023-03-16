@@ -5,7 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
 from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, Variable, render_python
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same, dedup, dtypes
+from tinygrad.helpers import LazyConst, getenv, DEBUG, prod, partition, mnum, all_same, dedup, dtypes
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -98,6 +98,13 @@ class GPUCodegen(ASTKernel):
   def load(self, buf_index:int, idx_override:Optional[str]=None) -> List[Token]:
     # constant folding
     const = None
+    if self.bufs[buf_index] is not None and isinstance(self.bufs[buf_index].realized, LazyConst):
+      # bufs_to_delete can be removed, just ignore LazyConst at runtime
+      if buf_index != 0: self.bufs_to_delete.add(buf_index)
+      val = self.bufs[buf_index].realized.value
+      assert not math.isnan(val)
+      const = Token(f"({val}f)", Types.FLOAT)
+
     """
     if self.bufs[buf_index] is not None and self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
@@ -107,7 +114,8 @@ class GPUCodegen(ASTKernel):
     """
     #IMAGE = hasattr(self.bufs[buf_index]._buf, "IMAGE")
     IMAGE = False
-    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
+    #should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
+    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16)
     tokens = []
     test_idy = []
     for o in self.buftokens[buf_index].offsets():

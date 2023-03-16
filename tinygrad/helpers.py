@@ -36,6 +36,9 @@ class LazyNumpyArray:
   def copy(self): return self
   def astype(self, typ): return self
 
+class LazyConst:
+  def __init__(self, value, dtype): self.value, self.dtype = value, dtype
+
 class dtypes:
   float16: Final[DType] = DType(2, "half", np.float16)
   float32: Final[DType] = DType(4, "float", np.float32)

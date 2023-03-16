@@ -13,7 +13,7 @@ class UnaryOps(Enum): NOOP = auto(); EXP = auto(); LOG = auto(); NEG = auto(); N
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class FusedOps(Enum): MULACC = auto() # noqa: E702
-class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto(); TOCPU = auto(); CUSTOM = auto() # noqa: E702
+class LoadOps(Enum): FROMCPU = auto(); CONTIGUOUS = auto(); TOCPU = auto(); CUSTOM = auto(); CONST = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
@@ -94,8 +94,9 @@ class Compiled:
     #k = self.codegen(ast, output_buffer)
     k = self.codegen(ast, output_buffer)
 
+    # this is broken in the new stuff
     if False and getenv("ENABLE_METHOD_CACHE", 1):  # this is the default now
-      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.spec.runtime)
+      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 4: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:
