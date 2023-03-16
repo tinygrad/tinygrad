@@ -3,7 +3,7 @@ from typing import Tuple, Any, ClassVar, Optional, Callable, Dict
 import functools
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.ops import DeviceBuffer, LazyOp, get_buffers, map_buffers, Op, FusedOps, UnaryOps, MovementOps, ReduceOps, BinaryOps
+from tinygrad.ops import LazyOp, get_buffers, map_buffers, Op, FusedOps, UnaryOps, MovementOps, ReduceOps, BinaryOps
 
 # this is a quick "buffer" class for flop tracking and getting the output shape
 class GenericShape:
@@ -21,7 +21,7 @@ shape_fxn_for_op: Dict[Op, Callable] = {
 def get_lazyop_info(ast:LazyOp) -> GenericShape: return InterpretedBuffer.exec_ast(map_buffers({x:InterpretedBuffer(GenericShape(x.shape, x.dtype)) for x in get_buffers(ast)}, ast))._buf
 
 # used in CPUBuffer and TorchBuffer
-class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
+class InterpretedBuffer:  # pylint: disable=abstract-method
   fxn_for_op: ClassVar = shape_fxn_for_op
   def __init__(self, lbuf:Any):
     self._buf: Any = lbuf
@@ -49,12 +49,3 @@ class InterpretedBuffer(DeviceBuffer):  # pylint: disable=abstract-method
       print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     return ret
-
-    """
-    if output_buffer is not None:
-      assert output_buffer.shape == ret.shape, output_buffer.dtype == ret.dtype
-      output_buffer._buf = ret._buf
-      return output_buffer
-    else:
-      return ret
-    """

@@ -1,11 +1,10 @@
 from __future__ import annotations
 import functools, itertools, operator, random
-import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Dict, Set, Final
-from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes, GlobalCounters
-from tinygrad.shape.shapetracker import ShapeTracker, MovementOps
-from tinygrad.runtime.lib import RawBuffer, Runtime
+from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Set
+from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters
+from tinygrad.shape.shapetracker import MovementOps
+from tinygrad.runtime.lib import RawBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -33,6 +32,7 @@ def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
 # a placeholder class to extend by the exec classes
+"""
 class DeviceBuffer:
   _buf: Any                # underlying buffer
   shape: Tuple[int, ...]
@@ -40,6 +40,7 @@ class DeviceBuffer:
   @classmethod
   def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
+"""
 
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
@@ -50,7 +51,7 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg)
     return self
 
-  def exec(self, bufs:List[Optional[CompiledBuffer]]) -> Optional[float]:
+  def exec(self, bufs) -> Optional[float]:
     #rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     rawbufs = [x.realized for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
@@ -85,17 +86,17 @@ class ASTRunner:
 from tinygrad.codegen.ast import ASTKernel
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen: Type[ASTKernel], runtime: Type[Runtime]):
+  def __init__(self, buffer: Type[RawBuffer], codegen: Type[ASTKernel], runtime):
     self.buffer, self.codegen, self.runtime = buffer, codegen, runtime
     self.method_cache: Dict[str, ASTRunner] = {}
 
-  def exec_ast(self, ast:LazyOp, output_buffer:LazyBuffer):
+  def exec_ast(self, ast:LazyOp, output_buffer):
     if ast.op == LoadOps.FROMCPU: return self.buffer.fromCPU(ast.arg())
     #k = self.codegen(ast, output_buffer)
     k = self.codegen(ast, output_buffer)
 
     # this is broken in the new stuff
-    if False and getenv("ENABLE_METHOD_CACHE", 1):  # this is the default now
+    if getenv("ENABLE_METHOD_CACHE", 0):
       if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
       elif DEBUG >= 4: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]

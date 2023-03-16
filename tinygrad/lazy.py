@@ -2,12 +2,11 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, Type
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, LazyConst
+from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.ops import DeviceBuffer, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.ops import Compiled, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.interpreted import InterpretedBuffer
-from tinygrad.runtime.ops_cpu import CPUBuffer
-from tinygrad.graph import log_op
+from tinygrad.runtime.lib import RawConst, RawBuffer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -20,7 +19,7 @@ class _Device:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, "CPU")
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Type[DeviceBuffer]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  def __getitem__(self, x:str) -> Type[Union[Compiled, InterpretedBuffer]]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
 Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
@@ -93,8 +92,8 @@ class LazyBuffer:
       return  # cache hit, we return and don't reinit
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
     self.shape, self.optype, self.op, self.dtype = self.st.shape, optype, op, dtype
-    self.realized: Optional[DeviceBuffer] = None
-    self.output_buffer: Optional[DeviceBuffer] = None
+    self.realized: Optional[Union[RawBuffer, InterpretedBuffer]] = None
+    #self.output_buffer: Optional[DeviceBuffer] = None
     self.device, self.dbuffer = device, Device[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
@@ -105,7 +104,7 @@ class LazyBuffer:
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
-  def realize(self:LazyBuffer, required_device=None) -> DeviceBuffer:
+  def realize(self:LazyBuffer, required_device=None) -> Union[Compiled, InterpretedBuffer]:
     assert required_device is None or required_device == self.device
     if self.realized is None:
       # get real ops first
@@ -113,11 +112,11 @@ class LazyBuffer:
         # don't resolve LazyNumpyArray here, do it in the devices
         ast = LazyOp(self.op.op, tuple(), self.op.arg)
       elif self.op.op == LoadOps.CONST:
-        self.realized = LazyConst(self.op.arg, self.dtype)
+        self.realized = RawConst(self.op.arg, self.dtype)
         ast = self.op
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device)
-        if self.op.src[0].st.contiguous and not isinstance(realized, (InterpretedBuffer, LazyConst)) and realized.size == prod(self.shape):
+        if self.op.src[0].st.contiguous and not isinstance(realized, (InterpretedBuffer, RawConst)) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
           self.realized = realized
           ast = self.op
@@ -176,9 +175,10 @@ class LazyBuffer:
       # no need to keep the op after realization
       del self.op
 
+      from tinygrad.graph import log_op
       log_op(self, ast)
 
-    if isinstance(self.dbuffer, type(InterpretedBuffer)):
+    if isinstance(self.realized, InterpretedBuffer):
       assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
       assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     else:

@@ -3,8 +3,7 @@ import platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List, Final
-from tinygrad.helpers import IMAGE, DEBUG, getenv, dtypes, GlobalCounters
-#from tinygrad.ops import CompiledBuffer, GlobalCounters, Specialized
+from tinygrad.helpers import DEBUG, getenv, dtypes, GlobalCounters
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
@@ -22,6 +21,7 @@ class _CL:
     self.cl_queue: cl.CommandQueue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 CL = _CL()
 
+# TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     super().__init__(size, dtype)

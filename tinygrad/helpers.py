@@ -31,14 +31,10 @@ class DType(NamedTuple):
 
 class LazyNumpyArray:
   def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
-  def __call__(self): return self.fxn(self) if isinstance(self.fxn, Callable) else self.fxn
+  def __call__(self): return self.fxn(self) if callable(self.fxn) else self.fxn
   def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
   def copy(self): return self
   def astype(self, typ): return LazyNumpyArray(self.fxn, self.shape, typ)
-
-# this is a RawBuffer
-class LazyConst:
-  def __init__(self, value, dtype): self.value, self.dtype, self.size = value, dtype, 1
 
 class dtypes:
   float16: Final[DType] = DType(2, "half", np.float16)
