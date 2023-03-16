@@ -12,7 +12,7 @@ class TestDtype(unittest.TestCase):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
     print(a)
     na = a.numpy()
-    print(na, na.dtype, a.data.realized)
+    print(na, na.dtype, a.lazydata.realized)
     assert na.dtype == np.float16
     np.testing.assert_allclose(na, [1,2,3,4])
 

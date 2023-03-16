@@ -48,7 +48,7 @@ class Tensor:
   _ctx: Optional[Function]
 
   # this is where the data (and other tensor properties) actually live
-  data: LazyBuffer
+  lazydata: LazyBuffer
 
   # high level ops (hlops) are defined on this class. example: relu
   def relu(self): return self.maximum(0)
@@ -114,12 +114,12 @@ from tinygrad.ops import LazyOp, BinaryOps, LoadOps
 
 # the 2+3 from before
 result = Tensor([2]) + Tensor([3])
-print(type(result.data), result.data)  # let's look at the data of result
+print(type(result.lazydata), result.lazydata)  # let's look at the lazydata of result
 
 # you'll see it has a LazyOp
 # the op type is BinaryOps.ADD
 # and it has two sources, the 2 and the 3
-lazyop: LazyOp = result.data.op
+lazyop: LazyOp = result.lazydata.op
 assert lazyop.op == BinaryOps.ADD
 assert len(lazyop.src) == 2
 
@@ -129,15 +129,15 @@ assert len(lazyop.src) == 2
 print(lazyop.src[0].op)
 assert lazyop.src[0].op.op == LoadOps.FROMCPU
 assert lazyop.src[0].op.arg[0] == [2], "the arg of the FROMCPU LazyOP is the [2.]"
-assert result.data.realized is None, "the LazyBuffer is not realized yet"
+assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
-result.data.realize()
-assert result.data.realized is not None, "the LazyBuffer is realized!"
+result.lazydata.realize()
+assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
-assert 'ClangBuffer' in str(type(result.data.realized))
+assert 'ClangBuffer' in str(type(result.lazydata.realized))
 # getting ahead of ourselves, but we can copy the DeviceBuffer toCPU
-assert result.data.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
+assert result.lazydata.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
 
 # %%
 # == DeviceBuffer (in tinygrad/ops.py, code 4/10) ==

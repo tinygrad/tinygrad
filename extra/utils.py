@@ -99,7 +99,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
     np_array = np.lib.stride_tricks.as_strided(
       np_array, shape=shape, strides=[i*t.dtype.itemsize for i in strides])
 
-    lna = t.data.op.arg
+    lna = t.lazydata.op.arg
     lna.fxn = lambda _: np_array
     t.realize()
     return
@@ -108,9 +108,9 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
   # ["GPU", "CUDA"] use _mmap since they have to copy in to the GPU anyway
   # this needs real APIs
   if t.device in ["METAL", "CLANG", "LLVM"]:
-    del t.data.op
-    t.data.realized = t.data.dbuffer(t.shape, dtype=t.dtype)
-    myfile.readinto(t.data.realized.raw()._buffer())
+    del t.lazydata.op
+    t.lazydata.realized = t.lazydata.dbuffer(t.shape, dtype=t.dtype)
+    myfile.readinto(t.lazydata.realized.raw()._buffer())
   else:
     def _mmap(lna):
       assert myfile._compress_type == 0, "compressed data can't be mmaped"
@@ -119,8 +119,8 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
       ret = np.empty(lna.shape, dtype=lna.dtype)
       myfile.readinto(ret.data)
       return ret
-    if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.data.op.arg.fxn = _mmap
-    else: t.data.op.arg.fxn = _read
+    if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
+    else: t.lazydata.op.arg.fxn = _read
     t.realize()
 
 def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):

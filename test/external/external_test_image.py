@@ -16,13 +16,13 @@ class TestImage(unittest.TestCase):
     t = Tensor.ones(128, 128, 1)
     t = t.reshape(128, 32, 4) + 3
     t.realize()
-    assert isinstance(t.data.realized._buf, CLImage)
+    assert isinstance(t.lazydata.realized._buf, CLImage)
     np.testing.assert_array_equal(t.numpy(), np.ones((128,32,4))*4)
 
   def test_sum_image(self):
     t1 = Tensor.ones(16, 16, 1).reshape(16, 4, 4) + 3
     t1.realize()
-    assert isinstance(t1.data.realized._buf, CLImage)
+    assert isinstance(t1.lazydata.realized._buf, CLImage)
     t1 = t1.sum()
     t1.realize()
     assert t1.numpy()[0] == 16*4*4*4, f"got {t1.numpy()}"
@@ -34,7 +34,7 @@ class TestImage(unittest.TestCase):
     t2.realize()
     t3 = t1 + t2
     t3.realize()
-    assert isinstance(t3.data.realized._buf, CLImage)
+    assert isinstance(t3.lazydata.realized._buf, CLImage)
     np.testing.assert_array_equal(t3.numpy(), np.ones((16,4,4))*9)
 
   def test_padded_conv(self):

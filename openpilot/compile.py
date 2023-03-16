@@ -63,7 +63,7 @@ def compile(dat, output_fn):
   assert len(model_exec.jit_cache) <= ALLOWED_KERNEL_COUNT or ALLOWED_KERNEL_COUNT == 0, "too many kernels!"
 
   # pull out inputs and put them in the jit cache
-  input_rawbuffers = {k:inputs[k].data.realized.raw() for k in inputs.keys()}
+  input_rawbuffers = {k:inputs[k].lazydata.realized.raw() for k in inputs.keys()}
   for (j,i),idx in model_exec.input_replace.items(): model_exec.jit_cache[j][1][i] = input_rawbuffers[idx]
 
   # transform to CL.CACHE
