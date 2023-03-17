@@ -109,62 +109,34 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        # constant fold
-        #if prod(self.op.arg.shape) == 1:
-        #  self.realized = RawConst(1, self.dtype, self.op.arg().reshape(1)[0])
-        #else:
         self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
-        ast = LazyOp(self.op.op, tuple(), self.op.arg)
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device).realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
           self.realized = realized
-          ast = self.op
         else:
-          # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS
-          ast = LazyOp(UnaryOps.NOOP, self.op.src)
+          # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS. confusing with Compiled though
+          self.op = LazyOp(UnaryOps.NOOP, self.op.src)
       elif self.op.op == LoadOps.CUSTOM:
+        # this needs to immediately realize
         for x in self.op.src: x.realize(self.device)
-        #real_srcs = tuple(x.realize(self.device) for x in self.op.src)
         self.realized = self.op.arg(self, *self.op.src)
-        ast = self.op
-        #ast = LazyOp(self.op.op, real_srcs)
-      elif self.optype == MovementOps:
-        # InterpretedBuffers run the MovementOp, CompiledBuffers don't. Move this?
-        #if not isinstance(self.dbuffer, type(InterpretedBuffer)):
-        #  self.realized = self.op.src[0].realize()  # movementops don't do anything, copy the data
-        #  assert self.realized is not None, "movementop didn't realize?"
-        ast = self.op
-
-        # fuse RESHAPE and ReduceOps
-        # NOTE: this is sort of a hack for IMAGE, otherwise it shouldn't matter
-        """
-        if src.realized is None and src.optype == ReduceOps and self.op.op == MovementOps.RESHAPE and len(src.children) <= 1:
-          # it's okay to add a RESHAPE to the ast here
-          ast = LazyOp(MovementOps.RESHAPE, (_ast_reduceops(src), ), self.op.arg)
-        else:
-          # movement ops aren't an AST, just run them
-          src.realize(self.device)
-          self.realized = src.realized
-          #real_src = src.realize(self.device)
-          #self.realized = real_src.movement_op(self.op.op, self.op.arg)
-          #ast = LazyOp(self.op.op, (real_src, ))
-        """
-
-      elif self.optype == ReduceOps: ast = _ast_reduceops(self)
-      elif self.optype == BinaryOps: ast = _ast_binaryops(self)  # ISSUE: this can include a reshape
+      # these can be folded and change the op
+      elif self.optype == ReduceOps: self.op = _ast_reduceops(self)
+      elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
 
       # run the ast if we still have to, and log the op
       if self.realized is None:
-        for x in get_buffers(ast): x.realize(self.device)
-        self.realized = Device[self.device].exec_ast(ast, output=self)
+        for x in get_buffers(self.op): x.realize(self.device)
+        self.realized = Device[self.device].exec_ast(self.op, output=self)
+
+      # log to the graph
+      from tinygrad.graph import log_op
+      log_op(self, self.op)
 
       # no need to keep the op after realization
       del self.op
-
-      from tinygrad.graph import log_op
-      log_op(self, ast)
 
     #if isinstance(self.realized, InterpretedBuffer):
     #  assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
@@ -226,8 +198,8 @@ class LazyBuffer:
     # some permutes are actually just reshapes
     if op == MovementOps.PERMUTE and local_st.contiguous: return self.movement_op(MovementOps.RESHAPE, tuple(self.shape[i] for i in arg))
 
-    # move permutes before expands
-    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.EXPAND:
+    # move permutes before expands (always, this is safe)
+    if op == MovementOps.PERMUTE and self.realized is None and self.op.op == MovementOps.EXPAND:
       self.op.src[0].children.discard(self)
       return self.op.src[0].movement_op(MovementOps.PERMUTE, arg).movement_op(MovementOps.EXPAND, tuple(self.op.arg[a] for a in arg))
 
