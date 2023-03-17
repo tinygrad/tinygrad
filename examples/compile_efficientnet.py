@@ -43,10 +43,10 @@ if __name__ == "__main__":
   # hack to put the inputs back
   assert len(run.input_replace) == 1, f"didn't get one input to replace {run.input_replace}"
   for (j,i),idx in run.input_replace.items():
-    run.jit_cache[j][1][i] = the_input.lazydata.realized.raw()
+    run.jit_cache[j][1][i] = the_input.lazydata.realized
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  special_names = {id(the_input.lazydata.realized.raw()): "input", id(the_output.lazydata.realized.raw()): "outputs"}
+  special_names = {id(the_input.lazydata.realized): "input", id(the_output.lazydata.realized): "outputs"}
 
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
@@ -109,4 +109,5 @@ int main(int argc, char* argv[]) {
 }"""]
 
   # CLANG=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/stable_diffusion_by_tinygrad.jpg
+  # category : 281 (tabby, tabby cat) with 9.452788
   print('\n'.join(cprog))
