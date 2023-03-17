@@ -76,7 +76,11 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
   # prepare weights
   w = w.permute(0,4,2,5,1,3)
-  w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W))
+  w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W)).expand(x.shape)
+
+  # cast to float where we do the math
+  # NOTE: you can't do ReduceOps on image types
+  x, w = x.cast(dtypes.float32), w.cast(dtypes.float32)
 
   # the conv!
   ret = (x*w).sum((-4, -3, -2, -1)).reshape(bs*oy, ox*cout//4, 4)

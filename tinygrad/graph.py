@@ -38,6 +38,10 @@ def get_sop(op: List[Op]):
   if len(op) <= 4: return '.'.join([str(y).split(".")[1][0:3] for y in op][::-1])
   return str(len(op))
 
+def str_dtype(dtyp):
+  ret = str(dtyp)[7:]
+  return "" if ret == 'float' else f"\n{ret}"
+
 def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None):
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
@@ -57,10 +61,10 @@ def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None):
     for x in inp:
       G.add_edge(nm(x), nm(ret), label=get_sop(op))
       if 'label' not in G.nodes[nm(x)]:
-        G.nodes[nm(x)]['label'] = str(x.shape)
+        G.nodes[nm(x)]['label'] = str(x.shape)+str_dtype(ret.dtype)
     if nm(ret) not in G.nodes: G.add_node(nm(ret))
 
-    G.nodes[nm(ret)]['label'] = str(set(x.shape for x in inp))+"\n"+str(ret.shape) if optype == ReduceOps else str(ret.shape)
+    G.nodes[nm(ret)]['label'] = (str(set(x.shape for x in inp))+"\n"+str(ret.shape) if optype == ReduceOps else str(ret.shape))+str_dtype(ret.dtype)
     G.nodes[nm(ret)]['fillcolor'] = (top_colors[optype] + ('80' if dashed else str())) if optype in top_colors else "#ffffff"
     G.nodes[nm(ret)]['style'] = 'filled, dashed' if dashed else 'filled'
     G.nodes[nm(ret)]['prunable'] = optype in [LoadOps, MovementOps]
