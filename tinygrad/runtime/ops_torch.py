@@ -22,10 +22,3 @@ class RawTorchBuffer(RawBuffer):
   def fromCPU(cls, x): return cls(torch.from_numpy(x).requires_grad_(False).to(device))
   def toCPU(self): return self._buf.cpu().numpy()
 TorchBuffer = Interpreted(RawTorchBuffer, torch_fxn_for_op)
-
-"""
-class TorchBuffer(InterpretedBuffer):
-  fxn_for_op: ClassVar = torch_fxn_for_op
-  def to_tinygrad_dtype(self): return {torch.float16: dtypes.float16, torch.float32: dtypes.float32}[self._buf.dtype]
-  def toCPU(self): return self._buf.cpu().numpy()
-"""

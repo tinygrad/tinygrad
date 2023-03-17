@@ -2,9 +2,8 @@ import itertools
 from enum import Enum, auto
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored, DType
-from tinygrad.ops import LazyOp, MovementOps, get_buffers, ReduceOps, get_lazyops, map_buffers, ASTRunner, get_lazyop_info
+from tinygrad.ops import LazyOp, MovementOps, get_buffers, ReduceOps, get_lazyops, map_buffers, ASTRunner, get_lazyop_info, FlopCounter
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
-#from tinygrad.interpreted import get_lazyop_info, GenericShape
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -41,24 +40,8 @@ class ASTKernel:
     self.bufs = [output_buffer] + dedup(get_buffers(ast))
     self.ast = ast
 
-    # check if the output buffer is allowed to be used
-    # if it's aliased, don't use it
-    """
-    if output_buffer is not None:
-      for a in self.bufs:
-        if a._buf == output_buffer._buf and not a.st.contiguous:
-          output_buffer = None
-          break
-    """
-
     # fetch lazyop info (this can be cached!)
-    self.info = get_lazyop_info(ast)
-    #print(self.info.dtype, self.info.flops)
-
-    # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
-    #self.ret = output_buffer if output_buffer else type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True, dtype=self.info.dtype)
-    #assert self.ret.dtype == self.info.dtype, f"return dtype {self.ret.dtype} != {self.info.dtype}"
-    #self.bufs = ([type(self.ret)(self.info.shape, hostbuf=self.ret, dtype=self.info.dtype)] if output_shape else [self.ret]) + self.bufs
+    self.info: FlopCounter = get_lazyop_info(ast)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -91,12 +74,6 @@ class ASTKernel:
     # make the output buffer shape correct in here
     if self.reduceop is not None: self.sts[0].reshape(self.reduceop.arg)
     else: self.sts[0].reshape([x.shape for x in self.bufs[1:] if x not in self.earlybufs][0])
-
-    #if self.output_shape is not None:
-      #self.sts[0].reshape(self.output_shape)
-
-    #print([x.shape for x in self.sts])
-    #assert all_same(x.shape for i,x in enumerate(self.sts))
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))

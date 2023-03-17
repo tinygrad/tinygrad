@@ -41,11 +41,3 @@ class RawNumpyBuffer(RawBuffer):
   def fromCPU(cls, x): return cls(x)
   def toCPU(self): return self._buf
 CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op)
-
-"""
-class CPUBuffer(InterpretedBuffer):
-  fxn_for_op: ClassVar[Dict[Op, Callable]] = numpy_fxn_for_op
-  def to_tinygrad_dtype(self): return dtypes.from_np(self._buf)
-  def toCPU(self): return self._buf
-"""
-

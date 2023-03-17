@@ -5,7 +5,6 @@ from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
-#from tinygrad.interpreted import InterpretedBuffer
 from tinygrad.runtime.lib import RawConst, RawBuffer
 
 # lazy can recurse a lot

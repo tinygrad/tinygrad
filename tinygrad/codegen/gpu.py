@@ -74,7 +74,7 @@ class GPUCodegen(ASTKernel):
     assert len(self.sts[buf_index].views) == 1, "store has more than one view"
 
     # all stores can merge, since they have one view and are valid
-    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16) # or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
+    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or self.bufs[buf_index].dtype.name.startswith('image'))
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()
@@ -104,17 +104,8 @@ class GPUCodegen(ASTKernel):
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
 
-    """
-    if self.bufs[buf_index] is not None and self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
-      if buf_index != 0: self.bufs_to_delete.add(buf_index)
-      val = self.bufs[buf_index]._backing[0]
-      assert not math.isnan(val)
-      const = Token(f"({val}f)", Types.FLOAT)
-    """
-    #IMAGE = hasattr(self.bufs[buf_index]._buf, "IMAGE")
     is_image = self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image')
-    #should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
-    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16)
+    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or self.bufs[buf_index].dtype.name.startswith('image'))
     tokens = []
     test_idy = []
     for o in self.buftokens[buf_index].offsets():
@@ -192,15 +183,12 @@ class GPUCodegen(ASTKernel):
           break
 
     # are we upcasting in mid reduce? (only for images)
-    #if hasattr(self.bufs[0]._buf, "IMAGE") and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
-    """
-    if not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
+    if self.bufs[0].dtype.name.startswith('image') and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
       axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:
         self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
         self.group_for_reduce.append(4)
-    """
 
     # now do everything required
     self.required_optimizations()

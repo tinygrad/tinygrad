@@ -31,17 +31,6 @@ def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
   if len(real_srcs) and x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
-# a placeholder class to extend by the exec classes
-"""
-class DeviceBuffer:
-  _buf: Any                # underlying buffer
-  shape: Tuple[int, ...]
-  dtype: DType
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
-  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
-"""
-
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
@@ -52,7 +41,6 @@ class ASTRunner:
     return self
 
   def exec(self, bufs) -> Optional[float]:
-    #rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     rawbufs = [x.realized for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     assert all(x is not None for x in rawbufs), "some rawbufs are None, you probably didn't realize them"
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)

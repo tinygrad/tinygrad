@@ -82,7 +82,3 @@ class MetalCodegen(GPUCodegen):
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
 MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram)
-
-#class MetalBuffer(CompiledBuffer):
-#  spec = Specialized(RawMetalBuffer, MetalCodegen, MetalProgram)
-
