@@ -79,7 +79,7 @@ jobs:
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
   testllvm:
-    name: LLVM Tests
+    name: LLVM Tests (w method cache)
     runs-on: ubuntu-latest
 
     steps:

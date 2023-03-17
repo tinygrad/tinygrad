@@ -101,7 +101,7 @@ class LazyBuffer:
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
 
-  def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'}>"
+  def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'} st:{self.st}>"
 
   # this produces a device buffer
   def realize(self:LazyBuffer, required_device=None) -> LazyBuffer:
