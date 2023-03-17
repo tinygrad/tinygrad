@@ -91,9 +91,10 @@ class LazyBuffer:
     if hasattr(self, 'device'):
       return  # cache hit, we return and don't reinit
     self.st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape, self.optype, self.op, self.dtype = self.st.shape, optype, op, dtype
+    self.shape, self.optype, self.dtype = self.st.shape, optype, dtype
+    self.op: LazyOp = op
     self.realized: Optional[RawBuffer] = None
-    #self.output_buffer: Optional[DeviceBuffer] = None
+    self.output_buffer: Optional[RawBuffer] = None
     self.device, self.dbuffer = device, Device[device]
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
@@ -158,22 +159,7 @@ class LazyBuffer:
       # run the ast if we still have to, and log the op
       if self.realized is None:
         for x in get_buffers(ast): x.realize(self.device)
-        #ast = map_buffers({x:x.realize(self.device) for x in get_buffers(ast)}, ast)
-        #self.realized = self.dbuffer.exec_ast(ast, output_buffer=self.output_buffer)
-
-        # check if we can reuse the output buffer
-        # if it's aliased, don't use it
-        # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
-        """
-        if output_buffer is not None:
-          for a in self.bufs:
-            if a._buf == output_buffer._buf and not a.st.contiguous:
-              output_buffer = None
-              break
-        """
-
-        #print(type(ast), ast)
-        self.realized = Device[self.device].exec_ast(ast, output_buffer=self)
+        self.realized = Device[self.device].exec_ast(ast, output=self)
 
       # no need to keep the op after realization
       del self.op

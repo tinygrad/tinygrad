@@ -91,7 +91,7 @@ class Interpreted:
     self.from_lazybuffer = from_lazybuffer
     self.to_underlying = to_underlying
 
-  def exec_ast(self, ast:LazyOp, output_buffer=None, context=None):
+  def exec_ast(self, ast:LazyOp, output=None, context=None):
     if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
@@ -101,7 +101,12 @@ class Interpreted:
     ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
-    return ret
+    if output is not None and output.output_buffer is not None:
+      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+      output.output_buffer._buf = ret._buf
+      return output.output_buffer
+    else:
+      return ret
 
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops = tup
@@ -126,11 +131,11 @@ class Compiled:
     self.buffer, self.codegen, self.runtime = buffer, codegen, runtime
     self.method_cache: Dict[str, ASTRunner] = {}
 
-  def exec_ast(self, ast:LazyOp, output_buffer):
+  def exec_ast(self, ast:LazyOp, output):
     # all movementops do nothing in a Compiled buffer!
     if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
 
-    k = self.codegen(ast, output_buffer)
+    k = self.codegen(ast, output)
 
     # this is broken in the new stuff
     if getenv("ENABLE_METHOD_CACHE", 0):
@@ -138,16 +143,25 @@ class Compiled:
       elif DEBUG >= 4: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:
-      #prg = k.codegen().build(self.spec.runtime)
       prg = k.codegen().build(self.runtime)
 
     if getenv("PRINT_AST", "") == prg.name or getenv("PRINT_AST", "") == "1":
       k.print()
       print(prg.prg)
 
-    # create the output memory
-    # TODO: this can be done in lazy.py
-    output_buffer.realized = self.buffer(prod(output_buffer.shape), output_buffer.dtype)
+    # check if we can reuse the output buffer
+    # if it's aliased, don't use it
+    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+    output.realized = output.output_buffer
+    if output.realized is not None:
+      for a in get_buffers(ast):
+        if a.realized == output.realized and not a.st.contiguous:
+          output.realized = None
+          break
+
+    # we don't have an output buffer, we have to create it
+    if output.realized is None:
+      output.realized = self.buffer(prod(output.shape), output.dtype)
 
     prg.exec(k.bufs)
-    return output_buffer.realized
+    return output.realized
