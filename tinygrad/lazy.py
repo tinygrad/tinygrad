@@ -104,7 +104,7 @@ class LazyBuffer:
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'}>"
 
   # this produces a device buffer
-  def realize(self:LazyBuffer, required_device=None) -> RawBuffer:
+  def realize(self:LazyBuffer, required_device=None) -> LazyBuffer:
     assert required_device is None or required_device == self.device
     if self.realized is None:
       # get real ops first
@@ -116,7 +116,7 @@ class LazyBuffer:
         self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
         ast = LazyOp(self.op.op, tuple(), self.op.arg)
       elif self.op.op == LoadOps.CONTIGUOUS:
-        realized = self.op.src[0].realize(self.device)
+        realized = self.op.src[0].realize(self.device).realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
           self.realized = realized
@@ -172,7 +172,7 @@ class LazyBuffer:
     #else:
     assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
-    return self.realized
+    return self
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
@@ -181,10 +181,8 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
-    ret = (self.cast(self.dtype.type_on_cpu) if self.dtype.type_on_cpu is not None else self).contiguous().realize().toCPU().reshape(self.shape)
-    # TODO: this might be copying extra from the CPU
-    # the size mismatch is if it's been cut
-    #ret = self.contiguous().realize().toCPU()[:prod(self.shape)].reshape(self.shape)
+    realized = (self.cast(self.dtype.type_on_cpu) if self.dtype.type_on_cpu is not None else self).contiguous().realize().realized
+    ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
     return ret.copy()
 
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg)
