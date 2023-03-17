@@ -54,6 +54,7 @@ class ASTRunner:
   def exec(self, bufs) -> Optional[float]:
     #rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
     rawbufs = [x.realized for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
+    assert all(x is not None for x in rawbufs), "some rawbufs are None, you probably didn't realize them"
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)

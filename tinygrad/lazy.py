@@ -125,8 +125,10 @@ class LazyBuffer:
           # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS
           ast = LazyOp(UnaryOps.NOOP, self.op.src)
       elif self.op.op == LoadOps.CUSTOM:
-        real_srcs = tuple(x.realize(self.device) for x in self.op.src)
-        self.realized = self.op.arg(*real_srcs)
+        for x in self.op.src: x.realize(self.device)
+        #real_srcs = tuple(x.realize(self.device) for x in self.op.src)
+        self.realized = self.op.arg(self, *self.op.src)
+        ast = self.op
         #ast = LazyOp(self.op.op, real_srcs)
       elif self.optype == MovementOps:
         # InterpretedBuffers run the MovementOp, CompiledBuffers don't. Move this?
@@ -194,7 +196,7 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
-    ret = self.contiguous().realize().toCPU().reshape(self.shape)
+    ret = (self.cast(self.dtype.type_on_cpu) if self.dtype.type_on_cpu is not None else self).contiguous().realize().toCPU().reshape(self.shape)
     # TODO: this might be copying extra from the CPU
     # the size mismatch is if it's been cut
     #ret = self.contiguous().realize().toCPU()[:prod(self.shape)].reshape(self.shape)

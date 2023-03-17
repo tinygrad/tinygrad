@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os, math, functools
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
@@ -27,6 +28,7 @@ class DType(NamedTuple):
   itemsize: int
   name: str
   np: type  # TODO: someday this will be removed with the "remove numpy" project
+  type_on_cpu: Optional[DType] = None
   arg: Optional[Any] = None  # arbitrary arg for the dtype, used in image for the shape
   def __repr__(self): return f"dtypes.{self.name}" + (f"({self.arg})" if self.arg is not None else "")
 
