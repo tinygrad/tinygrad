@@ -23,7 +23,7 @@ class RawBufferCopyIn(RawBuffer):
 
   @classmethod
   def fromCPU(cls, x:np.ndarray):
-    ret = cls(prod(x.shape), dtypes.from_np(x))
+    ret = cls(prod(x.shape), dtypes.from_np(x.dtype))
     ret._copyin(x)
     return ret
 

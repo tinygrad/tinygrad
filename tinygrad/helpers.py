@@ -32,10 +32,9 @@ class DType(NamedTuple):
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, np, type_on_cpu, shape):
+  def __new__(cls, priority, itemsize, name, np, shape):
     return super().__new__(cls, priority, itemsize, name, np)
-  def __init__(self, priority, itemsize, name, np, type_on_cpu, shape):
-    self.type_on_cpu: DType = type_on_cpu
+  def __init__(self, priority, itemsize, name, np, shape):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
@@ -51,7 +50,7 @@ class dtypes:
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
   @staticmethod
-  def from_np(x:Union[LazyNumpyArray, np.ndarray]) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x.dtype)]
+  def from_np(x) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x)]
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
