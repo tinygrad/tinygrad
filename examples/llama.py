@@ -10,7 +10,8 @@ from tqdm import tqdm
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple
 
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.runtime.ops_cpu import CPUBuffer
+from tinygrad.helpers import dtypes, getenv, DEBUG
 from tinygrad.lazy import Device
 
 # on mac, we make METAL the default. otherwise we make the GPU the default if we have one
@@ -173,11 +174,13 @@ args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm
 
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
 WEIGHTS_7B_FILENAME = WEIGHTS_DIR / "7B/consolidated.00.pth"
+SAFETENSORS_7B_WEIGHTS_FILENAME = WEIGHTS_DIR / "7B/weights.safetensors"
 
 # TODO: make this model work
 args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
 WEIGHTS_13B_0_FILENAME = WEIGHTS_DIR / "13B/consolidated.00.pth"
 WEIGHTS_13B_1_FILENAME = WEIGHTS_DIR / "13B/consolidated.01.pth"
+SAFETENSORS_13B_WEIGHTS_FILENAME = WEIGHTS_DIR / "13B/weights.safetensors"
 
 # **** helper functions ****
 
@@ -216,59 +219,100 @@ if __name__ == "__main__":
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
   parser.add_argument('--large', action='store_true', help="Use the 13B model instead of the 7B one")
+  parser.add_argument('--save-safetensors', action='store_true', help="Save the weights in a safetensors format")
+  parser.add_argument('--safetensors', action='store_true', help="Load the weights from a safetensors format")
   args = parser.parse_args()
   chatbot = args.prompt == None
 
   # load model (you have to find the weights yourself)
   from extra.utils import fake_torch_load_zipped, get_child
 
-  if args.large:
-    model = Transformer(**args_13B)
-    with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
-      weights0 = fake_torch_load_zipped(open(WEIGHTS_13B_0_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
-      weights1 = fake_torch_load_zipped(open(WEIGHTS_13B_1_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
-    # eww, this makes a copy
-    print("concatenating weights")
-    from tqdm import tqdm
-    assert set(weights0.keys()) == set(weights1.keys())
-    for k,v in (t := tqdm(weights0.items())):
-      # assert GlobalCounters.mem_used/1e9 < 28, "used over 28 GB"
-      t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
-      if 'rope.freqs' in k: continue  # no rope today
-      mv = get_child(model, k)
-      w0, w1 = v, weights1[k]
+  if not args.safetensors:
+    if args.large:
+      model = Transformer(**args_13B)
+      with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+        weights0 = fake_torch_load_zipped(open(WEIGHTS_13B_0_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+        weights1 = fake_torch_load_zipped(open(WEIGHTS_13B_1_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+      # eww, this makes a copy
+      print("concatenating weights")
+      from tqdm import tqdm
+      assert set(weights0.keys()) == set(weights1.keys())
+      for k,v in (t := tqdm(weights0.items())):
+        # assert GlobalCounters.mem_used/1e9 < 28, "used over 28 GB"
+        t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+        if 'rope.freqs' in k: continue  # no rope today
+        mv = get_child(model, k)
+        w0, w1 = v, weights1[k]
 
-      # if the weight is copied across models, it's simple
-      # TODO: assert they are the same
-      if w0.shape == mv.shape:
-        mv.assign(w0)
+        # if the weight is copied across models, it's simple
+        # TODO: assert they are the same
+        if w0.shape == mv.shape:
+          mv.assign(w0)
+          mv.realize()
+          w1.lazydata.realized._buf = None
+          continue
+
+        if w0.shape[0] != mv.shape[0]: mv.assign(w0.cat(w1, dim=0))
+        elif w0.shape[1] != mv.shape[1]: mv.assign(w0.cat(w1, dim=1))
+        else: raise RuntimeError("what axis mismatch?")
         mv.realize()
+
+        # rug the small tensor pieces
+        w0.lazydata.realized._buf = None
         w1.lazydata.realized._buf = None
-        continue
 
-      if w0.shape[0] != mv.shape[0]: mv.assign(w0.cat(w1, dim=0))
-      elif w0.shape[1] != mv.shape[1]: mv.assign(w0.cat(w1, dim=1))
-      else: raise RuntimeError("what axis mismatch?")
-      mv.realize()
+      del weights0
+      del weights1
+    else:
+      model = Transformer(**args_7B)
+      with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+        weights = fake_torch_load_zipped(open(WEIGHTS_7B_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
 
-      # rug the small tensor pieces
-      w0.lazydata.realized._buf = None
-      w1.lazydata.realized._buf = None
+      # assign weights (should be free)
+      for k,v in weights.items():
+        if '.inner_attention.rope.freqs' in k: continue  # no rope today
+        get_child(model, k).assign(v).realize()
 
-    del weights0
-    del weights1
+      del weights
   else:
-    model = Transformer(**args_7B)
+    from safetensors import safe_open
+    if args.large:
+      model = Transformer(**args_13B)
+      filename = SAFETENSORS_13B_WEIGHTS_FILENAME
+    else:
+      model = Transformer(**args_7B)
+      filename = SAFETENSORS_7B_WEIGHTS_FILENAME
+
     with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
-      weights = fake_torch_load_zipped(open(WEIGHTS_7B_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+      is_cpu = Device.DEFAULT == "CPU"
+      with safe_open(filename, framework="numpy") as f:
+        for k in (t := tqdm(f.keys())):
+          p = get_child(model, k)
+          v = f.get_tensor(k)
+          if is_cpu:
+            vt = Tensor.empty(*p.shape, dtype=dtypes.from_np(v))
+            vt.lazydata.realized = CPUBuffer(v)
+            p.assign(vt).realize()
+          else:
+            p.assign(v).realize()
 
-    # assign weights (should be free)
-    for k,v in weights.items():
-      if '.inner_attention.rope.freqs' in k: continue  # no rope today
-      #state_dict[k].assign(v).realize()
-      get_child(model, k).assign(v).realize()
+  if args.save_safetensors:
+    from safetensors.numpy import save_file
+    from tinygrad.nn.optim import get_state_dict
+    model_state_dict = {}
+    for k, v in get_state_dict(model).items():
+      if v.lazydata.realized is None: continue
+      assert type(v.lazydata.realized._buf) == np.ndarray, "use CPU backend"
+      model_state_dict[k] = v.lazydata.realized._buf
 
-    del weights
+    if args.large:
+      filename = SAFETENSORS_13B_WEIGHTS_FILENAME
+    else:
+      filename = SAFETENSORS_7B_WEIGHTS_FILENAME
+
+    save_file(model_state_dict, filename)
+    print('saved safetensors weights to', filename)
+    exit(0)
 
   # *** prompt engineers work here ****
 
