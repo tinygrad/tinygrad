@@ -63,7 +63,7 @@ def compile(dat, output_fn):
   assert len(model_exec.jit_cache) <= ALLOWED_KERNEL_COUNT or ALLOWED_KERNEL_COUNT == 0, "too many kernels!"
 
   # pull out inputs and put them in the jit cache
-  input_rawbuffers = {k:inputs[k].lazydata.realized.raw() for k in inputs.keys()}
+  input_rawbuffers = {k:inputs[k].lazydata.realized for k in inputs.keys()}
   for (j,i),idx in model_exec.input_replace.items(): model_exec.jit_cache[j][1][i] = input_rawbuffers[idx]
 
   # transform to CL.CACHE
@@ -73,11 +73,11 @@ def compile(dat, output_fn):
     # pass these to thneed
     setattr(prg.clprg, 'op_estimate', prg.op_estimate)
     setattr(prg.clprg, 'prg', prg.prg)
-    cl_cache.append((prg.clprg, [prg.global_size, prg.local_size, *[x._cl for x in args]]))
+    cl_cache.append((prg.clprg, [prg.global_size, prg.local_size, *[x._buf for x in args]]))
     used_ops += prg.op_estimate
 
   from extra.thneed import Thneed
-  t = Thneed(cl_cache, {k:v._cl for k,v in input_rawbuffers.items()})
+  t = Thneed(cl_cache, {k:v._buf for k,v in input_rawbuffers.items()})
 
   # save thneed (before run)
   t.save(output_fn)
