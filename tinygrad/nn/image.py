@@ -3,7 +3,7 @@ from tinygrad.helpers import prod, IMAGE, DType, getenv, dtypes
 from tinygrad.lazy import get_single_root
 
 FLOAT16 = getenv("FLOAT16", 0)
-base_image_type = (-100, 2, "image_half", np.float16, dtypes.float16) if FLOAT16 else (-100, 4, "image_float", np.float32, dtypes.float32)
+base_image_type = (100, 2, "image_half", np.float16, dtypes.float16) if FLOAT16 else (100, 4, "image_float", np.float32, dtypes.float32)
 
 def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
@@ -78,18 +78,13 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   w = w.permute(0,4,2,5,1,3)
   w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W)).expand(x.shape)
 
-  # cast to float where we do the math
-  # NOTE: you can't do ReduceOps on image types because the shapes are wrong
-  x, w = x.cast(dtypes.float32), w.cast(dtypes.float32)
-
   # the conv! (+ the bias)
-  ret = (x*w).sum((-4, -3, -2, -1))
-  if bias is not None: ret = ret + bias.pad(((0, added_output_channels),)).reshape(1, 1, 1, *cout_expand)
+  ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1))
 
   # reshape to image and cast back to image
   ret = ret.reshape(bs*oy, ox*cout//4, 4)
   ret = ret.cast(DType(*base_image_type, arg=ret.shape))
-  if IMAGE >= 3: ret = ret.contiguous()
+  if IMAGE >= 3: ret = ret.cast(DType(*base_image_type, arg=ret.shape)).contiguous()
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:
@@ -98,4 +93,5 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
     cout = groups * rcout
 
   # NCHW output
-  return ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+  ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+  return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))

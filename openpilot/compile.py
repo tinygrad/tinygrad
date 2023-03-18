@@ -9,7 +9,7 @@ if os.getenv("GPU", None) is None:
 if os.getenv("IMAGE", None) is None:
   os.environ['IMAGE'] = '2'
 
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 ALLOWED_KERNEL_COUNT = getenv("ALLOWED_KERNEL_COUNT", 0)
 DEBUGCL = getenv("DEBUGCL", 0)
 
@@ -38,7 +38,7 @@ from tinygrad.jit import TinyJit
 
 @TinyJit
 def model_exec(run_onnx, using_graph, **inputs):
-  ret = next(iter(run_onnx(inputs).values()))
+  ret = next(iter(run_onnx(inputs).values())).cast(dtypes.float32)
   GlobalCounters.reset()
   GlobalCounters.cache = []  # don't cache pre-realize
   if using_graph: graph.GRAPH = True
@@ -49,7 +49,7 @@ def compile(dat, output_fn):
   Tensor.manual_seed(1337)
   Tensor.no_grad = True
   using_graph = graph.GRAPH
-  graph.GRAPH = False
+  if getenv("GRAPH") < 2: graph.GRAPH = False
 
   onnx_model = onnx.load(io.BytesIO(dat))
   run_onnx = get_run_onnx(onnx_model)

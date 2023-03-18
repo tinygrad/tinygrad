@@ -162,7 +162,7 @@ class GPUCodegen(ASTKernel):
       upcast_strides = [self.sts[buf_index].strides[i] for i in self.upcast_in_mid_reduce_axes]
       if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.name.startswith('image') and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and (1 in upcast_strides))):
         axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
-        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes} on buf_index {buf_index}, {self.sts[buf_index]}"
         assert self.sts[buf_index].shape[axes[0]]%4 == 0, f"axis:{axes[0]} in buffer {buf_index} is not a multiple of 4, {self.sts[buf_index].shape}"
         self.shift_to(axes[0], 4)
         self.upcast()
@@ -315,7 +315,7 @@ class GPUCodegen(ASTKernel):
         for j in self.upcast_in_mid_reduce_axes:
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
-          if DEBUG >= 4: print("upcast", self.colorshape()) # NOTE: colorshape is wrong here
+          #if DEBUG >= 4: print("upcast", self.colorshape()) # NOTE: colorshape is wrong here, you have to remove it from group_for_reduce before calling
 
         self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")   # lidx.max works here too
 
