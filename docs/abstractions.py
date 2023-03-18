@@ -77,13 +77,19 @@ class LazyBuffer:
   shape: Tuple[int, ...]
   dtype: DType
 
+  # a ShapeTracker is used to track things like reshapes and permutes
+  # all MovementOps are zero copy in tinygrad!
+  # the ShapeTracker specifies how the data in the RawBuffer matches to the shape
+  # we'll come back to this later
+  st: ShapeTracker
+
+  # if the LazyBuffer is realized, it has a RawBuffer
+  # we will come back to RawBuffers later
+  realized: Optional[RawBuffer]
+
   # if the lazybuffer is unrealized, it has a LazyOp
   # this LazyOp describes the computation needed to realize this LazyBuffer
   op: Optional[LazyOp]
-
-  # if the LazyBuffer is realized, it has a DeviceBuffer
-  # we will come back to DeviceBuffers later, first we'll explore the LazyOp
-  realized: Optional[DeviceBuffer]
 
 # LazyOp (in tinygrad/ops.py, code 4/10)
 # in a tree they form an Abstract Syntax Tree for a single GPU kernel
