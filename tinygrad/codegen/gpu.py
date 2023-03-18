@@ -87,8 +87,8 @@ class GPUCodegen(ASTKernel):
         v = self.group_float4([to_store[o+j] for j in range(4)])
       if self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image'):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
-        idx, idy = to_image_idx(self.bufs[buf_index].dtype.arg, idxy, valid)
-        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index].dtype.arg} */\n")
+        idx, idy = to_image_idx(self.bufs[buf_index].dtype.shape, idxy, valid)
+        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index].dtype.shape} */\n")
       elif v.typ == Types.FLOAT4:
         self.kernel.append(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
@@ -104,6 +104,12 @@ class GPUCodegen(ASTKernel):
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
 
+    def check_no_mul(test, var):
+      if test == var: return True
+      if isinstance(test, SumNode): return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
+      if isinstance(test, ModNode) and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
+      return False
+
     is_image = self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image')
     should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or self.bufs[buf_index].dtype.name.startswith('image'))
     tokens = []
@@ -115,16 +121,15 @@ class GPUCodegen(ASTKernel):
         if should_upcast:
           float4_index = Variable("FLOAT4_INDEX", 0, 3)
           idxy_test, valid_test = self.sts[buf_index].expr_idxs(float4_index+o) if idx_override is None else self.sts[buf_index].expr_node(idx_override, float4_index+o)
-          idxy_check = idxy_test.a if isinstance(idxy_test, ModNode) and idxy_test.b%4 == 0 else idxy_test  # removing a mod is okay
-          can_merge = idxy_check == float4_index or (isinstance(idxy_check, SumNode) and any(x == float4_index for x in idxy_check.nodes))   # float4_index must be in there without a multiply
+          can_merge = check_no_mul(idxy_test, float4_index)
           # NOTE: valid_test.render() can contain a FLOAT4_INDEX that can't affect the result: example <(((idx0<0,511>*4)+FLOAT4_INDEX<0,3>)<1024)>
           can_merge = can_merge and "FLOAT4_INDEX" not in (idxy_test//4).render() and ("FLOAT4_INDEX" not in valid_test.render() or True)  # float4_index must not be in after divide or in valid (TODO: don't check render)
         if const is not None:
           ldr = const
         elif self.bufs[buf_index] is not None and is_image:
           assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]} should_upcast:{should_upcast} can_merge:{can_merge}"
-          idx, idy = to_image_idx(self.bufs[buf_index].dtype.arg, idxy, valid, VALIDHACKS)
-          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index].dtype.arg} */", Types.FLOAT4)
+          idx, idy = to_image_idx(self.bufs[buf_index].dtype.shape, idxy, valid, VALIDHACKS)
+          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index].dtype.shape} */", Types.FLOAT4)
           test_idy.append(idy.render(render_cl))
         elif should_upcast and can_merge:
           ldr = Token(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
@@ -200,7 +205,7 @@ class GPUCodegen(ASTKernel):
 
     # use more opencl indexing if the output buffer is an image and we have room
     if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0].dtype.arg
+      base_shape = self.bufs[0].dtype.shape
       if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
         if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)

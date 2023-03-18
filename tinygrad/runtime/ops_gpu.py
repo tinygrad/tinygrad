@@ -3,7 +3,7 @@ import platform
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
@@ -24,10 +24,10 @@ CL = _CL()
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
-    if dtype.name.startswith("image"):
+    if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
-      buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.arg[1], dtype.arg[0]))
-      assert size == prod(dtype.arg), f"image size mismatch {size} != {dtype.arg}"
+      buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
+      assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
     else:
       buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size * dtype.itemsize)

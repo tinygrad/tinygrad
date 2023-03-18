@@ -472,7 +472,3 @@ from tinygrad.nn.image import image_conv2d, image_dot
 if IMAGE:
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
-  # reduces must be hooked to remove image type, since it changes shape
-  def remove_image(x): return x.cast(x.dtype.type_on_cpu) if x.dtype.name.startswith('image') else x
-  setattr(Tensor, "sum", lambda self,axis=None,keepdim=False: remove_image(self)._reduce(mlops.Sum, axis, keepdim))
-  setattr(Tensor, "max", lambda self,axis=None,keepdim=False: remove_image(self)._reduce(mlops.Max, axis, keepdim))

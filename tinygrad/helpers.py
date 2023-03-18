@@ -28,9 +28,17 @@ class DType(NamedTuple):
   itemsize: int
   name: str
   np: type  # TODO: someday this will be removed with the "remove numpy" project
-  type_on_cpu: Optional[DType] = None
-  arg: Optional[Any] = None  # arbitrary arg for the dtype, used in image for the shape
-  def __repr__(self): return f"dtypes.{self.name}" + (f"({self.arg})" if self.arg is not None else "")
+  def __repr__(self): return f"dtypes.{self.name}"
+
+# dependent typing?
+class ImageDType(DType):
+  def __new__(cls, priority, itemsize, name, np, type_on_cpu, shape):
+    return super().__new__(cls, priority, itemsize, name, np)
+  def __init__(self, priority, itemsize, name, np, type_on_cpu, shape):
+    self.type_on_cpu: DType = type_on_cpu
+    self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
+    super().__init__()
+  def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
 class LazyNumpyArray:
   def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype

@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import prod, IMAGE, DType, getenv, dtypes
+from tinygrad.helpers import prod, IMAGE, ImageDType, getenv, dtypes
 from tinygrad.lazy import get_single_root
 
 FLOAT16 = getenv("FLOAT16", 0)
@@ -53,7 +53,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1).reshape(cout//4, H*cin//4*W*4, 4)
 
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
-  if IMAGE >= 2: x,w = x.cast(DType(*base_image_type, arg=x.shape)), w.cast(DType(*base_image_type, arg=w.shape))
+  if IMAGE >= 2: x,w = x.cast(ImageDType(*base_image_type, shape=x.shape)), w.cast(ImageDType(*base_image_type, shape=w.shape))
   x, w = x.contiguous(), w.contiguous()
   if get_single_root(w.lazydata).realized: w.realize()
 
@@ -83,8 +83,8 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
   # reshape to image and cast back to image
   ret = ret.reshape(bs*oy, ox*cout//4, 4)
-  ret = ret.cast(DType(*base_image_type, arg=ret.shape))
-  if IMAGE >= 3: ret = ret.cast(DType(*base_image_type, arg=ret.shape)).contiguous()
+  if IMAGE >= 2: ret = ret.cast(ImageDType(*base_image_type, shape=ret.shape))
+  if IMAGE >= 3: ret = ret.contiguous()
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:

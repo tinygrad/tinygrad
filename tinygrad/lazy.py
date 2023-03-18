@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, ClassVar, cast
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten
+from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
 from tinygrad.runtime.lib import RawConst, RawBuffer
@@ -127,6 +127,13 @@ class LazyBuffer:
       # run the ast if we still have to, and log the op
       if self.realized is None:
         for x in get_buffers(self.op): x.realize(self.device)
+
+        # HACK: image shape can be wrong, hot cast it back to a normal float
+        if self.optype != MovementOps and isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or self.shape[self.st.strides.index(1)]%4 != 0):
+          if self.op.op == MovementOps.RESHAPE: self.op = LazyOp(MovementOps.RESHAPE, LazyOp(UnaryOps.CAST, (self.op.src[0],), self.dtype.type_on_cpu), self.op.arg)
+          else: self.op = LazyOp(UnaryOps.CAST, (self.op,), self.dtype.type_on_cpu)
+          self.dtype = self.dtype.type_on_cpu
+
         self.realized = Device[self.device].exec_ast(self.op, output=self)
 
       # log to the graph
@@ -137,7 +144,9 @@ class LazyBuffer:
       del self.op
 
     assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
-    assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
+    # HACK: allow hot casting of images
+    assert self.realized.dtype == self.dtype or self.dtype.name.startswith("image"), f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
+    self.dtype = self.realized.dtype
     return self
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
@@ -147,7 +156,7 @@ class LazyBuffer:
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
-    realized = (self.cast(self.dtype.type_on_cpu) if self.dtype.type_on_cpu is not None else self).contiguous().realize().realized
+    realized = (self.cast(self.dtype.type_on_cpu) if isinstance(self.dtype, ImageDType) else self).contiguous().realize().realized
     ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
     return ret.copy()
 
