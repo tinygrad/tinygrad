@@ -180,6 +180,9 @@ class TestSymbolic(unittest.TestCase):
   def test_div_numerator_negative(self):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
+  def test_div_into_mod(self):
+    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
+
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
     # TODO: why are the negative tests broken? (even if we did support negative variables)

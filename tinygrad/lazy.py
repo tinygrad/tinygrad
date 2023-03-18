@@ -103,7 +103,6 @@ class LazyBuffer:
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'} st:{self.st}>"
 
-  # this produces a device buffer
   def realize(self:LazyBuffer, required_device=None) -> LazyBuffer:
     assert required_device is None or required_device == self.device
     if self.realized is None:
@@ -120,9 +119,8 @@ class LazyBuffer:
           self.op = LazyOp(UnaryOps.NOOP, self.op.src)
       elif self.op.op == LoadOps.CUSTOM:
         # this needs to immediately realize
-        for x in self.op.src: x.realize(self.device)
-        self.realized = self.op.arg(self, *self.op.src)
-      # these can be folded and change the op
+        self.realized = self.op.arg(self, *[x.realize(self.device) for x in self.op.src])
+      # these can be late folded and change the op to go further back in the graph
       elif self.optype == ReduceOps: self.op = _ast_reduceops(self)
       elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
 
@@ -138,10 +136,6 @@ class LazyBuffer:
       # no need to keep the op after realization
       del self.op
 
-    #if isinstance(self.realized, InterpretedBuffer):
-    #  assert self.realized.shape == self.shape, f"shape mismatch on realize got {self.realized.shape} expected {self.shape}"
-    #  assert isinstance(self.realized, Device[self.device]), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
-    #else:
     assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
     assert self.realized.dtype == self.dtype, f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
     return self
@@ -160,7 +154,9 @@ class LazyBuffer:
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg)
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
-  def contiguous(self:LazyBuffer) -> LazyBuffer: return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)), self.dtype)
+  def contiguous(self:LazyBuffer) -> LazyBuffer:
+    if self.realized is None and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
+    return LazyBuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)), self.dtype)
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self

@@ -79,12 +79,17 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W)).expand(x.shape)
 
   # cast to float where we do the math
-  # NOTE: you can't do ReduceOps on image types
+  # NOTE: you can't do ReduceOps on image types because the shapes are wrong
   x, w = x.cast(dtypes.float32), w.cast(dtypes.float32)
 
-  # the conv!
-  ret = (x*w).sum((-4, -3, -2, -1)).reshape(bs*oy, ox*cout//4, 4)
-  if IMAGE >= 3: ret = ret.cast(DType(*base_image_type, arg=ret.shape)).contiguous()
+  # the conv! (+ the bias)
+  ret = (x*w).sum((-4, -3, -2, -1))
+  if bias is not None: ret = ret + bias.pad(((0, added_output_channels),)).reshape(1, 1, 1, *cout_expand)
+
+  # reshape to image and cast back to image
+  ret = ret.reshape(bs*oy, ox*cout//4, 4)
+  ret = ret.cast(DType(*base_image_type, arg=ret.shape))
+  if IMAGE >= 3: ret = ret.contiguous()
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:
@@ -93,5 +98,4 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
     cout = groups * rcout
 
   # NCHW output
-  ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
-  return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+  return ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)

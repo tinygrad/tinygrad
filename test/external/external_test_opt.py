@@ -226,6 +226,14 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
+  def test_fold_with_contiguous(self):
+    a = Tensor.randn(16, 16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      c = (a.sum(2).contiguous() + b).contiguous()
+      c.realize()
+      cache_len = len(GlobalCounters.cache)
+    assert cache_len == 1, "contiguous wasn't folded"
 
 if __name__ == '__main__':
   unittest.main()

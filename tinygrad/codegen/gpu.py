@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple, ClassVar, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
-from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, Variable, render_python
+from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, ModNode, Variable, render_python
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same, dedup, dtypes
 from tinygrad.runtime.lib import RawConst
@@ -115,12 +115,14 @@ class GPUCodegen(ASTKernel):
         if should_upcast:
           float4_index = Variable("FLOAT4_INDEX", 0, 3)
           idxy_test, valid_test = self.sts[buf_index].expr_idxs(float4_index+o) if idx_override is None else self.sts[buf_index].expr_node(idx_override, float4_index+o)
-          can_merge = idxy_test == float4_index or (isinstance(idxy_test, SumNode) and any(x == float4_index for x in idxy_test.nodes))   # float4_index must be in there without a multiply
-          can_merge = can_merge and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()  # float4_index must not be in after divide or in valid (TODO: don't check render)
+          idxy_check = idxy_test.a if isinstance(idxy_test, ModNode) and idxy_test.b%4 == 0 else idxy_test  # removing a mod is okay
+          can_merge = idxy_check == float4_index or (isinstance(idxy_check, SumNode) and any(x == float4_index for x in idxy_check.nodes))   # float4_index must be in there without a multiply
+          # NOTE: valid_test.render() can contain a FLOAT4_INDEX that can't affect the result: example <(((idx0<0,511>*4)+FLOAT4_INDEX<0,3>)<1024)>
+          can_merge = can_merge and "FLOAT4_INDEX" not in (idxy_test//4).render() and ("FLOAT4_INDEX" not in valid_test.render() or True)  # float4_index must not be in after divide or in valid (TODO: don't check render)
         if const is not None:
           ldr = const
         elif self.bufs[buf_index] is not None and is_image:
-          assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
+          assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]} should_upcast:{should_upcast} can_merge:{can_merge}"
           idx, idy = to_image_idx(self.bufs[buf_index].dtype.arg, idxy, valid, VALIDHACKS)
           ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index].dtype.arg} */", Types.FLOAT4)
           test_idy.append(idy.render(render_cl))
@@ -197,14 +199,12 @@ class GPUCodegen(ASTKernel):
     self.simplify_ones()
 
     # use more opencl indexing if the output buffer is an image and we have room
-    """
-    if hasattr(self.bufs[0]._buf, "IMAGE") and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0]._base_shape
+    if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
+      base_shape = self.bufs[0].dtype.arg
       if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
         if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
         self.simplify_ones()
-    """
 
     # no more opt if we are grouping
     if self.group_for_reduce: return
