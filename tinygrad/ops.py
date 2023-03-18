@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, operator, random
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Set, Callable
-from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters
+from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer
 
@@ -30,6 +30,49 @@ def get_lazyops(op:LazyOp) -> List[LazyOp]: return functools.reduce(operator.add
 def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
   if len(real_srcs) and x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
+
+# **************** for Interpreted Buffers ****************
+
+class Interpreted:
+  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf):
+    self.buffer = buffer
+    self.fxn_for_op = fxn_for_op
+    self.from_lazybuffer = from_lazybuffer
+    self.to_underlying = to_underlying
+
+  def exec_ast(self, ast:LazyOp, output=None, context=None):
+    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
+    created_context = context is None
+    if context is None: context = dict()
+    if not created_context and ast in context: return context[ast]
+    srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
+    ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
+    if DEBUG >= 4: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
+    if not created_context: context[ast] = ret
+    if output is not None and output.output_buffer is not None:
+      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+      output.output_buffer._buf = ret._buf
+      return output.output_buffer
+    else:
+      return ret
+
+class FlopCounter:
+  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops = tup
+  def consume_flops(self):
+    self.flops, ret = 0, self.flops
+    return ret
+from tinygrad.shape.shapetracker import ShapeTracker
+shape_fxn_for_op: Dict[Op, Callable] = {
+  UnaryOps.CAST: lambda self,dtype: (self.shape, dtype, self.consume_flops() + prod(self.shape)),
+  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
+  **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
+  **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
+  **{op:functools.partial(lambda mop,self,arg: (ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
+InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: FlopCounter((x.shape, x.dtype, 0)), lambda x: x)
+def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
+
+# **************** for Compiled Buffers ****************
 
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
@@ -72,50 +115,8 @@ class ASTRunner:
     local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
     return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
-class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf):
-    self.buffer = buffer
-    self.fxn_for_op = fxn_for_op
-    self.from_lazybuffer = from_lazybuffer
-    self.to_underlying = to_underlying
-
-  def exec_ast(self, ast:LazyOp, output=None, context=None):
-    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
-    created_context = context is None
-    if context is None: context = dict()
-    if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
-    ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
-    if DEBUG >= 4: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
-    if not created_context: context[ast] = ret
-    if output is not None and output.output_buffer is not None:
-      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
-      output.output_buffer._buf = ret._buf
-      return output.output_buffer
-    else:
-      return ret
-
-class FlopCounter:
-  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops = tup
-  def consume_flops(self):
-    self.flops, ret = 0, self.flops
-    return ret
-from tinygrad.shape.shapetracker import ShapeTracker
-shape_fxn_for_op: Dict[Op, Callable] = {
-  UnaryOps.CAST: lambda self,dtype: (self.shape, dtype, self.consume_flops() + prod(self.shape)),
-  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
-  **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
-  **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
-  **{op:functools.partial(lambda mop,self,arg: (ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
-InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: FlopCounter((x.shape, x.dtype, 0)), lambda x: x)
-def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
-
-from tinygrad.codegen.ast import ASTKernel
-from tinygrad.helpers import DType
-
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen: Type[ASTKernel], runtime):
+  def __init__(self, buffer: Type[RawBuffer], codegen, runtime):
     self.buffer, self.codegen, self.runtime = buffer, codegen, runtime
     self.method_cache: Dict[str, ASTRunner] = {}
 
