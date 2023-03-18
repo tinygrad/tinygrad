@@ -243,6 +243,7 @@ if __name__ == "__main__":
       if w0.shape == mv.shape:
         mv.assign(w0)
         mv.realize()
+        w1.lazydata.realized._buf = None
         continue
 
       if w0.shape[0] != mv.shape[0]: mv.assign(w0.cat(w1, dim=0))
@@ -251,8 +252,8 @@ if __name__ == "__main__":
       mv.realize()
 
       # rug the small tensor pieces
-      w0._buf = None
-      w1._buf = None
+      w0.lazydata.realized._buf = None
+      w1.lazydata.realized._buf = None
 
     del weights0
     del weights1
