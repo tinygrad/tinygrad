@@ -3,7 +3,7 @@
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 
-import os
+from pathlib import Path
 import sys, argparse, math, platform
 import numpy as np
 from tqdm import tqdm
@@ -165,18 +165,19 @@ class Transformer:
 
 # **** files and arguments ****
 
-TOKENIZER_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/tokenizer.model")
+WEIGHTS_DIR = Path(__file__).parent.parent / "weights/LLaMA/"
+TOKENIZER_FILENAME = WEIGHTS_DIR / "tokenizer.model"
 VOCAB_SIZE = 32000
 
 args_small = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": VOCAB_SIZE}
 
 args_7B = {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/7B/consolidated.00.pth")
+WEIGHTS_7B_FILENAME = WEIGHTS_DIR / "7B/consolidated.00.pth"
 
 # TODO: make this model work
 args_13B = {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": VOCAB_SIZE}
-WEIGHTS0_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.00.pth")
-WEIGHTS1_FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/LLaMA/13B/consolidated.01.pth")
+WEIGHTS_13B_0_FILENAME = WEIGHTS_DIR / "13B/consolidated.00.pth"
+WEIGHTS_13B_1_FILENAME = WEIGHTS_DIR / "13B/consolidated.01.pth"
 
 # **** helper functions ****
 
@@ -199,10 +200,9 @@ def sample(logits, temperature):
 
 if __name__ == "__main__":
   Tensor.no_grad = True
-
   print(f"using {Device.DEFAULT} backend")
   from sentencepiece import SentencePieceProcessor
-  sp_model = SentencePieceProcessor(model_file=TOKENIZER_FILENAME)
+  sp_model = SentencePieceProcessor(model_file=str(TOKENIZER_FILENAME))
   assert sp_model.vocab_size() == VOCAB_SIZE
 
   parser = argparse.ArgumentParser(description='Run LLaMA 7B in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -225,8 +225,8 @@ if __name__ == "__main__":
   if args.large:
     model = Transformer(**args_13B)
     with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
-      weights0 = fake_torch_load_zipped(open(WEIGHTS0_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
-      weights1 = fake_torch_load_zipped(open(WEIGHTS1_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+      weights0 = fake_torch_load_zipped(open(WEIGHTS_13B_0_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
+      weights1 = fake_torch_load_zipped(open(WEIGHTS_13B_1_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
     # eww, this makes a copy
     print("concatenating weights")
     from tqdm import tqdm
@@ -259,10 +259,7 @@ if __name__ == "__main__":
   else:
     model = Transformer(**args_7B)
     with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
-      weights = fake_torch_load_zipped(open(WEIGHTS_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
-
-    #from tinygrad.nn.optim import get_state_dict
-    #state_dict = get_state_dict(model)
+      weights = fake_torch_load_zipped(open(WEIGHTS_7B_FILENAME, "rb"), load_weights=getenv("WEIGHTS", 1))
 
     # assign weights (should be free)
     for k,v in weights.items():

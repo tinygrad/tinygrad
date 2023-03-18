@@ -1,7 +1,7 @@
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 
-import os
+from pathlib import Path
 import gzip
 import argparse
 import math
@@ -466,7 +466,7 @@ class CLIPTextTransformer:
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
 @lru_cache()
 def default_bpe():
-  return os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/bpe_simple_vocab_16e6.txt.gz")
+  return Path(__file__).parent.parent / "weights/bpe_simple_vocab_16e6.txt.gz"
 
 def get_pairs(word):
   """Return set of symbol pairs in a word.
@@ -600,7 +600,7 @@ class StableDiffusion:
 # this is sd-v1-4.ckpt
 #FILENAME = "/Users/kafka/fun/mps/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
 #FILENAME = "/home/kafka/model.ckpt"
-FILENAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/sd-v1-4.ckpt")
+FILENAME = Path(__file__).parent.parent / "weights/sd-v1-4.ckpt"
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
