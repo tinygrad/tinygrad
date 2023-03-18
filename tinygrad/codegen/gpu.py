@@ -352,7 +352,7 @@ class GPUCodegen(ASTKernel):
       if GPUCodegen.kernel_cnt[function_name] > 1: function_name = f"{function_name}{'n'+str(GPUCodegen.kernel_cnt[function_name]-1)}"
       GPUCodegen.kernel_name_cache[prg] = function_name
 
-    return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
+    return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
       list(self.output_shape[::-1]) if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
       op_estimate=self.info.flops,

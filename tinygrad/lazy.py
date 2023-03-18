@@ -108,7 +108,10 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
+        if prod(self.op.arg.shape) == 1:  # constant folding
+          self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
+        else:
+          self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device).realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):

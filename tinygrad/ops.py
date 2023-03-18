@@ -1,10 +1,10 @@
 from __future__ import annotations
 import functools, itertools, operator, random
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Set, Callable
+from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable
 from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType
 from tinygrad.shape.shapetracker import MovementOps
-from tinygrad.runtime.lib import RawBuffer
+from tinygrad.runtime.lib import RawBuffer, RawConst
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -75,22 +75,16 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
-  def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
+  def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_size, local_size, bufs_to_delete if bufs_to_delete else set(), op_estimate, mem_estimate
+    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate = name, prg, global_size, local_size, op_estimate, mem_estimate
 
   def build(self, runtime):
     self.clprg = runtime(self.name, self.prg)
     return self
 
-  def exec(self, bufs) -> Optional[float]:
-    rawbufs = [x.realized for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
-    assert all(x is not None for x in rawbufs), "some rawbufs are None, you probably didn't realize them"
-    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
-    return self(rawbufs)
-
   def __call__(self, rawbufs:List[RawBuffer]) -> Optional[float]:
+    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
       print(f"*** {GlobalCounters.kernel_count:4d} {self.name:20s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
@@ -152,5 +146,7 @@ class Compiled:
     if output.realized is None:
       output.realized = self.buffer(prod(output.shape), output.dtype)
 
-    prg.exec(k.bufs)
+    rawbufs = [x.realized for x in k.bufs if x is not None and not isinstance(x.realized, RawConst)]
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, rawbufs))
+    prg(rawbufs)
     return output.realized
