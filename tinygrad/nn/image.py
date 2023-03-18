@@ -1,5 +1,9 @@
-from tinygrad.helpers import prod, IMAGE
+import numpy as np
+from tinygrad.helpers import prod, IMAGE, ImageDType, getenv, dtypes
 from tinygrad.lazy import get_single_root
+
+FLOAT16 = getenv("FLOAT16", 0)
+base_image_type = (100, 2, "image_half", np.float16) if FLOAT16 else (100, 4, "image_float", np.float32)
 
 def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
@@ -49,6 +53,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1).reshape(cout//4, H*cin//4*W*4, 4)
 
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
+  if IMAGE >= 2: x,w = x.cast(ImageDType(*base_image_type, shape=x.shape)), w.cast(ImageDType(*base_image_type, shape=w.shape))
   x, w = x.contiguous(), w.contiguous()
   if get_single_root(w.lazydata).realized: w.realize()
 
@@ -71,10 +76,14 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
   # prepare weights
   w = w.permute(0,4,2,5,1,3)
-  w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W))
+  w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W)).expand(x.shape)
 
-  # the conv!
-  ret = (x*w).sum((-4, -3, -2, -1)).reshape(bs*oy, ox*cout//4, 4)
+  # the conv! (+ the bias)
+  ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1))
+
+  # reshape to image and cast back to image
+  ret = ret.reshape(bs*oy, ox*cout//4, 4)
+  if IMAGE >= 2: ret = ret.cast(ImageDType(*base_image_type, shape=ret.shape))
   if IMAGE >= 3: ret = ret.contiguous()
 
   # undo hack for non multiples of 4 on C.rcout

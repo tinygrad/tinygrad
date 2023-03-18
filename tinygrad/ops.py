@@ -1,15 +1,14 @@
 from __future__ import annotations
 import functools, itertools, operator, random
-import numpy as np
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, ClassVar, Optional, Dict, Set, Final
-from tinygrad.helpers import prod, DEBUG, getenv, DType, dtypes, GlobalCounters
-from tinygrad.shape.shapetracker import ShapeTracker, MovementOps
+from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Set, Callable
+from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters
+from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
-class UnaryOps(Enum): NOOP = auto(); EXP = auto(); LOG = auto(); NEG = auto(); NOT = auto() # noqa: E702
+class UnaryOps(Enum): NOOP = auto(); EXP = auto(); LOG = auto(); NEG = auto(); NOT = auto(); CAST = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class FusedOps(Enum): MULACC = auto() # noqa: E702
@@ -32,15 +31,6 @@ def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
   if len(real_srcs) and x in real_srcs: return map_buffers(real_srcs, real_srcs[x]) if isinstance(real_srcs[x], LazyOp) else real_srcs[x]
   return LazyOp(x.op, tuple((map_buffers(real_srcs, y) if isinstance(y, LazyOp) else real_srcs[y]) for y in x.src), x.arg)
 
-# a placeholder class to extend by the exec classes
-class DeviceBuffer:
-  _buf: Any                # underlying buffer
-  shape: Tuple[int, ...]
-  dtype: DType
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer=None): raise NotImplementedError("must be implemented")
-  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
-
 class ASTRunner:
   def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
@@ -50,8 +40,9 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg)
     return self
 
-  def exec(self, bufs:List[Optional[CompiledBuffer]]) -> Optional[float]:
-    rawbufs = [x.raw() for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
+  def exec(self, bufs) -> Optional[float]:
+    rawbufs = [x.realized for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
+    assert all(x is not None for x in rawbufs), "some rawbufs are None, you probably didn't realize them"
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
@@ -81,66 +72,84 @@ class ASTRunner:
     local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
     return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
-from tinygrad.codegen.ast import ASTKernel
-class Specialized(NamedTuple):
-  raw_buffer: Type[RawBuffer]
-  codegen: Type[ASTKernel]
-  runtime: Type
+class Interpreted:
+  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_lazybuffer=lambda x: x.realized, to_underlying=lambda x: x._buf):
+    self.buffer = buffer
+    self.fxn_for_op = fxn_for_op
+    self.from_lazybuffer = from_lazybuffer
+    self.to_underlying = to_underlying
 
-# assumes you are using ShapeTracker
-# used in GPUBuffer and LLVMBuffer
-class CompiledBuffer(DeviceBuffer):  # pylint: disable=abstract-method
-  spec: ClassVar[Specialized]
-
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], hostbuf:Optional[CompiledBuffer]=None, backing:Optional[np.ndarray]=None, force_create=False, dtype:DType=dtypes.float32):
-    self.st: ShapeTracker = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
-    self.shape: Tuple[int, ...] = self.st.shape
-    self.dtype: DType = dtype
-    assert hostbuf is None or hostbuf.dtype == dtype, f"hostbuf dtype {hostbuf.dtype} != {dtype}"
-    self._base_shape: Tuple[int, ...] = hostbuf._base_shape if hostbuf is not None else self.shape
-    self._buf = hostbuf._buf if hostbuf is not None else None
-    self._backing: Optional[np.ndarray] = hostbuf._backing if hostbuf is not None else backing
-    assert self._backing is None or dtypes.from_np(self._backing) == dtype, f"backing dtype {dtypes.from_np(self._backing)} != {dtype}"
-    if (self._backing is not None and self._backing.shape != (1,)) or force_create: self.raw()
-
-  def __repr__(self): return f"{type(self).__name__}(shape={self.st}, hostbuf={type(self).__name__}(shape={self._base_shape}" + (f", backing=np.array({self._backing}, dtype=np.{self.dtype.np.__name__}), dtype={self.dtype}), dtype={self.dtype})" if self._backing is not None else f", force_create=True, dtype={self.dtype}), dtype={self.dtype})")
-
-  def create_raw_buffer(self, shape:Tuple[int, ...], backing:Optional[np.ndarray], dtype:DType) -> RawBuffer:
-    assert backing is None or prod(shape) == prod(backing.shape), "backing has the wrong shape"
-    assert backing is None or GlobalCounters.cache is None, f"can't copy in {backing.shape} while caching"
-    if DEBUG >= 4: print(f"create raw buffer {shape} {dtype} backed:{backing is not None}")
-    return self.spec.raw_buffer(prod(shape), dtype) if backing is None else self.spec.raw_buffer.fromCPU(backing)
-
-  def raw(self) -> RawBuffer:
-    if self._buf is None:
-      if DEBUG >= 4 and self._backing is not None: print(f"**** copy in {self._backing.shape} to {type(self)}")
-      self._buf = self.create_raw_buffer(self._base_shape, self._backing, self.dtype)
-      self._backing = None
-    return self._buf
-
-  def toCPU(self) -> np.ndarray:
-    assert GlobalCounters.cache is None, f"can't copy out {self} while caching"
-    if DEBUG >= 3: print(f"**** copy out {self.shape}")
-    return self.contiguous().raw().toCPU().reshape(self.shape)
-
-  method_cache: Final[Dict[str, ASTRunner]] = {}
-  @classmethod
-  def exec_ast(cls, ast:LazyOp, output_buffer:Optional[CompiledBuffer]=None):
-    if ast.op == LoadOps.FROMCPU: return cls(ast.arg.shape, backing=ast.arg.ravel(), dtype=dtypes.from_np(ast.arg))
-    k = cls.spec.codegen(ast, output_buffer)
-    if getenv("ENABLE_METHOD_CACHE", 1):  # this is the default now
-      if k.key not in cls.method_cache: cls.method_cache[k.key] = k.codegen().build(cls.spec.runtime)
-      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
-      prg = cls.method_cache[k.key]
+  def exec_ast(self, ast:LazyOp, output=None, context=None):
+    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
+    created_context = context is None
+    if context is None: context = dict()
+    if not created_context and ast in context: return context[ast]
+    srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
+    ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
+    if DEBUG >= 4: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
+    if not created_context: context[ast] = ret
+    if output is not None and output.output_buffer is not None:
+      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+      output.output_buffer._buf = ret._buf
+      return output.output_buffer
     else:
-      prg = k.codegen().build(cls.spec.runtime)
+      return ret
+
+class FlopCounter:
+  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops = tup
+  def consume_flops(self):
+    self.flops, ret = 0, self.flops
+    return ret
+from tinygrad.shape.shapetracker import ShapeTracker
+shape_fxn_for_op: Dict[Op, Callable] = {
+  UnaryOps.CAST: lambda self,dtype: (self.shape, dtype, self.consume_flops() + prod(self.shape)),
+  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
+  **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
+  **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
+  **{op:functools.partial(lambda mop,self,arg: (ShapeTracker(self.shape).movement_op(mop, arg).shape, self.dtype, self.consume_flops()), op) for op in MovementOps}}
+InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: FlopCounter((x.shape, x.dtype, 0)), lambda x: x)
+def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
+
+from tinygrad.codegen.ast import ASTKernel
+from tinygrad.helpers import DType
+
+class Compiled:
+  def __init__(self, buffer: Type[RawBuffer], codegen: Type[ASTKernel], runtime):
+    self.buffer, self.codegen, self.runtime = buffer, codegen, runtime
+    self.method_cache: Dict[str, ASTRunner] = {}
+
+  def exec_ast(self, ast:LazyOp, output):
+    # all movementops do nothing in a Compiled buffer!
+    if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
+
+    k = self.codegen(ast, output)
+
+    # this is the default now
+    if getenv("ENABLE_METHOD_CACHE", 1):
+      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
+      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
+      prg = self.method_cache[k.key]
+    else:
+      prg = k.codegen().build(self.runtime)
+
     if getenv("PRINT_AST", "") == prg.name or getenv("PRINT_AST", "") == "1":
       k.print()
       print(prg.prg)
+
+    # check if we can reuse the output buffer
+    # if it's aliased, don't use it
+    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+    output.realized = output.output_buffer
+    if output.realized is not None:
+      for a in get_buffers(ast):
+        if a.realized == output.realized and not a.st.contiguous:
+          output.realized = None
+          break
+
+    # we don't have an output buffer, we have to create it
+    if output.realized is None:
+      output.realized = self.buffer(prod(output.shape), output.dtype)
+
     prg.exec(k.bufs)
-    return k.ret
-
-  # universal for shape tracked
-  def contiguous(self): return self if self.st.contiguous and prod(self._base_shape) == prod(self.shape) else type(self).exec_ast(LazyOp(op=UnaryOps.NOOP, src=(self,)))
-  def movement_op(self, op:MovementOps, arg): return type(self)(ShapeTracker(self.st).movement_op(op, arg), hostbuf=self, dtype=self.dtype)
-
+    return output.realized

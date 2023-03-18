@@ -79,7 +79,7 @@ jobs:
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
   testllvm:
-    name: LLVM Tests
+    name: LLVM Tests (w method cache)
     runs-on: ubuntu-latest
 
     steps:
@@ -160,7 +160,9 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test GPU IMAGE ops
-      run: GPU=1 IMAGE=2 python3 test/test_ops.py
+      run: |
+        GPU=1 IMAGE=1 python3 test/test_ops.py
+        FORWARD_ONLY=1 GPU=1 IMAGE=2 python3 test/test_ops.py
     - name: Test openpilot model
       run: |
         ALLOWED_KERNEL_COUNT=197 FLOAT16=1 VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py

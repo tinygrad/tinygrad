@@ -2,9 +2,8 @@ import itertools
 from enum import Enum, auto
 from typing import List, Tuple
 from tinygrad.helpers import prod, dedup, all_same, colored, DType
-from tinygrad.ops import LazyOp, MovementOps, get_buffers, ReduceOps, get_lazyops, map_buffers, ASTRunner
+from tinygrad.ops import LazyOp, MovementOps, get_buffers, ReduceOps, get_lazyops, map_buffers, ASTRunner, get_lazyop_info, FlopCounter
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
-from tinygrad.interpreted import get_lazyop_info, GenericShape
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -35,31 +34,14 @@ class ASTKernel:
   def __init__(self, ast:LazyOp, output_buffer=None):
     self.input_ast = ast
 
-    # if the AST ends with a RESHAPE, we remove it and create the buffer accordingly
-    if ast.op == MovementOps.RESHAPE:
-      output_shape = ast.arg
-      ast = ast.src[0]
-    else:
-      output_shape = None
+    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
+    if ast.op == MovementOps.RESHAPE: ast = ast.src[0]
 
-    self.bufs = dedup(get_buffers(ast))
+    self.bufs = [output_buffer] + dedup(get_buffers(ast))
     self.ast = ast
 
-    # check if the output buffer is allowed to be used
-    # if it's aliased, don't use it
-    if output_buffer is not None:
-      for a in self.bufs:
-        if a._buf == output_buffer._buf and not a.st.contiguous:
-          output_buffer = None
-          break
-
     # fetch lazyop info (this can be cached!)
-    self.info: GenericShape = get_lazyop_info(ast)
-
-    # create the buffer we are returning (as the same type as the input buffers) and add it as the first buffer
-    self.ret = output_buffer if output_buffer else type(self.bufs[0])(output_shape if output_shape else self.info.shape, force_create=True, dtype=self.info.dtype)
-    assert self.ret.dtype == self.info.dtype, f"return dtype {self.ret.dtype} != {self.info.dtype}"
-    self.bufs = ([type(self.ret)(self.info.shape, hostbuf=self.ret, dtype=self.info.dtype)] if output_shape else [self.ret]) + self.bufs
+    self.info: FlopCounter = get_lazyop_info(ast)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -79,8 +61,8 @@ class ASTKernel:
 
     # check valid AST kernel
     assert all_same([x.shape for x in self.earlybufs]), "all earlybufs must have the same shape"
-    assert all_same([x.shape for x in self.bufs if x not in self.earlybufs]), "all latebufs must have the same shape"
-    assert all_same([len(x.shape) for x in self.bufs]), "all bufs must have the same shape size"
+    assert all_same([x.shape for x in self.bufs[1:] if x not in self.earlybufs]), "all latebufs must have the same shape"
+    assert all_same([len(x.shape) for x in self.bufs[1:]]), "all bufs must have the same shape size"
 
     # get full shape buf index (earlybufs if there are any, otherwise output)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
@@ -88,6 +70,10 @@ class ASTKernel:
     # process
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]   # create new shapetrackers inside this kernel
     for st in self.sts: st.simplify()
+
+    # make the output buffer shape correct in here
+    if self.reduceop is not None: self.sts[0].reshape(self.reduceop.arg)
+    else: self.sts[0].reshape([x.shape for x in self.bufs[1:] if x not in self.earlybufs][0])
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
@@ -125,7 +111,7 @@ class ASTKernel:
     if print_shapetrackers:
       for st in self.sts: print(st)
     for i in range(len(self.sts)):
-      print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), type(self.bufs[i]._buf) if self.bufs[i] is not None else "FAKE")
+      print(prefix, self.bufs[i].dtype if self.bufs[i] is not None else None, self.buftokens[i], f"early:{'T' if i < len(self.bufs) and self.bufs[i] in self.earlybufs else 'F'}", self.sts[i].shape, self.sts[i].views[-1].strides, len(self.sts[i].views), self.bufs[i].realized if self.bufs[i] is not None else "FAKE")
 
   def codegen(self) -> ASTRunner: raise NotImplementedError("need a codegen")
 

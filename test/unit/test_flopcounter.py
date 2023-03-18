@@ -1,37 +1,38 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.ops import LazyOp, BinaryOps
-from tinygrad.interpreted import get_lazyop_info, InterpretedBuffer, GenericShape
+from typing import NamedTuple, Tuple
+from tinygrad.ops import LazyOp, BinaryOps, get_lazyop_info
+from tinygrad.helpers import DType, dtypes
+
+class TestBuffer(NamedTuple):
+  shape: Tuple[int, ...]
+  dtype: DType
 
 class TestFlopCounter(unittest.TestCase):
+  def setUp(self):
+    self.buf0 = TestBuffer(shape=(4,), dtype=dtypes.float32)
+    self.buf1 = TestBuffer(shape=(4,), dtype=dtypes.float32)
+
   def test_flops_add(self):
-    buf0 = InterpretedBuffer(GenericShape((4,)))
-    buf1 = InterpretedBuffer(GenericShape((4,)))
-    op0 = LazyOp(BinaryOps.ADD, (buf0,buf1,), None)
+    op0 = LazyOp(BinaryOps.ADD, (self.buf0,self.buf1,), None)
     info = get_lazyop_info(op0)
     self.assertEqual(info.flops, 4)
 
   def test_flops_add_twice(self):
-    buf0 = InterpretedBuffer(GenericShape((4,)))
-    buf1 = InterpretedBuffer(GenericShape((4,)))
-    op0 = LazyOp(BinaryOps.ADD, (buf0,buf1,), None)
-    op1 = LazyOp(BinaryOps.ADD, (op0,buf1,), None)
+    op0 = LazyOp(BinaryOps.ADD, (self.buf0,self.buf1,), None)
+    op1 = LazyOp(BinaryOps.ADD, (op0,self.buf1,), None)
     info = get_lazyop_info(op1)
     self.assertEqual(info.flops, 8)
 
   def test_flops_add_self(self):
-    buf0 = InterpretedBuffer(GenericShape((4,)))
-    buf1 = InterpretedBuffer(GenericShape((4,)))
-    op0 = LazyOp(BinaryOps.ADD, (buf0,buf1,), None)
+    op0 = LazyOp(BinaryOps.ADD, (self.buf0,self.buf1,), None)
     op1 = LazyOp(BinaryOps.ADD, (op0,op0,), None)
     info = get_lazyop_info(op1)
     self.assertEqual(info.flops, 8)
 
   def test_flops_add_roundabout_self(self):
-    buf0 = InterpretedBuffer(GenericShape((4,)))
-    buf1 = InterpretedBuffer(GenericShape((4,)))
-    op0 = LazyOp(BinaryOps.ADD, (buf0,buf1,), None)
-    op1 = LazyOp(BinaryOps.ADD, (op0,buf1,), None)
+    op0 = LazyOp(BinaryOps.ADD, (self.buf0,self.buf1,), None)
+    op1 = LazyOp(BinaryOps.ADD, (op0,self.buf1,), None)
     op2 = LazyOp(BinaryOps.ADD, (op0,op1,), None)
     info = get_lazyop_info(op2)
     self.assertEqual(info.flops, 12)

@@ -2,10 +2,10 @@ from __future__ import annotations
 import platform
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import Optional, List, Final
-from tinygrad.helpers import IMAGE, DEBUG, getenv, dtypes
-from tinygrad.ops import CompiledBuffer, GlobalCounters, Specialized
-from tinygrad.runtime.lib import RawBufferCopyInOut, RawBuffer
+from typing import Optional, List
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType
+from tinygrad.ops import Compiled
+from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 OSX = platform.system() == "Darwin"
@@ -21,13 +21,25 @@ class _CL:
     self.cl_queue: cl.CommandQueue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
 CL = _CL()
 
+# TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
-    super().__init__(size, dtype)
-    self._cl = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, self._memsz)
-  def _copyin(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, self._cl, x, is_blocking=False)
-  def _copyout(self, x:np.ndarray): cl.enqueue_copy(CL.cl_queue, x, self._cl, is_blocking=True)
+    if isinstance(dtype, ImageDType):
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
+      buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
+      assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
+      # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
+    else:
+      buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size * dtype.itemsize)
+    super().__init__(size, dtype, buf)
+  def _copyin(self, x:np.ndarray):
+    assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
+    cl.enqueue_copy(CL.cl_queue, self._buf, x, is_blocking=False)
+  def _copyout(self, x:np.ndarray):
+    assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
+    cl.enqueue_copy(CL.cl_queue, x, self._buf, is_blocking=True)
 
+"""
 class CLImage(RawBuffer):  # pylint: disable=abstract-method
   IMAGE: Final = True
   def __init__(self, shape, dtype=dtypes.float16 if getenv("FLOAT16") else dtypes.float32):  # pylint: disable=super-init-not-called
@@ -35,6 +47,7 @@ class CLImage(RawBuffer):  # pylint: disable=abstract-method
     self.size, self.dtype, self._cl = shape, dtype, cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(shape[1], shape[0]))
     GlobalCounters.mem_used += self._cl.row_pitch * self._cl.height
   def __del__(self): GlobalCounters.mem_used -= self._cl.row_pitch * self._cl.height
+"""
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None):
@@ -59,7 +72,7 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._cl if isinstance(x, (CLBuffer, CLImage)) else x for x in bufs])
+    e = self.clprg(CL.cl_queue, global_size, local_size, *[x._buf if isinstance(x, CLBuffer) else x for x in bufs])
     if wait:
       CL.cl_queue.finish()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
@@ -72,9 +85,13 @@ class CLCodegen(GPUCodegen):
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
 
+GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram)
+
+"""
 class GPUBuffer(CompiledBuffer):
   spec = Specialized(CLBuffer, CLCodegen, CLProgram)
   # override this method for image
   def create_raw_buffer(self, shape, backing, dtype) -> RawBuffer:
     if len(shape) == 3 and shape[2] == 4 and IMAGE >= 2 and backing is None: return CLImage(shape)   # NOTE: this is a hack. we don't pass in the dtype here, it's controlled by the FLOAT16 env var
     else: return super().create_raw_buffer(shape, backing, dtype)
+"""

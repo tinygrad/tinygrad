@@ -3,9 +3,10 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, Dict, Set, Final, NamedTuple, ClassVar, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LazyOp, Op, ASTRunner
 from tinygrad.codegen.ast import ASTKernel, Token, Types
-from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, Variable, render_python
+from tinygrad.shape.symbolic import Node, MulNode, DivNode, SumNode, AndNode, ModNode, Variable, render_python
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.helpers import getenv, DEBUG, prod, partition, mnum, all_same, dedup, dtypes
+from tinygrad.runtime.lib import RawConst
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -55,7 +56,7 @@ class GPUCodegen(ASTKernel):
   kernel_name_cache: Final[Dict[str, str]] = {}
 
   code_for_op: Final[Dict[Op, str]] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "(1.0f-A)",
+    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "(1.0f-A)", UnaryOps.CAST: "(A)",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
@@ -73,7 +74,7 @@ class GPUCodegen(ASTKernel):
     assert len(self.sts[buf_index].views) == 1, "store has more than one view"
 
     # all stores can merge, since they have one view and are valid
-    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
+    should_upcast = self.lang.float4 and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or self.bufs[buf_index].dtype.name.startswith('image'))
 
     to_store = {o:v for o,v in zip(self.buftokens[buf_index].offsets(), value)}
     did_store = set()
@@ -84,10 +85,10 @@ class GPUCodegen(ASTKernel):
       if should_upcast:
         for j in range(4): did_store.add(o+j)
         v = self.group_float4([to_store[o+j] for j in range(4)])
-      if self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
+      if self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image'):
         assert v.typ == Types.FLOAT4, "Image requires upcasting to FLOAT4"
-        idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid)
-        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index]._base_shape} */\n")
+        idx, idy = to_image_idx(self.bufs[buf_index].dtype.shape, idxy, valid)
+        self.kernel.append(f"write_imagef({self.buftokens[buf_index].tok}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {v.tok});  /* {self.bufs[buf_index].dtype.shape} */\n")
       elif v.typ == Types.FLOAT4:
         self.kernel.append(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}] = {v.tok};\n")
       else:
@@ -96,12 +97,21 @@ class GPUCodegen(ASTKernel):
   def load(self, buf_index:int, idx_override:Optional[str]=None) -> List[Token]:
     # constant folding
     const = None
-    if self.bufs[buf_index] is not None and self.bufs[buf_index]._base_shape == (1,) and self.bufs[buf_index]._backing is not None:
+    if self.bufs[buf_index] is not None and isinstance(self.bufs[buf_index].realized, RawConst):
+      # bufs_to_delete can be removed, just ignore RawConst at runtime
       if buf_index != 0: self.bufs_to_delete.add(buf_index)
-      val = self.bufs[buf_index]._backing[0]
+      val = self.bufs[buf_index].realized._buf
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
-    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or hasattr(self.bufs[buf_index]._buf, "IMAGE"))
+
+    def check_no_mul(test, var):
+      if test == var: return True
+      if isinstance(test, SumNode): return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
+      if isinstance(test, ModNode) and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
+      return False
+
+    is_image = self.bufs[buf_index] is not None and self.bufs[buf_index].dtype.name.startswith('image')
+    should_upcast = self.lang.float4 and const is None and self.buftokens[buf_index].can_float4() and (self.bufs[buf_index] is None or self.bufs[buf_index].dtype != dtypes.float16 or self.bufs[buf_index].dtype.name.startswith('image'))
     tokens = []
     test_idy = []
     for o in self.buftokens[buf_index].offsets():
@@ -111,21 +121,22 @@ class GPUCodegen(ASTKernel):
         if should_upcast:
           float4_index = Variable("FLOAT4_INDEX", 0, 3)
           idxy_test, valid_test = self.sts[buf_index].expr_idxs(float4_index+o) if idx_override is None else self.sts[buf_index].expr_node(idx_override, float4_index+o)
-          can_merge = idxy_test == float4_index or (isinstance(idxy_test, SumNode) and any(x == float4_index for x in idxy_test.nodes))   # float4_index must be in there without a multiply
-          can_merge = can_merge and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()  # float4_index must not be in after divide or in valid (TODO: don't check render)
+          can_merge = check_no_mul(idxy_test, float4_index)
+          # NOTE: valid_test.render() can contain a FLOAT4_INDEX that can't affect the result: example <(((idx0<0,511>*4)+FLOAT4_INDEX<0,3>)<1024)>
+          can_merge = can_merge and "FLOAT4_INDEX" not in (idxy_test//4).render() and ("FLOAT4_INDEX" not in valid_test.render() or True)  # float4_index must not be in after divide or in valid (TODO: don't check render)
         if const is not None:
           ldr = const
-        elif self.bufs[buf_index] is not None and hasattr(self.bufs[buf_index]._buf, "IMAGE"):
-          assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]}"
-          idx, idy = to_image_idx(self.bufs[buf_index]._base_shape, idxy, valid, VALIDHACKS)
-          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index]._base_shape} */", Types.FLOAT4)
+        elif self.bufs[buf_index] is not None and is_image:
+          assert should_upcast and can_merge, f"Image requires upcasting to FLOAT4 {self.buftokens[buf_index]} should_upcast:{should_upcast} can_merge:{can_merge}"
+          idx, idy = to_image_idx(self.bufs[buf_index].dtype.shape, idxy, valid, VALIDHACKS)
+          ldr = Token(f"read_imagef({self.buftokens[buf_index].tok}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)})) /* {self.bufs[buf_index].dtype.shape} */", Types.FLOAT4)
           test_idy.append(idy.render(render_cl))
         elif should_upcast and can_merge:
           ldr = Token(f"(({self.lang.buffer_prefix if self.bufs[buf_index] is not None else self.lang.smem_prefix}float4*){self.buftokens[buf_index].tok})[{(idxy//4).render(render_cl)}]", Types.FLOAT4)
         else:
           ldr = Token(f"{self.buftokens[buf_index].tok}[{idxy.render(render_cl)}]", Types.FLOAT)
         invalid = self.group_float4([Token("0.0f", Types.FLOAT)]*4) if ldr.typ == Types.FLOAT4 else Token("0.0f", Types.FLOAT)
-        ldr = ldr if valid.min == 1 or (VALIDHACKS and hasattr(self.bufs[buf_index]._buf, "IMAGE")) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : {invalid.tok})", ldr.typ) if valid.max == 1 else invalid)
+        ldr = ldr if valid.min == 1 or (VALIDHACKS and is_image) else (Token(f"({valid.render(render_cl)} ? {ldr.tok} : {invalid.tok})", ldr.typ) if valid.max == 1 else invalid)
         if const is not None:
           self.loaded_keys[(buf_index,o)] = ldr
         else:
@@ -154,9 +165,10 @@ class GPUCodegen(ASTKernel):
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
       upcast_strides = [self.sts[buf_index].strides[i] for i in self.upcast_in_mid_reduce_axes]
-      if (not early_only or buf in self.earlybufs) and hasattr(buf._buf, "IMAGE") and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and (1 in upcast_strides))):
+      if (not early_only or buf in self.earlybufs) and self.bufs[buf_index].dtype.name.startswith('image') and not (self.buftokens[buf_index].can_float4() or (buf not in self.earlybufs and (1 in upcast_strides))):
         axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
-        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes} on buf_index {buf_index}, {self.sts[buf_index]}"
+        assert self.sts[buf_index].shape[axes[0]]%4 == 0, f"axis:{axes[0]} in buffer {buf_index} is not a multiple of 4, {self.sts[buf_index].shape}"
         self.shift_to(axes[0], 4)
         self.upcast()
         assert self.buftokens[buf_index].can_float4()
@@ -177,12 +189,13 @@ class GPUCodegen(ASTKernel):
           self.group_for_reduce.append(sz)
           break
 
-    # are we upcasting in mid reduce?
-    if hasattr(self.bufs[0]._buf, "IMAGE") and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2:
+    # are we upcasting in mid reduce? (only for images)
+    if self.bufs[0].dtype.name.startswith('image') and not self.buftokens[0].can_float4() and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
       axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-      self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
-      self.group_for_reduce.append(4)
+      if self.sts[0].shape[axes[0]]%4 == 0:
+        self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
+        self.group_for_reduce.append(4)
 
     # now do everything required
     self.required_optimizations()
@@ -191,8 +204,8 @@ class GPUCodegen(ASTKernel):
     self.simplify_ones()
 
     # use more opencl indexing if the output buffer is an image and we have room
-    if hasattr(self.bufs[0]._buf, "IMAGE") and self.first_reduce+len(self.group_for_reduce) < 3:
-      base_shape = self.bufs[0]._base_shape
+    if self.bufs[0].dtype.name.startswith('image') and self.first_reduce+len(self.group_for_reduce) < 3:
+      base_shape = self.bufs[0].dtype.shape
       if (base_shape[0]*base_shape[1]) % self.sts[0].shape[0] == 0 and self.sts[0].shape[0]//base_shape[0] != 0:
         if DEBUG >= 4: print("split opencl", base_shape, self.sts[0].shape)
         self.reshape_and_permute(lambda x: [base_shape[0], x[0]//base_shape[0]]+list(x[1:]), None)
@@ -266,7 +279,7 @@ class GPUCodegen(ASTKernel):
     self.bufs_to_delete: Set[int] = set()
     self.loaded_keys: Dict[Tuple[int,int], Token] = {}
     self.prekernel: Set[str] = set()
-    self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(hasattr(buf._buf, "IMAGE") for buf in self.bufs if buf is not None) else []
+    self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(buf.dtype.name.startswith("image") for buf in self.bufs if buf is not None) else []
 
     if self.lang.half_prekernel and any(x.dtype == dtypes.float16 for x in self.bufs if x is not None): self.prekernel.add(self.lang.half_prekernel+"\n")
 
@@ -307,7 +320,7 @@ class GPUCodegen(ASTKernel):
         for j in self.upcast_in_mid_reduce_axes:
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
-          if DEBUG >= 4: print("upcast", self.colorshape()) # NOTE: colorshape is wrong here
+          #if DEBUG >= 4: print("upcast", self.colorshape()) # NOTE: colorshape is wrong here, you have to remove it from group_for_reduce before calling
 
         self.kernel.append(f"if ({lidx.render(render_cl)} == 0) {{\n")   # lidx.max works here too
 
@@ -324,7 +337,7 @@ class GPUCodegen(ASTKernel):
     self.kernel.append("\n}")
 
     # concat kernel into prg
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if hasattr(x._buf, "IMAGE") else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
+    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
     prg = ' '.join(list(self.prekernel) + [f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
       [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] +
       [") {\n"] + self.kernel)
@@ -342,4 +355,5 @@ class GPUCodegen(ASTKernel):
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
       list(self.output_shape[::-1]) if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
-      op_estimate=self.info.flops, mem_estimate=sum(x.dtype.itemsize*prod(x._base_shape) for x in self.bufs if x is not None))
+      op_estimate=self.info.flops,
+      mem_estimate=sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None))

@@ -109,8 +109,8 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
   # this needs real APIs
   if t.device in ["METAL", "CLANG", "LLVM"]:
     del t.lazydata.op
-    t.lazydata.realized = t.lazydata.dbuffer(t.shape, dtype=t.dtype)
-    myfile.readinto(t.lazydata.realized.raw()._buffer())
+    t.lazydata.realized = t.lazydata.dbuffer.buffer(prod(t.shape), dtype=t.dtype)
+    myfile.readinto(t.lazydata.realized._buffer())
   else:
     def _mmap(lna):
       assert myfile._compress_type == 0, "compressed data can't be mmaped"

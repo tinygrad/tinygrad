@@ -212,4 +212,6 @@ class LLVMCodegen(ASTKernel):
     loop_entry[-1].branch(loop_exit[-1]._block)
     loop_exit[0].ret_void()
 
-    return ASTRunner('exec', str(module), op_estimate=self.info.flops, mem_estimate=sum(x.dtype.itemsize*prod(x._base_shape) for x in self.bufs))
+    # TODO: mem_estimate is copied from GPU
+    return ASTRunner('exec', str(module), op_estimate=self.info.flops,
+                     mem_estimate=sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None))

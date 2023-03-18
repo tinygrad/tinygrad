@@ -40,7 +40,12 @@ class Tensor:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
-    if isinstance(data, (np.ndarray, LazyNumpyArray)):
+    # all ndarrays are lazy now
+    if isinstance(data, np.ndarray): data = LazyNumpyArray(data, data.shape, data.dtype)
+
+    # by here, it's either LazyNumpyArray or LazyBuffer
+    # TODO: it should all be LazyBuffer I think
+    if isinstance(data, LazyNumpyArray):
       data = data if data.shape else data.reshape((1,))
       lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
     elif isinstance(data, LazyBuffer):
@@ -455,6 +460,7 @@ class Tensor:
 
   # TODO: this is a hack, but if we add float(0), it will become a float. need real casting support
   def float(self) -> Tensor: return self.add(Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad))
+  def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
 
 # register functions to move between devices
 for device in Device._buffers:

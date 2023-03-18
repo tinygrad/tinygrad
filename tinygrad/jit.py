@@ -4,7 +4,7 @@ from tinygrad.helpers import DEBUG, colored
 
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters, CompiledBuffer, RawBuffer
+from tinygrad.ops import GlobalCounters, RawBuffer
 
 class TinyJit:
   def __init__(self, fxn:Callable):
@@ -20,9 +20,7 @@ class TinyJit:
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in ["GPU", "CLANG", "METAL", "CUDA"]: return self.fxn(*args, **kwargs)  # only jit on the GPU codegen
     # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
-    input_buffers: Dict[Union[int, str], CompiledBuffer] = {cast(Union[int, str], k):cast(CompiledBuffer, v.realize().lazydata.realized) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
-    # TODO: check the shapetrackers on the CompiledBuffers are what we jitted
-    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {k:v.raw() for k,v in input_buffers.items()}
+    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     if self.cnt >= 2:
       for (j,i),idx in self.input_replace.items(): self.jit_cache[j][1][i] = input_rawbuffers[idx]

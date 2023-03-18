@@ -1,5 +1,5 @@
 import os, time, ctypes, hashlib, subprocess, platform
-from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
@@ -23,5 +23,4 @@ class ClangProgram:
 class ClangCodegen(GPUCodegen):
   lang = GPULanguage(buffer_suffix=" restrict")
 
-class ClangBuffer(CompiledBuffer):
-  spec = Specialized(RawMallocBuffer, ClangCodegen, ClangProgram)
+ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)

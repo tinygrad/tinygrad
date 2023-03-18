@@ -4,16 +4,14 @@ import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # no
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 
 class RawCUDABuffer(RawBufferCopyInOut):
-  def __init__(self, size, dtype):
-    super().__init__(size, dtype)
-    self._cl = cuda.mem_alloc(self._memsz)
-  def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._cl, x, stream)
-  def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._cl)
+  def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize))
+  def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x, stream)
+  def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf)
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -47,5 +45,4 @@ class CUDACodegen(GPUCodegen):
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
-class CUDABuffer(CompiledBuffer):
-  spec = Specialized(RawCUDABuffer, CUDACodegen, CUDAProgram)
+CUDABuffer = Compiled(RawCUDABuffer, CUDACodegen, CUDAProgram)

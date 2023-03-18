@@ -4,7 +4,8 @@ import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
-from tinygrad.ops import CompiledBuffer, Specialized
+#from tinygrad.ops import CompiledBuffer, Specialized
+from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
 METAL_XCODE = getenv("METAL_XCODE")
@@ -17,16 +18,14 @@ class _METAL:
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType):
-    super().__init__(size, dtype)
-    self._cl = METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def __init__(self, size:int, dtype:DType): super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
-    self._cl.release()
+    self._buf.release()
     super().__del__()
   def _buffer(self):
     for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
     METAL.mtl_buffers_in_flight.clear()
-    return self._cl.contents().as_buffer(self._cl.length())
+    return self._buf.contents().as_buffer(self._buf.length())
 
 def unwrap(x):
   ret, err = x
@@ -65,7 +64,7 @@ class MetalProgram:
     command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._cl, 0, i)
+    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
     encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()
@@ -82,5 +81,4 @@ class MetalCodegen(GPUCodegen):
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
-class MetalBuffer(CompiledBuffer):
-  spec = Specialized(RawMetalBuffer, MetalCodegen, MetalProgram)
+MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram)

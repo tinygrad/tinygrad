@@ -1,13 +1,14 @@
 import ctypes
 import numpy as np
-from typing import TypeVar, Type
+from typing import TypeVar, Type, Any
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
-  def __init__(self, size:int, dtype:DType):
+  def __init__(self, size:int, dtype:DType, buf:Any=None):
     self.size: int = size
     self.dtype: DType = dtype
+    self._buf = buf
     self._memsz: int = size*dtype.itemsize
     GlobalCounters.mem_used += self._memsz
   def __del__(self): GlobalCounters.mem_used -= self._memsz
@@ -22,7 +23,7 @@ class RawBufferCopyIn(RawBuffer):
 
   @classmethod
   def fromCPU(cls, x:np.ndarray):
-    ret = cls(prod(x.shape), dtypes.from_np(x))
+    ret = cls(prod(x.shape), dtypes.from_np(x.dtype))
     ret._copyin(x)
     return ret
 
@@ -33,9 +34,7 @@ class RawBufferMapped(RawBufferCopyIn):
 
 # this one is simple enough that i moved it out of the runtimes
 class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType):
-    super().__init__(size, dtype)
-    self._buf = ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)()
+  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)())
   def _buffer(self): return memoryview(self._buf)
 
 class RawBufferCopyInOut(RawBufferCopyIn):
@@ -45,3 +44,5 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     x: np.ndarray = np.empty(self.size, dtype=self.dtype.np)
     self._copyout(x)
     return x
+
+class RawConst(RawBuffer): pass  # pylint: disable=abstract-method
