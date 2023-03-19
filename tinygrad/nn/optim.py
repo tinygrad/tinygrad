@@ -62,6 +62,7 @@ class RMSprop(Optimizer):
 class AdamW(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01):
     super().__init__(params)
+    # NOTE: self.t is a tensor so Adam can be jitted
     self.lr, self.b1, self.b2, self.eps, self.wd, self.t = lr, b1, b2, eps, wd, Tensor([0], requires_grad=False).realize()
 
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
@@ -78,9 +79,7 @@ class AdamW(Optimizer):
       t.assign(t.detach() - a * self.m[i].div(self.v[i].sqrt() + self.eps) - self.lr * self.wd * t.detach())
     self.realize([self.t] + self.m + self.v)
 
-class Adam(AdamW):
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8):  
-    super().__init__(params, lr, b1, b2, eps, 0.0)
+def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return AdamW(params, lr, b1, b2, eps, 0.0)
 
 def get_state_dict(obj, prefix:str='') -> Dict[str, Tensor]:
   if isinstance(obj, Tensor): return {prefix.strip('.'):obj}
