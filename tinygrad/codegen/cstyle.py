@@ -4,7 +4,7 @@ from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.runtime.lib import RawConst
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -29,11 +29,20 @@ class CStyleCodegen(Linearizer):
     self.linearize()
 
     kernel = []
+    global_size = []
 
     for uop,newvar,args in self.uops:
       if uop == UOps.LOOP:
-        for var in args[0]:
-          kernel.append(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
+        for i,var in enumerate(args[0]):
+          if isinstance(var, NumNode):
+            # one number, not an index
+            kernel.append("{")
+          else:
+            if args[1] == "global" and self.lang.gid:
+              kernel.append(f"int {var.expr} = {self.lang.gid[len(args[0])-1-i]}; {{")
+              global_size.append(var.max+1)
+            else:
+              kernel.append(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
       if uop == UOps.ENDLOOP:
         kernel.append("}"*len(args[0]))
       if uop == UOps.CONST:
@@ -57,7 +66,7 @@ class CStyleCodegen(Linearizer):
       if uop == UOps.DEFINE_LOCAL:
         kernel.append(f"float {args[0]}[{args[1]}];")
 
-    buftypes = [(i,"float*") for i,x in enumerate(self.bufs) if x is not None and not isinstance(x.realized, RawConst)]
+    buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else self.lang.buffer_prefix+"float*"+self.lang.buffer_suffix) for i,x in enumerate(self.bufs) if x is not None and not isinstance(x.realized, RawConst)]
     prg = ''.join([f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
       [', '.join([f'{t} data{i}' for i,t in buftypes] + self.lang.extra_args)] +
       [") {\n"] + ['\n'.join(kernel), "}"])
@@ -67,6 +76,6 @@ class CStyleCodegen(Linearizer):
 
     function_name = "exec"
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
-      None, None,
+      global_size[::-1], None,
       op_estimate=self.info.flops,
       mem_estimate=sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None))

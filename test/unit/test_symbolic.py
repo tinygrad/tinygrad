@@ -27,7 +27,6 @@ class TestSymbolic(unittest.TestCase):
   def test_div_becomes_num(self):
     assert isinstance(Variable("a", 2, 3)//2, NumNode)
 
-  @unittest.skip("it doesn't do this anymore")
   def test_var_becomes_num(self):
     assert isinstance(Variable("a", 2, 2), NumNode)
 
