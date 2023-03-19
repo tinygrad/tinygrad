@@ -5,7 +5,7 @@ from tinygrad.helpers import getenv
 
 def sparse_categorical_crossentropy(out, Y):
   num_classes = out.shape[-1]
-  YY = Y.flatten()
+  YY = Y.flatten().astype(np.int32)
   y = np.zeros((YY.shape[0], num_classes), np.float32)
   # correct loss for NLL, torch NLL loss returns one per row
   y[range(y.shape[0]),YY] = -1.0*num_classes
