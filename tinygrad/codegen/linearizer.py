@@ -180,9 +180,10 @@ class Linearizer:
     self.uop(UOps.ENDLOOP, (global_idxs, "global"))
 
     # print
-    self.printbufs()
-    for x in self.uops:
-      print(x)
+    if DEBUG >= 3:
+      self.printbufs()
+      for x in self.uops:
+        print(x)
 
   def uop(self, uop:UOps, arg:Any, name:Optional[str]=None):
     if name is not None:
@@ -225,6 +226,7 @@ class Linearizer:
   # ******************** base simplifiers ********************
 
   def simplify_merge_adjacent(self):
+    if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.views[-1].strides for x in self.sts]
 
     # merge dimensions if we can, multi get_shape_strides
@@ -249,8 +251,8 @@ class Linearizer:
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
     all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
-    # keep at least 1 one
-    if all(all_ones): all_ones[-1] = False
+    # keep at least 1 one (don't!)
+    #if all(all_ones): all_ones[-1] = False
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   # apply reshape and permute to all shapetrackers

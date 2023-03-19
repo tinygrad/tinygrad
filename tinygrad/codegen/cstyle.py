@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python
 
@@ -14,8 +14,8 @@ NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the
 
 class CStyleCodegen(Linearizer):
   code_for_op: Final[Dict[Op, Callable]] = {
-    UnaryOps.EXP: lambda x: f"native_exp({x})" if NATIVE_EXPLOG else lambda x: f"exp({x})",
-    UnaryOps.LOG: lambda x: f"native_log({x})" if NATIVE_EXPLOG else lambda x: f"log({x})",
+    UnaryOps.EXP: lambda x: f"native_exp({x})" if NATIVE_EXPLOG else f"exp({x})",
+    UnaryOps.LOG: lambda x: f"native_log({x})" if NATIVE_EXPLOG else f"log({x})",
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
@@ -46,13 +46,16 @@ class CStyleCodegen(Linearizer):
         kernel.append(f"float {newvar} = {args[0]}[{args[1].render(render_cl)}];")
       if uop == UOps.STORE:
         kernel.append(f"{args[0]}[{args[1].render(render_cl)}] = {args[3]};")
+      if uop == UOps.DEFINE_LOCAL:
+        kernel.append(f"float {args[0]}[{args[1]}];")
 
     buftypes = [(i,"float*") for i,x in enumerate(self.bufs) if x is not None and not isinstance(x.realized, RawConst)]
     prg = ''.join([f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
       [', '.join([f'{t} data{i}' for i,t in buftypes] + self.lang.extra_args)] +
       [") {\n"] + ['\n'.join(kernel), "}"])
 
-    print(prg)
+    if DEBUG >= 3:
+      print(prg)
 
     function_name = "exec"
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
