@@ -1,4 +1,5 @@
 from typing import Final, Dict, Callable
+import math
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps
 from tinygrad.helpers import prod, getenv, DEBUG
@@ -36,14 +37,21 @@ class CStyleCodegen(Linearizer):
       if uop == UOps.ENDLOOP:
         kernel.append("}"*len(args[0]))
       if uop == UOps.CONST:
-        kernel.append(f"float {newvar} = {args[0]};")
+        if args[0] == -math.inf:
+          kernel.append(f"float {newvar} = -INFINITY;")
+        else:
+          kernel.append(f"float {newvar} = {args[0]}f;")
       if uop == UOps.ALU:
         if newvar is None:
           kernel.append(f"{args[2]} = {self.code_for_op[args[0]](*args[1])};")
         else:
           kernel.append(f"float {newvar} = {self.code_for_op[args[0]](*args[1])};")
       if uop == UOps.LOAD:
-        kernel.append(f"float {newvar} = {args[0]}[{args[1].render(render_cl)}];")
+        # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
+        if args[2].min == 1:
+          kernel.append(f"float {newvar} = {args[0]}[{args[1].render(render_cl)}];")
+        else:
+          kernel.append(f"float {newvar} = ({args[2].render(render_cl)}) ? ({args[0]}[{args[1].render(render_cl)}]) : 0.0f;")
       if uop == UOps.STORE:
         kernel.append(f"{args[0]}[{args[1].render(render_cl)}] = {args[3]};")
       if uop == UOps.DEFINE_LOCAL:

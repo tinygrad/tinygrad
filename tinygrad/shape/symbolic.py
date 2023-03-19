@@ -12,7 +12,7 @@ class Node:
   max: int
   def render(self, ops=None, ctx=None) -> str:
     if ops is None: ops = render_python
-    assert isinstance(self, NumNode) or self.min != self.max
+    assert isinstance(self, (Variable, NumNode)) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -131,7 +131,7 @@ class Node:
 class Variable(Node):
   def __new__(cls, expr:str, nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
-    if nmin == nmax: return NumNode(nmin)
+    #if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
 
   def __init__(self, expr:str, nmin:int, nmax:int):
@@ -188,6 +188,6 @@ render_python: Dict[Type, Callable] = {
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
   GeNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}>={self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{self.b})",
-  SumNode: lambda self,ops,ctx: f"({' + '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
+  SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
   AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
 }
