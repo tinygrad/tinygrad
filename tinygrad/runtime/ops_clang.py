@@ -1,8 +1,7 @@
 import os, time, ctypes, hashlib, subprocess, platform
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
-from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
-from tinygrad.codegen.cstyle import CStyleCodegen
+from tinygrad.codegen.cstyle import CStyleCodegen, GPULanguage
 
 class ClangProgram:
   def __init__(self, name:str, prg:str):

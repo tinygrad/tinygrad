@@ -1,10 +1,11 @@
-from typing import Final, Dict, Callable
+from typing import Final, Dict, Callable, ClassVar
 import math
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from tinygrad.codegen.gpu import GPULanguage
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -14,6 +15,8 @@ render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
 class CStyleCodegen(Linearizer):
+  lang: ClassVar[GPULanguage] = GPULanguage()
+
   code_for_op: Final[Dict[Op, Callable]] = {
     UnaryOps.EXP: lambda x: f"native_exp({x})" if NATIVE_EXPLOG else f"exp({x})",
     UnaryOps.LOG: lambda x: f"native_log({x})" if NATIVE_EXPLOG else f"log({x})",
@@ -67,15 +70,17 @@ class CStyleCodegen(Linearizer):
               kk(f"for (int {var.expr} = {var.min}; {var.expr} <= {var.max}; ++{var.expr}) {{")
         depth += 1
       if uop == UOps.ENDLOOP:
-        depth -= 1
         if args[1] == "local" and len(self.lang.lid):
+          # TODO: this is a bit of a hack. the local loop isn't real on the GPU
           kk(self.lang.barrier)
           kk(f"if ({Variable.sum(args[0]).render(render_cl)} == 0) {{")
           pend_close = "}"*(len(args[0])+1) + f" /* {args[1]} */"
         else:
           if args[1] == "global" and pend_close:
-            kernel.append(pend_close)
+            depth -= 1
+            kk(pend_close)
             pend_close = None
+          depth -= 1
           kk("}"*len(args[0]) + f" /* {args[1]} */")
       if uop == UOps.CONST:
         if args[0] == -math.inf:
@@ -105,7 +110,9 @@ class CStyleCodegen(Linearizer):
 
     if DEBUG >= 3:
       print(prg)
-    print(global_size, local_size)
+
+    # if we have local_sizes, we have to correct the global_size
+    for i,s in enumerate(local_size): global_size[i] *= s
 
     function_name = "exec"
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
