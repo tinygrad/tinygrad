@@ -158,6 +158,11 @@ class LazyBuffer:
   def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
     return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x.dtype))
 
+  # create a constant with the shape and dtype of self
+  def const_like(self, val) -> LazyBuffer:
+    return LazyBuffer(self.device, (1,), LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), LazyNumpyArray([val], (1,), self.dtype.np)), self.dtype) \
+      .movement_op(MovementOps.RESHAPE, (1,)*len(self.shape)).movement_op(MovementOps.EXPAND, self.shape)
+
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized

@@ -73,7 +73,7 @@ class Maximum(Function):
   def backward(self, grad_output):
     mask = self.y.binary_op(BinaryOps.CMPEQ, self.ret)
     # TODO: if they are equal, do they split the gradient?
-    return grad_output.binary_op(BinaryOps.MUL, mask.unary_op(UnaryOps.NOT)) if self.needs_input_grad[0] else None, \
+    return grad_output.binary_op(BinaryOps.MUL, mask.const_like(1).binary_op(BinaryOps.SUB, mask)) if self.needs_input_grad[0] else None, \
            grad_output.binary_op(BinaryOps.MUL, mask) if self.needs_input_grad[1] else None
 
 class Add(Function):
@@ -85,28 +85,28 @@ class Add(Function):
            grad_output if self.needs_input_grad[1] else None
 
 class Sub(Function):
-  def forward(self, x, y):
+  def forward(self, x:LazyBuffer, y:LazyBuffer):
     return x.binary_op(BinaryOps.SUB, y)
 
-  def backward(self, grad_output) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
-           grad_output.unary_op(UnaryOps.NEG) if self.needs_input_grad[1] else None
+           grad_output.const_like(0).binary_op(BinaryOps.SUB, grad_output) if self.needs_input_grad[1] else None
 
 class Mul(Function):
-  def forward(self, x, y):
+  def forward(self, x:LazyBuffer, y:LazyBuffer):
     self.x, self.y = x, y
     return x.binary_op(BinaryOps.MUL, y)
 
-  def backward(self, grad_output) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return self.y.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
            self.x.binary_op(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
 
 class Pow(Function):
-  def forward(self, x, y):
+  def forward(self, x:LazyBuffer, y:LazyBuffer):
     self.x, self.y, self.ret = x, y, x.binary_op(BinaryOps.POW, y)
     return self.ret
 
-  def backward(self, grad_output):
+  def backward(self, grad_output:LazyBuffer):
     return grad_output.binary_op(BinaryOps.MUL, self.y.binary_op(BinaryOps.MUL, self.ret.binary_op(BinaryOps.DIV, self.x))) if self.needs_input_grad[0] else None, \
            grad_output.binary_op(BinaryOps.MUL, self.x.unary_op(UnaryOps.LOG).binary_op(BinaryOps.MUL, self.ret)) if self.needs_input_grad[1] else None
 
@@ -117,7 +117,7 @@ class Div(Function):
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output.binary_op(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
-           grad_output.unary_op(UnaryOps.NEG).binary_op(BinaryOps.MUL, self.x).binary_op(BinaryOps.DIV, self.y.binary_op(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
+           grad_output.const_like(0).binary_op(BinaryOps.SUB, grad_output).binary_op(BinaryOps.MUL, self.x).binary_op(BinaryOps.DIV, self.y.binary_op(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
 
 # ************* movement ops *************
 
