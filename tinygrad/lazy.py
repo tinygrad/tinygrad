@@ -101,14 +101,14 @@ class LazyBuffer:
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
 
-  def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'} st:{self.st}>"
+  def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
 
   def realize(self:LazyBuffer, required_device=None) -> LazyBuffer:
     assert required_device is None or required_device == self.device
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        if prod(self.op.arg.shape) == 1:  # constant folding
+        if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
           self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
         else:
           self.realized = Device[self.device].buffer.fromCPU(self.op.arg())

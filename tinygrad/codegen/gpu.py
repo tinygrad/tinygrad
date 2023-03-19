@@ -50,6 +50,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
 
 class GPUCodegen(ASTKernel):
   lang: ClassVar[GPULanguage] = GPULanguage()
+  supports_constant_folding: bool = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)

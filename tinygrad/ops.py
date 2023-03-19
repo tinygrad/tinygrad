@@ -39,6 +39,7 @@ class Interpreted:
     self.fxn_for_op = fxn_for_op
     self.from_lazybuffer = from_lazybuffer
     self.to_underlying = to_underlying
+    self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None):
     if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:

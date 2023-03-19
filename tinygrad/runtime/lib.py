@@ -12,6 +12,7 @@ class RawBuffer:  # pylint: disable=abstract-method
     self._memsz: int = size*dtype.itemsize
     GlobalCounters.mem_used += self._memsz
   def __del__(self): GlobalCounters.mem_used -= self._memsz
+  def __repr__(self): return f"buffer<{self.size}, {self.dtype}>"
 
   # NOTE: this interface allows for 0 copy
   @classmethod
@@ -45,4 +46,5 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     self._copyout(x)
     return x
 
-class RawConst(RawBuffer): pass  # pylint: disable=abstract-method
+class RawConst(RawBuffer): # pylint: disable=abstract-method
+  def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
