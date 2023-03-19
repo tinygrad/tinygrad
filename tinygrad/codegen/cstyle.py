@@ -27,6 +27,7 @@ class CStyleLanguage(NamedTuple):
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
+  supports_constant_folding: bool = True
   supports_float4: bool = True
 
   # for renaming
@@ -114,7 +115,12 @@ class CStyleCodegen(Linearizer):
           kk(f"float {newvar} = {self.code_for_op[args[0]](*args[1])};")
       # TODO: refactor the next 14 lines
       if uop == UOps.LOAD:
-        val = f"{self.registers[args[0]].name}[{args[1].render(render_cl)}]"
+        # TODO: merge with CONST?
+        if self.bufs[args[0]] is not None and isinstance(self.bufs[args[0]].realized, RawConst):
+          # nan? inf?
+          val = f"{self.bufs[args[0]].realized._buf}f"
+        else:
+          val = f"{self.registers[args[0]].name}[{args[1].render(render_cl)}]"
         # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
         if args[2].min == 1: kk(f"float {newvar} = {val};")
         else: kk(f"float {newvar} = ({args[2].render(render_cl)}) ? ({val}) : 0.0f;")

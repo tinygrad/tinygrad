@@ -39,7 +39,7 @@ class Register:
   def __repr__(self): return f"<{self.name}{f'{self.axis}'}>"
 
 class Linearizer:
-  supports_float4: bool = True
+  supports_float4: bool = False
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
