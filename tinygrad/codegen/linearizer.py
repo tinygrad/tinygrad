@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.helpers import dedup, colored, all_same, ImageDType, DEBUG, prod, dtypes, mnum
 from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import MovementOps, ReduceOps, BinaryOps
+from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
 from tinygrad.shape.symbolic import Variable, SumNode, ModNode
 
@@ -240,9 +240,12 @@ class Linearizer:
     if not isinstance(x, LazyOp): return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
+    # MULACC fusion. TODO: this is copied from Interpreted
+    if x.op == ReduceOps.SUM and isinstance(x.src[0], LazyOp) and x.src[0].op == BinaryOps.MUL:
+      x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
-    if isinstance(x.op, ReduceOps):
-      return [self.uop(UOps.ALU, ({ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[x.op], val, val[0]), None) for val in zip(acc, *values)]
+    if isinstance(x.op, (ReduceOps, FusedOps)):
+      return [self.uop(UOps.ALU, ({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op], val, val[0]), None) for val in zip(acc, *values)]
     else:
       return [self.uop(UOps.ALU, (x.op, val), ssa('alu')) for val in zip(*values)]
 

@@ -329,12 +329,17 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_simple_conv2d_m4(self):
-    helper_test_op([(1,4,18,18), (4,4,3,3)],
+    helper_test_op([(1,16,18,18), (16,16,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_simple_conv2d_1x1(self):
     helper_test_op([(1,4,9,9), (4,4,1,1)],
+      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
+      lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_simple_conv2d_1x1_m4(self):
+    helper_test_op([(1,16,32,32), (16,16,1,1)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
