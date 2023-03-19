@@ -124,16 +124,6 @@ class Compiled:
     # all movementops do nothing in a Compiled buffer!
     if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
 
-    k = self.codegen(ast, output)
-
-    # this is the default now
-    if getenv("ENABLE_METHOD_CACHE", 1):
-      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
-      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
-      prg = self.method_cache[k.key]
-    else:
-      prg = k.codegen().build(self.runtime)
-
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
@@ -148,6 +138,24 @@ class Compiled:
     # we don't have an output buffer, we have to create it
     if output.realized is None:
       output.realized = self.buffer(prod(output.shape), output.dtype)
+
+    # compilation time
+
+    from tinygrad.codegen.linearizer import Linearizer
+    linear = Linearizer(ast, output)
+    linear.process()
+    linear.hand_coded_optimizations()
+    linear.linearize()
+
+    k = self.codegen(ast, output)
+
+    # this is the default now
+    if getenv("ENABLE_METHOD_CACHE", 1):
+      if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
+      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
+      prg = self.method_cache[k.key]
+    else:
+      prg = k.codegen().build(self.runtime)
 
     prg.exec(k.bufs)
     return output.realized
