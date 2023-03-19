@@ -1,14 +1,14 @@
 from __future__ import annotations
 import functools, itertools, operator, random
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Set, Callable
+from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable
 from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType
 from tinygrad.shape.shapetracker import MovementOps
-from tinygrad.runtime.lib import RawBuffer
+from tinygrad.runtime.lib import RawBuffer, RawConst
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
-class UnaryOps(Enum): NOOP = auto(); EXP = auto(); LOG = auto(); NEG = auto(); NOT = auto(); CAST = auto() # noqa: E702
+class UnaryOps(Enum): NOOP = auto(); EXP = auto(); LOG = auto(); CAST = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class FusedOps(Enum): MULACC = auto() # noqa: E702
@@ -39,6 +39,7 @@ class Interpreted:
     self.fxn_for_op = fxn_for_op
     self.from_lazybuffer = from_lazybuffer
     self.to_underlying = to_underlying
+    self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None):
     if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
@@ -48,7 +49,7 @@ class Interpreted:
     if not created_context and ast in context: return context[ast]
     srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
     ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
-    if DEBUG >= 4: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret.shape):30s} in({len(srcs)}):", list(set(x.shape for x in srcs)), ast.arg if ast.arg is not None else "")
+    if DEBUG >= 4: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape):30s} in({len(srcs)}):", list(set(x._buf.shape for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
       assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
@@ -58,7 +59,7 @@ class Interpreted:
       return ret
 
 class FlopCounter:
-  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops = tup
+  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
@@ -75,22 +76,21 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
-  def __init__(self, name, prg, bufs_to_delete:Optional[Set[int]]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
+  def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0):
     if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.bufs_to_delete, self.op_estimate, self.mem_estimate = name, prg, global_size, local_size, bufs_to_delete if bufs_to_delete else set(), op_estimate, mem_estimate
+    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate = name, prg, global_size, local_size, op_estimate, mem_estimate
 
   def build(self, runtime):
     self.clprg = runtime(self.name, self.prg)
     return self
 
   def exec(self, bufs) -> Optional[float]:
-    rawbufs = [x.realized for i,x in enumerate(bufs) if x is not None and i not in self.bufs_to_delete]
-    assert all(x is not None for x in rawbufs), "some rawbufs are None, you probably didn't realize them"
-    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
+    rawbufs = [x.realized for x in bufs if x is not None and not isinstance(x.realized, RawConst)]
     if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
     return self(rawbufs)
 
   def __call__(self, rawbufs:List[RawBuffer]) -> Optional[float]:
+    if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
       print(f"*** {GlobalCounters.kernel_count:4d} {self.name:20s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {self.op_estimate/1e6:7.1f}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
@@ -143,6 +143,7 @@ class Compiled:
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
     output.realized = output.output_buffer
     if output.realized is not None:
+      if isinstance(output.realized, RawConst): output.realized = None  # can't assign to RawConst
       for a in get_buffers(ast):
         if a.realized == output.realized and not a.st.contiguous:
           output.realized = None

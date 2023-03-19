@@ -103,6 +103,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (65,)], lambda x,y: x+y, lambda x,y: x+y)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
+  def test_neg(self):
+    helper_test_op([(45,65)], lambda x: -x)
   def test_mul(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
   def test_div(self):

@@ -50,13 +50,14 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
 
 class GPUCodegen(ASTKernel):
   lang: ClassVar[GPULanguage] = GPULanguage()
+  supports_constant_folding: bool = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   kernel_name_cache: Final[Dict[str, str]] = {}
 
   code_for_op: Final[Dict[Op, str]] = {
-    UnaryOps.NOOP: "(A)", UnaryOps.NEG: "(-(A))", UnaryOps.NOT: "(1.0f-A)", UnaryOps.CAST: "(A)",
+    UnaryOps.NOOP: "(A)", UnaryOps.CAST: "(A)",
     UnaryOps.EXP: "native_exp(A)" if NATIVE_EXPLOG else "exp(A)",
     UnaryOps.LOG: "native_log(A)" if NATIVE_EXPLOG else "log(A)",
     BinaryOps.ADD: "(A+B)", BinaryOps.SUB: "(A-B)", BinaryOps.MUL: "(A*B)",
@@ -98,8 +99,6 @@ class GPUCodegen(ASTKernel):
     # constant folding
     const = None
     if self.bufs[buf_index] is not None and isinstance(self.bufs[buf_index].realized, RawConst):
-      # bufs_to_delete can be removed, just ignore RawConst at runtime
-      if buf_index != 0: self.bufs_to_delete.add(buf_index)
       val = self.bufs[buf_index].realized._buf
       assert not math.isnan(val)
       const = Token(f"({val}f)", Types.FLOAT)
@@ -276,7 +275,6 @@ class GPUCodegen(ASTKernel):
       print("output shape", self.output_shape)
       self.printbufs("new:", DEBUG>=5)
 
-    self.bufs_to_delete: Set[int] = set()
     self.loaded_keys: Dict[Tuple[int,int], Token] = {}
     self.prekernel: Set[str] = set()
     self.kernel: List[str] = ["const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"] if any(buf.dtype.name.startswith("image") for buf in self.bufs if buf is not None) else []
@@ -337,9 +335,9 @@ class GPUCodegen(ASTKernel):
     self.kernel.append("\n}")
 
     # concat kernel into prg
-    buftypes = [f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix for i,x in enumerate(self.bufs) if x is not None]
+    buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else self.lang.buffer_prefix+self.buftokens[i].decltype(self.bufs[i].dtype)+self.lang.buffer_suffix) for i,x in enumerate(self.bufs) if x is not None and not isinstance(x.realized, RawConst)]
     prg = ' '.join(list(self.prekernel) + [f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
-      [', '.join([f'{t} data{i}' for i,t in enumerate(buftypes) if i not in self.bufs_to_delete] + self.lang.extra_args)] +
+      [', '.join([f'{t} data{i}' for i,t in buftypes] + self.lang.extra_args)] +
       [") {\n"] + self.kernel)
 
     # kernel function definition
@@ -352,7 +350,7 @@ class GPUCodegen(ASTKernel):
       if GPUCodegen.kernel_cnt[function_name] > 1: function_name = f"{function_name}{'n'+str(GPUCodegen.kernel_cnt[function_name]-1)}"
       GPUCodegen.kernel_name_cache[prg] = function_name
 
-    return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name), self.bufs_to_delete,
+    return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
       list(self.output_shape[::-1]) if len(self.output_shape) > 0 else [1],
       (self.group_for_reduce[::-1] + [1]*(len(self.output_shape)-len(self.group_for_reduce))) if self.group_for_reduce else None,
       op_estimate=self.info.flops,

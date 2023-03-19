@@ -101,14 +101,17 @@ class LazyBuffer:
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
 
-  def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else 'realized'} st:{self.st}>"
+  def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
 
   def realize(self:LazyBuffer, required_device=None) -> LazyBuffer:
     assert required_device is None or required_device == self.device
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
+        if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
+          self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
+        else:
+          self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize(self.device).realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
@@ -154,6 +157,11 @@ class LazyBuffer:
   @staticmethod
   def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
     return LazyBuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x.dtype))
+
+  # create a constant with the shape and dtype of self
+  def const_like(self, val) -> LazyBuffer:
+    return LazyBuffer(self.device, (1,), LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), LazyNumpyArray([val], (1,), self.dtype.np)), self.dtype) \
+      .movement_op(MovementOps.RESHAPE, (1,)*len(self.shape)).movement_op(MovementOps.EXPAND, self.shape)
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
   def toCPU(self):
