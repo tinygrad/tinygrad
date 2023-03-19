@@ -84,6 +84,11 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.prg)
     return self
 
+  def exec(self, bufs) -> Optional[float]:
+    rawbufs = [x.realized for x in bufs if x is not None and not isinstance(x.realized, RawConst)]
+    if GlobalCounters.cache is not None: GlobalCounters.cache.append((self, rawbufs))
+    return self(rawbufs)
+
   def __call__(self, rawbufs:List[RawBuffer]) -> Optional[float]:
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs)
     if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
@@ -148,7 +153,5 @@ class Compiled:
     if output.realized is None:
       output.realized = self.buffer(prod(output.shape), output.dtype)
 
-    rawbufs = [x.realized for x in k.bufs if x is not None and not isinstance(x.realized, RawConst)]
-    if GlobalCounters.cache is not None: GlobalCounters.cache.append((prg, rawbufs))
-    prg(rawbufs)
+    prg.exec(k.bufs)
     return output.realized

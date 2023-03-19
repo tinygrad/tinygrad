@@ -43,7 +43,7 @@ class ATan2(Function):
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.binary_op(BinaryOps.MUL, self.a)).binary_op(BinaryOps.ADD, self.b.binary_op(BinaryOps.MUL, self.b))
     return grad_output.binary_op(BinaryOps.MUL, self.b.binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \
-           grad_output.binary_op(BinaryOps.MUL, self.a.unary_op(UnaryOps.NEG).binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[1] else None
+           grad_output.binary_op(BinaryOps.MUL, self.a.const_like(0).binary_op(BinaryOps.SUB, self.a).binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[1] else None
 
 # *** third, we use our lovely new mlop in some tests ***
 
