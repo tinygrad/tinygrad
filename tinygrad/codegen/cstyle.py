@@ -1,11 +1,10 @@
-from typing import Final, Dict, Callable, ClassVar
-import math
+from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict
+import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
-from tinygrad.codegen.gpu import GPULanguage
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -14,8 +13,24 @@ render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx
 
 NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
+class CStyleLanguage(NamedTuple):
+  kernel_prefix: str = ""
+  buffer_prefix: str = ""
+  buffer_suffix: str = ""
+  smem_prefix: str = ""
+  barrier: str = ""
+  gid: List[str] = []
+  lid: List[str] = []
+  extra_args: List[str] = []
+  float4: Optional[str] = None
+  half_prekernel: Optional[str] = None
+
 class CStyleCodegen(Linearizer):
-  lang: ClassVar[GPULanguage] = GPULanguage()
+  lang: ClassVar[CStyleLanguage] = CStyleLanguage()
+
+  # for renaming
+  kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
+  kernel_name_cache: Final[Dict[str, str]] = {}
 
   code_for_op: Final[Dict[Op, Callable]] = {
     UnaryOps.EXP: lambda x: f"native_exp({x})" if NATIVE_EXPLOG else f"exp({x})",
@@ -114,7 +129,14 @@ class CStyleCodegen(Linearizer):
     # if we have local_sizes, we have to correct the global_size
     for i,s in enumerate(local_size): global_size[i] *= s
 
-    function_name = "exec"
+    # painfully name the function something unique
+    function_name = self.function_name
+    if prg in CStyleCodegen.kernel_name_cache: function_name = CStyleCodegen.kernel_name_cache[prg]
+    else:
+      CStyleCodegen.kernel_cnt[function_name] += 1
+      if CStyleCodegen.kernel_cnt[function_name] > 1: function_name = f"{function_name}{'n'+str(CStyleCodegen.kernel_cnt[function_name]-1)}"
+      CStyleCodegen.kernel_name_cache[prg] = function_name
+
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
       op_estimate=self.info.flops,

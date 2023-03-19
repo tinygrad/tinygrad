@@ -2,9 +2,8 @@
 import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
-from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
+from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
-#from tinygrad.ops import CompiledBuffer, Specialized
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
@@ -74,8 +73,8 @@ class MetalProgram:
     else:
       METAL.mtl_buffers_in_flight.append(command_buffer)
 
-class MetalCodegen(GPUCodegen):
-  lang = GPULanguage(
+class MetalCodegen(CStyleCodegen):
+  lang = CStyleLanguage(
     kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
     barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],

@@ -192,6 +192,9 @@ class Linearizer:
     # end the global loop
     self.uop(UOps.ENDLOOP, (global_idxs, "global"))
 
+    # kernel function definition
+    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
+
     # print
     if DEBUG >= 3:
       self.printbufs()
