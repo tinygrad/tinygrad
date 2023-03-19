@@ -69,7 +69,7 @@ class CStyleCodegen(Linearizer):
                 # sometimes, there's more dimensions. compact all the dimensions into the last CL dimension
                 # TODO: these compactions should be searchable (they sort of are with reshapes and permutes)
                 if i == 0:
-                  kk(f"{{ int {var.expr} = {self.lang.gid[-1]}; /* {var.max+1} */")
+                  kk(f"{{ int {var.expr} = {self.lang.gid[-1]};  /* {var.max+1} */")
                   root = var.expr
                   global_size.append(var.max+1)
                 else:
