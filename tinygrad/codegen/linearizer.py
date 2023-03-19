@@ -10,7 +10,7 @@ from tinygrad.ops import MovementOps, ReduceOps, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
 from tinygrad.shape.symbolic import Variable
 
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); LOOP_GLOBAL = auto(); ENDLOOP_GLOBAL = auto(); LOOP_LOCAL = auto(); ENDLOOP_LOCAL = auto();
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto()
 
 def get_first_reduce(shapes):
   for i in range(len(shapes[0])):
@@ -100,7 +100,7 @@ class Linearizer:
     # TODO: add upcasting to float4 here
     def global_buf(i, store=None):
       if store:
-        return [self.uop(UOps.STORE, (v, self.registers[i].name, *self.sts[i].expr_idxs(o, idxs))) for v,o in zip(store, self.registers[i].offsets())]
+        return [self.uop(UOps.STORE, (self.registers[i].name, *self.sts[i].expr_idxs(o, idxs), v)) for v,o in zip(store, self.registers[i].offsets())]
       else:
         return [self.uop(UOps.LOAD, (self.registers[i].name, *self.sts[i].expr_idxs(o, idxs)), self.registers[i].name+"_") for o in self.registers[i].offsets()]
 
@@ -114,14 +114,14 @@ class Linearizer:
 
     # global loop
     global_idxs = idxs[:self.first_reduce]
-    self.uop(UOps.LOOP_GLOBAL, global_idxs)
+    self.uop(UOps.LOOP, (global_idxs, "global"))
 
     # local loop
     if self.group_for_reduce:
       # NOTE: this is assuming the global size = the local size in these dims. in general, this doesn't have to be true
       local_idxs = idxs[self.first_reduce:self.first_reduce+len(self.group_for_reduce)]
       self.uop(UOps.DEFINE_LOCAL, (self.registers[-1].name, self.sts[-1].size()*self.registers[-1].size()))
-      self.uop(UOps.LOOP_LOCAL, local_idxs)
+      self.uop(UOps.LOOP, (local_idxs, "local"))
 
     # reduce op
     if self.reduceop is not None:
@@ -130,7 +130,7 @@ class Linearizer:
 
       # reduce loop
       reduce_idxs = idxs[self.first_reduce+len(self.group_for_reduce):]
-      self.uop(UOps.LOOP, reduce_idxs)
+      self.uop(UOps.LOOP, (reduce_idxs, "reduce"))
 
       # load earlybufs
       loaded_buffers.update({b:global_buf(i) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
@@ -140,15 +140,15 @@ class Linearizer:
 
       # accumulate
       for o,r in zip(self.registers[self.full_buf_index].acc_offsets(), red):
-        self.uop(UOps.ALU, (acc[o], {ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[self.reduceop.op], (acc[o],r)))
+        self.uop(UOps.ALU, ({ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[self.reduceop.op], (acc[o],r), acc[o]))
 
       # end the reduce loop
-      self.uop(UOps.ENDLOOP, reduce_idxs)
+      self.uop(UOps.ENDLOOP, (reduce_idxs, "reduce"))
 
     # end the local loop, do the local reduce
     if self.group_for_reduce:
       global_buf(-1, acc)  # store accumulators
-      self.uop(UOps.ENDLOOP_LOCAL, local_idxs)   # this is a barrier on GPUs
+      self.uop(UOps.ENDLOOP, (local_idxs, "local"))   # this is a barrier on GPUs
 
       # if any group_for_reduce items aren't reduces, upcast them here
       for j in self.upcast_in_mid_reduce_axes:
@@ -160,12 +160,12 @@ class Linearizer:
       acc = [self.uop(UOps.CONST, ({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[self.reduceop.op],), 'lacc') for _ in self.registers[-1].offsets()]
 
       end_local_idxs = idxs[self.first_reduce:self.first_reduce+len(self.group_for_reduce)]
-      self.uop(UOps.LOOP, end_local_idxs)
+      self.uop(UOps.LOOP, (end_local_idxs, "late_reduce"))
       red = global_buf(-1)
       # accumulate
       for o,r in zip(self.registers[-1].acc_offsets(), red):
-        self.uop(UOps.ALU, (acc[o], {ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[self.reduceop.op], (acc[o],r)))
-      self.uop(UOps.ENDLOOP, end_local_idxs)
+        self.uop(UOps.ALU, ({ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[self.reduceop.op], (acc[o],r), acc[o]))
+      self.uop(UOps.ENDLOOP, (end_local_idxs, "late_reduce"))
 
     # load latebufs
     loaded_buffers.update({b:global_buf(i) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b is not None})
@@ -177,7 +177,7 @@ class Linearizer:
     global_buf(0, val)
 
     # end the global loop
-    self.uop(UOps.ENDLOOP_GLOBAL, global_idxs)
+    self.uop(UOps.ENDLOOP, (global_idxs, "global"))
 
     # print
     self.printbufs()
@@ -188,14 +188,14 @@ class Linearizer:
     if name is not None:
       ret = f"{name}{self.ssa[name]}"
       self.ssa[name] += 1
-      self.uops.append((uop, (ret,)+arg))
+      self.uops.append((uop, ret, arg))
       return ret
     else:
-      self.uops.append((uop, arg))
+      self.uops.append((uop, None, arg))
 
   def ast_parse(self, x, acc, loaded_buffers) -> List[str]:
     if not isinstance(x, LazyOp): return loaded_buffers[x]
-    if x.op == UnaryOps.CAST: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
+    if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers)  # cast isn't an ALU op
     if x.op in ReduceOps: return acc
     values = [self.ast_parse(v, acc, loaded_buffers) for v in x.src]
     return [self.uop(UOps.ALU, (x.op, val), 'alu') for val in zip(*values)]

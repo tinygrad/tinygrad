@@ -140,13 +140,6 @@ class Compiled:
       output.realized = self.buffer(prod(output.shape), output.dtype)
 
     # compilation time
-
-    from tinygrad.codegen.linearizer import Linearizer
-    linear = Linearizer(ast, output)
-    linear.process()
-    linear.hand_coded_optimizations()
-    linear.linearize()
-
     k = self.codegen(ast, output)
 
     # this is the default now
