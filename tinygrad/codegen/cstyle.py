@@ -1,10 +1,10 @@
-from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict
+from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import prod, getenv, DEBUG, all_same
+from tinygrad.helpers import prod, getenv, DEBUG, all_same, partition, ImageDType
 from tinygrad.runtime.lib import RawConst
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 
 # div is different in cl than python
 render_cl = render_python.copy()
@@ -24,6 +24,26 @@ class CStyleLanguage(NamedTuple):
   extra_args: List[str] = []
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
+
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
+  idy = (idxy//(4*base_shape[1]))
+  if validhacks and valid.min == 0:
+    idx = (idxy//4) + (idy*-base_shape[1])
+    # find the ones in idx that didn't factorize and remove them (TODO: this is not universal)
+    if isinstance(idx, SumNode):
+      unfactored, idx_nodes = partition(idx.nodes, lambda x: isinstance(x, MulNode) and x.b == -base_shape[1])
+      assert len(unfactored) <= 1
+      idx = Variable.sum(idx_nodes)
+      unfactored = (Variable.sum(unfactored) // base_shape[1])
+      idy += unfactored
+      # ugh really...handtuned garbage
+      if idx.min >= (base_shape[1]*3)//4:
+        idx -= base_shape[1]
+        idy += 1
+  else:
+    idx = (idxy//4)%base_shape[1]
+  #print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
+  return idx, idy
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
@@ -52,6 +72,7 @@ class CStyleCodegen(Linearizer):
     self.hand_coded_optimizations()
     self.linearize()
 
+    prekernel: Set[str] = set()
     kernel = []
     global_size = []
     local_size = []
@@ -125,7 +146,12 @@ class CStyleCodegen(Linearizer):
         if args[2].min == 1: kk(f"float {newvar} = {val};")
         else: kk(f"float {newvar} = ({args[2].render(render_cl)}) ? ({val}) : 0.0f;")
       if uop == UOps.LOAD4:
-        val = f"(({self.lang.buffer_prefix if self.bufs[args[0]] is not None else self.lang.smem_prefix}float4*){self.registers[args[0]].name})[{(args[1]//4).render(render_cl)}]"
+        if self.bufs[args[0]] is not None and isinstance(self.bufs[args[0]].dtype, ImageDType):
+          prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
+          idx, idy = to_image_idx(self.bufs[args[0]].dtype.shape, args[1], args[2])
+          val = f"read_imagef({self.registers[args[0]].name}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
+        else:
+          val = f"(({self.lang.buffer_prefix if self.bufs[args[0]] is not None else self.lang.smem_prefix}float4*){self.registers[args[0]].name})[{(args[1]//4).render(render_cl)}]"
         # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
         if args[2].min == 1: kk(f"float4 {newvar} = {val};")
         else: kk(f"float4 {newvar} = ({args[2].render(render_cl)}) ? ({val}) : {self.group_float4(['0.0f']*4)};")
@@ -134,14 +160,18 @@ class CStyleCodegen(Linearizer):
         kk(f"{self.registers[args[0]].name}[{args[1].render(render_cl)}] = {args[3]};")
       if uop == UOps.STORE4:
         assert args[2].min == 1, "store must be valid"
-        kk(f"(({self.lang.buffer_prefix if self.bufs[args[0]] is not None else self.lang.smem_prefix}float4*){self.registers[args[0]].name})[{(args[1]//4).render(render_cl)}] = {self.group_float4(args[3])};")
+        if self.bufs[args[0]] is not None and isinstance(self.bufs[args[0]].dtype, ImageDType):
+          idx, idy = to_image_idx(self.bufs[args[0]].dtype.shape, args[1], args[2])
+          kk(f"write_imagef({self.registers[args[0]].name}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {self.group_float4(args[3])});")
+        else:
+          kk(f"(({self.lang.buffer_prefix if self.bufs[args[0]] is not None else self.lang.smem_prefix}float4*){self.registers[args[0]].name})[{(args[1]//4).render(render_cl)}] = {self.group_float4(args[3])};")
       if uop == UOps.DEFINE_LOCAL:
         kk(self.lang.smem_prefix + f"float {args[0]}[{args[1]}];")
 
     buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else self.lang.buffer_prefix+"float*"+self.lang.buffer_suffix) for i,x in enumerate(self.bufs) if x is not None and not isinstance(x.realized, RawConst)]
     prg = ''.join([f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
       [', '.join([f'{t} data{i}' for i,t in buftypes] + self.lang.extra_args)] +
-      [") {\n"] + ['\n'.join(kernel), "\n}"])
+      [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
     if DEBUG >= 3:
       print(prg)
