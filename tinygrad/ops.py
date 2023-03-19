@@ -138,6 +138,7 @@ class Compiled:
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
     output.realized = output.output_buffer
     if output.realized is not None:
+      if isinstance(output.realized, RawConst): output.realized = None  # can't assign to RawConst
       for a in get_buffers(ast):
         if a.realized == output.realized and not a.st.contiguous:
           output.realized = None
