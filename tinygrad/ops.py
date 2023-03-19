@@ -134,10 +134,6 @@ class Compiled:
     else:
       prg = k.codegen().build(self.runtime)
 
-    if getenv("PRINT_AST", "") == prg.name or getenv("PRINT_AST", "") == "1":
-      k.print()
-      print(prg.prg)
-
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?

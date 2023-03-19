@@ -32,16 +32,11 @@ class Token:
 # ast kernel can contain one ReduceOp with arbitrary Binary/Unary ops
 class ASTKernel:
   def __init__(self, ast:LazyOp, output_buffer=None):
-    self.input_ast = ast
-
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     if ast.op == MovementOps.RESHAPE: ast = ast.src[0]
 
     self.bufs = [output_buffer] + dedup(get_buffers(ast))
     self.ast = ast
-
-    # fetch lazyop info (this can be cached!)
-    self.info: FlopCounter = get_lazyop_info(ast)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -50,6 +45,9 @@ class ASTKernel:
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
+
+    # fetch lazyop info
+    self.info: FlopCounter = get_lazyop_info(self.ast)
 
     reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
@@ -72,8 +70,7 @@ class ASTKernel:
     for st in self.sts: st.simplify()
 
     # make the output buffer shape correct in here
-    if self.reduceop is not None: self.sts[0].reshape(self.reduceop.arg)
-    else: self.sts[0].reshape([x.shape for x in self.bufs[1:] if x not in self.earlybufs][0])
+    self.sts[0].reshape(self.info.shape)
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
@@ -83,28 +80,6 @@ class ASTKernel:
     # simplify
     self.simplify_ones()
     self.simplify_merge_adjacent()
-
-
-  def print(self):
-    buf_count, op_count, cache = -1, -1, {}
-    def print_ast(x, name=None):
-      nonlocal buf_count, op_count
-      if x not in cache:
-        if not isinstance(x, LazyOp):
-          if name is None:
-            buf_count += 1
-            name = f"buf{buf_count}"
-          print(f"buf{buf_count} = {x}")
-          cache[x] = name
-        else:
-          srcs = [print_ast(y) for y in x.src]
-          if name is None:
-            op_count += 1
-            name = f"op{op_count}"
-          print(f"{name} = LazyOp({str(x.op)}, ({','.join(srcs)},), {x.arg})")
-          cache[x] = name
-      return cache[x]
-    print_ast(self.input_ast, "ast")
 
   def printbufs(self, prefix="", print_shapetrackers=False):
     print(f"first_reduce: {self.first_reduce} shape_len: {self.shape_len} group_for_reduce: {self.group_for_reduce}")
