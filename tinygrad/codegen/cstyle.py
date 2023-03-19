@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps
-from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.helpers import prod, getenv, DEBUG, all_same
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
 
@@ -40,6 +40,10 @@ class CStyleCodegen(Linearizer):
     BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
     BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})",
   }
+
+  def group_float4(self, grp:List[str]) -> str:
+    if all(g.endswith(e) for g,e in zip(grp, [".x", ".y", ".z", ".w"])) and all_same([g.split(".")[0] for g in grp]): return grp[0].split(".")[0]
+    else: return f"{self.lang.float4}({','.join(g for g in grp)})"
 
   def codegen(self):
     self.process()
@@ -107,14 +111,23 @@ class CStyleCodegen(Linearizer):
           kk(f"{args[2]} = {self.code_for_op[args[0]](*args[1])};")
         else:
           kk(f"float {newvar} = {self.code_for_op[args[0]](*args[1])};")
+      # TODO: refactor the next 14 lines
       if uop == UOps.LOAD:
+        val = f"{self.registers[args[0]].name}[{args[1].render(render_cl)}]"
         # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
-        if args[2].min == 1:
-          kk(f"float {newvar} = {args[0]}[{args[1].render(render_cl)}];")
-        else:
-          kk(f"float {newvar} = ({args[2].render(render_cl)}) ? ({args[0]}[{args[1].render(render_cl)}]) : 0.0f;")
+        if args[2].min == 1: kk(f"float {newvar} = {val};")
+        else: kk(f"float {newvar} = ({args[2].render(render_cl)}) ? ({val}) : 0.0f;")
+      if uop == UOps.LOAD4:
+        val = f"(({self.lang.buffer_prefix if self.bufs[args[0]] is not None else self.lang.smem_prefix}float4*){self.registers[args[0]].name})[{(args[1]//4).render(render_cl)}]"
+        # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
+        if args[2].min == 1: kk(f"float4 {newvar} = {val};")
+        else: kk(f"float4 {newvar} = ({args[2].render(render_cl)}) ? ({val}) : {self.group_float4(['0.0f']*4)};")
       if uop == UOps.STORE:
-        kk(f"{args[0]}[{args[1].render(render_cl)}] = {args[3]};")
+        assert args[2].min == 1, "store must be valid"
+        kk(f"{self.registers[args[0]].name}[{args[1].render(render_cl)}] = {args[3]};")
+      if uop == UOps.STORE4:
+        assert args[2].min == 1, "store must be valid"
+        kk(f"(({self.lang.buffer_prefix if self.bufs[args[0]] is not None else self.lang.smem_prefix}float4*){self.registers[args[0]].name})[{(args[1]//4).render(render_cl)}] = {self.group_float4(args[3])};")
       if uop == UOps.DEFINE_LOCAL:
         kk(self.lang.smem_prefix + f"float {args[0]}[{args[1]}];")
 

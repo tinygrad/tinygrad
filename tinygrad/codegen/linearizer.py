@@ -108,7 +108,8 @@ class Linearizer:
     def global_buf(i, idxs, store=None):
       should_upcast = self.registers[i].can_float4() and (self.bufs[i] is None or self.bufs[i].dtype != dtypes.float16 or isinstance(self.bufs[i].dtype, ImageDType))
       cache: Dict[int, str] = {}
-      def op(store_offset, offset):
+      store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.registers[i].offsets())}  # NOTE: for stores, these should be unique
+      def op(offset):
         if offset in cache: return cache[offset]
         will_merge = False
         if should_upcast and offset%4 == 0:
@@ -117,11 +118,24 @@ class Linearizer:
           # float4_index must not be in after divide or in valid
           will_merge = check_no_mul(idxy_test, float4_index)  and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()
         if store is not None:
-          self.uop(UOps.STORE, (self.registers[i].name, *self.sts[i].expr_idxs(offset, idxs), store[store_offset]))
+          if offset in store_offset:
+            if will_merge:
+              offsets = []
+              for j in range(0, 4):
+                offsets.append(store[store_offset[offset+j]])
+                del store_offset[offset+j]
+              self.uop(UOps.STORE4, (i, *self.sts[i].expr_idxs(offset, idxs), offsets))
+            else:
+              self.uop(UOps.STORE, (i, *self.sts[i].expr_idxs(offset, idxs), store[store_offset[offset]]))
+              del store_offset[offset]
         else:
-          cache[offset] = self.uop(UOps.LOAD, (self.registers[i].name, *self.sts[i].expr_idxs(offset, idxs)), self.registers[i].name+"_"+mnum(offset))
+          reg = self.uop(UOps.LOAD4 if will_merge else UOps.LOAD, (i, *self.sts[i].expr_idxs(offset, idxs)), self.registers[i].name+"_"+mnum(offset))
+          if will_merge:
+            for j in range(0, 4): cache[offset+j] = reg+"."+"xyzw"[j]
+          else:
+            cache[offset] = reg
           return cache[offset]
-      return [op(j,o) for j,o in enumerate(self.registers[i].offsets())]
+      return [op(o) for o in self.registers[i].offsets()]
 
     # parse AST
     loaded_buffers = {}
