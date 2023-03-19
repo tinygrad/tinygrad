@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 import io
 import unittest
+from tinygrad.helpers import getenv
 from extra.utils import fetch, fake_torch_load_zipped
 from PIL import Image
 
-class TestUtils(unittest.TestCase):
-  @unittest.skip("hangs sometimes")
+@unittest.skipIf(getenv("CI", "") != "", "no internet tests in CI")
+class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
     self.assertRaises(AssertionError, fetch, 'http://httpstat.us/500')
     self.assertRaises(AssertionError, fetch, 'http://httpstat.us/404')
@@ -19,6 +20,7 @@ class TestUtils(unittest.TestCase):
     pimg = Image.open(io.BytesIO(img))
     assert pimg.size == (705, 1024)
 
+class TestUtils(unittest.TestCase):
   def test_fake_torch_load_zipped(self):
     import torch
     import numpy as np
@@ -53,7 +55,6 @@ class TestUtils(unittest.TestCase):
         assert a.shape == b.shape
         assert a.dtype == b.dtype
         assert np.array_equal(a, b)
-
 
 if __name__ == '__main__':
   unittest.main()
