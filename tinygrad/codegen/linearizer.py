@@ -39,6 +39,8 @@ class Register:
   def __repr__(self): return f"<{self.name}{f'{self.axis}'}>"
 
 class Linearizer:
+  supports_float4: bool = True
+
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
@@ -106,7 +108,7 @@ class Linearizer:
 
     # TODO: add upcasting to float4 here
     def global_buf(i, idxs, store=None):
-      should_upcast = self.registers[i].can_float4() and (self.bufs[i] is None or self.bufs[i].dtype != dtypes.float16 or isinstance(self.bufs[i].dtype, ImageDType))
+      should_upcast = self.supports_float4 and self.registers[i].can_float4() and (self.bufs[i] is None or self.bufs[i].dtype != dtypes.float16 or isinstance(self.bufs[i].dtype, ImageDType))
       cache: Dict[int, str] = {}
       store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.registers[i].offsets())}  # NOTE: for stores, these should be unique
       def op(offset):

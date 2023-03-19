@@ -22,5 +22,6 @@ class ClangProgram:
 
 class ClangCodegen(CStyleCodegen):
   lang = CStyleLanguage(buffer_suffix=" restrict")
+  supports_float4: bool = False
 
 ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)

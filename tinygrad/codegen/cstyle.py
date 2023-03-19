@@ -27,6 +27,7 @@ class CStyleLanguage(NamedTuple):
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
+  supports_float4: bool = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
