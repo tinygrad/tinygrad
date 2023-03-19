@@ -115,8 +115,9 @@ class Linearizer:
         if should_upcast and offset%4 == 0:
           float4_index = Variable("FLOAT4_INDEX", 0, 3)
           idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
-          # float4_index must not be in after divide or in valid
-          will_merge = check_no_mul(idxy_test, float4_index)  and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()
+          #print(check_no_mul(idxy_test, float4_index), (idxy_test//4).render(), valid_test.render())
+          # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
+          will_merge = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()
         if store is not None:
           if offset in store_offset:
             if will_merge:
@@ -173,12 +174,8 @@ class Linearizer:
       # load earlybufs
       loaded_buffers.update({b:global_buf(i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
-      # run early AST
-      red = self.ast_parse(self.reduceop.src[0], None, loaded_buffers, ssa)
-
-      # accumulate
-      for o,r in zip(self.registers[self.full_buf_index].acc_offsets(), red):
-        self.uop(UOps.ALU, ({ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[cast(ReduceOps, self.reduceop.op)], (acc[o],r), acc[o]))
+      # run early AST (with reduce)
+      self.ast_parse(self.reduceop, [acc[off] for off in self.registers[self.full_buf_index].acc_offsets()], loaded_buffers, ssa, do_reduce=True)
 
       # end the reduce loop
       self.uop(UOps.ENDLOOP, (reduce_idxs, "reduce"))
@@ -204,13 +201,10 @@ class Linearizer:
         self.uop(UOps.LOOP, (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        red = global_buf(-1, end_local_idxs)
+        loaded_buffers["LOCAL_BUFFER"] = global_buf(-1, end_local_idxs)
 
-        # there's no AST here
-
-        # accumulate
-        for o,r in zip(self.registers[-1].acc_offsets(), red):
-          self.uop(UOps.ALU, ({ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[cast(ReduceOps, self.reduceop.op)], (acc[o],r), acc[o]))
+        # there's no AST here (and there's no shape for the reduce LazyOp)
+        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.registers[-1].acc_offsets()], loaded_buffers, ssa, do_reduce=True)
 
         # end the late reduce loop
         self.uop(UOps.ENDLOOP, (end_local_idxs, "late_reduce"))
@@ -240,12 +234,15 @@ class Linearizer:
     self.uops.append((uop, name, arg))
     return name
 
-  def ast_parse(self, x, acc, loaded_buffers, ssa) -> List[str]:
+  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[str]:
     if not isinstance(x, LazyOp): return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
-    if x.op in ReduceOps: return acc
+    if x.op in ReduceOps and not do_reduce: return acc
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
-    return [self.uop(UOps.ALU, (x.op, val), ssa('alu')) for val in zip(*values)]
+    if isinstance(x.op, ReduceOps):
+      return [self.uop(UOps.ALU, ({ReduceOps.SUM: BinaryOps.ADD, ReduceOps.MAX: BinaryOps.MAX}[x.op], val, val[0]), None) for val in zip(acc, *values)]
+    else:
+      return [self.uop(UOps.ALU, (x.op, val), ssa('alu')) for val in zip(*values)]
 
   @property
   def first_reduce(self) -> int: return get_first_reduce([x.shape for i,x in enumerate(self.sts) if self.bufs[i] is not None])

@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps
+from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import prod, getenv, DEBUG, all_same
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
@@ -38,7 +38,7 @@ class CStyleCodegen(Linearizer):
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
-    BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})",
+    BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})"
   }
 
   def group_float4(self, grp:List[str]) -> str:
