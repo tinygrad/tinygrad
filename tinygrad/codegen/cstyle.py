@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import prod, getenv, DEBUG, all_same, partition, ImageDType
+from tinygrad.helpers import prod, getenv, all_same, partition, ImageDType
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 
@@ -172,9 +172,6 @@ class CStyleCodegen(Linearizer):
     prg = ''.join([f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
       [', '.join([f'{t} data{i}' for i,t in buftypes] + self.lang.extra_args)] +
       [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
-
-    if DEBUG >= 3:
-      print(prg)
 
     # if we have local_sizes, we have to correct the global_size
     for i,s in enumerate(local_size): global_size[i] *= s

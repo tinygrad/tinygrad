@@ -117,9 +117,9 @@ class Linearizer:
         if should_upcast and offset%4 == 0:
           float4_index = Variable("FLOAT4_INDEX", 0, 3)
           idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
-          #print(check_no_mul(idxy_test, float4_index), (idxy_test//4).render(), valid_test.render())
+          if DEBUG >= 4: print(f"attempting to fuse buf {i} :", check_no_mul(idxy_test, float4_index), idxy_test//4, valid_test//4)
           # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
-          will_merge = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in valid_test.render()
+          will_merge = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in (valid_test//4).render()
         if store is not None:
           if offset in store_offset:
             if will_merge:

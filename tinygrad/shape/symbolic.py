@@ -38,6 +38,12 @@ class Node:
     assert b != 0
     if b < 0: return (self//-b)*-1
     if b == 1: return self
+
+    # this is a hack to make div work with boolean nodes. TODO: make generic
+    if isinstance(self, GeNode): return (self.a//b) >= (self.b//b)
+    if isinstance(self, LtNode): return (self.a//b) < (self.b//b)
+    if isinstance(self, AndNode): return Variable.ands([x//b for x in self.nodes])
+
     if isinstance(self, ModNode) and self.b % b == 0: return (self.a//b) % (self.b//b) # put the div inside mod
     if isinstance(self, DivNode): return self.a//(self.b*b) # two divs is one div
     if isinstance(self, MulNode) and self.b % b == 0: return self.a*(self.b//b)
