@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import getenv, all_same, partition, ImageDType, DEBUG
+from tinygrad.helpers import getenv, all_same, partition, ImageDType, DEBUG, dtypes
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 
@@ -24,6 +24,7 @@ class CStyleLanguage(NamedTuple):
   extra_args: List[str] = []
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
+  uses_vload: bool = False
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -155,7 +156,10 @@ class CStyleCodegen(Linearizer):
           # nan? inf?
           val = f"{self.bufs[args[0]].realized._buf}f"
         else:
-          val = f"{self.registers[args[0]].name}[{args[1].render(render_cl)}]"
+          if self.lang.uses_vload and self.bufs[args[0]].dtype == dtypes.float16:
+            val = f"vload_half({args[1].render(render_cl)}, {self.registers[args[0]].name})"
+          else:
+            val = f"{self.registers[args[0]].name}[{args[1].render(render_cl)}]"
         # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
         if args[2].min == 1: kk(f"float {newvar} = {val};")
         else: kk(f"float {newvar} = ({args[2].render(render_cl)}) ? ({val}) : 0.0f;")
@@ -171,7 +175,10 @@ class CStyleCodegen(Linearizer):
         else: kk(f"float4 {newvar} = ({args[2].render(render_cl)}) ? ({val}) : {self.group_float4(['0.0f']*4)};")
       if uop == UOps.STORE:
         assert args[2].min == 1, "store must be valid"
-        kk(f"{self.registers[args[0]].name}[{args[1].render(render_cl)}] = {args[3]};")
+        if self.lang.uses_vload and self.bufs[args[0]].dtype == dtypes.float16:
+          kk(f"vstore_half({args[3]}, {args[1].render(render_cl)}, {self.registers[args[0]].name});")
+        else:
+          kk(f"{self.registers[args[0]].name}[{args[1].render(render_cl)}] = {args[3]};")
       if uop == UOps.STORE4:
         assert args[2].min == 1, "store must be valid"
         if self.bufs[args[0]] is not None and isinstance(self.bufs[args[0]].dtype, ImageDType):
@@ -182,9 +189,9 @@ class CStyleCodegen(Linearizer):
       if uop == UOps.DEFINE_LOCAL:
         kk(self.lang.smem_prefix + f"float {args[0]}[{args[1]}];")
 
-    buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else self.lang.buffer_prefix+"float*"+self.lang.buffer_suffix) for i,x in enumerate(self.bufs) if x is not None and not isinstance(x.realized, RawConst)]
+    buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else self.lang.buffer_prefix+x.dtype.name+"*"+self.lang.buffer_suffix) for i,x in enumerate(self.bufs) if x is not None and not isinstance(x.realized, RawConst)]
     prg = ''.join([f"{self.lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
-      [', '.join([f'{t} data{i}' for i,t in buftypes] + self.lang.extra_args)] +
+      [', '.join([f'{"const" if i > 0 else ""} {t} data{i}' for i,t in buftypes] + self.lang.extra_args)] +
       [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
     # if we have local_sizes, we have to correct the global_size

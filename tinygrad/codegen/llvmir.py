@@ -85,13 +85,17 @@ class LLVMIRCodegen(Linearizer):
         idx, valid = args[1].render(render_llvm, bb[-1]), args[2].render(render_llvm, bb[-1])
         if args[2].min == 0:
           aug_idx = bb[-1].select(valid, idx, int_const(0))
-          lvars[newvar] = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[args[0]], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[args[0]], 0))
+          val= bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[args[0]], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[args[0]], 0))
         else:
-          lvars[newvar] = bb[-1].load(bb[-1].gep(func.args[args[0]], [idx], inbounds=True))
+          val = bb[-1].load(bb[-1].gep(func.args[args[0]], [idx], inbounds=True))
+        if func_dtypes[args[0]] != ir.FloatType(): val = bb[-1].fpext(val, ir.FloatType())
+        lvars[newvar] = val
       if uop == UOps.STORE:
         assert args[2].min == 1, "store must be valid"
         idx = args[1].render(render_llvm, bb[-1])
-        bb[-1].store(lvars[args[3]], bb[-1].gep(func.args[args[0]], [idx], inbounds=True))
+        element = lvars[args[3]]
+        if func_dtypes[0] != ir.FloatType(): element = bb[-1].fptrunc(element, func_dtypes[0])
+        bb[-1].store(element, bb[-1].gep(func.args[args[0]], [idx], inbounds=True))
       if uop == UOps.ALU:
         lvars[newvar if newvar is not None else args[2]] = self.code_for_op[args[0]](bb[-1], *[lvars[x] for x in args[1]])
 

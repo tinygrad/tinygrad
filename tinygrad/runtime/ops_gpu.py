@@ -6,7 +6,6 @@ from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
-from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 OSX = platform.system() == "Darwin"
@@ -69,21 +68,11 @@ class CLProgram:
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
     return None
 
-if getenv("OLD"):
-  class OldCLCodegen(GPUCodegen):
-    lang = GPULanguage(
-      kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
-      half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
-      barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-      gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
+class CLCodegen(CStyleCodegen):
+  lang = CStyleLanguage(
+    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
+    barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
+    gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
 
-  GPUBuffer = Compiled(CLBuffer, OldCLCodegen, CLProgram)
-else:
-  class CLCodegen(CStyleCodegen):
-    lang = CStyleLanguage(
-      kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
-      half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
-      barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
-      gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)])
-
-  GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram)
+GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram)

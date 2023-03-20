@@ -3,7 +3,6 @@ from typing import ClassVar
 from tinygrad.ops import Compiled
 from tinygrad.helpers import getenv, DEBUG
 from ctypes import CFUNCTYPE
-from tinygrad.codegen.llvm import LLVMCodegen
 from tinygrad.codegen.llvmir import LLVMIRCodegen
 from tinygrad.runtime.lib import RawMallocBuffer
 
@@ -63,7 +62,4 @@ class LLVMProgram:
     cfunc(*[x._buf for x in bufs])
     if wait: return time.monotonic()-st
 
-if getenv("OLD"):
-  LLVMBuffer = Compiled(RawMallocBuffer, LLVMCodegen, LLVMProgram)
-else:
-  LLVMBuffer = Compiled(RawMallocBuffer, LLVMIRCodegen, LLVMProgram)
+LLVMBuffer = Compiled(RawMallocBuffer, LLVMIRCodegen, LLVMProgram)
