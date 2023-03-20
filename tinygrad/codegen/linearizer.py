@@ -106,6 +106,29 @@ class Linearizer:
     if DEBUG >= 4: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test//4, valid_test//4)
     return ret
 
+  def global_buf(self, i, idxs:List[Variable], store=None):
+    should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
+    cache: Dict[int, str] = {}
+    store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
+    def op(offset):
+      if offset in cache: return cache[offset]
+      will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
+      if store is not None:
+        if offset in store_offset:
+          offsets = []
+          for j in range(0, 4 if will_merge else 1):
+            offsets.append(store[store_offset[offset+j]])
+            del store_offset[offset+j]
+          self.uop(UOps.STORE4 if will_merge else UOps.STORE, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+      else:
+        reg = self.uop(UOps.LOAD4 if will_merge else UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+        if will_merge:
+          for j in range(0, 4): cache[offset+j] = reg+"."+"xyzw"[j]
+        else:
+          cache[offset] = reg
+        return cache[offset]
+    return [op(o) for o in self.offsets(i)]
+
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
@@ -119,29 +142,6 @@ class Linearizer:
 
     # print
     if DEBUG >= 3: self.printbufs()
-
-    def global_buf(i, idxs:List[Variable], store=None):
-      should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
-      cache: Dict[int, str] = {}
-      store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
-      def op(offset):
-        if offset in cache: return cache[offset]
-        will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
-        if store is not None:
-          if offset in store_offset:
-            offsets = []
-            for j in range(0, 4 if will_merge else 1):
-              offsets.append(store[store_offset[offset+j]])
-              del store_offset[offset+j]
-            self.uop(UOps.STORE4 if will_merge else UOps.STORE, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-        else:
-          reg = self.uop(UOps.LOAD4 if will_merge else UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-          if will_merge:
-            for j in range(0, 4): cache[offset+j] = reg+"."+"xyzw"[j]
-          else:
-            cache[offset] = reg
-          return cache[offset]
-      return [op(o) for o in self.offsets(i)]
 
     # parse AST
     loaded_buffers = {}
@@ -177,7 +177,7 @@ class Linearizer:
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # load earlybufs
-      loaded_buffers.update({b:global_buf(i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+      loaded_buffers.update({b:self.global_buf(i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
       # run early AST (with reduce)
       self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
@@ -187,7 +187,7 @@ class Linearizer:
 
       # end the local loop, do the local reduce
       if self.group_for_reduce:
-        global_buf(-1, local_idxs, acc)  # store accumulators
+        self.global_buf(-1, local_idxs, acc)  # store accumulators
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
 
         # if any group_for_reduce items aren't reduces, upcast them here
@@ -206,7 +206,7 @@ class Linearizer:
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = global_buf(-1, end_local_idxs)
+        loaded_buffers["LOCAL_BUFFER"] = self.global_buf(-1, end_local_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
@@ -215,13 +215,13 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:global_buf(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
+    loaded_buffers.update({b:self.global_buf(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    global_buf(0, global_idxs, val)
+    self.global_buf(0, global_idxs, val)
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
@@ -278,10 +278,30 @@ class Linearizer:
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
       print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
-      #print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s} {str(self.registers[i]):38s}", self.sts[i].views)
     print(self.colorshape())
 
   # ******************** base simplifiers ********************
+
+  # apply reshape and permute to all shapetrackers
+  def reshape_and_permute(self, new_shape_fxn, axis):
+    for st in self.sts:
+      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
+      if axis is not None: st.permute(tuple(axis))
+
+  # drops the final dimension
+  def upcast(self):
+    assert self.full_shape[-1] != 1, "can't upcast a dimension with size 1"
+    self.upcasted += 1
+
+  # ******************** complex simplifiers ********************
+
+  def simplify_ones(self):
+    # remove places where the shape is all ones
+    # TODO: this should be factored in to multi shape stride
+    all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
+    # keep at least 1 one
+    if all(all_ones): all_ones[-1] = False
+    self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
 
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
@@ -305,22 +325,6 @@ class Linearizer:
     # do the reshapes
     for i,x in enumerate(rets): self.sts[i].reshape(tuple(y[0] for y in x))
 
-  def simplify_ones(self):
-    # remove places where the shape is all ones
-    # TODO: this should be factored in to multi shape stride
-    all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
-    # keep at least 1 one
-    if all(all_ones): all_ones[-1] = False
-    self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
-
-  # apply reshape and permute to all shapetrackers
-  def reshape_and_permute(self, new_shape_fxn, axis):
-    for st in self.sts:
-      if new_shape_fxn is not None: st.reshape(tuple(new_shape_fxn(st.shape)))
-      if axis is not None: st.permute(tuple(axis))
-
-  # ******************** complex simplifiers ********************
-
   # axis : the axis to pull from
   # amount : the amount to take
   # top : if you want to pull that amount from the top
@@ -332,11 +336,6 @@ class Linearizer:
     self.reshape_and_permute(
       lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
       [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
-
-  # drops the final dimension
-  def upcast(self):
-    assert self.full_shape[-1] != 1, "can't upcast a dimension with size 1"
-    self.upcasted += 1
 
   # ******************** GPU simplifiers ********************
 
