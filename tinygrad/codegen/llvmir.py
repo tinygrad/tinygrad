@@ -1,7 +1,7 @@
-from typing import Final, Dict, Callable, Any, List, Optional, Tuple
+from typing import Final, Dict, Callable, Any, List, Optional
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import Linearizer, UOps
+from tinygrad.codegen.linearizer import Linearizer, UOps, UOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
 from tinygrad.lazy import LazyBuffer
@@ -32,7 +32,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   FusedOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(y,z, flags=('fast',)), x, flags=('fast',)),
 }
 
-def uops_to_llvm_ir(uops:List[Tuple[UOps, Optional[str], Any]], bufs:List[LazyBuffer]) -> str:
+def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -51,9 +51,9 @@ def uops_to_llvm_ir(uops:List[Tuple[UOps, Optional[str], Any]], bufs:List[LazyBu
   lvars: Dict[Optional[str], Any] = {}  # this Any is an llvm type
   render_llvm[Variable] = lambda self,ops,ctx: lvars[self.expr]
 
-  for uop,newvar,args in uops:
+  for uop,newvar,vin,args in uops:
     if uop == UOps.CONST:
-      lvars[newvar] = ir.Constant(ir.FloatType(), args[0])
+      lvars[newvar] = ir.Constant(ir.FloatType(), args)
       reduce_phis.append(newvar)
     if uop == UOps.LOOP:
       for var in args[0]:
@@ -81,22 +81,22 @@ def uops_to_llvm_ir(uops:List[Tuple[UOps, Optional[str], Any]], bufs:List[LazyBu
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{var.expr}")))
         bb[-2].cbranch(bb[-2].icmp_unsigned("==", idx_p1, int_const(var.max+1)), bb[-1]._block, block._block)
     if uop == UOps.LOAD:
-      idx, valid = args[1].render(render_llvm, bb[-1]), args[2].render(render_llvm, bb[-1])
-      if args[2].min == 0:
+      idx, valid = args.idx.render(render_llvm, bb[-1]), args.valid.render(render_llvm, bb[-1])
+      if args.valid.min == 0:
         aug_idx = bb[-1].select(valid, idx, int_const(0))
-        val= bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[args[0]], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[args[0]], 0))
+        val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[args.i], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[args[0]], 0))
       else:
-        val = bb[-1].load(bb[-1].gep(func.args[args[0]], [idx], inbounds=True))
-      if func_dtypes[args[0]] != ir.FloatType(): val = bb[-1].fpext(val, ir.FloatType())
+        val = bb[-1].load(bb[-1].gep(func.args[args.i], [idx], inbounds=True))
+      if func_dtypes[args.i] != ir.FloatType(): val = bb[-1].fpext(val, ir.FloatType())
       lvars[newvar] = val
     if uop == UOps.STORE:
-      assert args[2].min == 1, "store must be valid"
-      idx = args[1].render(render_llvm, bb[-1])
-      element = lvars[args[3]]
+      assert args.valid.min == 1, "store must be valid"
+      idx = args.idx.render(render_llvm, bb[-1])
+      element = lvars[vin[0]]
       if func_dtypes[0] != ir.FloatType(): element = bb[-1].fptrunc(element, func_dtypes[0])
-      bb[-1].store(element, bb[-1].gep(func.args[args[0]], [idx], inbounds=True))
+      bb[-1].store(element, bb[-1].gep(func.args[args.i], [idx], inbounds=True))
     if uop == UOps.ALU:
-      lvars[newvar if newvar is not None else args[2]] = code_for_op[args[0]](bb[-1], *[lvars[x] for x in args[1]])
+      lvars[newvar] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
 
   bb[-1].ret_void()
   return str(module)

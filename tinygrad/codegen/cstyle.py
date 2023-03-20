@@ -1,6 +1,6 @@
-from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set, Any
+from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set
 import math, collections
-from tinygrad.codegen.linearizer import Linearizer, UOps
+from tinygrad.codegen.linearizer import Linearizer, UOps, UOp
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import getenv, all_same, partition, ImageDType, DEBUG, dtypes
 from tinygrad.runtime.lib import RawConst
@@ -56,7 +56,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({b}*{c})+{a})"
 }
 
-def uops_to_cstyle(uops:List[Tuple[UOps, Optional[str], Any]], bufs:List[LazyBuffer], bufnames:List[str], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_cstyle(uops:List[UOp], bufs:List[LazyBuffer], bufnames:List[str], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   def group_float4(grp:List[str]) -> str:
     if all(g.endswith(e) for g,e in zip(grp, [".x", ".y", ".z", ".w"])) and all_same([g.split(".")[0] for g in grp]): return grp[0].split(".")[0]
     else: return f"{lang.float4}({','.join(g for g in grp)})"
@@ -70,7 +70,7 @@ def uops_to_cstyle(uops:List[Tuple[UOps, Optional[str], Any]], bufs:List[LazyBuf
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
 
-  for uop,newvar,args in uops:
+  for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
       root = None
       for i,var in enumerate(args[0]):
@@ -115,52 +115,52 @@ def uops_to_cstyle(uops:List[Tuple[UOps, Optional[str], Any]], bufs:List[LazyBuf
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     if uop == UOps.CONST:
-      if args[0] == -math.inf:
+      if args == -math.inf:
         kk(f"float {newvar} = -INFINITY;")
       else:
-        kk(f"float {newvar} = {args[0]}f;")
+        kk(f"float {newvar} = {args}f;")
     if uop == UOps.ALU:
-      if newvar is None:
-        kk(f"{args[2]} = {code_for_op[args[0]](*args[1])};")
+      if newvar in vin:
+        kk(f"{newvar} = {code_for_op[args](*vin)};")
       else:
-        kk(f"float {newvar} = {code_for_op[args[0]](*args[1])};")
+        kk(f"float {newvar} = {code_for_op[args](*vin)};")
     # TODO: refactor the next 14 lines
     if uop == UOps.LOAD:
       # TODO: merge with CONST?
-      if bufs[args[0]] is not None and isinstance(bufs[args[0]].realized, RawConst):
+      if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
         # nan? inf?
-        val = f"{bufs[args[0]].realized._buf}f"
+        val = f"{bufs[args.i].realized._buf}f"
       else:
-        if lang.uses_vload and bufs[args[0]] is not None and bufs[args[0]].dtype == dtypes.float16:
-          val = f"vload_half({args[1].render(render_cl)}, {bufnames[args[0]]})"
+        if lang.uses_vload and bufs[args.i] is not None and bufs[args.i].dtype == dtypes.float16:
+          val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
         else:
-          val = f"{bufnames[args[0]]}[{args[1].render(render_cl)}]"
+          val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
-      if args[2].min == 1: kk(f"float {newvar} = {val};")
-      else: kk(f"float {newvar} = ({args[2].render(render_cl)}) ? ({val}) : 0.0f;")
+      if args.valid.min == 1: kk(f"float {newvar} = {val};")
+      else: kk(f"float {newvar} = ({args.valid.render(render_cl)}) ? ({val}) : 0.0f;")
     if uop == UOps.LOAD4:
-      if bufs[args[0]] is not None and isinstance(bufs[args[0]].dtype, ImageDType):
+      if bufs[args.i] is not None and isinstance(bufs[args.i].dtype, ImageDType):
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
-        idx, idy = to_image_idx(bufs[args[0]].dtype.shape, args[1], args[2])
-        val = f"read_imagef({bufnames[args[0]]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
+        idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
+        val = f"read_imagef({bufnames[args.i]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
       else:
-        val = f"(({lang.buffer_prefix if bufs[args[0]] is not None else lang.smem_prefix}float4*){bufnames[args[0]]})[{(args[1]//4).render(render_cl)}]"
+        val = f"(({lang.buffer_prefix if bufs[args.i] is not None else lang.smem_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args[2].min == 1: kk(f"float4 {newvar} = {val};")
-      else: kk(f"float4 {newvar} = ({args[2].render(render_cl)}) ? ({val}) : {group_float4(['0.0f']*4)};")
+      else: kk(f"float4 {newvar} = ({args.valid.render(render_cl)}) ? ({val}) : {group_float4(['0.0f']*4)};")
     if uop == UOps.STORE:
-      assert args[2].min == 1, "store must be valid"
-      if lang.uses_vload and bufs[args[0]] is not None and bufs[args[0]].dtype == dtypes.float16:
-        kk(f"vstore_half({args[3]}, {args[1].render(render_cl)}, {bufnames[args[0]]});")
+      assert args.valid.min == 1, "store must be valid"
+      if lang.uses_vload and bufs[args.i] is not None and bufs[args.i].dtype == dtypes.float16:
+        kk(f"vstore_half({vin[0]}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
-        kk(f"{bufnames[args[0]]}[{args[1].render(render_cl)}] = {args[3]};")
+        kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {vin[0]};")
     if uop == UOps.STORE4:
-      assert args[2].min == 1, "store must be valid"
-      if bufs[args[0]] is not None and isinstance(bufs[args[0]].dtype, ImageDType):
-        idx, idy = to_image_idx(bufs[args[0]].dtype.shape, args[1], args[2])
-        kk(f"write_imagef({bufnames[args[0]]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {group_float4(args[3])});")
+      assert args.valid.min == 1, "store must be valid"
+      if bufs[args.i] is not None and isinstance(bufs[args[0]].dtype, ImageDType):
+        idx, idy = to_image_idx(bufs[args.i].dtype.shape, args[1], args[2])
+        kk(f"write_imagef({bufnames[args.i]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {group_float4(vin)});")
       else:
-        kk(f"(({lang.buffer_prefix if bufs[args[0]] is not None else lang.smem_prefix}float4*){bufnames[args[0]]})[{(args[1]//4).render(render_cl)}] = {group_float4(args[3])};")
+        kk(f"(({lang.buffer_prefix if bufs[args.i] is not None else lang.smem_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {group_float4(vin)};")
     if uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
 
