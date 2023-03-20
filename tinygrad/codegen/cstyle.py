@@ -156,7 +156,7 @@ class CStyleCodegen(Linearizer):
           # nan? inf?
           val = f"{self.bufs[args[0]].realized._buf}f"
         else:
-          if self.lang.uses_vload and self.bufs[args[0]].dtype == dtypes.float16:
+          if self.lang.uses_vload and self.bufs[args[0]] is not None and self.bufs[args[0]].dtype == dtypes.float16:
             val = f"vload_half({args[1].render(render_cl)}, {self.registers[args[0]].name})"
           else:
             val = f"{self.registers[args[0]].name}[{args[1].render(render_cl)}]"
@@ -175,7 +175,7 @@ class CStyleCodegen(Linearizer):
         else: kk(f"float4 {newvar} = ({args[2].render(render_cl)}) ? ({val}) : {self.group_float4(['0.0f']*4)};")
       if uop == UOps.STORE:
         assert args[2].min == 1, "store must be valid"
-        if self.lang.uses_vload and self.bufs[args[0]].dtype == dtypes.float16:
+        if self.lang.uses_vload and self.bufs[args[0]] is not None and self.bufs[args[0]].dtype == dtypes.float16:
           kk(f"vstore_half({args[3]}, {args[1].render(render_cl)}, {self.registers[args[0]].name});")
         else:
           kk(f"{self.registers[args[0]].name}[{args[1].render(render_cl)}] = {args[3]};")
