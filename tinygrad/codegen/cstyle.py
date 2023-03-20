@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import prod, getenv, all_same, partition, ImageDType
+from tinygrad.helpers import prod, getenv, all_same, partition, ImageDType, DEBUG
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 
@@ -42,7 +42,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
         idy += 1
   else:
     idx = (idxy//4)%base_shape[1]
-  #print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
+  if DEBUG >= 5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
   return idx, idy
 
 class CStyleCodegen(Linearizer):
@@ -69,6 +69,19 @@ class CStyleCodegen(Linearizer):
 
   def codegen(self):
     self.process()
+
+    # sometimes, there's more dimensions than len(self.lang.gid).
+    # compact all the dimensions into the first
+    # NOTE: this might make multiview shapetrackers
+    # NOTE: you ABSOLUTELY must do this before upcasting. the strides on the upcast are wrong if you don't
+    # TODO: this exposes bugs in the optimizers assuming the strides are on a single view
+    """
+    if len(self.lang.gid) and self.first_reduce > len(self.lang.gid):
+      num_to_merge = (self.first_reduce - len(self.lang.gid))+1
+      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
+      if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
+    """
+
     self.hand_coded_optimizations()
     self.linearize()
 
@@ -106,6 +119,7 @@ class CStyleCodegen(Linearizer):
                 kk(f"{{ int {var.expr} = {self.lang.gid[len(args[0])-1-i]};  /* {var.max+1} */")
                 global_size.append(var.max+1)
             elif args[1] == "local" and self.lang.lid:
+              assert len(args[0]) <= len(self.lang.lid)
               kk(f"{{ int {var.expr} = {self.lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
               local_size.append(var.max+1)
             else:
