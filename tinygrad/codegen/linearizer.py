@@ -143,6 +143,10 @@ class Linearizer:
     # print
     if DEBUG >= 3: self.printbufs()
 
+    # kernel name (before late upcast)
+    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
+    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'black', bright=True).join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())]) + " " * (23-len(self.function_name))
+
     # parse AST
     loaded_buffers = {}
     acc = []
@@ -226,9 +230,6 @@ class Linearizer:
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
-    # kernel function definition
-    self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
-
   def uop(self, uop:UOps, out:Optional[str], vin:List[str], arg:Any):
     self.uops.append(UOp(uop, out, vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
@@ -262,7 +263,7 @@ class Linearizer:
   @property
   def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
 
-  def colorshape(self) -> str:
+  def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
     colors = ["blue"] * self.first_reduce
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
@@ -271,14 +272,13 @@ class Linearizer:
     colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce)))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.shape_len-self.upcasted, self.shape_len)]
-    print(colors, self.shape_len)
     assert len(colors) == self.shape_len, "colors size mismatch"
-    return ' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, colors))
+    return colors
 
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
       print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
-    print(self.colorshape())
+    print(' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors())))
 
   # ******************** base simplifiers ********************
 
@@ -292,6 +292,18 @@ class Linearizer:
   def upcast(self):
     assert self.full_shape[-1] != 1, "can't upcast a dimension with size 1"
     self.upcasted += 1
+
+  # axis : the axis to pull from
+  # amount : the amount to take
+  # top : if you want to pull that amount from the top
+  # insert_before : place to insert the new stuff
+  def shift_to(self, axis, amount, top=False, insert_before=None):
+    if insert_before is None: insert_before = self.shape_len
+    move_axis = axis if top else axis+1
+    if move_axis < insert_before: insert_before += 1
+    self.reshape_and_permute(
+      lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
 
   # ******************** complex simplifiers ********************
 
@@ -325,18 +337,6 @@ class Linearizer:
     # do the reshapes
     for i,x in enumerate(rets): self.sts[i].reshape(tuple(y[0] for y in x))
 
-  # axis : the axis to pull from
-  # amount : the amount to take
-  # top : if you want to pull that amount from the top
-  # insert_before : place to insert the new stuff
-  def shift_to(self, axis, amount, top=False, insert_before=None):
-    if insert_before is None: insert_before = self.shape_len
-    move_axis = axis if top else axis+1
-    if move_axis < insert_before: insert_before += 1
-    self.reshape_and_permute(
-      lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
-      [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
-
   # ******************** GPU simplifiers ********************
 
   def required_optimizations(self, early_only=False):
@@ -362,7 +362,7 @@ class Linearizer:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
-          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce)
+          self.shift_to(self.first_reduce, sz, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
           self.group_for_reduce.append(sz)
           break
 
