@@ -103,7 +103,7 @@ class Linearizer:
     idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
     # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
     ret = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in (valid_test//4).render()
-    if DEBUG >= 4: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test//4, valid_test//4)
+    if DEBUG >= 4: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test, idxy_test//4, valid_test//4)
     return ret
 
   def global_buf(self, i, idxs:List[Variable], store=None):
@@ -112,14 +112,15 @@ class Linearizer:
     store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
     def op(offset):
       if offset in cache: return cache[offset]
+      if offset not in store_offset: return
       will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
+      assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
       if store is not None:
-        if offset in store_offset:
-          offsets = []
-          for j in range(0, 4 if will_merge else 1):
-            offsets.append(store[store_offset[offset+j]])
-            del store_offset[offset+j]
-          self.uop(UOps.STORE4 if will_merge else UOps.STORE, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+        offsets = []
+        for j in range(0, 4 if will_merge else 1):
+          offsets.append(store[store_offset[offset+j]])
+          del store_offset[offset+j]
+        self.uop(UOps.STORE4 if will_merge else UOps.STORE, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
       else:
         reg = self.uop(UOps.LOAD4 if will_merge else UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
         if will_merge:
