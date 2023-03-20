@@ -6,7 +6,7 @@ from pycuda.compiler import compile as cuda_compile # type: ignore
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
-from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
+from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 class RawCUDABuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype): super().__init__(size, dtype, cuda.mem_alloc(size * dtype.itemsize))
@@ -38,8 +38,8 @@ class CUDAProgram:
       end.synchronize()
       return start.time_till(end)*1e-3
 
-class CUDACodegen(GPUCodegen):
-  lang = GPULanguage(
+class CUDACodegen(CStyleCodegen):
+  lang = CStyleLanguage(
     kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
     half_prekernel = "#include <cuda_fp16.h>",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
