@@ -101,6 +101,14 @@ class Linearizer:
     self.registers = [Register(f"data{i}") for i in range(len(self.bufs))]
     self.group_for_reduce: List[int] = []
 
+  def can_merge_float4(self, i:int, idxs:List[Variable], offset:int) -> bool:
+    if offset%4 != 0: return False
+    float4_index = Variable("FLOAT4_INDEX", 0, 3)
+    idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
+    if DEBUG >= 4: print(f"attempting to fuse buf {i} :", check_no_mul(idxy_test, float4_index), idxy_test//4, valid_test//4)
+    # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
+    return check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in (valid_test//4).render()
+
   def linearize(self):
     # uops
     self.uops: List[UOp] = []
@@ -119,31 +127,20 @@ class Linearizer:
       self.registers.append(buftoken)
       self.uop(UOps.DEFINE_LOCAL, None, [], (self.registers[-1].name, self.sts[-1].size()*self.registers[-1].size()))
 
-    # TODO: add upcasting to float4 here
-    def global_buf(i, idxs, store=None):
+    def global_buf(i, idxs:List[Variable], store=None):
       should_upcast = self.supports_float4 and self.registers[i].can_float4() and (self.bufs[i] is None or self.bufs[i].dtype != dtypes.float16 or isinstance(self.bufs[i].dtype, ImageDType))
       cache: Dict[int, str] = {}
       store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.registers[i].offsets())}  # NOTE: for stores, these should be unique
       def op(offset):
         if offset in cache: return cache[offset]
-        will_merge = False
-        if should_upcast and offset%4 == 0:
-          float4_index = Variable("FLOAT4_INDEX", 0, 3)
-          idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
-          if DEBUG >= 4: print(f"attempting to fuse buf {i} :", check_no_mul(idxy_test, float4_index), idxy_test//4, valid_test//4)
-          # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
-          will_merge = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in (valid_test//4).render()
+        will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
         if store is not None:
           if offset in store_offset:
-            if will_merge:
-              offsets = []
-              for j in range(0, 4):
-                offsets.append(store[store_offset[offset+j]])
-                del store_offset[offset+j]
-              self.uop(UOps.STORE4, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-            else:
-              self.uop(UOps.STORE, None, [store[store_offset[offset]]], MemOp(i, *self.sts[i].expr_idxs(offset, idxs), ))
-              del store_offset[offset]
+            offsets = []
+            for j in range(0, 4 if will_merge else 1):
+              offsets.append(store[store_offset[offset+j]])
+              del store_offset[offset+j]
+            self.uop(UOps.STORE4 if will_merge else UOps.STORE, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
         else:
           reg = self.uop(UOps.LOAD4 if will_merge else UOps.LOAD, self.registers[i].name+"_"+mnum(offset), [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
           if will_merge:
