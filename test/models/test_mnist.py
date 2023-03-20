@@ -94,13 +94,12 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, steps=100)
     assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
 
-  @unittest.skip("slow and training batchnorm is broken")
   def test_conv_with_bn(self):
     np.random.seed(1337)
     model = TinyConvNet(has_batchnorm=True)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=100)
-    assert evaluate(model, X_test, Y_test) > 0.7 # TODO: batchnorm doesn't work!!!
+    optimizer = optim.AdamW(model.parameters(), lr=0.003)
+    train(model, X_train, Y_train, optimizer, steps=200)
+    assert evaluate(model, X_test, Y_test) > 0.94
 
   def test_sgd(self):
     np.random.seed(1337)
