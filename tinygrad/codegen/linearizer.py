@@ -85,6 +85,9 @@ class Linearizer:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
+    # print early
+    if DEBUG >= 5: self.printbufs("early")
+
   # NOTE: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],

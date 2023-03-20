@@ -103,8 +103,7 @@ class LazyBuffer:
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
 
-  def realize(self:LazyBuffer, required_device=None) -> LazyBuffer:
-    assert required_device is None or required_device == self.device
+  def realize(self:LazyBuffer) -> LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
@@ -113,7 +112,7 @@ class LazyBuffer:
         else:
           self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
       elif self.op.op == LoadOps.CONTIGUOUS:
-        realized = self.op.src[0].realize(self.device).realized
+        realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
           self.realized = realized
@@ -122,14 +121,14 @@ class LazyBuffer:
           self.op = LazyOp(UnaryOps.NOOP, self.op.src)
       elif self.op.op == LoadOps.CUSTOM:
         # this needs to immediately realize
-        self.realized = self.op.arg(self, *[x.realize(self.device) for x in self.op.src])
+        self.realized = self.op.arg(self, *[x.realize() for x in self.op.src])
       # these can be late folded and change the op to go further back in the graph
       elif self.optype == ReduceOps: self.op = _ast_reduceops(self)
       elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
 
       # run the ast if we still have to, and log the op
       if self.realized is None:
-        for x in get_buffers(self.op): x.realize(self.device)
+        for x in get_buffers(self.op): x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if self.optype != MovementOps and isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or self.shape[self.st.strides.index(1)]%4 != 0):
@@ -140,17 +139,17 @@ class LazyBuffer:
 
         self.realized = Device[self.device].exec_ast(self.op, output=self)
 
+      assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
+      # HACK: allow hot casting of images
+      assert self.realized.dtype == self.dtype or self.dtype.name.startswith("image"), f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
+      self.dtype = self.realized.dtype
+
       # log to the graph
       from tinygrad.graph import log_op
       log_op(self, self.op)
 
       # no need to keep the op after realization
       del self.op
-
-    assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
-    # HACK: allow hot casting of images
-    assert self.realized.dtype == self.dtype or self.dtype.name.startswith("image"), f"dtype mismatch on realize got {self.realized.dtype} expected {self.dtype}"
-    self.dtype = self.realized.dtype
     return self
 
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
