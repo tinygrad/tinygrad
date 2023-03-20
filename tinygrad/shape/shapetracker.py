@@ -42,7 +42,7 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, offset:Union[Node, int]=0):
-    return Variable.sum([Variable.num(self.offset)+offset] + [Variable(idx, 0, sh-1)*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+    return Variable.sum([Variable.num(self.offset)+offset] + [(idx if isinstance(idx, Variable) else Variable(idx, 0, sh-1))*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
 class ZeroView:
   def __init__(self, old_shape:Tuple[int, ...], arg):

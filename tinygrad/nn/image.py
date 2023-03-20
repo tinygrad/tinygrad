@@ -3,7 +3,7 @@ from tinygrad.helpers import prod, IMAGE, ImageDType, getenv, dtypes
 from tinygrad.lazy import get_single_root
 
 FLOAT16 = getenv("FLOAT16", 0)
-base_image_type = (100, 2, "image_half", np.float16) if FLOAT16 else (100, 4, "image_float", np.float32)
+base_image_type = (100, 2, "imageh", np.float16) if FLOAT16 else (100, 4, "imagef", np.float32)
 
 def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)

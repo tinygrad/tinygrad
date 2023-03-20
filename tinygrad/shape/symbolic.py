@@ -12,7 +12,7 @@ class Node:
   max: int
   def render(self, ops=None, ctx=None) -> str:
     if ops is None: ops = render_python
-    assert isinstance(self, NumNode) or self.min != self.max
+    assert isinstance(self, (Variable, NumNode)) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -38,6 +38,12 @@ class Node:
     assert b != 0
     if b < 0: return (self//-b)*-1
     if b == 1: return self
+
+    # this is a hack to make div work with boolean nodes. TODO: make generic
+    if isinstance(self, GeNode): return (self.a//b) >= (self.b//b)
+    if isinstance(self, LtNode): return (self.a//b) < (self.b//b)
+    if isinstance(self, AndNode): return Variable.ands([x//b for x in self.nodes])
+
     if isinstance(self, ModNode) and self.b % b == 0: return (self.a//b) % (self.b//b) # put the div inside mod
     if isinstance(self, DivNode): return self.a//(self.b*b) # two divs is one div
     if isinstance(self, MulNode) and self.b % b == 0: return self.a*(self.b//b)
@@ -181,7 +187,7 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   return create_node(ret)
 
 render_python: Dict[Type, Callable] = {
-  Variable: lambda self,ops,ctx: f"{self.expr}<{self.min},{self.max}>" if ctx == "DEBUG" else f"{self.expr}",
+  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
   NumNode: lambda self,ops,ctx: f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{self.b})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",

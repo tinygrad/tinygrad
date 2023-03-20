@@ -1,7 +1,7 @@
 import os, time, ctypes, hashlib, subprocess, platform
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
-from tinygrad.codegen.gpu import GPUCodegen, GPULanguage
+from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 class ClangProgram:
   def __init__(self, name:str, prg:str):
@@ -20,7 +20,8 @@ class ClangProgram:
     self.fxn(*[x._buf for x in args])
     if wait: return time.monotonic()-st
 
-class ClangCodegen(GPUCodegen):
-  lang = GPULanguage(buffer_suffix=" restrict")
+class ClangCodegen(CStyleCodegen):
+  lang = CStyleLanguage(buffer_suffix=" restrict")
+  supports_float4: bool = False
 
 ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)
