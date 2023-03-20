@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, all_same, ImageDType, DEBUG, prod, dtypes, mnum
+from tinygrad.helpers import dedup, colored, all_same, ImageDType, DEBUG, prod, dtypes, mnum, DType
 from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
@@ -11,6 +11,10 @@ from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
 from tinygrad.shape.symbolic import Variable, SumNode, ModNode
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); LOAD4 = auto(); STORE4 = auto() # noqa: E702
+
+class LocalBuffer(NamedTuple):
+  dtype: DType = dtypes.float32
+  realized: None = None
 
 class MemOp(NamedTuple):
   i: int
@@ -115,7 +119,7 @@ class Linearizer:
 
     # add a local buffer for multistage reduce
     if len(self.group_for_reduce):
-      self.bufs.append(None)
+      self.bufs.append(LocalBuffer())
       # TODO: the strides of this can be controlled
       st = ShapeTracker(tuple([1] * self.first_reduce + self.group_for_reduce + [1] * (self.shape_len - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.registers[0].axis]))
       buftoken = Register("temp")
@@ -127,8 +131,11 @@ class Linearizer:
       self.registers.append(buftoken)
       self.uop(UOps.DEFINE_LOCAL, None, [], (self.registers[-1].name, self.sts[-1].size()*self.registers[-1].size()))
 
+    # print
+    if DEBUG >= 3: self.printbufs()
+
     def global_buf(i, idxs:List[Variable], store=None):
-      should_upcast = self.supports_float4 and self.registers[i].can_float4() and (self.bufs[i] is None or self.bufs[i].dtype != dtypes.float16 or isinstance(self.bufs[i].dtype, ImageDType))
+      should_upcast = self.supports_float4 and self.registers[i].can_float4() and self.bufs[i].dtype != dtypes.float16
       cache: Dict[int, str] = {}
       store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.registers[i].offsets())}  # NOTE: for stores, these should be unique
       def op(offset):
@@ -222,7 +229,7 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:global_buf(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b is not None})
+    loaded_buffers.update({b:global_buf(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
@@ -236,14 +243,10 @@ class Linearizer:
     # kernel function definition
     self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
 
-    # print
-    if DEBUG >= 3:
-      self.printbufs()
-      for x in self.uops:
-        print(x)
 
   def uop(self, uop:UOps, out:Optional[str], vin:List[str], arg:Any):
     self.uops.append(UOp(uop, out, vin, arg))
+    if DEBUG >= 3: print(self.uops[-1])
     return out
 
   def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[str]:
@@ -260,7 +263,7 @@ class Linearizer:
       return [self.uop(UOps.ALU, ssa('alu'), list(val), x.op) for val in zip(*values)]
 
   @property
-  def first_reduce(self) -> int: return get_first_reduce([x.shape for i,x in enumerate(self.sts) if self.bufs[i] is not None])
+  def first_reduce(self) -> int: return get_first_reduce([x.shape for i,x in enumerate(self.sts) if not isinstance(self.bufs[i], LocalBuffer)])
 
   @property
   def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape

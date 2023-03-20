@@ -1,6 +1,6 @@
 from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set
 import math, collections
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp
+from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import getenv, all_same, partition, ImageDType, DEBUG, dtypes
 from tinygrad.runtime.lib import RawConst
@@ -131,7 +131,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[LazyBuffer], bufnames:List[str], la
         # nan? inf?
         val = f"{bufs[args.i].realized._buf}f"
       else:
-        if lang.uses_vload and bufs[args.i] is not None and bufs[args.i].dtype == dtypes.float16:
+        if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
           val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
         else:
           val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
@@ -139,34 +139,34 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[LazyBuffer], bufnames:List[str], la
       if args.valid.min == 1: kk(f"float {newvar} = {val};")
       else: kk(f"float {newvar} = ({args.valid.render(render_cl)}) ? ({val}) : 0.0f;")
     if uop == UOps.LOAD4:
-      if bufs[args.i] is not None and isinstance(bufs[args.i].dtype, ImageDType):
+      if isinstance(bufs[args.i].dtype, ImageDType):
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
         val = f"read_imagef({bufnames[args.i]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
       else:
-        val = f"(({lang.buffer_prefix if bufs[args.i] is not None else lang.smem_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}]"
+        val = f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args[2].min == 1: kk(f"float4 {newvar} = {val};")
       else: kk(f"float4 {newvar} = ({args.valid.render(render_cl)}) ? ({val}) : {group_float4(['0.0f']*4)};")
     if uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
-      if lang.uses_vload and bufs[args.i] is not None and bufs[args.i].dtype == dtypes.float16:
+      if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
         kk(f"vstore_half({vin[0]}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
         kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {vin[0]};")
     if uop == UOps.STORE4:
       assert args.valid.min == 1, "store must be valid"
-      if bufs[args.i] is not None and isinstance(bufs[args[0]].dtype, ImageDType):
+      if isinstance(bufs[args[0]].dtype, ImageDType):
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args[1], args[2])
         kk(f"write_imagef({bufnames[args.i]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {group_float4(vin)});")
       else:
-        kk(f"(({lang.buffer_prefix if bufs[args.i] is not None else lang.smem_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {group_float4(vin)};")
+        kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {group_float4(vin)};")
     if uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
 
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs)
-               if x is not None and not isinstance(x.realized, RawConst)]
+               if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
