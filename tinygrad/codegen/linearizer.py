@@ -58,6 +58,7 @@ class Linearizer:
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(self.ast)
+    self.mem_estimate: int = sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]

@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import prod, getenv, all_same, partition, ImageDType, DEBUG
+from tinygrad.helpers import getenv, all_same, partition, ImageDType, DEBUG
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 
@@ -200,5 +200,4 @@ class CStyleCodegen(Linearizer):
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
-      op_estimate=self.info.flops,
-      mem_estimate=sum(x.dtype.itemsize*(x.realized.size if x.realized is not None else prod(x.shape)) for x in self.bufs if x is not None))
+      op_estimate=self.info.flops, mem_estimate=self.mem_estimate)
