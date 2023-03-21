@@ -61,8 +61,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
 
 # **** lazy operations ****
 
-def remove_one_reshape(root:LazyBuffer) -> LazyBuffer: return root.op.src[0] if root.realized is None and root.optype == MovementOps and root.op.op == MovementOps.RESHAPE else root
-def get_weakop(op:LazyOp, remove_reshape=False) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x, remove_reshape) if isinstance(x, LazyOp) else weakref.ref(remove_one_reshape(x) if remove_reshape else x) for x in op.src), op.arg)
+def get_weakop(op:LazyOp) -> LazyOp: return LazyOp(op.op, tuple(get_weakop(x) if isinstance(x, LazyOp) else weakref.ref(x) for x in op.src), op.arg)
 def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.op.src[0]) if getattr(root, 'op', None) and len(root.op.src) == 1 else root
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(root.op.src[0], allow_contiguous) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(x.op.src[0]) if x.realized is None and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
@@ -83,13 +82,10 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
 
   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
   # get_weakop makes all the LazyBuffers in the op have a weakref
-  wop = (device, dtype, optype, get_weakop(op, remove_reshape=(optype == BinaryOps)))
+  wop = (device, dtype, optype, get_weakop(op))
 
   if wop not in lazycache: lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
-  else:
-    ret = lazycache[wop]
-    # create a new reshape, no pushing
-    if ret.shape != st.shape: ret = ret.movement_op(MovementOps.RESHAPE, st.shape, allow_binop_push=False)
+  else: ret = lazycache[wop]
   return ret
 
 class LazyBuffer:
@@ -184,7 +180,7 @@ class LazyBuffer:
     if self.shape == tuple(new_shape): return self
     return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape), self.dtype)
 
-  def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...], allow_binop_push=True) -> LazyBuffer:
+  def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop
     if op == MovementOps.RESHAPE and self.shape == arg: return self
 
@@ -229,7 +225,7 @@ class LazyBuffer:
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
-    if allow_binop_push and SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or (SHUFFLE_PAD_OPS and all(x.op != BinaryOps.DIV for x in get_lazyops(self.op)))):
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or (SHUFFLE_PAD_OPS and all(x.op != BinaryOps.DIV for x in get_lazyops(self.op)))):
       return replace_with_movement_op(self.op, op, arg)
 
     # create the buffer

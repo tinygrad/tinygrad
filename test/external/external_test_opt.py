@@ -72,7 +72,7 @@ class TestOpt(unittest.TestCase):
     with CLCache():
       img_bn = bn(img).realize()
       print(img_bn)
-      assert len(GlobalCounters.cache) == 3, "optimizer didn't fold batchnorm"
+      assert len(GlobalCounters.cache) == 3, f"optimizer didn't fold batchnorm, got {len(GlobalCounters.cache)}"
     Tensor.training = False
 
   def test_fold_conv_sgd(self):
@@ -115,7 +115,7 @@ class TestOpt(unittest.TestCase):
     img_conv = bn(c1(img)).relu().realize()
     with CLCache():
       img_conv = bn(c1(img)).relu().realize()
-      assert len(GlobalCounters.cache) == 1, "optimizer didn't fold conv-batchnorm at test time"
+      assert len(GlobalCounters.cache) == 1, f"optimizer didn't fold conv-batchnorm at test time, got {len(GlobalCounters.cache)}"
 
   def test_fold_conv_batchnorm(self):
     Tensor.training = True
@@ -125,7 +125,7 @@ class TestOpt(unittest.TestCase):
     with CLCache():
       img_conv = bn(c1(img)).relu().realize()
       print(img_conv)
-      assert len(GlobalCounters.cache) == 4, "optimizer didn't fold conv-batchnorm"
+      assert len(GlobalCounters.cache) == 4, f"optimizer didn't fold conv-batchnorm, got {len(GlobalCounters.cache)}"
     Tensor.training = False
 
   def test_fold_conv_elu(self):
