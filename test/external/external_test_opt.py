@@ -25,6 +25,27 @@ class CLCache():
     GlobalCounters.cache = None
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestOptBinOp(unittest.TestCase):
+  def _test_no_binop_rerun(self, f1, f2, allowed=1):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      c = f1(a, b)
+      d = f2(a, b)
+      c.realize()
+      d.realize()
+      assert len(GlobalCounters.cache) == allowed, "binop was rerun!"
+    np.testing.assert_allclose(c.numpy().ravel(), d.numpy().ravel(), rtol=1e-3, atol=1e-5)
+
+  def test_no_binop_rerun(self): return self._test_no_binop_rerun(lambda a,b: a*b, lambda a,b: (a*b).reshape(16, 16, 1))
+  def test_no_binop_rerun_alt(self): return self._test_no_binop_rerun(lambda a,b: (a*b).reshape(16, 16, 1), lambda a,b: a*b)
+  def test_no_binop_rerun_preshape(self): return self._test_no_binop_rerun(lambda a,b: a.reshape(16, 16, 1)*b.reshape(16, 16, 1), lambda a,b: a*b)
+  #def test_no_binop_rerun_reduce(self): return self._test_no_binop_rerun(lambda a,b: (a*b).sum(), lambda a,b: (a*b).reshape(16, 16, 1).sum())
+  def test_no_binop_rerun_reduce_alt(self): return self._test_no_binop_rerun(lambda a,b: a.sum(1)+b[0], lambda a,b: a.sum(1).reshape(1,16)+b[0])
+  def test_no_binop_rerun_reduce_broadcast(self): return self._test_no_binop_rerun(lambda a,b: a.sum()+b, lambda a,b: a.sum().reshape(1,1)+b, allowed=2)
+  def test_no_binop_rerun_transposed(self): return self._test_no_binop_rerun(lambda a,b: (a.T*b.T).T, lambda a,b: a*b)
+
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOpt(unittest.TestCase):
   def test_muladd(self):
     a,b,c = [Tensor.ones(2,2) for _ in range(3)]
@@ -175,30 +196,6 @@ class TestOpt(unittest.TestCase):
       cache_len = len(GlobalCounters.cache)
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
-
-  @unittest.skip("this is broken")
-  def test_no_binop_rerun(self):
-    a = Tensor.randn(16, 16)
-    b = Tensor.randn(16, 16)
-    with CLCache():
-      c = a*b
-      d = (a*b).reshape(16, 16, 1)
-      c.realize()
-      d.realize()
-      assert len(GlobalCounters.cache) == 1, "binop was rerun!"
-    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3, atol=1e-5)
-
-  @unittest.skip("this is broken")
-  def test_no_binop_rerun_alt(self):
-    a = Tensor.randn(16, 16)
-    b = Tensor.randn(16, 16)
-    with CLCache():
-      c = (a*b).reshape(16, 16, 1)
-      d = a*b
-      c.realize()
-      d.realize()
-      assert len(GlobalCounters.cache) == 1, "binop was rerun!"
-    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3, atol=1e-5)
 
   # TODO: should be okay with PUSH_PERMUTES
   def test_no_reduceop_rerun(self):
