@@ -180,6 +180,7 @@ class LazyBuffer:
     if self.shape == tuple(new_shape): return self
     return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape), self.dtype)
 
+  # shrink -> stride -> permute -> reshape -> pad -> expand
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     # very instant nop
     if op == MovementOps.RESHAPE and self.shape == arg: return self

@@ -445,8 +445,8 @@ class Tensor:
   def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
 
   def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
-    y = (self - self.mean(axis=axis, keepdim=True))
-    return y.div((y*y).mean(axis=axis, keepdim=True).add(eps).sqrt())
+    y = (self - self.mean(axis, keepdim=True))
+    return y.mul((y*y).mean(axis, keepdim=True).add(eps).pow(-0.5))
 
   def batchnorm(self, weight:Tensor, bias:Tensor, mean:Tensor, invstd:Tensor) -> Tensor:
     x = (self - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
