@@ -97,6 +97,29 @@ class TestOptBinOp(unittest.TestCase):
   #def test_no_binop_rerun_reduce(self): return self._test_no_binop_rerun(lambda a,b: (a*b).sum(), lambda a,b: (a*b).reshape(16, 16, 1).sum())
   #def test_no_binop_rerun_reduce_alt(self): return self._test_no_binop_rerun(lambda a,b: a.sum(1)+b[0], lambda a,b: a.sum(1).reshape(1,16)+b[0])
 
+@unittest.skip("elementwise with >1 reduce inputs currently don't fuse")
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestOptReduceLoop(unittest.TestCase):
+  def test_loop_left(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      t = a.sum(0)
+      b = t.reshape(16,1).expand(16,16).sum(0)
+      c = (t+b)
+      c.realize()
+      assert len(GlobalCounters.cache) == 2, "loop left fusion broken"
+
+  def test_loop_right(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      t = a.sum(0)
+      b = t.reshape(16,1).expand(16,16).sum(0)
+      c = (b+t)
+      c.realize()
+      assert len(GlobalCounters.cache) == 2, "loop right fusion broken"
+
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptWChild(unittest.TestCase):
   def test_unrealized_child(self):
