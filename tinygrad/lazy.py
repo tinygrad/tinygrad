@@ -245,6 +245,16 @@ class LazyBuffer:
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
   out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs) if op != UnaryOps.CAST else cast(DType, arg)
 
+  # if any of the inputs have reshapes, we shuffle them to the top and fuse the binary ops
+  if SHUFFLE_MOVEMENT_OPS and any(x.realized is None and x.op.op == MovementOps.RESHAPE and x.op.src[0].optype == BinaryOps and len(x.op.src[0].children) <= 1 for x in srcs):
+    new_srcs = []
+    for x in srcs:
+      if x.realized is None and x.op.op == MovementOps.RESHAPE and x.op.src[0].optype == BinaryOps and len(x.op.src[0].children) <= 1:
+        new_srcs.append(replace_with_movement_op(x.op.src[0].op, MovementOps.RESHAPE, x.op.arg))
+      else:
+        new_srcs.append(x)
+    return elementwise_op(op, *new_srcs, arg=arg).contiguous()
+
   # push all contiguous to the end of BinaryOps. kernels 198 -> 196
   if PUSH_CONTIGUOUS and any(x.realized is None and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
     new_srcs = []
