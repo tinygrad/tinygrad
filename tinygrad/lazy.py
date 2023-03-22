@@ -104,6 +104,10 @@ class LazyBuffer:
     for x in get_buffers(op): x.children.add(self)
     if not LAZY: self.realize()
 
+    # log phantom ops to the graph
+    from tinygrad.graph import log_op, GRAPH
+    if GRAPH >= 2: log_op(self, self.op, phantom=True)
+
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
 
   def realize(self:LazyBuffer) -> LazyBuffer:

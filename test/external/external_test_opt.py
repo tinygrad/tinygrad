@@ -98,6 +98,18 @@ class TestOptBinOp(unittest.TestCase):
   #def test_no_binop_rerun_reduce_alt(self): return self._test_no_binop_rerun(lambda a,b: a.sum(1)+b[0], lambda a,b: a.sum(1).reshape(1,16)+b[0])
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestOptWChild(unittest.TestCase):
+  def test_unrealized_child(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      c = (a*b).sum()
+      d = c+1
+      e = c+2
+      d.realize()
+      assert len(GlobalCounters.cache) == 2, "don't fuse if you have children"
+
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOpt(unittest.TestCase):
   def test_muladd(self):
     a,b,c = [Tensor.ones(2,2) for _ in range(3)]

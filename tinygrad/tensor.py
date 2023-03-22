@@ -346,7 +346,7 @@ class Tensor:
     x = x.reshape(bs, groups, 1, cin, oy, ox, H, W).expand(bs, groups, rcout, cin, oy, ox, H, W).permute(0,1,2,4,5,3,6,7)
 
     # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
-    ret = (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1)).reshape(bs, cout, oy, ox)
+    ret = (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1), keepdim=True).reshape(bs, cout, oy, ox)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
   def dot(self, w:Tensor) -> Tensor:
