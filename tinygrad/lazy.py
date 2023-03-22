@@ -4,7 +4,7 @@ import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers
+from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
 from tinygrad.runtime.lib import RawConst, RawBuffer
 
 # lazy can recurse a lot
@@ -66,10 +66,12 @@ def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(root.op.src[0], allow_contiguous) if root.realized is None and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(x.op.src[0]) if x.realized is None and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
-def replace_with_movement_op(y:Union[LazyOp, LazyBuffer], op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
-  if isinstance(y, LazyBuffer): return y.movement_op(op, arg)
+def replace_with_movement_ops(y:Union[LazyOp, LazyBuffer], ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> LazyBuffer:
+  if isinstance(y, LazyBuffer):
+    for op, arg in ops: y = y.movement_op(op, arg)
+    return y
   assert y.op in BinaryOps or y.op in UnaryOps
-  return elementwise_op(y.op, *[replace_with_movement_op(z, op, arg) for z in y.src], arg=y.arg)   # type: ignore
+  return elementwise_op(y.op, *[replace_with_movement_ops(z, ops) for z in y.src], arg=y.arg)   # type: ignore
 
 lazycache: WeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp, dtype:DType):
@@ -227,7 +229,7 @@ class LazyBuffer:
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
     if op in [MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE] and SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0: # and op != MovementOps.EXPAND and (op != MovementOps.PAD or (SHUFFLE_PAD_OPS and all(x.op != BinaryOps.DIV for x in get_lazyops(self.op)))):
-      return replace_with_movement_op(self.op, op, arg)
+      return replace_with_movement_ops(self.op, [(op, arg)])
 
     # create the buffer
     ret = create_lazybuffer(self.device, ShapeTracker(self.st).movement_op(op, arg), MovementOps, LazyOp(op, (self,), arg), self.dtype)
@@ -245,15 +247,25 @@ class LazyBuffer:
 def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
   out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs) if op != UnaryOps.CAST else cast(DType, arg)
 
-  # if any of the inputs have reshapes, we shuffle them to the top and fuse the binary ops
-  if SHUFFLE_MOVEMENT_OPS and any(x.realized is None and x.op.op == MovementOps.RESHAPE and x.op.src[0].optype == BinaryOps and len(x.op.src[0].children) <= 1 for x in srcs):
+  # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
+  if SHUFFLE_MOVEMENT_OPS:
     new_srcs = []
+    did_replace = False
     for x in srcs:
-      if x.realized is None and x.op.op == MovementOps.RESHAPE and x.op.src[0].optype == BinaryOps and len(x.op.src[0].children) <= 1:
-        new_srcs.append(replace_with_movement_op(x.op.src[0].op, MovementOps.RESHAPE, x.op.arg))
+      mops: List[Tuple[MovementOps, Tuple[Any, ...]]] = []
+      bx = x
+      # backwalk all the movement ops. don't push PAD or EXPAND
+      while bx.realized is None and bx.optype == MovementOps and bx.op.op != MovementOps.EXPAND and (bx.op.op != MovementOps.PAD or SHUFFLE_PAD_OPS) and len(bx.children) <= 1:
+        assert isinstance(bx.op.op, MovementOps)
+        mops.append((bx.op.op, bx.op.arg))
+        bx = bx.op.src[0]
+      # NOTE: can't push pads with a div
+      if bx.realized is None and bx.optype == BinaryOps and len(bx.children) <= 1 and len(mops) and (all(x[0] != MovementOps.PAD for x in mops) or all(x.op != BinaryOps.DIV for x in get_lazyops(bx.op))):
+        new_srcs.append(replace_with_movement_ops(bx.op, mops[::-1]))
+        did_replace = True
       else:
         new_srcs.append(x)
-    return elementwise_op(op, *new_srcs, arg=arg).contiguous()
+    if did_replace: return elementwise_op(op, *new_srcs, arg=arg)
 
   # push all contiguous to the end of BinaryOps. kernels 198 -> 196
   if PUSH_CONTIGUOUS and any(x.realized is None and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
