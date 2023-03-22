@@ -42,15 +42,16 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
-    if psrcs[0][1].optype == ReduceOps:
-      top = _ast_reduceops(psrcs[0][1])
-    real_srcs[psrcs[0][0]] = top
+    psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
+    if psrc[1].optype == ReduceOps:
+      top = _ast_reduceops(psrc[1])
+    real_srcs[psrc[0]] = top
     real_srcs.update({x:x for x in get_buffers(top)})  # the reduce op buffers are not modified
 
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
-    if psrcs[0][0].shape != psrcs[0][1].shape:
-      intermediate_shape = psrcs[0][1].shape
-      assert psrcs[0][0].shape == self.shape, f"shape mismatch {psrcs[0][0].shape} != {self.shape}"
+    if psrc[0].shape != psrc[1].shape:
+      intermediate_shape = psrc[1].shape
+      assert psrc[0].shape == self.shape, f"shape mismatch {psrc[0].shape} != {self.shape}"
 
   # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
