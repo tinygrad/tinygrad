@@ -53,6 +53,7 @@ class TestDtype(unittest.TestCase):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
     b = Tensor([1,2,3,4], dtype=dtypes.float32)
     c = a+b
+    print(f"{a.dtype=}")
     print(c.numpy())
     assert c.dtype == dtypes.float32
     np.testing.assert_allclose(c.numpy(), [2,4,6,8])
@@ -65,6 +66,7 @@ class TestDtype(unittest.TestCase):
     assert c.dtype == dtypes.float32
     np.testing.assert_allclose(c.numpy(), [1,4,9,16])
 
+  @unittest.skipIf(getenv("TORCH") == 1, "Not supported in PyTorch")
   def test_half_matmul_upcast(self):
     a = Tensor([[1,2],[3,4]], dtype=dtypes.float16)
     b = Tensor.eye(2, dtype=dtypes.float32)
