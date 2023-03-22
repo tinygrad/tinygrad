@@ -4,7 +4,7 @@ import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
-from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, get_lazyops, map_buffers
+from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_buffers, map_buffers
 from tinygrad.runtime.lib import RawConst, RawBuffer
 
 # lazy can recurse a lot
@@ -226,7 +226,7 @@ class LazyBuffer:
           .movement_op(MovementOps.RESHAPE, ShapeTracker(self.st).movement_op(op, arg).shape)
 
     # if this MovementOp is being applied to a BinaryOp, apply the MovementOp to all the BinaryOp inputs instead. NOTE: UnaryOps is never an OpType
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0 and op != MovementOps.EXPAND and (op != MovementOps.PAD or (SHUFFLE_PAD_OPS and all(x.op != BinaryOps.DIV for x in get_lazyops(self.op)))):
+    if op in [MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE] and SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and self.realized is None and len(self.children) == 0: # and op != MovementOps.EXPAND and (op != MovementOps.PAD or (SHUFFLE_PAD_OPS and all(x.op != BinaryOps.DIV for x in get_lazyops(self.op)))):
       return replace_with_movement_op(self.op, op, arg)
 
     # create the buffer

@@ -14,15 +14,64 @@ from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
 from tinygrad.lazy import PUSH_PERMUTES
 
 class CLCache():
+  def __init__(self, preclear=True): self.preclear = preclear
   def __enter__(self):
-    gc.collect()
-    for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
-      x.realize()
+    if self.preclear:
+      gc.collect()
+      for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
+        x.realize()
+      GlobalCounters.reset()
     GlobalCounters.cache = []
     print("cache: entering")
   def __exit__(self, type, value, traceback):
     print(f"cache: exiting with size {len(GlobalCounters.cache)}")
     GlobalCounters.cache = None
+
+from models.convnext import ConvNeXt
+from models.efficientnet import EfficientNet
+from models.resnet import ResNet18
+from models.vit import ViT
+from tinygrad.nn.optim import get_parameters
+
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestInferenceMinKernels(unittest.TestCase):
+  def setUp(self):
+    Tensor.training = False
+
+  @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
+  def test_convnext(self):
+    model = ConvNeXt()
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(preclear=False):
+      model(img).realize()
+      assert len(GlobalCounters.cache) <= 129, f"convnext used more than 129 kernels, it used {len(GlobalCounters.cache)}"
+
+  def test_enet(self):
+    model = EfficientNet(has_se=False)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache():
+      model.forward(img).realize()
+      assert len(GlobalCounters.cache) <= 51, f"efficientnet B0 used more than 51 kernels, it used {len(GlobalCounters.cache)}"
+
+  def test_resnet(self):
+    model = ResNet18()
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache():
+      model.forward(img).realize()
+      # NOTE: this should be 4 lower
+      assert len(GlobalCounters.cache) <= 31, f"ResNet18 used more than 31 kernels, it used {len(GlobalCounters.cache)}"
+
+  def test_vit(self):
+    model = ViT(embed_dim=192, num_heads=3)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache():
+      model.forward(img).realize()
+      # NOTE: this is way too high
+      assert len(GlobalCounters.cache) <= 224, f"ViT used more than 224 kernels, it used {len(GlobalCounters.cache)}"
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptBinOp(unittest.TestCase):
@@ -185,9 +234,8 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,1,16).transpose(2,1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  @unittest.skip("expansion can't push expand permute yet")
+  @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
   def test_permute_was_pushed_through_expand_reshape(self):
-    if not PUSH_PERMUTES: return
     a = Tensor.randn(16, 16, 16)
     with CLCache():
       c = a.sum(2)
@@ -197,9 +245,8 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  # TODO: should be okay with PUSH_PERMUTES
+  @unittest.skipIf(PUSH_PERMUTES, "this test is brokem with PUSH_PERMUTES")
   def test_no_reduceop_rerun(self):
-    if PUSH_PERMUTES: return
     a = Tensor.randn(16, 16, 16)
     with CLCache():
       c = a.sum(2)
@@ -210,9 +257,8 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy().transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
-  # TODO: should be okay with PUSH_PERMUTES
+  @unittest.skipIf(PUSH_PERMUTES, "this test is brokem with PUSH_PERMUTES")
   def test_no_reduceop_rerun_alt(self):
-    if PUSH_PERMUTES: return
     a = Tensor.randn(16, 16, 16)
     with CLCache():
       c = a.sum(2).permute(1,0)

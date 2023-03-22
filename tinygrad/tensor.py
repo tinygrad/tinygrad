@@ -446,11 +446,11 @@ class Tensor:
 
   def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
     y = (self - self.mean(axis, keepdim=True))
-    return y.mul((y*y).mean(axis, keepdim=True).add(eps).pow(-0.5))
+    return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
   def batchnorm(self, weight:Tensor, bias:Tensor, mean:Tensor, invstd:Tensor) -> Tensor:
     x = (self - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
-    return x.mul(invstd.reshape(shape=[1, -1, 1, 1])) + bias.reshape(shape=[1, -1, 1, 1])
+    return x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd) + bias.reshape(shape=[1, -1, 1, 1])
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
