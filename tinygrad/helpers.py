@@ -1,7 +1,6 @@
 from __future__ import annotations
 import os, math, functools
 import numpy as np
-import torch
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
@@ -29,7 +28,6 @@ class DType(NamedTuple):
   itemsize: int
   name: str
   np: type  # TODO: someday this will be removed with the "remove numpy" project
-  torch: type
   def __repr__(self): return f"dtypes.{self.name}"
 
 # dependent typing?
@@ -49,8 +47,8 @@ class LazyNumpyArray:
   def astype(self, typ): return LazyNumpyArray(self.fxn, self.shape, typ)
 
 class dtypes:
-  float16: Final[DType] = DType(0, 2, "half", np.float16, torch.float16)
-  float32: Final[DType] = DType(1, 4, "float", np.float32, torch.float32)
+  float16: Final[DType] = DType(0, 2, "half", np.float16)
+  float32: Final[DType] = DType(1, 4, "float", np.float32)
   @staticmethod
   def from_np(x) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x)]
 
