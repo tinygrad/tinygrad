@@ -24,6 +24,22 @@ class TestDtype(unittest.TestCase):
     assert c.dtype == dtypes.float16
     np.testing.assert_allclose(c.numpy(), [2,4,6,8])
 
+  def test_half_mul(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.float16)
+    b = Tensor([1,2,3,4], dtype=dtypes.float16)
+    c = a*b
+    print(c.numpy())
+    assert c.dtype == dtypes.float16
+    np.testing.assert_allclose(c.numpy(), [1,4,9,16])
+
+  def test_half_matmul(self):
+    a = Tensor([[1,2],[3,4]], dtype=dtypes.float16)
+    b = Tensor.eye(2, dtype=dtypes.float16)
+    c = a@b
+    print(c.numpy())
+    assert c.dtype == dtypes.float16
+    np.testing.assert_allclose(c.numpy(), [[1,2],[3,4]])
+
   def test_upcast_float(self):
     # NOTE: there's no downcasting support
     a = Tensor([1,2,3,4], dtype=dtypes.float16).float()
@@ -40,6 +56,22 @@ class TestDtype(unittest.TestCase):
     print(c.numpy())
     assert c.dtype == dtypes.float32
     np.testing.assert_allclose(c.numpy(), [2,4,6,8])
+
+  def test_half_mul_upcast(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.float16)
+    b = Tensor([1,2,3,4], dtype=dtypes.float32)
+    c = a*b
+    print(c.numpy())
+    assert c.dtype == dtypes.float32
+    np.testing.assert_allclose(c.numpy(), [1,4,9,16])
+
+  def test_half_matmul_upcast(self):
+    a = Tensor([[1,2],[3,4]], dtype=dtypes.float16)
+    b = Tensor.eye(2, dtype=dtypes.float32)
+    c = a@b
+    print(c.numpy())
+    assert c.dtype == dtypes.float32
+    np.testing.assert_allclose(c.numpy(), [[1,2],[3,4]])
 
 if __name__ == '__main__':
   unittest.main()
