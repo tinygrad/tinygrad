@@ -139,9 +139,11 @@ class LazyBuffer:
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if self.optype != MovementOps and isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or self.shape[self.st.strides.index(1)]%4 != 0):
-          upcasted = LazyOp(UnaryOps.CAST, (self.op,), dtypes.float32)
-          if self.op.op == MovementOps.RESHAPE: self.op = LazyOp(MovementOps.RESHAPE, upcasted, self.op.arg)
-          else: self.op = upcasted
+          if self.op.op == MovementOps.RESHAPE:
+            # put CAST before the final RESHAPE
+            self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
+          else:
+            self.op = LazyOp(UnaryOps.CAST, (self.op,), dtypes.float32)
           self.dtype = dtypes.float32
 
         self.realized = Device[self.device].exec_ast(self.op, output=self)
