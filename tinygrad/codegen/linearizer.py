@@ -149,7 +149,7 @@ class Linearizer:
 
     # kernel name (before late upcast)
     self.function_name = ("r_" if self.reduceop else "E_") + '_'.join([str(x) for x in self.full_shape])
-    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'black', bright=True).join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())]) + " " * (23-len(self.function_name))
+    self.display_name = ("r_" if self.reduceop else "E_") + colored('_', 'black', bright=True).join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # parse AST
     loaded_buffers = {}
