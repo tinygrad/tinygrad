@@ -109,7 +109,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
   # this needs real APIs
   if t.device in ["METAL", "CLANG", "LLVM"]:
     del t.lazydata.op
-    t.lazydata.realized = t.lazydata.dbuffer.buffer(prod(t.shape), dtype=t.dtype)
+    t.lazydata.realized = Device[t.lazydata.device].buffer(prod(t.shape), dtype=t.dtype)
     myfile.readinto(t.lazydata.realized._buffer())
   else:
     def _mmap(lna):

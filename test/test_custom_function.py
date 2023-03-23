@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
-from tinygrad.lazy import LazyBuffer, Device
+from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
 from tinygrad.ops import ASTRunner
 
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
@@ -39,7 +39,7 @@ class ATan2(Function):
     assert prod(a.shape) == prod(b.shape) and a.device == b.device, "shape or device mismatch"
     self.a, self.b = a, b
     ast = LazyOp(LoadOps.CUSTOM, (a.contiguous(), b.contiguous()), {"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device])
-    return LazyBuffer(a.device, a.shape, LoadOps, ast, max(a.dtype, b.dtype))
+    return create_lazybuffer(a.device, a.shape, LoadOps, ast, max(a.dtype, b.dtype))
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.binary_op(BinaryOps.MUL, self.a)).binary_op(BinaryOps.ADD, self.b.binary_op(BinaryOps.MUL, self.b))
     return grad_output.binary_op(BinaryOps.MUL, self.b.binary_op(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \

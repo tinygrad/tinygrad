@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 from typing import NamedTuple, Tuple
-from tinygrad.ops import LazyOp, BinaryOps, get_lazyop_info
+from tinygrad.ops import LazyOp, BinaryOps, ReduceOps, get_lazyop_info
 from tinygrad.helpers import DType, dtypes
 
 class TestBuffer(NamedTuple):
@@ -36,6 +36,13 @@ class TestFlopCounter(unittest.TestCase):
     op2 = LazyOp(BinaryOps.ADD, (op0,op1,), None)
     info = get_lazyop_info(op2)
     self.assertEqual(info.flops, 12)
+
+  def test_flops_red(self):
+    op0 = LazyOp(BinaryOps.MUL, (self.buf0,self.buf1,), None)
+    op1 = LazyOp(ReduceOps.SUM, (op0,), (1,))
+    op2 = LazyOp(BinaryOps.ADD, (op1, op1,), None)
+    info = get_lazyop_info(op2)
+    self.assertEqual(info.flops, 9)
 
 if __name__ == '__main__':
   unittest.main()
