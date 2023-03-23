@@ -9,6 +9,7 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad import nn
+from tinygrad.helpers import getenv
 from tinygrad.nn import optim
 from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
 from tinygrad.lazy import PUSH_PERMUTES
@@ -49,7 +50,7 @@ class TestInferenceMinKernels(unittest.TestCase):
       model(img).realize()
 
   def test_enet(self):
-    model = EfficientNet(has_se=False)
+    model = EfficientNet(getenv("ENET_NUM", 0), has_se=False)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(51):
