@@ -216,6 +216,7 @@ if __name__ == "__main__":
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--profile', action='store_true', help="Output profile data to out.prof")
   parser.add_argument('--large', action='store_true', help="Use the 13B model instead of the 7B one")
+  parser.add_argument('--tinyfake', action='store_true', help="Use the fake very small model")
   args = parser.parse_args()
   chatbot = args.prompt == None
 
@@ -257,6 +258,11 @@ if __name__ == "__main__":
 
     del weights0
     del weights1
+  elif args.tinyfake:
+    # GRAPH=1 python3 examples/llama.py --timing --prompt "Hello." --temperature=0 --tinyfake --count 1
+    model = Transformer(**args_small)
+    from tinygrad.nn.optim import get_parameters
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
   else:
     model = Transformer(**args_7B)
     with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):

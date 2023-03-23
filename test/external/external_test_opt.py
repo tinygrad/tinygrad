@@ -14,7 +14,7 @@ from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
 from tinygrad.lazy import PUSH_PERMUTES
 
 class CLCache():
-  def __init__(self, preclear=True): self.preclear = preclear
+  def __init__(self, allowed=None, strict=False, preclear=True): self.allowed, self.strict, self.preclear = allowed, strict, preclear
   def __enter__(self):
     if self.preclear:
       gc.collect()
@@ -24,7 +24,9 @@ class CLCache():
     GlobalCounters.cache = []
     print("cache: entering")
   def __exit__(self, type, value, traceback):
-    print(f"cache: exiting with size {len(GlobalCounters.cache)}")
+    print(f"cache: exiting with size {len(GlobalCounters.cache)}", f"allowed {self.allowed}" if self.allowed is not None else "")
+    if self.allowed is not None:
+      assert len(GlobalCounters.cache) <= self.allowed and (not self.strict or len(GlobalCounters.cache) == self.allowed), "used too many kernels!"
     GlobalCounters.cache = None
 
 from models.convnext import ConvNeXt
@@ -43,37 +45,39 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ConvNeXt()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(preclear=False):
+    with CLCache(129):
       model(img).realize()
-      assert len(GlobalCounters.cache) <= 129, f"convnext used more than 129 kernels, it used {len(GlobalCounters.cache)}"
 
   def test_enet(self):
     model = EfficientNet(has_se=False)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache():
+    with CLCache(51):
       model.forward(img).realize()
-      assert len(GlobalCounters.cache) <= 51, f"efficientnet B0 used more than 51 kernels, it used {len(GlobalCounters.cache)}"
 
   def test_resnet(self):
     model = ResNet18()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache():
+    with CLCache(31): # NOTE: this should be 4 lower
       model.forward(img).realize()
-      # NOTE: this should be 4 lower
-      assert len(GlobalCounters.cache) <= 31, f"ResNet18 used more than 31 kernels, it used {len(GlobalCounters.cache)}"
 
   def test_vit(self):
     model = ViT(embed_dim=192, num_heads=3)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache():
+    with CLCache(223): # NOTE: this is way too high
       out = model.forward(img)
       assert len(GlobalCounters.cache) == 0, f"ViT prerealized?"
       out.realize()
-      # NOTE: this is way too high
-      assert len(GlobalCounters.cache) <= 224, f"ViT used more than 224 kernels, it used {len(GlobalCounters.cache)}"
+
+  def test_llama(self):
+    from examples.llama import Transformer, onehot_encode
+    args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
+    model = Transformer(**args_tiny)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    with CLCache(85):
+      model(onehot_encode([1,2,3,4], vocab_size=args_tiny['vocab_size']), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptBinOp(unittest.TestCase):

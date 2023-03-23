@@ -23,9 +23,8 @@ Device = _Device()
 
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
-MERGE_ONE_REDUCE_INTO_ELEMENTWISE = OPT>=2
+MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2   # shuffle pad ops is fine now since we only push to merge binops
 PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
-SHUFFLE_PAD_OPS = OPT>=4  # no longer makes wrong outputs since div isn't allowed, but still unadvisable
 
 # **** realize functions ****
 def _ast_reduceops(self:LazyBuffer) -> LazyOp:
@@ -226,7 +225,7 @@ class LazyBuffer:
       return self.op.src[0].movement_op(MovementOps.PERMUTE, arg).movement_op(MovementOps.EXPAND, tuple(self.op.arg[a] for a in arg))
 
     # move permutes before reshapes if we can
-    if op == MovementOps.PERMUTE and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
+    if op == MovementOps.PERMUTE and PUSH_PERMUTES and self.realized is None and self.op.op == MovementOps.RESHAPE and isinstance(self.op.src[0], LazyBuffer):
       if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
         self.op.src[0].children.discard(self)   # this changes nothing?
         return self.op.src[0].movement_op(MovementOps.PERMUTE, tuple(flatten(shape_idx_groups[i] for i in arg))) \
