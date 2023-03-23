@@ -1,19 +1,14 @@
 import numpy as np
+from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_metal import RawMetalBuffer, MetalProgram
 
 N = 2048
-a = RawMetalBuffer(N*N*4)
-b = RawMetalBuffer(N*N*4)
-c = RawMetalBuffer(N*N*4)
+a = RawMetalBuffer(N*N, dtypes.float32)
 
 nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)
 nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)
-#nb = np.eye(N)
-#nc = np.eye(N)
-#nb = np.ones((N,N))
-#nc = np.ones((N,N))
-b.copyin(nb)
-c.copyin(nc)
+b = RawMetalBuffer.fromCPU(nb)
+c = RawMetalBuffer.fromCPU(nc)
 
 FLOPS = N*N*N*2
 
