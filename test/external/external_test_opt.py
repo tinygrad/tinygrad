@@ -14,15 +14,129 @@ from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
 from tinygrad.lazy import PUSH_PERMUTES
 
 class CLCache():
+  def __init__(self, allowed=None, strict=False, preclear=True): self.allowed, self.strict, self.preclear = allowed, strict, preclear
   def __enter__(self):
-    gc.collect()
-    for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
-      x.realize()
+    if self.preclear:
+      gc.collect()
+      for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
+        x.realize()
+      GlobalCounters.reset()
     GlobalCounters.cache = []
     print("cache: entering")
   def __exit__(self, type, value, traceback):
-    print(f"cache: exiting with size {len(GlobalCounters.cache)}")
+    print(f"cache: exiting with size {len(GlobalCounters.cache)}", f"allowed {self.allowed}" if self.allowed is not None else "")
+    if self.allowed is not None:
+      assert len(GlobalCounters.cache) <= self.allowed and (not self.strict or len(GlobalCounters.cache) == self.allowed), "used too many kernels!"
     GlobalCounters.cache = None
+
+from models.convnext import ConvNeXt
+from models.efficientnet import EfficientNet
+from models.resnet import ResNet18
+from models.vit import ViT
+from tinygrad.nn.optim import get_parameters
+
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestInferenceMinKernels(unittest.TestCase):
+  def setUp(self):
+    Tensor.training = False
+
+  @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
+  def test_convnext(self):
+    model = ConvNeXt()
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(129):
+      model(img).realize()
+
+  def test_enet(self):
+    model = EfficientNet(has_se=False)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(51):
+      model.forward(img).realize()
+
+  def test_resnet(self):
+    model = ResNet18()
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(31): # NOTE: this should be 4 lower
+      model.forward(img).realize()
+
+  def test_vit(self):
+    model = ViT(embed_dim=192, num_heads=3)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(223): # NOTE: this is way too high
+      out = model.forward(img)
+      assert len(GlobalCounters.cache) == 0, f"ViT prerealized?"
+      out.realize()
+
+  def test_llama(self):
+    from examples.llama import Transformer, onehot_encode
+    args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
+    model = Transformer(**args_tiny)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    with CLCache(85):
+      model(onehot_encode([1,2,3,4], vocab_size=args_tiny['vocab_size']), 0).realize()
+
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestOptBinOp(unittest.TestCase):
+  def _test_no_binop_rerun(self, f1, f2=None, allowed=1):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      c = f1(a, b)
+      if f2 is not None: d = f2(a, b)
+      c.realize()
+      if f2 is not None: d.realize()
+      assert len(GlobalCounters.cache) == allowed, "binop was rerun!"
+    if f2 is not None: np.testing.assert_allclose(c.numpy().ravel(), d.numpy().ravel(), rtol=1e-3, atol=1e-5)
+
+  def test_no_binop_rerun(self): return self._test_no_binop_rerun(lambda a,b: a*b, lambda a,b: (a*b).reshape(16, 16, 1))
+  def test_no_binop_rerun_alt(self): return self._test_no_binop_rerun(lambda a,b: (a*b).reshape(16, 16, 1), lambda a,b: a*b)
+  def test_no_binop_rerun_reduce_broadcast(self): return self._test_no_binop_rerun(lambda a,b: a.sum()+b, lambda a,b: a.sum().reshape(1,1)+b, allowed=2)
+  def test_no_binop_rerun_transposed(self): return self._test_no_binop_rerun(lambda a,b: (a.T*b.T).T, lambda a,b: a*b)
+  def test_no_binop_rerun_mid_reshape(self): return self._test_no_binop_rerun(lambda a,b: (a*b).reshape(256)+a.reshape(256))
+
+  # currently non working tests
+  #def test_no_binop_rerun_preshape(self): return self._test_no_binop_rerun(lambda a,b: a.reshape(16, 16, 1)*b.reshape(16, 16, 1), lambda a,b: a*b)
+  #def test_no_binop_rerun_reduce(self): return self._test_no_binop_rerun(lambda a,b: (a*b).sum(), lambda a,b: (a*b).reshape(16, 16, 1).sum())
+  #def test_no_binop_rerun_reduce_alt(self): return self._test_no_binop_rerun(lambda a,b: a.sum(1)+b[0], lambda a,b: a.sum(1).reshape(1,16)+b[0])
+
+@unittest.skip("elementwise with >1 reduce inputs currently don't fuse")
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestOptReduceLoop(unittest.TestCase):
+  def test_loop_left(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      t = a.sum(0)
+      b = t.reshape(16,1).expand(16,16).sum(0)
+      c = (t+b)
+      c.realize()
+      assert len(GlobalCounters.cache) == 2, "loop left fusion broken"
+
+  def test_loop_right(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      t = a.sum(0)
+      b = t.reshape(16,1).expand(16,16).sum(0)
+      c = (b+t)
+      c.realize()
+      assert len(GlobalCounters.cache) == 2, "loop right fusion broken"
+
+@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+class TestOptWChild(unittest.TestCase):
+  def test_unrealized_child(self):
+    a = Tensor.randn(16, 16)
+    b = Tensor.randn(16, 16)
+    with CLCache():
+      c = (a*b).sum()
+      d = c+1
+      e = c+2
+      d.realize()
+      assert len(GlobalCounters.cache) == 2, "don't fuse if you have children"
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOpt(unittest.TestCase):
@@ -51,7 +165,7 @@ class TestOpt(unittest.TestCase):
     with CLCache():
       img_bn = bn(img).realize()
       print(img_bn)
-      assert len(GlobalCounters.cache) == 3, "optimizer didn't fold batchnorm"
+      assert len(GlobalCounters.cache) == 3, f"optimizer didn't fold batchnorm, got {len(GlobalCounters.cache)}"
     Tensor.training = False
 
   def test_fold_conv_sgd(self):
@@ -94,7 +208,7 @@ class TestOpt(unittest.TestCase):
     img_conv = bn(c1(img)).relu().realize()
     with CLCache():
       img_conv = bn(c1(img)).relu().realize()
-      assert len(GlobalCounters.cache) == 1, "optimizer didn't fold conv-batchnorm at test time"
+      assert len(GlobalCounters.cache) == 1, f"optimizer didn't fold conv-batchnorm at test time, got {len(GlobalCounters.cache)}"
 
   def test_fold_conv_batchnorm(self):
     Tensor.training = True
@@ -104,7 +218,7 @@ class TestOpt(unittest.TestCase):
     with CLCache():
       img_conv = bn(c1(img)).relu().realize()
       print(img_conv)
-      assert len(GlobalCounters.cache) == 4, "optimizer didn't fold conv-batchnorm"
+      assert len(GlobalCounters.cache) == 4, f"optimizer didn't fold conv-batchnorm, got {len(GlobalCounters.cache)}"
     Tensor.training = False
 
   def test_fold_conv_elu(self):
@@ -164,9 +278,10 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,1,16).transpose(2,1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
+  # TODO: push permute through expansion reshape
   @unittest.skip("expansion can't push expand permute yet")
+  @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
   def test_permute_was_pushed_through_expand_reshape(self):
-    if not PUSH_PERMUTES: return
     a = Tensor.randn(16, 16, 16)
     with CLCache():
       c = a.sum(2)
@@ -176,33 +291,8 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
 
-  @unittest.skip("this is broken")
-  def test_no_binop_rerun(self):
-    a = Tensor.randn(16, 16)
-    b = Tensor.randn(16, 16)
-    with CLCache():
-      c = a*b
-      d = (a*b).reshape(16, 16, 1)
-      c.realize()
-      d.realize()
-      assert len(GlobalCounters.cache) == 1, "binop was rerun!"
-    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3, atol=1e-5)
-
-  @unittest.skip("this is broken")
-  def test_no_binop_rerun_alt(self):
-    a = Tensor.randn(16, 16)
-    b = Tensor.randn(16, 16)
-    with CLCache():
-      c = (a*b).reshape(16, 16, 1)
-      d = a*b
-      c.realize()
-      d.realize()
-      assert len(GlobalCounters.cache) == 1, "binop was rerun!"
-    np.testing.assert_allclose(c.numpy(), d.numpy(), rtol=1e-3, atol=1e-5)
-
-  # TODO: should be okay with PUSH_PERMUTES
+  @unittest.skipIf(PUSH_PERMUTES, "this test is broken with PUSH_PERMUTES")
   def test_no_reduceop_rerun(self):
-    if PUSH_PERMUTES: return
     a = Tensor.randn(16, 16, 16)
     with CLCache():
       c = a.sum(2)
@@ -213,9 +303,8 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy().transpose(1,0), d.numpy(), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
-  # TODO: should be okay with PUSH_PERMUTES
+  @unittest.skipIf(PUSH_PERMUTES, "this test is brokem with PUSH_PERMUTES")
   def test_no_reduceop_rerun_alt(self):
-    if PUSH_PERMUTES: return
     a = Tensor.randn(16, 16, 16)
     with CLCache():
       c = a.sum(2).permute(1,0)

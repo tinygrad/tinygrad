@@ -197,6 +197,8 @@ class TestOps(unittest.TestCase):
                 [[1.0,1.0,0.0,1.0]],
                 ])
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: Tensor.max(x, axis=1))
+  def test_mean(self):
+    helper_test_op([(3,4,5,6)], lambda x: x.mean())
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)))
   def test_log_softmax(self):

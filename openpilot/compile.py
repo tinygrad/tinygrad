@@ -49,7 +49,7 @@ def compile(dat, output_fn):
   Tensor.manual_seed(1337)
   Tensor.no_grad = True
   using_graph = graph.GRAPH
-  if getenv("GRAPH") < 2: graph.GRAPH = False
+  if getenv("GRAPH") < 3: graph.GRAPH = False
 
   onnx_model = onnx.load(io.BytesIO(dat))
   run_onnx = get_run_onnx(onnx_model)
