@@ -69,7 +69,9 @@ class TestInferenceMinKernels(unittest.TestCase):
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache():
-      model.forward(img).realize()
+      out = model.forward(img)
+      assert len(GlobalCounters.cache) == 0, f"ViT prerealized?"
+      out.realize()
       # NOTE: this is way too high
       assert len(GlobalCounters.cache) <= 224, f"ViT used more than 224 kernels, it used {len(GlobalCounters.cache)}"
 
