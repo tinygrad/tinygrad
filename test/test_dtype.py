@@ -41,12 +41,25 @@ class TestDtype(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), [[1,2],[3,4]])
 
   def test_upcast_float(self):
-    # NOTE: there's no downcasting support
-    a = Tensor([1,2,3,4], dtype=dtypes.float16).float()
+    a = Tensor([1,2,3,4], dtype=dtypes.float16)
     print(a)
-    na = a.numpy()
+    fa = a.float()
+    assert a.device == fa.device
+    assert a.requires_grad == fa.requires_grad
+    na = fa.numpy()
     print(na, na.dtype)
     assert na.dtype == np.float32
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_downcast_float(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.float32, requires_grad=False).half()
+    print(a)
+    ha = a.half()
+    assert a.device == ha.device
+    assert a.requires_grad == ha.requires_grad
+    na = ha.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.float16
     np.testing.assert_allclose(na, [1,2,3,4])
 
   def test_half_add_upcast(self):

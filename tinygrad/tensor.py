@@ -460,9 +460,9 @@ class Tensor:
 
   # ***** cast ops *****
 
-  # TODO: this is a hack, but if we add float(0), it will become a float. need real casting support
-  def float(self) -> Tensor: return self.add(Tensor([0], device=self.device, dtype=dtypes.float32, requires_grad=self.requires_grad))
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
+  def float(self) -> Tensor: return self.cast(dtypes.float32)
+  def half(self) -> Tensor: return self.cast(dtypes.float16)
 
 # register functions to move between devices
 for device in Device._buffers:
