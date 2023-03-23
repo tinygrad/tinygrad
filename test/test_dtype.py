@@ -48,6 +48,7 @@ class TestDtype(unittest.TestCase):
     print(na, na.dtype)
     assert na.dtype == np.float32
     np.testing.assert_allclose(na, [1,2,3,4])
+
   def test_half_add_upcast(self):
     a = Tensor([1,2,3,4], dtype=dtypes.float16)
     b = Tensor([1,2,3,4], dtype=dtypes.float32)
