@@ -24,9 +24,7 @@ class TinyJit:
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     if self.cnt >= 2:
       for (j,i),idx in self.input_replace.items(): self.jit_cache[j][1][i] = input_rawbuffers[idx]
-      if DEBUG >= 2: print(colored("TOK", 'magenta').split("TOK")[0], end="")
-      for prg, args in self.jit_cache: prg(args)
-      if DEBUG >= 2: print(colored("TOK", 'magenta').split("TOK")[1], end="")
+      for prg, args in self.jit_cache: prg(args, jit=True)
       for (j,i),idx in self.input_replace.items(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       GlobalCounters.cache = []
