@@ -152,7 +152,7 @@ class Compiled:
     # this is the default now
     if getenv("ENABLE_METHOD_CACHE", 1):
       if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
-      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
+      elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:
       prg = k.codegen().build(self.runtime)

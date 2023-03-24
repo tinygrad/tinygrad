@@ -10,7 +10,7 @@ from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable, SumNode, ModNode
 
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); LOAD4 = auto(); STORE4 = auto() # noqa: E702
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
   dtype: DType = dtypes.float32
@@ -20,6 +20,7 @@ class MemOp(NamedTuple):
   i: int
   idx: Variable
   valid: Variable
+  cnt: int
 
 class UOp(NamedTuple):
   uop: UOps
@@ -78,7 +79,9 @@ class Linearizer:
     self.reshape_and_permute(None, permute)
 
     # parameters
-    self.group_for_reduce: List[int] = []
+    self.local_non_reduce: int = 0
+    self.group_for_reduce: List[int] = []   # TODO: replace this with local_axes
+    self.upcast_in_mid_reduce_axes: List[int] = []
     self.upcasted: int = 0
 
     # group simplifies
@@ -123,9 +126,11 @@ class Linearizer:
         for j in range(0, 4 if will_merge else 1):
           offsets.append(store[store_offset[offset+j]])
           del store_offset[offset+j]
-        self.uop(UOps.STORE4 if will_merge else UOps.STORE, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+        idx, valid = self.sts[i].expr_idxs(offset, idxs)
+        self.uop(UOps.STORE, None, offsets, MemOp(i, idx, valid, 4 if will_merge else 1))
       else:
-        reg = self.uop(UOps.LOAD4 if will_merge else UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+        idx, valid = self.sts[i].expr_idxs(offset, idxs)
+        reg = self.uop(UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, idx, valid, 4 if will_merge else 1))
         if will_merge:
           for j in range(0, 4): cache[offset+j] = reg+"."+"xyzw"[j]
         else:
@@ -162,13 +167,13 @@ class Linearizer:
       return f"{name}{_ssa[name]-1}"
 
     # global loop
-    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1 if i < self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+    global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1 if i < self.first_reduce else 0) for i in range(0, self.first_reduce+self.local_non_reduce+len(self.group_for_reduce))]
     self.uop(UOps.LOOP, None, [], (global_idxs, "global"))
 
     # local loop
-    if self.group_for_reduce:
+    if self.group_for_reduce or self.local_non_reduce:
       # NOTE: this is assuming the global size = the local size in these dims. in general, this doesn't have to be true
-      local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
+      local_idxs = [Variable(f"lidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+self.local_non_reduce+len(self.group_for_reduce))]
       self.uop(UOps.LOOP, None, [], (local_idxs, "local"))
       gl_idxs = [x*(y.max+1)+y for x,y in zip(global_idxs, local_idxs)]
     else:
@@ -181,7 +186,7 @@ class Linearizer:
       acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
 
       # reduce loop
-      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.local_non_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # load earlybufs
@@ -229,7 +234,10 @@ class Linearizer:
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_buf(0, global_idxs, val)
+    self.global_buf(0, gl_idxs, val)
+
+    if self.local_non_reduce:
+      self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
@@ -253,7 +261,7 @@ class Linearizer:
       return [self.uop(UOps.ALU, ssa('alu'), list(val), x.op) for val in zip(*values)]
 
   @property
-  def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
+  def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True) - self.local_non_reduce
 
   @property
   def full_shape(self) -> Tuple[int, ...]: return self.sts[self.full_buf_index].shape
@@ -264,16 +272,13 @@ class Linearizer:
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
-  @property
-  def upcast_in_mid_reduce_axes(self) -> List[int]: return [j for j in range(self.first_reduce, self.first_reduce+len(self.group_for_reduce)) if self.full_shape[j] == self.sts[0].shape[j]]
-
   def colors(self) -> List[str]:
     # up to first_reduce, they are all global (blue)
     colors = ["blue"] * self.first_reduce
     # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
-    colors += ["green" if i in self.upcast_in_mid_reduce_axes else "cyan" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
+    colors += ["green" if i in self.upcast_in_mid_reduce_axes else "cyan" for i in range(self.first_reduce, self.first_reduce + self.local_non_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
-    colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce)))
+    colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + self.local_non_reduce + len(self.group_for_reduce)))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.shape_len-self.upcasted, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"

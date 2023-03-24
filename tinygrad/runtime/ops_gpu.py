@@ -109,6 +109,7 @@ class CLCodegen(CStyleCodegen):
       axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:
+        self.upcast_in_mid_reduce_axes.append(self.first_reduce + len(self.group_for_reduce))
         self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
         self.group_for_reduce.append(4)
 

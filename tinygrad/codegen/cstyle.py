@@ -127,7 +127,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       else:
         kk(f"float {newvar} = {code_for_op[args](*vin)};")
     # TODO: refactor the next 14 lines
-    if uop == UOps.LOAD:
+    if uop == UOps.LOAD and args.cnt == 1:
       # TODO: merge with CONST?
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
         # nan? inf?
@@ -140,7 +140,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args.valid.min == 1: kk(f"float {newvar} = {val};")
       else: kk(f"float {newvar} = ({args.valid.render(render_cl)}) ? ({val}) : 0.0f;")
-    if uop == UOps.LOAD4:
+    if uop == UOps.LOAD and args.cnt == 4:
       if isinstance(bufs[args.i].dtype, ImageDType):
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
@@ -150,13 +150,13 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args[2].min == 1: kk(f"float4 {newvar} = {val};")
       else: kk(f"float4 {newvar} = ({args.valid.render(render_cl)}) ? ({val}) : {group_float4(['0.0f']*4)};")
-    if uop == UOps.STORE:
+    if uop == UOps.STORE and args.cnt == 1:
       assert args.valid.min == 1, "store must be valid"
       if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
         kk(f"vstore_half({vin[0]}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
         kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {vin[0]};")
-    if uop == UOps.STORE4:
+    if uop == UOps.STORE and args.cnt == 4:
       assert args.valid.min == 1, "store must be valid"
       if isinstance(bufs[args[0]].dtype, ImageDType):
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args[1], args[2])

@@ -53,7 +53,6 @@ def helper_test_speed(f1, *args):
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
-    if DEBUG >= 4: print("benchmark start")
     st = time.monotonic()
     ret = f1(*args)
     if isinstance(ret, Tensor):
@@ -63,7 +62,6 @@ def helper_test_speed(f1, *args):
       sync()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
-    if DEBUG >= 4: print("benchmark stop")
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)

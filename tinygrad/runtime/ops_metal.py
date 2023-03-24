@@ -83,4 +83,15 @@ class MetalCodegen(CStyleCodegen):
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
+  def hand_coded_optimizations(self):
+    if self.sts[0].shape == (1024, 1024, 1):
+      # Metal supports a simdgroup_float8x8 type
+      self.shift_to(0, amount=8, insert_before=2)
+      self.shift_to(1, amount=2) # per kernel
+      self.upcast()
+      self.shift_to(1, amount=4, insert_before=3)
+      self.reshape_and_permute(lambda x: x[0:2]+(x[2]*x[3],)+x[4:], None)
+      self.local_non_reduce = 1
+      #self.group_for_reduce.append(32)
+
 MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)
