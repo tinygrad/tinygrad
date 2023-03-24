@@ -39,6 +39,7 @@ class Interpreted:
     self.fxn_for_op = fxn_for_op
     self.from_lazybuffer = from_lazybuffer
     self.to_underlying = to_underlying
+    self.synchronize = lambda: None
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, context=None):
@@ -122,8 +123,8 @@ class ASTRunner:
     return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], codegen, runtime):
-    self.buffer, self.codegen, self.runtime = buffer, codegen, runtime
+  def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):
+    self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
     self.method_cache: Dict[str, ASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output):

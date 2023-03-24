@@ -14,6 +14,10 @@ class _METAL:
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueue()
+  # TODO: is there a better way to do this?
+  def synchronize(self):
+    for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    self.mtl_buffers_in_flight.clear()
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
@@ -22,8 +26,7 @@ class RawMetalBuffer(RawBufferMapped):
     self._buf.release()
     super().__del__()
   def _buffer(self):
-    for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
-    METAL.mtl_buffers_in_flight.clear()
+    METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
 
 def unwrap(x):
@@ -80,4 +83,4 @@ class MetalCodegen(CStyleCodegen):
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
-MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram)
+MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)

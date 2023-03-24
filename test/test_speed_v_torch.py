@@ -10,6 +10,7 @@ import time
 import numpy as np
 np.set_printoptions(linewidth=160)
 from functools import partial
+from tinygrad.lazy import Device
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
@@ -19,6 +20,14 @@ from tinygrad.jit import TinyJit
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
 torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
+if str(torch_device) == "mps":
+  import torch.mps
+  sync = lambda: torch.mps.synchronize()
+elif str(torch_device) == "cuda":
+  import torch.cuda
+  sync = lambda: torch.cuda.synchronize()
+else:
+  sync = lambda: None
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
@@ -47,9 +56,11 @@ def helper_test_speed(f1, *args):
     if DEBUG >= 4: print("benchmark start")
     st = time.monotonic()
     ret = f1(*args)
-    # not ideal, it's copying (sometimes). why is this so slow in tinygrad?
-    if isinstance(ret, Tensor) or str(torch_device) == "cpu": ret.numpy()
-    else: ret.cpu().numpy()
+    if isinstance(ret, Tensor):
+      ret.realize()
+      Device[ret.device].synchronize()
+    else:
+      sync()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
     if DEBUG >= 4: print("benchmark stop")
@@ -160,7 +171,7 @@ class TestSpeed(unittest.TestCase):
 
   def test_gemm(self):
     def f(a, b): return a @ b
-    helper_test_generic_square('gemm', 512, f, f)
+    helper_test_generic_square('gemm', 1024, f, f)
 
   def test_gemm_unrolled(self):
     N = 512

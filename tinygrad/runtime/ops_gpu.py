@@ -75,4 +75,4 @@ class CLCodegen(CStyleCodegen):
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
 
-GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram)
+GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.cl_queue.finish)

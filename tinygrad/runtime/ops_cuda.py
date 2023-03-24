@@ -45,4 +45,4 @@ class CUDACodegen(CStyleCodegen):
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
-CUDABuffer = Compiled(RawCUDABuffer, CUDACodegen, CUDAProgram)
+CUDABuffer = Compiled(RawCUDABuffer, CUDACodegen, CUDAProgram, cuda.Context.synchronize)
