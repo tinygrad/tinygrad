@@ -184,6 +184,8 @@ class CStyleCodegen(Linearizer):
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
   kernel_name_cache: Final[Dict[str, Tuple[str, str]]] = {}
 
+  def hand_coded_optimizations(self): return
+
   def codegen(self):
     self.process()
     self.hand_coded_optimizations()
