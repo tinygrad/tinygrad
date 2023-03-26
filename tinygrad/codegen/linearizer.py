@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Optional, cast, Dict, DefaultDict, NamedTuple
+from typing import List, Tuple, Any, Optional, cast, Dict, DefaultDict, NamedTuple, Union
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -20,7 +20,8 @@ class MemOp(NamedTuple):
   i: int
   idx: Variable
   valid: Variable
-  cnt: int
+  cnt: Union[int, Tuple[int, ...]]
+  stride: Union[int, Tuple[int, ...]] = 1
 
 class UOp(NamedTuple):
   uop: UOps
@@ -140,6 +141,18 @@ class Linearizer:
         for j in range(0, cnt): cache[offset+j] = reg+"."+"xyzw"[j] if cnt > 1 else reg
         #print(cache)
         return cache[offset]
+
+    # 2d 8x8
+    strides = tuple(st for s,st,_ in self.upcasted_axis(i) if s==8 and st!=0)
+    if len(strides) == 2:
+      idx, valid = self.sts[i].expr_idxs(0, idxs)
+      if store is None:
+        reg = self.uop(UOps.LOAD, f"val{mnum(i)}", [], MemOp(i, idx, valid, (8,8), strides))
+        return [reg]
+      else:
+        reg = self.uop(UOps.STORE, None, [store[0]], MemOp(i, idx, valid, (8,8), strides))
+        return
+      #return [f"{reg}.thread_elements()[{j}]" for j in range(64)]
     return [op(o) for o in self.offsets(i)]
 
   def linearize(self):
@@ -187,7 +200,9 @@ class Linearizer:
     # reduce op
     if self.reduceop is not None:
       # define accumulator
-      acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
+      acc_one = self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      acc = [acc_one for _ in self.offsets(0)]
+      #acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
 
       # reduce loop
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.local_non_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]

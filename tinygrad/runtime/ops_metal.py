@@ -109,7 +109,7 @@ class MetalCodegen(CStyleCodegen):
       self.upcast()
       """
 
-      amt = 4
+      amt = 8
       self.shift_to(0, amount=amt)
       self.upcast()
       self.shift_to(1, amount=amt)

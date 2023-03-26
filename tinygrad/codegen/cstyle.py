@@ -66,6 +66,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   global_size = []
   local_size = []
   pend_close = None
+  using_simdgroups = False
 
   bufnames = ["temp" if isinstance(b, LocalBuffer) else f"data{i}" for i,b in enumerate(bufs)]
 
@@ -117,12 +118,16 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     if uop == UOps.CONST:
-      if args == -math.inf:
-        kk(f"float {newvar} = -INFINITY;")
-      else:
-        kk(f"float {newvar} = {args}f;")
+      #if args == -math.inf:
+      #  kk(f"float {newvar} = -INFINITY;")
+      #else:
+      #  kk(f"float {newvar} = {args}f;")
+      # TODO: needs type
+      kk(f"simdgroup_float8x8 {newvar}({args});")
     if uop == UOps.ALU:
-      if newvar in vin:
+      if args == FusedOps.MULACC:
+        kk(f"simdgroup_multiply_accumulate({newvar}, {vin[1]}, {vin[2]}, {vin[0]});")
+      elif newvar in vin:
         kk(f"{newvar} = {code_for_op[args](*vin)};")
       else:
         kk(f"float {newvar} = {code_for_op[args](*vin)};")
@@ -150,6 +155,23 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args[2].min == 1: kk(f"float4 {newvar} = {val};")
       else: kk(f"float4 {newvar} = ({args.valid.render(render_cl)}) ? ({val}) : {group_float4(['0.0f']*4)};")
+    if uop in [UOps.LOAD, UOps.STORE] and args.cnt == (8,8):
+      using_simdgroups = True
+      if args.stride[0] < args.stride[1]:
+        # transpose
+        stride = args.stride[::-1]
+        transpose = True
+      else:
+        stride = args.stride
+        transpose = False
+      transpose = False
+      idy = (args.idx//stride[0]).render(render_cl)
+      idx = (args.idx%stride[0]).render(render_cl)
+      if uop == UOps.LOAD:
+        kk(f"simdgroup_float8x8 {newvar}; simdgroup_load({newvar}, {bufnames[args.i]}, {stride[0]}, ulong2({idx},{idy}), {'true' if transpose else 'false'});")
+      elif uop == UOps.STORE:
+        kk(f"simdgroup_store({vin[0]}, {bufnames[args.i]}, {stride[0]}, ulong2({idx},{idy}), {'true' if transpose else 'false'});")
+      #kk(lang.barrier)
     if uop == UOps.STORE and args.cnt == 1:
       assert args.valid.min == 1, "store must be valid"
       if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
@@ -172,6 +194,13 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   prg = ''.join([f"{lang.kernel_prefix} void KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
+
+  if using_simdgroups:
+    global_size.append(1)
+    local_size = [1,1,32]
+    prg = prg.replace("gid.y", "gid.z").replace("gid.x", "gid.y")
+    #global_size = [1] + global_size
+    #local_size = [32,1,1]
 
   return prg, global_size, local_size
 
