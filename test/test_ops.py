@@ -132,7 +132,8 @@ class TestOps(unittest.TestCase):
   def test_leakyrelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
   def test_celu(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,1.0), Tensor.celu)
+    for shape in [(45,65), (100, 55), (65, 65)]:
+      helper_test_op([shape], lambda x: torch.nn.functional.celu(x,1.0), Tensor.celu)
   def test_abs(self):
     helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs)
   def test_log(self):
@@ -142,7 +143,8 @@ class TestOps(unittest.TestCase):
   def test_sign(self):
     helper_test_op([(45,65)], lambda x: torch.sign(x), Tensor.sign)
   def test_softsign(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.softsign(x), Tensor.softsign)
+    for shape in [(45,65), (100, 55), (65, 65)]:
+      helper_test_op([shape], lambda x: torch.nn.functional.softsign(x), Tensor.softsign)
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
   def test_softplus(self):
@@ -214,7 +216,8 @@ class TestOps(unittest.TestCase):
   def test_tanh(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
   def test_hardtanh(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.hardtanh(x,-1,1), Tensor.hardtanh, atol=1e-6, grad_atol=1e-6)
+    for shape in [(45,65), (100, 55), (65, 65)]:
+      helper_test_op([shape], lambda x: torch.nn.functional.hardtanh(x,-1,1), Tensor.hardtanh, atol=1e-6, grad_atol=1e-6)
   def test_topo_sort(self):
     helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6)
 

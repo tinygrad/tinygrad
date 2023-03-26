@@ -375,19 +375,19 @@ class Tensor:
   # ***** activation functions (unary) *****
 
   def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
-  def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
-  def celu(self, alpha=1.0): return max(0, self) + min(0, alpha * ((self / alpha).exp() - 1))
+  def elu(self, alpha: float = 1.0): return self.relu() - alpha*(1-self.exp()).relu()
+  def celu(self, alpha: float = 1.0): return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0) # min(alpha * (self.exp(1 / alpha) - 1))
   def swish(self): return self * self.sigmoid()
   def silu(self): return self.swish()   # The SiLU function is also known as the swish function.
   def relu6(self): return self.relu() - (self-6).relu()
   def hardswish(self): return self * (self+3).relu6() * (1/6)
   def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-  def hardtanh(self, min_val=-1, max_val=1): return min(max(self, min_val), max_val)
+  def hardtanh(self, min_val: int = -1, max_val: int = 1): return self.minimum(max_val).maximum(min_val)
   def gelu(self): return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
   def quick_gelu(self): return self * (self * 1.702).sigmoid()
-  def leakyrelu(self, neg_slope=0.01): return self.relu() - (-neg_slope*self).relu()
+  def leakyrelu(self, neg_slope: float = 0.01): return self.relu() - (-neg_slope*self).relu()
   def mish(self): return self * self.softplus().tanh()
-  def softplus(self, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
+  def softplus(self, beta: int =1): return (1/beta) * (1 + (self*beta).exp()).log()
   def softsign(self): return self / (1 + self.abs())
 
   # ***** broadcasted binary mlops *****
