@@ -132,8 +132,8 @@ class TestOps(unittest.TestCase):
   def test_leakyrelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
   def test_celu(self):
-    for shape in [(45,65), (100, 55), (65, 65)]:
-      helper_test_op([shape], lambda x: torch.nn.functional.celu(x,1.0), Tensor.celu)
+    for val in range(1, 5):
+      helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
   def test_abs(self):
     helper_test_op([(45,65)], lambda x: torch.abs(x), Tensor.abs)
   def test_log(self):
@@ -216,8 +216,8 @@ class TestOps(unittest.TestCase):
   def test_tanh(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
   def test_hardtanh(self):
-    for shape in [(45,65), (100, 55), (65, 65)]:
-      helper_test_op([shape], lambda x: torch.nn.functional.hardtanh(x,-1,1), Tensor.hardtanh, atol=1e-6, grad_atol=1e-6)
+    for val in range(10, 30):
+      helper_test_op([(45,65)], lambda x: torch.nn.functional.hardtanh(x,-val, val), lambda x: x.hardtanh(-val, val), atol=1e-6, grad_atol=1e-6)
   def test_topo_sort(self):
     helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6)
 
