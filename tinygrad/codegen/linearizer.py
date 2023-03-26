@@ -69,6 +69,9 @@ class Linearizer:
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]
     for st in self.sts: st.simplify()
 
+    # create new dtypes inside this kernel, they might change
+    self.dtypes: List[DType] = [x.dtype for x in self.bufs]
+
     # make the output buffer shape correct in here
     self.sts[0].reshape(self.info.shape)
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if len(self.earlybufs) > 0 else 0
@@ -121,20 +124,21 @@ class Linearizer:
       if offset not in store_offset: return
       will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
       assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
+      cnt = 4 if will_merge else 1
+      #if self.dtypes[i].name == "float4": cnt = 4
+      #print(store, store_offset, cnt)
       if store is not None:
-        offsets = []
-        for j in range(0, 4 if will_merge else 1):
-          offsets.append(store[store_offset[offset+j]])
+        values = []
+        for j in range(0, cnt):
+          values.append(store[store_offset[offset+j]])
           del store_offset[offset+j]
         idx, valid = self.sts[i].expr_idxs(offset, idxs)
-        self.uop(UOps.STORE, None, offsets, MemOp(i, idx, valid, 4 if will_merge else 1))
+        self.uop(UOps.STORE, None, values, MemOp(i, idx, valid, cnt))
       else:
         idx, valid = self.sts[i].expr_idxs(offset, idxs)
-        reg = self.uop(UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, idx, valid, 4 if will_merge else 1))
-        if will_merge:
-          for j in range(0, 4): cache[offset+j] = reg+"."+"xyzw"[j]
-        else:
-          cache[offset] = reg
+        reg = self.uop(UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, idx, valid, cnt))
+        for j in range(0, cnt): cache[offset+j] = reg+"."+"xyzw"[j] if cnt > 1 else reg
+        #print(cache)
         return cache[offset]
     return [op(o) for o in self.offsets(i)]
 
@@ -286,7 +290,7 @@ class Linearizer:
 
   def printbufs(self, prefix=""):
     for i in range(len(self.sts)):
-      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.sts[i].views)
+      print(prefix, f"{i:3d} {str(self.bufs[i].realized) if self.bufs[i] is not None else 'FAKE':47s}", self.dtypes[i], self.sts[i].views)
     print(' '.join(colored(f"{s:4d}", color) for s,color in zip(self.full_shape, self.colors())))
 
   # ******************** base simplifiers ********************

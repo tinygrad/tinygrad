@@ -56,7 +56,6 @@ def helper_test_speed(f1, *args):
     st = time.monotonic()
     ret = f1(*args)
     if isinstance(ret, Tensor):
-      ret.realize()
       Device[ret.device].synchronize()
     else:
       sync()

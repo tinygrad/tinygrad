@@ -1,5 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib
+import numpy as np
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -76,6 +77,17 @@ class MetalProgram:
     else:
       METAL.mtl_buffers_in_flight.append(command_buffer)
 
+class Float8x8DType(DType):
+  def __new__(cls, strides):
+    return super().__new__(cls, 100, 64, "float8x8", np.float32)
+  def __init__(self, strides):
+    self.strides = strides
+    super().__init__()
+  def __repr__(self): return f"dtypes.{self.name}({self.strides})"
+
+
+float4 = DType(100, 4*4, "float4", np.float32)
+
 class MetalCodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
@@ -84,14 +96,48 @@ class MetalCodegen(CStyleCodegen):
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
   def hand_coded_optimizations(self):
-    if self.sts[0].shape == (1024, 1024, 1):
+    if self.sts[0].shape == (1024, 1024, 1) or self.sts[0].shape == (512, 512, 1):
       # Metal supports a simdgroup_float8x8 type
+      """
       self.shift_to(0, amount=8, insert_before=2)
       self.shift_to(1, amount=2) # per kernel
       self.upcast()
       self.shift_to(1, amount=4, insert_before=3)
       self.reshape_and_permute(lambda x: x[0:2]+(x[2]*x[3],)+x[4:], None)
       self.local_non_reduce = 1
-      #self.group_for_reduce.append(32)
+      self.shift_to(3, amount=8) # per kernel
+      self.upcast()
+      """
+
+      amt = 4
+      self.shift_to(0, amount=amt)
+      self.upcast()
+      self.shift_to(1, amount=amt)
+      self.upcast()
+      self.shift_to(2, amount=amt)
+      self.upcast()
+
+      """
+      from tinygrad.shape.shapetracker import View
+      for j in range(len(self.bufs)):
+        s = self.sts[j].shape
+        st = self.sts[j].strides
+        axes = [i for i,(s,st) in enumerate(zip(s, st)) if s == 4 and st == 1 and i >= self.shape_len-self.upcasted]
+        if len(axes) == 1:
+          self.dtypes[j] = float4
+          self.sts[j].views[-1] = View(tuple(1 if i in axes else x for i,x in enumerate(s)),
+                                      tuple(0 if i in axes else x for i,x in enumerate(st)),
+                                      self.sts[j].views[-1].offset)
+        axes = [i for i,(s,st) in enumerate(zip(s, st)) if s == 8 and st != 0 and i >= self.shape_len-self.upcasted]
+        #axes = [i for i,(s,st) in enumerate(zip(s, st)) if s == 8 and i >= self.shape_len-self.upcasted]
+        #axes = [self.shape_len-3, self.shape_len-2, self.shape_len-1]
+        if len(axes) == 2:
+          self.dtypes[j] = Float8x8DType([st[i] for i in axes])
+          self.sts[j].views[-1] = View(tuple(1 if i in axes else x for i,x in enumerate(s)),
+                                       tuple(0 if i in axes else x for i,x in enumerate(st)),
+                                       self.sts[j].views[-1].offset)
+        #self.simplify_ones()
+        #self.upcasted -= 3
+      """
 
 MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)
