@@ -169,9 +169,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       idy = (args.idx//stride[0]).render(render_cl)
       idx = (args.idx%stride[0]).render(render_cl)
       if uop == UOps.LOAD:
-        kk(f"simdgroup_float8x8 {newvar}; simdgroup_load({newvar}, {bufnames[args.i]}, {stride[0]}, ulong2({idx},{idy}), {'true' if transpose else 'false'});")
+        #kk(f"simdgroup_float8x8 {newvar}; simdgroup_load({newvar}, {bufnames[args.i]}, {stride[0]}, ulong2({idx},{idy}), {'true' if transpose else 'false'});")
+        kk(f"simdgroup_float8x8 {newvar}; simdgroup_load({newvar}, {bufnames[args.i]}+{args.idx.render(render_cl)[1:-1]}, {stride[0]}, ulong2(0,0), {'true' if transpose else 'false'});")
       elif uop == UOps.STORE:
-        kk(f"simdgroup_store({vin[0]}, {bufnames[args.i]}, {stride[0]}, ulong2({idx},{idy}), {'true' if transpose else 'false'});")
+        #kk(f"simdgroup_store({vin[0]}, {bufnames[args.i]}, {stride[0]}, ulong2({idx},{idy}), {'true' if transpose else 'false'});")
+        kk(f"simdgroup_store({vin[0]}, {bufnames[args.i]}+{args.idx.render(render_cl)[1:-1]}, {stride[0]}, ulong2(0,0), {'true' if transpose else 'false'});")
       #kk(lang.barrier)
     if uop == UOps.STORE and args.cnt == 1:
       assert args.valid.min == 1, "store must be valid"
@@ -198,10 +200,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   if using_simdgroups:
     global_size.append(1)
-    #local_size = [1,1,32]
-    local_size = [2,2,32]
-    global_size[0] //= 2
-    global_size[1] //= 2
+    local_size = [1,1,32]
+    #local_size = [2,2,32]
+    #global_size[0] //= 2
+    #global_size[1] //= 2
     prg = prg.replace("gid.y", "gid.z").replace("gid.x", "gid.y")
     #global_size = [1] + global_size
     #local_size = [32,1,1]

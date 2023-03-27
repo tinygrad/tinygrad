@@ -39,26 +39,30 @@ def colorize_float(x):
     return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
-CNT = 8
+CNT = 20
 def helper_test_speed(f1, *args):
   global save_ops, save_mem
   ets = []
   ret = None
   for _ in range(CNT):
     del ret
-    args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]  # cache defeats
+
+    # cache defeats
+    #args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]
 
     # force syncing
-    [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
+    #[x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
+
+    # manual pre sync
+    if isinstance(args[0], Tensor): Device[args[0].device].synchronize()
+    else: sync()
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     st = time.monotonic()
     ret = f1(*args)
-    if isinstance(ret, Tensor):
-      Device[ret.device].synchronize()
-    else:
-      sync()
+    if isinstance(ret, Tensor): Device[ret.device].synchronize()
+    else: sync()
     et = (time.monotonic() - st) * 1000
     ets.append(et)
     if GlobalCounters.global_ops:
