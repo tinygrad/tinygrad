@@ -33,7 +33,7 @@ class UOp(NamedTuple):
   out: Optional[str]
   vin: List[str]
   arg: Any
-  def __repr__(self): return f"{str(self.uop):20s}: {self.out if self.out is not None else '':10s} {str(self.vin):32s} {self.arg}"
+  def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':10s} {str(self.vin):32s} {self.arg}"
 
 def check_no_mul(test, var):
   if test == var: return True
@@ -131,8 +131,28 @@ class Linearizer:
       will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
       assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
       cnt = 4 if will_merge else 1
-      #if self.dtypes[i].name == "float4": cnt = 4
-      #print(store, store_offset, cnt)
+
+      # 2d 8x8
+      strides = tuple(st for s,st,_ in self.upcasted_axis(i) if s==8 and st!=0)
+      if len(strides) == 2:
+        idx, valid = self.sts[i].expr_idxs(offset, idxs)
+        if store is None:
+          reg = self.uop(UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, idx, valid, (8,8), strides))
+          for j in range(0, 8*strides[0], strides[0]):
+            for k in range(0, 8*strides[1], strides[1]):
+              cache[offset+j+k] = (reg, offset+j+k)
+          return (reg, 0)
+        else:
+          this_store = None
+          for s,o in store:
+            if o == offset:
+              this_store = s
+          reg = self.uop(UOps.STORE, None, [this_store], MemOp(i, idx, valid, (8,8), strides))
+          for j in range(0, 8*strides[0], strides[0]):
+            for k in range(0, 8*strides[1], strides[1]):
+              del store_offset[offset+j+k]
+          return
+
       if store is not None:
         values = []
         for j in range(0, cnt):
@@ -147,17 +167,6 @@ class Linearizer:
         #print(cache)
         return cache[offset]
 
-    # 2d 8x8
-    strides = tuple(st for s,st,_ in self.upcasted_axis(i) if s==8 and st!=0)
-    if len(strides) == 2:
-      idx, valid = self.sts[i].expr_idxs(0, idxs)
-      if store is None:
-        reg = self.uop(UOps.LOAD, f"val{mnum(i)}", [], MemOp(i, idx, valid, (8,8), strides))
-        return [reg]
-      else:
-        reg = self.uop(UOps.STORE, None, [store[0]], MemOp(i, idx, valid, (8,8), strides))
-        return
-      #return [f"{reg}.thread_elements()[{j}]" for j in range(64)]
     return [op(o) for o in self.offsets(i)]
 
   def linearize(self):
@@ -207,7 +216,7 @@ class Linearizer:
       # define accumulator
       acc_value = {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]
       acc_one = [self.uop(UOps.CONST, ssa('acc'), [], ConstOp(acc_value, Variable.num(1), (8,8))) for _ in range(len(self.offsets(0))//64)]
-      acc = [acc_one[i//64] for i,_ in enumerate(self.offsets(0))]
+      acc = [(acc_one[i//64],o) for i,o in enumerate(self.offsets(0))]
       #acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
 
       # reduce loop
@@ -280,6 +289,15 @@ class Linearizer:
     if x.op == ReduceOps.SUM and isinstance(x.src[0], LazyOp) and x.src[0].op == BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
+    if x.op == FusedOps.MULACC:
+      ret = []
+      seen = set()
+      for val in zip(acc, *values):
+        if val[0][0] not in seen:
+          seen.add(val[0][0])
+          ret.append(self.uop(UOps.ALU, val[0][0], [y[0] for y in val],
+                              {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]))
+      return ret
     if isinstance(x.op, (ReduceOps, FusedOps)):
       return [self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]) for val in zip(acc, *values)]
     else:

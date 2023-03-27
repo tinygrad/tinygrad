@@ -117,7 +117,9 @@ class MetalCodegen(CStyleCodegen):
       self.shift_to(2, amount=amt)
       self.upcast()
 
-      self.shift_to(0, amount=2) #, insert_before=3)
+      self.shift_to(0, amount=4) #, insert_before=3)
+      self.upcast()
+      self.shift_to(1, amount=4) #, insert_before=3)
       self.upcast()
 
       """
