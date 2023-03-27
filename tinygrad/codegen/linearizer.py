@@ -109,7 +109,7 @@ class Linearizer:
   def can_float4(self, i): return any(a[0:2] == (4,1) for a in self.upcasted_axis(i))
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]
-    acc_strides = [x*(1-self.upcasted_axis(i)[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
+    acc_strides = [x*(1-self.upcasted_axis(i)[::-1][j][2]) for j,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.upcasted_axis(i)[::-1])])]
 
   def can_merge_float4(self, i:int, idxs:List[Variable], offset:int) -> bool:
