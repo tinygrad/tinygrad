@@ -156,14 +156,14 @@ class Linearizer:
       if store is not None:
         values = []
         for j in range(0, cnt):
-          values.append(store[store_offset[offset+j]])
+          values.append(store[store_offset[offset+j]][0])
           del store_offset[offset+j]
         idx, valid = self.sts[i].expr_idxs(offset, idxs)
         self.uop(UOps.STORE, None, values, MemOp(i, idx, valid, cnt))
       else:
         idx, valid = self.sts[i].expr_idxs(offset, idxs)
         reg = self.uop(UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, idx, valid, cnt))
-        for j in range(0, cnt): cache[offset+j] = reg+"."+"xyzw"[j] if cnt > 1 else reg
+        for j in range(0, cnt): cache[offset+j] = (reg+"."+"xyzw"[j] if cnt > 1 else reg, offset+j)
         #print(cache)
         return cache[offset]
 
@@ -216,9 +216,9 @@ class Linearizer:
     if self.reduceop is not None:
       # define accumulator
       acc_value = {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]
-      acc_one = [self.uop(UOps.CONST, ssa('acc'), [], ConstOp(acc_value, Variable.num(1), (8,8))) for _ in range(len(self.offsets(0))//64)]
-      acc = [(acc_one[i//64],o) for i,o in enumerate(self.offsets(0))]
-      #acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
+      #acc_one = [self.uop(UOps.CONST, ssa('acc'), [], ConstOp(acc_value, Variable.num(1), (8,8))) for _ in range(len(self.offsets(0))//64)]
+      #acc = [(acc_one[i//64],o) for i,o in enumerate(self.offsets(0))]
+      acc = [(self.uop(UOps.CONST, ssa('acc'), [], ConstOp(acc_value, Variable.num(1), 1)), o) for o in self.offsets(0)]
 
       # reduce loop
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.local_non_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
@@ -298,7 +298,7 @@ class Linearizer:
     if x.op == ReduceOps.SUM and isinstance(x.src[0], LazyOp) and x.src[0].op == BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
-    if x.op == FusedOps.MULACC:
+    if False and x.op == FusedOps.MULACC:
       ret = []
       seen = set()
       for val in zip(acc, *values):
@@ -308,9 +308,10 @@ class Linearizer:
                               {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]))
       return ret
     if isinstance(x.op, (ReduceOps, FusedOps)):
-      return [self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]) for val in zip(acc, *values)]
+      replace_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]
+      return [(self.uop(UOps.ALU, val[0][0], [y[0] for y in val], replace_op), val[0][1]) for val in zip(acc, *values)]
     else:
-      return [self.uop(UOps.ALU, ssa('alu'), list(val), x.op) for val in zip(*values)]
+      return [(self.uop(UOps.ALU, ssa('alu'), [y[0] for y in val], x.op), val[0][1]) for val in zip(*values)]
 
   @property
   def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True) - self.local_non_reduce

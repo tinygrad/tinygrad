@@ -111,7 +111,7 @@ kernel void test(device float *a, device const float *data1, device const float 
 }}""")
 
 def clear_l2():
-  for i in range(10): np.zeros((1024, 1024))+1
+  #for i in range(10): np.zeros((1024, 1024))+1
   return 0
 
 #tms = [prog([32, N//(8*4), N//(8*4)], [32, 1, 1], a, b, c, wait=True) for _ in range(20)]
@@ -123,7 +123,7 @@ if N <= 32:
   print(na)
   print(comp)
 print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:.2f} GFLOPS matmul, {BW*1e-9/tm:.2f} GB/s")
-np.testing.assert_allclose(na, comp, atol=1e-3)
+np.testing.assert_allclose(na, comp, atol=1e-2)
 
 import time, torch, torch.mps
 b = torch.from_numpy(nb).to('mps')

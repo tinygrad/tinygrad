@@ -124,11 +124,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         if args.val == -math.inf:
           kk(f"float {newvar} = -INFINITY;")
         else:
-          kk(f"float {newvar} = {args}f;")
+          kk(f"float {newvar} = {args.val}f;")
     if uop == UOps.ALU:
-      if args == FusedOps.MULACC:
-        kk(f"simdgroup_multiply_accumulate({newvar}, {vin[1]}, {vin[2]}, {vin[0]});")
-      elif newvar in vin:
+      #if args == FusedOps.MULACC:
+      #  kk(f"simdgroup_multiply_accumulate({newvar}, {vin[1]}, {vin[2]}, {vin[0]});")
+      if newvar in vin:
         kk(f"{newvar} = {code_for_op[args](*vin)};")
       else:
         kk(f"float {newvar} = {code_for_op[args](*vin)};")
@@ -206,6 +206,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     global_size[0] //= denom[0]
     global_size[1] //= denom[1]
     prg = prg.replace("gid.y", "gid.z").replace("gid.x", "gid.y")
+    #prg = prg.replace("gid.x", "gid.z")
     #global_size = [1] + global_size
     #local_size = [32,1,1]
 

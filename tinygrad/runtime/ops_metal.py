@@ -96,7 +96,7 @@ class MetalCodegen(CStyleCodegen):
     extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
 
   def hand_coded_optimizations(self):
-    if self.sts[0].shape == (1024, 1024, 1) or self.sts[0].shape == (512, 512, 1):
+    if self.sts[0].shape == (1024, 1024, 1) or self.sts[0].shape == (512, 512, 1) or self.sts[0].shape == (256, 256, 1):
       # Metal supports a simdgroup_float8x8 type
       """
       self.shift_to(0, amount=8, insert_before=2)
@@ -109,7 +109,8 @@ class MetalCodegen(CStyleCodegen):
       self.upcast()
       """
 
-      amt = 8
+      #amt = 8
+      amt = 4
       self.shift_to(0, amount=amt)
       self.upcast()
       self.shift_to(1, amount=amt)
@@ -117,10 +118,12 @@ class MetalCodegen(CStyleCodegen):
       self.shift_to(2, amount=amt)
       self.upcast()
 
+      """
       self.shift_to(0, amount=4) #, insert_before=3)
       self.upcast()
       self.shift_to(1, amount=4) #, insert_before=3)
       self.upcast()
+      """
 
       """
       from tinygrad.shape.shapetracker import View
