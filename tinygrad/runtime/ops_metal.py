@@ -117,6 +117,9 @@ class MetalCodegen(CStyleCodegen):
       self.shift_to(2, amount=amt)
       self.upcast()
 
+      #self.shift_to(0, amount=2) #, insert_before=3)
+      #self.upcast()
+
       """
       from tinygrad.shape.shapetracker import View
       for j in range(len(self.bufs)):

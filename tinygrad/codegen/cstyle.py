@@ -118,12 +118,13 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     if uop == UOps.CONST:
-      #if args == -math.inf:
-      #  kk(f"float {newvar} = -INFINITY;")
-      #else:
-      #  kk(f"float {newvar} = {args}f;")
-      # TODO: needs type
-      kk(f"simdgroup_float8x8 {newvar}({args});")
+      if args.cnt == (8,8):
+        kk(f"simdgroup_float8x8 {newvar}({args.val});")
+      else:
+        if args.val == -math.inf:
+          kk(f"float {newvar} = -INFINITY;")
+        else:
+          kk(f"float {newvar} = {args}f;")
     if uop == UOps.ALU:
       if args == FusedOps.MULACC:
         kk(f"simdgroup_multiply_accumulate({newvar}, {vin[1]}, {vin[2]}, {vin[0]});")
@@ -197,7 +198,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   if using_simdgroups:
     global_size.append(1)
-    local_size = [1,1,32]
+    #local_size = [1,1,32]
+    local_size = [2,2,32]
+    global_size[0] //= 2
+    global_size[1] //= 2
     prg = prg.replace("gid.y", "gid.z").replace("gid.x", "gid.y")
     #global_size = [1] + global_size
     #local_size = [32,1,1]

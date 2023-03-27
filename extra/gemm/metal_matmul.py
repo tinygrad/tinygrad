@@ -1,9 +1,9 @@
 import numpy as np
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, getenv
 from tinygrad.runtime.ops_metal import RawMetalBuffer, MetalProgram
 
 
-N = 2048
+N = getenv("N", 2048)
 
 a = RawMetalBuffer(N*N, dtypes.float32)
 

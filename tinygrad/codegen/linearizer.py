@@ -23,6 +23,11 @@ class MemOp(NamedTuple):
   cnt: Union[int, Tuple[int, ...]]
   stride: Union[int, Tuple[int, ...]] = 1
 
+class ConstOp(NamedTuple):
+  val: float
+  valid: Variable
+  cnt: Union[int, Tuple[int, ...]]
+
 class UOp(NamedTuple):
   uop: UOps
   out: Optional[str]
@@ -200,8 +205,9 @@ class Linearizer:
     # reduce op
     if self.reduceop is not None:
       # define accumulator
-      acc_one = self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
-      acc = [acc_one for _ in self.offsets(0)]
+      acc_value = {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]
+      acc_one = [self.uop(UOps.CONST, ssa('acc'), [], ConstOp(acc_value, Variable.num(1), (8,8))) for _ in range(len(self.offsets(0))//64)]
+      acc = [acc_one[i//64] for i,_ in enumerate(self.offsets(0))]
       #acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
 
       # reduce loop
