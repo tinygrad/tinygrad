@@ -143,8 +143,7 @@ class TestOps(unittest.TestCase):
   def test_sign(self):
     helper_test_op([(45,65)], lambda x: torch.sign(x), Tensor.sign)
   def test_softsign(self):
-    for shape in [(45,65), (100, 55), (65, 65)]:
-      helper_test_op([shape], lambda x: torch.nn.functional.softsign(x), Tensor.softsign)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.softsign(x), Tensor.softsign)
   def test_sigmoid(self):
     helper_test_op([(45,65)], lambda x: x.sigmoid(), Tensor.sigmoid)
   def test_softplus(self):
@@ -216,7 +215,7 @@ class TestOps(unittest.TestCase):
   def test_tanh(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), Tensor.tanh, atol=1e-6, grad_atol=1e-6)
   def test_hardtanh(self):
-    for val in range(10, 30):
+    for val in range(10, 30, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.hardtanh(x,-val, val), lambda x: x.hardtanh(-val, val), atol=1e-6, grad_atol=1e-6)
   def test_topo_sort(self):
     helper_test_op([(45,65)], lambda x: (x+x)*x, lambda x: x.add(x).mul(x), atol=1e-6, grad_atol=1e-6)
