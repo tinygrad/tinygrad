@@ -12,7 +12,7 @@ b = RawMetalBuffer.fromCPU(nb)
 c = RawMetalBuffer.fromCPU(nc)
 
 FLOPS = N*N*N*2
-BW = N*N*3
+BW = N*N*3*4
 
 prog = MetalProgram("test", f"""
 #include <metal_stdlib>
@@ -110,8 +110,12 @@ kernel void test(device float *a, device const float *data1, device const float 
   }}*/
 }}""")
 
+def clear_l2():
+  for i in range(10): np.zeros((1024, 1024))+1
+  return 0
+
 #tms = [prog([32, N//(8*4), N//(8*4)], [32, 1, 1], a, b, c, wait=True) for _ in range(20)]
-tm = min([prog([32, N//(8*4), N//(8*4)], [32, 1, 1], a, b, c, wait=True) for _ in range(20)])
+tm = min([clear_l2()+prog([32, N//(8*4), N//(8*4)], [32, 1, 4], a, b, c, wait=True) for _ in range(20)])
 #tm = min([prog([N*N//(2*4*4)], [4*32], a, b, c, wait=True) for _ in range(20)])
 na = a.toCPU().reshape(N,N)
 comp = nb@nc
@@ -130,5 +134,5 @@ def torch_prog(b, c):
   a = b@c
   torch.mps.synchronize()
   return time.perf_counter() - st
-tm = min([torch_prog(b, c) for _ in range(20)])
+tm = min([clear_l2()+torch_prog(b, c) for _ in range(20)])
 print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:.2f} GFLOPS matmul in torch")

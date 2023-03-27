@@ -190,6 +190,7 @@ class Linearizer:
     # parse AST
     loaded_buffers = {}
     acc = []
+    reduce_idxs = []
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
@@ -275,6 +276,14 @@ class Linearizer:
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
+
+    # get the real mem estimate
+    """
+    self.mem_estimate = 0
+    for uop,newvar,vin,args in self.uops:
+      if uop in [UOps.LOAD, UOps.STORE]: self.mem_estimate += (prod(args.cnt) if isinstance(args.cnt, tuple) else args.cnt)*self.bufs[args.i].dtype.itemsize
+    self.mem_estimate *= prod([x.max+1 for x in gl_idxs+reduce_idxs])
+    """
 
   def uop(self, uop:UOps, out:Optional[str], vin:List[str], arg:Any):
     self.uops.append(UOp(uop, out, vin, arg))
