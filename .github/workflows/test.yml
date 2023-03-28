@@ -72,7 +72,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e .
     - name: Compile EfficientNet to C
-      run: CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
+      run: CPU=1 CLANG=1 python3 examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
