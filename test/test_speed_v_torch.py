@@ -44,6 +44,7 @@ def helper_test_speed(f1, *args):
   global save_ops, save_mem
   ets = []
   ret = None
+  cache_defeat = np.zeros((2048,2048))
   for _ in range(CNT):
     del ret
 
@@ -53,8 +54,8 @@ def helper_test_speed(f1, *args):
     # force syncing
     #[x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
 
-    # clear 16MB global memory cache (CPU)
-    torch.zeros((2048,2048))+1
+    # clear 32MB global memory cache (CPU)
+    cache_defeat += 1
 
     # manual pre sync
     if isinstance(args[0], Tensor): Device[args[0].device].synchronize()
@@ -62,11 +63,11 @@ def helper_test_speed(f1, *args):
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
-    st = time.monotonic()
+    st = time.perf_counter()
     ret = f1(*args)
     if isinstance(ret, Tensor): Device[ret.device].synchronize()
     else: sync()
-    et = (time.monotonic() - st) * 1000
+    et = (time.perf_counter() - st) * 1000
     ets.append(et)
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
