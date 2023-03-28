@@ -71,7 +71,7 @@ print(y.grad)  # dz/dy
 Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
 
 ```python
-DEBUG=3 OPTLOCAL=1 GPU=1 python3 -c "from tinygrad.tensor import Tensor;
+DEBUG=3 OPTLOCAL=1 python3 -c "from tinygrad.tensor import Tensor;
 N = 1024; a, b = Tensor.randn(N, N), Tensor.randn(N, N);
 c = (a.reshape(N, 1, N) * b.permute(1,0).reshape(1, N, N)).sum(axis=2);
 print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
@@ -180,15 +180,13 @@ Or, if you have a webcam and cv2 installed
 ipython3 examples/efficientnet.py webcam
 ```
 
-PROTIP: Set "GPU=1" environment variable if you want this to go faster.
-
-PROPROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
+PROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
 
 ### tinygrad supports Stable Diffusion!
 
 You might need to download the [weight](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt) of Stable Diffusion and put it into weights/
 
-Run `GPU=1 python3 examples/stable_diffusion.py`
+Run `python3 examples/stable_diffusion.py`
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg">
