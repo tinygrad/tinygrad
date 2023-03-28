@@ -45,7 +45,7 @@ def helper_test_speed(f1, *args):
   ets = []
   ret = None
   cache_defeat = np.zeros((2048,2048))
-  for _ in range(CNT):
+  for i in range(CNT):
     del ret
 
     # operation cache defeats
@@ -68,7 +68,7 @@ def helper_test_speed(f1, *args):
     if isinstance(ret, Tensor): Device[ret.device].synchronize()
     else: sync()
     et = (time.perf_counter() - st) * 1000
-    ets.append(et)
+    if i >= 1: ets.append(et)   # not the first run / one used for OPTLOCAL
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)
