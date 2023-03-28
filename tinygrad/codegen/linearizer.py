@@ -3,7 +3,7 @@ import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
@@ -41,7 +41,7 @@ class UOp(NamedTuple):
   out: Optional[Token]
   vin: List[Token]
   arg: Any
-  def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':10s} {str(self.vin):32s} {self.arg}"
+  def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
 def check_no_mul(test, var):
   if test == var: return True
@@ -124,6 +124,22 @@ class Linearizer:
     if DEBUG >= 5: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test, idxy_test//4, valid_test//4)
     return ret
 
+  # TODO: this is very similar to load
+  def acc(self, ssa, i, idxs:List[Variable]) -> List[Token]:
+    should_upcast = self.supports_float4 and self.can_float4(i)
+    cache: Dict[int, Token] = {}
+    def op(offset):
+      if offset in cache: return cache[offset]
+      will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
+      assert self.reduceop is not None
+      reg = self.uop(UOps.CONST, ssa('acc', LocalTypes.float4 if will_merge else LocalTypes.float), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      if will_merge:
+        for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
+      else:
+        cache[offset] = reg
+      return cache[offset]
+    return [op(o) for o in self.offsets(i)]
+
   def global_load(self, i, idxs:List[Variable]) -> List[Token]:
     should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
     cache: Dict[int, Token] = {}
@@ -147,7 +163,11 @@ class Linearizer:
       will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
       assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
       if will_merge:
-        var = self.uop(UOps.CAST, Token(store[store_offset[offset]].name+"_float4", LocalTypes.float4), [store[store_offset[offset+j]] for j in range(4)])
+        out_tokens = [store[store_offset[offset+j]] for j in range(4)]
+        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
+          var = Token(store[store_offset[offset]].name, LocalTypes.float4)
+        else:
+          var = self.uop(UOps.CAST, Token(store[store_offset[offset]].name+"_f4", LocalTypes.float4), out_tokens)
       else:
         var = store[store_offset[offset]]
       for j in range(0, 4 if will_merge else 1): del store_offset[offset+j]
@@ -178,9 +198,9 @@ class Linearizer:
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
-    def ssa(name) -> Token:
+    def ssa(name, ltype=LocalTypes.float) -> Token:
       _ssa[name] += 1
-      return Token(f"{name}{_ssa[name]-1}", LocalTypes.float)
+      return Token(f"{name}{_ssa[name]-1}", ltype)
 
     # global loop
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1 if i < self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -199,7 +219,8 @@ class Linearizer:
     # reduce op
     if self.reduceop is not None:
       # define accumulator
-      acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
+      #acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
+      acc = self.acc(ssa, 0, gl_idxs)
 
       # reduce loop
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
@@ -268,6 +289,8 @@ class Linearizer:
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and isinstance(x.src[0], LazyOp) and x.src[0].op == BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
+    if x.op == ReduceOps.SUM and isinstance(x.src[0], LazyOp) and x.src[0].op == UnaryOps.CAST and isinstance(x.src[0].src[0], LazyOp) and x.src[0].src[0].op == BinaryOps.MUL:
+      x = LazyOp(FusedOps.MULACC, x.src[0].src[0].src, x.arg)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     if isinstance(x.op, (ReduceOps, FusedOps)):
       return [self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]) for val in zip(acc, *values)]
