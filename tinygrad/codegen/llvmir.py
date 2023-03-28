@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, Any, List, Optional
 import functools
 from llvmlite import ir  # type: ignore
-from tinygrad.codegen.linearizer import Linearizer, UOps, UOp
+from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, Token
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
 from tinygrad.lazy import LazyBuffer
@@ -48,7 +48,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   loop_blocks = []
   reduce_phis: List = []
   # TODO: newvar probably shouldn't be optional
-  lvars: Dict[Optional[str], Any] = {}  # this Any is an llvm type
+  lvars: Dict[Optional[Token], Any] = {}  # this Any is an llvm type
   render_llvm[Variable] = lambda self,ops,ctx: lvars[self.expr]
 
   for uop,newvar,vin,args in uops:
