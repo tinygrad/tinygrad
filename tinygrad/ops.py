@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, itertools, operator, random
+import functools, itertools, operator, random, time
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
 from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType, colored
@@ -49,8 +49,9 @@ class Interpreted:
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
     srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
+    if DEBUG >= 3: st = time.perf_counter()
     ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
-    if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape):30s} in({len(srcs)}):", list(set(x._buf.shape for x in srcs)), ast.arg if ast.arg is not None else "")
+    if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape):30s} in({len(srcs)}):", list(set(x._buf.shape for x in srcs)), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
     if output is not None and output.output_buffer is not None:
       assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
@@ -152,7 +153,7 @@ class Compiled:
     # this is the default now
     if getenv("ENABLE_METHOD_CACHE", 1):
       if k.key not in self.method_cache: self.method_cache[k.key] = k.codegen().build(self.runtime)
-      elif DEBUG >= 4: print(f"method cache hit : {k.key}")
+      elif DEBUG >= 5: print(f"method cache hit : {k.key}")
       prg = self.method_cache[k.key]
     else:
       prg = k.codegen().build(self.runtime)

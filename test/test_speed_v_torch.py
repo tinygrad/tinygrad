@@ -44,26 +44,31 @@ def helper_test_speed(f1, *args):
   global save_ops, save_mem
   ets = []
   ret = None
+  cache_defeat = np.zeros((2048,2048))
   for _ in range(CNT):
     del ret
-    args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]  # cache defeats
+
+    # operation cache defeats
+    args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]
 
     # force syncing
     [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
 
+    # clear 32MB global memory cache (CPU and global memory only)
+    cache_defeat += 1
+
+    # manual pre sync
+    if isinstance(args[0], Tensor): Device[args[0].device].synchronize()
+    else: sync()
+
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
-    if DEBUG >= 4: print("benchmark start")
-    st = time.monotonic()
+    st = time.perf_counter()
     ret = f1(*args)
-    if isinstance(ret, Tensor):
-      ret.realize()
-      Device[ret.device].synchronize()
-    else:
-      sync()
-    et = (time.monotonic() - st) * 1000
+    if isinstance(ret, Tensor): Device[ret.device].synchronize()
+    else: sync()
+    et = (time.perf_counter() - st) * 1000
     ets.append(et)
-    if DEBUG >= 4: print("benchmark stop")
     if GlobalCounters.global_ops:
       save_ops, save_mem = GlobalCounters.global_ops, GlobalCounters.global_mem
   return ret.cpu().numpy(), np.min(ets)
@@ -172,6 +177,10 @@ class TestSpeed(unittest.TestCase):
   def test_gemm(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 1024, f, f)
+
+  def test_gemm_small(self):
+    def f(a, b): return a @ b
+    helper_test_generic_square('gemm', 256, f, f)
 
   def test_gemm_unrolled(self):
     N = 512
