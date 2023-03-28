@@ -49,8 +49,9 @@ class LazyNumpyArray:
 class dtypes:
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
+  int32: Final[DType] = DType(1, 4, "int", np.int32)
   @staticmethod
-  def from_np(x) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32}[np.dtype(x)]
+  def from_np(x) -> DType: return {np.dtype(np.float16): dtypes.float16, np.dtype(np.float32): dtypes.float32, np.dtype(np.int32): dtypes.int32}[np.dtype(x)]
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
