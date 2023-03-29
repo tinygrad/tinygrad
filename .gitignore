@@ -17,3 +17,4 @@ recognize*
 .idea
 disassemblers/applegpu
 *.prof
+datasets/cifar-10-python.tar.gz
