@@ -8,7 +8,9 @@ def multidevice_test(fxn):
   def ret(self):
     for device in Device._buffers:
       with self.subTest(device=device):
-        if Device[device] is None:
+        try:
+          Device[device]
+        except Exception:
           print(f"WARNING: {device} test isn't running")
           continue
         fxn(self, device)
