@@ -143,8 +143,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       kk(f"{newvar.render(newvar not in created)} = {val};")
-      #if args.valid.min == 1: kk(f"float {newvar.name} = {val};")
-      #else: kk(f"float {newvar.name} = ({args.valid.render(render_cl)}) ? ({val}) : 0.0f;")
     elif uop == UOps.LOAD and newvar is not None and newvar.ltype == LocalTypes.float4:
       assert newvar.offset is None, "load can't have an offset"
       if isinstance(bufs[args.i].dtype, ImageDType):
@@ -157,7 +155,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       if args[2].min == 1: kk(f"{newvar.render(True)} = {val};")
       else: kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? ({val}) : {lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);")
     elif uop == UOps.STORE and (vin[0].ltype == LocalTypes.float or (vin[0].ltype == LocalTypes.float4 and vin[0].offset is not None)):
-      assert args.valid.min == 1, "store must be valid"
       if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
         kk(f"vstore_half({vin[0].render()}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
       else:
@@ -165,7 +162,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     elif uop == UOps.CAST and newvar is not None and newvar.ltype == LocalTypes.float4:
       kk(f"{newvar.render(True)} = {lang.float4}({','.join([x.render() for x in vin])});")
     elif uop == UOps.STORE and len(vin) != 0 and vin[0].ltype == LocalTypes.float4 and vin[0].offset is None:
-      assert args.valid.min == 1, "store must be valid"
       if isinstance(bufs[args[0]].dtype, ImageDType):
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args[1], args[2])
         kk(f"write_imagef({bufnames[args.i]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {vin[0].render()});")

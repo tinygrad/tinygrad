@@ -34,7 +34,6 @@ class Token(NamedTuple):
 class MemOp(NamedTuple):
   i: int
   idx: Variable
-  valid: Variable
 
 class UOp(NamedTuple):
   uop: UOps
@@ -136,12 +135,10 @@ class Linearizer:
         assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
         idx, valid = self.sts[i].expr_idxs(offset, idxs)
         reg = Token(f"val{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float)
-        if valid.min == 0:
-          self.uop(UOps.CONST, reg, [], 0.0)
-          self.uop(UOps.IF, None, [], valid)
-        self.uop(UOps.LOAD, reg, [], MemOp(i, idx, valid))
-        if valid.min == 0:
-          self.uop(UOps.ENDIF, None, [])
+        if valid.min == 0: self.uop(UOps.CONST, reg, [], 0.0)
+        if valid.min == 0 and valid.max == 1: self.uop(UOps.IF, None, [], valid)
+        if valid.max == 1: self.uop(UOps.LOAD, reg, [], MemOp(i, idx))
+        if valid.min == 0 and valid.max == 1: self.uop(UOps.ENDIF, None, [])
       if will_merge:
         for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
       else:
@@ -165,7 +162,9 @@ class Linearizer:
       else:
         var = store[store_offset[offset]]
       for j in range(0, 4 if will_merge else 1): del store_offset[offset+j]
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+      idx, valid = self.sts[i].expr_idxs(offset, idxs)
+      assert valid.min == 1, "store must be valid"
+      self.uop(UOps.STORE, None, [var], MemOp(i, idx))
     for o in self.offsets(i): op(o)
 
   def linearize(self):
