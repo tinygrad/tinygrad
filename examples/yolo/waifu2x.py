@@ -72,7 +72,7 @@ class Conv3x3Biased:
     # Not outChannel,inChannel,Y,X.
     # Therefore, transpose it before assignment.
     # I have long since forgotten how I worked this out.
-    self.weight.assign(Tensor(layer["weight"]).reshape(shape=self.weight.shape).transpose(order=(0, 1, 3, 2)))
+    self.weight.assign(Tensor(layer["weight"]).reshape(shape=self.weight.shape).transpose(2, 3))
     self.bias.assign(Tensor(layer["bias"]).reshape(shape=self.bias.shape))
 
 class Vgg7:

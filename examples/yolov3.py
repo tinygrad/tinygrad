@@ -174,8 +174,7 @@ def predict_transform(prediction, inp_dim, anchors, num_classes):
   bbox_attrs = 5 + num_classes
   num_anchors = len(anchors)
   prediction = prediction.reshape(shape=(batch_size, bbox_attrs*num_anchors, grid_size*grid_size))
-  # Original PyTorch: transpose(1, 2) -> For some reason numpy.transpose order has to be reversed?
-  prediction = prediction.transpose(order=(0,2,1))
+  prediction = prediction.transpose(1, 2)
   prediction = prediction.reshape(shape=(batch_size, grid_size*grid_size*num_anchors, bbox_attrs))
   prediction_cpu = prediction.cpu().numpy()
   for i in (0, 1, 4):
