@@ -285,7 +285,7 @@ def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional
 class _Device:
   def __init__(self) -> None:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
-    try: default = "METAL" if self["METAL"] is not None else "CUDA" if self["CUDA"] is not None else "GPU"
+    try: default = "METAL" if self["METAL"] else "CUDA" if self["CUDA"] else "GPU"
     except ImportError: default = "GPU"
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, default)
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
