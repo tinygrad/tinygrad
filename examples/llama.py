@@ -13,10 +13,8 @@ from typing import Optional, Tuple
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
 
-# on mac, we make METAL the default. otherwise we make the GPU the default if we have one
-if not getenv("CPU") and Device.DEFAULT == "CPU":
-  if platform.system() == "Darwin" and Device["METAL"] is not None: Device.DEFAULT = "METAL"
-  elif Device["GPU"] is not None: Device.DEFAULT = "GPU"
+# on mac, we make METAL the default
+if platform.system() == "Darwin" and Device["METAL"] is not None: Device.DEFAULT = "METAL"
 
 from extra.helpers import Timing
 from tinygrad.tensor import Tensor
