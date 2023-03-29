@@ -12,10 +12,6 @@ from typing import Optional, Tuple
 
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
-
-# on mac, we make METAL the default
-if not getenv("CPU") and platform.system() == "Darwin" and Device["METAL"] is not None: Device.DEFAULT = "METAL"
-
 from extra.helpers import Timing
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear
