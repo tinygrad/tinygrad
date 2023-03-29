@@ -158,5 +158,7 @@ class Compiled:
     else:
       prg = k.codegen().build(self.runtime)
 
+    if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
+
     prg.exec(k.bufs)
     return output.realized
