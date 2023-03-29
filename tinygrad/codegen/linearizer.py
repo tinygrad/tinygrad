@@ -125,14 +125,14 @@ class Linearizer:
     return ret
 
   # TODO: this is very similar to load
-  def acc(self, ssa, i, idxs:List[Variable]) -> List[Token]:
-    should_upcast = self.supports_float4 and self.can_float4(i)
+  def acc(self, ssa, i, idxs:List[Variable], name='acc', allow_acc_float4=True) -> List[Token]:
+    should_upcast = allow_acc_float4 and self.supports_float4 and self.can_float4(i)
     cache: Dict[int, Token] = {}
     def op(offset):
       if offset in cache: return cache[offset]
       will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
       assert self.reduceop is not None
-      reg = self.uop(UOps.CONST, ssa('acc', LocalTypes.float4 if will_merge else LocalTypes.float), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      reg = self.uop(UOps.CONST, ssa(name, LocalTypes.float4 if will_merge else LocalTypes.float), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
       if will_merge:
         for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
       else:
@@ -219,7 +219,6 @@ class Linearizer:
     # reduce op
     if self.reduceop is not None:
       # define accumulator
-      #acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
       acc = self.acc(ssa, 0, gl_idxs)
 
       # reduce loop
@@ -249,7 +248,8 @@ class Linearizer:
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = [self.uop(UOps.CONST, ssa('lacc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(-1)]
+        # TODO: why does allow_acc_float4 break it?
+        acc = self.acc(ssa, -1, local_idxs, 'lacc', allow_acc_float4=False)
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
