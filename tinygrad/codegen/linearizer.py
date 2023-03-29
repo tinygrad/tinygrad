@@ -10,7 +10,7 @@ from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable, SumNode, ModNode
 
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); IF = auto(); ENDIF = auto() # noqa: E702
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
   dtype: DType = dtypes.float32
@@ -34,6 +34,7 @@ class Token(NamedTuple):
 class MemOp(NamedTuple):
   i: int
   idx: Variable
+  valid: Optional[Variable] = None
 
 class UOp(NamedTuple):
   uop: UOps
@@ -136,9 +137,7 @@ class Linearizer:
         idx, valid = self.sts[i].expr_idxs(offset, idxs)
         reg = Token(f"val{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float)
         if valid.min == 0: self.uop(UOps.CONST, reg, [], 0.0)
-        if valid.min == 0 and valid.max == 1: self.uop(UOps.IF, None, [], valid)
-        if valid.max == 1: self.uop(UOps.LOAD, reg, [], MemOp(i, idx))
-        if valid.min == 0 and valid.max == 1: self.uop(UOps.ENDIF, None, [])
+        if valid.max == 1: self.uop(UOps.LOAD, reg, [], MemOp(i, idx, valid if valid.min == 0 else None))
       if will_merge:
         for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
       else:
