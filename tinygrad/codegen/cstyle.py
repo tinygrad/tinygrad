@@ -68,6 +68,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   depth = 0
   def kk(s): kernel.append("  "*depth+s)
 
+  created = set()
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
       root = None
@@ -112,6 +113,12 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           pend_close = None
         depth -= 1
         kk("}"*len(args[0]) + f" /* {args[1]} */")
+    elif uop == UOps.IF:
+      kk(f"if ({args.render(render_cl)}) {{")
+      depth += 1
+    elif uop == UOps.ENDIF:
+      depth -= 1
+      kk("}")
     elif uop == UOps.CONST:
       assert newvar is not None
       if args == -math.inf:
@@ -135,8 +142,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         else:
           val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
-      if args.valid.min == 1: kk(f"float {newvar.name} = {val};")
-      else: kk(f"float {newvar.name} = ({args.valid.render(render_cl)}) ? ({val}) : 0.0f;")
+      kk(f"{newvar.render(newvar not in created)} = {val};")
+      #if args.valid.min == 1: kk(f"float {newvar.name} = {val};")
+      #else: kk(f"float {newvar.name} = ({args.valid.render(render_cl)}) ? ({val}) : 0.0f;")
     elif uop == UOps.LOAD and newvar is not None and newvar.ltype == LocalTypes.float4:
       assert newvar.offset is None, "load can't have an offset"
       if isinstance(bufs[args.i].dtype, ImageDType):
@@ -167,6 +175,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       kk(lang.smem_prefix + f"float {args[0]}[{args[1]}];")
     else:
       raise RuntimeError(f"failed to render {uop}")
+    created.add(newvar)
 
   buftypes = [(i,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if x.dtype.name.startswith('image') else
                ("const " if i > 0 else "")+lang.buffer_prefix+x.dtype.name+"*"+lang.buffer_suffix) for i,x in enumerate(bufs)

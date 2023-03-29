@@ -10,7 +10,7 @@ from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable, SumNode, ModNode
 
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto() # noqa: E702
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto(); IF = auto(); ENDIF = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
   dtype: DType = dtypes.float32
@@ -134,7 +134,14 @@ class Linearizer:
         reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
       else:
         assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
-        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+        idx, valid = self.sts[i].expr_idxs(offset, idxs)
+        reg = Token(f"val{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float)
+        if valid.min == 0:
+          self.uop(UOps.CONST, reg, [], 0.0)
+          self.uop(UOps.IF, None, [], valid)
+        self.uop(UOps.LOAD, reg, [], MemOp(i, idx, valid))
+        if valid.min == 0:
+          self.uop(UOps.ENDIF, None, [])
       if will_merge:
         for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
       else:
