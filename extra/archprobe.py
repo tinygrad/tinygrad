@@ -58,36 +58,6 @@ def test_reg_count(nthread=1, ngrp=1):
   base = reg_count(nthread, ngrp, 1)
   return [(nreg, (reg_count(nthread, ngrp, nreg)-base)/nreg) for nreg in trange(4, 513, 4)]
 
-def buf_cacheline_size(stride):
-  BUF_CACHE_SIZE = 128*1024
-  NTHREAD_LOGIC = 256
-  PITCH = BUF_CACHE_SIZE * 2 // NTHREAD_LOGIC
-  BUF_SIZE = PITCH * NTHREAD_LOGIC
-
-  prg = """__kernel void buf_cacheline_size(
-    __global const float* src,
-    __global float* dst,
-    __private const int niter,
-    __private const int stride,
-    __private const int pitch
-  ) {
-    float c = 0;
-    for (int i = 0; i < niter; ++i) {
-      const int zero = i >> 31;
-      c += src[zero + stride * 0 + pitch * get_global_id(0)];
-      c += src[zero + stride * 1 + pitch * get_global_id(0)];
-    }
-    dst[0] = c;
-  }"""
-  in_buf = CLBuffer(BUF_SIZE, dtypes.float32)
-  out_buf = CLBuffer(1, dtypes.float32)
-  cl = CLProgram("buf_cacheline_size", prg, argdtypes=[None, None, np.int32, np.int32, np.int32])
-  return min([cl([NTHREAD_LOGIC, 1, 1], [NTHREAD_LOGIC, 1, 1], in_buf, out_buf, 10, stride, PITCH, wait=True) for _ in range(5)])*1e9
-
-@register_test
-def test_cacheline_size():
-  return [(stride, buf_cacheline_size(stride)) for stride in trange(1,64)]
-
 def buf_cache_hierarchy_pchase(ndata, stride=1, NCOMP=1, steps=65536):
   ndata //= NCOMP*4  # ptr size
   prg = f"""__kernel void buf_cache_hierarchy_pchase(
@@ -113,6 +83,11 @@ def test_memory_latency():
   # requires cacheline < 16
   szs = [int(1.3**x) for x in range(20, 70)]
   return [(ndata, buf_cache_hierarchy_pchase(ndata, NCOMP=16, steps=128*1024)) for ndata in tqdm(szs)]
+
+@register_test
+def test_cacheline_size():
+  # TODO: this buffer must be at least 2x the L1 cache for this test to work
+  return [(stride, buf_cache_hierarchy_pchase(4*65536, stride, steps=65536)) for stride in trange(1,64)]
 
 def cl_read(sz, niter=1):
   prg = f"""__kernel void copy(
