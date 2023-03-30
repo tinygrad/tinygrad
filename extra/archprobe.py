@@ -56,7 +56,37 @@ def reg_count(nthread, ngrp, nreg):
 @register_test
 def test_reg_count(nthread=1, ngrp=1):
   base = reg_count(nthread, ngrp, 1)
-  return [(nreg, (reg_count(nthread, ngrp, nreg)-base)/nreg) for nreg in trange(2, 257)]   # archprobe goes to 512
+  return [(nreg, (reg_count(nthread, ngrp, nreg)-base)/nreg) for nreg in trange(4, 513, 4)]
+
+def buf_cacheline_size(stride):
+  BUF_CACHE_SIZE = 128*1024
+  NTHREAD_LOGIC = 256
+  PITCH = BUF_CACHE_SIZE * 2 // NTHREAD_LOGIC
+  BUF_SIZE = PITCH * NTHREAD_LOGIC
+
+  prg = """__kernel void buf_cacheline_size(
+    __global const float* src,
+    __global float* dst,
+    __private const int niter,
+    __private const int stride,
+    __private const int pitch
+  ) {
+    float c = 0;
+    for (int i = 0; i < niter; ++i) {
+      const int zero = i >> 31;
+      c += src[zero + stride * 0 + pitch * get_global_id(0)];
+      c += src[zero + stride * 1 + pitch * get_global_id(0)];
+    }
+    dst[0] = c;
+  }"""
+  in_buf = CLBuffer(BUF_SIZE, dtypes.float32)
+  out_buf = CLBuffer(1, dtypes.float32)
+  cl = CLProgram("buf_cacheline_size", prg, argdtypes=[None, None, np.int32, np.int32, np.int32])
+  return min([cl([NTHREAD_LOGIC, 1, 1], [NTHREAD_LOGIC, 1, 1], in_buf, out_buf, 10, stride, PITCH, wait=True) for _ in range(5)])*1e9
+
+@register_test
+def test_cacheline_size():
+  return [(stride, buf_cacheline_size(stride)) for stride in trange(1,64)]
 
 def buf_cache_hierarchy_pchase(ndata, stride=1, NCOMP=1, steps=65536):
   ndata //= NCOMP*4  # ptr size
@@ -77,10 +107,6 @@ def buf_cache_hierarchy_pchase(ndata, stride=1, NCOMP=1, steps=65536):
   out_buf = CLBuffer(1, dtypes.int32)
   cl = CLProgram("buf_cache_hierarchy_pchase", prg, argdtypes=[None, None, np.int32])
   return min([cl([1, 1, 1], [1, 1, 1], in_buf, out_buf, steps, wait=True)/steps for _ in range(5)])*1e9
-
-@register_test
-def test_cacheline_size():
-  return [(stride, buf_cache_hierarchy_pchase(65536, stride, steps=65536)) for stride in trange(1,64)]
 
 @register_test
 def test_memory_latency():
@@ -125,7 +151,7 @@ def gflops(niter=4, nroll=4, ngroups=4096):
       out_buf[get_global_id(0) >> 31] = {'+'.join(f"y.s{'0123456789abcdef'[i]}" for i in range(NCOMP))};
   }}"""
   out_buf = CLBuffer(1, dtypes.float32)
-  cl = CLProgram("gflops", prg)
+  cl = CLProgram("gflops", prg, options="-Werror -cl-mad-enable -cl-fast-relaxed-math")
   FLOPS = NCOMP*2*2 * niter * nroll * ngroups * 32
   # NOTE: if nay of the niters form a local group, this is wrong
   return FLOPS/(min([cl([32, ngroups, 1], [32, 1, 1], out_buf, wait=True) for _ in range(10)])*1e9)
@@ -137,7 +163,7 @@ def test_gflops():
 if __name__ == "__main__":
   cache = {}
   #cache = pickle.load(open("/tmp/cache.pkl", "rb"))
-  #tests = {"test_gflops": tests["test_gflops"]}
+  #tests = {"test_cacheline_size": tests["test_cacheline_size"]}
   plt.figure(figsize=(16, 9))
   for i,(k,test) in enumerate(tests.items()):
     print(f"running {k}")

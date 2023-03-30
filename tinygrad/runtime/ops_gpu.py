@@ -40,10 +40,10 @@ class CLBuffer(RawBufferCopyInOut):
     cl.enqueue_copy(CL.cl_queue, x, self._buf, is_blocking=True)
 
 class CLProgram:
-  def __init__(self, name:str, prg:str, binary=False, argdtypes=None):
+  def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
     self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
     try:
-      self._clprg = self.clprogram.build()
+      self._clprg = self.clprogram.build(options=options)
     except cl.RuntimeError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
