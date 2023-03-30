@@ -49,14 +49,15 @@ class CLProgram:
       raise e
     self.clprg = self._clprg.__getattr__(name)
     if DEBUG >= 5 and not OSX:
-      binary = self.clprogram.get_info(cl.program_info.BINARIES)[0]
       if 'Adreno' in CL.cl_ctx.devices[0].name:
         from disassemblers.adreno import disasm
-        disasm(binary)
+        disasm(self.binary())
       else:
         # print the PTX for NVIDIA. TODO: probably broken for everything else
-        print(binary.decode('utf-8'))
+        print(self.binary().decode('utf-8'))
     if self.argdtypes is not None: self.clprg.set_scalar_arg_dtypes(self.argdtypes)
+
+  def binary(self): return self.clprogram.get_info(cl.program_info.BINARIES)[0]
 
   @staticmethod
   def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
@@ -64,7 +65,7 @@ class CLProgram:
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
     e = self.clprg(CL.cl_queue, global_size, local_size, *[x._buf if isinstance(x, CLBuffer) else x for x in bufs])
     if wait:
-      CL.cl_queue.finish()
+      e.wait()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
     return None
 
