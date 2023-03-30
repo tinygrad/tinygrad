@@ -1,20 +1,35 @@
-from typing import List, Tuple, Any, Optional, cast, Dict, DefaultDict, NamedTuple
+from typing import List, Tuple, Any, Optional, cast, Dict, DefaultDict, NamedTuple, TypeVar
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
 from tinygrad.shape.symbolic import Variable, SumNode, ModNode
 
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); LOAD4 = auto(); STORE4 = auto() # noqa: E702
+class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto() # noqa: E702
 
 class LocalBuffer(NamedTuple):
   dtype: DType = dtypes.float32
   realized: None = None
+
+class LocalTypes(Enum): float = auto(); float4 = auto(); half = auto(); half4 = auto(); simdgroup_float8x8 = auto() # noqa: E702
+
+class Token(NamedTuple):
+  name: str
+  ltype: LocalTypes
+  offset: Optional[int] = None
+  def render(self, with_type=False):
+    if with_type:
+      assert self.offset is None
+      return f"{self.ltype.name} {self.name}"
+    if self.offset is None: return self.name
+    assert self.ltype == LocalTypes.float4
+    return self.name+"."+"xyzw"[int(self.offset)]
+  def __repr__(self): return f"<{self.name}>" if self.offset is None and self.ltype == LocalTypes.float else f"<{self.name}:{self.ltype.name}:{self.offset}>"
 
 class MemOp(NamedTuple):
   i: int
@@ -23,10 +38,10 @@ class MemOp(NamedTuple):
 
 class UOp(NamedTuple):
   uop: UOps
-  out: Optional[str]
-  vin: List[str]
+  out: Optional[Token]
+  vin: List[Token]
   arg: Any
-  def __repr__(self): return f"{str(self.uop):20s}: {self.out if self.out is not None else '':10s} {str(self.vin):32s} {self.arg}"
+  def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
 def check_no_mul(test, var):
   if test == var: return True
@@ -106,32 +121,45 @@ class Linearizer:
     idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
     # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
     ret = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in (valid_test//4).render()
-    if DEBUG >= 4: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test, idxy_test//4, valid_test//4)
+    if DEBUG >= 5: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test, idxy_test//4, valid_test//4)
     return ret
 
-  def global_buf(self, i, idxs:List[Variable], store=None):
+  def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
     should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
-    cache: Dict[int, str] = {}
-    store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
+    cache: Dict[int, Token] = {}
     def op(offset):
       if offset in cache: return cache[offset]
+      will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
+      if const is not None:
+        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
+      else:
+        assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
+        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+      if will_merge:
+        for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
+      else:
+        cache[offset] = reg
+      return cache[offset]
+    return [op(o) for o in self.offsets(i)]
+
+  def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
+    should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
+    store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
+    def op(offset):
       if offset not in store_offset: return
       will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
       assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
-      if store is not None:
-        offsets = []
-        for j in range(0, 4 if will_merge else 1):
-          offsets.append(store[store_offset[offset+j]])
-          del store_offset[offset+j]
-        self.uop(UOps.STORE4 if will_merge else UOps.STORE, None, offsets, MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-      else:
-        reg = self.uop(UOps.LOAD4 if will_merge else UOps.LOAD, f"val{mnum(i)}_{mnum(offset)}", [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-        if will_merge:
-          for j in range(0, 4): cache[offset+j] = reg+"."+"xyzw"[j]
+      if will_merge:
+        out_tokens = [store[store_offset[offset+j]] for j in range(4)]
+        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
+          var = Token(store[store_offset[offset]].name, LocalTypes.float4)
         else:
-          cache[offset] = reg
-        return cache[offset]
-    return [op(o) for o in self.offsets(i)]
+          var = self.uop(UOps.CAST, Token(store[store_offset[offset]].name+"_f4", LocalTypes.float4), out_tokens)
+      else:
+        var = store[store_offset[offset]]
+      for j in range(0, 4 if will_merge else 1): del store_offset[offset+j]
+      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+    for o in self.offsets(i): op(o)
 
   def linearize(self):
     # uops
@@ -157,9 +185,9 @@ class Linearizer:
 
     # ssa
     _ssa:DefaultDict[str,int] = defaultdict(int)
-    def ssa(name):
+    def ssa(name, ltype=LocalTypes.float) -> Token:
       _ssa[name] += 1
-      return f"{name}{_ssa[name]-1}"
+      return Token(f"{name}{_ssa[name]-1}", ltype)
 
     # global loop
     global_idxs = [Variable(f"gidx{i}", 0, self.full_shape[i]-1 if i < self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -178,14 +206,14 @@ class Linearizer:
     # reduce op
     if self.reduceop is not None:
       # define accumulator
-      acc = [self.uop(UOps.CONST, ssa('acc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(0)]
+      acc = self.global_load(0, gl_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
       # reduce loop
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # load earlybufs
-      loaded_buffers.update({b:self.global_buf(i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
+      loaded_buffers.update({b:self.global_load(i, gl_idxs+reduce_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs and i != 0})
 
       # run early AST (with reduce)
       self.ast_parse(self.reduceop, [acc[off] for off in self.acc_offsets(self.full_buf_index)], loaded_buffers, ssa, do_reduce=True)
@@ -195,7 +223,7 @@ class Linearizer:
 
       # end the local loop, do the local reduce
       if self.group_for_reduce:
-        self.global_buf(-1, local_idxs, acc)  # store accumulators
+        self.global_store(-1, local_idxs, acc)  # store accumulators
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
 
         # if any group_for_reduce items aren't reduces, upcast them here
@@ -207,14 +235,14 @@ class Linearizer:
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = [self.uop(UOps.CONST, ssa('lacc'), [], {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)]) for _ in self.offsets(-1)]
+        acc = self.global_load(-1, local_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_buf(-1, end_local_idxs)
+        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
@@ -223,29 +251,32 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_buf(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
+    loaded_buffers.update({b:self.global_load(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_buf(0, global_idxs, val)
+    self.global_store(0, global_idxs, val)
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
 
-  def uop(self, uop:UOps, out:Optional[str], vin:List[str], arg:Any):
-    self.uops.append(UOp(uop, out, vin, arg))
+  _OT = TypeVar("_OT")
+  def uop(self, uop:UOps, out:_OT, vin:List[Token], arg:Any=None) -> _OT:
+    self.uops.append(UOp(uop, cast(Optional[Token], out), vin, arg))
     if DEBUG >= 4: print(self.uops[-1])
     return out
 
-  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[str]:
+  def ast_parse(self, x, acc, loaded_buffers, ssa, do_reduce=False) -> List[Token]:
     if not isinstance(x, LazyOp): return loaded_buffers[x]
     if x.op in [UnaryOps.NOOP, UnaryOps.CAST]: return self.ast_parse(x.src[0], acc, loaded_buffers, ssa)  # cast isn't an ALU op
     if x.op in ReduceOps and not do_reduce: return acc
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM and isinstance(x.src[0], LazyOp) and x.src[0].op == BinaryOps.MUL:
       x = LazyOp(FusedOps.MULACC, x.src[0].src, x.arg)
+    if x.op == ReduceOps.SUM and isinstance(x.src[0], LazyOp) and x.src[0].op == UnaryOps.CAST and isinstance(x.src[0].src[0], LazyOp) and x.src[0].src[0].op == BinaryOps.MUL:
+      x = LazyOp(FusedOps.MULACC, x.src[0].src[0].src, x.arg)
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     if isinstance(x.op, (ReduceOps, FusedOps)):
       return [self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]) for val in zip(acc, *values)]
