@@ -50,8 +50,9 @@ class LazyNumpyArray:
 
 @dataclass
 class dtypes:
+  # TODO this is really hacky
   float16: Final[DType] = DType(0, 2, "half", np.float16)
-  float32: Final[DType] = DType(1, 4, "float", np.float32)
+  float32: Final[DType] = DType(1, 4, "f32", np.float32)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   @staticmethod

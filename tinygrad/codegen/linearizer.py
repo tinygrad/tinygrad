@@ -25,7 +25,7 @@ class Token(NamedTuple):
   def render(self, with_type=False):
     if with_type:
       assert self.offset is None
-      return f"{self.ltype.name} {self.name}"
+      return f"let mut {self.name}"
     if self.offset is None: return self.name
     assert self.ltype == LocalTypes.float4
     return self.name+"."+"xyzw"[int(self.offset)]
