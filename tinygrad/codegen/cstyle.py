@@ -133,15 +133,21 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   buftypes = [(i,f"{lang.buffer_prefix}{x.dtype.name}{lang.buffer_suffix}", x.realized.size) for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
   prg = ''.join([f"{lang.kernel_prefix} unsafe fn KERNEL_NAME_PLACEHOLDER(",] +
-    [', '.join([f'{bufnames[i]} : &mut [{t}; {s}]' if bufnames[i] in mutations else f'{bufnames[i]} : &[{t}; {s}]' for i,t,s in buftypes] + lang.extra_args)] +
+    [', '.join([f'{bufnames[i]} : &mut [{t}; {s}]' if bufnames[i] in mutations else f'{bufnames[i]} : &[{t}; {s}]' for i,t,s in buftypes])] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
+
+
+  args = ', '.join([f'std::convert::TryInto::try_into(std::slice::from_raw_parts_mut({bufnames[i]} as *mut f32, {s})).unwrap()' if bufnames[i] in mutations else f'std::convert::TryInto::try_into(std::slice::from_raw_parts({bufnames[i]} as *const f32, {s})).unwrap()' for i,t,s in buftypes])
+
+  prg += ''.join([f"\n\n#[no_mangle]\npub extern \"C\" fn KERNEL_NAME_PLACEHOLDER_c(",] +
+    [', '.join([f'{bufnames[i]} : *mut f32' if bufnames[i] in mutations else f'{bufnames[i]} : *const f32' for i,t,s in buftypes])] +
+    [") {\n"] + [f"unsafe {{ KERNEL_NAME_PLACEHOLDER({args}); }}\n" + "}\n\n"])
 
   return prg, global_size, local_size
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
   supports_constant_folding: bool = True
-  supports_float4: bool = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
