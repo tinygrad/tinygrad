@@ -100,7 +100,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         # nan? inf?
         val = f"{bufs[args.i].realized._buf}"
       else:
-        val = f"{bufnames[args.i]}[{args.idx.render(render_cl)} as usize]"
+        val = f"unsafe {{ {bufnames[args.i]}[{args.idx.render(render_cl)} as usize] }}"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args.valid.min == 1: kk(f"let {newvar.name} = {val};")
       else: kk(f"let {newvar.name} = if {args.valid.render(render_cl)} {{{val}}} else {{0.0}};")
@@ -113,7 +113,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     elif uop == UOps.STORE and (vin[0].ltype == LocalTypes.float or (vin[0].ltype == LocalTypes.float4 and vin[0].offset is not None)):
       assert not isinstance(bufs[args.i].dtype, ImageDType), "image store must be float4"
       assert args.valid.min == 1, "store must be valid"
-      kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)} as usize] = {vin[0].render()};")
+      kk(f"unsafe {{ {bufnames[args.i]}[{args.idx.render(render_cl)} as usize] = {vin[0].render()}; }}")
       mutations.append(bufnames[args.i])
       # print("store into" , bufnames[args.i])
       # exit()
@@ -131,7 +131,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   # exit()
 
   buftypes = [(i,f"{lang.buffer_prefix}{x.dtype.name}{lang.buffer_suffix}", x.realized.size) for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
-  prg = ''.join([f"{lang.kernel_prefix} pub unsafe fn KERNEL_NAME_PLACEHOLDER(",] +
+  prg = ''.join([f"{lang.kernel_prefix} pub fn KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{bufnames[i]} : &mut [{t}; {s}]' if bufnames[i] in mutations else f'{bufnames[i]} : &[{t}; {s}]' for i,t,s in buftypes])] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
@@ -140,7 +140,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   prg += ''.join([f"\n\n#[no_mangle]\npub extern \"C\" fn KERNEL_NAME_PLACEHOLDER_c(",] +
     [', '.join([f'{bufnames[i]} : *mut f32' if bufnames[i] in mutations else f'{bufnames[i]} : *const f32' for i,t,s in buftypes])] +
-    [") {\n"] + [f"unsafe {{ KERNEL_NAME_PLACEHOLDER({args}); }}\n" + "}\n\n"])
+    [") {\n"] + [f"unsafe {{ KERNEL_NAME_PLACEHOLDER({args}) }};\n" + "}\n\n"])
 
   return prg, global_size, local_size
 

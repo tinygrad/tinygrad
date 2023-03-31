@@ -27,7 +27,7 @@ def compile_net(run, special_names):
         cargs.append(f"&{bufs[key][0]}")
       else:
         cargs.append(f"&mut {bufs[key][0]}")
-    statements.append(f"{fxn.name}({', '.join(cargs)});")
+    statements.append(f"unsafe {{ {fxn.name}({', '.join(cargs)}) }};")
 
   return functions, statements, bufs, bufs_to_save
 
@@ -81,8 +81,7 @@ if __name__ == "__main__":
   rsprog += list(functions.values())
 
   # the net
-  # TODO reduce unsafe scope to just indexing ops
-  rsprog += ["pub unsafe fn net() {"] + statements + ["}"]
+  rsprog += ["pub fn net() {"] + statements + ["}"]
 
   # CLANG=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/stable_diffusion_by_tinygrad.jpg
   # category : 281 (tabby, tabby cat) with 9.452788
