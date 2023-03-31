@@ -123,7 +123,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       assert args.valid.min == 1, "store must be valid"
       kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {vin[0].render()};")
     elif uop == UOps.DEFINE_LOCAL:
-      # TODO add length here?
       kk(lang.smem_prefix + f"static mut {args[0]} : &'static mut [f32] = &mut[0.0; {args[1]}];")
     else:
       raise RuntimeError(f"failed to render {uop}")
@@ -132,7 +131,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
   # exit()
 
   buftypes = [(i,f"{lang.buffer_prefix}{x.dtype.name}{lang.buffer_suffix}", x.realized.size) for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
-  prg = ''.join([f"{lang.kernel_prefix} unsafe fn KERNEL_NAME_PLACEHOLDER(",] +
+  prg = ''.join([f"{lang.kernel_prefix} pub unsafe fn KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{bufnames[i]} : &mut [{t}; {s}]' if bufnames[i] in mutations else f'{bufnames[i]} : &[{t}; {s}]' for i,t,s in buftypes])] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 

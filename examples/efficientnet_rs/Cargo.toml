@@ -1,0 +1,7 @@
+[package]
+name = "efficientnet_rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = { version = "0.24.6", default-features = false, features=["jpeg"] }
