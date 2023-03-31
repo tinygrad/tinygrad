@@ -12,7 +12,7 @@ class ClangProgram:
     fn = f"/tmp/rustc_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if platform.system() == 'Darwin' else 'so'}"
 
     if not os.path.exists(fn):
-      subprocess.check_output(['rustc', '--crate-type=dylib', '-o', fn+".tmp", "-"], input=prg.encode('utf-8'))
+      subprocess.check_output(['rustc', '--crate-type=dylib', '-Copt-level=3', '-o', fn+".tmp", "-"], input=prg.encode('utf-8'))
       os.rename(fn+".tmp", fn)
     self.lib = ctypes.CDLL(fn)
     self.fxn = self.lib[name+"_c"]
