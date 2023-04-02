@@ -67,14 +67,19 @@ class Equal(Function):
 
 class Maximum(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.y, self.ret = y, x.binary_op(BinaryOps.MAX, y)
+    self.x, self.y = x, y
+    self.ret = x.binary_op(BinaryOps.MAX, y)
     return self.ret
 
   def backward(self, grad_output):
     mask = self.y.binary_op(BinaryOps.CMPEQ, self.ret)
-    # TODO: if they are equal, do they split the gradient?
-    return grad_output.binary_op(BinaryOps.MUL, mask.const_like(1).binary_op(BinaryOps.SUB, mask)) if self.needs_input_grad[0] else None, \
-           grad_output.binary_op(BinaryOps.MUL, mask) if self.needs_input_grad[1] else None
+    eq = self.x.binary_op(BinaryOps.CMPEQ, self.y)
+
+    return \
+        grad_output.binary_op(BinaryOps.MUL, mask.const_like(1).binary_op(BinaryOps.SUB, mask).binary_op(BinaryOps.ADD, eq)) \
+          .binary_op(BinaryOps.MUL, eq.const_like(1).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.ADD, eq.const_like(1)).binary_op(BinaryOps.DIV, eq.const_like(2))) if self.needs_input_grad[0] else None, \
+        grad_output.binary_op(BinaryOps.MUL, mask) \
+          .binary_op(BinaryOps.MUL, eq.const_like(1).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.ADD, eq.const_like(1)).binary_op(BinaryOps.DIV, eq.const_like(2))) if self.needs_input_grad[1] else None
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
