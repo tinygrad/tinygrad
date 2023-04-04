@@ -77,9 +77,9 @@ class Maximum(Function):
 
     return \
         grad_output.binary_op(BinaryOps.MUL, mask.const_like(1).binary_op(BinaryOps.SUB, mask).binary_op(BinaryOps.ADD, eq)) \
-          .binary_op(BinaryOps.MUL, eq.const_like(1).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.ADD, eq.const_like(1)).binary_op(BinaryOps.DIV, eq.const_like(2))) if self.needs_input_grad[0] else None, \
+          .binary_op(BinaryOps.MUL, eq.const_like(2).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.DIV, eq.const_like(2))) if self.needs_input_grad[0] else None, \
         grad_output.binary_op(BinaryOps.MUL, mask) \
-          .binary_op(BinaryOps.MUL, eq.const_like(1).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.ADD, eq.const_like(1)).binary_op(BinaryOps.DIV, eq.const_like(2))) if self.needs_input_grad[1] else None
+          .binary_op(BinaryOps.MUL, eq.const_like(2).binary_op(BinaryOps.SUB, eq).binary_op(BinaryOps.DIV, eq.const_like(2))) if self.needs_input_grad[1] else None
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
