@@ -292,6 +292,6 @@ class _Device:
     for device in ["METAL", "CUDA", "GPU"]:
       try:
         if self[device]: return device
-      except ImportError: pass
+      except Exception: pass
     return "CPU"
 Device = _Device()
