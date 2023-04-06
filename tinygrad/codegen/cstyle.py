@@ -21,7 +21,6 @@ class CStyleLanguage(NamedTuple):
   gid: List[str] = []
   lid: List[str] = []
   extra_args: List[str] = []
-  float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
 
@@ -34,7 +33,6 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({b}*{c})+{a})"
 }
 
-# TODO remove everything related to float4 for rust?
 def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
@@ -51,7 +49,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
-      root = None
       for i,var in enumerate(args[0]):
         if isinstance(var, NumNode):
           if args[1] == "global" and lang.gid: global_size.append(1)
@@ -104,22 +101,11 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
       if args.valid.min == 1: kk(f"let {newvar.name} = {val};")
       else: kk(f"let {newvar.name} = if {args.valid.render(render_cl)} {{{val}}} else {{0.0}};")
-    elif uop == UOps.LOAD and newvar is not None and newvar.ltype == LocalTypes.float4:
-      assert newvar.offset is None, "load can't have an offset"
-      val = f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}]"
-      # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
-      if args[2].min == 1: kk(f"{newvar.render(True)} = {val};")
-      else: kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? ({val}) : {lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);")
-    elif uop == UOps.STORE and (vin[0].ltype == LocalTypes.float or (vin[0].ltype == LocalTypes.float4 and vin[0].offset is not None)):
+    elif uop == UOps.STORE and vin[0].ltype == LocalTypes.float:
       assert not isinstance(bufs[args.i].dtype, ImageDType), "image store must be float4"
       assert args.valid.min == 1, "store must be valid"
       kk(f"unsafe {{ {bufnames[args.i]}[{args.idx.render(render_cl)} as usize] = {vin[0].render()}; }}")
       mutations.append(bufnames[args.i])
-    elif uop == UOps.CAST and newvar is not None and newvar.ltype == LocalTypes.float4:
-      kk(f"{newvar.render(True)} = {lang.float4}({','.join([x.render() for x in vin])});")
-    elif uop == UOps.STORE and len(vin) != 0 and vin[0].ltype == LocalTypes.float4 and vin[0].offset is None:
-      assert args.valid.min == 1, "store must be valid"
-      kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {vin[0].render()};")
     elif uop == UOps.DEFINE_LOCAL:
       kk(lang.smem_prefix + f"static mut {args[0]} : &'static mut [f32] = &mut[0.0; {args[1]}];")
     else:
