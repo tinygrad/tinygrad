@@ -8,6 +8,11 @@ class ClangProgram:
     # this might not even be needed
     prg = "#![crate_type = \"dylib\"]\n" + prg
 
+    prg += "fn pow(a: f32, b: f32) -> f32 { a.powf(b) }\n"
+    prg += "fn log(a: f32) -> f32 { a.log10() }\n"
+    prg += "fn exp(a: f32) -> f32 { a.exp() }\n"
+    prg += "type float = f32;\n"
+
     # TODO: is there a way to not write this to disk?
     fn = f"/tmp/rustc_{hashlib.md5(prg.encode('utf-8')).hexdigest()}.{'dylib' if platform.system() == 'Darwin' else 'so'}"
 
@@ -23,7 +28,6 @@ class ClangProgram:
     if wait: return time.monotonic()-st
 
 class ClangCodegen(CStyleCodegen):
-  # TODO could add `static` as kernel_prefix, but we can't use -shared and DLL to test the code in __init__
   lang = CStyleLanguage(buffer_suffix="", kernel_prefix="#[inline(always)]\n")
 
 ClangBuffer = Compiled(RawMallocBuffer, ClangCodegen, ClangProgram)

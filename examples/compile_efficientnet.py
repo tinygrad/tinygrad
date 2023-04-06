@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
-  rsprog = []
+  rsprog = ["fn exp(a: f32) -> f32 { a.exp() }", "fn pow(a: f32, b: f32) -> f32 { a.powf(b) }", "type float = f32;"]
 
   # save the weights
   for name,cl in bufs_to_save.items():

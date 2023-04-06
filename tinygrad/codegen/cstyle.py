@@ -26,11 +26,11 @@ class CStyleLanguage(NamedTuple):
   uses_vload: bool = False
 
 code_for_op: Final[Dict[Op, Callable]] = {
-  UnaryOps.EXP: lambda x:  f"f32::exp({x})",
-  UnaryOps.LOG: lambda x:  f"f32::log({x})",
+  UnaryOps.EXP: lambda x:  f"exp({x})",
+  UnaryOps.LOG: lambda x:  f"log({x})",
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
-  BinaryOps.POW: lambda a,b: f"f32::powf({a},{b})", BinaryOps.MAX: lambda a,b: f"f32::max({a},{b})",
+  BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({b}*{c})+{a})"
 }
 
@@ -115,8 +115,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       assert args.valid.min == 1, "store must be valid"
       kk(f"unsafe {{ {bufnames[args.i]}[{args.idx.render(render_cl)} as usize] = {vin[0].render()}; }}")
       mutations.append(bufnames[args.i])
-      # print("store into" , bufnames[args.i])
-      # exit()
     elif uop == UOps.CAST and newvar is not None and newvar.ltype == LocalTypes.float4:
       kk(f"{newvar.render(True)} = {lang.float4}({','.join([x.render() for x in vin])});")
     elif uop == UOps.STORE and len(vin) != 0 and vin[0].ltype == LocalTypes.float4 and vin[0].offset is None:
@@ -126,9 +124,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       kk(lang.smem_prefix + f"static mut {args[0]} : &'static mut [f32] = &mut[0.0; {args[1]}];")
     else:
       raise RuntimeError(f"failed to render {uop}")
-
-  # print([x.realized.size for x in bufs if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)])
-  # exit()
 
   buftypes = [(i,f"{lang.buffer_prefix}{x.dtype.name}{lang.buffer_suffix}", x.realized.size) for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
   prg = ''.join([f"{lang.kernel_prefix} pub fn KERNEL_NAME_PLACEHOLDER(",] +
