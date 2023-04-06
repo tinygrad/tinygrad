@@ -46,7 +46,7 @@ def get_run_onnx(onnx_model):
   def attribute_parse(a):
     if a.type in [6,7]: return tuple([int(x) for x in a.ints])
     elif a.type == 4: return buffer_parse(a.t)  # TENSOR
-    elif a.type == 3: return str(a.s)
+    elif a.type == 3: return a.s.decode("utf-8")
     elif a.type == 2: return int(a.i)
     elif a.type == 1: return float(a.f)
     else: raise Exception(f"can't parse {a.type} {a}")

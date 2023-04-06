@@ -47,28 +47,45 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
   
-# TODO: expand to N-D
-def _padding(X, pads=None, auto_pad="NOTSET"):
+# onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
+# numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
+def _format_padding(onnx_pads, ndims=None, axes=None):
+  if ndims is None: ndims = len(onnx_pads) // 2
+  if axes is None: axes = list(range(ndims))
+  num_axes = len(axes)
+  np_pads = [(0,0)] * ndims
+  for i in range(num_axes):
+    np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + num_axes])
+  return np_pads
+
+def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0.):
   assert auto_pad == "NOTSET"  # TODO: write this
-  if pads is not None:
-    return X.pad2d((pads[1], pads[3], pads[0], pads[2]))
-  else:
-    return X
+  if pads is None: return X
+  np_pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
+  zero_padded = X.pad(tuple(np_pads))
+  constant_padder = Tensor(np.pad(np.zeros(X.shape), np_pads, constant_values=constant_value), dtype=X.dtype)
+  return zero_padded + constant_padder
+
+def Pad(x: Tensor, pads: Tensor, constant_value: Tensor=None, axes: Tensor=None, mode="constant"):
+  assert mode == "constant"
+  constant_value = 0. if constant_value is None else constant_value.numpy()
+  seq_pads = pads.numpy().astype(np.int32).tolist()
+  seq_axes = axes.numpy().astype(np.int32).tolist() if axes is not None else None
+  return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
-  # TODO: the padding shouldn't be counted in the average! this is causing a test failure
   assert ceil_mode == 0 and dilations == 1
-  padding_included = _padding(X, pads, auto_pad).avg_pool2d(kernel_shape, stride=strides)
+  pixel_axes = tuple(range(len(X.shape)))[-2:]
+  padding_included = _padding(X, pads, auto_pad, axes=pixel_axes).avg_pool2d(kernel_shape, stride=strides)
   if count_include_pad:
     return padding_included
   else:
-    div = _padding(Tensor.ones(*X.shape), pads, auto_pad).avg_pool2d(kernel_shape, stride=strides)
+    div = _padding(Tensor.ones(*X.shape), pads, auto_pad, axes=pixel_axes).avg_pool2d(kernel_shape, stride=strides)
     return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  # TODO: the padding should be infinity, not 0!
   assert ceil_mode == 0 and storage_order == 0 and dilations == 1
-  return _padding(X, pads, auto_pad).max_pool2d(kernel_shape, stride=strides)
+  return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
