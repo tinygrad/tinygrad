@@ -251,6 +251,28 @@ class Tensor:
       s[dim] = (-k, shape_cumsum[-1]-k)
     return functools.reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
 
+  def stack(self, tensors, dim=0):
+    if not tensors:
+      return self
+    
+    first = self.unsqueeze(dim)
+    unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors]
+    # checks for shapes and number of dimensions delegated to cat
+    return first.cat(*unsqueezed_tensors, dim=dim)
+
+  def repeat(self, repeats):
+    ndim = len(self.shape)
+
+    base_shape = self.shape
+    if len(repeats) > ndim:
+      base_shape = (1,) * (len(repeats) - ndim) + base_shape
+
+    new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
+
+    expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
+    final_shape = [r*s for r,s in zip(repeats, base_shape)]
+    return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
+
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]

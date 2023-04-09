@@ -575,6 +575,30 @@ class TestOps(unittest.TestCase):
     for dim in range(-1, 2):
       helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
+  def test_stack(self):
+    x = Tensor.randn(45, 65, 3)
+
+    for dim in range(-1, 3):
+      helper_test_op([(45, 65, 3), (45, 65, 3), (45, 65, 3)], lambda x, y, z: torch.stack((x, y, z), dim=dim), lambda x, y, z: x.stack([y, z], dim=dim))
+    
+    with self.assertRaises(IndexError):
+      x.stack([x], dim=77)
+    
+  def test_repeat(self):
+    x = Tensor.randn(45, 65, 3)
+    base_repeats = [2, 4, 3]
+
+    for reps in [[], [4], [2, 1], [3, 2, 2]]:
+      repeats = base_repeats + reps
+      helper_test_op([(45, 65, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
+
+    with self.assertRaises(AssertionError):
+      x.repeat((2, 4))
+
+    with self.assertRaises(AssertionError):
+      x.repeat((2, 0, 4))
+       
+
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
 
