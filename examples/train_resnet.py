@@ -29,13 +29,13 @@ if __name__ == "__main__":
   if TRANSFER:
     model.load_from_pretrained()
 
+  lr = 5e-3
   transform = ComposeTransforms([
     lambda x: [Image.fromarray(xx, mode='L').resize((64, 64)) for xx in x],
     lambda x: np.stack([np.asarray(xx) for xx in x], 0),
     lambda x: x / 255.0,
     lambda x: np.tile(np.expand_dims(x, 1), (1, 3, 1, 1)).astype(np.float32),
   ])
-  lr = 0.005
   for _ in range(10):
     optimizer = optim.SGD(optim.get_parameters(model), lr=lr, momentum=0.9)
     train(model, X_train, Y_train, optimizer, 100, BS=32, transform=transform)
