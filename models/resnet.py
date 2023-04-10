@@ -80,7 +80,7 @@ class ResNet:
     self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2)
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2)
     self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2)
-    self.fc = {"weight": Tensor.uniform(512 * self.block.expansion, num_classes), "bias": Tensor.zeros(num_classes)}
+    self.fc = {"weight": Tensor.scaled_uniform(512 * self.block.expansion, num_classes), "bias": Tensor.zeros(num_classes)}
 
   def _make_layer(self, block, planes, num_blocks, stride):
     strides = [stride] + [1] * (num_blocks-1)
