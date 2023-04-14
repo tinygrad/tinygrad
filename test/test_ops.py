@@ -91,6 +91,7 @@ class TestOps(unittest.TestCase):
 
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 2., 3., 4.], [1., 2., 3., 4.]])
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
   def test_add(self):
