@@ -58,8 +58,6 @@ def train_step_jitted(model, optimizer, X, Y):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-  #optimizer.lr *= 0.995  # decay LR
-  #optimizer.lr.realize()
   return loss.realize()
 
 def fetch_batch(X_train, Y_train, BS):
@@ -88,8 +86,7 @@ def train_cifar():
   if getenv("ADAM"):
     optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
   else:
-    #optimizer = optim.SGD(optim.get_parameters(model), lr=0.001)
-    optimizer = optim.SGD(optim.get_parameters(model), lr=Tensor([0.003]).realize(), momentum=0.85, nesterov=True)
+    optimizer = optim.SGD(optim.get_parameters(model), lr=0.01, momentum=0.85, nesterov=True)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -102,14 +99,13 @@ def train_cifar():
 
   X, Y = fetch_batch(X_train, Y_train, BS=BS)
   for i in range(getenv("STEPS", 10)):
-    #new_lr = (0.003 * i/300) if i < 300 else min(0.00001, 0.003 - 0.003 * i/300)
-    #optimizer.lr = Tensor([new_lr]).realize()
-
     if i%10 == 0:
       # use training batchnorm (and no_grad would change the kernels)
-      outs = model(Xt).numpy().argmax(axis=1)
+      out = model(Xt)
+      outs = out.numpy().argmax(axis=1)
+      loss = (out * Yt).mean().numpy()[0]
       correct = outs == Yt.numpy().argmin(axis=1)
-      print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%")
+      print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%, {loss:7.2f} val_loss")
     GlobalCounters.reset()
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, X, Y)

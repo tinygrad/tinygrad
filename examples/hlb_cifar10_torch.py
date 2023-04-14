@@ -56,7 +56,8 @@ def train_step_jitted(model, optimizer, X, Y):
   optimizer.zero_grad()
   loss.backward()
   optimizer.step()
-  return loss
+  correct = out.detach().argmax(axis=1) == Y.detach().argmin(axis=1)
+  return loss, correct.cpu().numpy()
 
 def fetch_batch(X_train, Y_train, BS):
   # fetch a batch
@@ -81,21 +82,25 @@ def train_cifar():
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
 
   model = SpeedyResNet().cuda()
-  optimizer = optim.SGD(model.parameters(), lr=0.003, momentum=0.85, nesterov=True)
+  model.train()
+  optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.85, nesterov=True)
   X, Y = fetch_batch(X_train, Y_train, BS=BS)
   for i in range(getenv("STEPS", 10)):
+    #for param_group in optimizer.param_groups: print(param_group['lr'])
     if i%10 == 0:
       # use training batchnorm (and no_grad would change the kernels)
-      outs = model(Xt).detach().cpu().numpy().argmax(axis=1)
+      out = model(Xt).detach()
+      loss = (out * Yt).mean().cpu().numpy()
+      outs = out.cpu().numpy().argmax(axis=1)
       correct = outs == Yt.detach().cpu().numpy().argmin(axis=1)
-      print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%")
+      print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%, {loss:7.2f} val_loss")
     st = time.monotonic()
-    loss = train_step_jitted(model, optimizer, X, Y)
+    loss, correct = train_step_jitted(model, optimizer, X, Y)
     et = time.monotonic()
     X, Y = fetch_batch(X_train, Y_train, BS=BS)  # do this here
     loss_cpu = loss.detach().cpu().item()
     cl = time.monotonic()
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {sum(correct)/len(correct)*100.0:7.2f}% acc")
 
 if __name__ == "__main__":
   train_cifar()
