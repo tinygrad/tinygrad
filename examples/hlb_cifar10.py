@@ -71,7 +71,7 @@ def fetch_batch(X_train, Y_train, BS):
 
 def train_cifar():
   Tensor.training = True
-  BS = getenv("BS", 512)
+  BS, STEPS = getenv("BS", 512), getenv("STEPS", 10)
   if getenv("FAKEDATA"):
     N = 2048
     X_train = np.random.default_rng().standard_normal(size=(N, 3, 32, 32), dtype=np.float32)
@@ -98,14 +98,15 @@ def train_cifar():
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
 
   X, Y = fetch_batch(X_train, Y_train, BS=BS)
-  for i in range(getenv("STEPS", 10)):
-    if i%10 == 0:
+  for i in range(max(1, STEPS)):
+    if i%10 == 0 and STEPS != 1:
       # use training batchnorm (and no_grad would change the kernels)
       out = model(Xt)
       outs = out.numpy().argmax(axis=1)
       loss = (out * Yt).mean().numpy()[0]
       correct = outs == Yt.numpy().argmin(axis=1)
       print(f"eval {sum(correct)}/{len(correct)} {sum(correct)/len(correct)*100.0:.2f}%, {loss:7.2f} val_loss")
+    if STEPS == 0: break
     GlobalCounters.reset()
     st = time.monotonic()
     loss = train_step_jitted(model, optimizer, X, Y)

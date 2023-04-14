@@ -98,7 +98,7 @@ class LazyBuffer:
 
     # log phantom ops to the graph
     from tinygrad.graph import log_op, GRAPH
-    if GRAPH >= 2: log_op(self, self.op, phantom=True)
+    if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
 
@@ -146,8 +146,8 @@ class LazyBuffer:
       self.dtype = self.realized.dtype
 
       # log to the graph
-      from tinygrad.graph import log_op
-      log_op(self, self.op)
+      from tinygrad.graph import log_op, GRAPH
+      if not isinstance(self.realized, RawConst) or GRAPH >= 2: log_op(self, self.op)
 
       # no need to keep the op after realization
       del self.op

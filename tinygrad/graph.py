@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import getenv, DEBUG, GlobalCounters
+from tinygrad.runtime.lib import RawConst
 
 GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
@@ -52,7 +53,7 @@ def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phan
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
   op: List[Op] = [x.op for x in get_lazyops(ast)]
-  inp: List[LazyBuffer] = get_buffers(ast)
+  inp: List[LazyBuffer] = [x for x in get_buffers(ast) if not isinstance(x.realized, RawConst) or GRAPH > 1]
   oporder = [LoadOps, FusedOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
