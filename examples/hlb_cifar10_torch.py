@@ -1,11 +1,15 @@
 import numpy as np
 import torch
 import time
+import platform
 from torch import nn
 from torch import optim
 
 from datasets import fetch_cifar
 from tinygrad.helpers import getenv
+
+OSX = platform.system() == "Darwin"
+device = 'mps' if OSX else 'cuda'
 
 num_classes = 10
 class ConvGroup(nn.Module):
@@ -57,7 +61,7 @@ def train_step_jitted(model, optimizer, X, Y):
   loss.backward()
   optimizer.step()
   correct = out.detach().argmax(axis=1) == Y.detach().argmin(axis=1)
-  return loss, correct.cpu().numpy()
+  return loss, correct
 
 def fetch_batch(X_train, Y_train, BS):
   # fetch a batch
@@ -66,7 +70,7 @@ def fetch_batch(X_train, Y_train, BS):
   Y[range(BS),Y_train[samp]] = -1.0*num_classes
   X = torch.tensor(X_train[samp])
   Y = torch.tensor(Y.reshape(BS, num_classes))
-  return X.cuda(), Y.cuda()
+  return X.to(device), Y.to(device)
 
 def train_cifar():
   BS = getenv("BS", 512)
@@ -81,7 +85,7 @@ def train_cifar():
   print(X_train.shape, Y_train.shape)
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
 
-  model = SpeedyResNet().cuda()
+  model = SpeedyResNet().to(device)
   model.train()
   optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.85, nesterov=True)
   X, Y = fetch_batch(X_train, Y_train, BS=BS)
@@ -99,6 +103,7 @@ def train_cifar():
     et = time.monotonic()
     X, Y = fetch_batch(X_train, Y_train, BS=BS)  # do this here
     loss_cpu = loss.detach().cpu().item()
+    correct = correct.cpu().numpy()
     cl = time.monotonic()
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {sum(correct)/len(correct)*100.0:7.2f}% acc")
 

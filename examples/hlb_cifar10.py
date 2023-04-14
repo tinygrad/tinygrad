@@ -78,8 +78,8 @@ def train_cifar():
     Y_train = np.random.randint(0,10,size=(N), dtype=np.int32)
     X_test, Y_test = X_train, Y_train
   else:
-    X_train,Y_train = fetch_cifar(train=True)
-    X_test,Y_test = fetch_cifar(train=False)
+    X_train, Y_train = fetch_cifar(train=True)
+    X_test, Y_test = fetch_cifar(train=False)
   print(X_train.shape, Y_train.shape)
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
