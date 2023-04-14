@@ -176,9 +176,9 @@ class Tensor:
   def backward(self):
     assert self.shape == (1,)
 
-    # fill in the first grad with one
+    # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor.ones(*self.shape, device=self.device, requires_grad=False)
+    self.grad = Tensor([1], device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       if not any(x.requires_grad for x in t0._ctx.parents):
