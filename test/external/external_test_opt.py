@@ -193,6 +193,19 @@ class TestOpt(unittest.TestCase):
       assert len(GlobalCounters.cache) in [4,5,6], f"optimizer didn't fold conv-backward SGD, got {len(GlobalCounters.cache)}"
     Tensor.training = False
 
+  def test_fold_2convs_sgd(self):
+    # TODO: with Tensor.training
+    Tensor.training = True
+    img = Tensor.ones(2,3,8,8)
+    c1 = nn.Conv2d(3,16,3,bias=False)
+    c2 = nn.Conv2d(16,32,3,bias=False)
+    opt = optim.SGD(optim.get_parameters([c1, c2]))
+    with CLCache(allowed=9):
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      opt.step()
+    Tensor.training = False
+
   def test_fold_conv_batchnorm_sgd(self):
     # TODO: with Tensor.training
     Tensor.training = True
