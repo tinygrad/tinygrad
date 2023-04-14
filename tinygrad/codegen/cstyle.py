@@ -27,9 +27,9 @@ class CStyleLanguage(NamedTuple):
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
 
-def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
+def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Optional[Node]=None, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
-  if validhacks and valid.min == 0:
+  if valid is not None and validhacks and valid.min == 0:
     idx = (idxy//4) + (idy*-base_shape[1])
     # find the ones in idx that didn't factorize and remove them (TODO: this is not universal)
     if isinstance(idx, SumNode):
@@ -147,13 +147,12 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       assert newvar.offset is None, "load can't have an offset"
       if isinstance(bufs[args.i].dtype, ImageDType):
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
-        idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
+        idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx)
         val = f"read_imagef({bufnames[args.i]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
       else:
         val = f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
-      if args[2].min == 1: kk(f"{newvar.render(True)} = {val};")
-      else: kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? ({val}) : {lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);")
+      kk(f"{newvar.render(True)} = {val};")
     elif uop == UOps.STORE and (vin[0].ltype == LocalTypes.float or (vin[0].ltype == LocalTypes.float4 and vin[0].offset is not None)):
       if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
         kk(f"vstore_half({vin[0].render()}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
@@ -163,7 +162,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       kk(f"{newvar.render(True)} = {lang.float4}({','.join([x.render() for x in vin])});")
     elif uop == UOps.STORE and len(vin) != 0 and vin[0].ltype == LocalTypes.float4 and vin[0].offset is None:
       if isinstance(bufs[args[0]].dtype, ImageDType):
-        idx, idy = to_image_idx(bufs[args.i].dtype.shape, args[1], args[2])
+        idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx)
         kk(f"write_imagef({bufnames[args.i]}, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}), {vin[0].render()});")
       else:
         kk(f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}] = {vin[0].render()};")
