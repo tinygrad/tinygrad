@@ -30,6 +30,7 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
 def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   real_srcs: Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in get_buffers(self.op)}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
+  # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
   if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
@@ -178,7 +179,8 @@ class LazyBuffer:
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
-    return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, (self,), new_shape), self.dtype)
+    srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
+    return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, tuple(srcs), new_shape), self.dtype)
 
   # shrink -> stride -> permute -> reshape -> pad -> expand
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
@@ -242,28 +244,29 @@ class LazyBuffer:
 
     return ret
 
-def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
-  out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs) if op != UnaryOps.CAST else cast(DType, arg)
+def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
+  new_srcs = []
+  for x in srcs:
+    mops: List[Tuple[MovementOps, Tuple[Any, ...]]] = []
+    bx = x
+    # backwalk all the movement ops. don't push PAD or EXPAND
+    while bx.realized is None and bx.optype == MovementOps and bx.op.op != MovementOps.EXPAND and (bx.op.op != MovementOps.PAD or SHUFFLE_PAD_OPS) and len(bx.children) <= 1:
+      assert isinstance(bx.op.op, MovementOps)
+      mops.append((bx.op.op, bx.op.arg))
+      bx = bx.op.src[0]
+    # NOTE: can't push pads with a div
+    if bx.realized is None and bx.optype == BinaryOps and len(bx.children) <= 1 and len(mops) and (all(x[0] != MovementOps.PAD for x in mops) or all(x.op != BinaryOps.DIV for x in get_lazyops(bx.op))):
+      new_srcs.append(replace_with_movement_ops(bx.op, mops[::-1]))
+    else:
+      new_srcs.append(x)
+  return tuple(new_srcs)
 
+def elementwise_op(op:Union[UnaryOps, BinaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
   # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
-  if SHUFFLE_MOVEMENT_OPS:
-    new_srcs = []
-    did_replace = False
-    for x in srcs:
-      mops: List[Tuple[MovementOps, Tuple[Any, ...]]] = []
-      bx = x
-      # backwalk all the movement ops. don't push PAD or EXPAND
-      while bx.realized is None and bx.optype == MovementOps and bx.op.op != MovementOps.EXPAND and (bx.op.op != MovementOps.PAD or SHUFFLE_PAD_OPS) and len(bx.children) <= 1:
-        assert isinstance(bx.op.op, MovementOps)
-        mops.append((bx.op.op, bx.op.arg))
-        bx = bx.op.src[0]
-      # NOTE: can't push pads with a div
-      if bx.realized is None and bx.optype == BinaryOps and len(bx.children) <= 1 and len(mops) and (all(x[0] != MovementOps.PAD for x in mops) or all(x.op != BinaryOps.DIV for x in get_lazyops(bx.op))):
-        new_srcs.append(replace_with_movement_ops(bx.op, mops[::-1]))
-        did_replace = True
-      else:
-        new_srcs.append(x)
-    if did_replace: return elementwise_op(op, *new_srcs, arg=arg)
+  if SHUFFLE_MOVEMENT_OPS: srcs = _push_movement_ops(srcs)
+
+  # get outputs now
+  out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max(x.dtype for x in srcs) if op != UnaryOps.CAST else cast(DType, arg)
 
   # push all contiguous to the end of BinaryOps. kernels 198 -> 196
   if PUSH_CONTIGUOUS and any(x.realized is None and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
