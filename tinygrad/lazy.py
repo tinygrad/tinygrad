@@ -179,8 +179,8 @@ class LazyBuffer:
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
-    #srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
-    srcs = (self,)
+    srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
+    #srcs = (self,)
     return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, tuple(srcs), new_shape), self.dtype)
 
   # shrink -> stride -> permute -> reshape -> pad -> expand

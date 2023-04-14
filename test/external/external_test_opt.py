@@ -196,7 +196,7 @@ class TestOpt(unittest.TestCase):
   def test_fold_2convs_sgd(self):
     # TODO: with Tensor.training
     Tensor.training = True
-    img = Tensor.ones(2,3,8,8)
+    img = Tensor.ones(2,3,64,64)
     c1 = nn.Conv2d(3,16,3,bias=False)
     c2 = nn.Conv2d(16,32,3,bias=False)
     opt = optim.SGD(optim.get_parameters([c1, c2]))
