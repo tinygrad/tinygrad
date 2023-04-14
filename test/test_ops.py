@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
+PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   torch.manual_seed(0)
@@ -26,6 +27,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   tinygrad_fp = time.monotonic() - st
 
   def compare(s, x,y,atol,rtol):
+    if PRINT_TENSORS: print(s, x, y)
     if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch (tinygrad){x.shape} != (torch){y.shape}"
     try:
       np.testing.assert_allclose(x,y, atol=atol, rtol=rtol)
@@ -37,11 +39,11 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY:
     st = time.monotonic()
-    out.square().mean().backward()
+    (out+1).square().mean().backward()
     torch_fbp = time.monotonic() - st
 
     st = time.monotonic()
-    ret.square().mean().backward()
+    (ret+1).square().mean().backward()
     for tt in tst: tt.grad.realize()
     tinygrad_fbp = time.monotonic() - st
 
@@ -91,7 +93,7 @@ class TestOps(unittest.TestCase):
 
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
-    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 2., 3., 4.], [1., 2., 3., 4.]])
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., 4.], [1., 2., 3., 0.]])
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
   def test_add(self):
@@ -130,6 +132,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu(), Tensor.relu)
+  def test_relu_exact(self):
+    helper_test_op(None, lambda x: x.relu(), Tensor.relu, vals=[[-1.,0,1]])
+  def test_relu_maximum_exact(self):
+    helper_test_op(None, lambda x: torch.maximum(x, torch.zeros_like(x, requires_grad=False)), lambda x: Tensor.maximum(x, 0), vals=[[-1.,0,1]])
   def test_leakyrelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
   def test_celu(self):

@@ -17,6 +17,16 @@ class Cast(Function):
 
 # ************* unary ops *************
 
+# NOTE: maximum(x, 0) behaves differently where x=0
+class Relu(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.ret = x.binary_op(BinaryOps.MAX, x.const_like(0))
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    mask = self.ret.const_like(1).binary_op(BinaryOps.SUB, self.ret.binary_op(BinaryOps.CMPEQ, self.ret.const_like(0)))
+    return mask.binary_op(BinaryOps.MUL, grad_output)
+
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x

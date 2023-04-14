@@ -359,6 +359,7 @@ class Tensor:
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
+  def relu(self): return mlops.Relu.apply(self)
 
   # ***** math functions (unary) *****
 
@@ -369,7 +370,6 @@ class Tensor:
   def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
-  def relu(self): return self.maximum(0)
   def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
