@@ -14,8 +14,11 @@ def do_pad(st):
   print("st.pad(", pad, ")")
   st.pad(pad)
 
-def do_reshape_add_1_at_end(st):
-  shp = st.shape + (1,)
+def do_reshape_split_one(st):
+  c = random.randint(0, len(st.shape)-1)
+  poss = [n for n in [1,2,3,4,5] if st.shape[c]%n == 0]
+  spl = random.choice(poss)
+  shp = st.shape[0:c] + (st.shape[c]//spl, spl) + st.shape[c+1:]
   print("st.reshape(", shp, ")")
   st.reshape(shp)
 
@@ -27,17 +30,16 @@ def do_reshape_combine_two(st):
   st.reshape(shp)
 
 def do_shrink(st):
+  c = random.randint(0, len(st.shape)-1)
   while 1:
-    shrink = tuple((random.randint(0, 2), random.randint(s-2,s)) for i,s in enumerate(st.shape))
+    shrink = tuple((random.randint(0,s), random.randint(0,s)) if i == c else (0,s) for i,s in enumerate(st.shape))
     if all(x<y for (x,y) in shrink): break
   print("st.shrink(", shrink, ")")
   st.shrink(shrink)
 
 def do_stride(st):
   c = random.randint(0, len(st.shape)-1)
-  # TODO: negative strides have an issue
   stride = tuple(random.choice([-2,-1,2]) if i==c else 1 for i in range(len(st.shape)))
-  #stride = tuple(random.choice([2]) if i==c else 1 for i in range(len(st.shape)))
   print("st.stride(", stride, ")")
   st.stride(stride)
 
@@ -50,9 +52,9 @@ def do_expand(st):
   st.expand(expand)
 
 if __name__ == "__main__":
-  ops = [do_permute, do_pad, do_shrink, do_reshape_add_1_at_end, do_reshape_combine_two, do_stride, do_expand]
+  ops = [do_permute, do_pad, do_shrink, do_reshape_split_one, do_reshape_combine_two, do_stride, do_expand]
   while 1:
     st = CheckingShapeTracker((3, 3, 3))
-    for i in range(5): random.choice(ops)(st)
+    for i in range(8): random.choice(ops)(st)
     #st.simplify()
     st.assert_same()
