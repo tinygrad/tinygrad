@@ -53,6 +53,6 @@ if __name__ == "__main__":
   ops = [do_permute, do_pad, do_shrink, do_reshape_add_1_at_end, do_reshape_combine_two, do_stride, do_expand]
   while 1:
     st = CheckingShapeTracker((3, 3, 3))
-    for i in range(3): random.choice(ops)(st)
+    for i in range(5): random.choice(ops)(st)
     #st.simplify()
     st.assert_same()
