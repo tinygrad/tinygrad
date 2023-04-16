@@ -63,7 +63,7 @@ class CheckingShapeTracker:
     x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
     y = [self[i] for i in range(prod(self.shape))]
     idx, valid = self.st.expr_node()
-    print(x, y, self.st.shape, self.shape, idx.render(), valid.render())
+    print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
     assert self.st.shape == self.shape
     assert x == y, f"mismatch {x} {y}"
 

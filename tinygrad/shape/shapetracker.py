@@ -24,15 +24,18 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tup
 def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: return all(s1 == s2 or s == 1 for s,s1,s2 in zip(shape, strides, strides_for_shape(shape)))
 
 class View:
-  def __init__(self, shape:Tuple[int, ...], strides:Tuple[int, ...], offset:int=0):
+  def __init__(self, shape:Tuple[int, ...], strides:Tuple[int, ...], offset:int=0, mask:Optional[Tuple[Tuple[int, int], ...]]=None):
     self.shape, self.strides, self.offset = shape, tuple(stride if shp != 1 else 0 for stride,shp in zip(strides, shape)), offset
+    self.mask = mask
     self.shape_strides = to_shape_strides(self.shape, self.strides)
     self.contiguous: bool = self.offset == 0 and is_contiguous(self.shape, self.strides)
 
-  def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset})"
+  def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset}, {self.mask})"
 
   def expr_node(self, idx=None, offset:Union[Node, int]=0):
     if idx is None: idx = Variable('idx', 0, prod(self.shape))
+    # extract idxs
+
     ret = [Variable.num(self.offset)+offset]
     acc = 1
     for d,s in self.shape_strides[::-1]:
@@ -79,6 +82,7 @@ def view_from_shape(shape:Tuple[int, ...]) -> View:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
+  if vm2.mask: return None  # this isn't supported yet
   new_strides, new_offset = [], vm2.expr_node(Variable.num(vm1.offset))
   assert isinstance(new_offset, NumNode), "new_offset wasn't a number?!?"
   for s,st in zip(vm1.shape, vm1.strides):
@@ -94,7 +98,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
     else:
       if DEBUG >= 4: print("can't simplify", s, this_dim.render())
       break
-  return View(vm1.shape, tuple(new_strides), new_offset.b) if len(new_strides) == len(vm1.strides) else None
+  return View(vm1.shape, tuple(new_strides), new_offset.b, vm1.mask) if len(new_strides) == len(vm1.strides) else None
 
 class ShapeTracker:
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
@@ -113,6 +117,9 @@ class ShapeTracker:
 
   @property
   def offset(self) -> int: return self.views[-1].offset
+
+  @property
+  def mask(self): return self.views[-1].mask
 
   # this is the real size
   def size(self): return prod([s for s,st in zip(self.shape, self.strides) if st != 0])
@@ -145,18 +152,21 @@ class ShapeTracker:
 
   # *** under this line are the movement ops ***
 
-  def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...]):
+  def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
     offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
-    self.views[-1] = View(tuple(y-x for x,y in arg), self.strides, self.offset+offset)
+    if self.mask:
+      # TODO: move the mask
+      pass
+    self.views[-1] = View(tuple(y-x for x,y in arg), self.strides, self.offset+offset, mask)
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
     if all(b==0 and e==0 for b,e in arg): return self   # ZeroView is expensive if we don't need it
     zvarg = tuple((-b,s+e) for s,(b,e) in zip(self.shape, arg))
-    zeroview = ZeroView(self.shape, zvarg)
-    self.__unsafe_resize(zvarg)
+    #zeroview = ZeroView(self.shape, zvarg)
+    self.__unsafe_resize(zvarg, mask=tuple((b,s+b) for s,(b,_) in zip(self.shape, arg)))
     # if we add a ZeroView, we add another (stock) view also for modding
-    self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
+    #self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
 
   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
@@ -164,6 +174,7 @@ class ShapeTracker:
 
   def expand(self, new_shape: Tuple[int, ...]):
     assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
+    # TODO: add mask
     self.views[-1] = View(new_shape, self.strides, self.offset)
 
   def reshape(self, new_shape: Tuple[int, ...]):
@@ -173,7 +184,7 @@ class ShapeTracker:
 
     # check if this is adding or removing 1s (only)
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views
-    if tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
+    if self.mask is None and tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
       old_strides = [y for x,y in zip(self.shape, self.strides) if x != 1]
       new_strides_tuple = tuple(0 if x == 1 else old_strides.pop(0) for x in new_shape)
       self.views[-1] = View(new_shape, new_strides_tuple, self.offset)
@@ -189,7 +200,7 @@ class ShapeTracker:
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
-    self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset)
+    self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset, tuple(self.mask[a] for a in axis) if self.mask is not None else None)
 
   # except for the negative case, you can build this from the others. invertible in the negative case
   def stride(self, mul: Tuple[int, ...]):
@@ -197,6 +208,7 @@ class ShapeTracker:
     strides = tuple(z*m for z,m in zip(self.strides, mul))
     new_shape = tuple((s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul))
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
+    # TODO: add mask
     self.views[-1] = View(new_shape, strides, self.offset + offset)
 
   # *** entry point for external ***
