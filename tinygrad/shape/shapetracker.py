@@ -138,7 +138,7 @@ class ShapeTracker:
   def expr_idxs(self, offset=0, idxs=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = self.views[-1].expr_idxs(idxs, offset)
-    valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs))
+    valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs)+offset)
     return self._expr_idx(idx, valid)
 
   def expr_node(self, idx='idx', offset=0):
@@ -172,7 +172,7 @@ class ShapeTracker:
   def expand(self, new_shape: Tuple[int, ...]):
     assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple(((0,0) if m == (0,0) else (0,ns) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)) if self.mask else None
+    mask = tuple((((0,0) if m == (0,0) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)) if self.mask else None
     self.views[-1] = View(new_shape, self.strides, self.offset, mask)
 
   def reshape(self, new_shape: Tuple[int, ...]):
@@ -181,18 +181,25 @@ class ShapeTracker:
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # check if this is adding or removing 1s (only)
-    # NOTE: this is optional, but removes most calls to (expensive!) merge_views
-    if self.mask is None and tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
+    # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
+    if tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
       old_strides = [y for x,y in zip(self.shape, self.strides) if x != 1]
       new_strides_tuple = tuple(0 if x == 1 else old_strides.pop(0) for x in new_shape)
-      self.views[-1] = View(new_shape, new_strides_tuple, self.offset)
+      new_mask_tuple = None
+      if self.mask:
+        assert all(y==(0,1) for x,y in zip(self.shape, self.mask) if x == 1), "all dim 1 must be unmasked"
+        old_mask = [y for x,y in zip(self.shape, self.mask) if x != 1]
+        new_mask_tuple = tuple((0,1) if x == 1 else old_mask.pop(0) for x in new_shape)
+      self.views[-1] = View(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
       return self
 
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
     else:
       if (merged_view := merge_views(self.views[-1], view)) is not None: self.views[-1] = merged_view
-      else: self.views.append(view)
+      else:
+        if DEBUG >= 4: print(f"WARNING: creating new view with reshape {self} -> {new_shape}")
+        self.views.append(view)
 
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
