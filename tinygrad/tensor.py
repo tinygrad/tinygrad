@@ -347,15 +347,15 @@ class Tensor:
     padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
 
     # conv2d is a pooling op (with padding)
-    #x = self.pad2d(padding_)._pool((H,W), stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
-    #rcout, oy, ox = cout//groups, x.shape[2], x.shape[3]
-    #x = x.reshape(bs, groups, cin, 1, oy, ox, H, W).expand(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
+    x = self.pad2d(padding_)._pool((H,W), stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
+    rcout, oy, ox = cout//groups, x.shape[2], x.shape[3]
+    x = x.reshape(bs, groups, cin, 1, oy, ox, H, W).expand(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
 
     # expand the channels with the pool
     # TODO: this reduces the number of kernels, but it's slower!
-    x = self.pad2d(padding_)._pool((H,W), stride, dilation, _insert_dims=(cout//groups,))   # (bs, groups*cin, rcout, oy, ox, H, W)
-    rcout, oy, ox = x.shape[2:5]
-    x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
+    #x = self.pad2d(padding_)._pool((H,W), stride, dilation, _insert_dims=(cout//groups,))   # (bs, groups*cin, rcout, oy, ox, H, W)
+    #rcout, oy, ox = x.shape[2:5]
+    #x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
 
     # conv! broadcasted to (bs, groups, rcout, oy, ox, cin, H, W)
     ret = (x * weight.reshape(1, groups, rcout, 1, 1, cin, H, W)).sum((-3, -2, -1), keepdim=True).reshape(bs, cout, oy, ox)
