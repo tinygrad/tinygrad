@@ -47,7 +47,7 @@ class View:
     acc = 1
     ret = []
     for tidx,d in list(zip(idxs, self.shape))[::-1]:
-      ret.append(tidx * acc)
+      ret.append(Variable(tidx, 0, d-1) * acc)
       acc *= d
     return Variable.sum(ret)
 
@@ -168,15 +168,17 @@ class ShapeTracker:
     return self._expr_idx(self.views[-1].expr_node(idx, offset), self.views[-1].expr_node_mask(idx))
 
   def needs_valid(self) -> bool:
-    return any(isinstance(v, ZeroView) for v in self.views)
+    return any(v.mask is not None for v in self.views)
 
   # *** under this line are the movement ops ***
 
   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
     offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
     if self.mask:
-      # TODO: move the mask
-      pass
+      # move the old mask
+      nmask = tuple((max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.mask, arg))
+      # merge the masks if we have two
+      mask = tuple((max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)) if mask is not None else nmask
     self.views[-1] = View(tuple(y-x for x,y in arg), self.strides, self.offset+offset, mask)
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):

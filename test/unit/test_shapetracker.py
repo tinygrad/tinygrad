@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
-from tinygrad.shape.shapetracker import ShapeTracker, View, ZeroView, merge_views, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
 from tinygrad.codegen.cstyle import to_image_idx
 
 def shapetracker_getitem(st, val):
@@ -79,8 +79,7 @@ class TestImageShapeTracker(unittest.TestCase):
     print(new_view)
 
     st = ShapeTracker(shape=(64, 32, 8, 3, 3), views=[
-      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
-      ZeroView((1, 64, 128, 32, 1, 1), ((0, 1), (-1, 65), (-1, 129), (0, 32), (0, 1), (0, 1))),
+      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128, mask=((0,1), (1,65), (1,129), (0,1), (0,1))),
       View((64, 32, 8, 3, 3), (4160, 128, 4, 4160, 32), 0)])
     offsets = [0,32,64,96]
 
@@ -304,6 +303,10 @@ class TestShapeTracker(unittest.TestCase):
   def test_pad_shrink(self):
     self.st.pad(((1,1), (1,1)))
     self.st.shrink(((0,4), (0,4)))
+
+  def test_pad_pad(self):
+    self.st.pad(((1,1), (1,1)))
+    self.st.pad(((1,1), (1,1)))
 
   def test_pad_permute(self):
     self.st.pad(((1,1), (2,2)))
