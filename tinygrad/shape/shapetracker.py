@@ -28,7 +28,7 @@ class View:
     self.shape, self.strides, self.offset = shape, tuple(stride if shp != 1 else 0 for stride,shp in zip(strides, shape)), offset
     self.mask = mask
     self.shape_strides = to_shape_strides(self.shape, self.strides)
-    self.contiguous: bool = self.offset == 0 and is_contiguous(self.shape, self.strides)
+    self.contiguous: bool = self.offset == 0 and is_contiguous(self.shape, self.strides) and mask is None
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset}, {self.mask})"
 
@@ -103,7 +103,7 @@ class ShapeTracker:
   def copy(self) -> ShapeTracker: return ShapeTracker(self.shape, self.views[:])
 
   @property
-  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous and self.views[-1].mask is None
+  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
