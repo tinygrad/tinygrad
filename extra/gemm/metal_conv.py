@@ -8,7 +8,8 @@ COUT = 256
 HW = 32
 K = 3
 # TODO: this is doing some trick, since with CIN=256 COUT=256 it's over 10.4 TFLOPS.
-# are winograd convs less flops?
+# are winograd convs less flops? it appears so if they are batched
+# https://www.cse.ust.hk/~weiwa/papers/yan-ppopp20.pdf
 FLOPS = BS*K*K*CIN*HW*HW*COUT*2
 
 nb = np.random.default_rng().standard_normal(size=(BS,CIN,HW,HW), dtype=np.float32)
