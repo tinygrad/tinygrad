@@ -174,7 +174,7 @@ class ShapeTracker:
   def expand(self, new_shape: Tuple[int, ...]):
     assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple((((0,0) if m == (0,0) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)) if self.mask else None
+    mask = tuple((((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)) if self.mask else None
     self.views[-1] = View(new_shape, self.strides, self.offset, mask)
 
   def reshape(self, new_shape: Tuple[int, ...]):
@@ -189,9 +189,12 @@ class ShapeTracker:
       new_strides_tuple = tuple(0 if x == 1 else old_strides.pop(0) for x in new_shape)
       new_mask_tuple = None
       if self.mask:
-        assert all(y==(0,1) for x,y in zip(self.shape, self.mask) if x == 1), "all dim 1 must be unmasked"
-        old_mask = [y for x,y in zip(self.shape, self.mask) if x != 1]
-        new_mask_tuple = tuple((0,1) if x == 1 else old_mask.pop(0) for x in new_shape)
+        if any(y!=(0,1) for x,y in zip(self.shape, self.mask) if x == 1):
+          # mask it all out!
+          new_mask_tuple = tuple((0,0) for _ in new_shape)
+        else:
+          old_mask = [y for x,y in zip(self.shape, self.mask) if x != 1]
+          new_mask_tuple = tuple((0,1) if x == 1 else old_mask.pop(0) for x in new_shape)
       self.views[-1] = View(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
       return self
 
