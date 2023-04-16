@@ -134,7 +134,7 @@ class Linearizer:
       if const is not None:
         reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
       else:
-        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(0, idxs+[Variable.num(x) for x in uidxs])))
+        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs])))
       ret.append(reg)
     return ret
 
@@ -159,7 +159,7 @@ class Linearizer:
 
   def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
     for uidxs, var in zip(self.shape_offsets(i), store):
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(0, idxs+[Variable.num(x) for x in uidxs])))
+      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs])))
 
 
     """

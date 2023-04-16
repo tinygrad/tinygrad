@@ -32,9 +32,7 @@ class View:
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset}, {self.mask})"
 
-  def expr_node_mask(self, idx, offset=0, valid=None) -> Node:
-    # NOTE: self.offset isn't used here
-    idx = idx + offset
+  def expr_node_mask(self, idx, valid=None) -> Node:
     expr = [valid] if valid is not None else []
     if self.mask is not None:
       acc = 1
@@ -54,9 +52,9 @@ class View:
     return Variable.sum(ret)
 
   # generate an expression if you have a single idx variable
-  def expr_node(self, idx=None, offset:Union[Node, int]=0) -> Node:
+  def expr_node(self, idx=None) -> Node:
     if idx is None: idx = Variable('idx', 0, prod(self.shape))
-    ret = [Variable.num(self.offset)+offset]
+    ret = [Variable.num(self.offset)]
     acc = 1
     for d,s in self.shape_strides[::-1]:
       ret.append(((idx//acc)%d)*s)
@@ -64,9 +62,9 @@ class View:
     return Variable.sum(ret)
 
   # generate an expression if you have a variable or expression for each index
-  def expr_idxs(self, idxs, offset:Union[Node, int]=0):
+  def expr_idxs(self, idxs):
     assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
-    return Variable.sum([Variable.num(self.offset)+offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+    return Variable.sum([Variable.num(self.offset)] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -125,7 +123,7 @@ class ShapeTracker:
 
   def _expr_idx(self, idx, valid):
     for v in self.views[0:-1][::-1]:
-      valid = v.expr_node_mask(idx, 0, valid)
+      valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
     return idx, valid
 
@@ -138,15 +136,15 @@ class ShapeTracker:
         self.simplify()
 
   # TODO: arg order is reversed here
-  def expr_idxs(self, offset=0, idxs=None):
+  def expr_idxs(self, idxs=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx = self.views[-1].expr_idxs(idxs, offset)
-    valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs), offset)
+    idx = self.views[-1].expr_idxs(idxs)
+    valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs))
     return self._expr_idx(idx, valid)
 
-  def expr_node(self, idx='idx', offset=0):
+  def expr_node(self, idx='idx'):
     idx = Variable(idx, 0, prod(self.shape)-1)
-    return self._expr_idx(self.views[-1].expr_node(idx, offset), self.views[-1].expr_node_mask(idx, offset))
+    return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
 
   def needs_valid(self) -> bool:
     return any(v.mask is not None for v in self.views)
