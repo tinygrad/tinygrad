@@ -304,6 +304,13 @@ class TestShapeTracker(unittest.TestCase):
     self.st.pad(((1,1), (1,1)))
     self.st.shrink(((0,4), (0,4)))
 
+  def test_pad_one_sided(self):
+    self.st.pad(((0,1), (0,0)))
+
+  def test_pad_reshape(self):
+    self.st.pad(((0,1), (0,0)))
+    self.st.reshape((8*4,))
+
   def test_pad_pad(self):
     self.st.pad(((1,1), (1,1)))
     self.st.pad(((1,1), (1,1)))

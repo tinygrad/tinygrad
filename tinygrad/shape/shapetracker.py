@@ -103,7 +103,7 @@ class ShapeTracker:
   def copy(self) -> ShapeTracker: return ShapeTracker(self.shape, self.views[:])
 
   @property
-  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous
+  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[-1].contiguous and self.views[-1].mask is None
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
