@@ -108,6 +108,7 @@ class Linearizer:
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
                     self.sts[i].strides[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
+  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:]]) if self.upcasted > 0 else [[]]
   def offsets(self, i): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.upcasted_axis(i)[::-1]])] if self.upcasted > 0 else [0]
   def can_float4(self, i): return any(a[0:2] == (4,1) for a in self.upcasted_axis(i))
   def acc_offsets(self, i):
@@ -125,6 +126,19 @@ class Linearizer:
     return ret
 
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
+    will_merge = False
+    ret = []
+    # NOTE: this idxs don't include the upcasted ones, we generate them here
+    for uidxs in self.shape_offsets(i):
+      print(i, uidxs, self.sts[i].shape[self.shape_len-self.upcasted:])
+      if const is not None:
+        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
+      else:
+        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(0, idxs+[Variable.num(x) for x in uidxs])))
+      ret.append(reg)
+    return ret
+
+    """
     should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
     cache: Dict[int, Token] = {}
     def op(offset):
@@ -141,8 +155,14 @@ class Linearizer:
         cache[offset] = reg
       return cache[offset]
     return [op(o) for o in self.offsets(i)]
+    """
 
   def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
+    for uidxs, var in zip(self.shape_offsets(i), store):
+      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(0, idxs+[Variable.num(x) for x in uidxs])))
+
+
+    """
     should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
     store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
     def op(offset):
@@ -160,6 +180,7 @@ class Linearizer:
       for j in range(0, 4 if will_merge else 1): del store_offset[offset+j]
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
     for o in self.offsets(i): op(o)
+    """
 
   def linearize(self):
     # uops
@@ -204,12 +225,16 @@ class Linearizer:
       gl_idxs = global_idxs
 
     # reduce op
+    nonreduce_idxs = []
     if self.reduceop is not None:
+      # define indexes
+      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+      nonreduce_idxs = [r*0 for r in reduce_idxs]
+
       # define accumulator
-      acc = self.global_load(0, gl_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      acc = self.global_load(0, gl_idxs+nonreduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
       # reduce loop
-      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # load earlybufs
@@ -251,13 +276,13 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
+    loaded_buffers.update({b:self.global_load(i, global_idxs+nonreduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_store(0, global_idxs, val)
+    self.global_store(0, global_idxs+nonreduce_idxs, val)
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))

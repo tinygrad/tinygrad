@@ -40,13 +40,13 @@ class View:
       acc = 1
       for ns,(x,y) in list(zip(self.shape, self.mask))[::-1]:
         base = ((idx//acc) % ns)
-        expr += ([base >= x] if x > 0 else []) + ([base < y] if y != ns else [])
+        expr += [base >= x, base < y]
         acc *= ns
     return Variable.ands(expr)
 
   def idxs_to_idx(self, idxs):
-    # NOTE: idxs can be smaller than self.shape, we start the offset appropriately
-    acc = prod(self.shape[len(idxs):])
+    assert len(idxs) == len(self.shape), "need an idx for all dimensions"
+    acc = 1
     ret = []
     for tidx,d in list(zip(idxs, self.shape))[::-1]:
       ret.append(tidx * acc)
@@ -65,6 +65,7 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, offset:Union[Node, int]=0):
+    assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
     return Variable.sum([Variable.num(self.offset)+offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
 @functools.lru_cache(maxsize=None)
