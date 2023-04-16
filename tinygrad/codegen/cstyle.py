@@ -116,6 +116,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       assert newvar is not None
       if args == -math.inf:
         kk(f"{newvar.render(True)} = -INFINITY;")
+      elif newvar.ltype == LocalTypes.float4:
+        kk(f"{newvar.render(True)} = {{ {args}f, {args}f, {args}f, {args}f }};")
       else:
         kk(f"{newvar.render(True)} = {args}f;")
     elif uop == UOps.ALU:
