@@ -315,7 +315,7 @@ class TestShapeTracker(unittest.TestCase):
     self.st.expand((9,6,4))
 
   def test_pad_stride(self):
-    self.st.pad(((1,1), (1,1)))
+    self.st.pad(((1,4), (1,3)))
     self.st.stride((2,2))
 
   def test_pad_stride_neg(self):

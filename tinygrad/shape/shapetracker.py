@@ -229,7 +229,7 @@ class ShapeTracker:
     strides = tuple(z*m for z,m in zip(self.strides, mul))
     new_shape = tuple((s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul))
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
-    mask = tuple(((mx+(abs(m)-1))//abs(m), (my+(abs(m)-1))//abs(m)) for (mx,my),m in zip(self.mask, mul)) if self.mask is not None else None
+    mask = tuple((((mx+(abs(m)-1))//abs(m), (my+(abs(m)-1))//abs(m)) if m > 0 else (((s-my)+(abs(m)-1))//abs(m), ((s-mx)+(abs(m)-1))//abs(m))) for (mx,my),s,m in zip(self.mask, self.shape, mul)) if self.mask is not None else None
     self.views[-1] = View(new_shape, strides, self.offset + offset, mask)
 
   # *** entry point for external ***
