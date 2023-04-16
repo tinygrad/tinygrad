@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools
 from enum import Enum, auto
-from typing import Tuple, Union, List, Optional, cast, Dict, Callable
+from typing import Tuple, Union, List, Optional, Dict, Callable
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node
 
@@ -47,7 +47,7 @@ class View:
     acc = 1
     ret = []
     for tidx,d in list(zip(idxs, self.shape))[::-1]:
-      ret.append(Variable(tidx, 0, d-1) * acc)
+      ret.append(tidx * acc)
       acc *= d
     return Variable.sum(ret)
 
@@ -63,7 +63,7 @@ class View:
 
   # generate an expression if you have a variable or expression for each index
   def expr_idxs(self, idxs, offset:Union[Node, int]=0):
-    return Variable.sum([Variable.num(self.offset)+offset] + [(idx if isinstance(idx, Variable) else Variable(idx, 0, sh-1))*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
+    return Variable.sum([Variable.num(self.offset)+offset] + [idx*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -136,7 +136,7 @@ class ShapeTracker:
 
   # TODO: arg order is reversed here
   def expr_idxs(self, offset=0, idxs=None):
-    if idxs is None: idxs = [f"idx{i}" for i in range(len(self.shape))]
+    if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = self.views[-1].expr_idxs(idxs, offset)
     valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs))
     return self._expr_idx(idx, valid)
@@ -205,7 +205,7 @@ class ShapeTracker:
     strides = tuple(z*m for z,m in zip(self.strides, mul))
     new_shape = tuple((s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul))
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
-    mask = tuple((((mx+(abs(m)-1))//abs(m), (my+(abs(m)-1))//abs(m)) if m > 0 else (((s-my)+(abs(m)-1))//abs(m), ((s-mx)+(abs(m)-1))//abs(m))) for (mx,my),s,m in zip(self.mask, self.shape, mul)) if self.mask is not None else None
+    mask = tuple((((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.mask, self.shape, mul)) if self.mask is not None else None
     self.views[-1] = View(new_shape, strides, self.offset + offset, mask)
 
   # *** entry point for external ***
