@@ -32,10 +32,28 @@ class View:
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset}, {self.mask})"
 
-  def expr_node(self, idx=None, offset:Union[Node, int]=0):
-    if idx is None: idx = Variable('idx', 0, prod(self.shape))
-    # extract idxs
+  def expr_node_mask(self, idx, valid=None) -> Node:
+    # NOTE: the offset isn't used here
+    expr = [valid] if valid is not None else []
+    if self.mask is not None:
+      acc = 1
+      for ns,(x,y) in list(zip(self.shape, self.mask))[::-1]:
+        base = ((idx//acc) % ns)
+        expr += ([base >= x] if x > 0 else []) + ([base < y] if y != ns else [])
+        acc *= ns
+    return Variable.ands(expr)
 
+  def idxs_to_idx(self, idxs):
+    acc = 1
+    ret = []
+    for tidx,d in list(zip(idxs, self.shape))[::-1]:
+      ret.append(tidx * acc)
+      acc *= d
+    return Variable.sum(ret)
+
+  # generate an expression if you have a single idx variable
+  def expr_node(self, idx=None, offset:Union[Node, int]=0) -> Node:
+    if idx is None: idx = Variable('idx', 0, prod(self.shape))
     ret = [Variable.num(self.offset)+offset]
     acc = 1
     for d,s in self.shape_strides[::-1]:
@@ -124,11 +142,10 @@ class ShapeTracker:
   # this is the real size
   def size(self): return prod([s for s,st in zip(self.shape, self.strides) if st != 0])
 
-  def _expr_idx(self, idx):
-    valid = Variable.num(1)
+  def _expr_idx(self, idx, valid):
     for v in self.views[0:-1][::-1]:
-      if isinstance(v, ZeroView): valid = v.expr_node(idx, valid)
-      else: idx = v.expr_node(idx)
+      valid = v.expr_node_mask(idx, valid)
+      idx = v.expr_node(idx)
     return idx, valid
 
   def simplify(self):
@@ -142,10 +159,13 @@ class ShapeTracker:
   # TODO: arg order is reversed here
   def expr_idxs(self, offset=0, idxs=None):
     if idxs is None: idxs = [f"idx{i}" for i in range(len(self.shape))]
-    return self._expr_idx(self.views[-1].expr_idxs(idxs, offset))
+    idx = self.views[-1].expr_idxs(idxs, offset)
+    valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs))
+    return self._expr_idx(idx, valid)
 
   def expr_node(self, idx='idx', offset=0):
-    return self._expr_idx(self.views[-1].expr_node(Variable(idx, 0, prod(self.shape)-1), offset))
+    idx = Variable(idx, 0, prod(self.shape)-1)
+    return self._expr_idx(self.views[-1].expr_node(idx, offset), self.views[-1].expr_node_mask(idx))
 
   def needs_valid(self) -> bool:
     return any(isinstance(v, ZeroView) for v in self.views)
@@ -174,8 +194,9 @@ class ShapeTracker:
 
   def expand(self, new_shape: Tuple[int, ...]):
     assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
-    # TODO: add mask
-    self.views[-1] = View(new_shape, self.strides, self.offset)
+    # NOTE: can the mask ever be (0,0)?
+    mask = tuple(((0,0) if m == (0,0) else (0,ns) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)) if self.mask else None
+    self.views[-1] = View(new_shape, self.strides, self.offset, mask)
 
   def reshape(self, new_shape: Tuple[int, ...]):
     if self.shape == new_shape: return self
@@ -208,8 +229,8 @@ class ShapeTracker:
     strides = tuple(z*m for z,m in zip(self.strides, mul))
     new_shape = tuple((s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul))
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
-    # TODO: add mask
-    self.views[-1] = View(new_shape, strides, self.offset + offset)
+    mask = tuple(((mx+(abs(m)-1))//abs(m), (my+(abs(m)-1))//abs(m)) for (mx,my),m in zip(self.mask, mul)) if self.mask is not None else None
+    self.views[-1] = View(new_shape, strides, self.offset + offset, mask)
 
   # *** entry point for external ***
 

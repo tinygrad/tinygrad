@@ -65,7 +65,7 @@ class CheckingShapeTracker:
     idx, valid = self.st.expr_node()
     print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
     assert self.st.shape == self.shape
-    assert x == y, f"mismatch {x} {y}"
+    assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
 class TestImageShapeTracker(unittest.TestCase):
   def test_image(self):
@@ -272,6 +272,17 @@ class TestSingleShapeTracker(unittest.TestCase):
     self.st.permute((1,0))
     assert not self.st.contiguous
 
+class TestMaskedShapeTracker(unittest.TestCase):
+  def test_pad_1x1(self):
+    self.st = CheckingShapeTracker((1,1))
+    self.st.pad(((1,1), (1,1)))
+    self.st.assert_same()
+
+  def test_pad_2x2(self):
+    self.st = CheckingShapeTracker((2,2))
+    self.st.pad(((1,1), (1,1)))
+    self.st.assert_same()
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
@@ -293,6 +304,27 @@ class TestShapeTracker(unittest.TestCase):
   def test_pad_shrink(self):
     self.st.pad(((1,1), (1,1)))
     self.st.shrink(((0,4), (0,4)))
+
+  def test_pad_permute(self):
+    self.st.pad(((1,1), (2,2)))
+    self.st.permute((1,0))
+
+  def test_pad_expand(self):
+    self.st.reshape((7,4,1))
+    self.st.pad(((1,1), (1,1), (0,0)))
+    self.st.expand((9,6,4))
+
+  def test_pad_stride(self):
+    self.st.pad(((1,1), (1,1)))
+    self.st.stride((2,2))
+
+  def test_pad_stride_neg(self):
+    self.st.pad(((1,2), (1,0)))
+    self.st.stride((-1,-1))
+
+  def test_pad_stride_both(self):
+    self.st.pad(((1,2), (1,0)))
+    self.st.stride((-2,-2))
 
   def test_shrink_pad(self):
     self.st.shrink(((0,4), (0,4)))
