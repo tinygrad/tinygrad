@@ -32,7 +32,7 @@ class CUDAProgram:
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    self.prg(*[x._cl for x in args], block=tuple(local_size), grid=tuple(global_size))
+    self.prg(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
     if wait:
       end.record()
       end.synchronize()
