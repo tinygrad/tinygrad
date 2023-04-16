@@ -32,8 +32,9 @@ class View:
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset}, {self.mask})"
 
-  def expr_node_mask(self, idx, valid=None) -> Node:
-    # NOTE: the offset isn't used here
+  def expr_node_mask(self, idx, offset=0, valid=None) -> Node:
+    # NOTE: self.offset isn't used here
+    idx = idx + offset
     expr = [valid] if valid is not None else []
     if self.mask is not None:
       acc = 1
@@ -44,7 +45,8 @@ class View:
     return Variable.ands(expr)
 
   def idxs_to_idx(self, idxs):
-    acc = 1
+    # NOTE: idxs can be smaller than self.shape, we start the offset appropriately
+    acc = prod(self.shape[len(idxs):])
     ret = []
     for tidx,d in list(zip(idxs, self.shape))[::-1]:
       ret.append(tidx * acc)
@@ -122,7 +124,7 @@ class ShapeTracker:
 
   def _expr_idx(self, idx, valid):
     for v in self.views[0:-1][::-1]:
-      valid = v.expr_node_mask(idx, valid)
+      valid = v.expr_node_mask(idx, 0, valid)
       idx = v.expr_node(idx)
     return idx, valid
 
@@ -138,12 +140,12 @@ class ShapeTracker:
   def expr_idxs(self, offset=0, idxs=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = self.views[-1].expr_idxs(idxs, offset)
-    valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs)+offset)
+    valid = self.views[-1].expr_node_mask(self.views[-1].idxs_to_idx(idxs), offset)
     return self._expr_idx(idx, valid)
 
   def expr_node(self, idx='idx', offset=0):
     idx = Variable(idx, 0, prod(self.shape)-1)
-    return self._expr_idx(self.views[-1].expr_node(idx, offset), self.views[-1].expr_node_mask(idx))
+    return self._expr_idx(self.views[-1].expr_node(idx, offset), self.views[-1].expr_node_mask(idx, offset))
 
   def needs_valid(self) -> bool:
     return any(v.mask is not None for v in self.views)

@@ -89,7 +89,7 @@ class TestImageShapeTracker(unittest.TestCase):
       print("offset:", o)
       idxy, valid = st.expr_idxs(o)
       print("idxy:", idxy.render())
-      print("valids:", [x.render() for x in valid.nodes])
+      print("valids:", valid.render())
       idx, idy = to_image_idx(base_shape, idxy, valid, True)
       idys.append(idy)
       print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
