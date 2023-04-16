@@ -94,7 +94,7 @@ class Node:
     else:
       a = self
     if a.min >= 0 and a.max < b: return a
-    if a.min < 0: return (a + ((a.min//b)*b)) % b
+    if a.min < 0: return (a - ((a.min//b)*b)) % b
     return create_opnode(ModNode, a, b)
 
   @staticmethod
