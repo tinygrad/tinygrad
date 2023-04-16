@@ -65,28 +65,6 @@ class View:
   def expr_idxs(self, idxs, offset:Union[Node, int]=0):
     return Variable.sum([Variable.num(self.offset)+offset] + [(idx if isinstance(idx, Variable) else Variable(idx, 0, sh-1))*st for idx,sh,st in zip(idxs, self.shape, self.strides) if sh != 1 and st != 0])
 
-class ZeroView:
-  def __init__(self, old_shape:Tuple[int, ...], arg):
-    self.old_shape, self.arg = old_shape, arg
-    self.shape: Tuple[int, ...] = tuple([y-x for x,y in self.arg])
-    # fake properties
-    self.strides, self.contiguous, self.offset = strides_for_shape(self.shape), False, 0
-
-  def __repr__(self): return f"ZeroView({self.old_shape}, {self.arg})"
-
-  def expr_node(self, idx=None, valid=None):
-    if idx is None: idx = Variable('idx', 0, prod([y-x for x,y in self.arg]))
-    expr, acc = [valid] if valid is not None else [], 1
-    for s,ns,(x,y) in list(zip(self.old_shape, self.shape, self.arg))[::-1]:
-      base = ((idx//acc) % ns) + x
-      expr += ([base >= 0] if x < 0 else []) + ([base < s] if y > s else [])
-      acc *= ns
-    return Variable.ands(expr)
-
-  def expr_idxs(self, idxs, offset=0): raise NotImplementedError("ZeroView doesn't support expr_idxs")
-
-ViewTypes = Union[View, ZeroView]
-
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   strides = [1]
@@ -119,8 +97,8 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   return View(vm1.shape, tuple(new_strides), new_offset.b, vm1.mask) if len(new_strides) == len(vm1.strides) else None
 
 class ShapeTracker:
-  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[ViewTypes]]=None):
-    self.views: List[ViewTypes] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
+  def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
+    self.views: List[View] = views if views is not None else (shape.views[:] if isinstance(shape, ShapeTracker) else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.shape, self.views[:])
 
@@ -149,7 +127,7 @@ class ShapeTracker:
     return idx, valid
 
   def simplify(self):
-    if len(self.views) >= 2 and isinstance(self.views[-2], View) and isinstance(self.views[-1], View):
+    if len(self.views) >= 2:
       new_view = merge_views(self.views[-2], self.views[-1])
       if new_view:
         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
@@ -183,12 +161,9 @@ class ShapeTracker:
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
-    if all(b==0 and e==0 for b,e in arg): return self   # ZeroView is expensive if we don't need it
+    if all(b==0 and e==0 for b,e in arg): return self
     zvarg = tuple((-b,s+e) for s,(b,e) in zip(self.shape, arg))
-    #zeroview = ZeroView(self.shape, zvarg)
     self.__unsafe_resize(zvarg, mask=tuple((b,s+b) for s,(b,_) in zip(self.shape, arg)))
-    # if we add a ZeroView, we add another (stock) view also for modding
-    #self.views += [zeroview, View(self.shape, strides_for_shape(self.shape))]
 
   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
@@ -216,8 +191,7 @@ class ShapeTracker:
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
     else:
-      # NOTE: the last view in self.views is never a ZeroView
-      if (merged_view := merge_views(cast(View, self.views[-1]), view)) is not None: self.views[-1] = merged_view
+      if (merged_view := merge_views(self.views[-1], view)) is not None: self.views[-1] = merged_view
       else: self.views.append(view)
 
   def permute(self, axis: Tuple[int, ...]):
