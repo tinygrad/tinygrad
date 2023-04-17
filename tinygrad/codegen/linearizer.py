@@ -8,7 +8,7 @@ from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazy
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
-from tinygrad.shape.symbolic import Variable, SumNode, ModNode
+from tinygrad.shape.symbolic import Variable
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto() # noqa: E702
 
@@ -42,12 +42,6 @@ class UOp(NamedTuple):
   vin: List[Token]
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
-
-def check_no_mul(test, var):
-  if test == var: return True
-  if isinstance(test, SumNode): return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
-  if isinstance(test, ModNode) and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
-  return False
 
 class Linearizer:
   supports_float4: bool = False
@@ -106,10 +100,12 @@ class Linearizer:
   # NOTE: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
-                    self.sts[i].strides[self.shape_len-self.upcasted:],
+                    self.sts[i].views[-1].strides[self.shape_len-self.upcasted:],  # WRONG
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [j for j,a in enumerate(self.upcasted_axis(i)) if a[0:2] == (4,1)]
+  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
+
+  #def float4_axis(self, i): return [j for j,a in enumerate(self.upcasted_axis(i)) if a[0:2] == (4,1)]
   def can_float4(self, i): return any(a[0:2] == (4,1) for a in self.upcasted_axis(i))
   def offsets(self, i): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.upcasted_axis(i)[::-1]])] if self.upcasted > 0 else [0]
   def acc_offsets(self, i):
@@ -398,6 +394,24 @@ class Linearizer:
 
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
+      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes() if self.sts[buf_index].shape[i]%4 == 0]
+      if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType):
+        assert len(unit_stride_axes_mul_4) >= 1, "needs a unit stride axis"
+        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4):
+          self.shift_to(unit_stride_axes_mul_4[0], 4)
+          self.upcast()
+
+        #if all(self.sts[buf_index].shape[x] != 4 for x in unit_stride_axes)
+
+        #and len(unit_stride_axes) >= 1 and all(self.sts[buf_index].shape[x] != 4 for x in unit_stride_axes):
+        #print("needs cast", unit_stride_axes, [self.sts[buf_index].shape[x] for x in unit_stride_axes], self.bufs[buf_index].dtype)
+
+
+      #and not (self.can_float4(buf_index) or (buf not in self.earlybufs and (1 in upcast_strides))):
+        #pass
+
+      """
+      print(buf_index, self.sts[buf_index], self.sts[buf_index].unit_stride_axes())
       upcast_strides = [self.sts[buf_index].strides[i] for i in self.upcast_in_mid_reduce_axes]
       if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType) and not (self.can_float4(buf_index) or (buf not in self.earlybufs and (1 in upcast_strides))):
         axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
@@ -406,6 +420,7 @@ class Linearizer:
         self.shift_to(axes[0], 4)
         self.upcast()
         assert self.can_float4(buf_index)
+      """
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
@@ -455,8 +470,9 @@ class Linearizer:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
-        if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
-          xb_choices.append((sum(st.strides[axis]>0 for st in self.sts), sum(st.strides[axis] for st in self.sts), axis, upcast_amount))
+        # NOTE: this is using views[-1]
+        if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
+          xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
       if len(xb_choices):
         xb_choices = sorted(xb_choices)
         if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")

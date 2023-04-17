@@ -4,10 +4,16 @@ import functools
 from enum import Enum, auto
 from typing import Tuple, Union, List, Optional, Dict, Callable
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node
+from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, ModNode
 
 # these ops live here
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
+
+def check_no_mul(test, var):
+  if test == var: return True
+  if isinstance(test, SumNode): return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
+  if isinstance(test, ModNode) and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
+  return False
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
@@ -109,17 +115,18 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
 
-  @property
-  def strides(self) -> Tuple[int, ...]: return self.views[-1].strides
+  # this is the real size (ish)
+  def size(self): return prod([s for s,st in zip(self.shape, self.views[-1].strides) if st != 0])
 
-  @property
-  def offset(self) -> int: return self.views[-1].offset
-
-  @property
-  def mask(self): return self.views[-1].mask
-
-  # this is the real size
-  def size(self): return prod([s for s,st in zip(self.shape, self.strides) if st != 0])
+  def unit_stride_axes(self) -> List[int]:
+    ret, acc = [], 1
+    for j,s in list(enumerate(self.shape))[::-1]:
+      if s == 1: continue
+      var = Variable('idx', 0, s-1)
+      this_dim = self.expr_node(var*acc)
+      acc *= s
+      if check_no_mul(this_dim[0], var): ret.append(j)
+    return ret
 
   def _expr_idx(self, idx, valid):
     for v in self.views[0:-1][::-1]:
@@ -135,7 +142,6 @@ class ShapeTracker:
         self.views = self.views[:-2] + [new_view]
         self.simplify()
 
-  # TODO: arg order is reversed here
   def expr_idxs(self, idxs=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = self.views[-1].expr_idxs(idxs)
@@ -143,7 +149,7 @@ class ShapeTracker:
     return self._expr_idx(idx, valid)
 
   def expr_node(self, idx='idx'):
-    idx = Variable(idx, 0, prod(self.shape)-1)
+    if isinstance(idx, str): idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
 
   def needs_valid(self) -> bool:
@@ -152,13 +158,13 @@ class ShapeTracker:
   # *** under this line are the movement ops ***
 
   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
-    offset = sum([self.strides[i]*x for i,(x,_) in enumerate(arg)])
-    if self.mask:
+    offset = sum([self.views[-1].strides[i]*x for i,(x,_) in enumerate(arg)])
+    if self.views[-1].mask:
       # move the old mask
-      nmask = tuple((max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.mask, arg))
+      nmask = tuple((max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg))
       # merge the masks if we have two
       mask = tuple((max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)) if mask is not None else nmask
-    self.views[-1] = View(tuple(y-x for x,y in arg), self.strides, self.offset+offset, mask)
+    self.views[-1] = View(tuple(y-x for x,y in arg), self.views[-1].strides, self.views[-1].offset+offset, mask)
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
@@ -171,10 +177,10 @@ class ShapeTracker:
     self.__unsafe_resize(arg)
 
   def expand(self, new_shape: Tuple[int, ...]):
-    assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
+    assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple((((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)) if self.mask else None
-    self.views[-1] = View(new_shape, self.strides, self.offset, mask)
+    mask = tuple((((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)) if self.views[-1].mask else None
+    self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
 
   def reshape(self, new_shape: Tuple[int, ...]):
     if self.shape == new_shape: return self
@@ -184,17 +190,17 @@ class ShapeTracker:
     # check if this is adding or removing 1s (only)
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
     if tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
-      old_strides = [y for x,y in zip(self.shape, self.strides) if x != 1]
+      old_strides = [y for x,y in zip(self.shape, self.views[-1].strides) if x != 1]
       new_strides_tuple = tuple(0 if x == 1 else old_strides.pop(0) for x in new_shape)
       new_mask_tuple = None
-      if self.mask:
-        if any(y!=(0,1) for x,y in zip(self.shape, self.mask) if x == 1):
+      if self.views[-1].mask:
+        if any(y!=(0,1) for x,y in zip(self.shape, self.views[-1].mask) if x == 1):
           # mask it all out!
           new_mask_tuple = tuple((0,0) for _ in new_shape)
         else:
-          old_mask = [y for x,y in zip(self.shape, self.mask) if x != 1]
+          old_mask = [y for x,y in zip(self.shape, self.views[-1].mask) if x != 1]
           new_mask_tuple = tuple((0,1) if x == 1 else old_mask.pop(0) for x in new_shape)
-      self.views[-1] = View(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
+      self.views[-1] = View(new_shape, new_strides_tuple, self.views[-1].offset, new_mask_tuple)
       return self
 
     view = View(new_shape, strides_for_shape(new_shape))
@@ -208,16 +214,16 @@ class ShapeTracker:
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
-    self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset, tuple(self.mask[a] for a in axis) if self.mask is not None else None)
+    self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.views[-1].strides[a] for a in axis), self.views[-1].offset, tuple(self.views[-1].mask[a] for a in axis) if self.views[-1].mask is not None else None)
 
   # except for the negative case, you can build this from the others. invertible in the negative case
   def stride(self, mul: Tuple[int, ...]):
     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
-    strides = tuple(z*m for z,m in zip(self.strides, mul))
+    strides = tuple(z*m for z,m in zip(self.views[-1].strides, mul))
     new_shape = tuple((s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul))
-    offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
-    mask = tuple((((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.mask, self.shape, mul)) if self.mask is not None else None
-    self.views[-1] = View(new_shape, strides, self.offset + offset, mask)
+    offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.views[-1].strides, mul) if m < 0])
+    mask = tuple((((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.shape, mul)) if self.views[-1].mask is not None else None
+    self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
 
   # *** entry point for external ***
 
