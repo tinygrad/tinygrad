@@ -1,9 +1,9 @@
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
@@ -108,9 +108,10 @@ class Linearizer:
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
                     self.sts[i].strides[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
-  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [[]]
-  def offsets(self, i): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.upcasted_axis(i)[::-1]])] if self.upcasted > 0 else [0]
+  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
+  def float4_axis(self, i): return [j for j,a in enumerate(self.upcasted_axis(i)) if a[0:2] == (4,1)]
   def can_float4(self, i): return any(a[0:2] == (4,1) for a in self.upcasted_axis(i))
+  def offsets(self, i): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.upcasted_axis(i)[::-1]])] if self.upcasted > 0 else [0]
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]
     acc_strides = [x*(1-self.upcasted_axis(i)[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
@@ -127,41 +128,133 @@ class Linearizer:
     return ret
   """
 
+  """
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
     will_merge = False
     ret: List[Token] = []
+    cache = {}
     # NOTE: this idxs don't include the upcasted ones, we generate them here
     for uidxs in self.shape_offsets(i):
       #print(i, uidxs, self.sts[i].shape[self.shape_len-self.upcasted:])
       if const is not None:
         reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
       else:
-        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
+        idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
+        key = f"{idx.render()}{valid.render()}"
+        if key not in cache: cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, idx, valid))
+        reg = cache[key]
       ret.append(reg)
 
-    """
     should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
-    cache: Dict[int, Token] = {}
-    def op(offset):
-      if offset in cache: return cache[offset]
-      will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
+    cache: Dict[Tuple[int, ...], Token] = {}
+    def op(uidxs):
+      idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
+      key = f"{idx.render()}{valid.render()}"
+      if key in cache: return cache[key]
+      will_merge = should_upcast
+      #will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
       if const is not None:
-        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
+        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
       else:
         assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
-        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
+        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
       if will_merge:
-        for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
+        for j in range(0, 4):
+
+          idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
+          key = f"{idx.render()}{valid.render()}"
+          cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
       else:
-        cache[offset] = reg
-      return cache[offset]
-    return [op(o) for o in self.offsets(i)]
+        cache[key] = reg
+      return cache[key]
+    return [op(o) for o in self.shape_offsets(i)]
+  """
+
+  def _group_float4(self, i, store_offset):
+    store_offset_float4 = {}
+    float4_axis = (self.upcasted-1) - self.float4_axis(i)[0]
+    for uidxs, var in store_offset.items():
+      if uidxs[float4_axis] == 0:
+        store_offset_float4[uidxs] = [var]
+      else:
+        uidxs2 = list(uidxs)
+        uidxs2[float4_axis] = 0
+        store_offset_float4[tuple(uidxs2)].append(var)
+    return store_offset_float4
+
+  def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
+    load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(LocalTypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
+
+    # float4 grouping (optional)
+    should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    if should_upcast:
+      load_offset_new = {}
+      for k,out_tokens in self._group_float4(i, load_offset).items():
+        # TODO: check the idxs
+        if not all_same([x[3] for x in out_tokens]):
+          # valids don't match, normal float
+          for x in out_tokens: load_offset_new[x[1]] = x
+        else:
+          load_offset_new[k] = (LocalTypes.float4, [x[1] for x in out_tokens], out_tokens[0][2], out_tokens[0][3])
+      load_offset = load_offset_new
+
+    # do loads
+    cache: Dict[str, Token] = {}
+    loaded = {}
+    for uidxs, (localtype, uidx_list, idx, valid) in load_offset.items():
+      key = f"{localtype}{idx.render()}{valid.render()}"
+      if key not in cache:
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+      if localtype == LocalTypes.float4:
+        for j,uidx in enumerate(uidx_list):
+          loaded[uidx] = Token(cache[key].name, LocalTypes.float4, j)
+      else:
+        loaded[uidxs] = cache[key]
+    return [loaded[uidxs] for uidxs in self.shape_offsets(i)]
+
+    # float4 grouping (optional)
+    #should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    #if should_upcast:
+    #  pass
+
+    """
+    load_offset_new = {}
+    for k,out_tokens in self._group_float4(i, load_offset).items():
+      load_offset_new[k] = (LocalTypes.float4, out_tokens[0][1], out_tokens[0][2])
+    load_offset = load_offset_new
     """
 
+    print(load_offset)
+
+    cache: Dict[Tuple[int, ...], Token] = {}
+    ret = []
+    for uidxs, (localtype, idx, valid) in load_offset.items():
+      if const is not None:
+        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(ret)}", localtype), [], const)
+      else:
+        idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
+        key = f"{idx.render()}{valid.render()}"
+        if key not in cache: cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", localtype), [], MemOp(i, idx, valid))
+        reg = cache[key]
+      ret.append(reg)
     return ret
 
   def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
-    for uidxs, var in zip(self.shape_offsets(i), store):
+    store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
+
+    # float4 grouping (optional)
+    should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    if should_upcast:
+      store_offset_new = {}
+      for k,out_tokens in self._group_float4(i, store_offset).items():
+        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
+          store_offset_new[k] = Token(out_tokens[0].name, LocalTypes.float4)
+        else:
+          store_offset_new[k] = self.uop(UOps.CAST, Token(out_tokens[0].name+"_f4", LocalTypes.float4), out_tokens)
+      store_offset = store_offset_new
+
+    # do stores
+    for uidxs, var in store_offset.items():
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
 
 
