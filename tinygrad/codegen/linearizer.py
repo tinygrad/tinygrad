@@ -440,7 +440,7 @@ class Linearizer:
 
     # are we upcasting in mid reduce? (only for images)
     if self.bufs[0].dtype.name.startswith('image') and not self.can_float4(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
-      axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
+      axes = self.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:
         self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
