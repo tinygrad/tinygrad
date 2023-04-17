@@ -105,8 +105,6 @@ class Linearizer:
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
   def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
 
-  #def float4_axis(self, i): return [j for j,a in enumerate(self.upcasted_axis(i)) if a[0:2] == (4,1)]
-  def can_float4(self, i): return any(a[0:2] == (4,1) for a in self.upcasted_axis(i))
   def offsets(self, i): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.upcasted_axis(i)[::-1]])] if self.upcasted > 0 else [0]
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]
@@ -401,27 +399,6 @@ class Linearizer:
           self.shift_to(unit_stride_axes_mul_4[0], 4)
           self.upcast()
 
-        #if all(self.sts[buf_index].shape[x] != 4 for x in unit_stride_axes)
-
-        #and len(unit_stride_axes) >= 1 and all(self.sts[buf_index].shape[x] != 4 for x in unit_stride_axes):
-        #print("needs cast", unit_stride_axes, [self.sts[buf_index].shape[x] for x in unit_stride_axes], self.bufs[buf_index].dtype)
-
-
-      #and not (self.can_float4(buf_index) or (buf not in self.earlybufs and (1 in upcast_strides))):
-        #pass
-
-      """
-      print(buf_index, self.sts[buf_index], self.sts[buf_index].unit_stride_axes())
-      upcast_strides = [self.sts[buf_index].strides[i] for i in self.upcast_in_mid_reduce_axes]
-      if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType) and not (self.can_float4(buf_index) or (buf not in self.earlybufs and (1 in upcast_strides))):
-        axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
-        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes} on buf_index {buf_index}, {self.sts[buf_index]}"
-        assert self.sts[buf_index].shape[axes[0]]%4 == 0, f"axis:{axes[0]} in buffer {buf_index} is not a multiple of 4, {self.sts[buf_index].shape}"
-        self.shift_to(axes[0], 4)
-        self.upcast()
-        assert self.can_float4(buf_index)
-      """
-
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
@@ -430,7 +407,7 @@ class Linearizer:
     self.simplify_ones()
 
     # are we grouping? (requires local shape support)
-    if not self.can_float4(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -439,7 +416,7 @@ class Linearizer:
           break
 
     # are we upcasting in mid reduce? (only for images)
-    if self.bufs[0].dtype.name.startswith('image') and not self.can_float4(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
+    if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
       axes = self.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:
