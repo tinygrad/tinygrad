@@ -117,59 +117,6 @@ class Linearizer:
     acc_strides = [x*(1-self.upcasted_axis(i)[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.upcasted_axis(i)[::-1])])]
 
-  """
-  def can_merge_float4(self, i:int, idxs:List[Variable], offset:int) -> bool:
-    if offset%4 != 0: return False
-    float4_index = Variable("FLOAT4_INDEX", 0, 3)
-    idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
-    # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
-    ret = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in (valid_test//4).render()
-    if DEBUG >= 5: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test, idxy_test//4, valid_test//4)
-    return ret
-  """
-
-  """
-  def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
-    will_merge = False
-    ret: List[Token] = []
-    cache = {}
-    # NOTE: this idxs don't include the upcasted ones, we generate them here
-    for uidxs in self.shape_offsets(i):
-      #print(i, uidxs, self.sts[i].shape[self.shape_len-self.upcasted:])
-      if const is not None:
-        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
-      else:
-        idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
-        key = f"{idx.render()}{valid.render()}"
-        if key not in cache: cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, idx, valid))
-        reg = cache[key]
-      ret.append(reg)
-
-    should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
-    cache: Dict[Tuple[int, ...], Token] = {}
-    def op(uidxs):
-      idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
-      key = f"{idx.render()}{valid.render()}"
-      if key in cache: return cache[key]
-      will_merge = should_upcast
-      #will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
-      if const is not None:
-        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
-      else:
-        assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
-        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-      if will_merge:
-        for j in range(0, 4):
-
-          idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
-          key = f"{idx.render()}{valid.render()}"
-          cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
-      else:
-        cache[key] = reg
-      return cache[key]
-    return [op(o) for o in self.shape_offsets(i)]
-  """
-
   def _group_float4(self, i, store_offset):
     store_offset_float4 = {}
     float4_axis = (self.upcasted-1) - self.float4_axis(i)[0]
@@ -190,9 +137,9 @@ class Linearizer:
     if should_upcast:
       load_offset_new = {}
       for k,out_tokens in self._group_float4(i, load_offset).items():
-        # TODO: check the idxs
-        if not all_same([x[3] for x in out_tokens]):
-          # valids don't match, normal float
+        idxs = [x[2]-out_tokens[0][2] for x in out_tokens]
+        if any(idx.min != idx.max or idx.min != val for idx,val in zip(idxs, range(4))) or not all_same([x[3] for x in out_tokens]) or (out_tokens[0][2]//4)*4 != out_tokens[0][2]:
+          # idxs not in order, valids don't match, or idx doesn't evenly divide 4. use normal float
           for x in out_tokens: load_offset_new[x[1]] = x
         else:
           load_offset_new[k] = (LocalTypes.float4, [x[1] for x in out_tokens], out_tokens[0][2], out_tokens[0][3])
@@ -212,33 +159,6 @@ class Linearizer:
         loaded[uidxs] = cache[key]
     return [loaded[uidxs] for uidxs in self.shape_offsets(i)]
 
-    # float4 grouping (optional)
-    #should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
-    #if should_upcast:
-    #  pass
-
-    """
-    load_offset_new = {}
-    for k,out_tokens in self._group_float4(i, load_offset).items():
-      load_offset_new[k] = (LocalTypes.float4, out_tokens[0][1], out_tokens[0][2])
-    load_offset = load_offset_new
-    """
-
-    print(load_offset)
-
-    cache: Dict[Tuple[int, ...], Token] = {}
-    ret = []
-    for uidxs, (localtype, idx, valid) in load_offset.items():
-      if const is not None:
-        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(ret)}", localtype), [], const)
-      else:
-        idx, valid = self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])
-        key = f"{idx.render()}{valid.render()}"
-        if key not in cache: cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(ret)}", localtype), [], MemOp(i, idx, valid))
-        reg = cache[key]
-      ret.append(reg)
-    return ret
-
   def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
@@ -256,27 +176,6 @@ class Linearizer:
     # do stores
     for uidxs, var in store_offset.items():
       self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
-
-
-    """
-    should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
-    store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
-    def op(offset):
-      if offset not in store_offset: return
-      will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
-      assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
-      if will_merge:
-        out_tokens = [store[store_offset[offset+j]] for j in range(4)]
-        if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
-          var = Token(store[store_offset[offset]].name, LocalTypes.float4)
-        else:
-          var = self.uop(UOps.CAST, Token(store[store_offset[offset]].name+"_f4", LocalTypes.float4), out_tokens)
-      else:
-        var = store[store_offset[offset]]
-      for j in range(0, 4 if will_merge else 1): del store_offset[offset+j]
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-    for o in self.offsets(i): op(o)
-    """
 
   def linearize(self):
     # uops
