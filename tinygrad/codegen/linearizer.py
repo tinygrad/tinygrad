@@ -132,7 +132,8 @@ class Linearizer:
       load_offset_new = {}
       for k,out_tokens in self._group_float4(i, load_offset).items():
         idxs = [x[2]-out_tokens[0][2] for x in out_tokens]
-        if any(idx.min != idx.max or idx.min != val for idx,val in zip(idxs, range(4))) or not all_same([x[3]//4 for x in out_tokens]) or (out_tokens[0][2]//4)*4 != out_tokens[0][2]:
+        valids_okay = all_same([x[3] for x in out_tokens]) or (all_same([x[3]//4 for x in out_tokens]) and (out_tokens[0][3]//4)*4 == out_tokens[0][3])
+        if any(idx.min != idx.max or idx.min != val for idx,val in zip(idxs, range(4))) or (out_tokens[0][2]//4)*4 != out_tokens[0][2] or not valids_okay:
           # idxs not in order, valids don't match, or idx doesn't evenly divide 4. use normal float
           for x in out_tokens: load_offset_new[x[1]] = x
         else:
