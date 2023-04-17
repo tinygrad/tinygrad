@@ -124,6 +124,7 @@ class Linearizer:
     return store_offset_float4
 
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
+    #idxs = idxs + [Variable.num(0) for _ in range((self.shape_len-self.upcasted)-len(idxs))] # append 0s
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(LocalTypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
     # float4 grouping (optional)
@@ -132,7 +133,7 @@ class Linearizer:
       load_offset_new = {}
       for k,out_tokens in self._group_float4(i, load_offset).items():
         idxs = [x[2]-out_tokens[0][2] for x in out_tokens]
-        if any(idx.min != idx.max or idx.min != val for idx,val in zip(idxs, range(4))) or not all_same([x[3] for x in out_tokens]) or (out_tokens[0][2]//4)*4 != out_tokens[0][2]:
+        if any(idx.min != idx.max or idx.min != val for idx,val in zip(idxs, range(4))) or not all_same([x[3]//4 for x in out_tokens]) or (out_tokens[0][2]//4)*4 != out_tokens[0][2]:
           # idxs not in order, valids don't match, or idx doesn't evenly divide 4. use normal float
           for x in out_tokens: load_offset_new[x[1]] = x
         else:
@@ -154,6 +155,7 @@ class Linearizer:
     return [loaded[uidxs] for uidxs in self.shape_offsets(i)]
 
   def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
+    #idxs = idxs + [Variable.num(0) for _ in range((self.shape_len-self.upcasted)-len(idxs))] # append 0s
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
     # float4 grouping (optional)
@@ -214,14 +216,15 @@ class Linearizer:
       gl_idxs = global_idxs
 
     # reduce op
-    nonreduce_idxs = []
+    fake_reduce_idxs = []
+    removed = len(global_idxs)
     if self.reduceop is not None:
       # define indexes
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
-      nonreduce_idxs = [r*0 for r in reduce_idxs]
+      fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, gl_idxs+nonreduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      acc = self.global_load(0, gl_idxs+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
       # reduce loop
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
@@ -237,28 +240,27 @@ class Linearizer:
 
       # end the local loop, do the local reduce
       if self.group_for_reduce:
-        self.global_store(-1, local_idxs+nonreduce_idxs, acc)  # store accumulators
+        self.global_store(-1, local_idxs+fake_reduce_idxs, acc)  # store accumulators
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
 
         # if any group_for_reduce items aren't reduces, upcast them here
-        nonreduce_idxs_old = []
         for j in self.upcast_in_mid_reduce_axes:
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
           self.group_for_reduce.pop()
-          nonreduce_idxs_old.append(nonreduce_idxs.pop())
+          removed -= 1
 
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, local_idxs+nonreduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        acc = self.global_load(-1, local_idxs[:removed]+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+nonreduce_idxs+nonreduce_idxs_old)
+        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
@@ -267,13 +269,13 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs+nonreduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
+    loaded_buffers.update({b:self.global_load(i, global_idxs[:removed]+fake_reduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_store(0, global_idxs+nonreduce_idxs, val)
+    self.global_store(0, global_idxs[:removed]+fake_reduce_idxs, val)
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
@@ -395,7 +397,7 @@ class Linearizer:
       unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes() if self.sts[buf_index].shape[i]%4 == 0]
       if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType):
         assert len(unit_stride_axes_mul_4) >= 1, "needs a unit stride axis"
-        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4):
+        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
           self.shift_to(unit_stride_axes_mul_4[0], 4)
           self.upcast()
 
