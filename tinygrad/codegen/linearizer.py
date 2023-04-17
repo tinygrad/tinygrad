@@ -97,15 +97,15 @@ class Linearizer:
     # print early
     if DEBUG >= 5: self.printbufs("early")
 
-  # NOTE: this stride is only on the last view, and may not be real
+  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
+  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
+
+  # TODO: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
                     self.sts[i].views[-1].strides[self.shape_len-self.upcasted:],  # WRONG
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
-  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
-
-  def offsets(self, i): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.upcasted_axis(i)[::-1]])] if self.upcasted > 0 else [0]
+  # TODO: is there a better way to write this?
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]
     acc_strides = [x*(1-self.upcasted_axis(i)[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
@@ -124,7 +124,6 @@ class Linearizer:
     return store_offset_float4
 
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
-    #idxs = idxs + [Variable.num(0) for _ in range((self.shape_len-self.upcasted)-len(idxs))] # append 0s
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(LocalTypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
     # float4 grouping (optional)
@@ -155,7 +154,6 @@ class Linearizer:
     return [loaded[uidxs] for uidxs in self.shape_offsets(i)]
 
   def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
-    #idxs = idxs + [Variable.num(0) for _ in range((self.shape_len-self.upcasted)-len(idxs))] # append 0s
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
     # float4 grouping (optional)
@@ -462,5 +460,5 @@ class Linearizer:
         break
 
     # if last dim <= 5 and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
-    if self.first_reduce < (self.shape_len-self.upcasted) and self.full_unupcasted_shape[-1] <= 5 and (len(self.offsets(self.full_buf_index)) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
+    if self.first_reduce < (self.shape_len-self.upcasted) and self.full_unupcasted_shape[-1] <= 5 and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
       self.upcast()
