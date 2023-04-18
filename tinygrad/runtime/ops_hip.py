@@ -6,6 +6,8 @@ from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
+# The default HIP stream is used for everything.
+
 class RawHIPBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     self.buf_sz = size * dtype.itemsize
@@ -52,4 +54,4 @@ class HIPCodegen(CStyleCodegen):
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
-HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram)
+HIPBuffer = Compiled(RawHIPBuffer, HIPCodegen, HIPProgram, hip.hipDeviceSynchronize)
