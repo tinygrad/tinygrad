@@ -1,4 +1,3 @@
-from typing import Optional
 import numpy as np
 import ctypes
 from pyhip import hip, hiprtc # type: ignore
