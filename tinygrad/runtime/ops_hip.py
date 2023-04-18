@@ -8,8 +8,8 @@ from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 
 class RawHIPBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
-    super().__init__(size, dtype, hip.hipMalloc(size * dtype.itemsize))
     self.buf_sz = size * dtype.itemsize
+    super().__init__(size, dtype, hip.hipMalloc(self.buf_sz))
   def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.buf_sz, 0)
   def _copyout(self, x:np.ndarray): hip.hipMemcpyAsync_dtoh(x.ctypes.data, self._buf, self.buf_sz, 0)
 
@@ -48,7 +48,7 @@ class HIPProgram:
 class HIPCodegen(CStyleCodegen):
   lang = CStyleLanguage(
     kernel_prefix = "#define INFINITY (__builtin_inff())\nextern \"C\" __global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
-    half_prekernel = "#include <cuda_fp16.h>",
+    half_prekernel = "",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 
