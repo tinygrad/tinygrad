@@ -11,8 +11,8 @@ class RawHIPBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype):
     super().__init__(size, dtype, hip.hipMalloc(size * dtype.itemsize))
     self.buf_sz = size * dtype.itemsize
-  def _copyin(self, x:np.ndarray): hip.hipMemcpy_htod(self._buf, x.ctypes.data, self.buf_sz)
-  def _copyout(self, x:np.ndarray): hip.hipMemcpy_dtoh(x.ctypes.data, self._buf, self.buf_sz)
+  def _copyin(self, x:np.ndarray): hip.hipMemcpyAsync_htod(self._buf, x.ctypes.data, self.buf_sz, 0)
+  def _copyout(self, x:np.ndarray): hip.hipMemcpyAsync_dtoh(x.ctypes.data, self._buf, self.buf_sz, 0)
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
@@ -27,13 +27,7 @@ class HIPProgram:
       raise e
     if DEBUG >= 5: print(prg)
     module = hip.hipModuleLoadData(prg)
-
     self.prg = hip.hipModuleGetFunction(module, name)
-
-  @staticmethod
-  def numpy_to_ctypes_struct_field(idx, data):
-    assert type(data) == RawHIPBuffer, "Data type error " + str(type(data))
-    return (f'field{idx}', ctypes.c_void_p)
 
   def __call__(self, global_size, local_size, *args, wait=False):
     local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
@@ -44,7 +38,7 @@ class HIPProgram:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
       hip.hipEventRecord(start)
     class PackageStruct(ctypes.Structure):
-      _fields_ = [HIPProgram.numpy_to_ctypes_struct_field(idx, data) for idx, data in enumerate(args)]
+      _fields_ = [(f'field{idx}', ctypes.c_void_p) for idx in range(len(args))]
     struct = PackageStruct(*[data._buf for data in args])
     hip.hipModuleLaunchKernel(self.prg, global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct)
     if wait:
