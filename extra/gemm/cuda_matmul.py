@@ -4,6 +4,7 @@ os.environ["CUDA"] = "1"
 from tinygrad.runtime.ops_cuda import RawCUDABuffer, CUDAProgram
 
 FLOAT16 = True
+ACC_FLOAT16 = False
 N = 4096
 
 na = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32)
@@ -12,9 +13,6 @@ nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32)
 if FLOAT16:
   na = na.astype(np.float16)
   nb = nb.astype(np.float16)
-
-#na = np.ones((N, N), dtype=np.float16)
-#nb = np.ones((N, N), dtype=np.float16)
 
 a = RawCUDABuffer.fromCPU(na)
 b = RawCUDABuffer.fromCPU(nb)
@@ -40,7 +38,7 @@ __global__ void wmma_example({'half' if FLOAT16 else 'float'} *a, {'half' if FLO
 
   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, {'half' if FLOAT16 else 'wmma::precision::tf32'}, wmma::col_major> a_frag[4];
   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, {'half' if FLOAT16 else 'wmma::precision::tf32'}, wmma::col_major> b_frag[4];
-  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag[4][4];
+  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, {'half' if ACC_FLOAT16 else 'float'}> acc_frag[4][4];
   for (int j = 0; j < 4; j++) {{
     for (int i = 0; i < 4; i++) {{
       wmma::fill_fragment(acc_frag[i][j], 0.0f);
@@ -58,10 +56,18 @@ __global__ void wmma_example({'half' if FLOAT16 else 'float'} *a, {'half' if FLO
     wmma::load_matrix_sync(a_frag[2], a + aRow + 2 * WMMA_M + aCol * {N}, {N});
     wmma::load_matrix_sync(a_frag[3], a + aRow + 3 * WMMA_M + aCol * {N}, {N});
 
-    wmma::load_matrix_sync(b_frag[0], b + bRow + (bCol + 0 * WMMA_N) * {N}, {N});
-    wmma::load_matrix_sync(b_frag[1], b + bRow + (bCol + 1 * WMMA_N) * {N}, {N});
-    wmma::load_matrix_sync(b_frag[2], b + bRow + (bCol + 2 * WMMA_N) * {N}, {N});
-    wmma::load_matrix_sync(b_frag[3], b + bRow + (bCol + 3 * WMMA_N) * {N}, {N});
+    wmma::load_matrix_sync(b_frag[0], b + bRow + (0 * WMMA_N + bCol) * {N}, {N});
+    wmma::load_matrix_sync(b_frag[1], b + bRow + (1 * WMMA_N + bCol) * {N}, {N});
+    wmma::load_matrix_sync(b_frag[2], b + bRow + (2 * WMMA_N + bCol) * {N}, {N});
+    wmma::load_matrix_sync(b_frag[3], b + bRow + (3 * WMMA_N + bCol) * {N}, {N});
+
+    #pragma unroll
+    for (int i = 0; i < {'0' if FLOAT16 else '4'}; i++) {{
+      #pragma unroll
+      for (int t = 0; t < a_frag[i].num_elements; t++) {{ a_frag[i].x[t] =  wmma::__float_to_tf32(a_frag[i].x[t]); }}
+      #pragma unroll
+      for (int t = 0; t < b_frag[i].num_elements; t++) {{ b_frag[i].x[t] =  wmma::__float_to_tf32(b_frag[i].x[t]); }}
+    }}
 
     #pragma unroll
     for (int j = 0; j < 4; j++) {{
