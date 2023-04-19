@@ -292,7 +292,7 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
   def _default_device(self) -> str:
-    for device in ["METAL", "CUDA", "GPU", "HIP"]:
+    for device in ["METAL", "CUDA", "HIP", "GPU"]:
       try:
         if self[device]: return device
       except Exception: pass

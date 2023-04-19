@@ -1,6 +1,6 @@
 import numpy as np
 import ctypes
-from pyhip import hip, hiprtc # type: ignore
+import extra.hip_wrapper as hip
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
@@ -19,11 +19,11 @@ class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
     try:
       if not binary:
-        prog = hiprtc.hiprtcCreateProgram(prg, name, [], [])
+        prog = hip.hiprtcCreateProgram(prg, name, [], [])
         device_properties = hip.hipGetDeviceProperties(0)
-        hiprtc.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
-        prg = hiprtc.hiprtcGetCode(prog)
-    except hip.hipError as e:
+        hip.hiprtcCompileProgram(prog, [f'--offload-arch={device_properties.gcnArchName}'])
+        prg = hip.hiprtcGetCode(prog)
+    except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
     if DEBUG >= 5: print(prg)
