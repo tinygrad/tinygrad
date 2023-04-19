@@ -108,21 +108,25 @@ class TestEnd2End(unittest.TestCase):
     compare_tiny_torch(BatchNorm2d(10), nn.BatchNorm2d(10), X, Y)
 
   def test_bn_linear(self):
-    np.random.seed(1337)
-    X = Tensor(np.random.randn(32, 10, 1, 1).astype(np.float32))
-    Y = Tensor(np.random.randn(32, 10, 1, 1).astype(np.float32))
+    BS, K = 2, 1
+    eps = 0
+    X = Tensor([1,0]).reshape(BS, K, 1, 1)
+    Y = Tensor([-1,0]).reshape(BS, K, 1, 1)
     class LinTiny:
       def __init__(self):
-        self.l1 = Conv2d(10, 10, 1, bias=False)
-        self.bn1 = BatchNorm2d(10, affine=False, track_running_stats=False)
+        self.l1 = Conv2d(K, K, 1, bias=False)
+        self.bn1 = BatchNorm2d(K, affine=False, track_running_stats=False, eps=eps)
       def __call__(self, x): return self.bn1(self.l1(x))
     class LinTorch(nn.Module):
       def __init__(self):
         super().__init__()
-        self.l1 = nn.Conv2d(10, 10, 1, bias=False)
-        self.bn1 = nn.BatchNorm2d(10, affine=False, track_running_stats=False)
+        self.l1 = nn.Conv2d(K, K, 1, bias=False)
+        self.bn1 = nn.BatchNorm2d(K, affine=False, track_running_stats=False, eps=eps)
       def forward(self, x): return self.bn1(self.l1(x))
-    compare_tiny_torch(LinTiny(), LinTorch(), X, Y)
+    model_torch = LinTorch()
+    with torch.no_grad():
+      model_torch.l1.weight[:] = 1.
+    compare_tiny_torch(LinTiny(), model_torch, X, Y)
 
   def test_conv_mnist(self):
     class LinTiny:
