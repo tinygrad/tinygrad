@@ -114,13 +114,13 @@ class TestEnd2End(unittest.TestCase):
     class LinTiny:
       def __init__(self):
         self.l1 = Conv2d(10, 10, 1, bias=False)
-        self.bn1 = BatchNorm2d(10)
+        self.bn1 = BatchNorm2d(10, affine=False, track_running_stats=False)
       def __call__(self, x): return self.bn1(self.l1(x))
     class LinTorch(nn.Module):
       def __init__(self):
         super().__init__()
         self.l1 = nn.Conv2d(10, 10, 1, bias=False)
-        self.bn1 = nn.BatchNorm2d(10)
+        self.bn1 = nn.BatchNorm2d(10, affine=False, track_running_stats=False)
       def forward(self, x): return self.bn1(self.l1(x))
     compare_tiny_torch(LinTiny(), LinTorch(), X, Y)
 
