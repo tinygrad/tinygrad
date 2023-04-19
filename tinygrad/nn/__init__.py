@@ -3,10 +3,10 @@ from tinygrad.tensor import Tensor
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
-    assert affine, "BatchNorm2d is only supported with affine"
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    else: self.weight, self.bias = None, None
 
     self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
@@ -16,16 +16,15 @@ class BatchNorm2d:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
-      x_detached = x.detach()
-      batch_mean = x_detached.mean(axis=(0,2,3))
-      y = (x_detached - batch_mean.reshape(shape=[1, -1, 1, 1]))
+      batch_mean = x.mean(axis=(0,2,3))
+      y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
       batch_var = (y*y).mean(axis=(0,2,3))
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
-        self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean)
-        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * batch_var)
+        self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
+        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * batch_var.detach())
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean

@@ -463,9 +463,11 @@ class Tensor:
     y = (self - self.mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
-  def batchnorm(self, weight:Tensor, bias:Tensor, mean:Tensor, invstd:Tensor) -> Tensor:
-    x = (self - mean.reshape(shape=[1, -1, 1, 1])) * weight.reshape(shape=[1, -1, 1, 1])
-    return x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd) + bias.reshape(shape=[1, -1, 1, 1])
+  def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor) -> Tensor:
+    x = (self - mean.reshape(shape=[1, -1, 1, 1]))
+    if weight: x = x * weight.reshape(shape=[1, -1, 1, 1])
+    ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
+    return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
