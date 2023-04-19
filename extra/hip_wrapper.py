@@ -441,22 +441,6 @@ def hipGetDeviceProperties(deviceId: int):
   return device_properties
 
 
-# Memory types:
-hipMemoryTypeHost = 1
-hipMemoryTypeDevice = 2
-hipMemoryTypeArray = 3
-hipMemoryTypeUnified = 4  # Not used currently
-
-
-class hipPointerAttributes(ctypes.Structure):
-  _fields_ = [
-    ('memoryType', ctypes.c_int),
-    ('device', ctypes.c_int),
-    ('devicePointer', ctypes.c_void_p),
-    ('hostPointer', ctypes.c_void_p)
-  ]
-
-
 _libhip.hipModuleLoadData.restype = int
 _libhip.hipModuleLoadData.argtypes = [ctypes.POINTER(ctypes.c_void_p),  # Module
                                       ctypes.c_void_p]                 # Image
