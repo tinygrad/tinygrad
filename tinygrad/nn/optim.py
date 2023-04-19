@@ -30,11 +30,11 @@ class SGD(Optimizer):
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      g = t.grad
+      g = t.grad.realize()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      t.assign((t.detach() - g * self.lr).realize())
+      t.assign(t.detach() - g * self.lr)
     self.realize(self.b)
 
 class AdamW(Optimizer):
