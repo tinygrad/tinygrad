@@ -11,17 +11,6 @@ try:
 except:
   raise OSError('cant find libhiprtc.so.')
 
-def POINTER(obj):
-  p = ctypes.POINTER(obj)
-  if not isinstance(p.from_param, classmethod):
-    def from_param(cls, x):
-      if x is None:
-        return cls()
-      else:
-        return x
-    p.from_param = classmethod(from_param)
-  return p
-
 
 def hipCheckStatus(status):
   if status != 0:
@@ -91,12 +80,10 @@ _libhip.hipMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p),
                               ctypes.c_size_t]
 
 
-def hipMalloc(count, ctype=None):
+def hipMalloc(count):
   ptr = ctypes.c_void_p()
   status = _libhip.hipMalloc(ctypes.byref(ptr), count)
   hipCheckStatus(status)
-  if ctype is not None:
-    ptr = ctypes.cast(ptr, ctypes.POINTER(ctype))
   return ptr
 
 
@@ -359,10 +346,10 @@ class hipDeviceProperties(ctypes.Structure):
     ('maxTexture3D', ctypes.c_int * 3),
 
     # Addres of HDP_MEM_COHERENCY_FLUSH_CNTL register
-    ('hdpMemFlushCntl', POINTER(ctypes.c_uint)),
+    ('hdpMemFlushCntl', ctypes.POINTER(ctypes.c_uint)),
 
     # Addres of HDP_REG_COHERENCY_FLUSH_CNTL register
-    ('hdpRegFlushCntl', POINTER(ctypes.c_uint)),
+    ('hdpRegFlushCntl', ctypes.POINTER(ctypes.c_uint)),
 
     # Maximum pitch in bytes allowed by memory copies
     ('memPitch', ctypes.c_size_t),
@@ -431,7 +418,7 @@ class hipDeviceProperties(ctypes.Structure):
 
 
 _libhip.hipGetDeviceProperties.restype = int
-_libhip.hipGetDeviceProperties.argtypes = [POINTER(hipDeviceProperties), ctypes.c_int]
+_libhip.hipGetDeviceProperties.argtypes = [ctypes.POINTER(hipDeviceProperties), ctypes.c_int]
 
 
 def hipGetDeviceProperties(deviceId: int):
