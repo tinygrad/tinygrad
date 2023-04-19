@@ -83,6 +83,17 @@ def train_cifar():
   print(X_train.shape, Y_train.shape)
   Xt, Yt = fetch_batch(X_test, Y_test, BS=BS)
   model = SpeedyResNet()
+
+  # init weights with torch
+  if getenv("TORCHWEIGHTS"):
+    from examples.hlb_cifar10_torch import SpeedyResNet as SpeedyResNetTorch
+    torch_model = SpeedyResNetTorch()
+    model_state_dict = optim.get_state_dict(model)
+    torch_state_dict = torch_model.state_dict()
+    for k,v in torch_state_dict.items():
+      print(f"initting {k} from torch")
+      model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
+
   if getenv("ADAM"):
     optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
   else:
