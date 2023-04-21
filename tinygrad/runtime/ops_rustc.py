@@ -1,7 +1,7 @@
 import os, time, ctypes, hashlib, subprocess, platform
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawMallocBuffer
-from tinygrad.codegen.cstyle import RustCodegen # TODO copy cstyle to rustcstyle and revert changes to cstyle.py
+from tinygrad.codegen.ruststyle import RustCodegen
 
 class RustcProgram:
   def __init__(self, name:str, prg:str):
