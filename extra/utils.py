@@ -104,10 +104,10 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
     t.realize()
     return
 
-  # ["METAL", "CLANG", "LLVM"] support readinto for more speed
+  # ["METAL", "CLANG", "LLVM", "RUSTC"] support readinto for more speed
   # ["GPU", "CUDA"] use _mmap since they have to copy in to the GPU anyway
   # this needs real APIs
-  if t.device in ["METAL", "CLANG", "LLVM"]:
+  if t.device in ["METAL", "CLANG", "LLVM", "RUSTC"]:
     del t.lazydata.op
     t.lazydata.realized = Device[t.lazydata.device].buffer(prod(t.shape), dtype=t.dtype)
     myfile.readinto(t.lazydata.realized._buffer())

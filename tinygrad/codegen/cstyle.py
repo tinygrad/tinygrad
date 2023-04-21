@@ -1,28 +1,17 @@
-from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set, Union
+# TODO this file needs to be copied to rust.py, this is just kept like this to make rebases easier for now
+from typing import Final, Dict, Callable, List, DefaultDict, Tuple, Set, Union
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer, LocalTypes
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
 from tinygrad.helpers import ImageDType, colored
 from tinygrad.runtime.lib import RawConst
-from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable
+from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode
 from tinygrad.lazy import LazyBuffer
 
 # div is different in cl than python
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
 render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
-
-class CStyleLanguage(NamedTuple):
-  kernel_prefix: str = ""
-  buffer_prefix: str = ""
-  buffer_suffix: str = ""
-  smem_prefix: str = ""
-  barrier: str = ""
-  gid: List[str] = []
-  lid: List[str] = []
-  extra_args: List[str] = []
-  half_prekernel: Optional[str] = None
-  uses_vload: bool = False
 
 code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.EXP: lambda x:  f"exp({x})",
@@ -33,7 +22,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.CMPEQ: lambda a,b: f"({a}=={b})", FusedOps.MULACC: lambda a,b,c: f"(({b}*{c})+{a})"
 }
 
-def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lang:CStyleLanguage) -> Tuple[str, List[int], List[int]]:
+def uops_to_rust(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]]) -> Tuple[str, List[int], List[int]]:
   prekernel: Set[str] = set()
   kernel = []
   global_size = []
@@ -49,33 +38,19 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
-      for i,var in enumerate(args[0]):
+      for var in args[0]:
         if isinstance(var, NumNode):
-          if args[1] == "global" and lang.gid: global_size.append(1)
-          if args[1] == "local" and lang.lid: local_size.append(1)
-          # one number, not an index
           kk("{")
         else:
-          if args[1] == "local" and lang.lid:
-            assert len(args[0]) <= len(lang.lid)
-            kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  // {var.max+1}")
-            local_size.append(var.max+1)
-          else:
-            kk(f"for {var.expr} in {var.min}..={var.max}isize {{")
+          kk(f"for {var.expr} in {var.min}..={var.max}isize {{")
       depth += 1
     elif uop == UOps.ENDLOOP:
-      if args[1] == "local" and len(lang.lid):
-        # TODO: this is a bit of a hack. the local loop isn't real on the GPU
-        kk(lang.barrier)
-        kk(f"if {Variable.sum(args[0]).render(render_cl)} == 0 {{")
-        pend_close = "}"*(len(args[0])+1) + f" // {args[1]}"
-      else:
-        if args[1] == "global" and pend_close:
-          depth -= 1
-          kk(pend_close)
-          pend_close = None
+      if args[1] == "global" and pend_close:
         depth -= 1
-        kk("}"*len(args[0]) + f" // {args[1]}")
+        kk(pend_close)
+        pend_close = None
+      depth -= 1
+      kk("}"*len(args[0]) + f" // {args[1]}")
     elif uop == UOps.CONST:
       assert newvar is not None
       if args == -math.inf:
@@ -107,12 +82,12 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       kk(f"unsafe {{ {bufnames[args.i]}[{args.idx.render(render_cl)} as usize] = {vin[0].render()}; }}")
       mutations.append(bufnames[args.i])
     elif uop == UOps.DEFINE_LOCAL:
-      kk(lang.smem_prefix + f"static mut {args[0]} : &'static mut [f32] = &mut[0.0; {args[1]}];")
+      kk(f"static mut {args[0]} : &'static mut [f32] = &mut[0.0; {args[1]}];")
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  buftypes = [(i,f"{lang.buffer_prefix}{x.dtype.name}{lang.buffer_suffix}", x.realized.size) for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
-  prg = ''.join([f"{lang.kernel_prefix} pub fn KERNEL_NAME_PLACEHOLDER(",] +
+  buftypes = [(i,f"{x.dtype.name}", x.realized.size) for i,x in enumerate(bufs) if not isinstance(x, LocalBuffer) and not isinstance(x.realized, RawConst)]
+  prg = ''.join(["#[inline(always)]\npub fn KERNEL_NAME_PLACEHOLDER(",] +
     [', '.join([f'{bufnames[i]} : &mut [{t}; {s}]' if bufnames[i] in mutations else f'{bufnames[i]} : &[{t}; {s}]' for i,t,s in buftypes])] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
@@ -125,8 +100,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   return prg, global_size, local_size
 
-class CStyleCodegen(Linearizer):
-  lang: ClassVar[CStyleLanguage] = CStyleLanguage()
+class RustCodegen(Linearizer):
   supports_constant_folding: bool = True
 
   # for renaming
@@ -150,17 +124,17 @@ class CStyleCodegen(Linearizer):
 
     self.linearize()
 
-    prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
+    prg, global_size, local_size = uops_to_rust(self.uops, self.bufs)
 
     # if we have local_sizes, we have to correct the global_size
     for i,s in enumerate(local_size): global_size[i] *= s
 
     # painfully name the function something unique
-    if prg in CStyleCodegen.kernel_name_cache: function_name, display_name = CStyleCodegen.kernel_name_cache[prg]
+    if prg in RustCodegen.kernel_name_cache: function_name, display_name = RustCodegen.kernel_name_cache[prg]
     else:
-      CStyleCodegen.kernel_cnt[self.function_name] += 1
-      suffix = f"{'n'+str(CStyleCodegen.kernel_cnt[self.function_name]-1)}" if CStyleCodegen.kernel_cnt[self.function_name] > 1 else ""
-      CStyleCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'black', bright=True)
+      RustCodegen.kernel_cnt[self.function_name] += 1
+      suffix = f"{'n'+str(RustCodegen.kernel_cnt[self.function_name]-1)}" if RustCodegen.kernel_cnt[self.function_name] > 1 else ""
+      RustCodegen.kernel_name_cache[prg] = function_name, display_name = self.function_name+suffix, self.display_name+colored(suffix, 'black', bright=True)
 
     return ASTRunner(function_name, prg.replace("KERNEL_NAME_PLACEHOLDER", function_name),
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,

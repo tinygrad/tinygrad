@@ -2,6 +2,7 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Ty
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
+import os
 
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
@@ -25,7 +26,8 @@ class Token(NamedTuple):
   def render(self, with_type=False):
     if with_type:
       assert self.offset is None
-      return f"let mut {self.name}" # TODO how to abstract this properly between different languages?
+      t = "let mut" if "RUSTC" in os.environ else self.ltype.name
+      return f"{t} {self.name}"
     if self.offset is None: return self.name
     assert self.ltype == LocalTypes.float4
     return self.name+"."+"xyzw"[int(self.offset)]

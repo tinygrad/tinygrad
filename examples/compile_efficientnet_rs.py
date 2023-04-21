@@ -1,3 +1,4 @@
+import struct
 from models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from extra.utils import fetch
@@ -22,8 +23,11 @@ def compile_net(run, special_names):
           bufs[key] = (f"buf_{bufnum}", len(arg._buf))
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
-      cargs.append(bufs[key][0])
-    statements.append(f"{fxn.name}({', '.join(cargs)});")
+      if bufs[key][0] in bufs_to_save:
+        cargs.append(f"&{bufs[key][0]}")
+      else:
+        cargs.append(f"&mut {bufs[key][0]}")
+    statements.append(f"unsafe {{ {fxn.name}({', '.join(cargs)}) }};")
 
   return functions, statements, bufs, bufs_to_save
 
@@ -50,64 +54,32 @@ if __name__ == "__main__":
 
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
-  # c header
-  cprog = ["#include <stdio.h>", "#include <math.h>", "#define max(x,y) ((x>y)?x:y)"]
+  rsprog = ["fn exp(a: f32) -> f32 { a.exp() }", "fn pow(a: f32, b: f32) -> f32 { a.powf(b) }", "type float = f32;"]
 
   # save the weights
   for name,cl in bufs_to_save.items():
-    weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
-    cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
-
-  # image library!
-  cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode('utf-8')]
+    b = bytes(cl._buf)
+    num = len(b) // 4
+    weights = ",".join([str(f) for f in struct.unpack(str(num)+'f', b)])
+    rsprog.append(f"static {name} : [f32; {num}] = [{weights}];")
 
   # imagenet labels, move to datasets?
   lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
   lbls = ast.literal_eval(lbls.decode('utf-8'))
   lbls = ['"'+lbls[i]+'"' for i in range(1000)]
-  cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
+  rsprog.append(f"pub static lbls : [&'static str; 1000] = [{','.join(lbls)}];")
 
-  # buffers (empty + weights)
-  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,len in bufs.values()]
+  # empty buffers
+  # TODO move all, but the input buffer into the net function to help the compiler?
+  # if name == "input" or name == "outputs":
+  rsprog += [f"pub static mut {name} : &'static mut [f32; {len}] = &mut[0.0; {len}];" for name,len in bufs.values() if name not in bufs_to_save]
 
   # the functions
-  cprog += list(functions.values())
+  rsprog += list(functions.values())
 
   # the net
-  cprog += ["void net() {"] + statements + ["}"]
+  rsprog += ["pub fn net() {"] + statements + ["}"]
 
-  cprog += ["""
-int main(int argc, char* argv[]) {
-  int DEBUG = getenv("DEBUG") != NULL ? atoi(getenv("DEBUG")) : 0;
-  int X=0, Y=0, chan=0;
-  stbi_uc *image = (argc > 1) ? stbi_load(argv[1], &X, &Y, &chan, 3) : stbi_load_from_file(stdin, &X, &Y, &chan, 3);
-  assert(image != NULL);
-  if (DEBUG) printf("loaded image %dx%d channels %d\\n", X, Y, chan);
-  assert(chan == 3);
-  // resize to input[1,3,224,224] and rescale
-  for (int y = 0; y < 224; y++) {
-    for (int x = 0; x < 224; x++) {
-      // get sample position
-      int tx = (x/224.)*X;
-      int ty = (y/224.)*Y;
-      for (int c = 0; c < 3; c++) {
-        input[c*224*224 + y*224 + x] = (image[ty*X*chan + tx*chan + c] / 255.0 - 0.45) / 0.225;
-      }
-    }
-  }
-  net();
-  float best = -INFINITY;
-  int best_idx = -1;
-  for (int i = 0; i < 1000; i++) {
-    if (outputs[i] > best) {
-      best = outputs[i];
-      best_idx = i;
-    }
-  }
-  if (DEBUG) printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
-  else printf("%s\\n", lbls[best_idx]);
-}"""]
-
-  # CLANG=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/stable_diffusion_by_tinygrad.jpg
   # category : 281 (tabby, tabby cat) with 9.452788
-  print('\n'.join(cprog))
+  with open("./examples/efficientnet_rs/src/net.rs", "w") as f:
+    f.write('\n'.join(rsprog))
