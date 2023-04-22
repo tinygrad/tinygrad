@@ -161,7 +161,16 @@ class Tensor:
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
-  # ***** toposort and backward pass *****
+  @staticmethod
+  def kaiming_uniform(*shape, fan_mode: str="fan_in", **kwargs) -> Tensor:
+    if fan_mode == "fan_in":
+      fan = shape[0]
+    elif fan_mode == "fan_out":
+      fan = prod(shape[1:])
+    else:
+      raise ValueError(f"Invalid fan_mode '{fan_mode}', should be 'fan_in' or 'fan_out'")
+    gain = (3/fan) ** 0.5
+    return gain * Tensor.uniform(*shape, **kwargs).mul((3/fan)**0.5)
 
   def deepwalk(self):
     def _deepwalk(node, visited, nodes):
