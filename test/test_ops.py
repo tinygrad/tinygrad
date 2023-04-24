@@ -579,10 +579,10 @@ class TestOps(unittest.TestCase):
     x = Tensor.randn(45, 65, 3)
 
     for dim in range(-1, 3):
-      helper_test_op([(45, 65, 3), (45, 65, 3), (45, 65, 3)], lambda x, y, z: torch.stack((x, y, z), dim=dim), lambda x, y, z: x.stack([y, z], dim=dim))
+      helper_test_op([(45, 65, 3), (45, 65, 3), (45, 65, 3)], lambda x, y, z: torch.stack((x, y, z), dim=dim), lambda x, y, z: Tensor.stack([x, y, z], dim=dim))
     
     with self.assertRaises(IndexError):
-      x.stack([x], dim=77)
+      Tensor.stack([x], dim=77)
     
   def test_repeat(self):
     x = Tensor.randn(45, 65, 3)
