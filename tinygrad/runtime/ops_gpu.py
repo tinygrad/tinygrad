@@ -16,9 +16,9 @@ class _CL:
   def __init__(self):
     devices: List[cl.Device] = sum([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()], [])
     if len(devices) == 0: devices = sum([x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()], []) # settle for CPU
-    if len(devices) > 1 or DEBUG >= 1: print(f"using {devices[getenv('CL_DEVICE', 0)]}")
-    self.cl_ctx: cl.Context = cl.Context(devices=[devices[getenv("CL_DEVICE", 0)]])
-    self.cl_queue: cl.CommandQueue = cl.CommandQueue(self.cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)  # this is an in-order command queue
+    #if len(devices) > 1 or DEBUG >= 1: print(f"using {devices[getenv('CL_DEVICE', 0)]}")
+    self.cl_ctx: cl.Context = [cl.Context(devices=[device]) for device in devices]
+    self.cl_queue: cl.Context = [cl.CommandQueue(ctx, properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctx]
 CL = _CL()
 
 # TODO: merge CLImage in here
