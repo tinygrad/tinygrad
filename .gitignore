@@ -1,4 +1,6 @@
 __pycache__
+.venv/
+.vscode
 notebooks
 .*.swp
 .*.swo
