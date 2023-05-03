@@ -128,7 +128,7 @@ class Compiled:
     self.buffer, self.codegen, self.runtime, self.synchronize = buffer, codegen, runtime, synchronize
     self.method_cache: Dict[str, ASTRunner] = {}
 
-  def exec_ast(self, ast:LazyOp, output):
+  def exec_ast(self, ast:LazyOp, output, **kwargs):
     # all movementops do nothing in a Compiled buffer!
     if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
 
@@ -145,7 +145,7 @@ class Compiled:
 
     # we don't have an output buffer, we have to create it
     if output.realized is None:
-      output.realized = self.buffer(prod(output.shape), output.dtype)
+      output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
 
     # compilation time
     k = self.codegen(ast, output)

@@ -102,6 +102,7 @@ class LazyBuffer:
     if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
+  def _device_extra_args(self) -> Dict[str, int]: return {"device": int(self.device.split(":")[1])} if ":" in self.device else {}
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if self.realized is None:
@@ -110,7 +111,7 @@ class LazyBuffer:
         if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
           self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
         else:
-          self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
+          self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
@@ -139,7 +140,7 @@ class LazyBuffer:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), dtypes.float32)
           self.dtype = dtypes.float32
 
-        self.realized = Device[self.device].exec_ast(self.op, output=self)
+        self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args())
 
       assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
@@ -289,8 +290,9 @@ class _Device:
   def __init__(self) -> None:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, self._default_device())
+  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return self._get_device(x.split(":")[0])
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  def _get_device(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
   def _default_device(self) -> str:
     for device in ["METAL", "CUDA", "GPU"]:
       try:
