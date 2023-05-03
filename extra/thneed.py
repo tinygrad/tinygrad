@@ -193,7 +193,7 @@ class Thneed:
               })
               if needs_load:
                 data = np.empty(a.size//4, dtype=np.float32)
-                cl.enqueue_copy(CL.cl_queue, data, a, is_blocking=True)
+                cl.enqueue_copy(CL.cl_queue[0], data, a, is_blocking=True)
                 weights.append(data.tobytes())
             elif isinstance(a, cl.Image):
               assert a.format == cl.ImageFormat(cl.channel_order.RGBA, cl.channel_type.HALF_FLOAT if FLOAT16 else cl.channel_type.FLOAT), "wrong type"
@@ -204,7 +204,7 @@ class Thneed:
               buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size=size * (2 if FLOAT16 else 1))
 
               # zero out the buffer
-              cl.enqueue_copy(CL.cl_queue, buf, b'\x00'*buf.size, is_blocking=True)
+              cl.enqueue_copy(CL.cl_queue[0], buf, b'\x00'*buf.size, is_blocking=True)
 
               CLProgram("from_image_strided", """
                 __kernel void from_image_strided(read_only image2d_t in, __global float4 *out, int row_pitch) {
@@ -224,7 +224,7 @@ class Thneed:
 
               if needs_load:
                 data = np.empty(size//(2 if FLOAT16 else 4), dtype=np.float32)
-                cl.enqueue_copy(CL.cl_queue, data, buf, is_blocking=True)
+                cl.enqueue_copy(CL.cl_queue[0], data, buf, is_blocking=True)
                 if FLOAT16: data = data.astype(np.float16)
                 weights.append(data.tobytes())
             else:
@@ -271,9 +271,9 @@ class Thneed:
     events = []
     st = time.monotonic()
     for prg, args in self.cl_cache:
-      events.append(prg.clprg(CL.cl_queue, *args))
+      events.append(prg.clprg(CL.cl_queue[0], *args))
     mt = time.monotonic()
-    CL.cl_queue.finish()
+    CL.synchronize()
     et = time.monotonic() - st
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 
