@@ -24,7 +24,7 @@ CL = _CL()
 
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
-  def __init__(self, size, dtype):
+  def __init__(self, size, dtype, device=0):
     if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
       buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
@@ -32,13 +32,14 @@ class CLBuffer(RawBufferCopyInOut):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
     else:
       buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size * dtype.itemsize)
+    setattr(buf, 'device', device)  # device is tracked on the underlying buffer
     super().__init__(size, dtype, buf)
   def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
-    cl.enqueue_copy(CL.cl_queue[0], self._buf, x, is_blocking=False)
+    cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, x, is_blocking=False)
   def _copyout(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
-    cl.enqueue_copy(CL.cl_queue[0], x, self._buf, is_blocking=True)
+    cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
@@ -64,7 +65,8 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    e = self.clprg(CL.cl_queue[0], global_size, local_size, *[x._buf if isinstance(x, CLBuffer) else x for x in bufs])
+    cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
+    e = self.clprg(CL.cl_queue[cl_bufs[0].device], global_size, local_size, *cl_bufs)
     if wait:
       e.wait()
       return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
