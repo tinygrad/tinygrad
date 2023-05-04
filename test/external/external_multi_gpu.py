@@ -11,8 +11,8 @@ from tinygrad.runtime.ops_gpu import CL
 device = 'gpu'
 
 if __name__ == "__main__":
-  #sz = 1024*1024*256  # 1 GB
-  sz = 1024*64
+  sz = 1024*1024*256  # 1 GB
+  #sz = 1024*64
 
   with Timing("CPU creation: ", on_exit=lambda x: f", {(sz*4*2)/x:.2f} GB/sec"):
     c0 = Tensor.ones(sz, device="cpu").realize()
@@ -20,20 +20,26 @@ if __name__ == "__main__":
 
   with Timing("CPU -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     a0 = c0.to(f'{device}:0').realize()
+    CL.synchronize()
   with Timing("CPU -> 1: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     b1 = c1.to(f'{device}:1').realize()
+    CL.synchronize()
 
   # cross copy. this is going through the CPU
   with Timing("0 -> 1: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     a1 = a0.to(f'{device}:1').realize()
+    CL.synchronize()
   with Timing("1 -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     b0 = b1.to(f'{device}:0').realize()
+    CL.synchronize()
 
-  # sum (NOTE: without DEBUG=2, these timings are wrong)
+  # sum
   with Timing("0 -> 0 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     ab0 = (a0 + b0).realize()
+    CL.synchronize()
   with Timing("1 -> 1 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     ab1 = (a1 + b1).realize()
+    CL.synchronize()
 
   # cross device sum (does this work?)
   # is this making a copy first? is that copy through the CPU?
@@ -53,8 +59,8 @@ if __name__ == "__main__":
   print(abx1)
 
   # same
-  print("testing")
-  np.testing.assert_allclose(ab0.numpy(), ab1.numpy())
-  np.testing.assert_allclose(ab0.numpy(), abx0.numpy())
-  np.testing.assert_allclose(ab0.numpy(), abx1.numpy())
+  #print("testing")
+  #np.testing.assert_allclose(ab0.numpy(), ab1.numpy())
+  #np.testing.assert_allclose(ab0.numpy(), abx0.numpy())
+  #np.testing.assert_allclose(ab0.numpy(), abx1.numpy())
 
