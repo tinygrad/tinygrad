@@ -34,6 +34,7 @@ class Tensor:
   default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+    device = device.upper().replace(":0", "")  # canonicalize device
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -68,7 +69,7 @@ class Tensor:
     self._ctx: Optional[Function] = None
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)

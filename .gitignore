@@ -18,5 +18,6 @@ vertex.bin
 recognize*
 .idea
 disassemblers/applegpu
+disassemblers/cuda_ioctl_sniffer
 *.prof
 datasets/cifar-10-python.tar.gz
