@@ -12,6 +12,7 @@
 // includes from the ROCm sources
 #include <linux/kfd_ioctl.h>
 #include <hsa.h>
+#include <amd_hsa_kernel_code.h>
 
 #include <string>
 #include <map>
@@ -26,6 +27,7 @@ int queue_type = 0;
 void hexdump(void *d, int l) {
   for (int i = 0; i < l; i++) {
     if (i%0x10 == 0 && i != 0) printf("\n");
+    if (i%0x10 == 8) printf(" ");
     if (i%0x10 == 0) printf("%8X: ", i);
     printf("%2.2X ", ((uint8_t*)d)[i]);
   }
@@ -68,6 +70,10 @@ static void handler(int sig, siginfo_t *si, void *unused) {
     hsa_kernel_dispatch_packet_t *pkt = (hsa_kernel_dispatch_packet_t *)(ring_base_address+value*0x40);
     if ((pkt->header&0xFF) == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
       D("HSA_PACKET_TYPE_KERNEL_DISPATCH -- setup:%d workgroup[%d, %d, %d] grid[%d, %d, %d] kernel_object:0x%lx kernarg_address:%p\n", pkt->setup, pkt->workgroup_size_x, pkt->workgroup_size_y, pkt->workgroup_size_z, pkt->grid_size_x, pkt->grid_size_y, pkt->grid_size_z, pkt->kernel_object, pkt->kernarg_address);
+      amd_kernel_code_t *code = (amd_kernel_code_t *)pkt->kernel_object;
+      D("kernel_code_entry_byte_offset:%lx\n", code->kernel_code_entry_byte_offset);
+      hexdump((void*)(pkt->kernel_object + code->kernel_code_entry_byte_offset), 0x200);
+      //hexdump((void*)pkt->kernel_object, sizeof(amd_kernel_code_t));
     } else if ((pkt->header&0xFF) == HSA_PACKET_TYPE_BARRIER_AND) {
       D("HSA_PACKET_TYPE_BARRIER_AND\n");
     }
@@ -87,7 +93,7 @@ static void handler(int sig, siginfo_t *si, void *unused) {
   mprotect((void *)((uint64_t)si->si_addr & ~0xFFF), 0x2000, PROT_NONE);
 }
 
-__attribute__((constructor)) void foo(void) {
+void register_sigsegv_handler() {
   struct sigaction sa;
   sa.sa_flags = SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
@@ -124,6 +130,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 
   if (doorbell_offset != -1 && offset == doorbell_offset) {
     D("HIDDEN DOORBELL %p\n", addr);
+    register_sigsegv_handler();
     mprotect(addr, length, PROT_NONE);
   }
 
