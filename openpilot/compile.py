@@ -88,7 +88,7 @@ def compile(dat, output_fn):
 
   # confirm thneed found the right output
   thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
-  cl.enqueue_copy(CL.cl_queue, thneed_out, t.outputs[0], is_blocking=True)
+  cl.enqueue_copy(CL.cl_queue[0], thneed_out, t.outputs[0], is_blocking=True)
   np.testing.assert_allclose(thneed_out, tinygrad_out.numpy())
 
   # testing is float32 only (fix this)
@@ -106,11 +106,11 @@ def compile(dat, output_fn):
 
       # try old thneed with a different input
       for k,v in t.inputs.items():
-        cl.enqueue_copy(CL.cl_queue, v, new_np_inputs[k], is_blocking=True)
+        cl.enqueue_copy(CL.cl_queue[0], v, new_np_inputs[k], is_blocking=True)
 
       t.run()
       old_thneed_out = np.empty((t.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
-      cl.enqueue_copy(CL.cl_queue, old_thneed_out, t.outputs[0], is_blocking=True)
+      cl.enqueue_copy(CL.cl_queue[0], old_thneed_out, t.outputs[0], is_blocking=True)
 
       # compare thneed (rerun) with torch
       np.testing.assert_allclose(new_torch_out, old_thneed_out, atol=1e-4, rtol=1e-2)
@@ -123,11 +123,11 @@ def compile(dat, output_fn):
 
       # inputs
       for k,v in nt.inputs.items():
-        cl.enqueue_copy(CL.cl_queue, v, new_np_inputs[k], is_blocking=True)
+        cl.enqueue_copy(CL.cl_queue[0], v, new_np_inputs[k], is_blocking=True)
 
       nt.run()
       new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(tinygrad_out.shape)
-      cl.enqueue_copy(CL.cl_queue, new_thneed_out, nt.outputs[0], is_blocking=True)
+      cl.enqueue_copy(CL.cl_queue[0], new_thneed_out, nt.outputs[0], is_blocking=True)
 
       # compare torch to thneed
       np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)

@@ -126,7 +126,7 @@ def gflops(niter=4, nroll=4, ngroups=4096):
       out_buf[get_global_id(0) >> 31] = {'+'.join(f"y.s{'0123456789abcdef'[i]}" for i in range(NCOMP))};
   }}"""
   out_buf = CLBuffer(1, dtypes.float32)
-  cl = CLProgram("gflops", prg, options="-Werror -cl-mad-enable -cl-fast-relaxed-math")
+  cl = CLProgram("gflops", prg, options="-cl-mad-enable -cl-fast-relaxed-math")
   FLOPS = NCOMP*2*2 * niter * nroll * ngroups * 32
   # NOTE: if nay of the niters form a local group, this is wrong
   return FLOPS/(min([cl([32, ngroups, 1], [32, 1, 1], out_buf, wait=True) for _ in range(10)])*1e9)

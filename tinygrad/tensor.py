@@ -34,6 +34,7 @@ class Tensor:
   default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+    device = device.upper().replace(":0", "")  # canonicalize device
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -68,7 +69,7 @@ class Tensor:
     self._ctx: Optional[Function] = None
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
@@ -261,6 +262,23 @@ class Tensor:
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
     return functools.reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
+
+  @staticmethod
+  def stack(tensors, dim=0):
+    first = tensors[0].unsqueeze(dim)
+    unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
+    # checks for shapes and number of dimensions delegated to cat
+    return first.cat(*unsqueezed_tensors, dim=dim)
+
+  def repeat(self, repeats):
+    ndim = len(self.shape)
+    base_shape = self.shape
+    if len(repeats) > ndim:
+      base_shape = (1,) * (len(repeats) - ndim) + base_shape
+    new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
+    expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
+    final_shape = [r*s for r,s in zip(repeats, base_shape)]
+    return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
   # TODO: make this nicer with syntactic sugar in slice
   def chunk(self, num, dim):
