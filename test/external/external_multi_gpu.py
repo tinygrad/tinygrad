@@ -26,18 +26,18 @@ if __name__ == "__main__":
     CL.synchronize()
 
   # cross copy. this is going through the CPU
-  with Timing("0 -> 1: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+  with Timing("0 -> CPU -> 1: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     a1 = a0.to(f'{device}:1').realize()
     CL.synchronize()
-  with Timing("1 -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+  with Timing("1 -> CPU -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     b0 = b1.to(f'{device}:0').realize()
     CL.synchronize()
 
   # sum
-  with Timing("0 -> 0 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+  with Timing("0+0 -> 0 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     ab0 = (a0 + b0).realize()
     CL.synchronize()
-  with Timing("1 -> 1 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+  with Timing("1+1 -> 1 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     ab1 = (a1 + b1).realize()
     CL.synchronize()
 
@@ -52,15 +52,19 @@ if __name__ == "__main__":
     abx1 = (b1 + a0).realize()
     CL.synchronize()
 
+  # copy back
+  # NOTE: half of this slowness is caused by allocating memory on the CPU
+  with Timing("0 -> CPU: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+    cc0 = ab0.numpy()
+  with Timing("1 -> CPU: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+    cc1 = ab1.numpy()
+
+  # same
+  print("testing")
+  np.testing.assert_allclose(cc0, cc1)
+
   # devices
   print(ab0)
   print(ab1)
   print(abx0)
   print(abx1)
-
-  # same
-  #print("testing")
-  #np.testing.assert_allclose(ab0.numpy(), ab1.numpy())
-  #np.testing.assert_allclose(ab0.numpy(), abx0.numpy())
-  #np.testing.assert_allclose(ab0.numpy(), abx1.numpy())
-
