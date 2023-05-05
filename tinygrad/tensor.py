@@ -309,7 +309,6 @@ class Tensor:
 
   def std(self, axis=None, keepdim=False):
     mu = self.mean(axis=axis, keepdim=keepdim)
-    print(self.shape[0])
     var = ((self - mu) ** 2).mean(axis=None, keepdim=False)
     std = var.sqrt()
     return std
