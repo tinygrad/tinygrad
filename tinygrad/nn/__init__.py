@@ -48,7 +48,7 @@ class Conv2d:
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True, initialization: str='kaiming_uniform'):
-    self.weight = Tensor.kaiming_uniform(out_features, in_features) if initialization=="kaiming_uniform" else Tensor.glorot_uniform(out_features, in_features)
+    self.weight = getattr(Tensor, initialization)(out_features, in_features)
     self.bias = Tensor.zeros(out_features) if bias else None
 
   def __call__(self, x):
