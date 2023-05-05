@@ -460,6 +460,13 @@ class Linearizer:
       else:
         break
 
-    # if last dim <= 5 and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
-    if self.first_reduce < (self.shape_len-self.upcasted) and self.full_unupcasted_shape[-1] <= 32 and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
-      self.upcast()
+    # if last dim <= 16 and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
+    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
+      if self.full_unupcasted_shape[-1] <= 16:
+        self.upcast()
+      else:
+        for splits in [16,8,4]:
+          if self.full_unupcasted_shape[-1]%splits == 0:
+            self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
+            self.upcast()
+            break

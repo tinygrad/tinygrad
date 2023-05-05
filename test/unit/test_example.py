@@ -2,11 +2,16 @@ import unittest
 import numpy as np
 from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import getenv
 
 def multidevice_test(fxn):
+  exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
   def ret(self):
     for device in Device._buffers:
+      print(device)
+      if device in exclude_devices:
+        print(f"WARNING: {device} test is excluded")
+        continue
       with self.subTest(device=device):
         try:
           Device[device]
