@@ -215,10 +215,10 @@ class TestOps(unittest.TestCase):
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)))
   def test_std(self):
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x), lambda x: Tensor.std(x))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False), lambda x: Tensor.std(x))
   def test_std_axis(self):
     # rtol=1e-3 was default
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=0), lambda x: Tensor.std(x, axis=0), rtol=1e-1)
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=0), lambda x: Tensor.std(x, axis=0))
   def test_std_keepdim(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
   def test_log_softmax(self):
