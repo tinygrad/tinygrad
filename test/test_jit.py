@@ -15,6 +15,25 @@ class TestJit(unittest.TestCase):
       c = add(a, b)
       np.testing.assert_equal(c.numpy(), a.numpy()+b.numpy())
 
+  def test_jit_shape_mismatch(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    for _ in range(3):
+      a = Tensor.randn(10, 10)
+      b = Tensor.randn(10, 10)
+      c = add(a, b)
+    bad = Tensor.randn(20, 20)
+    with self.assertRaises(AssertionError):
+      add(a, bad)
+
+  def test_jit_duplicate_fail(self):
+    # the jit doesn't support duplicate arguments
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    a = Tensor.randn(10, 10)
+    with self.assertRaises(AssertionError):
+      add(a, a)
+
   def test_kwargs_jit(self):
     @TinyJit
     def add_kwargs(first, second): return (first+second).realize()
