@@ -74,8 +74,11 @@ amdhsa.version:
 """
 
 # fix: COMGR failed to get code object ISA name. set triple to 'amdgcn-amd-amdhsa'
-object = early_exec(([pathlib.Path(__file__).parent.parent.parent.parent / "extra/rocm/build/llvm-project/bin/llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code))
-asm = early_exec(([pathlib.Path(__file__).parent.parent.parent.parent / "extra/rocm/build/llvm-project/bin/ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], object))
+ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
+#ROCM_LLVM_PATH = pathlib.Path(__file__).parent.parent.parent.parent / "extra/rocm/build/llvm-project/bin"
+
+object = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code))
+asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], object))
 
 with open("/tmp/cc2.o", "wb") as f:
   f.write(object)
