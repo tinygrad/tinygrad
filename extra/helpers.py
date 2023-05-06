@@ -9,7 +9,8 @@ class Timing(object):
 
 def enable_early_exec():
   import subprocess, multiprocessing
-  qin, qout = multiprocessing.Queue(), multiprocessing.Queue()
+  qin: multiprocessing.Queue = multiprocessing.Queue()
+  qout: multiprocessing.Queue = multiprocessing.Queue()
   def _early_exec_process(qin, qout):
     while 1:
       path, inp = qin.get()
