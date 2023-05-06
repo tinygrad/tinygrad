@@ -72,8 +72,14 @@ static void handler(int sig, siginfo_t *si, void *unused) {
       D("HSA_PACKET_TYPE_KERNEL_DISPATCH -- setup:%d workgroup[%d, %d, %d] grid[%d, %d, %d] kernel_object:0x%lx kernarg_address:%p\n", pkt->setup, pkt->workgroup_size_x, pkt->workgroup_size_y, pkt->workgroup_size_z, pkt->grid_size_x, pkt->grid_size_y, pkt->grid_size_z, pkt->kernel_object, pkt->kernarg_address);
       amd_kernel_code_t *code = (amd_kernel_code_t *)pkt->kernel_object;
       D("kernel_code_entry_byte_offset:%lx\n", code->kernel_code_entry_byte_offset);
-      hexdump((void*)(pkt->kernel_object + code->kernel_code_entry_byte_offset), 0x200);
-      //hexdump((void*)pkt->kernel_object, sizeof(amd_kernel_code_t));
+      uint32_t *kernel_code = (uint32_t*)(pkt->kernel_object + code->kernel_code_entry_byte_offset);
+      int code_len = 0;
+      while (kernel_code[code_len] != 0xbf9f0000 && kernel_code[code_len] != 0) code_len++;
+      hexdump(kernel_code, code_len*4);
+      /*FILE *f = fopen("/tmp/kernel_code", "wb");
+      fwrite(kernel_code, 4, code_len, f);
+      fclose(f);
+      system("python -c 'print(\" \".join([(\"0x%02X\"%x) for x in open(\"/tmp/kernel_code\", \"rb\").read()]))' | ../build/llvm-project/bin/llvm-mc --disassemble --arch=amdgcn --mcpu=gfx1100 --show-encoding");*/
     } else if ((pkt->header&0xFF) == HSA_PACKET_TYPE_BARRIER_AND) {
       D("HSA_PACKET_TYPE_BARRIER_AND\n");
     }

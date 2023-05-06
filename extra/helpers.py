@@ -6,3 +6,18 @@ class Timing(object):
   def __exit__(self, exc_type, exc_val, exc_tb):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
+
+def enable_early_exec():
+  import subprocess, multiprocessing
+  qin, qout = multiprocessing.Queue(), multiprocessing.Queue()
+  def _early_exec_process(qin, qout):
+    while 1:
+      path, inp = qin.get()
+      qout.put(subprocess.check_output(path, input=inp))
+  p = multiprocessing.Process(target=_early_exec_process, args=(qin, qout))
+  p.daemon = True
+  p.start()
+  def early_exec(x):
+    qin.put(x)
+    return qout.get()
+  return early_exec
