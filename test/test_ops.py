@@ -212,10 +212,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: Tensor.max(x, axis=1))
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
-  def test_std(self):
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x), lambda x: Tensor.std(x))
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)))
+  def test_std(self):
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x), lambda x: Tensor.std(x))
   def test_log_softmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
   def test_log_softmax_other_axis(self):
