@@ -64,7 +64,7 @@ def compile(dat, output_fn):
 
   # pull out inputs and put them in the jit cache
   input_rawbuffers = {k:inputs[k].lazydata.realized for k in inputs.keys()}
-  for (j,i),idx in model_exec.input_replace.items(): model_exec.jit_cache[j][1][i] = input_rawbuffers[idx]
+  for (j,i),(idx,_,_) in model_exec.input_replace.items(): model_exec.jit_cache[j][1][i] = input_rawbuffers[idx]
 
   # transform to CL.CACHE
   used_ops = 0
