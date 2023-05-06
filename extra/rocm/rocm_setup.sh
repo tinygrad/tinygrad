@@ -11,5 +11,4 @@ sudo apt-get install amdgpu-dkms
 sudo apt-get install rocm-opencl-runtime
 
 # for HIP
-sudo apt-get install hip-runtime-amd rocm-device-libs
-
+sudo apt-get install hip-runtime-amd rocm-device-libs hip-dev

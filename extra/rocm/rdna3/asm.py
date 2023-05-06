@@ -17,6 +17,8 @@ print(buf.toCPU())
 
 buf = CLBuffer.fromCPU(np.zeros(10, np.float32))
 code = b"""
+.global _start
+_start:
 .rodata
 .align 0x10
 .global code.kd
