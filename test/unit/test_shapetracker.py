@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.helpers import prod, all_same
-from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
-from tinygrad.codegen.cstyle import to_image_idx
+from tinygrad.helpers import prod
+from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 
 def shapetracker_getitem(st, val):
   locals = {"idx": val, "valid": 1}
@@ -239,6 +238,93 @@ class TestSingleShapeTracker(unittest.TestCase):
   def test_reshape_permute_no(self):
     self.st.reshape((4,7))
     self.st.permute((1,0))
+    assert not self.st.contiguous
+
+class TestCheckingShapeTracker(unittest.TestCase):
+  def setUp(self):
+    self.st = CheckingShapeTracker((7, 4))
+
+  def test_reshape(self):
+    self.st.reshape((7, 1, 4))
+    assert self.st.shape == (7, 1, 4)
+
+  def test_permute(self):
+    self.st.permute((1, 0))
+    assert self.st.shape == (4, 7)
+
+class TestAdditionalShapeTracker(unittest.TestCase):
+  def test_permute_reshape_flip(self):
+    self.st = CheckingShapeTracker((4, 4))
+    self.st.permute((1, 0))
+    self.st.reshape((2, 2, 2, 2))
+    self.st.flip((0, 1))
+    assert len(self.st.views) == 1
+
+  def test_permute_stride(self):
+    self.st = CheckingShapeTracker((4, 4))
+    self.st.permute((1, 0))
+    self.st.stride((2, 2))
+    assert not self.st.contiguous
+
+  def test_permute_stride_flip(self):
+    self.st = CheckingShapeTracker((4, 4))
+    self.st.permute((1, 0))
+    self.st.stride((2, 2))
+    self.st.flip((0,))
+    assert not self.st.contiguous
+
+  def test_shrink_reshape_flip(self):
+    self.st = CheckingShapeTracker((4, 4))
+    self.st.shrink(((0, 2), (0, 2)))
+    self.st.reshape((1, 4))
+    self.st.flip((1,))
+    assert not self.st.contiguous
+
+  def test_reshape_stride_flip(self):
+    self.st = CheckingShapeTracker((8, 8))
+    self.st.reshape((4, 16))
+    self.st.stride((2, 2))
+    self.st.flip((0, 1))
+    assert not self.st.contiguous
+
+  def test_reshape_flip_permute(self):
+    self.st = CheckingShapeTracker((4, 4))
+    self.st.reshape((2, 8))
+    self.st.flip((0,))
+    self.st.permute((1, 0))
+    assert not self.st.contiguous
+
+  def test_flip_stride(self):
+    self.st = CheckingShapeTracker((8, 8))
+    self.st.flip((0, 1))
+    self.st.stride((2, 2))
+    assert not self.st.contiguous
+
+  def test_flip_stride_reshape(self):
+    self.st = CheckingShapeTracker((8, 8))
+    self.st.flip((0, 1))
+    self.st.stride((2, 2))
+    self.st.reshape((4, 4))
+    assert not self.st.contiguous
+
+  def test_flip_permute_stride(self):
+    self.st = CheckingShapeTracker((8, 8))
+    self.st.flip((0, 1))
+    self.st.permute((1, 0))
+    self.st.stride((2, 2))
+    assert not self.st.contiguous
+
+  def test_flip_shrink(self):
+    self.st = CheckingShapeTracker((8, 8))
+    self.st.flip((0, 1))
+    self.st.shrink(((0, 3), (0, 3)))
+    assert not self.st.contiguous
+
+  def test_permute_stride_shrink(self):
+    self.st = CheckingShapeTracker((8, 8))
+    self.st.permute((1, 0))
+    self.st.stride((2, 2))
+    self.st.shrink(((0, 3), (0, 3)))
     assert not self.st.contiguous
 
 class TestShapeTrackerFuzzFailures(unittest.TestCase):
