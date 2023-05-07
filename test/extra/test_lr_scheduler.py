@@ -22,13 +22,17 @@ class TinyBobNet:
   def forward(self, x):
     return x.dot(self.l1).relu().dot(self.l2).log_softmax()
 
-def lr_scheduler_training(uses_sched):
+def lr_scheduler_training(sched_fn=None, args=None):
   model = TinyBobNet()
   optim = SGD(model.parameters(), lr=0.005)
-  if uses_sched: sched = MultiStepLR(optim, milestones=[3, 6, 8], gamma=0.5)
+  if sched_fn is not None: sched = sched_fn(optim, **args)
   for _ in range(10):
     train(model, X_train, Y_train, optim, 100)
-    if uses_sched: sched.step()
+    if sched_fn is not None:
+      if isinstance(sched, ReduceLROnPlateau):
+        sched.step(evaluate(model, X_test, Y_test))
+      else:
+        sched.step()
   return evaluate(model, X_test, Y_test)
 
 def current_lr(optim): return optim.param_groups[0]['lr'] if hasattr(optim, 'param_groups') else optim.lr
@@ -74,10 +78,13 @@ class TestLrScheduler(unittest.TestCase):
   def test_cosineannealinglr(self): self._test_cosineannealinglr(100, {}, 1e-6, 1e-6)
   def test_cosineannealinglr_eta_min(self): self._test_cosineannealinglr(100, {'eta_min': 0.001}, 1e-6, 1e-6)
 
-  def test_lr_scheduler_training(self):
-    without = lr_scheduler_training(False)   # usually around 40% accuracy
-    with_sched = lr_scheduler_training(True) # usually around 85% accuracy
-    assert with_sched > without
+  def test_training(self):
+    without = lr_scheduler_training() # usually around 40% accuracy
+    sched_fns = [MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR]
+    argss = [{'milestones': [3, 6, 8], 'gamma': 0.5}, {'factor': 0.5, 'patience': 2}, {'T_max': 10}]
+    for sched_fn, args in zip(sched_fns, argss):
+      with_sched = lr_scheduler_training(sched_fn, args) # usually around 85% accuracy
+      assert with_sched > without
 
 if __name__ == '__main__':
   unittest.main()
