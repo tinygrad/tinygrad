@@ -308,9 +308,8 @@ class Tensor:
     return out * (prod(out.shape)/prod(self.shape))
   def std(self, axis=None, keepdim=False, unbiased=True):
     n = self.shape[axis] if axis is not None else prod(self.shape)
-    if unbiased:
-      return ((((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)) / (n - 1)).sqrt()
-    return (((self - self.mean(axis=axis, keepdim=True)).square()).mean(axis=axis, keepdim=keepdim)).sqrt()
+    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
+    return (square_sum / (n - (1 if unbiased else 0))).sqrt()
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
