@@ -4,24 +4,34 @@ _start:
 .align 0x10
 .global code.kd
 .type code.kd,STT_OBJECT
+# amd_kernel_code_t (must be at 0x440 for kernel_code_entry_byte_offset to be right)
 code.kd:
+# amd_kernel_..., amd_machine_...
 .long 0,0,0,0
-# NOTE: the real one has 0x00000b40 here, but that doesn't work
+# kernel_code_entry_byte_offset, kernel_code_prefetch_byte_offset
 .long 0x00000bc0,0x00000000,0x00000000,0x00000000
+# kernel_code_prefetch_byte_size, max_scratch_backing_memory_byte_size
 .long 0,0,0,0
+# compute_pgm_rsrc1, compute_pgm_rsrc2, kernel_code_properties, workitem_private_segment_byte_size
 .long 0x60af0000,0x0000009e,0x00000408,0x00000000
-
+# compute_pgm_rsrc1 |= AMD_COMPUTE_PGM_RSRC_ONE_FLOAT_DENORM_MODE_32 | AMD_COMPUTE_PGM_RSRC_ONE_FLOAT_DENORM_MODE_16_64
+# compute_pgm_rsrc1 |= AMD_COMPUTE_PGM_RSRC_ONE_ENABLE_DX10_CLAMP | AMD_COMPUTE_PGM_RSRC_ONE_ENABLE_IEEE_MODE
+# compute_pgm_rsrc2 |= AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT = 0xF
+# compute_pgm_rsrc2 |= AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X
+# kernel_code_properties |= AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR = 1
+# kernel_code_properties |= AMD_KERNEL_CODE_PROPERTIES_RESERVED1 = 1
 .text
 .global code
 .type code,STT_FUNC
 code:
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
 # s[0:1] contains the kernarg_address
+# TODO: can we use s[2:3] if this was really a wave since we only alloced 2 SGPRs?
 s_load_b64 s[2:3], s[0:1], null
 
-# v_dual_mov_b32 v0, 4 :: v_dual_mov_b32 v1, 2.0
-v_mov_b32 v0, 4
-v_mov_b32 v1, 2.0
+v_dual_mov_b32 v0, 4 :: v_dual_mov_b32 v1, 2.0
+# v_mov_b32 v0, 4
+# v_mov_b32 v1, 2.0
 
 # wait for the s_load_b64
 s_waitcnt lgkmcnt(0)
