@@ -13,6 +13,8 @@ OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.p
 FLOAT16 = getenv("FLOAT16", 0)
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
+ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
+#ROCM_LLVM_PATH = pathlib.Path(__file__).parent.parent.parent.parent / "extra/rocm/build/llvm-project/bin"
 if DEBUG >= 5:
   from extra.helpers import enable_early_exec
   early_exec = enable_early_exec()
@@ -60,7 +62,7 @@ class CLProgram:
         from disassemblers.adreno import disasm
         disasm(self.binary())
       elif 'gfx1100' in CL.cl_ctx.devices[0].name:
-        asm = early_exec(([pathlib.Path(__file__).parent.parent.parent / "extra/rocm/build/llvm-project/bin/llvm-objdump", '-d', '-'], self.binary()))
+        asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
       else:
         # print the PTX for NVIDIA. TODO: probably broken for everything else

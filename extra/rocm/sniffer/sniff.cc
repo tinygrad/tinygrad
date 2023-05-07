@@ -13,6 +13,8 @@
 #include <linux/kfd_ioctl.h>
 #include <hsa.h>
 #include <amd_hsa_kernel_code.h>
+#include <ROCR-Runtime/src/core/inc/sdma_registers.h>
+using namespace rocr::AMD;
 
 #include <string>
 #include <map>
@@ -22,7 +24,7 @@ std::map<uint64_t, uint64_t> ring_base_addresses;
 #define D(args...) fprintf(stderr, args)
 
 uint64_t doorbell_offset = -1;
-int queue_type = 0;
+std::map<uint64_t, int> queue_types;
 
 void hexdump(void *d, int l) {
   for (int i = 0; i < l; i++) {
@@ -38,6 +40,7 @@ extern "C" {
 
 // https://defuse.ca/online-x86-assembler.htm#disassembly2
 static void handler(int sig, siginfo_t *si, void *unused) {
+  D("handler called\n");
   ucontext_t *u = (ucontext_t *)unused;
   uint8_t *rip = (uint8_t*)u->uc_mcontext.gregs[REG_RIP];
 
@@ -60,10 +63,42 @@ static void handler(int sig, siginfo_t *si, void *unused) {
   }
 
   uint64_t ring_base_address = ring_base_addresses[((uint64_t)si->si_addr)&0xFFF];
-  D("%16p: DING DONG store(%d): 0x%8lx -> %p ring_base_address:0x%lx\n", rip, store_size, value, si->si_addr, ring_base_address);
+  int queue_type = queue_types[((uint64_t)si->si_addr)&0xFFF];
+  D("%16p: DING DONG (queue_type %d) store(%d): 0x%8lx -> %p ring_base_address:0x%lx\n", rip, queue_type, store_size, value, si->si_addr, ring_base_address);
 
   if (queue_type == KFD_IOC_QUEUE_TYPE_SDMA) {
-    hexdump((void*)(ring_base_address), 0x100);
+    uint8_t *sdma_ptr = (uint8_t*)(ring_base_address);
+    while (sdma_ptr < ((uint8_t*)(ring_base_address)+value)) {
+      D("0x%3lx: ", sdma_ptr-(uint8_t*)(ring_base_address));
+      if (sdma_ptr[0] == SDMA_OP_TIMESTAMP) {
+        D("SDMA_PKT_TIMESTAMP\n");
+        sdma_ptr += sizeof(SDMA_PKT_TIMESTAMP);
+      } else if (sdma_ptr[0] == SDMA_OP_GCR) {
+        D("SDMA_PKT_GCR\n");
+        sdma_ptr += sizeof(SDMA_PKT_GCR);
+      } else if (sdma_ptr[0] == SDMA_OP_ATOMIC) {
+        D("SDMA_PKT_ATOMIC\n");
+        sdma_ptr += sizeof(SDMA_PKT_ATOMIC);
+      } else if (sdma_ptr[0] == SDMA_OP_FENCE) {
+        D("SDMA_PKT_FENCE\n");
+        sdma_ptr += sizeof(SDMA_PKT_FENCE);
+      } else if (sdma_ptr[0] == SDMA_OP_TRAP) {
+        D("SDMA_PKT_TRAP\n");
+        sdma_ptr += sizeof(SDMA_PKT_TRAP);
+      } else if (sdma_ptr[0] == SDMA_OP_COPY && sdma_ptr[1] == SDMA_SUBOP_COPY_LINEAR) {
+        SDMA_PKT_COPY_LINEAR *pkt = (SDMA_PKT_COPY_LINEAR *)sdma_ptr;
+        D("SDMA_PKT_COPY_LINEAR: count:0x%x src:0x%lx dst:0x%lx\n", pkt->COUNT_UNION.count+1,
+          (uint64_t)pkt->SRC_ADDR_LO_UNION.src_addr_31_0 | ((uint64_t)pkt->SRC_ADDR_HI_UNION.src_addr_63_32 << 32),
+          (uint64_t)pkt->DST_ADDR_LO_UNION.dst_addr_31_0 | ((uint64_t)pkt->DST_ADDR_HI_UNION.dst_addr_63_32 << 32)
+        );
+        sdma_ptr += sizeof(SDMA_PKT_COPY_LINEAR);
+      } else {
+        D("unhandled packet type %d %d, exiting\n", sdma_ptr[0], sdma_ptr[1]);
+        break;
+      }
+    }
+
+    //hexdump((void*)(ring_base_address), 0x100);
   } else if (queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL) {
     hexdump((void*)(ring_base_address+value*0x40), 0x40);
 
@@ -100,11 +135,19 @@ static void handler(int sig, siginfo_t *si, void *unused) {
 }
 
 void register_sigsegv_handler() {
-  struct sigaction sa;
+  struct sigaction sa = {0};
   sa.sa_flags = SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
   sa.sa_sigaction = handler;
-  sigaction(SIGSEGV, &sa, NULL);
+  if (sigaction(SIGSEGV, &sa, NULL) == -1) {
+    D("ERROR: failed to register sigsegv handler");
+    exit(-1);
+  }
+  // NOTE: python (or ocl runtime?) blocks the SIGSEGV signal
+  sigset_t x;
+  sigemptyset(&x);
+  sigaddset(&x, SIGSEGV);
+  sigprocmask(SIG_UNBLOCK, &x, NULL);
 }
 
 int (*my_open)(const char *pathname, int flags, mode_t mode);
@@ -135,7 +178,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
   void *ret = my_mmap(addr, length, prot, flags, fd, offset);
 
   if (doorbell_offset != -1 && offset == doorbell_offset) {
-    D("HIDDEN DOORBELL %p\n", addr);
+    D("HIDDEN DOORBELL %p, handled by %p\n", addr, handler);
     register_sigsegv_handler();
     mprotect(addr, length, PROT_NONE);
   }
@@ -208,8 +251,8 @@ int ioctl(int filedes, unsigned long request, void *argp) {
     D("RETURNS write_pointer_address:0x%llx read_pointer_address:0x%llx doorbell_offset:0x%llx queue_id:%d\n", args->write_pointer_address, args->read_pointer_address, args->doorbell_offset, args->queue_id);
     //D("RETURNS *write_pointer_address:0x%llx *read_pointer_address:0x%llx\n", *(uint64_t*)args->write_pointer_address, *(uint64_t*)args->read_pointer_address);
     ring_base_addresses[args->doorbell_offset&0xFFF] = args->ring_base_address;
+    queue_types[args->doorbell_offset&0xFFF] = args->queue_type;
     doorbell_offset = args->doorbell_offset&~0xFFF;
-    queue_type = args->queue_type;
   } else {
     D("type:0x%x nr:0x%x size:0x%x", type, nr, size);
   }
