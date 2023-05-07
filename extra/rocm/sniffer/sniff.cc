@@ -115,6 +115,8 @@ static void handler(int sig, siginfo_t *si, void *unused) {
       fwrite(kernel_code, 4, code_len, f);
       fclose(f);
       system("python -c 'print(\" \".join([(\"0x%02X\"%x) for x in open(\"/tmp/kernel_code\", \"rb\").read()]))' | ../build/llvm-project/bin/llvm-mc --disassemble --arch=amdgcn --mcpu=gfx1100 --show-encoding");*/
+      D("kernargs\n");
+      hexdump((void*)pkt->kernarg_address, 0x20);
     } else if ((pkt->header&0xFF) == HSA_PACKET_TYPE_BARRIER_AND) {
       D("HSA_PACKET_TYPE_BARRIER_AND\n");
     }

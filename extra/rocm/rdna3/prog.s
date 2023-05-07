@@ -15,14 +15,18 @@ code.kd:
 .global code
 .type code,STT_FUNC
 code:
-s_load_b64 s[0:1], s[0:1], null
+# https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
+# s[0:1] contains the kernarg_address
+s_load_b64 s[2:3], s[0:1], null
 
 # v_dual_mov_b32 v0, 4 :: v_dual_mov_b32 v1, 2.0
 v_mov_b32 v0, 4
 v_mov_b32 v1, 2.0
+
+# wait for the s_load_b64
 s_waitcnt lgkmcnt(0)
 
-global_store_b32 v0, v1, s[0:1]
+global_store_b32 v0, v1, s[2:3]
 
 # Deallocate all VGPRs for this wave. Use only when next instruction is S_ENDPGM.
 s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
