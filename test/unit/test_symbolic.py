@@ -85,6 +85,9 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_1(self):
     self.helper_test_variable(Variable("a", 0, 8)*1, 0, 8, "a")
 
+  def test_mul_neg_1(self):
+    self.helper_test_variable((Variable("a", 0, 2)*-1)//3, -1, 0, "((((a*-1)+3)//3)+-1)")
+
   def test_mul_2(self):
     self.helper_test_variable(Variable("a", 0, 8)*2, 0, 16, "(a*2)")
 

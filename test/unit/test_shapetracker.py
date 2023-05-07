@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, all_same
-from tinygrad.shape.shapetracker import ShapeTracker, View, ZeroView, merge_views, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
 from tinygrad.codegen.cstyle import to_image_idx
 
 def shapetracker_getitem(st, val):
@@ -63,40 +63,9 @@ class CheckingShapeTracker:
     x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
     y = [self[i] for i in range(prod(self.shape))]
     idx, valid = self.st.expr_node()
-    print(x, y, self.st.shape, self.shape, idx.render(), valid.render())
+    print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
     assert self.st.shape == self.shape
-    assert x == y, f"mismatch {x} {y}"
-
-class TestImageShapeTracker(unittest.TestCase):
-  def test_image(self):
-    base_shape = (64, 1024, 4)
-    print(base_shape)
-
-    new_view = merge_views(
-      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
-      View((64, 32, 8, 3, 3), (4160, 128, 4, 4160, 32), 0)
-    )
-    print(new_view)
-
-    st = ShapeTracker(shape=(64, 32, 8, 3, 3), views=[
-      View((1, 66, 130, 32, 1, 1), (0, 4096, 32, 1, 0, 0), -4128),
-      ZeroView((1, 64, 128, 32, 1, 1), ((0, 1), (-1, 65), (-1, 129), (0, 32), (0, 1), (0, 1))),
-      View((64, 32, 8, 3, 3), (4160, 128, 4, 4160, 32), 0)])
-    offsets = [0,32,64,96]
-
-    print(st.shape)
-    idys = []
-    for o in offsets:
-      print("offset:", o)
-      idxy, valid = st.expr_idxs(o)
-      print("idxy:", idxy.render())
-      print("valids:", [x.render() for x in valid.nodes])
-      idx, idy = to_image_idx(base_shape, idxy, valid, True)
-      idys.append(idy)
-      print(base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy)
-
-    # y index shouldn't be changing
-    assert all_same(idys)
+    assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
@@ -272,6 +241,47 @@ class TestSingleShapeTracker(unittest.TestCase):
     self.st.permute((1,0))
     assert not self.st.contiguous
 
+class TestShapeTrackerFuzzFailures(unittest.TestCase):
+  def setUp(self):
+    self.st = CheckingShapeTracker((3,3,3))
+  def tearDown(self):
+    self.st.assert_same()
+  @unittest.skip("simplify doesn't work in this case")
+  def test_case_1(self):
+    self.st.shrink(((1, 2), (1, 3), (1, 3)))
+    self.st.reshape((1, 4))
+    self.st.shrink(((0, 1), (1, 3)))
+    print(self.st.st)
+    self.st.simplify()
+    print(self.st.st)
+  def test_case_2(self):
+    self.st.stride( (1, 1, -2) )
+    self.st.reshape( (3, 6) )
+    self.st.shrink( ((1, 2), (1, 5)) )
+    self.st.stride( (1, -1) )
+  def test_case_3(self):
+    self.st.shrink( ((0, 2), (0, 2), (0, 1)) )
+    self.st.permute( (1, 0, 2) )
+    self.st.reshape( (4,) )
+    self.st.shrink( ((0, 3),) )
+    self.st.stride( (-1,) )
+  def test_case_4(self):
+    self.st.reshape( (3, 3, 3, 1) )
+    self.st.pad( ((0, 0), (0, 0), (0, 0), (1, 1)) )
+    self.st.shrink( ((0, 2), (1, 2), (0, 2), (0, 1)) )
+    self.st.expand( (2, 1, 2, 3) )
+
+class TestMaskedShapeTracker(unittest.TestCase):
+  def test_pad_1x1(self):
+    self.st = CheckingShapeTracker((1,1))
+    self.st.pad(((1,1), (1,1)))
+    self.st.assert_same()
+
+  def test_pad_2x2(self):
+    self.st = CheckingShapeTracker((2,2))
+    self.st.pad(((1,1), (1,1)))
+    self.st.assert_same()
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
@@ -293,6 +303,43 @@ class TestShapeTracker(unittest.TestCase):
   def test_pad_shrink(self):
     self.st.pad(((1,1), (1,1)))
     self.st.shrink(((0,4), (0,4)))
+
+  def test_pad_one_sided(self):
+    self.st.pad(((0,1), (0,0)))
+
+  def test_pad_reshape(self):
+    self.st.pad(((0,1), (0,0)))
+    self.st.reshape((8*4,))
+
+  def test_pad_pad(self):
+    self.st.pad(((1,1), (1,1)))
+    self.st.pad(((1,1), (1,1)))
+
+  def test_pad_permute(self):
+    self.st.pad(((1,1), (2,2)))
+    self.st.permute((1,0))
+
+  def test_pad_expand(self):
+    self.st.reshape((7,4,1))
+    self.st.pad(((1,1), (1,1), (0,0)))
+    self.st.expand((9,6,4))
+
+  def test_pad_expand_alt(self):
+    self.st.pad(((1,1), (1,1)))
+    self.st.reshape((9,6,1))
+    self.st.expand((9,6,4))
+
+  def test_pad_stride(self):
+    self.st.pad(((1,4), (1,3)))
+    self.st.stride((2,2))
+
+  def test_pad_stride_neg(self):
+    self.st.pad(((1,2), (1,0)))
+    self.st.stride((-1,-1))
+
+  def test_pad_stride_both(self):
+    self.st.pad(((1,2), (1,0)))
+    self.st.stride((-2,-2))
 
   def test_shrink_pad(self):
     self.st.shrink(((0,4), (0,4)))

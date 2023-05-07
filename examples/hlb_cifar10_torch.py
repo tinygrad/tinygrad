@@ -30,28 +30,28 @@ class ConvGroup(nn.Module):
     x = self.norm[2](self.conv[2](x) * mult).relu()
     return x + residual
 
+class GlobalMaxPool(nn.Module):
+  def forward(self, x): return torch.amax(x, dim=(2,3))
+
 class SpeedyResNet(nn.Module):
   def __init__(self):
     super().__init__()
     # TODO: add whitening
-    self.ic = nn.Conv2d(3, 64, kernel_size=1)
-    self.ib = nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8)
     self.net = nn.ModuleList([
+      nn.Conv2d(3, 64, kernel_size=1),
+      nn.BatchNorm2d(64, track_running_stats=False, eps=1e-12, momentum=0.8),
+      nn.ReLU(),
       ConvGroup(64, 128, short=False),
       ConvGroup(128, 256, short=True),
       ConvGroup(256, 512, short=False),
+      GlobalMaxPool(),
+      nn.Linear(512, num_classes, bias=False)
     ])
-    self.lin = nn.Linear(512, num_classes, bias=False)
 
   # note, pytorch just uses https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html instead of log_softmax
   def forward(self, x):
-    x = self.ic(x)
-    x = self.ib(x)
-    x = x.relu()
     for layer in self.net:
       x = layer(x)
-    x = torch.amax(x, dim=(2,3))
-    x = self.lin(x)
     return x.log_softmax(-1)
 
 def train_step_jitted(model, optimizer, X, Y):

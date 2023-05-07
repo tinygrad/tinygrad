@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Optional, cast, Dict, DefaultDict, NamedTuple, TypeVar
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -8,7 +8,7 @@ from tinygrad.ops import LazyOp, get_lazyops, get_buffers, FlopCounter, get_lazy
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
-from tinygrad.shape.symbolic import Variable, SumNode, ModNode
+from tinygrad.shape.symbolic import Variable
 
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto(); CAST = auto() # noqa: E702
 
@@ -42,12 +42,6 @@ class UOp(NamedTuple):
   vin: List[Token]
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
-
-def check_no_mul(test, var):
-  if test == var: return True
-  if isinstance(test, SumNode): return any(check_no_mul(x, var) for x in test.nodes) # in a sum is okay
-  if isinstance(test, ModNode) and test.b%4 == 0: return check_no_mul(test.a, var)   # removing a mod is okay
-  return False
 
 class Linearizer:
   supports_float4: bool = False
@@ -103,63 +97,80 @@ class Linearizer:
     # print early
     if DEBUG >= 5: self.printbufs("early")
 
-  # NOTE: this stride is only on the last view, and may not be real
+  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
+  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
+
+  # TODO: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
-                    self.sts[i].strides[self.shape_len-self.upcasted:],
+                    self.sts[i].views[-1].strides[self.shape_len-self.upcasted:],  # WRONG
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
-  def offsets(self, i): return [sum(t) for t in itertools.product(*[[y*x[1] for y in range(x[0])] for x in self.upcasted_axis(i)[::-1]])] if self.upcasted > 0 else [0]
-  def can_float4(self, i): return any(a[0:2] == (4,1) for a in self.upcasted_axis(i))
+  # TODO: is there a better way to write this?
   def acc_offsets(self, i):
     if self.upcasted == 0: return [0]
     acc_strides = [x*(1-self.upcasted_axis(i)[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in self.upcasted_axis(i)[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(self.upcasted_axis(i)[::-1])])]
 
-  def can_merge_float4(self, i:int, idxs:List[Variable], offset:int) -> bool:
-    if offset%4 != 0: return False
-    float4_index = Variable("FLOAT4_INDEX", 0, 3)
-    idxy_test, valid_test = self.sts[i].expr_idxs(float4_index+offset, idxs)
-    # float4_index must not be in after divide or in valid. NOTE: this forces it to always be aligned too, maybe not required?
-    ret = check_no_mul(idxy_test, float4_index) and "FLOAT4_INDEX" not in (idxy_test//4).render() and "FLOAT4_INDEX" not in (valid_test//4).render()
-    if DEBUG >= 5: print(f"fuse buf {i} {ret} :", check_no_mul(idxy_test, float4_index), idxy_test, idxy_test//4, valid_test//4)
-    return ret
+  def _group_float4(self, i, store_offset):
+    store_offset_float4 = {}
+    float4_axis = (self.upcasted-1) - self.float4_axis(i)[0]
+    for uidxs, var in store_offset.items():
+      if uidxs[float4_axis] == 0:
+        store_offset_float4[uidxs] = [var]
+      else:
+        uidxs2 = list(uidxs)
+        uidxs2[float4_axis] = 0
+        store_offset_float4[tuple(uidxs2)].append(var)
+    return store_offset_float4
 
   def global_load(self, i, idxs:List[Variable], const=None) -> List[Token]:
-    should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
-    cache: Dict[int, Token] = {}
-    def op(offset):
-      if offset in cache: return cache[offset]
-      will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
-      if const is not None:
-        reg = self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], const)
+    load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(LocalTypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
+
+    # float4 grouping (optional)
+    should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    if should_upcast:
+      load_offset_new = {}
+      for k,out_tokens in self._group_float4(i, load_offset).items():
+        idxs = [x[2]-out_tokens[0][2] for x in out_tokens]
+        valids_okay = all_same([x[3] for x in out_tokens]) or (all_same([x[3]//4 for x in out_tokens]) and (out_tokens[0][3]//4)*4 == out_tokens[0][3])
+        if any(idx.min != idx.max or idx.min != val for idx,val in zip(idxs, range(4))) or (out_tokens[0][2]//4)*4 != out_tokens[0][2] or not valids_okay:
+          # idxs not in order, valids don't match, or idx doesn't evenly divide 4. use normal float
+          for x in out_tokens: load_offset_new[x[1]] = x
+        else:
+          load_offset_new[k] = (LocalTypes.float4, [x[1] for x in out_tokens], out_tokens[0][2], out_tokens[0][3])
+      load_offset = load_offset_new
+
+    # do loads
+    cache: Dict[str, Token] = {}
+    loaded = {}
+    for uidxs, (localtype, uidx_list, idx, valid) in load_offset.items():
+      key = f"{localtype}{idx.render()}{valid.render()}"
+      if key not in cache:
+        cache[key] = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{len(cache)}", localtype), [], MemOp(i, idx, valid)) if const is None else self.uop(UOps.CONST, Token(f"acc{mnum(i)}_{len(cache)}", localtype), [], const)
+      if localtype == LocalTypes.float4:
+        for j,uidx in enumerate(uidx_list):
+          loaded[uidx] = Token(cache[key].name, LocalTypes.float4, j)
       else:
-        assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
-        reg = self.uop(UOps.LOAD, Token(f"val{mnum(i)}_{mnum(offset)}", LocalTypes.float4 if will_merge else LocalTypes.float), [], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-      if will_merge:
-        for j in range(0, 4): cache[offset+j] = Token(reg.name, LocalTypes.float4, j)
-      else:
-        cache[offset] = reg
-      return cache[offset]
-    return [op(o) for o in self.offsets(i)]
+        loaded[uidxs] = cache[key]
+    return [loaded[uidxs] for uidxs in self.shape_offsets(i)]
 
   def global_store(self, i, idxs:List[Variable], store=List[Token]) -> None:
-    should_upcast = self.supports_float4 and self.can_float4(i) and self.bufs[i].dtype != dtypes.float16
-    store_offset: Dict[int, int] = {y:x for x,y in enumerate(self.offsets(i))}  # NOTE: for stores, these should be unique
-    def op(offset):
-      if offset not in store_offset: return
-      will_merge = should_upcast and self.can_merge_float4(i, idxs, offset)
-      assert will_merge or not isinstance(self.bufs[i].dtype, ImageDType), "image must merge float4"
-      if will_merge:
-        out_tokens = [store[store_offset[offset+j]] for j in range(4)]
+    store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
+
+    # float4 grouping (optional)
+    should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    if should_upcast:
+      store_offset_new = {}
+      for k,out_tokens in self._group_float4(i, store_offset).items():
         if all_same([x.name for x in out_tokens]) and tuple(range(4)) == tuple(x.offset for x in out_tokens):
-          var = Token(store[store_offset[offset]].name, LocalTypes.float4)
+          store_offset_new[k] = Token(out_tokens[0].name, LocalTypes.float4)
         else:
-          var = self.uop(UOps.CAST, Token(store[store_offset[offset]].name+"_f4", LocalTypes.float4), out_tokens)
-      else:
-        var = store[store_offset[offset]]
-      for j in range(0, 4 if will_merge else 1): del store_offset[offset+j]
-      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(offset, idxs)))
-    for o in self.offsets(i): op(o)
+          store_offset_new[k] = self.uop(UOps.CAST, Token(out_tokens[0].name+"_f4", LocalTypes.float4), out_tokens)
+      store_offset = store_offset_new
+
+    # do stores
+    for uidxs, var in store_offset.items():
+      self.uop(UOps.STORE, None, [var], MemOp(i, *self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]])))
 
   def linearize(self):
     # uops
@@ -204,12 +215,17 @@ class Linearizer:
       gl_idxs = global_idxs
 
     # reduce op
+    fake_reduce_idxs = []
+    removed = len(global_idxs)
     if self.reduceop is not None:
+      # define indexes
+      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
+      fake_reduce_idxs = [x*0 for x in reduce_idxs]
+
       # define accumulator
-      acc = self.global_load(0, gl_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      acc = self.global_load(0, gl_idxs+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
       # reduce loop
-      reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]
       self.uop(UOps.LOOP, None, [], (reduce_idxs, "reduce"))
 
       # load earlybufs
@@ -223,7 +239,7 @@ class Linearizer:
 
       # end the local loop, do the local reduce
       if self.group_for_reduce:
-        self.global_store(-1, local_idxs, acc)  # store accumulators
+        self.global_store(-1, local_idxs+fake_reduce_idxs, acc)  # store accumulators
         self.uop(UOps.ENDLOOP, None, [], (local_idxs, "local"))   # this is a barrier on GPUs
 
         # if any group_for_reduce items aren't reduces, upcast them here
@@ -231,18 +247,19 @@ class Linearizer:
           self.reshape_and_permute(None, [i for i in range(self.shape_len) if i != j] + [j])
           self.upcast()
           self.group_for_reduce.pop()
+          removed -= 1
 
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, local_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        acc = self.global_load(-1, local_idxs[:removed]+fake_reduce_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
 
         # late reduce loop
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
         self.uop(UOps.LOOP, None, [], (end_local_idxs, "late_reduce"))
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs)
+        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
         self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
@@ -251,13 +268,13 @@ class Linearizer:
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
+    loaded_buffers.update({b:self.global_load(i, global_idxs[:removed]+fake_reduce_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and not isinstance(b, LocalBuffer)})
 
     # run late AST
     val = self.ast_parse(self.ast, acc, loaded_buffers, ssa)
 
     # store
-    self.global_store(0, global_idxs, val)
+    self.global_store(0, global_idxs[:removed]+fake_reduce_idxs, val)
 
     # end the global loop
     self.uop(UOps.ENDLOOP, None, [], (global_idxs, "global"))
@@ -376,14 +393,12 @@ class Linearizer:
 
   def required_optimizations(self, early_only=False):
     for buf_index,buf in enumerate(self.bufs):
-      upcast_strides = [self.sts[buf_index].strides[i] for i in self.upcast_in_mid_reduce_axes]
-      if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType) and not (self.can_float4(buf_index) or (buf not in self.earlybufs and (1 in upcast_strides))):
-        axes = [i for i,x in enumerate(self.sts[buf_index].strides) if x == 1]
-        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes} on buf_index {buf_index}, {self.sts[buf_index]}"
-        assert self.sts[buf_index].shape[axes[0]]%4 == 0, f"axis:{axes[0]} in buffer {buf_index} is not a multiple of 4, {self.sts[buf_index].shape}"
-        self.shift_to(axes[0], 4)
-        self.upcast()
-        assert self.can_float4(buf_index)
+      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes() if self.sts[buf_index].shape[i]%4 == 0]
+      if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType):
+        assert len(unit_stride_axes_mul_4) >= 1, "needs a unit stride axis"
+        if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
+          self.shift_to(unit_stride_axes_mul_4[0], 4)
+          self.upcast()
 
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
@@ -393,7 +408,7 @@ class Linearizer:
     self.simplify_ones()
 
     # are we grouping? (requires local shape support)
-    if not self.can_float4(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+    if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
       for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
         if all([st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts]):
@@ -402,8 +417,8 @@ class Linearizer:
           break
 
     # are we upcasting in mid reduce? (only for images)
-    if self.bufs[0].dtype.name.startswith('image') and not self.can_float4(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
-      axes = [i for i,x in enumerate(self.sts[0].strides) if x == 1]
+    if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:
+      axes = self.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
       if self.sts[0].shape[axes[0]]%4 == 0:
         self.shift_to(axes[0], 4, insert_before=self.first_reduce + len(self.group_for_reduce))   # insert at the end of the grouped axis
@@ -433,8 +448,9 @@ class Linearizer:
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if it mods, and some buffer has stride 0 on axis while having no stride 0 in the buftoken
-        if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
-          xb_choices.append((sum(st.strides[axis]>0 for st in self.sts), sum(st.strides[axis] for st in self.sts), axis, upcast_amount))
+        # NOTE: this is using views[-1]
+        if self.full_shape[axis]%upcast_amount == 0 and any(self.sts[buf_index].views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index in range(len(self.sts))):
+          xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))
       if len(xb_choices):
         xb_choices = sorted(xb_choices)
         if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
@@ -444,6 +460,13 @@ class Linearizer:
       else:
         break
 
-    # if last dim <= 5 and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
-    if self.first_reduce < (self.shape_len-self.upcasted) and self.full_unupcasted_shape[-1] <= 5 and (len(self.offsets(self.full_buf_index)) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
-      self.upcast()
+    # if last dim <= 16 and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
+    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
+      if self.full_unupcasted_shape[-1] <= 16:
+        self.upcast()
+      else:
+        for splits in [16,8,4]:
+          if self.full_unupcasted_shape[-1]%splits == 0:
+            self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
+            self.upcast()
+            break

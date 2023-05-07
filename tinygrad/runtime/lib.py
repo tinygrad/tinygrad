@@ -23,8 +23,8 @@ class RawBufferCopyIn(RawBuffer):
   def _copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod
-  def fromCPU(cls, x:np.ndarray):
-    ret = cls(prod(x.shape), dtypes.from_np(x.dtype))
+  def fromCPU(cls, x:np.ndarray, **kwargs):
+    ret = cls(prod(x.shape), dtypes.from_np(x.dtype), **kwargs)
     ret._copyin(x)
     return ret
 

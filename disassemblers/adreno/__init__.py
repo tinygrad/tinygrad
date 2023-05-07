@@ -10,7 +10,7 @@ def disasm(buf):
     shared = pathlib.Path(__file__).parent / "disasm.so"
     if not os.path.isfile(shared):
       os.system(f'cd {pathlib.Path(__file__).parent} && gcc -shared disasm-a3xx.c -o disasm.so')
-    fxn = ctypes.CDLL(shared)['disasm']
+    fxn = ctypes.CDLL(shared.as_posix())['disasm']
   #hexdump(buf)
   END = b"\x00\x00\x00\x00\x00\x00\x00\x03"
   buf = buf[0x510:]  # this right?

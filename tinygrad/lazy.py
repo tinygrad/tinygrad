@@ -102,6 +102,7 @@ class LazyBuffer:
     if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
+  def _device_extra_args(self) -> Dict[str, int]: return {"device": int(self.device.split(":")[1])} if ":" in self.device else {}
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if self.realized is None:
@@ -110,7 +111,7 @@ class LazyBuffer:
         if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
           self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
         else:
-          self.realized = Device[self.device].buffer.fromCPU(self.op.arg())
+          self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
@@ -131,7 +132,7 @@ class LazyBuffer:
         for x in get_buffers(self.op): x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
-        if self.optype != MovementOps and isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or self.shape[self.st.strides.index(1)]%4 != 0):
+        if self.optype != MovementOps and isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
           if self.op.op == MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
             self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
@@ -139,7 +140,7 @@ class LazyBuffer:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), dtypes.float32)
           self.dtype = dtypes.float32
 
-        self.realized = Device[self.device].exec_ast(self.op, output=self)
+        self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args())
 
       assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
@@ -157,7 +158,7 @@ class LazyBuffer:
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
   def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
-    return create_lazybuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x.copy()), dtypes.from_np(x.dtype))
+    return create_lazybuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x), dtypes.from_np(x.dtype))
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
@@ -168,7 +169,7 @@ class LazyBuffer:
   def toCPU(self):
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
     ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
-    return ret.copy()
+    return ret
 
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg else self
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
@@ -289,8 +290,9 @@ class _Device:
   def __init__(self) -> None:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, self._default_device())
+  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return self._get_device(x.split(":")[0].upper())
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+  def _get_device(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
   def _default_device(self) -> str:
     for device in ["METAL", "CUDA", "HIP", "GPU"]:
       try:

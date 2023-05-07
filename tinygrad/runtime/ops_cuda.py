@@ -1,3 +1,4 @@
+import subprocess
 from typing import Optional
 import numpy as np
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
@@ -16,6 +17,11 @@ class RawCUDABuffer(RawBufferCopyInOut):
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False):
     try:
+      if DEBUG >= 6:
+        with open("/tmp/cubin", "wb") as f:
+          f.write(cuda_compile(prg, target="cubin", no_extern_c=True))
+        sass = subprocess.check_output(['nvdisasm', '/tmp/cubin']).decode('utf-8')
+        print(sass)
       if not binary: prg = cuda_compile(prg, target="ptx", no_extern_c=True).decode('utf-8')
     except cuda.CompileError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)

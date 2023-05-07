@@ -28,6 +28,12 @@ class Node:
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
+
+    # this is a hack to make div work with boolean nodes. TODO: make generic
+    if isinstance(self, GeNode): return (self.a*b) >= (self.b*b)
+    if isinstance(self, LtNode): return (self.a*b) < (self.b*b)
+    if isinstance(self, AndNode): return Variable.ands([x*b for x in self.nodes])
+
     if isinstance(self, MulNode): return self.a*(self.b*b) # two muls is one mul
     if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
     return create_opnode(MulNode, self, b)
@@ -47,7 +53,7 @@ class Node:
     if isinstance(self, ModNode) and self.b % b == 0: return (self.a//b) % (self.b//b) # put the div inside mod
     if isinstance(self, DivNode): return self.a//(self.b*b) # two divs is one div
     if isinstance(self, MulNode) and self.b % b == 0: return self.a*(self.b//b)
-    if isinstance(self, MulNode) and b % self.b == 0: return self.a//(b//self.b)
+    if isinstance(self, MulNode) and b % self.b == 0 and self.b > 0: return self.a//(b//self.b) # NOTE: mod negative isn't handled right
     if isinstance(self, SumNode) and factoring_allowed:
       factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, (MulNode, NumNode))) and x.b%b == 0)
       nofactor = []
@@ -94,7 +100,7 @@ class Node:
     else:
       a = self
     if a.min >= 0 and a.max < b: return a
-    if a.min < 0: return (a + ((a.min//b)*b)) % b
+    if a.min < 0: return (a - ((a.min//b)*b)) % b
     return create_opnode(ModNode, a, b)
 
   @staticmethod
