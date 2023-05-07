@@ -1,4 +1,6 @@
 # run two tinygrad matrix example in a loop
+# amdgpu-6.0.5-1581431.20.04
+# NOT fixed in kernel 6.2.14
 
 [  553.016624] gmc_v11_0_process_interrupt: 30 callbacks suppressed
 [  553.016631] amdgpu 0000:0b:00.0: amdgpu: [gfxhub] page fault (src_id:0 ring:24 vmid:9 pasid:32770, for process python3 pid 10001 thread python3 pid 10001)

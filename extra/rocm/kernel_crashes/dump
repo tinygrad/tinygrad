@@ -1,4 +1,6 @@
 # run two "rocm-bandwidth-test" in a loop
+# amdgpu-6.0.5-1581431.20.04
+# fixed in kernel 6.2.14
 
 [   72.153646] RIP: 0010:pm_send_runlist+0x4a/0x630 [amdgpu]
 [   72.153815] Code: 30 65 48 8b 04 25 28 00 00 00 48 89 45 d0 31 c0 80 fb 01 0f 87 aa 9d 49 00 83 e3 01 0f 85 1c 05 00 00 49 8b 3f b8 01 00 00 00 <48> 8b 97 30 01 00 00 44 8b b7 6c 01 00 00 8b 9f 70 01 00 00 8b 8a
