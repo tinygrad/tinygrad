@@ -13,6 +13,13 @@ W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
+  def test_zerodim_initialization(self):
+    a = Tensor(55)
+    b = Tensor(3.14)
+
+    self.assertEqual(a.shape, ())
+    self.assertEqual(b.shape, ())
+
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
     b = Tensor.randn(10,10)

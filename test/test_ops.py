@@ -15,7 +15,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if shps is None:
     ts = [torch.tensor(x, requires_grad=True) for x in vals]
   else:
-    ts = [torch.tensor((np.random.random(size=x).astype(np.float32)+a)*b, requires_grad=True) for x in shps]
+    ts = [torch.tensor((np.random.random(size=x)+a)*b, requires_grad=True, dtype=torch.float32) for x in shps]
 
   tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
 
@@ -62,6 +62,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.full((45,65), 4), lambda: Tensor.full((45,65), 4), forward_only=True)
   def test_zeros(self):
     helper_test_op([], lambda: torch.zeros(45,65), lambda: Tensor.zeros(45,65), forward_only=True)
+    helper_test_op([], lambda: torch.zeros([45,65]), lambda: Tensor.zeros([45,65]), forward_only=True)
+    helper_test_op([], lambda: torch.zeros([]), lambda: Tensor.zeros([]), forward_only=True)
   def test_zeros_like(self):
     a = Tensor([[1,2,3],[4,5,6]])
     b = torch.tensor([[1,2,3],[4,5,6]])
@@ -70,6 +72,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.empty(45,65)*0/0, lambda: Tensor.empty(45,65)*0/0, forward_only=True)
   def test_ones(self):
     helper_test_op([], lambda: torch.ones(45,65), lambda: Tensor.ones(45,65), forward_only=True)
+    helper_test_op([], lambda: torch.ones([45,65]), lambda: Tensor.ones([45,65]), forward_only=True)
+    helper_test_op([], lambda: torch.ones([]), lambda: Tensor.ones([]), forward_only=True)
   def test_ones_like(self):
     a = Tensor([[1,2,3],[4,5,6]])
     b = torch.tensor([[1,2,3],[4,5,6]])
@@ -372,10 +376,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x.transpose(0,2), lambda x: x.transpose(0,2))
     helper_test_op([(1,2,3,4)], lambda x: x.movedim((3,0,2,1),(0,1,2,3)), lambda x: x.permute(order=(3,0,2,1)))
     helper_test_op([(3,4,5,6)], lambda x: x.movedim((3,2,1,0),(0,1,2,3)), lambda x: x.permute(order=(3,2,1,0)))
+    helper_test_op([()], lambda x: x.permute(()), lambda x: x.permute(()))
 
   def test_reshape(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,3,6,6)), lambda x: x.reshape(shape=(-1,3,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: torch.reshape(x, (-1,1,6,6)), lambda x: x.reshape(shape=(-1,1,6,6)))
+    helper_test_op([()], lambda x: torch.reshape(x, []), lambda x: x.reshape([]))
+    helper_test_op([(1,)], lambda x: torch.reshape(x, []), lambda x: x.reshape([]))
 
   def test_flip(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (0,)), lambda x: x.flip(axis=(0,)))
@@ -384,16 +391,22 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (3,)), lambda x: x.flip(axis=(3,)))
     helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (0,1,3)).flip((0,)), lambda x: x.flip(axis=(0,1,3)).flip(0))
     helper_test_op([(4,3,6,6)], lambda x: torch.flip(x, (3,)), lambda x: x.flip(axis=(-1,)))
+    helper_test_op([()], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
+    helper_test_op([(1,)], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
+    helper_test_op([(4, 3, 6, 6)], lambda x: torch.flip(x, ()), lambda x: x.flip(axis=()))
 
   def test_unsqueeze(self):
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 0), lambda x: x.unsqueeze(dim=0))
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, 4), lambda x: x.unsqueeze(dim=4))
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, -1), lambda x: x.unsqueeze(dim=-1))
     helper_test_op([(4,3,6,6)], lambda x: torch.unsqueeze(x, -3), lambda x: x.unsqueeze(dim=-3))
+    helper_test_op([()], lambda x: torch.unsqueeze(x, 0), lambda x: x.unsqueeze(dim=0))
 
   def test_flatten(self):
     for axis in range(3):
       helper_test_op([(4,3,6,6)], lambda x: torch.flatten(x, start_dim=axis), lambda x: x.flatten(axis))
+    helper_test_op([()], lambda x: x.flatten(), lambda x: x.flatten())
+    helper_test_op([(1,)], lambda x: x.flatten(), lambda x: x.flatten())
 
   def test_detach(self):
     helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), forward_only=True)
@@ -401,6 +414,7 @@ class TestOps(unittest.TestCase):
   def test_expand(self):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
+    helper_test_op([()], lambda x: x.expand([]), lambda x: x.expand(shape=[]))
 
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
