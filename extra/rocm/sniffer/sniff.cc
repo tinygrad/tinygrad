@@ -40,7 +40,6 @@ extern "C" {
 
 // https://defuse.ca/online-x86-assembler.htm#disassembly2
 static void handler(int sig, siginfo_t *si, void *unused) {
-  D("handler called\n");
   ucontext_t *u = (ucontext_t *)unused;
   uint8_t *rip = (uint8_t*)u->uc_mcontext.gregs[REG_RIP];
 
@@ -64,7 +63,7 @@ static void handler(int sig, siginfo_t *si, void *unused) {
 
   uint64_t ring_base_address = ring_base_addresses[((uint64_t)si->si_addr)&0xFFF];
   int queue_type = queue_types[((uint64_t)si->si_addr)&0xFFF];
-  D("%16p: DING DONG (queue_type %d) store(%d): 0x%8lx -> %p ring_base_address:0x%lx\n", rip, queue_type, store_size, value, si->si_addr, ring_base_address);
+  D("%16p: \u001b[31mDING DONG\u001b[0m (queue_type %d) store(%d): 0x%8lx -> %p ring_base_address:0x%lx\n", rip, queue_type, store_size, value, si->si_addr, ring_base_address);
 
   if (queue_type == KFD_IOC_QUEUE_TYPE_SDMA) {
     uint8_t *sdma_ptr = (uint8_t*)(ring_base_address);
@@ -100,8 +99,6 @@ static void handler(int sig, siginfo_t *si, void *unused) {
 
     //hexdump((void*)(ring_base_address), 0x100);
   } else if (queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL) {
-    hexdump((void*)(ring_base_address+value*0x40), 0x40);
-
     hsa_kernel_dispatch_packet_t *pkt = (hsa_kernel_dispatch_packet_t *)(ring_base_address+value*0x40);
     if ((pkt->header&0xFF) == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
       D("HSA_PACKET_TYPE_KERNEL_DISPATCH -- setup:%d workgroup[%d, %d, %d] grid[%d, %d, %d] kernel_object:0x%lx kernarg_address:%p\n", pkt->setup, pkt->workgroup_size_x, pkt->workgroup_size_y, pkt->workgroup_size_z, pkt->grid_size_x, pkt->grid_size_y, pkt->grid_size_z, pkt->kernel_object, pkt->kernarg_address);
@@ -115,10 +112,22 @@ static void handler(int sig, siginfo_t *si, void *unused) {
       fwrite(kernel_code, 4, code_len, f);
       fclose(f);
       system("python -c 'print(\" \".join([(\"0x%02X\"%x) for x in open(\"/tmp/kernel_code\", \"rb\").read()]))' | ../build/llvm-project/bin/llvm-mc --disassemble --arch=amdgcn --mcpu=gfx1100 --show-encoding");*/
-      D("kernargs\n");
-      hexdump((void*)pkt->kernarg_address, 0x20);
+      D("kernargs (kernarg_segment_byte_size:0x%lx)\n", code->kernarg_segment_byte_size);
+      // get length
+      int i;
+      for (i = 0; i < 0x400; i+=0x10) {
+        if (memcmp((void*)((uint64_t)pkt->kernarg_address+i), "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 0x10) == 0) break;
+      }
+      hexdump((void*)pkt->kernarg_address, i+0x10);
     } else if ((pkt->header&0xFF) == HSA_PACKET_TYPE_BARRIER_AND) {
-      D("HSA_PACKET_TYPE_BARRIER_AND\n");
+      hsa_barrier_and_packet_t *pkt_and = (hsa_barrier_and_packet_t *)(ring_base_address+value*0x40);
+      D("HSA_PACKET_TYPE_BARRIER_AND completion_signal:0x%lx\n", pkt_and->completion_signal.handle);
+      //hexdump((void*)(ring_base_address+value*0x40), 0x40);
+    } else if ((pkt->header&0xFF) == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
+      D("HSA_PACKET_TYPE_VENDOR_SPECIFIC\n");
+      hexdump((void*)(ring_base_address+value*0x40), 0x40);
+    } else {
+      hexdump((void*)(ring_base_address+value*0x40), 0x40);
     }
   }
 
@@ -219,9 +228,15 @@ int ioctl(int filedes, unsigned long request, void *argp) {
     D("AMDKFD_IOC_MAP_MEMORY_TO_GPU handle:%llX", args->handle);
   } else if (request == AMDKFD_IOC_CREATE_EVENT) {
     kfd_ioctl_create_event_args *args = (kfd_ioctl_create_event_args *)argp;
-    D("AMDKFD_IOC_CREATE_EVENT event_type:%d event_id:%d", args->event_type, args->event_id);
+    D("AMDKFD_IOC_CREATE_EVENT event_page_offset:0x%llx event_type:%d event_id:%d", args->event_page_offset, args->event_type, args->event_id);
   } else if (request == AMDKFD_IOC_WAIT_EVENTS) {
     D("AMDKFD_IOC_WAIT_EVENTS");
+  } else if (request == AMDKFD_IOC_SET_XNACK_MODE) {
+    D("AMDKFD_IOC_SET_XNACK_MODE");
+  } else if (request == AMDKFD_IOC_SVM || (type == 0x4b && nr == 0x20)) {
+    // NOTE: this one is variable length
+    kfd_ioctl_svm_args *args = (kfd_ioctl_svm_args *)argp;
+    D("AMDKFD_IOC_SVM start_addr:0x%llx size:0x%llx op:%d", args->start_addr, args->size, args->op);
   } else if (request == AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU) {
     kfd_ioctl_unmap_memory_from_gpu_args *args = (kfd_ioctl_unmap_memory_from_gpu_args *)argp;
     D("AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU handle:%llX", args->handle);
