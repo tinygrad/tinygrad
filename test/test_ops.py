@@ -29,7 +29,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   def compare(s, x,y,atol,rtol):
     if PRINT_TENSORS: print(s, x, y)
-    if y.shape != tuple(): assert x.shape == y.shape, f"shape mismatch (tinygrad){x.shape} != (torch){y.shape}"
+    assert x.shape == y.shape, f"shape mismatch: tinygrad={x.shape} | torch={y.shape}"
     try:
       np.testing.assert_allclose(x,y, atol=atol, rtol=rtol)
     except Exception:
