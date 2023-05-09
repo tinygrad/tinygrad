@@ -218,12 +218,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True), lambda x: Tensor.std(x, unbiased=True))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False), lambda x: Tensor.std(x, unbiased=False))
   def test_std_axis(self):
-    #helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=0), lambda x: Tensor.std(x, unbiased=True, axis=0))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=0), lambda x: Tensor.std(x, unbiased=False, axis=0))
-    #helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=1), lambda x: Tensor.std(x, unbiased=True, axis=1))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=1), lambda x: Tensor.std(x, unbiased=False, axis=1))
-    #helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=2), lambda x: Tensor.std(x, unbiased=True, axis=2))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=2), lambda x: Tensor.std(x, unbiased=False, axis=2))
+    def test_std_axis(self):
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=0), lambda x: Tensor.std(x, unbiased=True, axis=0), atol=1e-2, rtol=1e-2)
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=0), lambda x: Tensor.std(x, unbiased=False, axis=0))
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=2), lambda x: Tensor.std(x, unbiased=True, axis=2), atol=1e-2, rtol=1e-2)
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=2), lambda x: Tensor.std(x, unbiased=False, axis=2))
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=[1, 2]), lambda x: Tensor.std(x, unbiased=True, axis=[1, 2]))
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=[1, 2]), lambda x: Tensor.std(x, unbiased=False, axis=[1, 2]))
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=None), lambda x: Tensor.std(x, unbiased=True, axis=None))
+      helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=None), lambda x: Tensor.std(x, unbiased=False, axis=None))
   def test_std_keepdim(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
   def test_log_softmax(self):
