@@ -29,13 +29,17 @@ code:
 # TODO: can we use s[2:3] if this was really a wave since we only alloced 2 SGPRs?
 s_load_b64 s[2:3], s[0:1], null
 
-v_dual_mov_b32 v0, 4 :: v_dual_mov_b32 v1, 2.0
-# v_mov_b32 v0, 4
-# v_mov_b32 v1, 2.0
+s_mov_b32 s8, 0
+loop:
+s_addk_i32 s8, 1
+s_cmp_eq_u32 s8, 100000
+// FLOPS
+s_cbranch_scc0 loop
 
 # wait for the s_load_b64
 s_waitcnt lgkmcnt(0)
 
+v_dual_mov_b32 v0, 4 :: v_dual_mov_b32 v1, 2.0
 global_store_b32 v0, v1, s[2:3]
 
 # Deallocate all VGPRs for this wave. Use only when next instruction is S_ENDPGM.
@@ -66,7 +70,7 @@ amdhsa.kernels:
     .sgpr_spill_count: 0
     .symbol:         code.kd
     .uses_dynamic_stack: false
-    .vgpr_count:     2
+    .vgpr_count:     256
     .vgpr_spill_count: 0
     .wavefront_size: 32
 amdhsa.target:   amdgcn-amd-amdhsa--gfx1100

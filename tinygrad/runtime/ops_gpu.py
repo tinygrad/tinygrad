@@ -24,8 +24,7 @@ class _CL:
     platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
     if DEBUG >= 1: print(f"using {platforms[getenv('CL_PLATFORM', 0)]}")
     self.cl_ctx: cl.Context = cl.Context(devices=platforms[getenv('CL_PLATFORM', 0)])
-    #self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(self.cl_ctx, device=device, properties=cl.command_queue_properties.PROFILING_ENABLE) for device in self.cl_ctx.devices]
-    self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(self.cl_ctx, device=device) for device in self.cl_ctx.devices]
+    self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(self.cl_ctx, device=device, properties=cl.command_queue_properties.PROFILING_ENABLE) for device in self.cl_ctx.devices]
   def synchronize(self):
     for q in self.cl_queue: q.finish()
 CL = _CL()
