@@ -180,10 +180,24 @@ class Tensor:
       return fan_in if mode == "fan_in" else fan_out
 
     def _calculate_gain(nonlinearity, a):
-      if nonlinearity == "relu":
+      if nonlinearity == "linear":
+        return 1
+      elif nonlinearity == "relu":
         return math.sqrt(2.0)
+      elif nonlinearity == "tanh":
+        return 5.0 / 3
+      elif nonlinearity == "leaky_relu":
+        if a is None:
+          neg_slope = 0.01
+        elif not isinstance(a, bool) and isinstance(a, int) or isinstance(a, float):
+          neg_slope = a
+        else:
+          raise ValueError(f"Negative slope {a} is not a valid number.")
+        return math.sqrt(2.0 / (1 + neg_slope ** 2))
+      elif nonlinearity == "selu":
+        return 3.0 / 4
       else:
-        raise ValueError(f"{nonlinearity} is not supported yet.")
+        raise ValueError(f"{nonlinearity} is unsupported nonlinearity.")
 
     fan = _calculate_fan(shape, fan_mode)
     gain = _calculate_gain(nonlinearity, a)
