@@ -162,17 +162,34 @@ class Tensor:
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
-# apply kaiming uniform to weights
+  # ***** kaiming uniform to weights *****
   @staticmethod
-  def kaiming_uniform(*shape, fan_mode: str="fan_in", **kwargs) -> Tensor:
-    if fan_mode == "fan_in":
-      fan = shape[0]
-    elif fan_mode == "fan_out":
-      fan = prod(shape[1:])
-    else:
-      raise ValueError(f"Invalid fan_mode '{fan_mode}', should be 'fan_in' or 'fan_out'")
-    gain = (3/fan) ** 0.5
-    return gain * Tensor.uniform(*shape, **kwargs).mul((3/fan)**0.5)
+  def kaiming_uniform(*shape, a:float = 0, fan_mode: str = "fan_in", nonlinearity: str = "relu", **kwargs) -> Tensor:
+    # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
+    def _calculate_fan(shape, mode):
+      num_input_fmaps = shape[1]
+      num_output_fmaps = shape[0]
+      receptive_field_size = 1
+
+      for s in shape[2:]:
+        receptive_field_size *= s
+
+      fan_in = num_input_fmaps * receptive_field_size
+      fan_out = num_output_fmaps * receptive_field_size
+
+      return fan_in if mode == "fan_in" else fan_out
+
+    def _calculate_gain(nonlinearity, a):
+      if nonlinearity == "relu":
+        return math.sqrt(2.0)
+      else:
+        raise ValueError(f"{nonlinearity} is not supported yet.")
+
+    fan = _calculate_fan(shape, fan_mode)
+    gain = _calculate_gain(nonlinearity, a)
+    std = gain / math.sqrt(fan)
+    bound = math.sqrt(3.0) * std
+    return Tensor.uniform(*shape, **kwargs).mul(bound)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):

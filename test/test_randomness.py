@@ -1,6 +1,7 @@
 import math
 import unittest
 import numpy as np
+import torch
 from tinygrad.tensor import Tensor
 
 # https://gist.github.com/devries/11405101
