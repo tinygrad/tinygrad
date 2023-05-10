@@ -313,19 +313,58 @@ class TestOps(unittest.TestCase):
           # NOTE: ANE backwards?
           helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
 
-  def test_slice_simple(self):
-    helper_test_op([(3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
+  def test_slice_in_bounds_1dim(self):
+    helper_test_op([(3)], lambda x: x[1:3], lambda x: x[1:3])
+    helper_test_op([(3)], lambda x: x[0:2], lambda x: x[0:2])
+    helper_test_op([(3)], lambda x: x[-2:2], lambda x: x[-2:2])
 
-  def test_slice(self):
-    helper_test_op([(3,3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
-    helper_test_op([(3,3,3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
-    helper_test_op([(3,3,3,3)], lambda x: x[1:2, 1:2, 0:-1], lambda x: x[1:2, 1:2, 0:-1])
-
-  def test_slice_one(self):
+  def test_slice_int_indexing(self):
     helper_test_op([(3)], lambda x: x[1], lambda x: x[1])
-
-  def test_slice_one_multi(self):
+    helper_test_op([(3)], lambda x: x[-2], lambda x: x[-2])
     helper_test_op([(10,10)], lambda x: x[1], lambda x: x[1])
+
+  def test_slice_in_bounds_multidim(self):
+    helper_test_op([(3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
+    helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
+    helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, 0:-1], lambda x: x[1:2, 1:2, 0:-1])
+
+  def test_slice_with_none(self):
+    helper_test_op([(3,3,3)], lambda x: x[None], lambda x: x[None])
+    helper_test_op([(3,3,3)], lambda x: x[1:2, None], lambda x: x[1:2, None])
+    helper_test_op([(3,3,3)], lambda x: x[1:2, None, 1:2], lambda x: x[1:2, None, 1:2])
+    helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, None, -1], lambda x: x[1:2, 1:2, None, -1])
+
+  def test_slice_one_endpoint_out_of_bounds(self):
+    helper_test_op([(3,3,3)], lambda x: x[0:4], lambda x: x[0:4])
+    helper_test_op([(3,3,3)], lambda x: x[-6:4], lambda x: x[-6:4])
+    helper_test_op([(3,3,3)], lambda x: x[1:50], lambda x: x[1:50])
+    helper_test_op([(3,3,3)], lambda x: x[1:50, 1:2, -1], lambda x: x[1:50, 1:2, -1])
+
+  @unittest.skip("tinygrad: can't handle tensor with a dim size of 0")  # torch can: x[-15:-12].shape = torch.Size([0, 3, 3])
+  def test_slice_both_endpoints_out_of_bounds(self):
+    helper_test_op([(3,3,3)], lambda x: x[5:10], lambda x: x[5:10])
+    helper_test_op([(3,3,3)], lambda x: x[-15:-7], lambda x: x[-15:-7])
+
+  @unittest.skip("tinygrad: can't handle backward of tensor([])")
+  def test_slice_start_gt_end(self):
+    helper_test_op([(3,3,3)], lambda x: x[-2:2], lambda x: x[-2:2])
+    helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5])
+
+  @unittest.skip("torch: allow empty slices, tinygrad: throws AssertionError")
+  def test_slice_empty(self):
+    helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)
+
+  @unittest.skip("tinygrad: exprs raise AssertionError instead of IndexError")
+  def test_slice_errors(self):
+    a = Tensor.ones(4, 3)
+    with self.assertRaises(IndexError):
+      a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
+      a[1, 77]  # IndexError: (out of bounds).
+      a[0, -77]
+
+    with self.assertRaises(AssertionError):
+      a[1::2]
+      a[1, ::2]
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
@@ -701,7 +740,6 @@ class TestOps(unittest.TestCase):
 
     with self.assertRaises(AssertionError):
       x.repeat((2, 0, 4))
-
 
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
