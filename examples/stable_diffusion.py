@@ -615,8 +615,7 @@ if __name__ == "__main__":
   # load in weights
   download_file(
     'https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt',
-    FILENAME,
-    skip_if_exists=True
+    FILENAME
   )
   dat = fake_torch_load_zipped(open(FILENAME, "rb"))
   for k,v in dat['state_dict'].items():
