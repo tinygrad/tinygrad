@@ -73,5 +73,9 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.glorot_uniform))
     self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)), lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
+  def test_kaiming_uniform(self):
+    self.assertFalse(normal_test(Tensor.kaiming_uniform))
+    self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(3.0) * math.sqrt(2.0) / math.sqrt(x[0])))
+
 if __name__ == "__main__":
   unittest.main()
