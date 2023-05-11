@@ -27,6 +27,15 @@ class Relu(Function):
     mask = self.ret.const_like(1).binary_op(BinaryOps.SUB, self.ret.binary_op(BinaryOps.CMPEQ, self.ret.const_like(0)))
     return mask.binary_op(BinaryOps.MUL, grad_output)
 
+class LeakyRelu(Function):
+  def forward(self, x:LazyBuffer, alpha:float=0.01) -> LazyBuffer:
+    self.alpha = alpha
+    self.mask = x.binary_op(BinaryOps.ADD, x.const_like(0).binary_op(BinaryOps.LESS_THAN, x).binary_op(BinaryOps.MUL, self.alpha.const_like(0)))
+    return x.binary_op(BinaryOps.MUL, self.mask)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.mask.binary_op(BinaryOps.MUL, grad_output)
+
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
