@@ -162,27 +162,6 @@ class Tensor:
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
-  @staticmethod
-  def he_uniform(*shape, fan_mode : str = "fan_in", **kwargs) -> Tensor:
-    def _calculate_fan(shape, fan_mode):
-      if len(shape) < 1:
-        fan_in = fan_out = 1
-      elif len(shape) == 1:
-        fan_in = fan_out = shape[0]
-      elif len(shape) == 2:
-        fan_in = shape[0]
-        fan_out = shape[1]
-      else:
-        receptive_field_size = 1
-        for dim in shape[:-2]:
-          receptive_field_size *= dim
-        fan_in = shape[-2] * receptive_field_size
-        fan_out = shape[-1] * receptive_field_size
-      return fan_in if fan_mode=="fan_in" else fan_out
-
-    fan = _calculate_fan(shape, fan_mode)
-    return Tensor.uniform(*shape, **kwargs).mul((3 / fan) ** 0.5)
-
   # ***** toposort and backward pass *****
 
   def deepwalk(self):
