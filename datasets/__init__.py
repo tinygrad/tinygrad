@@ -17,7 +17,7 @@ def fetch_cifar(train=True):
   cifar10_mean = np.array([0.4913997551666284, 0.48215855929893703, 0.4465309133731618], dtype=np.float32).reshape(1,3,1,1)
   cifar10_std = np.array([0.24703225141799082, 0.24348516474564, 0.26158783926049628], dtype=np.float32).reshape(1,3,1,1)
   fn = os.path.dirname(__file__)+"/cifar-10-python.tar.gz"
-  download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn, True)
+  download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
   tt = tarfile.open(fn, mode='r:gz')
   if train:
     db = [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)]

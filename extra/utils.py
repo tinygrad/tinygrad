@@ -20,7 +20,7 @@ def fetch(url):
   with open(fp, "rb") as f:
     return f.read()
 
-def download_file(url, fp, skip_if_exists=False):
+def download_file(url, fp, skip_if_exists=True):
   import requests, os
   if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
     return
