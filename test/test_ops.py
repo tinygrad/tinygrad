@@ -346,6 +346,11 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  def test_simple_conv3d(self):
+    helper_test_op([(1,4,9,9,9), (4,4,3,3,3)],
+      lambda x,w: torch.nn.functional.conv3d(x,w).relu(),
+      lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
   def test_simple_conv2d_m4(self):
     helper_test_op([(1,16,18,18), (16,16,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
@@ -580,10 +585,10 @@ class TestOps(unittest.TestCase):
 
     for dim in range(-1, 3):
       helper_test_op([(45, 65, 3), (45, 65, 3), (45, 65, 3)], lambda x, y, z: torch.stack((x, y, z), dim=dim), lambda x, y, z: Tensor.stack([x, y, z], dim=dim))
-    
+
     with self.assertRaises(IndexError):
       Tensor.stack([x], dim=77)
-    
+
   def test_repeat(self):
     x = Tensor.randn(45, 65, 3)
     base_repeats = [2, 4, 3]
@@ -597,7 +602,7 @@ class TestOps(unittest.TestCase):
 
     with self.assertRaises(AssertionError):
       x.repeat((2, 0, 4))
-       
+
 
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
