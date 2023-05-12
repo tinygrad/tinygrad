@@ -36,9 +36,9 @@ class BatchNorm2d:
 # TODO: is this good weight init?
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
-    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else (kernel_size[0], kernel_size[1])
+    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
-    self.weight = Tensor.glorot_uniform(out_channels, in_channels//groups, self.kernel_size[0], self.kernel_size[1])
+    self.weight = Tensor.glorot_uniform(out_channels, in_channels//groups, *self.kernel_size)
     self.bias = Tensor.zeros(out_channels) if bias else None
 
   def __call__(self, x):
