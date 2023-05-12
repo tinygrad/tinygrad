@@ -7,7 +7,7 @@ class SingleConv:
   def __init__(self, in_channels, out_channels):
     self.groupnorm = nn.GroupNorm(1, in_channels) # 1 group?
     # TODO: make 2D conv generic for 3D, might already work with kernel_size=(3,3,3)
-    self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(3,3,3), bias=False)
+    self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(3,3,3), padding=(1,1,1,1,1,1), bias=False)
   def __call__(self, x):
     return self.conv(self.groupnorm(x)).relu()
 

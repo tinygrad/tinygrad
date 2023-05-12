@@ -27,7 +27,7 @@ if __name__ == "__main__":
   from models.unet3d import UNet3D
   mdl = UNet3D()
   mdl.load_from_pretrained()
-  img = Tensor.randn(1, 1, 64, 224, 224)
+  img = Tensor.randn(1, 1, 5, 224, 224)
   test_model(mdl, img)
 
   # RNNT
