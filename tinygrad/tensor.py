@@ -243,31 +243,35 @@ class Tensor:
     padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_))
     return self.pad(padding).shrink(tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)))
 
-  # Tensors mostly follow the normal python indexing / slicing behavior for sequences
-  # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
-  # - A slice i:j returns the elements with indices in [i, j)
-  #   - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
-  #   - Negative values for i and j are taken relative to the end of the sequence
-  #   - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
-  # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
-  # - Empty slices are not allowed
-  # - Strides other than 1 are not allowed
   def __getitem__(self, val):
-    def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))  # Fix negative idxs, clamp to [0,N]
-    new_slice, new_shape = [], []
-    val = [val] if not isinstance(val, (list, tuple)) else val
-    assert sum(s is not None for s in val) <= len(self.shape)
-    assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
-    for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
-      if isinstance(s, int) and not (-sz <= s < sz):
-        raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
-      new_slice.append((s%sz, s%sz+1) if isinstance(s, int) else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
-    for s,sz in zip(val, [self.shape[i-1] for i in itertools.accumulate([int(s is not None) for s in val])]):  # Shape depends on slices + positions of Nones
-      if not isinstance(s, int):
-        new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
-    new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
-    new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
-    return self.slice(new_slice).reshape(new_shape if len(new_shape) else (1,))
+    val = list(val) if isinstance(val, tuple) else [val]
+    if (num_slices := sum(isinstance(v, (slice, int)) for v in val)) > len(self.shape):
+      raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    else:
+      val += [slice(None) for _ in range(len(self.shape) - num_slices)]
+    it_shape = iter(self.shape)
+    new_shape, new_slice, zeros_in_shape = [], [], False
+    for i, e in enumerate(val):  # e either None, int or slice
+      if e is None:
+        new_shape.append(1)
+      else:
+        dim_sz = next(it_shape)
+        if isinstance(e, slice):
+          start, stop, stride = e.indices(dim_sz)  # let slice.indices() figure [i:j:k] for dim of size dim_sz
+          assert stride == 1, f"slices with stride > 1 not supported. stride = {stride} for dimension {i}"
+          if (y := stop - start) > 0:
+            new_shape.append(y)
+            new_slice.append((start, stop))
+          else: # y == 0 when [i:i] or [i:j] with (i, j) not in [-dim_sz, dim_sz), y < 0 when (i, j) in [-dim_sz, dim_sz) but i > j
+            new_slice.append((0, 0))
+            zeros_in_shape |= True
+        elif -dim_sz <= e < dim_sz:
+          e = e if e >= 0 else dim_sz + e
+          new_slice.append((e, e+1))
+        else:
+          raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
+    sliced_tensor = self.shrink(tuple(new_slice))
+    return sliced_tensor if zeros_in_shape else sliced_tensor.reshape(new_shape if len(new_shape) else (1,))
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
