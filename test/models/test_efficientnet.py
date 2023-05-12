@@ -105,8 +105,7 @@ class TestViT(unittest.TestCase):
 class TestResNet(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    from models.resnet import ResNet101
-    cls.model = ResNet101()
+    cls.model = ResNet50()
     cls.model.load_from_pretrained()
 
   @classmethod
