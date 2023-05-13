@@ -184,7 +184,7 @@ class ShapeTracker:
 
   def reshape(self, new_shape: Tuple[int, ...]):
     if self.shape == new_shape: return self
-    assert all(isinstance(x, int) and x != 0 for x in new_shape), f"shape must be ints and can't contain 0 {new_shape}"
+    assert all(isinstance(x, int) and x > 0 for x in new_shape), f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
     assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
 
     # check if this is adding or removing 1s (only)
