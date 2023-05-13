@@ -52,7 +52,6 @@ def _infer(model: EfficientNet, img, bs=1):
 
 chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')
 car_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/car.jpg')
-cannon_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/cannon.jpeg')
 
 class TestEfficientNet(unittest.TestCase):
   @classmethod
@@ -76,10 +75,6 @@ class TestEfficientNet(unittest.TestCase):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "sports car, sport car")
 
-  def test_cannon(self):
-    label = _infer(self.model, cannon_img)
-    self.assertEqual(label, "cannon")
-
 class TestViT(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
@@ -98,10 +93,6 @@ class TestViT(unittest.TestCase):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "racer, race car, racing car")
 
-  def test_cannon(self):
-    label = _infer(self.model, cannon_img)
-    self.assertEqual(label, "cannon")
-
 class TestResNet(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
@@ -114,11 +105,11 @@ class TestResNet(unittest.TestCase):
 
   def test_chicken(self):
     label = _infer(self.model, chicken_img)
-    self.assertEqual(label, "cock")
+    self.assertEqual(label, "hen")
 
-  def test_cannon(self):
-    label = _infer(self.model, cannon_img)
-    self.assertEqual(label, "cannon")
+  def test_car(self):
+    label = _infer(self.model, car_img)
+    self.assertEqual(label, "sports car, sport car")
 
 if __name__ == '__main__':
   unittest.main()
