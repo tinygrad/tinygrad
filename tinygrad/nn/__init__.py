@@ -1,9 +1,10 @@
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import prod
 
 class BatchNorm2d:
-  def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
-    self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
+  def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, unbiased=False):
+    self.eps, self.track_running_stats, self.momentum, self.unbiased = eps, track_running_stats, momentum, unbiased
 
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
@@ -18,7 +19,12 @@ class BatchNorm2d:
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       batch_mean = x.mean(axis=(0,2,3))
       y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
-      batch_var = (y*y).mean(axis=(0,2,3))
+      if self.unbiased:
+          out = y.square().sum(axis=(0,2,3), keepdim=False)
+          batch_var = out * (prod(out.shape)/(prod(y.shape) - 1))
+      else:
+          batch_var = y.square().mean(axis=(0,2,3))
+
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
