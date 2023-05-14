@@ -30,7 +30,7 @@ def proc(itermaker, q):
 def cross_process(itermaker, maxsize=8):
   # TODO: use cloudpickle for itermaker
   import multiprocessing
-  q = multiprocessing.Queue(maxsize)
+  q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
   p = multiprocessing.Process(target=proc, args=(itermaker, q))
   p.daemon = True
   p.start()
