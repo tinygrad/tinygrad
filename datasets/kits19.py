@@ -1,4 +1,5 @@
 # for kits19 clone the offical repo and run get_imaging.py
+import random
 import functools
 from pathlib import Path
 import pickle
@@ -77,15 +78,34 @@ def save(image, label, aux):
   mean, std = np.round(np.mean(image, (1, 2, 3)), 2), np.round(np.std(image, (1, 2, 3)), 2)
   results_dir = BASEDIR.parent / "results" 
   results_dir.mkdir(exist_ok=True) 
-  with (results_dir / f"{case}.pkl").open("wb") as f:
+  with (results_dir / f"{case:05}.pkl").open("wb") as f:
     pickle.dump([image, label], f)
 
+def preprocess(fn):
+  image, label, aux = load_resampled_case(fn)
+  image = normalize_intensity(image.copy())
+  image, label = pad_to_min_shape(image, label)
+  image, label = adjust_shape(image, label)
+  print(f"{fn.stem} {image.shape=} {label.shape=}")
+  save(image, label, aux)
+  return image, label
+
+def iterate(val=True, shuffle=True):
+  if not val: raise NotImplementedError
+  files = get_val_files()
+  order = list(range(0, len(files)))
+  if shuffle: random.shuffle(order)
+  # TODO: load batch
+  for file in files:
+    result_file = file.parent.parent / "results" / f"{file.stem}.pkl"
+    if result_file.is_file():
+      with result_file.open("rb") as f:
+        X, Y = pickle.load(f)
+    else:
+      X, Y = preprocess(file)
+    yield (np.array(X), np.array(Y))
+
 if __name__ == "__main__":
-  # preprocess validation set
-  for fn in get_val_files():
-    X, Y, aux = load_resampled_case(fn)
-    X = normalize_intensity(X.copy())
-    X, Y = pad_to_min_shape(X, Y)
-    X, Y = adjust_shape(X, Y)
-    print(f"{fn.stem} {X.shape=} {Y.shape=}")
-    save(X, Y, aux)
+  #for fn in get_val_files(): preprocess(fn)
+  X, Y = next(iterate())
+  print(X.shape, Y.shape)
