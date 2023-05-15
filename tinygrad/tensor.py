@@ -150,6 +150,10 @@ class Tensor:
   @staticmethod
   def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
+  @staticmethod
+  def bounded_randn(*shape, a=-1, b=1, **kwargs) -> Tensor:
+    return Tensor(LazyNumpyArray(lambda lna:  np.random.uniform(low=a, high=b, size=lna.shape), shape, np.float32), **kwargs)
+
   # ***** rng hlops *****
 
   @staticmethod
