@@ -95,7 +95,6 @@ def iterate(val=True, shuffle=True):
   files = get_val_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
-  # TODO: load batch
   for file in files:
     result_file = file.parent.parent / "results" / f"{file.stem}.pkl"
     if result_file.is_file():
