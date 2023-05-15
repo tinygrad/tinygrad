@@ -309,10 +309,9 @@ class Tensor:
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
     return out * (prod(out.shape)/prod(self.shape))
-  # TODO: implement unbiased True option for torch bessel's correction (subtracting 1 from divisor causes 0.01 error)
-  def std(self, axis=None, keepdim=False):
+  def std(self, axis=None, keepdim=False, unbiased=False):
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return (square_sum * (prod(square_sum.shape)/prod(self.shape))).sqrt()
+    return (square_sum * (prod(square_sum.shape)/(prod(self.shape) - (1 if unbiased else 0)))).sqrt()
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()

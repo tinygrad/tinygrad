@@ -19,11 +19,7 @@ class BatchNorm2d:
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       batch_mean = x.mean(axis=(0,2,3))
       y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
-      if self.unbiased:
-          out = y.square().sum(axis=(0,2,3), keepdim=False)
-          batch_var = out * (prod(out.shape)/(prod(y.shape) - 1))
-      else:
-          batch_var = y.square().mean(axis=(0,2,3))
+      batch_var = y.std(axis=(0,2,3))
 
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
