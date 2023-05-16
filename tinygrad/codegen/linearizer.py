@@ -31,6 +31,54 @@ class Token(NamedTuple):
     return self.name+"."+"xyzw"[int(self.offset)]
   def __repr__(self): return f"<{self.name}>" if self.offset is None and self.ltype == LocalTypes.float else f"<{self.name}:{self.ltype.name}:{self.offset}>"
 
+# TODO: the next four functions are poorly written
+def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
+  idxs = []
+  for i,a in enumerate(acc):
+    if idxs is None: break
+    if i in idxs: continue
+    if a.ltype == LocalTypes.float4 and a.offset == 0:
+      idxs.append(i)
+      friends = []
+      for j,b in enumerate(acc):
+        if len(friends) == 3: break
+        if j in idxs: continue
+        if a.name == b.name and b.ltype == LocalTypes.float4 and b.offset == len(friends)+1:
+          friends.append(j)
+      if len(friends) == 3: idxs += friends
+      else: idxs = None
+    else:
+      idxs = None
+  return idxs
+
+def to_float4(x:List[Token]) -> Optional[Token]:
+  if all_same(x): return x[0]
+  if all_same([y.name for y in x]) and all([y.ltype == LocalTypes.float4 and y.offset == i for i,y in enumerate(x)]):
+    return Token(x[0].name, LocalTypes.float4)
+  return None
+
+def get_grouped_maybe_float4(acc:List[Token], *values:List[Token]):
+  assert all_same([len(acc)] + [len(x) for x in values]), f"all values are not the same length {acc} {values}"
+  # these use accumulators, we can only fold if the acc is a float4
+  idxs = get_grouped_float4_idxs(acc)
+  if idxs is not None:
+    new_values = []
+    for i in range(0, len(idxs), 4):
+      nv = [Token(acc[i].name, LocalTypes.float4)]
+      for v in values:
+        nv.append(to_float4([v[j] for j in idxs[i:i+4]]))
+      if any([x is None for x in nv]): return zip(acc, *values)
+      new_values.append(nv)
+    return new_values
+  return zip(acc, *values)
+
+def expand_float4(x:List[Token]) -> List[Token]:
+  ret = []
+  for t in x:
+    if t.ltype == LocalTypes.float4 and t.offset is None: ret += [Token(t.name, t.ltype, i) for i in range(4)]
+    else: ret.append(t)
+  return ret
+
 class MemOp(NamedTuple):
   i: int
   idx: Variable
@@ -297,9 +345,11 @@ class Linearizer:
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     # TODO: fold float4 into a single uop when possible.
     if isinstance(x.op, (ReduceOps, FusedOps)):
-      return [self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]) for val in zip(acc, *values)]
+      # TODO: this has to be a root node? do we need to expand_float4?
+      return [self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op]) for val in get_grouped_maybe_float4(acc, *values)]
     else:
-      return [self.uop(UOps.ALU, ssa('alu'), list(val), x.op) for val in zip(*values)]
+      # ugh...this is wrong
+      return expand_float4([self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op) for val in get_grouped_maybe_float4(*values)])
 
   @property
   def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
