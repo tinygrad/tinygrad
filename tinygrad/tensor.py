@@ -163,9 +163,9 @@ class Tensor:
   def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
   # ***** kaiming uniform to weights *****
+  # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0, fan_mode: str = "fan_in", nonlinearity: str = "relu", **kwargs) -> Tensor:
-    # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
     def _calculate_fan(shape, mode):
       num_input_fmaps = shape[1]
       num_output_fmaps = shape[0]
@@ -203,7 +203,7 @@ class Tensor:
     gain = _calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std
-    return Tensor.uniform(*shape, **kwargs).mul(bound)
+    return Tensor(LazyNumpyArray(lambda lna: np.random.uniform(low=-bound, high=bound, size=lna.shape), shape, np.float32))
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
