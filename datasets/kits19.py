@@ -86,7 +86,6 @@ def preprocess(fn):
   image = normalize_intensity(image.copy())
   image, label = pad_to_min_shape(image, label)
   image, label = adjust_shape(image, label)
-  print(f"{fn.stem} {image.shape=} {label.shape=}")
   save(image, label, aux)
   return image, label
 
@@ -105,6 +104,5 @@ def iterate(val=True, shuffle=True):
     yield (np.array(X), np.array(Y))
 
 if __name__ == "__main__":
-  #for fn in get_val_files(): preprocess(fn)
   X, Y = next(iterate())
   print(X.shape, Y.shape)
