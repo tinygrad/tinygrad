@@ -33,13 +33,13 @@ class Token(NamedTuple):
 
 # TODO: the next three functions are poorly written
 def get_grouped_float4_idxs(acc:List[Token]) -> Optional[List[int]]:
-  idxs = []
+  idxs: Optional[List[int]] = []
   for i,a in enumerate(acc):
     if idxs is None: break
     if i in idxs: continue
     if a.ltype == LocalTypes.float4 and a.offset == 0:
       idxs.append(i)
-      friends = []
+      friends: List[int] = []
       for j,b in enumerate(acc):
         if len(friends) == 3: break
         if j in idxs: continue
@@ -342,12 +342,13 @@ class Linearizer:
       ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values)]
     else:
       ret = [(idx, self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=x.op!=BinaryOps.CMPEQ)]
-    ordered_ret = [None]*len(values[0])
+    ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
       for o,k in enumerate(i):
         ordered_ret[k] = Token(j.name, j.ltype, o) if j.ltype == LocalTypes.float4 else j
-    return ordered_ret
+    assert all(isinstance(x, Token) for x in ordered_ret), "some tokens didn't get scattered?"
+    return cast(List[Token], ordered_ret)
 
   @property
   def first_reduce(self) -> int: return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)
