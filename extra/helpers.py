@@ -22,3 +22,18 @@ def enable_early_exec():
     qin.put(x)
     return qout.get()
   return early_exec
+
+def proc(itermaker, q):
+  for x in itermaker(): q.put(x)
+  q.close()
+
+def cross_process(itermaker, maxsize=8):
+  # TODO: use cloudpickle for itermaker
+  import multiprocessing
+  q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
+  p = multiprocessing.Process(target=proc, args=(itermaker, q))
+  p.daemon = True
+  p.start()
+
+  # TODO: write tests and handle exit case
+  while 1: yield q.get()
