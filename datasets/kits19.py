@@ -101,7 +101,7 @@ def iterate(val=True, shuffle=True):
         X, Y = pickle.load(f)
     else:
       X, Y = preprocess(file)
-    yield (np.array(X), np.array(Y))
+    yield (np.array(X), np.array(Y), file.stem)
 
 if __name__ == "__main__":
   X, Y = next(iterate())

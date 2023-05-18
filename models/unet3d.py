@@ -35,8 +35,9 @@ class UNet3D:
   def load_from_pretrained(self):
     fn = Path(__file__).parent.parent / "weights/unet-3d.ckpt"
     download_file("https://oc.embl.de/index.php/s/61s67Mg5VQy7dh9/download?path=%2FLateral-Root-Primordia%2Funet_bce_dice_ds1x&files=best_checkpoint.pytorch", fn)
-    # TODO: replace with fake_torch_load
     import torch
+    # TODO: replace with fake_torch_load
+    # NOTE: the weights were serialized on a CUDA device, so we need to remap for non-CUDA users
     state_dict = torch.load(fn, map_location=lambda storage, loc: storage)["model_state_dict"]
     for k, v in state_dict.items():
       print(k, v.shape)
