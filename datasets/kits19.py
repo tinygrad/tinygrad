@@ -9,10 +9,10 @@ import nibabel as nib
 from scipy.ndimage import zoom
 
 BASEDIR = Path(__file__).parent.parent.parent.resolve() / "kits19" / "data"
-eval_set = requests.get("https://raw.githubusercontent.com/mlcommons/inference/c04de44104b80b7950e027e6c4b9b025eff2338b/vision/medical_imaging/3d-unet-kits19/meta/inference_cases.json").json()
 
 @functools.lru_cache(None)
 def get_val_files():
+  eval_set = requests.get("https://raw.githubusercontent.com/mlcommons/inference/c04de44104b80b7950e027e6c4b9b025eff2338b/vision/medical_imaging/3d-unet-kits19/meta/inference_cases.json").json()
   return [x for x in BASEDIR.iterdir() if x.stem in eval_set]
 
 # inspired by https://github.com/mlcommons/inference/blob/master/vision/medical_imaging/3d-unet-kits19/preprocess.py

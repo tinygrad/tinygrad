@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from tinygrad.tensor import Tensor
+from examples.mlperf import helpers
 
 if __name__ == "__main__":
   # inference only
@@ -43,4 +44,19 @@ if __name__ == "__main__":
     print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
     st = time.perf_counter()
 
-
+  # UNet3D
+  from models.unet3d import UNet3D
+  from datasets.kits19 import iterate
+  mdl = UNet3D()
+  mdl.load_from_pretrained()
+  for x, y in iterate():
+    image = x[np.newaxis, ...]
+    result, norm_map, norm_patch = helpers.prepare_arrays(image)
+    t_norm_patch = Tensor(norm_patch)
+    for i, j, k in helpers.get_slice(image):
+      result_slice = Tensor(result[..., i:i+128, j:j+128, k:k+128])
+      input_slice = image[..., i:i+128, j:j+128, k:k+128]
+      norm_map_slice = Tensor(norm_map[..., i:i+128, j:j+128, k:k+128])
+      # TODO: shape and dtype do not match here
+      result_slice += mdl(Tensor(input_slice)) * t_norm_patch
+      norm_map_slice += t_norm_patch
