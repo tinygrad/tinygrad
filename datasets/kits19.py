@@ -104,5 +104,6 @@ def iterate(val=True, shuffle=True):
     yield (np.array(X), np.array(Y), file.stem)
 
 if __name__ == "__main__":
-  X, Y = next(iterate())
-  print(X.shape, Y.shape)
+  # preprocess all files
+  for X, Y, case in iterate():
+    print(case, X.shape, Y.shape)

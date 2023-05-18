@@ -51,7 +51,7 @@ if __name__ == "__main__":
   mdl = UNet3D()
   mdl.load_from_pretrained()
   for x, y, case in iterate(shuffle=False):
-    if getenv("LOAD"): final_result = np.load(f"/tmp/{case}.npy")
+    if getenv("LOAD"): prediction = np.load(f"/tmp/{case}.npy")
     else:
       image = x[np.newaxis, ...]
       result, norm_map, norm_patch = helpers.prepare_arrays(image)
@@ -59,7 +59,8 @@ if __name__ == "__main__":
         input_slice = Tensor(image[..., i:i+128, j:j+128, k:k+128])
         result[..., i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
         norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
-      final_result = helpers.finalize(result, norm_map)
-      if getenv("STORE"): np.save(f"/tmp/{case}.npy", final_result)
-    # final_result.shape = (1, 1, 3, 128, 512, 512)
-    # y.shape = (1, 128, 512, 512)
+        print((i, j, k))
+      prediction = helpers.finalize(result, norm_map)
+      if getenv("STORE"): np.save(f"/tmp/{case}.npy", prediction)
+    groundtruth = np.expand_dims(y, 0)
+    assert prediction.shape == groundtruth.shape
