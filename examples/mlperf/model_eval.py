@@ -52,13 +52,9 @@ if __name__ == "__main__":
   for x, y in iterate():
     image = x[np.newaxis, ...]
     result, norm_map, norm_patch = helpers.prepare_arrays(image)
-    t_result, t_image, t_norm_map, t_norm_patch = Tensor(result), Tensor(image), Tensor(norm_map), Tensor(norm_patch)
     for i, j, k in helpers.get_slice(image):
-      result_slice = t_result[:, :, i:i+128, j:j+128, k:k+128]
-      input_slice = t_image[:, :, i:i+128, j:j+128, k:k+128]
-      norm_map_slice = t_norm_map[:, :, i:i+128, j:j+128, k:k+128]
-      result_slice += mdl(input_slice) * t_norm_patch
-      norm_map_slice += t_norm_patch
-    # TODO: assign values properly?
-    result, norm_map = t_result.numpy(), t_norm_map.numpy()
+      input_slice = Tensor(image[:, :, i:i+128, j:j+128, k:k+128])
+      # TODO: if going_to_segfault(): dont()
+      result[:, :, i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
+      norm_map[:, :, i:i+128, j:j+128, k:k+128] += norm_patch
     final_result = helpers.finalize(result, norm_map)
