@@ -54,7 +54,6 @@ if __name__ == "__main__":
     result, norm_map, norm_patch = helpers.prepare_arrays(image)
     for i, j, k in helpers.get_slice(image):
       input_slice = Tensor(image[:, :, i:i+128, j:j+128, k:k+128])
-      # TODO: if going_to_segfault(): dont()
       result[:, :, i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
       norm_map[:, :, i:i+128, j:j+128, k:k+128] += norm_patch
     final_result = helpers.finalize(result, norm_map)
