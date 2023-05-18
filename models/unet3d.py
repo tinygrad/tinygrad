@@ -29,6 +29,7 @@ class UNet3D:
     for e in self.encoders: intermediates.append(e(intermediates[-1]))
     ret = intermediates[-1]
     for d,i in zip(self.decoders, intermediates[:-1][::-1]): ret = d(ret.cat(i, dim=1))
+    ret = self.final_conv(ret)
     return ret
 
   def load_from_pretrained(self):

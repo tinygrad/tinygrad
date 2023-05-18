@@ -48,3 +48,9 @@ def get_slice(image, roi_shape=(128, 128, 128), overlap_factor=0.5):
     for j in range(0, strides[1] * size[1], strides[1]):
       for k in range(0, strides[2] * size[2], strides[2]):
         yield i, j, k
+
+def finalize(image, norm_map):
+  image /= norm_map
+  iamge = np.argmax(image, axis=1).astype(np.uint8)
+  image = np.expand_dims(image, axis=0)
+  return image
