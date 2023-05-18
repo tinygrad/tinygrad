@@ -53,7 +53,9 @@ if __name__ == "__main__":
     image = x[np.newaxis, ...]
     result, norm_map, norm_patch = helpers.prepare_arrays(image)
     for i, j, k in helpers.get_slice(image):
-      input_slice = Tensor(image[:, :, i:i+128, j:j+128, k:k+128])
-      result[:, :, i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
-      norm_map[:, :, i:i+128, j:j+128, k:k+128] += norm_patch
+      input_slice = Tensor(image[..., i:i+128, j:j+128, k:k+128])
+      result[..., i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
+      norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
     final_result = helpers.finalize(result, norm_map)
+    # final_result.shape = (1, 1, 3, 128, 512, 512)
+    # y.shape = (1, 128, 512, 512)
