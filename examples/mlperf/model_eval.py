@@ -51,10 +51,11 @@ if __name__ == "__main__":
   from datasets.kits19 import iterate
   mdl = UNet3D()
   mdl.load_from_pretrained()
-  score = []
+  scores = []
   for x, y, case in iterate(shuffle=False):
-    store_file = Path(f"/tmp/{case}.npy")
-    if getenv("LOAD") and store_file.is_file(): prediction = np.load(store_file)
+    print(case)  # DEBUG
+    result_file = Path(f"/tmp/{case}.npy")
+    if getenv("LOAD_KITS") and result_file.is_file(): prediction = np.load(result_file)
     else:
       image = x[np.newaxis, ...]
       result, norm_map, norm_patch = helpers.prepare_arrays(image)
@@ -63,7 +64,7 @@ if __name__ == "__main__":
         result[..., i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
         norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
       prediction = helpers.finalize(result, norm_map)
-      if getenv("STORE"): np.save(f"/tmp/{case}.npy", store_path)
+      if getenv("STORE_KITS"): np.save(result_file, prediction)
     assert prediction.shape == y.shape
-    score.append(helpers.get_dice_score(prediction, y))
-  print(sum(score) / len(score))
+    scores.append(helpers.get_dice_score(prediction, y).mean())
+  print(sum(scores) / len(scores))
