@@ -29,5 +29,11 @@ if __name__ == "__main__":
   test_model(mdl, img)
 
   # RNNT
+  from models.rnnt import RNNT
+  mdl = RNNT()
+  mdl.load_from_pretrained()
+  x = Tensor.randn(220, 1, 240)
+  y = Tensor.randn(220, 1, 240)
+  test_model(mdl, x, Tensor([220]), y)
 
   # BERT-large
