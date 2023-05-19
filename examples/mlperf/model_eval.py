@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
@@ -50,8 +51,10 @@ if __name__ == "__main__":
   from datasets.kits19 import iterate
   mdl = UNet3D()
   mdl.load_from_pretrained()
+  score = []
   for x, y, case in iterate(shuffle=False):
-    if getenv("LOAD"): prediction = np.load(f"/tmp/{case}.npy")
+    store_file = Path(f"/tmp/{case}.npy")
+    if getenv("LOAD") and store_file.is_file(): prediction = np.load(store_file)
     else:
       image = x[np.newaxis, ...]
       result, norm_map, norm_patch = helpers.prepare_arrays(image)
@@ -59,8 +62,8 @@ if __name__ == "__main__":
         input_slice = Tensor(image[..., i:i+128, j:j+128, k:k+128])
         result[..., i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
         norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
-        print((i, j, k))
       prediction = helpers.finalize(result, norm_map)
-      if getenv("STORE"): np.save(f"/tmp/{case}.npy", prediction)
-    groundtruth = np.expand_dims(y, 0)
-    assert prediction.shape == groundtruth.shape
+      if getenv("STORE"): np.save(f"/tmp/{case}.npy", store_path)
+    assert prediction.shape == y.shape
+    score.append(helpers.get_dice_score(prediction, y))
+  print(sum(score) / len(score))
