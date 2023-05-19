@@ -15,7 +15,6 @@ def get_val_files():
   eval_set = requests.get("https://raw.githubusercontent.com/mlcommons/inference/c04de44104b80b7950e027e6c4b9b025eff2338b/vision/medical_imaging/3d-unet-kits19/meta/inference_cases.json").json()
   return [x for x in BASEDIR.iterdir() if x.stem in eval_set]
 
-# inspired by https://github.com/mlcommons/inference/blob/master/vision/medical_imaging/3d-unet-kits19/preprocess.py
 def load_resampled_case(fn, target_spacing=[1.6, 1.2, 1.2]):
   image = nib.load(fn / "imaging.nii.gz")
   label = nib.load(fn / "segmentation.nii.gz")
@@ -70,24 +69,23 @@ def adjust_shape(image, label, roi_shape=[128, 128, 128], overlap=0.5, padding_v
   label, paddings = constant_pad_volume(label, roi_shape, strides, 0)
   return image, label
 
-def save(image, label, aux):
-  case = aux["case"]
-  reshaped_affine = aux["reshaped_affine"]
+def save(image, label, fp):
   image = image.astype(np.float32)
   label = label.astype(np.uint8)
-  mean, std = np.round(np.mean(image, (1, 2, 3)), 2), np.round(np.std(image, (1, 2, 3)), 2)
-  results_dir = BASEDIR.parent / "results" 
-  results_dir.mkdir(exist_ok=True) 
-  with (results_dir / f"{case:05}.pkl").open("wb") as f:
+  with fp.open("wb") as f:
     pickle.dump([image, label], f)
 
-def preprocess(fn):
-  image, label, aux = load_resampled_case(fn)
+def preprocess(fn, fp):
+  image, label, _ = load_resampled_case(fn)
   image = normalize_intensity(image.copy())
   image, label = pad_to_min_shape(image, label)
   image, label = adjust_shape(image, label)
-  save(image, label, aux)
   return image, label
+
+def load(fp):
+  with fp.open("rb") as f:
+    X, Y = pickle.load(f)
+  return X, Y
 
 def iterate(val=True, shuffle=True):
   if not val: raise NotImplementedError
@@ -95,13 +93,13 @@ def iterate(val=True, shuffle=True):
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   for file in files:
-    result_file = file.parent.parent / "results" / f"{file.stem}.pkl"
-    if result_file.is_file():
-      with result_file.open("rb") as f:
-        X, Y = pickle.load(f)
+    preprocess_fp = BASEDIR.parent / "results" / f"case_{file.stem}.pkl"
+    if preprocess_fp.is_file():
+      X, Y = load(preprocess_fp)
     else:
-      X, Y = preprocess(file)
-    yield (np.array(X), np.array(Y), file.stem)
+      X, Y = preprocess(file, preprocess_fp)
+      save(X, Y, preprocess_fp)
+    yield (X, Y, file.stem)
 
 if __name__ == "__main__":
   # preprocess all files

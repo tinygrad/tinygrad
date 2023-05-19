@@ -52,19 +52,27 @@ if __name__ == "__main__":
   mdl = UNet3D()
   mdl.load_from_pretrained()
   scores = []
-  for x, y, case in iterate(shuffle=False):
-    print(case)  # DEBUG
+  for X, Y, case in iterate():
+    print(f"{case=}")
     result_file = Path(f"/tmp/{case}.npy")
-    if getenv("LOAD_KITS") and result_file.is_file(): prediction = np.load(result_file)
+    if getenv("LOAD_KITS") and result_file.is_file():
+      pred = np.load(result_file)
     else:
-      image = x[np.newaxis, ...]
+      image = X[np.newaxis, ...]
       result, norm_map, norm_patch = helpers.prepare_arrays(image)
+      t_image, t_result, t_norm_map, t_norm_patch = Tensor(image), Tensor(result), Tensor(norm_map), Tensor(norm_patch)
       for i, j, k in helpers.get_slice(image):
-        input_slice = Tensor(image[..., i:i+128, j:j+128, k:k+128])
-        result[..., i:i+128, j:j+128, k:k+128] += mdl(input_slice).numpy() * norm_patch
-        norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
-      prediction = helpers.finalize(result, norm_map)
-      if getenv("STORE_KITS"): np.save(result_file, prediction)
-    assert prediction.shape == y.shape
-    scores.append(helpers.get_dice_score(prediction, y).mean())
+        result_slice = t_result[:, :, i:i+128, j:j+128, k:k+128]
+        input_slice = t_image[:, :, i:i+128, j:j+128, k:k+128]
+        norm_map_slice = t_norm_map[:, :, i:i+128, j:j+128, k:k+128]
+        result_slice += mdl(input_slice).realize() * t_norm_patch
+        norm_map_slice += t_norm_patch
+      result, norm_map = t_result.numpy(), t_norm_map.numpy()
+      result /= norm_map
+      pred = np.argmax(result, axis=1).astype(np.uint8)
+      if getenv("STORE_KITS"):
+        np.save(result_file, pred)
+    assert pred.shape == Y.shape
+    scores.append(helpers.get_dice_score(pred, Y).mean())
+    break
   print(sum(scores) / len(scores))
