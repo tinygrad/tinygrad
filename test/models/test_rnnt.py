@@ -5,8 +5,8 @@ from tinygrad.tensor import Tensor
 from models.rnnt import LSTM
 import torch
 
-class TestNN(unittest.TestCase):
-  def test_groupnorm(self):
+class TestRNNT(unittest.TestCase):
+  def test_lstm(self):
     BS, SQ, IS, HS, L = 8, 24, 512, 1024, 2
 
     # create in torch
@@ -29,9 +29,16 @@ class TestNN(unittest.TestCase):
 
     # test
     x = Tensor.randn(SQ, BS, IS)
-    z, _, _ = layer(x, None, None)
+    z, tg_h, tg_c = layer(x, None, None)
     torch_x = torch.tensor(x.cpu().numpy())
-    torch_z, _ = torch_layer(torch_x)
+    torch_z, pt_hidden = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
+
+    # test passing hidden
+    x = Tensor.randn(SQ, BS, IS)
+    z, tg_h, tg_c = layer(x, tg_h, tg_c)
+    torch_x = torch.tensor(x.cpu().numpy())
+    torch_z, pt_hidden = torch_layer(torch_x, pt_hidden)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
 if __name__ == '__main__':
