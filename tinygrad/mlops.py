@@ -46,8 +46,7 @@ class Exp(Function):
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    self.ret = x.unary_op(UnaryOps.SIN)
-    return self.ret
+    return x.unary_op(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.unary_op(UnaryOps.COS).binary_op(BinaryOps.MUL, grad_output)
@@ -55,8 +54,7 @@ class Sin(Function):
 class Cos(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    self.ret = x.unary_op(UnaryOps.COS)
-    return self.ret
+    return x.unary_op(UnaryOps.COS)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.const_like(-1).binary_op(BinaryOps.MUL, self.x.unary_op(UnaryOps.SIN)).binary_op(BinaryOps.MUL, grad_output)
