@@ -2,10 +2,23 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm, LayerNorm2d
+from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Upsample
 import torch
 
 class TestNN(unittest.TestCase):
+
+  def test_upsample(self):
+    for x in range(3):
+      idx = x + 1
+      scale = x + 2
+      xt = Tensor.randn(1, 3, *[32] * idx)
+      yt = Upsample(scale_factor=scale)(xt)
+      x = torch.tensor(xt.numpy())
+      y = torch.nn.Upsample(scale_factor=scale)(x)
+      self.assertEqual(y.shape, (1, 3, *[32 * scale] * idx))
+      self.assertEqual(yt.shape, (1, 3, *[32 * scale] * idx))
+      np.testing.assert_allclose(yt.numpy(), y.detach().numpy(), rtol=1e-5, atol=1e-6)
+
 
   def test_batchnorm2d(self, training=False):
     sz = 4

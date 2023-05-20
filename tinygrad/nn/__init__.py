@@ -1,5 +1,18 @@
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
+from itertools import chain
+class Upsample:
+  def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
+    assert mode == "nearest" # only mode supported for now
+    self.mode = mode
+    self.scale_factor = scale_factor
+  
+  def __call__(self, x: Tensor) -> Tensor:
+    assert len(x.shape) > 2 and len(x.shape) <= 5
+    (b, c), _lens = x.shape[:2], len(x.shape[2:])
+    tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
+    return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
+  
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
