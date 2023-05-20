@@ -58,12 +58,12 @@ if __name__ == "__main__":
   st = time.perf_counter()
   for X, Y in iterate():
     mt = time.perf_counter()
-    tt = mdl.decode(Tensor(X), Tensor([X.shape[0]]))
+    tt = mdl.decode(Tensor(X[0]), Tensor([X[1]]))
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
     for n, t in enumerate(tt):
       tnp = np.array(t)
       wer += word_error_rate(["".join([LABELS[int(tnp[i])] for i in range(tnp.shape[0])])], [Y[n]])
     c += len(tt)
-    print(f"WER: {wer/c:.8f}")
+    print(f"WER: {wer/c}, {c} samples, raw wer: {wer}")
     st = time.perf_counter()

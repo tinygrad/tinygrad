@@ -140,22 +140,24 @@ class StackTime:
     r = x.transpose(0, 1)
     if r.shape[1] % self.factor != 0:
       r = r.cat(Tensor.zeros(r.shape[0], (-r.shape[1]) % self.factor, r.shape[2]), dim=1)
+    else:
+      r = r.cat(Tensor.zeros(r.shape[0], self.factor, r.shape[2]), dim=1)
     r = r.reshape(r.shape[0], r.shape[1] // self.factor, r.shape[2] * self.factor)
-    x_lens = Tensor(np.ceil((x_lens / self.factor).numpy()))
+    x_lens = Tensor(np.ceil((x_lens / self.factor).numpy()).astype(np.float32))
     return r.transpose(0, 1), x_lens
 
 
 class Encoder:
-    def __init__(self, input_size, hidden_size, pre_layers, post_layers, stack_time_factor, dropout):
-      self.pre_rnn = LSTM(input_size, hidden_size, pre_layers, dropout)
-      self.stack_time = StackTime(stack_time_factor)
-      self.post_rnn = LSTM(stack_time_factor * hidden_size, hidden_size, post_layers, dropout)
+  def __init__(self, input_size, hidden_size, pre_layers, post_layers, stack_time_factor, dropout):
+    self.pre_rnn = LSTM(input_size, hidden_size, pre_layers, dropout)
+    self.stack_time = StackTime(stack_time_factor)
+    self.post_rnn = LSTM(stack_time_factor * hidden_size, hidden_size, post_layers, dropout)
 
-    def __call__(self, x, x_lens):
-      x, _, _ = self.pre_rnn(x, None, None)
-      x, x_lens = self.stack_time(x, x_lens)
-      x, _, _ = self.post_rnn(x, None, None)
-      return x.transpose(0, 1), x_lens
+  def __call__(self, x, x_lens):
+    x, _, _ = self.pre_rnn(x, None, None)
+    x, x_lens = self.stack_time(x, x_lens)
+    x, _, _ = self.post_rnn(x, None, None)
+    return x.transpose(0, 1), x_lens
 
 
 class Embedding:
@@ -179,9 +181,10 @@ class Prediction:
     self.rnn = LSTM(hidden_size, hidden_size, layers, dropout)
 
   def __call__(self, x, h, c):
-    x = self.emb(x) if x is not None else (Tensor.zeros(1, 1, self.hidden_size) if h is None else Tensor.zeros(h[0].shape[1], 1, self.hidden_size))
-    x, h, c = self.rnn(x.transpose(0, 1), h, c)
-    return x.transpose(0, 1), h, c
+    emb = self.emb(x) if x is not None else (Tensor.zeros(1, 1, self.hidden_size) if h is None else Tensor.zeros(h[0].shape[1], 1, self.hidden_size))
+    x, h_, c_ = self.rnn(emb.transpose(0, 1), h, c)
+    del emb, h, c
+    return x.transpose(0, 1), h_, c_
 
 
 class Joint:
@@ -199,4 +202,5 @@ class Joint:
     inp = f.cat(g, dim=3)
     t = self.l1(inp).relu()
     t = t.dropout(self.dropout)
+    del f, g, inp
     return self.l2(t)
