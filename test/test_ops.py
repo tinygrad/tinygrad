@@ -8,7 +8,7 @@ from tinygrad.lazy import Device
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
-def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3, printer=False):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   torch.manual_seed(0)
   np.random.seed(0)
@@ -24,6 +24,9 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   torch_fp = time.monotonic() - st
 
   st = time.monotonic()
+  if printer:
+    print("PRINTING TORCH INPUT")
+    print(ts[0])
   ret = tinygrad_fxn(*tst).realize()
   tinygrad_fp = time.monotonic() - st
 
@@ -148,6 +151,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: torch.log(x), Tensor.log)
   def test_exp(self):
     helper_test_op([(45,65)], lambda x: torch.exp(x), Tensor.exp)
+  def test_sin(self):
+    helper_test_op([(45,65)], lambda x: torch.sin(x), Tensor.sin, printer=True)
+  def test_cos(self):
+    helper_test_op([(45,65)], lambda x: torch.cos(x), Tensor.cos)
   def test_sign(self):
     helper_test_op([(45,65)], lambda x: torch.sign(x), Tensor.sign)
   def test_softsign(self):

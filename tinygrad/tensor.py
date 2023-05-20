@@ -396,6 +396,8 @@ class Tensor:
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
+  def sin(self): return mlops.Sin.apply(self)
+  def cos(self): return mlops.Cos.apply(self)
 
   # ***** math functions (unary) *****
 
