@@ -25,7 +25,7 @@ class RNNT:
     for b in range(logits.shape[0]):
       inseq = logits[b, :, :].unsqueeze(1)
       logit_len = logit_lens[b]
-      seq = self._greedy_decode(inseq, int(logit_len.numpy().item()))
+      seq = self._greedy_decode(inseq, int(np.ceil(logit_len.numpy()).item()))
       outputs.append(seq)
     return outputs
 
@@ -150,14 +150,9 @@ class StackTime:
 
   def __call__(self, x, x_lens):
     r = x.transpose(0, 1)
-    if r.shape[1] % self.factor != 0:
-      z = Tensor.zeros(r.shape[0], (-r.shape[1]) % self.factor, r.shape[2])
-    else:
-      z = Tensor.zeros(r.shape[0], self.factor, r.shape[2])
-    r = r.cat(z, dim=1)
+    r = r.pad(((0, 0), (0, (-r.shape[1]) % self.factor), (0, 0)))
     r = r.reshape(r.shape[0], r.shape[1] // self.factor, r.shape[2] * self.factor)
-    x_lens = (-(x_lens / self.factor)).cast(dtypes.int32) * -1
-    return r.transpose(0, 1), x_lens
+    return r.transpose(0, 1), x_lens / self.factor
 
 
 class Encoder:
