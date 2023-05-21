@@ -25,12 +25,10 @@ _start:
 .type code.kd,STT_OBJECT
 code.kd:
 .long 0,0,0,0
-.long 0xb00,0x00000000,0x00000000,0x00000000
+.long 0x00000bc0,0x00000000,0x00000000,0x00000000
 .long 0,0,0,0
 .long 0x60af0000,0x0000009e,0x00000408,0x00000000
-code_kd_end:
 .text
-code:
 """
 
 # TODO: generate this yaml
@@ -46,19 +44,19 @@ amdhsa.kernels:
         .value_kind:     global_buffer
       - .address_space:  global
         .name:           b
-        .offset:         8
+        .offset:         0
         .size:           8
         .type_name:      'float*'
         .value_kind:     global_buffer
       - .address_space:  global
         .name:           c
-        .offset:         0x10
+        .offset:         0
         .size:           8
         .type_name:      'float*'
         .value_kind:     global_buffer
     .group_segment_fixed_size: 0
     .kernarg_segment_align: 8
-    .kernarg_segment_size: 0x18
+    .kernarg_segment_size: 8
     .language:       OpenCL C
     .language_version:
       - 1
@@ -66,7 +64,7 @@ amdhsa.kernels:
     .max_flat_workgroup_size: 256
     .name:           code
     .private_segment_fixed_size: 0
-    .sgpr_count:     6
+    .sgpr_count:     2
     .sgpr_spill_count: 0
     .symbol:         code.kd
     .uses_dynamic_stack: false
@@ -89,32 +87,14 @@ class AssemblyCodegen(Linearizer):
     self.hand_coded_optimizations()
     self.linearize()
 
-    ins = []
-
-    # first three things are the buffers, load into s0-s5
-    ins.append('s_load_b64 s[4:5], s[0:1], 0x10')
-    ins.append('s_load_b128 s[0:3], s[0:1], null')
-    ins.append('s_waitcnt lgkmcnt(0)')
-
-    # move to vector reg
-    #ins.append('v_add_co_ci_u32_e32 v1, vcc_lo, s1, v1, vcc_lo')
-    #ins.append('v_add_co_ci_u32_e32 v0, vcc_lo, s0, v0, vcc_lo')
-
-    # store
-    ins.append('v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, 2.0')
-    ins.append('global_store_b32 v0, v1, s[0:1]')
-    #ins.append('global_store_b32 v0, v1, s[2:3]')
-    #ins.append('global_store_b32 v0, v1, s[4:5]')
+    instructions = []
 
     # exit asm
-    ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
+    instructions += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
 
-    code = boilerplate_start + '\n'.join(ins) + boilerplate_end
+    code = boilerplate_start + '\n'.join(instructions) + boilerplate_end
     object = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
     asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], object))
-
-    from hexdump import hexdump
-    hexdump(asm)
 
     global_size = []
     local_size = []
