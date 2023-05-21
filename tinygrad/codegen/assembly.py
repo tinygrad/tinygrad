@@ -113,8 +113,8 @@ class AssemblyCodegen(Linearizer):
     object = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
     asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], object))
 
-    from hexdump import hexdump
-    hexdump(asm)
+    #from hexdump import hexdump
+    #hexdump(asm)
 
     global_size = []
     local_size = []
