@@ -16,10 +16,8 @@ class Node:
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
-  def __repr__(self): return "<"+self.key+">"
-  def __eq__(self, other:object) -> bool:
-    if not isinstance(other, Node): return NotImplemented
-    return self.key == other.key
+  def __repr__(self): return f"<{self.key}>"
+  def __eq__(self, other:object) -> bool: return self.key == other.key if isinstance(other, Node) else NotImplemented
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:Union[Node, int]): return self+-b
@@ -68,7 +66,7 @@ class Node:
       gcd = [math.gcd(x.b, b) if isinstance(x, (MulNode, NumNode)) else None for x in nofactor]
       if len(factors) > 0:
         # these don't have to be the same, just having a common factor
-        if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
+        if gcd and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
           nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
         else:
           nofactor_term = Variable.sum(nofactor)//b
@@ -100,8 +98,7 @@ class Node:
     else:
       a = self
     if a.min >= 0 and a.max < b: return a
-    if a.min < 0: return (a - ((a.min//b)*b)) % b
-    return create_opnode(ModNode, a, b)
+    return (a - ((a.min//b)*b)) % b if a.min < 0 else create_opnode(ModNode, a, b)
 
   @staticmethod
   def num(num:int) -> Node: return NumNode(num)
@@ -109,14 +106,14 @@ class Node:
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
     # expand any sums inside one sum
-    if any([isinstance(x, SumNode) for x in nodes]):
+    if any(isinstance(x, SumNode) for x in nodes):
       nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
       for x in sum_nodes: nodes += x.nodes
       return Variable.sum(nodes)
 
     # combine any numbers inside a sum
     nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
-    nodes.append(NumNode(sum([x.b for x in num_nodes])))
+    nodes.append(NumNode(sum(x.b for x in num_nodes)))
 
     # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
     # TODO: this is slow!
@@ -143,8 +140,7 @@ class Node:
 class Variable(Node):
   def __new__(cls, expr:str, nmin:int, nmax:int):
     assert nmin >= 0 and nmin <= nmax
-    if nmin == nmax: return NumNode(nmin)
-    return super().__new__(cls)
+    return NumNode(nmin) if nmin == nmax else super().__new__(cls)
 
   def __init__(self, expr:str, nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
@@ -155,8 +151,7 @@ class NumNode(Node):
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
-  if ret.min == ret.max: return NumNode(ret.min)
-  return ret
+  return NumNode(ret.min) if ret.min == ret.max else ret
 
 class OpNode(Node):
   def __init__(self, a:Node, b:int): self.a, self.b = a, b
@@ -188,8 +183,8 @@ class AndNode(RedNode): pass
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
-  if typ == SumNode: ret.min, ret.max = (sum([x.min for x in nodes]), sum([x.max for x in nodes]))
-  elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
+  if typ == SumNode: ret.min, ret.max = sum(x.min for x in nodes), sum(x.max for x in nodes)
+  elif typ == AndNode: ret.min, ret.max = min(x.min for x in nodes), max(x.max for x in nodes)
   return create_node(ret)
 
 render_python: Dict[Type, Callable] = {

@@ -46,19 +46,17 @@ class Interpreted:
     if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
-    if context is None: context = dict()
+    if context is None: context = {}
     if not created_context and ast in context: return context[ast]
     srcs = [self.exec_ast(x, context=context) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.buffer(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
-    if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape):30s} in({len(srcs)}):", list(set(x._buf.shape for x in srcs)), ast.arg if ast.arg is not None else "")
+    if DEBUG >= 3: print( f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used / 1000000000.0:5.2f} GB {(time.perf_counter() - st) * 1000.0:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape):30s} in({len(srcs)}):", list({x._buf.shape for x in srcs}), ast.arg if ast.arg is not None else "", )
     if not created_context: context[ast] = ret
-    if output is not None and output.output_buffer is not None:
-      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
-      output.output_buffer._buf = ret._buf
-      return output.output_buffer
-    else:
-      return ret
+    if output is None or output.output_buffer is None: return ret
+    assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+    output.output_buffer._buf = ret._buf
+    return output.output_buffer
 
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
@@ -119,9 +117,9 @@ class ASTRunner:
       output_replacement = type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype)
       rawbufs = [output_replacement if x == rawbufs[0] else x for x in rawbufs]
     MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in self.global_size]
+    local_dims = [[ x for x in {sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP} if x <= sz ] for sz in self.global_size]
     local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-    return min([(self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
+    return min((self.timeit(rawbufs, local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes)))[1]
 
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], codegen, runtime, synchronize=lambda: None):

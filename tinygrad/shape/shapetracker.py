@@ -18,7 +18,7 @@ def check_no_mul(test, var):
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> List[Tuple[int, int]]:
   assert len(shape) == len(strides)
-  ret = [(shape[0], strides[0])] if len(shape) > 0 else []
+  ret = [(shape[0], strides[0])] if shape else []
   for i in range(1, len(shape)):
     if (strides[i] != 0 and ret[-1][1] == shape[i]*strides[i]) or ret[-1][0] == 1 or (strides[i] == 0 and ret[-1][1] == 0):
       ret[-1] = (ret[-1][0] * shape[i], strides[i])
@@ -80,7 +80,7 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
 
 @functools.lru_cache(maxsize=None)
 def view_from_shape(shape:Tuple[int, ...]) -> View:
-  assert all(isinstance(x, int) for x in shape) and len(shape) != 0
+  assert all(isinstance(x, int) for x in shape) and shape
   return View(tuple(shape), strides_for_shape(shape))
 
 @functools.lru_cache(maxsize=None)
@@ -129,15 +129,14 @@ class ShapeTracker:
     return ret
 
   def _expr_idx(self, idx, valid):
-    for v in self.views[0:-1][::-1]:
+    for v in self.views[:-1][::-1]:
       valid = v.expr_node_mask(idx, valid)
       idx = v.expr_node(idx)
     return idx, valid
 
   def simplify(self):
     if len(self.views) >= 2:
-      new_view = merge_views(self.views[-2], self.views[-1])
-      if new_view:
+      if new_view := merge_views(self.views[-2], self.views[-1]):
         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
         self.views = self.views[:-2] + [new_view]
         self.simplify()
@@ -158,7 +157,7 @@ class ShapeTracker:
   # *** under this line are the movement ops ***
 
   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
-    offset = sum([self.views[-1].strides[i]*x for i,(x,_) in enumerate(arg)])
+    offset = sum(self.views[-1].strides[i]*x for i,(x,_) in enumerate(arg))
     if self.views[-1].mask:
       # move the old mask
       nmask = tuple((max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg))
@@ -190,30 +189,31 @@ class ShapeTracker:
     # check if this is adding or removing 1s (only)
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
     if tuple(x for x in self.shape if x != 1) == tuple(x for x in new_shape if x != 1):
-      old_strides = [y for x,y in zip(self.shape, self.views[-1].strides) if x != 1]
-      new_strides_tuple = tuple(0 if x == 1 else old_strides.pop(0) for x in new_shape)
-      new_mask_tuple = None
-      if self.views[-1].mask:
-        if any(y!=(0,1) for x,y in zip(self.shape, self.views[-1].mask) if x == 1):
-          # mask it all out!
-          new_mask_tuple = tuple((0,0) for _ in new_shape)
-        else:
-          old_mask = [y for x,y in zip(self.shape, self.views[-1].mask) if x != 1]
-          new_mask_tuple = tuple((0,1) if x == 1 else old_mask.pop(0) for x in new_shape)
-      self.views[-1] = View(new_shape, new_strides_tuple, self.views[-1].offset, new_mask_tuple)
-      return self
-
+      return self._handle_ones_shape(new_shape)
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
-    else:
-      if (merged_view := merge_views(self.views[-1], view)) is not None: self.views[-1] = merged_view
+    elif (merged_view := merge_views(self.views[-1], view)) is None:
+      if DEBUG >= 4: print(f"WARNING: creating new view with reshape {self} -> {new_shape}")
+      self.views.append(view)
+    else: self.views[-1] = merged_view
+
+  def _handle_ones_shape(self, new_shape):
+    old_strides = [y for x,y in zip(self.shape, self.views[-1].strides) if x != 1]
+    new_strides_tuple = tuple(0 if x == 1 else old_strides.pop(0) for x in new_shape)
+    new_mask_tuple = None
+    if self.views[-1].mask:
+      if any(y!=(0,1) for x,y in zip(self.shape, self.views[-1].mask) if x == 1):
+        # mask it all out!
+        new_mask_tuple = tuple((0,0) for _ in new_shape)
       else:
-        if DEBUG >= 4: print(f"WARNING: creating new view with reshape {self} -> {new_shape}")
-        self.views.append(view)
+        old_mask = [y for x,y in zip(self.shape, self.views[-1].mask) if x != 1]
+        new_mask_tuple = tuple((0,1) if x == 1 else old_mask.pop(0) for x in new_shape)
+    self.views[-1] = View(new_shape, new_strides_tuple, self.views[-1].offset, new_mask_tuple)
+    return self
 
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
+    assert (len(set(axis)) == len(axis) == len( self.shape)), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.views[-1].strides[a] for a in axis), self.views[-1].offset, tuple(self.views[-1].mask[a] for a in axis) if self.views[-1].mask is not None else None)
 
   # except for the negative case, you can build this from the others. invertible in the negative case
@@ -221,7 +221,7 @@ class ShapeTracker:
     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
     strides = tuple(z*m for z,m in zip(self.views[-1].strides, mul))
     new_shape = tuple((s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul))
-    offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.views[-1].strides, mul) if m < 0])
+    offset = sum((s - 1) * z for s, z, m in zip(self.shape, self.views[-1].strides, mul)if m < 0)
     mask = tuple((((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.shape, mul)) if self.views[-1].mask is not None else None
     self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
 
@@ -251,7 +251,6 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Opt
         return None
       axis_groups[i].append(old_shape_i)
       # Move to next axes group if total size of all dimensions match.
-      if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i]:
-        if i < len(new_shape) - 1: i += 1
+      if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i] and i < len(new_shape) - 1: i += 1
       old_shape_i += 1
   return axis_groups

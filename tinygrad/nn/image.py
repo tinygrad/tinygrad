@@ -7,9 +7,9 @@ base_image_type = (100, 2, "imageh", np.float16) if FLOAT16 else (100, 4, "image
 
 def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-  bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
+  bs, groups = prod(self.shape[:-2]), prod(w.shape[:-2])
   cin, cout = w.shape[-2], w.shape[-1]
-  out_shape_t = self.shape[0:-2] + (cout,-1)
+  out_shape_t = self.shape[:-2] + (cout,-1)
   if len(self.shape) > 1:
     order = tuple(range(len(self.shape)-2)) + (len(self.shape)-1, len(self.shape)-2)
   else:
@@ -71,7 +71,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   # prepare input
   x = x.permute(0,3,4,5,1,2)._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
   oy, ox = x.shape[4:6]
-  x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, oy, ox, *cout_expand[0:2], 1, 1, rcin_hi, rcin_lo, H, W)
+  x = x.permute(0, 4, 5, 1, 2, 3, 6, 7).reshape(bs, oy, ox, *cout_expand[:2], 1, 1, rcin_hi, rcin_lo, H, W)
   x = x.expand(bs, oy, ox, *cout_expand, rcin_hi, rcin_lo, H, W)
 
   # prepare weights

@@ -76,8 +76,6 @@ class LayerNorm:
   def __call__(self, x:Tensor):
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
     x = x.layernorm(eps=self.eps, axis=self.axis)
-    if not self.elementwise_affine: return x
-    return x * self.weight + self.bias
-
+    return x * self.weight + self.bias if self.elementwise_affine else x
 class LayerNorm2d(LayerNorm):
   def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
