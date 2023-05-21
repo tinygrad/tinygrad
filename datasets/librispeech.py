@@ -49,7 +49,7 @@ def load_wav(file):
   sample = librosa.load(file, sr=16000)[0].astype(np.float32)
   return sample, sample.shape[0]
 
-def iterate(bs=1, start=0):
+def iterate(bs=8, start=0):
   print(f"there are {len(ci)} samples in the dataset")
   for i in range(start, len(ci), bs):
     samples, sample_lens = zip(*[load_wav(os.path.join(BASEDIR, v["files"][0]["fname"])) for v in ci[i : i + bs]])
