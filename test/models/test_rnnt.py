@@ -7,7 +7,7 @@ import torch
 
 class TestRNNT(unittest.TestCase):
   def test_lstm(self):
-    BS, SQ, IS, HS, L = 8, 24, 512, 1024, 2
+    BS, SQ, IS, HS, L = 8, 220, 240, 1024, 2
 
     # create in torch
     with torch.no_grad():
@@ -28,18 +28,20 @@ class TestRNNT(unittest.TestCase):
       layer.cells[1].bias_hh.assign(Tensor(torch_layer.bias_hh_l1.numpy()))
 
     # test
-    x = Tensor.randn(SQ, BS, IS)
-    z, tg_h, tg_c = layer(x, None, None)
-    torch_x = torch.tensor(x.cpu().numpy())
-    torch_z, pt_hidden = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
+    for i in range(3):
+      x = Tensor.randn(SQ, BS, IS)
+      z, hc = layer(x, None)
+      torch_x = torch.tensor(x.cpu().numpy())
+      torch_z, torch_hc = torch_layer(torch_x)
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
     # test passing hidden
-    x = Tensor.randn(SQ, BS, IS)
-    z, tg_h, tg_c = layer(x, tg_h, tg_c)
-    torch_x = torch.tensor(x.cpu().numpy())
-    torch_z, pt_hidden = torch_layer(torch_x, pt_hidden)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
+    for i in range(3):
+      x = Tensor.randn(SQ, BS, IS)
+      z, hc = layer(x, hc)
+      torch_x = torch.tensor(x.cpu().numpy())
+      torch_z, torch_hc = torch_layer(torch_x, torch_hc)
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
 if __name__ == '__main__':
   unittest.main()
