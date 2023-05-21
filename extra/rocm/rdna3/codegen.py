@@ -17,4 +17,7 @@ b1 = LazyBuffer.fromCPU(ones, target)
 b2 = LazyBuffer.fromCPU(ones, target)
 
 out = LazyBuffer(target, ShapeTracker((3,)), BinaryOps, LazyOp(BinaryOps.ADD, (b1, b2)), dtypes.float32)
+out.realize()
+print(b1.toCPU())
+print(b2.toCPU())
 print(out.toCPU())
