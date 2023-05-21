@@ -79,12 +79,12 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
-  def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None):
-    if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name
+  def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args={}):
+    if DEBUG >= 4 and 'binary' not in runtime_args: print(prg)
+    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args
 
   def build(self, runtime):
-    self.clprg = runtime(self.name, self.prg)
+    self.clprg = runtime(self.name, self.prg, **self.runtime_args)
     return self
 
   def exec(self, bufs) -> Optional[float]:

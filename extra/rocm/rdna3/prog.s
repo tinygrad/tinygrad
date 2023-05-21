@@ -21,9 +21,6 @@ code.kd:
 # kernel_code_properties |= AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR = 1
 # kernel_code_properties |= AMD_KERNEL_CODE_PROPERTIES_RESERVED1 = 1
 .text
-.global code
-.type code,STT_FUNC
-code:
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
 # s[0:1] contains the kernarg_address
 # TODO: can we use s[2:3] if this was really a wave since we only alloced 2 SGPRs?
