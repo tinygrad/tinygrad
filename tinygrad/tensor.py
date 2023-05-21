@@ -17,7 +17,7 @@ class Function:
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
 
   @classmethod
-  def apply(cls, fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
+  def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
     if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
