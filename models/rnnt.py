@@ -1,6 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn import Linear
+from tinygrad.helpers import dtypes
 import numpy as np
 from extra.utils import download_file
 from pathlib import Path
@@ -12,9 +13,9 @@ class RNNT:
     self.prediction = Prediction(vocab_size, pred_hidden_size, pred_layers, dropout)
     self.joint = Joint(vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout)
 
-  def __call__(self, x, x_lens, y, h=None, c=None):
+  def __call__(self, x, x_lens, y, hc=None):
     f, _ = self.encoder(x, x_lens)
-    g, *_ = self.prediction(y, h, c)
+    g, _ = self.prediction(y, hc)
     out = self.joint(f, g)
     return out
 
@@ -119,9 +120,9 @@ def _FastLSTM():
 
       output = None
       for t in range(x.shape[0]):
-        inp = Tensor.cat(x[t].reshape(x.shape[1] * self.input_size), hc)
+        inp = x[t].flatten().cat(hc)
         out = self.do_cell(inp, x.shape[1])
-        hc, o = out[x.shape[1]:].reshape(-1), Tensor(out[:x.shape[1]].numpy())
+        hc, o = out[x.shape[1]:].flatten(), Tensor(out[:x.shape[1]].numpy())
         output = o.unsqueeze(0) if output is None else output.cat(o.unsqueeze(0), dim=0).realize()
 
       return output, hc
@@ -136,7 +137,7 @@ def _FastLSTM():
         x, h_, c_ = cell(x, h, c)
         new_h.append(h_)
         new_c.append(c_)
-      return Tensor.cat(x, *new_h, *new_c).realize()
+      return x.cat(*new_h, *new_c).realize()
 
   return _LSTM
 
@@ -155,7 +156,7 @@ class StackTime:
       z = Tensor.zeros(r.shape[0], self.factor, r.shape[2])
     r = r.cat(z, dim=1)
     r = r.reshape(r.shape[0], r.shape[1] // self.factor, r.shape[2] * self.factor)
-    x_lens = Tensor(np.ceil((x_lens / self.factor).numpy()).astype(np.float32))
+    x_lens = (-(x_lens / self.factor)).cast(dtypes.int32) * -1
     return r.transpose(0, 1), x_lens
 
 
