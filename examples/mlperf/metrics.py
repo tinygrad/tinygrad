@@ -22,4 +22,4 @@ def word_error_rate(x, y):
     r_list = r.split()
     words += len(r_list)
     scores += levenshtein(h_list, r_list)
-  return 1.0 * scores / words
+  return float(scores) / words, float(scores), words

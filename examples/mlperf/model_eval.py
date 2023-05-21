@@ -53,8 +53,9 @@ if __name__ == "__main__":
 
   LABELS = [" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "'"]
 
-  wer = 0
   c = 0
+  scores = 0
+  words = 0
   st = time.perf_counter()
   for X, Y in iterate():
     mt = time.perf_counter()
@@ -63,7 +64,9 @@ if __name__ == "__main__":
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
     for n, t in enumerate(tt):
       tnp = np.array(t)
-      wer += word_error_rate(["".join([LABELS[int(tnp[i])] for i in range(tnp.shape[0])])], [Y[n]])
+      _, scores_, words_ = word_error_rate(["".join([LABELS[int(tnp[i])] for i in range(tnp.shape[0])])], [Y[n]])
+      scores += scores_
+      words += words_
     c += len(tt)
-    print(f"WER: {wer/c}, {c} samples, raw wer: {wer}")
+    print(f"WER: {scores/words}, {words} words, raw scores: {scores}, c: {c}")
     st = time.perf_counter()
