@@ -16,7 +16,7 @@ def feature_extract(x, x_lens):
   x = np.concatenate((np.expand_dims(x[:, 0], 1), x[:, 1:] - 0.97 * x[:, :-1]), axis=1)
 
   # stft
-  x = librosa.stft(x, n_fft=512, window="hann", hop_length=160, win_length=320, center=True)
+  x = librosa.stft(x, n_fft=512, window="hann", hop_length=160, win_length=320, center=True, pad_mode="reflect")
   x = np.stack((x.real, x.imag), axis=-1)
 
   # power spectrum
@@ -29,8 +29,13 @@ def feature_extract(x, x_lens):
   x = np.log(x + 1e-20)
 
   # feature splice
-  frames = librosa.util.frame(x, frame_length=3, hop_length=1)
-  features = np.concatenate((frames[:, :, 0], frames[:, :, 1], frames[:, :, 2]), axis=1)[:, :, ::3]
+  seq = [x]
+  for i in range(1, 3):
+    tmp = np.zeros_like(x)
+    tmp[:, :, :-i] = x[:, :, i:]
+    seq.append(tmp)
+  features = np.concatenate(seq, axis=1)[:, :, ::3]
+  print("===", features.shape)
 
   # normalize
   features_mean = np.zeros((features.shape[0], features.shape[1]), dtype=np.float32)
