@@ -46,7 +46,8 @@ class LazyNumpyArray:
   def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
   def copy(self): return self if callable(self.fxn) else LazyNumpyArray(self.fxn, self.shape, self.dtype)
   def astype(self, typ): return LazyNumpyArray(self.fxn, self.shape, typ)
-
+  @staticmethod
+  def from_np(data): return LazyNumpyArray(data, data.shape, data.dtype)
 
 @dataclass
 class dtypes:

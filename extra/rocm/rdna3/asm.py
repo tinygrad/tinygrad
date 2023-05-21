@@ -24,8 +24,10 @@ code = open(pathlib.Path(__file__).parent / "prog.s", "r").read()
 
 gen = []
 FLOPS = 0
-for j in range(4):
-  for i in range(0, 251, 6):
+#MAX_REG = 251
+MAX_REG = 32
+for j in range(1):
+  for i in range(0, MAX_REG, 6):
     #gen.append(f"v_dual_fmac_f32 v{i+0}, v{i+1}, v{i+2} :: v_dual_fmac_f32 v{i+3}, v{i+4}, v{i+5}")
     #FLOPS += 4
     gen.append(f"v_dual_dot2acc_f32_f16 v{i+0}, v{i+1}, v{i+2} :: v_dual_dot2acc_f32_f16 v{i+3}, v{i+4}, v{i+5}")
@@ -48,9 +50,10 @@ print(colored("creating CLProgram", "green"))
 prg = CLProgram("code", asm, binary=True)
 
 print(colored("running program", "green"))
-FLOPS *= 100000*1024*1024  # loop * global_size
+G = 256
+FLOPS *= 100000*G*G  # loop * global_size
 for i in range(3):
-  tm = prg([1024, 1024], [256, 1], buf, wait=True)
+  tm = prg([G, G], [256, 1], buf, wait=True)
   print(f"ran in {tm*1e3:.2f} ms, {FLOPS/(tm*1e9):.2f} GFLOPS")
 
 print(colored("transferring buffer", "green"))

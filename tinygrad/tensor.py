@@ -42,7 +42,7 @@ class Tensor:
       data = data.realize().toCPU()
 
     # all ndarrays are lazy now
-    if isinstance(data, np.ndarray): data = LazyNumpyArray(data, data.shape, data.dtype)
+    if isinstance(data, np.ndarray): data = LazyNumpyArray.from_np(data)
 
     # by here, it's either LazyNumpyArray or LazyBuffer
     # TODO: it should all be LazyBuffer I think
