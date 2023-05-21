@@ -414,6 +414,11 @@ class TestOps(unittest.TestCase):
   def test_slice_empty(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)
 
+  @unittest.skip("backward not supported for tensor with zero in shape")
+  def test_slice_zero_in_shape(self):
+    helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1])  # x.shape = (0, 10)
+    helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5])  # x.shape = (0, 3, 3)
+
   def test_slice_errors(self):
     a = Tensor.ones(4, 3)
     with self.assertRaises(IndexError):
