@@ -1,7 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn import Linear
-from tinygrad.helpers import dtypes
 import numpy as np
 from extra.utils import download_file
 from pathlib import Path
