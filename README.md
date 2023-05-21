@@ -83,7 +83,7 @@ Change to `DEBUG=4` to see the generated code.
 
 It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, Adam, AdamW implemented) from tinygrad.nn.optim, write some boilerplate minibatching code, and you have all you need.
 
-### Neural network example (from test/models/test_mnist.py)
+### Neural network example ([from test/models/test_mnist.py](test/models/test_mnist.py))
 
 ```python
 from tinygrad.tensor import Tensor
@@ -136,7 +136,7 @@ print(b.cpu())
 
 Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doing something important with tinygrad and wanted to use the ANE, you might have a bad time.
 
-### hlops (in tensor.py)
+### hlops (in [tensor.py](tinygrad/tensor.py))
 
 hlops are syntactic sugar around mlops. They support most things torch does.
 
@@ -180,7 +180,7 @@ Or, if you have a webcam and cv2 installed
 ipython3 examples/efficientnet.py webcam
 ```
 
-PROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
+PROTIP: Set `DEBUG=1` environment variable if you want to see why it's slow.
 
 ### tinygrad supports Stable Diffusion!
 
@@ -198,7 +198,7 @@ Run `python3 examples/stable_diffusion.py`
 
 ### tinygrad supports GANs
 
-See `examples/mnist_gan.py`
+See [examples/mnist_gan.py](examples/mnist_gan.py)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/mnist_by_tinygrad.jpg">
@@ -206,7 +206,7 @@ See `examples/mnist_gan.py`
 
 ### tinygrad supports yolo
 
-See `examples/yolov3.py`
+See [examples/yolov3.py](examples/yolov3.py)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/yolo_by_tinygrad.jpg">
