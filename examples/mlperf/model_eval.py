@@ -47,10 +47,11 @@ if __name__ == "__main__":
     st = time.perf_counter()
 
   # UNet3D
-  from models.unet3d import UNet3D
   from datasets.kits19 import iterate
-  mdl = UNet3D()
-  mdl.load_from_pretrained()
+  from pathlib import Path
+  import torch
+  fn = Path(__file__).parent.parent.parent / "weights/unet-3d.ckpt"
+  mdl = torch.jit.load(fn, map_location=torch.device("cpu"))
   scores = []
   for X, Y, case in iterate():
     print(f"{case=}")
@@ -61,7 +62,8 @@ if __name__ == "__main__":
       image = X[np.newaxis, ...]
       result, norm_map, norm_patch = helpers.prepare_arrays(image)
       for i, j, k in helpers.get_slice(image):
-        result[..., i:i+128, j:j+128, k:k+128] += mdl(Tensor(image[..., i:i+128, j:j+128, k:k+128])).numpy() * norm_patch
+        out = mdl(torch.tensor(image[..., i:i+128, j:j+128, k:k+128])).detach().numpy()
+        result[..., i:i+128, j:j+128, k:k+128] += out * norm_patch
         norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
       result /= norm_map
       pred = np.argmax(result, axis=1).astype(np.uint8)
@@ -69,5 +71,4 @@ if __name__ == "__main__":
         np.save(result_file, pred)
     assert pred.shape == Y.shape
     scores.append(helpers.get_dice_score(pred, Y).mean())
-    break
   print(sum(scores) / len(scores))

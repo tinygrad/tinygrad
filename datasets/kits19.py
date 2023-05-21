@@ -42,7 +42,7 @@ def normalize_intensity(image, min_clip=-79.0, max_clip=304.0, mean=101.0, std=7
   image = (image - mean) / std
   return image
 
-def pad_to_min_shape(image, label, roi_shape=[128, 128, 128]):
+def pad_to_min_shape(image, label, roi_shape=(128, 128, 128)):
   current_shape = image.shape[1:]
   bounds = [max(0, roi_shape[i] - current_shape[i]) for i in range(3)]
   paddings = [(0, 0)] + [(bounds[i] // 2, bounds[i] - bounds[i] // 2) for i in range(3)]
@@ -72,6 +72,7 @@ def adjust_shape(image, label, roi_shape=[128, 128, 128], overlap=0.5, padding_v
 def save(image, label, fp):
   image = image.astype(np.float32)
   label = label.astype(np.uint8)
+  fp.parent.mkdir(exist_ok=True)
   with fp.open("wb") as f:
     pickle.dump([image, label], f)
 
@@ -93,7 +94,7 @@ def iterate(val=True, shuffle=True):
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   for file in files:
-    preprocess_fp = BASEDIR.parent / "results" / f"case_{file.stem}.pkl"
+    preprocess_fp = BASEDIR.parent / "results" / f"{file.stem}.pkl"
     if preprocess_fp.is_file():
       X, Y = load(preprocess_fp)
     else:
