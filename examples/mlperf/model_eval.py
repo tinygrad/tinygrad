@@ -51,24 +51,20 @@ if __name__ == "__main__":
   from pathlib import Path
   import torch
   fn = Path(__file__).parent.parent.parent / "weights/unet-3d.ckpt"
+  # TODO: this is cheating!
   mdl = torch.jit.load(fn, map_location=torch.device("cpu"))
   scores = []
   for X, Y, case in iterate():
-    print(f"{case=}")
-    result_file = Path(f"/tmp/{case}.npy")
-    if getenv("LOAD_KITS") and result_file.is_file():
-      pred = np.load(result_file)
-    else:
-      image = X[np.newaxis, ...]
-      result, norm_map, norm_patch = helpers.prepare_arrays(image)
-      for i, j, k in helpers.get_slice(image):
-        out = mdl(torch.tensor(image[..., i:i+128, j:j+128, k:k+128])).detach().numpy()
-        result[..., i:i+128, j:j+128, k:k+128] += out * norm_patch
-        norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
-      result /= norm_map
-      pred = np.argmax(result, axis=1).astype(np.uint8)
-      if getenv("STORE_KITS"):
-        np.save(result_file, pred)
+    print(case)
+    image = X[np.newaxis, ...]
+    result, norm_map, norm_patch = helpers.prepare_arrays(image)
+    for i, j, k in helpers.get_slice(image):
+      out = mdl(torch.tensor(image[..., i:i+128, j:j+128, k:k+128])).detach().numpy()
+      result[..., i:i+128, j:j+128, k:k+128] += out * norm_patch
+      norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
+    result /= norm_map
+    pred = np.argmax(result, axis=1).astype(np.uint8)
     assert pred.shape == Y.shape
-    scores.append(helpers.get_dice_score(pred, Y).mean())
-  print(sum(scores) / len(scores))
+    scores.append(helpers.get_dice_score(pred, Y))
+  scores = np.mean(np.stack(scores, axis=0), axis=0)
+  print((scores[-1] + scores[-2]) / 2)
