@@ -36,7 +36,6 @@ kernel void test(device float *a, device const float *data1, device const float 
   simdgroup_float8x8 A[4];
   simdgroup_float8x8 B[4];
   for (uint k = 0; k < {N}; k+=8) {{
-    threadgroup_barrier(mem_flags::mem_threadgroup);
     simdgroup_load(A[0], data1+k+{0*N}, {N}, ulong2(0, 0));
     simdgroup_load(A[1], data1+k+{8*N}, {N}, ulong2(0, 0));
     simdgroup_load(A[2], data1+k+{16*N}, {N}, ulong2(0, 0));
