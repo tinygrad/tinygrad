@@ -80,6 +80,8 @@ amdhsa.version:
 .end_amdgpu_metadata
 """
 
+# RDNA3 is actually a SIMD machine!
+# warp size of 32, s registers are shared across the warp, v are 32-wide vectors
 class AssemblyCodegen(Linearizer):
   supports_float4: bool = True
 
@@ -100,8 +102,11 @@ class AssemblyCodegen(Linearizer):
     #ins.append('v_add_co_ci_u32_e32 v1, vcc_lo, s1, v1, vcc_lo')
     #ins.append('v_add_co_ci_u32_e32 v0, vcc_lo, s0, v0, vcc_lo')
 
-    # store
-    ins.append('v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, 2.0')
+    # store. NOTE: v0 contains offset at launch
+    #ins.append('v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, 2.0')
+    #ins.append('v_mov_b32 v0, 4')
+    ins.append('v_lshlrev_b32 v0, 2, v0')
+    ins.append('v_mov_b32 v1, 2.0')
     ins.append('global_store_b32 v0, v1, s[0:1]')
     #ins.append('global_store_b32 v0, v1, s[2:3]')
     #ins.append('global_store_b32 v0, v1, s[4:5]')
@@ -116,8 +121,8 @@ class AssemblyCodegen(Linearizer):
     #from hexdump import hexdump
     #hexdump(asm)
 
-    global_size = []
-    local_size = []
+    global_size = [2]
+    local_size = [2]
     return ASTRunner('code', asm,
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.function_name, runtime_args={"binary": True})
