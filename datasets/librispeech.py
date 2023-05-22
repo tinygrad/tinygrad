@@ -1,10 +1,10 @@
 import json
-import os
+import pathlib
 import numpy as np
 import librosa
 
-BASEDIR = "/home/woze/projects/tinygrad/datasets/"
-ci = json.load(open(os.path.join(BASEDIR, "dev-clean-wav.json")))
+BASEDIR = pathlib.Path("/home/woze/projects/tinygrad/datasets/librispeech")
+ci = json.load(open(BASEDIR / "dev-clean-wav.json"))
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
 
@@ -53,7 +53,7 @@ def load_wav(file):
 def iterate(bs=8, start=0):
   print(f"there are {len(ci)} samples in the dataset")
   for i in range(start, len(ci), bs):
-    samples, sample_lens = zip(*[load_wav(os.path.join(BASEDIR, v["files"][0]["fname"])) for v in ci[i : i + bs]])
+    samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
     samples = list(samples)
     # pad to same length
     max_len = max(sample_lens)
