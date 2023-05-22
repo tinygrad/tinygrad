@@ -6,38 +6,34 @@ import pickle
 import requests
 import numpy as np
 import nibabel as nib
-from scipy.ndimage import zoom
+import torch
+from torch.nn.functional import interpolate
 
 BASEDIR = Path(__file__).parent.parent.parent.resolve() / "kits19" / "data"
 
 @functools.lru_cache(None)
 def get_val_files():
-  eval_set = requests.get("https://raw.githubusercontent.com/mlcommons/inference/c04de44104b80b7950e027e6c4b9b025eff2338b/vision/medical_imaging/3d-unet-kits19/meta/inference_cases.json").json()
-  return [x for x in BASEDIR.iterdir() if x.stem in eval_set]
+  data = requests.get("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt")
+  return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in data.text.split("\n")])
 
-def load_resampled_case(fn, target_spacing=[1.6, 1.2, 1.2]):
-  image = nib.load(fn / "imaging.nii.gz")
-  label = nib.load(fn / "segmentation.nii.gz")
+def load_pair(file_path):
+  image, label = nib.load(file_path / "imaging.nii.gz"), nib.load(file_path / "segmentation.nii.gz")
   image_spacings = image.header["pixdim"][1:4].tolist()
-  original_affine = image.affine
-  image = image.get_fdata().astype(np.float32)
-  label = label.get_fdata().astype(np.uint8)
-  targ_arr = np.array(target_spacing)
-  zoom_factor = np.array(target_spacing) / targ_arr
-  reshaped_affine = original_affine.copy()
-  for i in range(3):
-    idx = np.where(original_affine[i][:-1] != 0)
-    sign = -1 if original_affine[i][idx] < 0 else 1
-    reshaped_affine[i][idx] = targ_arr[idx] * sign
-    if image_spacings != target_spacing:
-      image = zoom(image, zoom_factor, order=1, mode="constant", cval=image.min(), grid_mode=False)
-      label = zoom(label, zoom_factor, order=0, mode="constant", cval=label.min(), grid_mode=False)
-  aux = {"original_affine": original_affine, "reshaped_affine": reshaped_affine, "zoom_factor": zoom_factor, "case": fn.stem}
-  image = np.expand_dims(image, 0)
-  label = np.expand_dims(label, 0)
-  return image, label, aux
+  image, label = image.get_fdata().astype(np.float32), label.get_fdata().astype(np.uint8)
+  image, label = np.expand_dims(image, 0), np.expand_dims(label, 0)
+  return image, label, image_spacings
 
-def normalize_intensity(image, min_clip=-79.0, max_clip=304.0, mean=101.0, std=76.9):
+def resample3d(image, label, image_spacings, target_spacing=(1.6, 1.2, 1.2)):
+  if image_spacings != target_spacing:
+    spc_arr, targ_arr, shp_arr = np.array(image_spacings), np.array(target_spacing), np.array(image.shape[1:])
+    new_shape = (spc_arr / targ_arr * shp_arr).astype(int).tolist()
+    image = interpolate(torch.from_numpy(np.expand_dims(image, axis=0)), size=new_shape, mode="trilinear", align_corners=True)
+    label = interpolate(torch.from_numpy(np.expand_dims(label, axis=0)), size=new_shape, mode="nearest")
+    image = np.squeeze(image.numpy(), axis=0)
+    label = np.squeeze(label.numpy(), axis=0)
+  return image, label
+
+def normal_intensity(image, min_clip=-79.0, max_clip=304.0, mean=101.0, std=76.9):
   image = np.clip(image, min_clip, max_clip)
   image = (image - mean) / std
   return image
@@ -50,24 +46,17 @@ def pad_to_min_shape(image, label, roi_shape=(128, 128, 128)):
   label = np.pad(label, paddings, mode="edge")
   return image, label
 
-def constant_pad_volume(volume, roi_shape, strides, padding_val, dim=3):
-  bounds = [(strides[i] - volume.shape[1:][i] % strides[i]) % strides[i] for i in range(dim)]
-  bounds = [bounds[i] if (volume.shape[1:][i] + bounds[i]) >= roi_shape[i] else bounds[i] + strides[i] for i in range(dim)]
-  paddings = [(0, 0)] + [(bounds[i] // 2, bounds[i] - bounds[i] // 2) for i in range(3)]
-  padded_volume = np.pad(volume, paddings, mode="constant", constant_values=[padding_val])
-  return padded_volume, paddings
-
-def adjust_shape(image, label, roi_shape=[128, 128, 128], overlap=0.5, padding_val=-2.2):
-  image_shape = list(image.shape[1:])
-  dim = len(image_shape)
-  strides = [int(roi_shape[i] * (1 - overlap)) for i in range(dim)]
-  bounds = [image_shape[i] % strides[i] for i in range(dim)]
-  bounds = [bounds[i] if bounds[i] < strides[i] // 2 else 0 for i in range(dim)]
-  image = image[..., bounds[0]//2:image_shape[0]-(bounds[0]-bounds[0]//2), bounds[1]//2:image_shape[1]-(bounds[1]-bounds[1]//2), bounds[2]//2:image_shape[2]-(bounds[2]-bounds[2]//2)]
-  label = label[..., bounds[0]//2:image_shape[0]-(bounds[0]-bounds[0]//2), bounds[1]//2:image_shape[1]-(bounds[1]-bounds[1]//2), bounds[2]//2:image_shape[2]-(bounds[2]-bounds[2]//2)]
-  image, paddings = constant_pad_volume(image, roi_shape, strides, padding_val)
-  label, paddings = constant_pad_volume(label, roi_shape, strides, 0)
+def preprocess(file_path):
+  image, label, image_spacings = load_pair(file_path)
+  image, label = resample3d(image, label, image_spacings)
+  image = normal_intensity(image.copy())
+  iamge, label = pad_to_min_shape(image, label)
   return image, label
+
+def load(fp):
+  with fp.open("rb") as f:
+    X, Y = pickle.load(f)
+  return X, Y
 
 def save(image, label, fp):
   image = image.astype(np.float32)
@@ -76,30 +65,18 @@ def save(image, label, fp):
   with fp.open("wb") as f:
     pickle.dump([image, label], f)
 
-def preprocess(fn, fp):
-  image, label, _ = load_resampled_case(fn)
-  image = normalize_intensity(image.copy())
-  image, label = pad_to_min_shape(image, label)
-  image, label = adjust_shape(image, label)
-  return image, label
-
-def load(fp):
-  with fp.open("rb") as f:
-    X, Y = pickle.load(f)
-  return X, Y
-
 def iterate(val=True, shuffle=True):
   if not val: raise NotImplementedError
   files = get_val_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   for file in files:
-    preprocess_fp = BASEDIR.parent / "results" / f"{file.stem}.pkl"
-    if preprocess_fp.is_file():
-      X, Y = load(preprocess_fp)
+    preprocessed_file = BASEDIR.parent / "preprocessed" / f"{file.stem}.pkl"
+    if preprocessed_file.is_file():
+      X, Y = load(preprocessed_file)
     else:
-      X, Y = preprocess(file, preprocess_fp)
-      save(X, Y, preprocess_fp)
+      X, Y = preprocess(file)
+      save(X, Y, preprocessed_file)
     yield (X, Y, file.stem)
 
 if __name__ == "__main__":
