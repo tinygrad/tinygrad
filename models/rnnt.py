@@ -84,7 +84,6 @@ class RNNT:
 
 class LSTMCell:
   def __init__(self, input_size, hidden_size, dropout):
-    self.hidden_size = hidden_size
     self.dropout = dropout
 
     self.weights_ih = Tensor.uniform(hidden_size * 4, input_size)
@@ -92,55 +91,48 @@ class LSTMCell:
     self.weights_hh = Tensor.uniform(hidden_size * 4, hidden_size)
     self.bias_hh = Tensor.uniform(hidden_size * 4)
 
-  def __call__(self, x, h, c):
-    gates = x.linear(self.weights_ih.T, self.bias_ih) + h.linear(self.weights_hh.T, self.bias_hh)
+  def __call__(self, x, hc):
+    gates = x.linear(self.weights_ih.T, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh.T, self.bias_hh)
 
     i, f, g, o = gates.chunk(4, 1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
 
-    c = (f * c) + (i * g)
+    c = (f * hc[x.shape[0]:]) + (i * g)
     h = (o * c.tanh()).dropout(self.dropout)
 
-    return h, h, c
+    return Tensor.cat(h, c).realize()
 
 
-def _FastLSTM():
-  class _LSTM:
-    def __init__(self, input_size, hidden_size, layers, dropout):
-      self.input_size = input_size
-      self.hidden_size = hidden_size
-      self.layers = layers
+class LSTM:
+  def __init__(self, input_size, hidden_size, layers, dropout):
+    self.input_size = input_size
+    self.hidden_size = hidden_size
+    self.layers = layers
 
-      self.cells = [LSTMCell(input_size, hidden_size, dropout) if i == 0 else LSTMCell(hidden_size, hidden_size, dropout if i != layers - 1 else 0) for i in range(layers)]
+    self.cells = [LSTMCell(input_size, hidden_size, dropout) if i == 0 else LSTMCell(hidden_size, hidden_size, dropout if i != layers - 1 else 0) for i in range(layers)]
 
-    def __call__(self, x, hc):
-      if hc is None:
-        hc = Tensor.zeros(x.shape[1] * self.layers * 2 * self.hidden_size)
-
-      output = None
-      for t in range(x.shape[0]):
-        inp = x[t].flatten().cat(hc)
-        out = self.do_cell(inp, x.shape[1])
-        hc, o = out[x.shape[1]:].flatten(), Tensor(out[:x.shape[1]].numpy())
-        output = o.unsqueeze(0) if output is None else output.cat(o.unsqueeze(0), dim=0).realize()
-
-      return output, hc
-
+  def __call__(self, x, hc):
     @TinyJit
-    def do_cell(self, inp, BS):
-      x = inp[:BS*self.input_size].reshape(BS, self.input_size)
-      new_h, new_c = [], []
-      for i, cell in enumerate(self.cells):
-        h = inp[BS*self.input_size + i*BS*self.hidden_size:BS*self.input_size + (i+1)*BS*self.hidden_size].reshape(BS, self.hidden_size)
-        c = inp[BS*self.input_size + BS*self.hidden_size*self.layers + i*BS*self.hidden_size:BS*self.input_size + BS*self.hidden_size*self.layers + (i+1)*BS*self.hidden_size].reshape(BS, self.hidden_size)
-        x, h_, c_ = cell(x, h, c)
-        new_h.append(h_)
-        new_c.append(c_)
-      return x.cat(*new_h, *new_c).realize()
+    def _do_cell(x, hc):
+      return self.do_cell(x, hc)
 
-  return _LSTM
+    if hc is None:
+      hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size)
 
-LSTM = _FastLSTM()
+    inp = Tensor.zeros(x.shape[1], self.input_size)
+    output = Tensor.zeros(x.shape[0], x.shape[1], self.hidden_size)
+    for t in range(x.shape[0]):
+      inp = (inp * 0 + x[t]).realize()
+      hc = _do_cell(inp, hc)
+      output = (output + hc[-1, :x.shape[1]].unsqueeze(0).pad(((t, x.shape[0] - t - 1), (0, 0), (0, 0)))).realize()
+
+    return output, hc
+
+  def do_cell(self, x, hc):
+    new_hc = [x]
+    for i, cell in enumerate(self.cells):
+      new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
+    return Tensor.stack(new_hc[1:]).realize()
 
 
 class StackTime:
@@ -156,9 +148,9 @@ class StackTime:
 
 class Encoder:
   def __init__(self, input_size, hidden_size, pre_layers, post_layers, stack_time_factor, dropout):
-    self.pre_rnn = _FastLSTM()(input_size, hidden_size, pre_layers, dropout)
+    self.pre_rnn = LSTM(input_size, hidden_size, pre_layers, dropout)
     self.stack_time = StackTime(stack_time_factor)
-    self.post_rnn = _FastLSTM()(stack_time_factor * hidden_size, hidden_size, post_layers, dropout)
+    self.post_rnn = LSTM(stack_time_factor * hidden_size, hidden_size, post_layers, dropout)
 
   def __call__(self, x, x_lens):
     x, _ = self.pre_rnn(x, None)
@@ -185,7 +177,7 @@ class Prediction:
     self.hidden_size = hidden_size
 
     self.emb = Embedding(vocab_size - 1, hidden_size)
-    self.rnn = _FastLSTM()(hidden_size, hidden_size, layers, dropout)
+    self.rnn = LSTM(hidden_size, hidden_size, layers, dropout)
 
   def __call__(self, x, hc):
     emb = self.emb(x) if x is not None else Tensor.zeros(1, 1, self.hidden_size)
