@@ -10,7 +10,6 @@ FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80,
 
 def feature_extract(x, x_lens):
   x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
-  print(x_lens)
 
   # pre-emphasis
   x = np.concatenate((np.expand_dims(x[:, 0], 1), x[:, 1:] - 0.97 * x[:, :-1]), axis=1)
@@ -35,7 +34,6 @@ def feature_extract(x, x_lens):
     tmp[:, :, :-i] = x[:, :, i:]
     seq.append(tmp)
   features = np.concatenate(seq, axis=1)[:, :, ::3]
-  print("===", features.shape)
 
   # normalize
   features_mean = np.zeros((features.shape[0], features.shape[1]), dtype=np.float32)
@@ -45,8 +43,6 @@ def feature_extract(x, x_lens):
     features_std[i, :] = features[i, :, :x_lens[i]].std(axis=1, ddof=1)
   features_std += 1e-5
   features = (features - np.expand_dims(features_mean, 2)) / np.expand_dims(features_std, 2)
-
-  print(features.shape)
 
   return features.transpose(2, 0, 1), x_lens.astype(np.float32)
 
