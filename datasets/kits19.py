@@ -50,7 +50,7 @@ def preprocess(file_path):
   image, label, image_spacings = load_pair(file_path)
   image, label = resample3d(image, label, image_spacings)
   image = normal_intensity(image.copy())
-  iamge, label = pad_to_min_shape(image, label)
+  image, label = pad_to_min_shape(image, label)
   return image, label
 
 def load(fp):
