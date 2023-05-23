@@ -165,14 +165,18 @@ class Tensor:
   # ***** kaiming uniform to weights *****
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
-  def kaiming_uniform(*shape, a:float = 0, fan_mode: str = "fan_in", nonlinearity: str = "relu", **kwargs) -> Tensor:
+  def kaiming_uniform(*shape, a:float = 0, fan_mode: str = "fan_in", nonlinearity: str = "leaky_relu", **kwargs) -> Tensor:
     def _calculate_fan(shape, mode):
+      dims = len(shape)
+      if dims < 2:
+        raise ValueError(f"Fan in and fan out can not computed for fewer than 2 dimensions. Got {dims} dims.")
       num_input_fmaps = shape[1]
       num_output_fmaps = shape[0]
       receptive_field_size = 1
 
-      for s in shape[2:]:
-        receptive_field_size *= s
+      if dims > 2:
+        for s in shape[2:]:
+          receptive_field_size *= s
 
       fan_in = num_input_fmaps * receptive_field_size
       fan_out = num_output_fmaps * receptive_field_size
