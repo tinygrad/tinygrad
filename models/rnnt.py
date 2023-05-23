@@ -133,7 +133,7 @@ class LSTM:
     for t in range(x.shape[0]):
       hc = _do_cell(x[t] + 1 - 1, hc) # TODO: why do we need to do this?
       if output is None:
-        output = hc[-1, :x.shape[1]].unsqueeze(0).realize()
+        output = hc[-1, :x.shape[1]].unsqueeze(0)
       else:
         output = output.cat(hc[-1, :x.shape[1]].unsqueeze(0), dim=0).realize()
 
@@ -151,10 +151,9 @@ class StackTime:
     self.factor = factor
 
   def __call__(self, x, x_lens):
-    r = x.transpose(0, 1)
-    r = r.pad(((0, 0), (0, (-r.shape[1]) % self.factor), (0, 0)))
-    r = r.reshape(r.shape[0], r.shape[1] // self.factor, r.shape[2] * self.factor)
-    return r.transpose(0, 1), x_lens / self.factor if x_lens is not None else None
+    x = x.pad(((0, (-x.shape[0]) % self.factor), (0, 0), (0, 0)))
+    x = x.reshape(x.shape[0] // self.factor, x.shape[1], x.shape[2] * self.factor)
+    return x, x_lens / self.factor if x_lens is not None else None
 
 
 class Encoder:
