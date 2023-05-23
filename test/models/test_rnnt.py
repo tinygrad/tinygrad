@@ -7,9 +7,6 @@ import torch
 
 class TestRNNT(unittest.TestCase):
   def test_lstm(self):
-    Tensor.training = False
-    Tensor.no_grad = True
-
     BS, SQ, IS, HS, L = 4, 220, 240, 1024, 2
 
     # create in torch
