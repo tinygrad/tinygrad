@@ -3,7 +3,7 @@ import pathlib
 import numpy as np
 import librosa
 
-BASEDIR = pathlib.Path("/home/woze/projects/tinygrad/datasets/librispeech")
+BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/librispeech"
 ci = json.load(open(BASEDIR / "dev-clean-wav.json"))
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
