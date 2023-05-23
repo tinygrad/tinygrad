@@ -85,48 +85,16 @@ class TestRandomness(unittest.TestCase):
     torch.manual_seed(1337)
     np.random.seed(1337)
 
+    fan_modes = ["fan_in", "fan_out"]
+    non_linearities = ["leaky_relu", "relu", "linear", "tanh", "selu"]
+
     for shape in shapes:
-      # check combinations of non_linearities and fan_in
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_in", nonlinearity="leaky_relu").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="leaky_relu"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_in", nonlinearity="relu").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="relu"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_in", nonlinearity="linear").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="linear"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_in", nonlinearity="tanh").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="tanh"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_in", nonlinearity="selu").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="selu"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      # check combinations of non_linearities and fan_out
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_out", nonlinearity="leaky_relu").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_out", nonlinearity="leaky_relu"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_out", nonlinearity="relu").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_out", nonlinearity="relu"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_out", nonlinearity="linear").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_out", nonlinearity="linear"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_out", nonlinearity="tanh").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_out", nonlinearity="tanh"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
-
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_out", nonlinearity="selu").cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_out", nonlinearity="selu"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
+      for fan_mode in fan_modes:
+        for non_linearity in non_linearities:
+          # check combinations of non linearities and fan modes
+            x = Tensor.kaiming_uniform(*shape, fan_mode=fan_mode, nonlinearity=non_linearity).cpu().numpy().flatten()
+            z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode=fan_mode, nonlinearity=non_linearity))(shape).numpy().flatten()
+            self.assertTrue(kstest(x, z) >= alpha)
 
 if __name__ == "__main__":
   unittest.main()
