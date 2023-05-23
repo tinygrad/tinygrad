@@ -92,9 +92,9 @@ class TestRandomness(unittest.TestCase):
       for fan_mode in fan_modes:
         for non_linearity in non_linearities:
           # check combinations of non linearities and fan modes
-            x = Tensor.kaiming_uniform(*shape, fan_mode=fan_mode, nonlinearity=non_linearity).cpu().numpy().flatten()
-            z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode=fan_mode, nonlinearity=non_linearity))(shape).numpy().flatten()
-            self.assertTrue(kstest(x, z) >= alpha)
+          x = Tensor.kaiming_uniform(*shape, fan_mode=fan_mode, nonlinearity=non_linearity).cpu().numpy().flatten()
+          z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode=fan_mode, nonlinearity=non_linearity))(shape).numpy().flatten()
+          self.assertTrue(kstest(x, z) >= alpha)
 
 if __name__ == "__main__":
   unittest.main()
