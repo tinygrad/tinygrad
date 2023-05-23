@@ -31,8 +31,8 @@ class TestRNNT(unittest.TestCase):
       layer.cells[1].bias_hh.assign(Tensor(torch_layer.bias_hh_l1.numpy()))
 
     # test initial hidden
-    x = Tensor.randn(SQ, BS, IS)
     for _ in range(3):
+      x = Tensor.randn(SQ, BS, IS)
       z, hc = layer(x, None)
       torch_x = torch.tensor(x.cpu().numpy())
       torch_z, torch_hc = torch_layer(torch_x)
