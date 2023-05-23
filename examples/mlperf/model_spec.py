@@ -33,7 +33,7 @@ if __name__ == "__main__":
   mdl = RNNT()
   mdl.load_from_pretrained()
   x = Tensor.randn(220, 1, 240)
-  y = Tensor.randn(220, 1, 240)
-  test_model(mdl, x, Tensor([220]), y)
+  y = Tensor.randn(1, 220)
+  test_model(mdl, x, y)
 
   # BERT-large

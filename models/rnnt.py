@@ -14,7 +14,7 @@ class RNNT:
 
   def __call__(self, x, y, hc=None):
     f, _ = self.encoder(x, None)
-    g, _ = self.prediction(y, hc)
+    g, _ = self.prediction(y, hc, Tensor.zeros(1, requires_grad=False))
     out = self.joint(f, g)
     return out.realize()
 
@@ -29,24 +29,34 @@ class RNNT:
     return outputs
 
   def _greedy_decode(self, logits, logit_len):
-    hc = None
+    hc = Tensor.zeros(self.prediction.rnn.layers, 2, self.prediction.hidden_size, requires_grad=False)
     labels = []
+    label = Tensor.zeros(1, 1, requires_grad=False)
+    mask = Tensor.zeros(1, requires_grad=False)
     for time_idx in range(logit_len):
       logit = logits[time_idx, :, :].unsqueeze(0)
       not_blank = True
       added = 0
       while not_blank and added < 30:
-        label = Tensor([[labels[-1] if labels[-1] <= 28 else labels[-1] - 1]]) if len(labels) > 0 else None
-        g, hc_ = self.prediction(label, hc)
-        j = self.joint(Tensor(logit.numpy()), g)[0, 0, 0, :].numpy()
-
-        k = np.argmax(j, axis=0)
+        if len(labels) > 0:
+          mask = (mask + 1).clip(0, 1)
+          label = Tensor([[labels[-1] if labels[-1] <= 28 else labels[-1] - 1]], requires_grad=False) + 1 - 1
+        jhc = self._pred_joint(Tensor(logit.numpy()), label, hc, mask)
+        k = np.argmax(jhc[0, 0, :29].numpy(), axis=0)
         not_blank = k != 28
         if not_blank:
           labels.append(k)
-          hc = hc_
+          hc = jhc[:, :, 29:] + 1 - 1
         added += 1
     return labels
+
+  @TinyJit
+  def _pred_joint(self, logit, label, hc, mask):
+    g, hc = self.prediction(label, hc, mask)
+    j = self.joint(logit, g)[0]
+    j = j.pad(((0, 1), (0, 1), (0, 0)))
+    out = j.cat(hc, dim=2)
+    return out.realize()
 
   def load_from_pretrained(self):
     fn = Path(__file__).parent.parent / "weights/rnnt.pt"
@@ -121,8 +131,7 @@ class LSTM:
 
     output = None
     for t in range(x.shape[0]):
-      inp = (x[t] + 1) # TODO: why do we need to do this
-      hc = _do_cell(inp, hc)
+      hc = _do_cell(x[t] + 1 - 1, hc) # TODO: why do we need to do this?
       if output is None:
         output = hc[-1, :x.shape[1]].unsqueeze(0).realize()
       else:
@@ -131,7 +140,7 @@ class LSTM:
     return output, hc
 
   def do_cell(self, x, hc):
-    new_hc = [x - 1] # undo the +1 from above
+    new_hc = [x]
     for i, cell in enumerate(self.cells):
       new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
     return Tensor.stack(new_hc[1:]).realize()
@@ -174,9 +183,7 @@ class Embedding:
       for j in range(idx.shape[1]):
         ohba.append((self.vocab_counter == idx[i, j]).realize())
       oha.append(Tensor.stack(ohba).realize())
-    oh = Tensor.stack(oha).realize()
-
-    return oh @ self.weight
+    return Tensor.stack(oha) @ self.weight
 
 
 class Prediction:
@@ -186,10 +193,10 @@ class Prediction:
     self.emb = Embedding(vocab_size - 1, hidden_size)
     self.rnn = LSTM(hidden_size, hidden_size, layers, dropout)
 
-  def __call__(self, x, hc):
-    emb = self.emb(x) if x is not None else Tensor.zeros(1, 1, self.hidden_size, requires_grad=False)
-    x, hc = self.rnn(emb.transpose(0, 1), hc)
-    return x.transpose(0, 1), hc
+  def __call__(self, x, hc, m):
+    emb = self.emb(x) * m
+    x_, hc = self.rnn(emb.transpose(0, 1), hc)
+    return x_.transpose(0, 1), hc
 
 
 class Joint:
@@ -199,7 +206,6 @@ class Joint:
     self.l1 = Linear(pred_hidden_size + enc_hidden_size, joint_hidden_size)
     self.l2 = Linear(joint_hidden_size, vocab_size)
 
-  @TinyJit
   def __call__(self, f, g):
     (_, T, H), (B, U, H2) = f.shape, g.shape
     f = f.unsqueeze(2).expand(B, T, U, H)
@@ -208,4 +214,4 @@ class Joint:
     inp = f.cat(g, dim=3)
     t = self.l1(inp).relu()
     t = t.dropout(self.dropout)
-    return self.l2(t).realize()
+    return self.l2(t)
