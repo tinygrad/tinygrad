@@ -14,7 +14,7 @@ class RNNT:
 
   def __call__(self, x, y, hc=None):
     f, _ = self.encoder(x, None)
-    g, _ = self.prediction(y, hc, Tensor.zeros(1, requires_grad=False))
+    g, _ = self.prediction(y, hc, Tensor.ones(1, requires_grad=False))
     out = self.joint(f, g)
     return out.realize()
 
