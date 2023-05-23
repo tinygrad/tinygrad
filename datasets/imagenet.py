@@ -27,12 +27,10 @@ def image_load(fn):
   img = Image.open(fn).convert('RGB')
   img = F.resize(img, 256, Image.BILINEAR)
   img = F.center_crop(img, 224)
-  img = F.to_tensor(img)
-  img = F.normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], inplace=False)
-  ret = np.array(img, dtype='float32')
+  ret = np.array(img)
   return ret
 
-def iterate(bs, val=False, shuffle=True):
+def iterate(bs=32, val=True, shuffle=True):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)

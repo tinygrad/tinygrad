@@ -13,6 +13,8 @@ OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external_osx_profiling.p
 FLOAT16 = getenv("FLOAT16", 0)
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
+ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
+#ROCM_LLVM_PATH = pathlib.Path(__file__).parent.parent.parent.parent / "extra/rocm/build/llvm-project/bin"
 if DEBUG >= 5:
   from extra.helpers import enable_early_exec
   early_exec = enable_early_exec()
@@ -48,7 +50,7 @@ class CLBuffer(RawBufferCopyInOut):
 
 class CLProgram:
   def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
-    self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
+    self.name, self.argdtypes, self.clprogram = name, argdtypes, cl.Program(CL.cl_ctx, CL.cl_ctx.devices, [prg]*len(CL.cl_ctx.devices)) if binary else cl.Program(CL.cl_ctx, prg)  # type: ignore
     try:
       self._clprg = self.clprogram.build(options=options)
     except cl.RuntimeError as e:
@@ -60,7 +62,7 @@ class CLProgram:
         from disassemblers.adreno import disasm
         disasm(self.binary())
       elif 'gfx1100' in CL.cl_ctx.devices[0].name:
-        asm = early_exec(([pathlib.Path(__file__).parent.parent.parent / "extra/rocm/build/llvm-project/bin/llvm-objdump", '-d', '-'], self.binary()))
+        asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
       else:
         # print the PTX for NVIDIA. TODO: probably broken for everything else
@@ -77,7 +79,10 @@ class CLProgram:
     e = self.clprg(CL.cl_queue[cl_bufs[0].device], global_size, local_size, *cl_bufs)
     if wait:
       e.wait()
-      return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
+      try:
+        return ((e.profile.end - e.profile.start) * OSX_TIMING_RATIO) * 1e-9
+      except cl.RuntimeError:   # no profiling info available
+        return None
     return None
 
 class CLCodegen(CStyleCodegen):

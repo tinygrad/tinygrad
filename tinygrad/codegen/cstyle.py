@@ -197,7 +197,7 @@ class CStyleCodegen(Linearizer):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    # TODO: this exposes bugs in the optimizers assuming the strides are on a single vie
+    # TODO: this exposes bugs in the optimizers assuming the strides are on a single view
     """
     if len(self.lang.gid) and self.first_reduce > len(self.lang.gid):
       num_to_merge = (self.first_reduce - len(self.lang.gid))+1
