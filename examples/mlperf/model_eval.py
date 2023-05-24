@@ -9,7 +9,7 @@ if __name__ == "__main__":
   # inference only
   Tensor.training = False
   Tensor.no_grad = True
-
+  """
   # Resnet50-v1.5
   from tinygrad.jit import TinyJit
   from models.resnet import ResNet50
@@ -45,21 +45,18 @@ if __name__ == "__main__":
     d += len(t)
     print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
     st = time.perf_counter()
-
+  """
   # UNet3D
   from datasets.kits19 import iterate
-  from pathlib import Path
-  import torch
-  fn = Path(__file__).parent.parent.parent / "weights/unet-3d.ckpt"
-  # TODO: this is cheating!
-  mdl = torch.jit.load(fn, map_location=torch.device("cpu"))
+  from models.unet3d_v2 import UNet3D
+  mdl = UNet3D()
   scores = []
   for X, Y, case in iterate():
     print(case)
     image = X[np.newaxis, ...]
     result, norm_map, norm_patch = helpers.prepare_arrays(image)
     for i, j, k in helpers.get_slice(image):
-      out = mdl(torch.tensor(image[..., i:i+128, j:j+128, k:k+128])).detach().numpy()
+      out = mdl(Tensor(image[..., i:i+128, j:j+128, k:k+128])).numpy()
       result[..., i:i+128, j:j+128, k:k+128] += out * norm_patch
       norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
     result /= norm_map

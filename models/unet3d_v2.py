@@ -13,7 +13,7 @@ class InputBlock:
     self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
 
   def __call__(self, x):
-    return x.sequential(self.conv1 + self.conv2)
+    return x.sequential(self.conv1).sequential(self.conv2)
 
 class DownsampleBlock:
   def __init__(self, c0, c1):
@@ -21,7 +21,7 @@ class DownsampleBlock:
     self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
 
   def __call__(self, x):
-    return x.sequential(self.conv1 + self.conv2)
+    return x.sequential(self.conv1).sequential(self.conv2)
 
 class UpsampleBlock:
   def __init__(self, c0, c1):
@@ -32,19 +32,18 @@ class UpsampleBlock:
 
   def __call__(self, x, skip):
     x = Tensor(self.upsample_conv[0](torch.tensor(x.numpy())).detach().numpy())
-    print(x.shape, skip.shape)
     x = Tensor.cat(x, skip, dim=1)
-    return x.sequential(self.conv1 + self.conv2)
+    return x.sequential(self.conv1).sequential(self.conv2)
 
 class UNet3D:
   def __init__(self, in_channels=1, n_class=3):
     filters = [32, 64, 128, 256, 320]
-    self.inp, self.out = filters[:-1], filters[1:]
+    inp, out = filters[:-1], filters[1:]
     self.input_block = InputBlock(in_channels, filters[0])
-    self.downsample = [DownsampleBlock(i, o) for i, o in zip(self.inp, self.out)]
+    self.downsample = [DownsampleBlock(i, o) for i, o in zip(inp, out)]
     self.bottleneck = DownsampleBlock(filters[-1], filters[-1])
-    self.upsample = [UpsampleBlock(filters[-1], filters[-1])] + [UpsampleBlock(i, o) for i, o in zip(self.out[::-1], self.inp[::-1])] 
-    self.output = {"conv": nn.Conv2d(filters[0], n_class, (1, 1, 1))}
+    self.upsample = [UpsampleBlock(filters[-1], filters[-1])] + [UpsampleBlock(i, o) for i, o in zip(out[::-1], inp[::-1])] 
+    self.output = {"conv": nn.Conv2d(filters[0], n_class, kernel_size=(1, 1, 1))}
 
   def __call__(self, x):
     x = self.input_block(x)
@@ -63,19 +62,13 @@ class UNet3D:
     download_file("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)
     # TODO: replace with fake_torch_load
     state_dict = torch.jit.load(fn, map_location=torch.device("cpu")).state_dict()
-    passed = 0  # DEBUG
     for k, v in state_dict.items():
-      try:  # DEBUG
-        obj = get_child(self, k)
-        assert obj.shape == v.shape, (k, obj.shape, v.shape)
-        if hasattr(obj, "assign"):
-          obj.assign(v.numpy())
-        else:
-          obj[0].data = v
-        passed += 1  # DEBUG
-      except Exception as error:
-        print((k, str(error)))
-    print(f"{passed}/{len(state_dict)} passed")
+      obj = get_child(self, k)
+      assert obj.shape == v.shape, (k, obj.shape, v.shape)
+      if hasattr(obj, "assign"):
+        obj.assign(v.numpy())
+      else:
+        obj[0].data = v
 
 if __name__ == "__main__":
   mdl = UNet3D()
