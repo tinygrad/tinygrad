@@ -2,11 +2,14 @@ import json
 import pathlib
 import numpy as np
 import librosa
+import soundfile
 
 BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/librispeech"
-ci = json.load(open(BASEDIR / "dev-clean-wav.json"))
+with open(BASEDIR / "dev-clean-wav.json") as f:
+  ci = json.load(f)
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
+WINDOW = librosa.filters.get_window("hann", 320)
 
 def feature_extract(x, x_lens):
   x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
@@ -15,7 +18,7 @@ def feature_extract(x, x_lens):
   x = np.concatenate((np.expand_dims(x[:, 0], 1), x[:, 1:] - 0.97 * x[:, :-1]), axis=1)
 
   # stft
-  x = librosa.stft(x, n_fft=512, window="hann", hop_length=160, win_length=320, center=True, pad_mode="reflect")
+  x = librosa.stft(x, n_fft=512, window=WINDOW, hop_length=160, win_length=320, center=True, pad_mode="reflect")
   x = np.stack((x.real, x.imag), axis=-1)
 
   # power spectrum
@@ -47,7 +50,7 @@ def feature_extract(x, x_lens):
   return features.transpose(2, 0, 1), x_lens.astype(np.float32)
 
 def load_wav(file):
-  sample = librosa.load(file, sr=16000)[0].astype(np.float32)
+  sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
 
 def iterate(bs=8, start=0):
