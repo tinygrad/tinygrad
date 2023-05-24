@@ -1,14 +1,11 @@
-from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.ops import ASTRunner
+from tinygrad.codegen.linearizer import Linearizer, UOps
+from tinygrad.ops import ASTRunner, BinaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
+from collections import defaultdict
 
 # ugh, is this really needed?
 from extra.helpers import enable_early_exec
 early_exec = enable_early_exec()
-
-# https://github.com/ROCm-Developer-Tools/ROCm-ComputeABI-Doc/blob/master/AMDGPU-ABI.md#initial-kernel-register-state
-# enable_sgpr_kernarg_segment_ptr
-# enable_sgpr_grid_workgroup_count_X
 
 # amd_kernel_..., amd_machine_...
 # kernel_code_entry_byte_offset, kernel_code_prefetch_byte_offset
@@ -16,6 +13,8 @@ early_exec = enable_early_exec()
 # compute_pgm_rsrc1, compute_pgm_rsrc2, kernel_code_properties, workitem_private_segment_byte_size
 
 # TODO: generate this struct
+# enable_sgpr_kernarg_segment_ptr
+# enable_sgpr_grid_workgroup_count_X
 boilerplate_start = """
 .global _start
 _start:
@@ -80,6 +79,7 @@ amdhsa.version:
 .end_amdgpu_metadata
 """
 
+# https://github.com/ROCm-Developer-Tools/ROCm-ComputeABI-Doc/blob/master/AMDGPU-ABI.md#initial-kernel-register-state
 # RDNA3 is actually a SIMD machine!
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
 class AssemblyCodegen(Linearizer):
@@ -96,12 +96,54 @@ class AssemblyCodegen(Linearizer):
     # first three things are the buffers, load into s0-s5
     ins.append('s_load_b64 s[4:5], s[0:1], 0x10')
     ins.append('s_load_b128 s[0:3], s[0:1], null')
-    ins.append('s_waitcnt lgkmcnt(0)')
+
+    # v0 is a float offset
+    ins.append('v_lshlrev_b32 v0, 2, v0')
+
+    name_to_v = {}
+    latest_v = 1
+    ready = defaultdict(lambda: False)
+    pend_i = ["s[0:1]", "s[2:3]", "s[4:5]"]
+    pend_v = []
+    def get_i(i):
+      nonlocal latest_v, name_to_v, pend_v, pend_i
+      ret = f"s[{i*2}:{i*2+1}]"
+      if not ready[ret]:
+        ins.append('s_waitcnt lgkmcnt(0)')
+        for x in pend_i: ready[x] = True
+        pend_i = []
+      return ret
+    def get_v(var):
+      nonlocal latest_v, name_to_v, pend_v, pend_i
+      if var not in name_to_v:
+        name_to_v[var] = f"v{latest_v}"
+        pend_v.append(name_to_v[var])
+        latest_v += 1
+      else:
+        if not ready[name_to_v[var]]:
+          ins.append('s_waitcnt vmcnt(0)')
+          for x in pend_v: ready[x] = True
+          pend_v = []
+      return name_to_v[var]
+
+    for uop,newvar,vin,args in self.uops:
+      if uop == UOps.LOAD:
+        # TODO: indexing and valid
+        ins.append(f'global_load_b32 {get_v(newvar)}, v0, {get_i(args.i)}')
+      elif uop == UOps.ALU:
+        if args == BinaryOps.ADD:
+          ins.append(f'v_add_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
+          #ins.append('v_mov_b32 v3, 2.0')
+      elif uop == UOps.STORE:
+        ins.append(f'global_store_b32 v0, {get_v(vin[0])}, {get_i(args.i)}')
+
+      #print(uop)
 
     # move to vector reg
     #ins.append('v_add_co_ci_u32_e32 v1, vcc_lo, s1, v1, vcc_lo')
     #ins.append('v_add_co_ci_u32_e32 v0, vcc_lo, s0, v0, vcc_lo')
 
+    """
     # store. NOTE: v0 contains offset at launch
     #ins.append('v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, 2.0')
     #ins.append('v_mov_b32 v0, 4')
@@ -110,6 +152,7 @@ class AssemblyCodegen(Linearizer):
     ins.append('global_store_b32 v0, v1, s[0:1]')
     #ins.append('global_store_b32 v0, v1, s[2:3]')
     #ins.append('global_store_b32 v0, v1, s[4:5]')
+    """
 
     # exit asm
     ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
