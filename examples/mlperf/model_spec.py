@@ -22,10 +22,10 @@ if __name__ == "__main__":
   # Retinanet
 
   # 3D UNET
-  from models.unet3d import UNet3D
+  from models.unet3d_v2 import UNet3D
   mdl = UNet3D()
   mdl.load_from_pretrained()
-  img = Tensor.randn(1, 1, 5, 224, 224)
+  img = Tensor.randn(1, 1, 128, 128, 128)
   test_model(mdl, img)
 
   # RNNT
