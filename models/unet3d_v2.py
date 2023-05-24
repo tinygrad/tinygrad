@@ -4,31 +4,28 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from extra.utils import download_file, get_child
 
-class ConvTranspose:
-  ...
-
 class InputBlock:
   def __init__(self, c0, c1):
-    self.conv1 = [nn.Conv2d(c0, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
-    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
+    self.conv1 = [nn.Conv2d(c0, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
 
   def __call__(self, x):
     return x.sequential(self.conv1).sequential(self.conv2)
 
 class DownsampleBlock:
   def __init__(self, c0, c1):
-    self.conv1 = [nn.Conv2d(c0, c1, kernel_size=(3, 3, 3), stride=2, padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
-    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
+    self.conv1 = [nn.Conv2d(c0, c1, kernel_size=(3, 3, 3), stride=2, padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
 
   def __call__(self, x):
     return x.sequential(self.conv1).sequential(self.conv2)
 
 class UpsampleBlock:
   def __init__(self, c0, c1):
-    # TODO: this is also cheating!
+    # TODO: this is cheating!
     self.upsample_conv = [torch.nn.ConvTranspose3d(c0, c1, kernel_size=2, stride=2)]
-    self.conv1 = [nn.Conv2d(c1 * 2, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
-    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.GroupNorm(16, c1), Tensor.relu]
+    self.conv1 = [nn.Conv2d(c1 * 2, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
 
   def __call__(self, x, skip):
     x = Tensor(self.upsample_conv[0](torch.tensor(x.numpy())).detach().numpy())
