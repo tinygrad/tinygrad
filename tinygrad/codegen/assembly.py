@@ -7,13 +7,15 @@ from collections import defaultdict
 from extra.helpers import enable_early_exec
 early_exec = enable_early_exec()
 
+# https://github.com/RadeonOpenCompute/ROCm_Documentation/blob/master/ROCm_Compiler_SDK/ROCm-Codeobj-format.rst
 # amd_kernel_..., amd_machine_...
 # kernel_code_entry_byte_offset, kernel_code_prefetch_byte_offset
 # kernel_code_prefetch_byte_size, max_scratch_backing_memory_byte_size
 # compute_pgm_rsrc1, compute_pgm_rsrc2, kernel_code_properties, workitem_private_segment_byte_size
 
 # TODO: generate this struct
-# enable_sgpr_kernarg_segment_ptr
+# amdhsa_user_sgpr_kernarg_segment_ptr
+# amdhsa_system_sgpr_workgroup_id_x
 # enable_sgpr_grid_workgroup_count_X
 boilerplate_start = """
 .global _start
@@ -22,12 +24,50 @@ _start:
 .align 0x10
 .global code.kd
 .type code.kd,STT_OBJECT
-code.kd:
+/*code.kd:
 .long 0,0,0,0
 .long 0xb00,0x00000000,0x00000000,0x00000000
 .long 0,0,0,0
-.long 0x60af0000,0x0000009e,0x00000408,0x00000000
-code_kd_end:
+.long 0x60af0000,0x0000009e,0x00000408,0x00000000*/
+.amdhsa_kernel code
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_next_free_vgpr 8
+  .amdhsa_reserve_vcc 0
+  .amdhsa_reserve_xnack_mask 0
+  .amdhsa_next_free_sgpr 8
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_dx10_clamp 1
+  .amdhsa_ieee_mode 1
+  .amdhsa_fp16_overflow 0
+  .amdhsa_workgroup_processor_mode 1
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+.end_amdhsa_kernel
 .text
 code:
 """
@@ -91,7 +131,16 @@ class AssemblyCodegen(Linearizer):
     self.hand_coded_optimizations()
     self.linearize()
 
+    local_size = [32]
+
     ins = []
+
+    # add work group x before we smash s2
+    #ins.append('s_load_b32 s3, s[0:1], 0x24')
+    #ins.append('s_waitcnt lgkmcnt(0)')
+    #ins.append(f's_mov_b32 s3, {local_size[0]}')  # local size
+    ins.append(f's_mul_i32 s3, s2, {local_size[0]}')  # TODO: how do i get this dynamicly?
+    ins.append('v_add_co_u32 v0, vcc_lo, s3, v0')
 
     # first three things are the buffers, load into s0-s5
     ins.append('s_load_b64 s[4:5], s[0:1], 0x10')
@@ -113,6 +162,8 @@ class AssemblyCodegen(Linearizer):
         for x in pend_i: ready[x] = True
         pend_i = []
       return ret
+
+    # TODO: free vs that aren't used again with liveness analysis
     def get_v(var):
       nonlocal latest_v, name_to_v, pend_v, pend_i
       if var not in name_to_v:
@@ -126,8 +177,13 @@ class AssemblyCodegen(Linearizer):
           pend_v = []
       return name_to_v[var]
 
+    global_size = []
     for uop,newvar,vin,args in self.uops:
-      if uop == UOps.LOAD:
+      if uop == UOps.LOOP:
+        if args[1] == "global":
+          for i,var in enumerate(args[0]):
+            global_size.append(var.max+1)
+      elif uop == UOps.LOAD:
         # TODO: indexing and valid
         ins.append(f'global_load_b32 {get_v(newvar)}, v0, {get_i(args.i)}')
       elif uop == UOps.ALU:
@@ -163,9 +219,8 @@ class AssemblyCodegen(Linearizer):
 
     #from hexdump import hexdump
     #hexdump(asm)
+    #global_size = [7]
 
-    global_size = [2]
-    local_size = [2]
     return ASTRunner('code', asm,
       global_size[::-1] if len(global_size) else [1], local_size[::-1] if len(local_size) else None,
       op_estimate=self.info.flops, mem_estimate=self.mem_estimate, display_name=self.function_name, runtime_args={"binary": True})
