@@ -84,14 +84,9 @@ class LayerNorm2d(LayerNorm):
 
 class Embedding:
   def __init__(self, vocab_size:int, embed_size:int):
-    self.vocab_counter = Tensor.arange(vocab_size, requires_grad=False)
+    self.vocab_size = vocab_size
     self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    oha = []
-    for i in range(idx.shape[0]):
-      ohba = []
-      for j in range(idx.shape[1]):
-        ohba.append((self.vocab_counter == idx[i, j]).realize())
-      oha.append(Tensor.stack(ohba).realize())
-    return Tensor.stack(oha) @ self.weight
+    vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size).expand(*idx.shape, self.vocab_size)
+    return (vocab_counter == idx.unsqueeze(2).expand(*idx.shape, self.vocab_size)) @ self.weight
