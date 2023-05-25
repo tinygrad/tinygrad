@@ -12,6 +12,7 @@ class RNNT:
     self.prediction = Prediction(vocab_size, pred_hidden_size, pred_layers, dropout)
     self.joint = Joint(vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout)
 
+  @TinyJit
   def __call__(self, x, y, hc=None):
     f, _ = self.encoder(x, None)
     g, _ = self.prediction(y, hc, Tensor.ones(1, requires_grad=False))
@@ -63,7 +64,8 @@ class RNNT:
     download_file("https://zenodo.org/record/3662521/files/DistributedDataParallel_1576581068.9962234-epoch-100.pt?download=1", fn)
 
     import torch
-    state_dict = torch.load(open(fn, "rb"), map_location="cpu")["state_dict"]
+    with open(fn, "rb") as f:
+      state_dict = torch.load(f, map_location="cpu")["state_dict"]
 
     # encoder
     for i in range(2):
@@ -123,23 +125,23 @@ class LSTM:
 
   def __call__(self, x, hc):
     @TinyJit
-    def _do_cell(x_, hc_):
-      return self.do_cell(x_, hc_)
+    def _do_step(x_, hc_):
+      return self.do_step(x_, hc_)
 
     if hc is None:
       hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size, requires_grad=False)
 
     output = None
     for t in range(x.shape[0]):
-      hc = _do_cell(x[t] + 1 - 1, hc) # TODO: why do we need to do this?
+      hc = _do_step(x[t] + 1 - 1, hc) # TODO: why do we need to do this?
       if output is None:
-        output = hc[-1, :x.shape[1]].unsqueeze(0)
+        output = hc[-1:, :x.shape[1]]
       else:
-        output = output.cat(hc[-1, :x.shape[1]].unsqueeze(0), dim=0).realize()
+        output = output.cat(hc[-1:, :x.shape[1]], dim=0).realize()
 
     return output, hc
 
-  def do_cell(self, x, hc):
+  def do_step(self, x, hc):
     new_hc = [x]
     for i, cell in enumerate(self.cells):
       new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
