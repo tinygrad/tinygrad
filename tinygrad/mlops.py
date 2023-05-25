@@ -3,6 +3,7 @@ from tinygrad.helpers import argsort, ShapeType
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
+import math
 
 class Contiguous(Function):
   def forward(self, x): return x.contiguous()
@@ -17,6 +18,12 @@ class Cast(Function):
 
 # ************* unary ops *************
 
+class Sin(Function):
+  def forward(self, x: LazyBuffer) -> LazyBuffer:
+    self.x = x
+    return x.unary_op(UnaryOps.SIN)
+  def backward(self, grad: LazyBuffer) -> LazyBuffer:
+    return self.x.const_like(math.pi / 2).binary_op(BinaryOps.SUB, self.x).unary_op(UnaryOps.SIN).binary_op(BinaryOps.MUL, grad) # TODO: implement backwards
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:

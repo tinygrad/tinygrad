@@ -131,6 +131,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
+  
+  def test_sin(self):
+    helper_test_op([(45,65)], lambda x: x.sin(), Tensor.sin, a=0)
+  def test_cos(self):
+    helper_test_op([(45,65)], lambda x: x.cos(), Tensor.cos, a=0)
+  def test_tan(self):
+    helper_test_op([(45,65)], lambda x: x.tan(), Tensor.tan, a=0)
+    
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu(), Tensor.relu)
   def test_relu_exact(self):
