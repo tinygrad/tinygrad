@@ -5,6 +5,7 @@ from tinygrad.ops import LazyOp, BinaryOps, ReduceOps, get_lazyop_info
 from tinygrad.helpers import DType, dtypes
 
 class TestBuffer(NamedTuple):
+  __test__ = False # To prevent pytest from collecting this as a test
   shape: Tuple[int, ...]
   dtype: DType
 
