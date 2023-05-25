@@ -43,4 +43,30 @@ if __name__ == "__main__":
     print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
     st = time.perf_counter()
 
+  # RNN-T
+  from models.rnnt import RNNT
+  mdl = RNNT()
+  mdl.load_from_pretrained()
 
+  from datasets.librispeech import iterate
+  from examples.mlperf.metrics import word_error_rate
+
+  LABELS = [" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "'"]
+
+  c = 0
+  scores = 0
+  words = 0
+  st = time.perf_counter()
+  for X, Y in iterate():
+    mt = time.perf_counter()
+    tt = mdl.decode(Tensor(X[0]), Tensor([X[1]]))
+    et = time.perf_counter()
+    print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
+    for n, t in enumerate(tt):
+      tnp = np.array(t)
+      _, scores_, words_ = word_error_rate(["".join([LABELS[int(tnp[i])] for i in range(tnp.shape[0])])], [Y[n]])
+      scores += scores_
+      words += words_
+    c += len(tt)
+    print(f"WER: {scores/words}, {words} words, raw scores: {scores}, c: {c}")
+    st = time.perf_counter()
