@@ -1,4 +1,6 @@
 def levenshtein(a, b):
+  if not isinstance(a, str) or not isinstance(b, str):
+        raise ValueError("Inputs must be strings")
   n, m = len(a), len(b)
   if n > m:
     a, b, n, m = b, a, m, n
