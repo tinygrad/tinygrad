@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding
 import torch
@@ -166,6 +167,18 @@ class TestNN(unittest.TestCase):
     torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
+
+    # test with jit enabled
+    @TinyJit
+    def layer_jit(x):
+        return layer(x).realize()
+
+    for _ in range(3):
+        x = Tensor(np.random.randint(0, VS, (B, T)).astype(np.float32))
+        z = layer_jit(x)
+        torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
+        torch_z = torch_layer(torch_x)
+        np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
 
 if __name__ == '__main__':
