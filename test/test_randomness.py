@@ -73,7 +73,7 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.glorot_uniform))
     self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)), lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
-  def test_kaiming_uniform(self, shapes=None, alpha=0.05):
+  def test_kaiming_uniform(self, shapes=None, a=0.01):
     if shapes is None:
       shapes = [(20, 23), (20, 23, 26)]
     Tensor.manual_seed(1337)
@@ -81,10 +81,8 @@ class TestRandomness(unittest.TestCase):
     np.random.seed(1337)
 
     for shape in shapes:
-      # check combinations of non linearities and fan modes
-      x = Tensor.kaiming_uniform(*shape).cpu().numpy().flatten()
-      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="leaky_relu"))(shape).numpy().flatten()
-      self.assertTrue(kstest(x, z) >= alpha)
+      bound = (math.sqrt(3.0) * (math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * np.prod(shape[2:]))))
+      self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), lambda x: np.random.uniform(low=-bound, high=bound, size=shape), shape=shape))
 
 if __name__ == "__main__":
   unittest.main()
