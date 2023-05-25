@@ -189,7 +189,8 @@ class AssemblyCodegen(Linearizer):
       elif uop == UOps.ALU:
         if args == BinaryOps.ADD:
           ins.append(f'v_add_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
-          #ins.append('v_mov_b32 v3, 2.0')
+        elif args == BinaryOps.SUB:
+          ins.append(f'v_sub_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
       elif uop == UOps.STORE:
         ins.append(f'global_store_b32 v0, {get_v(vin[0])}, {get_i(args.i)}')
 
