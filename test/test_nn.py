@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm, LayerNorm2d
+from tinygrad.nn import BatchNorm2d, Conv2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding
 import torch
 
 class TestNN(unittest.TestCase):
@@ -149,6 +149,24 @@ class TestNN(unittest.TestCase):
     torch_x = torch.tensor(x.cpu().numpy())
     torch_z = torch_layer(torch_x.permute(0,2,3,1)).permute(0,3,1,2)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
+
+  def test_embedding(self):
+    B, T, C, VS = 4, 10, 20, 28
+
+    # create in tinygrad
+    layer = Embedding(VS, C)
+
+    with torch.no_grad():
+      torch_layer = torch.nn.Embedding(VS, C).eval()
+      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
+
+    # test
+    x = Tensor(np.random.randint(0, VS, (B, T)).astype(np.float32))
+    z = layer(x)
+    torch_x = torch.tensor(x.cpu().numpy().astype(np.int32))
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
+
 
 if __name__ == '__main__':
   unittest.main()

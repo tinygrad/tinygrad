@@ -81,3 +81,17 @@ class LayerNorm:
 
 class LayerNorm2d(LayerNorm):
   def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+class Embedding:
+  def __init__(self, vocab_size:int, embed_size:int):
+    self.vocab_counter = Tensor.arange(vocab_size, requires_grad=False)
+    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+
+  def __call__(self, idx:Tensor) -> Tensor:
+    oha = []
+    for i in range(idx.shape[0]):
+      ohba = []
+      for j in range(idx.shape[1]):
+        ohba.append((self.vocab_counter == idx[i, j]).realize())
+      oha.append(Tensor.stack(ohba).realize())
+    return Tensor.stack(oha) @ self.weight
