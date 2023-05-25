@@ -73,11 +73,6 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.glorot_uniform))
     self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)), lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
-  def test_kaiming_uniform(self):
-    self.assertFalse(normal_test(Tensor.kaiming_uniform))
-    self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(3.0) * math.sqrt(2.0) / math.sqrt(x[0])))
-    self.assertTrue(equal_distribution(Tensor.kaiming_uniform(fan_mode="fan_out"), lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_out"), lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(3.0) * math.sqrt(2.0) / math.sqrt(x[0])))
-
   def test_kaiming_uniform(self, shapes=None, alpha=0.05):
     if shapes is None:
       shapes = [(20, 23), (20, 23, 26)]
@@ -85,14 +80,11 @@ class TestRandomness(unittest.TestCase):
     torch.manual_seed(1337)
     np.random.seed(1337)
 
-    fan_modes = ["fan_in", "fan_out"]
-
     for shape in shapes:
-      for fan_mode in fan_modes:
-        # check combinations of non linearities and fan modes
-        x = Tensor.kaiming_uniform(*shape, fan_mode=fan_mode, nonlinearity="leaky_relu").cpu().numpy().flatten()
-        z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode=fan_mode, nonlinearity="leaky_relu"))(shape).numpy().flatten()
-        self.assertTrue(kstest(x, z) >= alpha)
+      # check combinations of non linearities and fan modes
+      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_in", nonlinearity="leaky_relu").cpu().numpy().flatten()
+      z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="leaky_relu"))(shape).numpy().flatten()
+      self.assertTrue(kstest(x, z) >= alpha)
 
 if __name__ == "__main__":
   unittest.main()
