@@ -86,15 +86,13 @@ class TestRandomness(unittest.TestCase):
     np.random.seed(1337)
 
     fan_modes = ["fan_in", "fan_out"]
-    non_linearities = ["leaky_relu", "relu", "linear", "tanh", "selu"]
 
     for shape in shapes:
       for fan_mode in fan_modes:
-        for non_linearity in non_linearities:
-          # check combinations of non linearities and fan modes
-          x = Tensor.kaiming_uniform(*shape, fan_mode=fan_mode, nonlinearity=non_linearity).cpu().numpy().flatten()
-          z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode=fan_mode, nonlinearity=non_linearity))(shape).numpy().flatten()
-          self.assertTrue(kstest(x, z) >= alpha)
+        # check combinations of non linearities and fan modes
+        x = Tensor.kaiming_uniform(*shape, fan_mode=fan_mode, nonlinearity="leaky_relu").cpu().numpy().flatten()
+        z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode=fan_mode, nonlinearity="leaky_relu"))(shape).numpy().flatten()
+        self.assertTrue(kstest(x, z) >= alpha)
 
 if __name__ == "__main__":
   unittest.main()

@@ -165,46 +165,22 @@ class Tensor:
   # ***** kaiming uniform to weights *****
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
-  def kaiming_uniform(*shape, a:float = 0, fan_mode: str = "fan_in", nonlinearity: str = "leaky_relu", **kwargs) -> Tensor:
+  def kaiming_uniform(*shape, a:float = 0.01, fan_mode: str = "fan_in", nonlinearity: str = "leaky_relu", **kwargs) -> Tensor:
     def _calculate_fan(shape, mode):
       dims = len(shape)
       if dims < 2:
         raise ValueError(f"Fan in and fan out can not computed for fewer than 2 dimensions. Got {dims} dims.")
-      num_input_fmaps = shape[1]
-      num_output_fmaps = shape[0]
+      num_input_fmaps, num_output_fmaps = shape[1], shape[0]
       receptive_field_size = 1
 
       if dims > 2:
         for s in shape[2:]:
           receptive_field_size *= s
 
-      fan_in = num_input_fmaps * receptive_field_size
-      fan_out = num_output_fmaps * receptive_field_size
-
-      return fan_in if mode == "fan_in" else fan_out
-
-    def _calculate_gain(nonlinearity, a):
-      if nonlinearity == "linear":
-        return 1
-      elif nonlinearity == "relu":
-        return math.sqrt(2.0)
-      elif nonlinearity == "tanh":
-        return 5.0 / 3
-      elif nonlinearity == "leaky_relu":
-        if a is None:
-          neg_slope = 0.01
-        elif not isinstance(a, bool) and isinstance(a, int) or isinstance(a, float):
-          neg_slope = a
-        else:
-          raise ValueError(f"Negative slope {a} is not a valid number.")
-        return math.sqrt(2.0 / (1 + neg_slope ** 2))
-      elif nonlinearity == "selu":
-        return 3.0 / 4
-      else:
-        raise ValueError(f"{nonlinearity} is unsupported nonlinearity.")
+      return num_input_fmaps * receptive_field_size if mode == "fan_in" else num_output_fmaps * receptive_field_size
 
     fan = _calculate_fan(shape, fan_mode)
-    gain = _calculate_gain(nonlinearity, a)
+    gain = math.sqrt(2.0 / (1 + a ** 2))
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std
     return Tensor(LazyNumpyArray(lambda lna: np.random.uniform(low=-bound, high=bound, size=lna.shape), shape, np.float32))
