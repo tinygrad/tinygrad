@@ -165,7 +165,7 @@ class Tensor:
   # ***** kaiming uniform to weights *****
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
-  def kaiming_uniform(*shape, a:float = 0.01, fan_mode: str = "fan_in", nonlinearity: str = "leaky_relu", **kwargs) -> Tensor:
+  def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
     fan = shape[1] * prod(shape[2:])
     gain = math.sqrt(2.0 / (1 + a ** 2))
     std = gain / math.sqrt(fan)

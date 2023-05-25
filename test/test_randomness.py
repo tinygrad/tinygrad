@@ -82,7 +82,7 @@ class TestRandomness(unittest.TestCase):
 
     for shape in shapes:
       # check combinations of non linearities and fan modes
-      x = Tensor.kaiming_uniform(*shape, fan_mode="fan_in", nonlinearity="leaky_relu").cpu().numpy().flatten()
+      x = Tensor.kaiming_uniform(*shape).cpu().numpy().flatten()
       z = (lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x), mode="fan_in", nonlinearity="leaky_relu"))(shape).numpy().flatten()
       self.assertTrue(kstest(x, z) >= alpha)
 
