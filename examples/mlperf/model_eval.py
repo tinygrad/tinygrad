@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 
 def eval_resnet():
   # Resnet50-v1.5
@@ -73,8 +74,7 @@ if __name__ == "__main__":
   Tensor.training = False
   Tensor.no_grad = True
 
-  models = ["resnet", "retinanet", "unet3d", "rnnt", "bert"]
-
+  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
   for m in models:
     nm = f"eval_{m}"
     if nm in globals():

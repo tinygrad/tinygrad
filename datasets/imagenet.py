@@ -1,24 +1,22 @@
 # for imagenet download prepare.sh and run it
-import os, glob, random
+import glob, random
 import json
 import numpy as np
 from PIL import Image
-import functools
-import torchvision.transforms as transforms
+import functools, pathlib
 
-BASEDIR = "/Users/kafka/fun/imagenet"
-ci = json.load(open(os.path.join(BASEDIR, "imagenet_class_index.json")))
+BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/imagenet"
+ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
 def get_train_files():
-  train_files = open(os.path.join(BASEDIR, "train_files")).read().strip().split("\n")
-  return [os.path.join(BASEDIR, "train", x) for x in train_files]
+  train_files = open(BASEDIR / "train_files").read().strip().split("\n")
+  return [(BASEDIR / "train" / x) for x in train_files]
 
 @functools.lru_cache(None)
 def get_val_files():
-  #val_files = open(os.path.join(BASEDIR, "val_files")).read().strip().split("\n")
-  val_files = glob.glob(os.path.join(BASEDIR, "val", "*", "*"))
+  val_files = glob.glob(str(BASEDIR / "val/*/*"))
   return val_files
 
 #rrc = transforms.RandomResizedCrop(224)
