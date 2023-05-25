@@ -17,8 +17,12 @@ def spec_resnet():
   test_model(mdl, img)
 
 def spec_retinanet():
-  # TODO: Retinanet
-  pass
+  # Retinanet with ResNet backbone
+  from models.resnet import ResNet50
+  from models.retinanet import RetinaNet
+  mdl = RetinaNet(ResNet50(), num_classes=91, num_anchors=9)
+  img = Tensor.randn(1, 3, 224, 224)
+  test_model(mdl, img)
 
 def spec_unet3d():
   # 3D UNET
