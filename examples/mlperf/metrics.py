@@ -41,6 +41,3 @@ def f1_score(x, y):
   p = len(ct) / len(xt)
   r = len(ct) / len(yt)
   return 2 * p * r / (p + r)
-
-def exact_match_score(x, y):
-  return float(normalize_string(x) == normalize_string(y))
