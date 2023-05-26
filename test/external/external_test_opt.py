@@ -81,12 +81,12 @@ class TestInferenceMinKernels(unittest.TestCase):
       out.realize()
 
   def test_llama(self):
-    from examples.llama import Transformer, onehot_encode
+    from examples.llama import Transformer
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
-    with CLCache(85):
-      model(onehot_encode([1,2,3,4], vocab_size=args_tiny['vocab_size']), 0).realize()
+    with CLCache(86):
+      model(Tensor([[1,2,3,4]]), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptBinOp(unittest.TestCase):

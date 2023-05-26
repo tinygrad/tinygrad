@@ -50,6 +50,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
 code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.EXP: lambda x: f"native_exp({x})" if NATIVE_EXPLOG else f"exp({x})",
   UnaryOps.LOG: lambda x: f"native_log({x})" if NATIVE_EXPLOG else f"log({x})",
+  UnaryOps.SIN: lambda x: f"sin({x})",
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
   BinaryOps.POW: lambda a,b: f"pow({a},{b})", BinaryOps.MAX: lambda a,b: f"max({a},{b})",
@@ -126,31 +127,33 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])};")
       else:
         kk(f"{newvar.render(True)} = {code_for_op[args](*[x.render() for x in vin])};")
-    elif uop == UOps.LOAD and newvar is not None and newvar.ltype == LocalTypes.float:
-      assert not isinstance(bufs[args.i].dtype, ImageDType), "image load must be float4"
+    elif uop == UOps.LOAD and newvar is not None:
       # TODO: merge with CONST?
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
+        assert newvar.ltype == LocalTypes.float, "const can't be float4"
         # nan? inf?
         val = f"{bufs[args.i].realized._buf}f"
-      else:
-        if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
-          val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
-        else:
-          val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
-      # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
-      if args.valid.min == 1: kk(f"float {newvar.name} = {val};")
-      else: kk(f"float {newvar.name} = ({args.valid.render(render_cl)}) ? ({val}) : 0.0f;")
-    elif uop == UOps.LOAD and newvar is not None and newvar.ltype == LocalTypes.float4:
-      assert newvar.offset is None, "load can't have an offset"
-      if isinstance(bufs[args.i].dtype, ImageDType):
+      elif isinstance(bufs[args.i].dtype, ImageDType):
+        assert newvar.ltype == LocalTypes.float4, "image must be float4"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
         idx, idy = to_image_idx(bufs[args.i].dtype.shape, args.idx, args.valid)
         val = f"read_imagef({bufnames[args.i]}, smp, (int2)({idx.render(render_cl)}, {idy.render(render_cl)}))"
       else:
-        val = f"(({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}float4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}]"
+        if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
+          if newvar.ltype == LocalTypes.float4:
+            val = f"vload_half4({(args.idx//4).render(render_cl)}, {bufnames[args.i]})"
+          else:
+            val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
+        else:
+          if newvar.ltype == LocalTypes.float4:
+            val = f"{lang.float4}((({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}])"
+          else:
+            val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
-      if args[2].min == 1: kk(f"{newvar.render(True)} = {val};")
-      else: kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? ({val}) : {lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);")
+      if args.valid.min == 1: kk(f"{newvar.render(True)} = {val};")
+      else:
+        zero = f"{lang.float4}(0.0f, 0.0f, 0.0f, 0.0f);" if newvar.ltype == LocalTypes.float4 else "0.0f"
+        kk(f"{newvar.render(True)} = ({args.valid.render(render_cl)}) ? ({val}) : {zero};")
     elif uop == UOps.STORE and (vin[0].ltype == LocalTypes.float or (vin[0].ltype == LocalTypes.float4 and vin[0].offset is not None)):
       assert not isinstance(bufs[args.i].dtype, ImageDType), "image store must be float4"
       assert args.valid.min == 1, "store must be valid"
@@ -197,7 +200,7 @@ class CStyleCodegen(Linearizer):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    # TODO: this exposes bugs in the optimizers assuming the strides are on a single vie
+    # TODO: this exposes bugs in the optimizers assuming the strides are on a single view
     """
     if len(self.lang.gid) and self.first_reduce > len(self.lang.gid):
       num_to_merge = (self.first_reduce - len(self.lang.gid))+1

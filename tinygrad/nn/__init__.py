@@ -1,5 +1,6 @@
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import prod
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -24,7 +25,7 @@ class BatchNorm2d:
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * batch_var.detach())
+        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape) - y.shape[1]) * batch_var.detach() )
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
@@ -92,3 +93,12 @@ class LayerNorm:
 
 class LayerNorm2d(LayerNorm):
   def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+class Embedding:
+  def __init__(self, vocab_size:int, embed_size:int):
+    self.vocab_size = vocab_size
+    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+
+  def __call__(self, idx:Tensor) -> Tensor:
+    vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size).expand(*idx.shape, self.vocab_size)
+    return (vocab_counter == idx.unsqueeze(2).expand(*idx.shape, self.vocab_size)) @ self.weight
