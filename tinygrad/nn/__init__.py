@@ -1,5 +1,6 @@
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import prod
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -24,7 +25,7 @@ class BatchNorm2d:
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * batch_var.detach())
+        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape) - y.shape[1]) * batch_var.detach() )
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
