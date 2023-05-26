@@ -130,7 +130,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Optimizer Test (OPT 2 and 3)
       run: |
         PYTHONPATH="." OPT=2 GPU=1 python test/external/external_test_opt.py
@@ -158,7 +158,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test GPU IMAGE ops
       run: |
         GPU=1 IMAGE=1 python3 test/test_ops.py
