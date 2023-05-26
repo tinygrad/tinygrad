@@ -69,6 +69,25 @@ def eval_rnnt():
     print(f"WER: {scores/words}, {words} words, raw scores: {scores}, c: {c}")
     st = time.perf_counter()
 
+def eval_bert():
+  # Bert-QA
+  from models.bert import BertForQuestionAnswering
+  mdl = BertForQuestionAnswering()
+  mdl.load_from_pretrained()
+
+  from datasets.squad import iterate
+
+  st = time.perf_counter()
+  for X, Y in iterate():
+    mt = time.perf_counter()
+    out = mdl(Tensor(X["input_ids"]), Tensor(X["input_mask"]), Tensor(X["segment_ids"])).realize()
+    et = time.perf_counter()
+    print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
+    st = time.perf_counter()
+
+    print(Y)
+
+
 if __name__ == "__main__":
   # inference only
   Tensor.training = False
