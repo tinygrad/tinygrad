@@ -8,19 +8,18 @@ from itertools import chain
 
 class SPPF:
     def __init__(self, c1, c2, k=5):
-        self.c1 = c1
-        self.c2 = c2
         c_ = c1 // 2  # hidden channels
+        k = k // 2
         self.cv1 = Conv2d(c1, c_, 1, 1)
         self.cv2 = Conv2d(c_ * 4, c2, 1, 1)
-        self.maxpool = lambda x : x.pad2d(k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
+        self.maxpool = lambda x : x.pad2d((k, k, k, k)).max_pool2d(kernel_size=(5,5), stride=(1,1))
         
     def forward(self, x):
         x = self.cv1(x)
         x2 = self.maxpool(x)
         x3 = self.maxpool(x2)
         x4 = self.maxpool(x3)
-        concatenated = x.cat((x, x2, x3, x4), axis=1)
+        concatenated = x.cat((x2, x3, x4), dim=1)
         return self.cv2(concatenated)
     
 class Conv_Block:
