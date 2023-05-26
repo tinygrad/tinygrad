@@ -30,12 +30,12 @@ class TinygradBackend(Backend):
     print("prepare", cls, device, net_feed_input)
     run_onnx = get_run_onnx(model)
     return TinygradModel(run_onnx, net_feed_input)
-  
+
   @classmethod
   def supports_device(cls, device: str) -> bool:
     return device == "CPU"
 
-backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__) 
+backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
 # add support for SoftmaxCrossEntropyLoss and NegativeLogLikelihoodLoss
 backend_test.exclude('test_sce_*')
