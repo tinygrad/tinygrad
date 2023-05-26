@@ -8,6 +8,7 @@ from extra.training import train, evaluate
 from datasets import fetch_mnist
 
 np.random.seed(1337)
+Tensor.manual_seed(1337)
 
 X_train, Y_train, X_test, Y_test = fetch_mnist()
 
@@ -79,11 +80,11 @@ class TestLrScheduler(unittest.TestCase):
   def test_cosineannealinglr_eta_min(self): self._test_cosineannealinglr(100, {'eta_min': 0.001}, 1e-6, 1e-6)
 
   def test_training(self):
-    without = lr_scheduler_training() # usually around 40% accuracy
+    without = lr_scheduler_training()
     sched_fns = [MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR]
     argss = [{'milestones': [3, 6, 8], 'gamma': 0.5}, {'factor': 0.5, 'patience': 2}, {'T_max': 10}]
     for sched_fn, args in zip(sched_fns, argss):
-      with_sched = lr_scheduler_training(sched_fn, args) # usually around 85% accuracy
+      with_sched = lr_scheduler_training(sched_fn, args)
       assert with_sched > without
 
 if __name__ == '__main__':
