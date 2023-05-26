@@ -3,31 +3,39 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d,BatchNorm2d
 
 # Model architecture from https://github.com/ultralytics/ultralytics/issues/189
-class Conv_Block:
-  def __init__(self, c1, c2, kernel_size, stride, padding, dilation=1, groups=1):
-    self.conv = Conv2d(c1,c2, kernel_size, stride, padding, dilation=dilation, groups=groups,bias=False)
-    self.batch = BatchNorm2d(c2)
-
-  def __call__(self, x):
-    return self.batch(self.conv(x)).silu()
   
 class SPPF:
     def __init__(self, c1, c2, k=5):
         c_ = c1 // 2  # hidden channels
-        k = k // 2
-        self.cv1 = Conv_Block(c1, c_, 1, 1)
-        self.cv2 = Conv_Block(c_ * 4, c2, 1, 1)
-        self.maxpool = lambda x : x.pad2d((k, k, k, k)).max_pool2d(kernel_size=(5,5), stride=(1,1))
+        self.cv1 = Conv_Block(c1, c_, k, 1)
+        self.cv2 = Conv_Block(c_ * 4, c2, k, 1)
+        self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=5, stride=1)
         
     def forward(self, x):
         x = self.cv1(x)
         x2 = self.maxpool(x)
         x3 = self.maxpool(x2)
         x4 = self.maxpool(x3)
-        concatenated = x.cat((x2, x3, x4), dim=1)
-        return self.cv2(concatenated)
+        return self.cv2(x.cat(x2, x3, x4, dim=1))
     
-    
+# this function is from the original implementation
+def autopad(k, p=None, d=1):  # kernel, padding, dilation
+    """Pad to 'same' shape outputs."""
+    if d > 1:
+        k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
+    if p is None:
+        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
+    return p
+
+class Conv_Block:
+  def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
+    self.conv = Conv2d(c1,c2, kernel_size, stride, padding= autopad(kernel_size, padding, dilation),bias=False, groups=groups, dilation=dilation)
+    self.batch = BatchNorm2d(c2)
+
+  def __call__(self, x):
+    return self.conv(x).silu()
+  
+  
 class Bottleneck:
   def __init__(self, c1, c2 , shortcut: bool, g=1, kernels: list = (3,3), channel_factor=0.5):
     c_ = int(c2 * channel_factor)
@@ -37,6 +45,7 @@ class Bottleneck:
     
   def forward(self, x):
     return x + self.cv2(self.cv1(x)) if self.residual else self.cv2(self.cv1(x))
+
 
 # TODO: test this
 class C2f:
