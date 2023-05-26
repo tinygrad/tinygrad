@@ -46,7 +46,6 @@ class TestNN(unittest.TestCase):
 
     np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
 
-    # TODO: this is failing
     np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5)
 
   def test_batchnorm2d_training(self):
