@@ -1,5 +1,7 @@
 import unittest
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import dtypes
+from tinygrad.lazy import Device
 # similar to test/external/external_test_gpu_ast.py, but universal
 
 class TestSpecific(unittest.TestCase):
@@ -16,6 +18,15 @@ class TestSpecific(unittest.TestCase):
     x = Tensor.ones(1, 512, 4).contiguous().reshape(1, 2048)
     w = Tensor.randn(2048, 512)
     (x @ w).reshape(1, 128, 4).contiguous().realize()
+
+  def test_big_vec_mul(self):
+    # from LLaMA
+    #   0 buffer<4096, dtypes.float>                      [View((1024, 1, 1, 4), (4, 0, 0, 1), 0, None)]
+    #   1 buffer<4096, dtypes.float>                      [View((1024, 1024, 4, 4), (0, 4, 1, 0), 0, None)]
+    #   2 buffer<16777216, dtypes.half>                   [View((1024, 1024, 4, 4), (16384, 4, 1, 4096), 0, None)]
+    x = Tensor.randn(4096).realize()
+    w = Tensor.randn(4096, 4096, device='cpu').cast(dtypes.float16).to(Device.DEFAULT).realize()
+    (x @ w.T).realize()
 
   # from https://dl.acm.org/doi/pdf/10.1145/3495243.3517020
 
