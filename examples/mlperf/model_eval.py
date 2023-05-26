@@ -76,17 +76,21 @@ def eval_bert():
   mdl.load_from_pretrained()
 
   from datasets.squad import iterate
+  from examples.mlperf.helpers import get_bert_qa_prediction
+  from examples.mlperf.metrics import f1_score, exact_match_score
 
   st = time.perf_counter()
   for X, Y in iterate():
     mt = time.perf_counter()
-    out = mdl(Tensor(X["input_ids"]), Tensor(X["input_mask"]), Tensor(X["segment_ids"])).realize()
+    out = mdl(Tensor(X["input_ids"]), Tensor(X["input_mask"]), Tensor(X["segment_ids"])).numpy()
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
     st = time.perf_counter()
 
-    print(Y)
-
+    pred = get_bert_qa_prediction(X, Y, out[0], out[1])
+    print(pred)
+    print(Y["answers"])
+    print(f1_score(pred, Y["answers"][0]), exact_match_score(pred, Y["answers"][0]))
 
 if __name__ == "__main__":
   # inference only

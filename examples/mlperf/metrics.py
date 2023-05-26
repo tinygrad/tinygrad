@@ -1,3 +1,6 @@
+import re
+import string
+
 def levenshtein(a, b):
   n, m = len(a), len(b)
   if n > m:
@@ -23,3 +26,21 @@ def word_error_rate(x, y):
     words += len(r_list)
     scores += levenshtein(h_list, r_list)
   return float(scores) / words, float(scores), words
+
+def normalize_string(s):
+  s = "".join(c for c in s.lower() if c not in string.punctuation)
+  s = re.sub(r'\b(a|an|the)\b', ' ', s)
+  return " ".join(s.split())
+
+def f1_score(x, y):
+  xt = normalize_string(x).split()
+  yt = normalize_string(y).split()
+  ct = set(xt) & set(yt)
+  if len(ct) == 0:
+    return 0.0
+  p = len(ct) / len(xt)
+  r = len(ct) / len(yt)
+  return 2 * p * r / (p + r)
+
+def exact_match_score(x, y):
+  return float(normalize_string(x) == normalize_string(y))

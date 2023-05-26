@@ -27,7 +27,7 @@ class BertForQuestionAnswering:
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
     sequence_output = self.bert(input_ids, attention_mask, token_type_ids)
     logits = self.qa_outputs(sequence_output)
-    start_logits, end_logits = logits.chunk(2, dim=1)
+    start_logits, end_logits = logits.chunk(2, dim=-1)
     start_logits = start_logits.reshape(-1, 1)
     end_logits = end_logits.reshape(-1, 1)
 
@@ -114,9 +114,9 @@ class BertAttention:
     self.self = BertSelfAttention(hidden_size, num_attention_heads, attention_probs_dropout_prob)
     self.output = BertSelfOutput(hidden_size, hidden_dropout_prob)
 
-  def __call__(self, input_tensor, attention_mask):
-    self_output = self.self(input_tensor, attention_mask)
-    attention_output = self.output(self_output, input_tensor)
+  def __call__(self, hidden_states, attention_mask):
+    self_output = self.self(hidden_states, attention_mask)
+    attention_output = self.output(self_output, hidden_states)
     return attention_output
 
 class BertSelfAttention:
@@ -137,10 +137,10 @@ class BertSelfAttention:
     mixed_value_layer = self.value(hidden_states)
 
     query_layer = self.transpose_for_scores(mixed_query_layer)
-    key_layer = self.transpose_key_for_scores(mixed_key_layer)
+    key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    attention_scores = query_layer @ key_layer
+    attention_scores = query_layer @ key_layer.transpose(2, 3)
     attention_scores = attention_scores / self.attention_head_size**0.5
     attention_scores = attention_scores + attention_mask
     attention_probs = attention_scores.softmax()
@@ -155,10 +155,6 @@ class BertSelfAttention:
   def transpose_for_scores(self, x):
     x = x.reshape(x.shape[0], x.shape[1], self.num_attention_heads, self.attention_head_size)
     return x.transpose(1, 2)
-
-  def transpose_key_for_scores(self, x):
-    x = x.reshape(x.shape[0], x.shape[1], self.num_attention_heads, self.attention_head_size)
-    return x.permute(0, 2, 3, 1)
 
 class BertSelfOutput:
   def __init__(self, hidden_size, hidden_dropout_prob):

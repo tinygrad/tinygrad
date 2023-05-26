@@ -142,8 +142,9 @@ def iterate(start=0):
     example = examples[i]
     features = convert_example_to_features(example, tokenizer)
     for feature in features:
-      yield feature, example["answers"]
+      yield feature, example
 
 if __name__ == "__main__":
   X, Y = next(iterate())
-  print(X["input_ids"].shape, Y[0])
+  print(" ".join(X["tokens"]))
+  print(X["input_ids"].shape, Y)
