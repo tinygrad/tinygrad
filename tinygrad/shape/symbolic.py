@@ -1,6 +1,8 @@
 from __future__ import annotations
-import math, itertools, functools
-from typing import List, Dict, Callable, Type, Union
+from abc import abstractmethod
+from collections import defaultdict
+import math, functools
+from typing import List, Dict, Callable, Tuple, Type, Union
 from tinygrad.helpers import partition, all_same
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -23,20 +25,12 @@ class Node:
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node, int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __sub__(self, b:Union[Node, int]): return self+-b
-  def __ge__(self, b:int): return create_opnode(GeNode, self, b)
-  def __lt__(self, b:int): return create_opnode(LtNode, self, b)
+  def __ge__(self, b:int): return create_node(GeNode(self, b))
+  def __lt__(self, b:int): return create_node(LtNode(self, b))
   def __mul__(self, b:int):
     if b == 0: return NumNode(0)
     elif b == 1: return self
-
-    # this is a hack to make div work with boolean nodes. TODO: make generic
-    if isinstance(self, GeNode): return (self.a*b) >= (self.b*b)
-    if isinstance(self, LtNode): return (self.a*b) < (self.b*b)
-    if isinstance(self, AndNode): return Variable.ands([x*b for x in self.nodes])
-
-    if isinstance(self, MulNode): return self.a*(self.b*b) # two muls is one mul
-    if isinstance(self, SumNode): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
-    return create_opnode(MulNode, self, b)
+    return create_node(MulNode(self, b))
 
   # *** complex ops ***
 
@@ -45,90 +39,54 @@ class Node:
     if b < 0: return (self//-b)*-1
     if b == 1: return self
 
-    # this is a hack to make div work with boolean nodes. TODO: make generic
-    if isinstance(self, GeNode): return (self.a//b) >= (self.b//b)
-    if isinstance(self, LtNode): return (self.a//b) < (self.b//b)
-    if isinstance(self, AndNode): return Variable.ands([x//b for x in self.nodes])
-
-    if isinstance(self, ModNode) and self.b % b == 0: return (self.a//b) % (self.b//b) # put the div inside mod
-    if isinstance(self, DivNode): return self.a//(self.b*b) # two divs is one div
-    if isinstance(self, MulNode) and self.b % b == 0: return self.a*(self.b//b)
-    if isinstance(self, MulNode) and b % self.b == 0 and self.b > 0: return self.a//(b//self.b) # NOTE: mod negative isn't handled right
-    if isinstance(self, SumNode) and factoring_allowed:
-      factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, (MulNode, NumNode))) and x.b%b == 0)
-      nofactor = []
-      # ugh, i doubt this is universally right
-      for x in tmp_nofactor:
-        if isinstance(x, NumNode):
-          if (x.b%b) != x.b:
-            factors.append(Variable.num(x.b - (x.b%b)))  # python does floor division
-          nofactor.append(Variable.num(x.b%b))
-        else:
-          nofactor.append(x)
-      gcd = [math.gcd(x.b, b) if isinstance(x, (MulNode, NumNode)) else None for x in nofactor]
-      if len(factors) > 0:
-        # these don't have to be the same, just having a common factor
-        if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
-          nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
-        else:
-          nofactor_term = Variable.sum(nofactor)//b
-        return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
-      else:
-        muls = [x.b for x in nofactor if isinstance(x, MulNode)]
-        for m in muls:
-          if m > 1 and b%m == 0:
-            return (self//m)//(b//m)
     # the numerator of div is not allowed to be negative
     if self.min < 0:
       offset = self.min//b
       # factor out an "offset" to make the numerator positive. don't allowing factoring again
       return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
-    return create_opnode(DivNode, self, b)
+    return create_node(DivNode(self, b))
 
   def __mod__(self, b:int):
     assert b > 0
     if b == 1: return NumNode(0)
-    if isinstance(self, SumNode):
-      new_nodes = []
-      for x in self.nodes:
-        if isinstance(x, NumNode): new_nodes.append(Variable.num(x.b%b))
-        elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
-        else: new_nodes.append(x)
-      a = Variable.sum(new_nodes)
-    elif isinstance(self, MulNode):
-      a = self.a * (self.b%b)
-    else:
-      a = self
-    if a.min >= 0 and a.max < b: return a
-    if a.min < 0: return (a - ((a.min//b)*b)) % b
-    return create_opnode(ModNode, a, b)
+    if self.min >= 0 and self.max < b: return self
+    if self.min < 0: return (self - ((self.min//b)*b)) % b
+    return create_node(ModNode(self, b))
 
   @staticmethod
   def num(num:int) -> Node: return NumNode(num)
 
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
-    # expand any sums inside one sum
-    if any([isinstance(x, SumNode) for x in nodes]):
-      nodes, sum_nodes = partition(nodes, lambda x: not isinstance(x, SumNode))
-      for x in sum_nodes: nodes += x.nodes
-      return Variable.sum(nodes)
+    new_nodes: List[Node] = []
+    num_nodes: List[NumNode] = []
+    mul_nodes: List[MulNode] = []
+    for node in nodes:
+      if isinstance(node, NumNode):
+        num_nodes.append(node)
+      elif isinstance(node, MulNode):
+        mul_nodes.append(node)
+      elif isinstance(node, SumNode): # expand any sums inside one sum
+        new_nodes.append(Variable.sum(node.nodes))
+      else:
+        new_nodes.append(node)
 
     # combine any numbers inside a sum
-    nodes, num_nodes = partition(nodes, lambda x: not isinstance(x, NumNode))
-    nodes.append(NumNode(sum([x.b for x in num_nodes])))
+    if num_nodes:
+      new_nodes.append(NumNode(sum([x.b for x in num_nodes])))
 
     # combine any MulNodes that factorize (big hack sticking the MulNode(x, 1) on things)
-    # TODO: this is slow!
-    nodes, mul_nodes = partition(nodes, lambda x: not isinstance(x, MulNode))
-    mul_nodes += [MulNode(x, 1) for x in nodes]
-    mul_nodes = sorted(mul_nodes, key=lambda x: x.a.render()) # group by equality (ugh, uses render!)
-    new_nodes = [k * sum(x.b for x in g) for k, g in itertools.groupby(mul_nodes, key=lambda x: x.a)]
-    nodes = [x if not isinstance(x, MulNode) or x.b != 1 else x.a for x in new_nodes]
+    mul_nodes += [MulNode(x, 1) for x in new_nodes]
+    mul_groups: Dict[str, Tuple[Node, List[MulNode]]] = defaultdict(lambda: (Node(), []))
+    for node in mul_nodes: #NOTE can we somehow avoid rendering here?
+      key = node.a.render()
+      mul_groups[key] = (node.a, mul_groups[key][1] + [node])
+    mul_nodes = [k * sum(x.b for x in g) for k, g in mul_groups.values()]
+    new_nodes = [x if not isinstance(x, MulNode) or x.b != 1 else x.a for x in mul_nodes]
 
     # filter 0s
-    nodes = [x for x in nodes if x.min != 0 or x.max != 0]
-    return create_rednode(SumNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(0))
+    new_nodes = [x for x in new_nodes if x.min != 0 or x.max != 0]
+    return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else (new_nodes[0] if len(new_nodes) == 1 else NumNode(0))
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
@@ -159,32 +117,91 @@ def create_node(ret:Node):
   return ret
 
 class OpNode(Node):
-  def __init__(self, a:Node, b:int): self.a, self.b = a, b
+  def __init__(self, a:Node, b:int): 
+    self.a, self.b = a, b
+    self.min, self.max = self.get_bounds()
+  @abstractmethod 
+  def get_bounds(self) -> Tuple[int, int]: pass
 
-class GeNode(OpNode): pass
-class LtNode(OpNode): pass
-class MulNode(OpNode): pass
-class DivNode(OpNode): pass
-class ModNode(OpNode): pass
-
-def create_opnode(typ:Type[OpNode], a:Node, b:int):
-  ret = typ(a, b)
-  if typ == GeNode: ret.min, ret.max = int(a.min >= b), int(a.max >= b)
-  elif typ == LtNode: ret.min, ret.max = int(a.max < b), int(a.min < b)
-  elif typ == MulNode: ret.min, ret.max = (a.min*b, a.max*b) if b >= 0 else (a.max*b, a.min*b)
-  elif typ == DivNode:
-    assert a.min >= 0
-    ret.min, ret.max = a.min//b, a.max//b
-  elif typ == ModNode:
-    assert a.min >= 0
-    ret.min, ret.max = (0, b-1) if a.max - a.min >= b or (a.min != a.max and a.min%b >= a.max%b) else (a.min%b, a.max%b)
-  return create_node(ret)
+class GeNode(OpNode):
+  def __mul__(self, b: int): return (self.a*b) >= (self.b*b)
+  def __floordiv__(self, b: int, _=False): return (self.a//b) >= (self.b//b)
+  def get_bounds(self) -> Tuple[int, int]: return int(self.a.min >= self.b), int(self.a.max >= self.b)
+class LtNode(OpNode):
+  def __mul__(self, b: int): return (self.a*b) < (self.b*b)
+  def __floordiv__(self, b: int, _=False): return (self.a//b) < (self.b//b)
+  def get_bounds(self) -> Tuple[int, int]: return int(self.a.max < self.b), int(self.a.min < self.b)
+class MulNode(OpNode):
+  def __mul__(self, b: int): return self.a*(self.b*b) # two muls in one mul
+  def __floordiv__(self, b: int, factoring_allowed=False): # NOTE: mod negative isn't handled right
+    if self.b % b == 0: return self.a*(self.b//b)
+    if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
+    return super().__floordiv__(b, factoring_allowed)
+  def __mod__(self, b: int):
+    a = (self.a * (self.b%b))
+    if a.min >= 0 and a.max < b: return a
+    if a.min < 0: return (a - ((a.min//b)*b)) % b
+    return create_node(ModNode(a, b))
+  def get_bounds(self) -> Tuple[int, int]: 
+    return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+class DivNode(OpNode):
+  def __floordiv__(self, b: int, _=False): return self.a//(self.b*b) # two divs is one div
+  def get_bounds(self) -> Tuple[int, int]: 
+    assert self.a.min >= 0
+    return self.a.min//self.b, self.a.max//self.b
+class ModNode(OpNode):
+  def __floordiv__(self, b: int, factoring_allowed=True):
+    if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod
+    return super().__floordiv__(b, factoring_allowed)
+  def get_bounds(self) -> Tuple[int, int]: 
+    assert self.a.min >= 0
+    return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
 
-class SumNode(RedNode): pass
-class AndNode(RedNode): pass
+class SumNode(RedNode):
+  def __mul__(self, b: int): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
+  def __floordiv__(self, b: int, factoring_allowed=True):
+    if not factoring_allowed: return super().__floordiv__(b, factoring_allowed)
+    factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, (MulNode, NumNode))) and x.b%b == 0)
+    nofactor = []
+    # ugh, i doubt this is universally right
+    for x in tmp_nofactor:
+      if isinstance(x, NumNode):
+        if (x.b%b) != x.b:
+          factors.append(Variable.num(x.b - (x.b%b)))  # python does floor division
+        nofactor.append(Variable.num(x.b%b))
+      else:
+        nofactor.append(x)
+    gcd = [math.gcd(x.b, b) if isinstance(x, (MulNode, NumNode)) else None for x in nofactor]
+    if len(factors) > 0:
+      # these don't have to be the same, just having a common factor
+      if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
+        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
+      else:
+        nofactor_term = Variable.sum(nofactor)//b
+      return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
+    else:
+      muls = [x.b for x in nofactor if isinstance(x, MulNode)]
+      for m in muls:
+        if m > 1 and b%m == 0:
+          return (self//m)//(b//m)
+      return super().__floordiv__(b, factoring_allowed)
+  def __mod__(self, b: int): 
+    new_nodes = []
+    for x in self.nodes:
+      if isinstance(x, NumNode): new_nodes.append(Variable.num(x.b%b))
+      elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
+      else: new_nodes.append(x)
+    a = Variable.sum(new_nodes)
+    if a.min >= 0 and a.max < b: return a
+    if a.min < 0: return (a - ((a.min//b)*b)) % b
+    return create_node(ModNode(a, b))
+
+class AndNode(RedNode): 
+  def __mul__(self, b: int): Variable.ands([x*b for x in self.nodes])
+  def __floordiv__(self, b: int, _=True): return Variable.ands([x//b for x in self.nodes])
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
