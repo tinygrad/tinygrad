@@ -186,8 +186,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
     helper_test_op([(64), (64,99)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+
+  @unittest.skipIf(IMAGE>0, "no batched matmul on images")
   def test_matmul_batched(self):
     helper_test_op([(3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+
+  @unittest.skipIf(IMAGE>0, "no batched matmul on images")
   def test_matmul_batched_vector(self):
     helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_gemm(self):
