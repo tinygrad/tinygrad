@@ -14,7 +14,7 @@ from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
 from extra.helpers import Timing
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Linear
+from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
 
@@ -133,13 +133,13 @@ class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, max_batch_size=32, max_seq_len=1024):
     self.layers = [TransformerBlock(dim, multiple_of, n_heads, norm_eps) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
-    self.tok_embeddings = {"weight": Tensor.glorot_uniform(vocab_size, dim)}
+    self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = Linear(dim, vocab_size, bias=False)
     self.freqs_cis = Tensor(precompute_freqs_cis(dim // n_heads, max_seq_len * 2))
 
   def __call__(self, tokens:Tensor, start_pos:int):
-    _bsz, seqlen, _ = tokens.shape
-    h = tokens @ self.tok_embeddings['weight']
+    _bsz, seqlen = tokens.shape
+    h = self.tok_embeddings(tokens)
 
     # get only the part we are using. making it contiguous avoids more kernel calls
     freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen].contiguous().realize()
@@ -174,13 +174,6 @@ WEIGHTS_13B_0_FILENAME = WEIGHTS_DIR / "13B/consolidated.00.pth"
 WEIGHTS_13B_1_FILENAME = WEIGHTS_DIR / "13B/consolidated.01.pth"
 
 # **** helper functions ****
-
-def onehot_encode(toks, vocab_size=VOCAB_SIZE):
-  # this allows the embedding to work in tinygrad
-  onehot = np.zeros((1, len(toks), vocab_size), dtype=np.float32)
-  onehot[0,range(len(toks)),toks] = 1
-  return Tensor(onehot)
-
 def sample(logits, temperature):
   if temperature < 1e-6:
     # so close to 0 we use argmax
@@ -365,7 +358,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      model(onehot_encode(toks), 0).realize()  # NOTE: output logits are not used
+      model(Tensor([toks]), 0).realize()  # NOTE: output logits are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -400,7 +393,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
       with Timing("ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU") if DEBUG else None, enabled=args.timing):
-        logits = model(onehot_encode(toks[start_pos:]), start_pos).realize()
+        logits = model(Tensor([toks[start_pos:]]), start_pos).realize()
       with Timing("sync in ", enabled=args.timing):
         tok = sample(logits, args.temperature)
 
