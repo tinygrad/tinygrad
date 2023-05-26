@@ -55,7 +55,7 @@ class C2f:
             concatenated = tuple([y] + y_chunks + y2)
             return self.cv2(concatenated)
 
-#****** incomplete and probably doesn't work yet*******
+#  ****** incomplete and probably doesn't work yet*******
 # class Detect():
 #     """YOLOv8 Detect head for detection models."""
 #     dynamic = False  # force grid reconstruction
@@ -72,20 +72,10 @@ class C2f:
 #         self.no = nc + self.reg_max * 4  # number of outputs per anchor
 #         self.stride = Tensor.zeros(self.nl)  # strides computed during build
 #         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)  # channels
+#         self.cv2 = [Tensor.sequential([Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.reg_max, 1)]) for x in ch]
+#         self.cv3 = [Tensor.sequential([Conv_Block(x, c3, 3), Conv_Block(c3, c3, 3), Conv2d(c3, self.nc, 1)]) for x in ch]
 
-#         # TODO: make a function so blocks dont repeat
-#         self.cv2 = []
-#         for x in ch:
-#             conv_sequence = [Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.reg_max, 1)]
-#             composed_function = Tensor.sequential(conv_sequence)
-#             self.cv2.append(composed_function)
-
-#         self.cv3 = []
-#         for x in ch:
-#             conv_sequence = [Conv_Block(x, c3, 3), Conv_Block(c3, c3, 3), Conv2d(c3, self.nc, 1)]
-#             composed_function = Tensor.sequential(conv_sequence)
-#             self.cv2.append(composed_function)
-# # TODO: DFL block create?
+#         TODO: DFL block create
 #         # self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
     
