@@ -141,7 +141,7 @@ class Linearizer:
     if DEBUG >= 5: self.printbufs("early")
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
+  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
   # TODO: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
@@ -158,11 +158,11 @@ class Linearizer:
     store_offset_float4 = {}
     float4_axis = (self.upcasted-1) - self.float4_axis(i)[0]
     for uidxs, var in store_offset.items():
-      if uidxs[float4_axis] == 0:
+      if uidxs[float4_axis]%4 == 0:
         store_offset_float4[uidxs] = [var]
       else:
         uidxs2 = list(uidxs)
-        uidxs2[float4_axis] = 0
+        uidxs2[float4_axis] -= uidxs2[float4_axis]%4
         store_offset_float4[tuple(uidxs2)].append(var)
     return store_offset_float4
 
