@@ -166,10 +166,7 @@ class Tensor:
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
-    fan = shape[1] * prod(shape[2:])
-    gain = math.sqrt(2.0 / (1 + a ** 2))
-    std = gain / math.sqrt(fan)
-    bound = math.sqrt(3.0) * std
+    bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * prod(shape[2:]))
     return Tensor(LazyNumpyArray(lambda lna: np.random.uniform(low=-bound, high=bound, size=lna.shape), shape, np.float32))
 
   # ***** toposort and backward pass *****
