@@ -7,28 +7,25 @@ from itertools import chain
 # Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 
 class SPPF:
-    """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
-    def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
+    def __init__(self, c1, c2, k=5):
         self.c1 = c1
         self.c2 = c2
-        self.k = k
-
         c_ = c1 // 2  # hidden channels
         self.cv1 = Conv2d(c1, c_, 1, 1)
         self.cv2 = Conv2d(c_ * 4, c2, 1, 1)
-
+        self.maxpool = lambda x : x.pad2d(k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
+        
     def forward(self, x):
-        """Forward pass through Ghost Convolution block."""
         x = self.cv1(x)
-        x2 = x.pad2d(self.k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
-        x3 = x.pad2d(self.k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
-        x4 = x.pad2d(self.k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
+        x2 = self.maxpool(x)
+        x3 = self.maxpool(x2)
+        x4 = self.maxpool(x3)
         concatenated = x.cat((x, x2, x3, x4), axis=1)
         return self.cv2(concatenated)
     
 class Conv_Block:
-  def __init__(self, c1, c2, kernel_size, stride, padding):
-    self.conv = Conv2d(c1,c2, kernel_size, stride, padding, bias=False)
+  def __init__(self, c1, c2, kernel_size, stride, padding, dilation=1, groups=1):
+    self.conv = Conv2d(c1,c2, kernel_size, stride, padding, dilation=dilation, groups=groups,bias=False)
     self.batch = BatchNorm2d(c2)
 
   def __call__(self, x):
