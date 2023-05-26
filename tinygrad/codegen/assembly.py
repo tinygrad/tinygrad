@@ -147,6 +147,7 @@ class AssemblyCodegen(Linearizer):
     ins.append('s_load_b128 s[0:3], s[0:1], null')
 
     # v0 is a float offset
+    # TODO: compute indexes
     ins.append('v_lshlrev_b32 v0, 2, v0')
 
     name_to_v = {}
@@ -164,11 +165,14 @@ class AssemblyCodegen(Linearizer):
       return ret
 
     # TODO: free vs that aren't used again with liveness analysis
-    def get_v(var):
+    def get_v(var, needs_wait=False):
       nonlocal latest_v, name_to_v, pend_v, pend_i
       if var not in name_to_v:
         name_to_v[var] = f"v{latest_v}"
-        pend_v.append(name_to_v[var])
+        if needs_wait:
+          pend_v.append(name_to_v[var])
+        else:
+          ready[name_to_v[var]] = True
         latest_v += 1
       else:
         if not ready[name_to_v[var]]:
@@ -185,12 +189,14 @@ class AssemblyCodegen(Linearizer):
             global_size.append(var.max+1)
       elif uop == UOps.LOAD:
         # TODO: indexing and valid
-        ins.append(f'global_load_b32 {get_v(newvar)}, v0, {get_i(args.i)}')
+        ins.append(f'global_load_b32 {get_v(newvar, True)}, v0, {get_i(args.i)}')
       elif uop == UOps.ALU:
         if args == BinaryOps.ADD:
           ins.append(f'v_add_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
         elif args == BinaryOps.SUB:
           ins.append(f'v_sub_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
+        else:
+          raise NotImplementedError(f"missing imp for ALU op {uop}")
       elif uop == UOps.STORE:
         ins.append(f'global_store_b32 v0, {get_v(vin[0])}, {get_i(args.i)}')
 
