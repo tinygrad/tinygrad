@@ -22,6 +22,7 @@ render_llvm = {
 code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x], fastmath=('fast',)),
   UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x], fastmath=('fast',)),
+  UnaryOps.SIN: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.sin', [ir.FloatType()]), [x], fastmath=('fast',)),
   BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y, flags=('fast',)),
   BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),
   BinaryOps.MUL: lambda builder,x,y: builder.fmul(x,y, flags=('fast',)),

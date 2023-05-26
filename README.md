@@ -23,6 +23,9 @@ This project is maintained by [tiny corp](https://tinygrad.org/).
 ### Installation
 
 ```bash
+python3 -m pip install git+https://git@github.com/geohot/tinygrad.git
+
+# or
 git clone https://github.com/geohot/tinygrad.git
 cd tinygrad
 python3 -m pip install -e .
@@ -118,24 +121,6 @@ from tinygrad.tensor import Tensor
 (Tensor.ones(4,4).gpu() + Tensor.ones(4,4).gpu()).cpu()
 ```
 
-### ANE Support?! (broken)
-
-If all you want to do is ReLU, you are in luck! You can do very fast ReLU (at least 30 MEGAReLUs/sec confirmed)
-
-Requires your Python to be signed with `ane/lib/sign_python.sh` to add the `com.apple.ane.iokit-user-access` entitlement, which also requires `sudo nvram boot-args="amfi_get_out_of_my_way=1 ipc_control_port_options=0"`. Build the library with `ane/lib/build.sh`
-
-In order to set boot-args and for the AMFI kext to respect that arg, run `csrutil enable --without-kext --without-nvram` in recovery mode.
-
-```python
-from tinygrad.tensor import Tensor
-
-a = Tensor([-2,-1,0,1,2]).ane()
-b = a.relu()
-print(b.cpu())
-```
-
-Warning: do not rely on the ANE port. It segfaults sometimes. So if you were doing something important with tinygrad and wanted to use the ANE, you might have a bad time.
-
 ### hlops (in tensor.py)
 
 hlops are syntactic sugar around mlops. They support most things torch does.
@@ -145,7 +130,7 @@ hlops are syntactic sugar around mlops. They support most things torch does.
 mlops are mid level ops. They understand derivatives. They are very simple.
 
 ```
-Relu, Log, Exp                                 # unary ops
+Relu, Log, Exp, Sin                            # unary ops
 Sum, Max                                       # reduce ops (with axis argument)
 Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, use expand)
 Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
@@ -159,7 +144,7 @@ The autodiff stuff is all in mlops now so you can focus on the raw operations
 
 ```
 Buffer                                                       # class of memory on this device
-unary_op  (NOOP, EXP, LOG, CAST)                             # A -> A
+unary_op  (NOOP, EXP, LOG, CAST, SIN)                        # A -> A
 reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)              # A + A -> A (all the same size)
 movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
@@ -171,16 +156,16 @@ fused_op [[optional]] (MULACC)                               # A * A -> B
 Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture to discover what it is.
 
 ```bash
-ipython3 examples/efficientnet.py https://media.istockphoto.com/photos/hen-picture-id831791190
+python3 examples/efficientnet.py https://media.istockphoto.com/photos/hen-picture-id831791190
 ```
 
 Or, if you have a webcam and cv2 installed
 
 ```bash
-ipython3 examples/efficientnet.py webcam
+python3 examples/efficientnet.py webcam
 ```
 
-PROTIP: Set "DEBUG=1" environment variable if you want to see why it's slow.
+PROTIP: Set "DEBUG=2" environment variable if you want to see why it's slow.
 
 ### tinygrad supports Stable Diffusion!
 
@@ -195,6 +180,14 @@ Run `python3 examples/stable_diffusion.py`
 <p align="center">
 "a horse sized cat eating a bagel"
 </p>
+
+### tinygrad supports LLaMA
+
+After putting the weights in weights/LLaMA, you can have a chat with Stacy. She lives inside tinygrad.
+
+```bash
+python3 examples/llama.py
+```
 
 ### tinygrad supports GANs
 
@@ -212,17 +205,7 @@ See `examples/yolov3.py`
   <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/yolo_by_tinygrad.jpg">
 </p>
 
-## The promise of small
-
-tinygrad will always be below 1000 lines. If it isn't, we will revert commits until tinygrad becomes smaller.
-
 ### Drawing Execution Graph
-
-* Nodes are Tensors
-* Black edge is a forward pass
-* Blue edge is a backward pass
-* Red edge is data the backward pass depends on
-* Purple edge is intermediates created in the forward
 
 ```bash
 GRAPH=1 python3 test/models/test_mnist.py TestMNIST.test_sgd_onestep
