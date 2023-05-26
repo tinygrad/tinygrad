@@ -77,8 +77,10 @@ def eval_bert():
 
   from datasets.squad import iterate
   from examples.mlperf.helpers import get_bert_qa_prediction
-  from examples.mlperf.metrics import f1_score, exact_match_score
+  from examples.mlperf.metrics import f1_score
 
+  c = 0
+  f1 = 0.0
   st = time.perf_counter()
   for X, Y in iterate():
     mt = time.perf_counter()
@@ -88,9 +90,13 @@ def eval_bert():
     st = time.perf_counter()
 
     pred = get_bert_qa_prediction(X, Y, out[0], out[1])
+    print()
     print(pred)
     print(Y["answers"])
-    print(f1_score(pred, Y["answers"][0]), exact_match_score(pred, Y["answers"][0]))
+    c += 1
+    f1 += max([f1_score(pred, ans) for ans in Y["answers"]])
+    print(f"f1: {f1/c}, raw: {f1}, c: {c}")
+
 
 if __name__ == "__main__":
   # inference only
