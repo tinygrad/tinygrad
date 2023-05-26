@@ -52,7 +52,7 @@ class BertEmbeddings:
     self.word_embeddings = Embedding(vocab_size, hidden_size)
     self.position_embeddings = Embedding(max_position_embeddings, hidden_size)
     self.token_type_embeddings = Embedding(type_vocab_size, hidden_size)
-    self.LayerNorm = LayerNorm(hidden_size)
+    self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
     self.dropout = hidden_dropout_prob
 
   def __call__(self, input_ids, token_type_ids):
@@ -93,7 +93,7 @@ class BertLayer:
 class BertOutput:
   def __init__(self, hidden_size, intermediate_size, hidden_dropout_prob):
     self.dense = Linear(intermediate_size, hidden_size)
-    self.LayerNorm = LayerNorm(hidden_size)
+    self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
     self.dropout = hidden_dropout_prob
 
   def __call__(self, hidden_states, input_tensor):
@@ -159,7 +159,7 @@ class BertSelfAttention:
 class BertSelfOutput:
   def __init__(self, hidden_size, hidden_dropout_prob):
     self.dense = Linear(hidden_size, hidden_size)
-    self.LayerNorm = LayerNorm(hidden_size)
+    self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
     self.dropout = hidden_dropout_prob
 
   def __call__(self, hidden_states, input_tensor):
