@@ -16,7 +16,7 @@ The sub 1000 line core of it is in `tinygrad/`
 
 Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. Support the simple basic ops, and you get SOTA [vision](https://arxiv.org/abs/1905.11946) `models/efficientnet.py` and [language](https://arxiv.org/abs/1706.03762) `models/transformer.py` models.
 
-We are working on support for the Apple Neural Engine and the Google TPU in the `accel/` folder. Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blindingly fast. Now, it is slow.
+We are working on support for the Apple Neural Engine and the Google TPU in the `accel/` folder. Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blazingly fast. Now, it is slow.
 
 This project is maintained by [tiny corp](https://tinygrad.org/).
 
