@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.nn import Linear, LayerNorm
+from tinygrad.nn import Linear, LayerNorm, Embedding
 import numpy as np
 from extra.utils import download_file, get_child
 from pathlib import Path
@@ -46,15 +46,6 @@ class Bert:
     encoder_outputs = self.encoder(embedding_output, extended_attention_mask)
 
     return encoder_outputs
-
-class Embedding:
-  def __init__(self, vocab_size:int, embed_size:int):
-    self.vocab_size = vocab_size
-    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
-
-  def __call__(self, idx:Tensor) -> Tensor:
-    vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size).expand(*idx.shape, self.vocab_size)
-    return (vocab_counter == idx.unsqueeze(2).expand(*idx.shape, self.vocab_size)) @ self.weight
 
 class BertEmbeddings:
   def __init__(self, hidden_size, max_position_embeddings, type_vocab_size, vocab_size,  hidden_dropout_prob):
