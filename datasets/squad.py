@@ -8,9 +8,9 @@ with open(BASEDIR / "dev-v1.1.json") as f:
   data = json.load(f)["data"]
 
 def is_whitespace(c):
-    if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
-      return True
-    return False
+  if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+    return True
+  return False
 
 examples = []
 for article in data:
