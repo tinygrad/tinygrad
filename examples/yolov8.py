@@ -1,17 +1,24 @@
-#!/usr/bin/env python3
-import os
-from ultralytics import YOLO
-import onnx
-from extra.onnx import get_run_onnx
-from tinygrad.tensor import Tensor
+import tinygrad as tg
+from tinygrad.nn import Conv2d,BatchNorm2d
 
-os.chdir("/tmp")
-if not os.path.isfile("yolov8n-seg.onnx"):
-  model = YOLO("yolov8n-seg.pt") 
-  model.export(format="onnx", imgsz=[480,640])
-onnx_model = onnx.load(open("yolov8n-seg.onnx", "rb"))
-# TODO: move get example inputs to onnx
-input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
-print(input_shapes)
-run_onnx = get_run_onnx(onnx_model)
-run_onnx({"images": Tensor.zeros(1,3,480,640)}, debug=True)
+
+class SPPF:
+    """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
+    def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
+        self.c1 = c1
+        self.c2 = c2
+        self.k = k
+
+        c_ = c1 // 2  # hidden channels
+        self.cv1 = Conv2d(c1, c_, 1, 1)
+        self.cv2 = Conv2d(c_ * 4, c2, 1, 1)
+
+    def forward(self, x):
+        """Forward pass through Ghost Convolution block."""
+        x = self.cv1(x)
+        x2 = x.pad2d(self.k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
+        x3 = x.pad2d(self.k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
+        x4 = x.pad2d(self.k // 2).max_pool2d(kernel_size=(5,5), stride=(1,1))
+        concatenated = x.cat((x, x2, x3, x4), axis=1)
+        return self.cv2(concatenated)
+    
