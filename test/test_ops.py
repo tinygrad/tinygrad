@@ -437,7 +437,6 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=2).relu(),
       lambda x,w: Tensor.conv_transpose2d(x,w,dilation=2).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skip("not currently supported")
   def test_strided_conv_transpose2d(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv_transpose2d(x,w,stride=2).relu(),

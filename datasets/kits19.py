@@ -6,10 +6,12 @@ import pickle
 import requests
 import numpy as np
 import nibabel as nib
+from scipy import signal
 import torch
-from torch.nn.functional import interpolate
+import torch.nn.functional as F
+from tinygrad.tensor import Tensor
 
-BASEDIR = Path(__file__).parent.parent.parent.resolve() / "kits19" / "data"
+BASEDIR = Path(__file__).parent.parent.resolve() / "kits19" / "data"
 
 @functools.lru_cache(None)
 def get_val_files():
@@ -27,8 +29,8 @@ def resample3d(image, label, image_spacings, target_spacing=(1.6, 1.2, 1.2)):
   if image_spacings != target_spacing:
     spc_arr, targ_arr, shp_arr = np.array(image_spacings), np.array(target_spacing), np.array(image.shape[1:])
     new_shape = (spc_arr / targ_arr * shp_arr).astype(int).tolist()
-    image = interpolate(torch.from_numpy(np.expand_dims(image, axis=0)), size=new_shape, mode="trilinear", align_corners=True)
-    label = interpolate(torch.from_numpy(np.expand_dims(label, axis=0)), size=new_shape, mode="nearest")
+    image = F.interpolate(torch.from_numpy(np.expand_dims(image, axis=0)), size=new_shape, mode="trilinear", align_corners=True)
+    label = F.interpolate(torch.from_numpy(np.expand_dims(label, axis=0)), size=new_shape, mode="nearest")
     image = np.squeeze(image.numpy(), axis=0)
     label = np.squeeze(label.numpy(), axis=0)
   return image, label
@@ -53,33 +55,63 @@ def preprocess(file_path):
   image, label = pad_to_min_shape(image, label)
   return image, label
 
-def load(fp):
-  with fp.open("rb") as f:
-    X, Y = pickle.load(f)
-  return X, Y
-
-def save(image, label, fp):
-  image = image.astype(np.float32)
-  label = label.astype(np.uint8)
-  fp.parent.mkdir(exist_ok=True)
-  with fp.open("wb") as f:
-    pickle.dump([image, label], f)
-
-def iterate(val=True, shuffle=True):
+def iterate(val=True, shuffle=False):
   if not val: raise NotImplementedError
   files = get_val_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   for file in files:
-    preprocessed_file = BASEDIR.parent / "preprocessed" / f"{file.stem}.pkl"
-    if preprocessed_file.is_file():
-      X, Y = load(preprocessed_file)
-    else:
-      X, Y = preprocess(file)
-      save(X, Y, preprocessed_file)
-    yield (X, Y, file.stem)
+    X, Y = preprocess(file)
+    yield (X, Y)
+
+def gaussian_kernel(n, std):
+  gaussian_1d = signal.gaussian(n, std)
+  gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
+  gaussian_3d = np.outer(gaussian_2d, gaussian_1d)
+  gaussian_3d = gaussian_3d.reshape(n, n, n)
+  gaussian_3d = np.cbrt(gaussian_3d)
+  gaussian_3d /= gaussian_3d.max()
+  return gaussian_3d
+
+def pad_input(volume, roi_shape, strides, padding_mode="constant", padding_val=-2.2, dim=3):
+  bounds = [(strides[i] - volume.shape[2:][i] % strides[i]) % strides[i] for i in range(dim)]
+  bounds = [bounds[i] if (volume.shape[2:][i] + bounds[i]) >= roi_shape[i] else bounds[i] + strides[i] for i in range(dim)]
+  paddings = [bounds[2]//2, bounds[2]-bounds[2]//2, bounds[1]//2, bounds[1]-bounds[1]//2, bounds[0]//2, bounds[0]-bounds[0]//2, 0, 0, 0, 0]
+  return F.pad(torch.tensor(volume), paddings, mode=padding_mode, value=padding_val).numpy(), paddings
+
+def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5):
+  image_shape, dim = list(inputs.shape[2:]), len(inputs.shape[2:])
+  strides = [int(roi_shape[i] * (1 - overlap)) for i in range(dim)]
+  bounds = [image_shape[i] % strides[i] for i in range(dim)]
+  bounds = [bounds[i] if bounds[i] < strides[i] // 2 else 0 for i in range(dim)]
+  inputs = inputs[
+    ...,
+    bounds[0]//2:image_shape[0]-(bounds[0]-bounds[0]//2),
+    bounds[1]//2:image_shape[1]-(bounds[1]-bounds[1]//2),
+    bounds[2]//2:image_shape[2]-(bounds[2]-bounds[2]//2),
+  ]
+  labels = labels[
+    ...,
+    bounds[0]//2:image_shape[0]-(bounds[0]-bounds[0]//2),
+    bounds[1]//2:image_shape[1]-(bounds[1]-bounds[1]//2),
+    bounds[2]//2:image_shape[2]-(bounds[2]-bounds[2]//2),
+  ]
+  inputs, paddings = pad_input(inputs, roi_shape, strides)
+  padded_shape = inputs.shape[2:]
+  size = [(inputs.shape[2:][i] - roi_shape[i]) // strides[i] + 1 for i in range(dim)]
+  result, norm_map = np.zeros((1, 3, *padded_shape)), np.zeros((1, 3, *padded_shape))
+  norm_patch = gaussian_kernel(roi_shape[0], 0.125 * roi_shape[0])
+  norm_patch = np.expand_dims(norm_patch, axis=0)
+  for i in range(0, strides[0] * size[0], strides[0]):
+    for j in range(0, strides[1] * size[1], strides[1]):
+      for k in range(0, strides[2] * size[2], strides[2]):
+        out = model(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k])).numpy()
+        result[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += out * norm_patch
+        norm_map[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += norm_patch
+  result /= norm_map
+  result = result[..., paddings[4]:image_shape[0]+paddings[4], paddings[2]:image_shape[1]+paddings[2], paddings[0]:image_shape[2]+paddings[0]]
+  return result, labels
 
 if __name__ == "__main__":
-  # preprocess all files
-  for X, Y, case in iterate():
-    print(case, X.shape, Y.shape)
+  for X, Y in iterate():
+    print(X.shape, Y.shape)

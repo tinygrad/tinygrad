@@ -4,6 +4,16 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from extra.utils import download_file, get_child
 
+class ConvTranspose:
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+    self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
+    self.weight = Tensor.glorot_uniform(in_channels//groups, out_channels, *self.kernel_size)
+    self.bias = Tensor.zeros(out_channels) if bias else None
+
+  def __call__(self, x):
+    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
+
 class DownsampleBlock:
   def __init__(self, c0, c1, stride=2):
     self.conv1 = [nn.Conv2d(c0, c1, kernel_size=(3, 3, 3), stride=stride, padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
@@ -14,12 +24,12 @@ class DownsampleBlock:
 
 class UpsampleBlock:
   def __init__(self, c0, c1):
-    self.upsample_conv = [torch.nn.ConvTranspose3d(c0, c1, kernel_size=2, stride=2)]
-    self.conv1 = [nn.Conv2d(c1 * 2, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+    self.upsample_conv = [ConvTranspose(c0, c1, kernel_size=(2, 2, 2), stride=2)]
+    self.conv1 = [nn.Conv2d(2 * c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
     self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
 
   def __call__(self, x, skip):
-    x = Tensor(self.upsample_conv[0](torch.tensor(x.numpy())).detach().numpy())
+    x = x.sequential(self.upsample_conv)
     x = Tensor.cat(x, skip, dim=1)
     return x.sequential(self.conv1).sequential(self.conv2)
 
@@ -52,10 +62,7 @@ class UNet3D:
     for k, v in state_dict.items():
       obj = get_child(self, k)
       assert obj.shape == v.shape, (k, obj.shape, v.shape)
-      if hasattr(obj, "assign"):
-        obj.assign(v.numpy())
-      else:
-        obj[0].data = v
+      obj.assign(v.numpy())
 
 if __name__ == "__main__":
   mdl = UNet3D()

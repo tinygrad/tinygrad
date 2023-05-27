@@ -1,8 +1,6 @@
 import numpy as np
 from scipy import signal
 
-# ***** UNet3D *****
-
 def gaussian_kernel(n, std):
   gaussian_1d = signal.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
@@ -30,19 +28,3 @@ def get_slice(image, roi_shape=(128, 128, 128), overlap_factor=0.5):
     for j in range(0, strides[1] * size[1], strides[1]):
       for k in range(0, strides[2] * size[2], strides[2]):
         yield i, j, k
-
-def one_hot(arr, axis=1, num_classes=3):
-  res = np.eye(num_classes)[np.array(arr).reshape(-1)]
-  arr = res.reshape(list(arr.shape) + [num_classes])
-  arr = np.transpose(arr, (0, 4, 1, 2, 3)).astype(np.float64)
-  return arr
-
-def get_dice_score(prediction, target, reduce_axis=(2, 3, 4), smooth_nr=1e-6, smooth_dr=1e-6):
-  prediction = one_hot(prediction)[:, 1:]
-  target = one_hot(target)[:, 1:]
-  assert prediction.shape == target.shape
-  intersection = np.sum(prediction * target, axis=reduce_axis)
-  target_sum = np.sum(target, axis=reduce_axis)
-  prediction_sum = np.sum(prediction, axis=reduce_axis)
-  dice_val = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
-  return dice_val[0]

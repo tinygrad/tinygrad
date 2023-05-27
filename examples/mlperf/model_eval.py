@@ -44,24 +44,22 @@ def eval_resnet():
   
 def eval_unet3d():
   # UNet3D
-  from datasets.kits19 import iterate
   from models.unet3d_v2 import UNet3D
+  from datasets.kits19 import iterate, sliding_window_inference
+  from examples.mlperf.metrics import get_dice_score
   mdl = UNet3D()
-  scores = []
-  for X, Y, case in iterate():
-    print(case)
-    image = X[np.newaxis, ...]
-    result, norm_map, norm_patch = helpers.prepare_arrays(image)
-    for i, j, k in helpers.get_slice(image):
-      out = mdl(Tensor(image[..., i:i+128, j:j+128, k:k+128])).numpy()
-      result[..., i:i+128, j:j+128, k:k+128] += out * norm_patch
-      norm_map[..., i:i+128, j:j+128, k:k+128] += norm_patch
-    result /= norm_map
-    pred = np.argmax(result, axis=1).astype(np.uint8)
-    assert pred.shape == Y.shape
-    scores.append(helpers.get_dice_score(pred, Y))
-  scores = np.mean(np.stack(scores, axis=0), axis=0)
-  print((scores[-1] + scores[-2]) / 2)
+  mdl.load_from_pretrained()
+  s = 0
+  st = time.perf_counter()
+  for i, (image, label) in enumerate(iterate(), start=1):
+    mt = time.perf_counter()
+    image = image[np.newaxis, ...]
+    pred, label = sliding_window_inference(mdl, image, label)
+    et = time.perf_counter()
+    print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
+    s += get_dice_score(pred, label).mean().item()
+    print(f"****** {s:.3f}/{i}  {s/i:.3f} Mean DICE score")
+    st = time.perf_counter()
 
 def eval_rnnt():
   # RNN-T
