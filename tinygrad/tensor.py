@@ -220,9 +220,9 @@ class Tensor:
               flat.append(item)
       return tuple(flat)
 
-    if all(isinstance(elem, int) for elem in padding): padding_ = padding
+    if isinstance(padding, int): padding_ = (padding, )*4
+    elif all(isinstance(elem, int) for elem in padding): padding_ = padding
     elif isinstance(padding, (tuple, list)): padding_ = flatten(padding)
-    elif isinstance(padding, int): padding_ = (padding, )*4
     
     if len(padding_)<4: padding_ = (padding_[1], padding_[1], padding_[0], padding_[0])
     else: assert len(padding_)%2==0 #padding goes by pairs (dim, value)
@@ -304,8 +304,8 @@ class Tensor:
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Union[List[int], Tuple[int, ...]]):
-    slc = [(-p[0], s+p[1]) for p,s in zip(self.clean_padding(padding), self.shape[::-1])][::-1]
-    print(slc)
+    padding = self.clean_padding(padding)
+    slc = [(-p[0], s+p[1]) for p,s in zip(padding, self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc)
 
   @property
@@ -404,9 +404,8 @@ class Tensor:
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) >= 4 else [padding[1], padding[1], padding[0], padding[0]])
     # conv2d is a pooling op (with padding)
-    x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
+    x = self.pad2d(padding)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
     x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
