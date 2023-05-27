@@ -1,6 +1,8 @@
 import time
+from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv
 
 def eval_resnet():
@@ -67,6 +69,42 @@ def eval_rnnt():
       words += words_
     c += len(tt)
     print(f"WER: {scores/words}, {words} words, raw scores: {scores}, c: {c}")
+    st = time.perf_counter()
+
+def eval_bert():
+  # Bert-QA
+  from models.bert import BertForQuestionAnswering
+  mdl = BertForQuestionAnswering()
+  mdl.load_from_pretrained()
+
+  @TinyJit
+  def run(input_ids, input_mask, segment_ids):
+    return mdl(input_ids, input_mask, segment_ids).realize()
+
+  from datasets.squad import iterate
+  from examples.mlperf.helpers import get_bert_qa_prediction
+  from examples.mlperf.metrics import f1_score
+  from transformers import BertTokenizer
+
+  tokenizer = BertTokenizer(str(Path(__file__).parent.parent.parent / "weights/bert_vocab.txt"))
+
+  c = 0
+  f1 = 0.0
+  st = time.perf_counter()
+  for X, Y in iterate(tokenizer):
+    mt = time.perf_counter()
+    outs = []
+    for x in X:
+      outs.append(run(Tensor(x["input_ids"]), Tensor(x["input_mask"]), Tensor(x["segment_ids"])).numpy())
+    et = time.perf_counter()
+    print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model over {len(X)} features")
+
+    pred = get_bert_qa_prediction(X, Y, outs)
+    print(f"pred: {pred}\nans: {Y['answers']}")
+    f1 += max([f1_score(pred, ans) for ans in Y["answers"]])
+    c += 1
+    print(f"f1: {f1/c}, raw: {f1}, c: {c}\n")
+
     st = time.perf_counter()
 
 if __name__ == "__main__":
