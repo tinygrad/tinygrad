@@ -1,3 +1,6 @@
+import re
+import string
+from collections import Counter
 import numpy as np
 
 def levenshtein(a, b):
@@ -41,3 +44,18 @@ def get_dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr
   prediction_sum = np.sum(prediction, axis=reduce_axis)
   result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
   return result[0]
+
+def normalize_string(s):
+  s = "".join(c for c in s.lower() if c not in string.punctuation)
+  s = re.sub(r'\b(a|an|the)\b', ' ', s)
+  return " ".join(s.split())
+
+def f1_score(x, y):
+  xt = normalize_string(x).split()
+  yt = normalize_string(y).split()
+  ct = Counter(xt) & Counter(yt)
+  if (ns := sum(ct.values())) == 0:
+    return 0.0
+  p = ns / len(xt)
+  r = ns / len(yt)
+  return 2 * p * r / (p + r)
