@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv
 
 def eval_resnet():
@@ -76,6 +77,10 @@ def eval_bert():
   mdl = BertForQuestionAnswering()
   mdl.load_from_pretrained()
 
+  @TinyJit
+  def run(input_ids, input_mask, segment_ids):
+    return mdl(input_ids, input_mask, segment_ids).realize()
+
   from datasets.squad import iterate
   from examples.mlperf.helpers import get_bert_qa_prediction
   from examples.mlperf.metrics import f1_score
@@ -90,7 +95,7 @@ def eval_bert():
     mt = time.perf_counter()
     outs = []
     for x in X:
-      outs.append(mdl(Tensor(x["input_ids"]), Tensor(x["input_mask"]), Tensor(x["segment_ids"])).numpy())
+      outs.append(run(Tensor(x["input_ids"]), Tensor(x["input_mask"]), Tensor(x["segment_ids"])).numpy())
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model over {len(X)} features")
 
