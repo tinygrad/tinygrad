@@ -24,3 +24,4 @@ datasets/cifar-10-python.tar.gz
 datasets/librispeech/
 datasets/imagenet/
 datasets/squad/
+datasets/img_align_celeba*
