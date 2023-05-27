@@ -39,6 +39,7 @@ setup(name='tinygrad',
             "onnx",
             "onnx2torch",
             "opencv-python",
+            "tabulate",
         ],
       },
       include_package_data=True)

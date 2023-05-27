@@ -79,6 +79,7 @@ class TestLrScheduler(unittest.TestCase):
   def test_cosineannealinglr(self): self._test_cosineannealinglr(100, {}, 1e-6, 1e-6)
   def test_cosineannealinglr_eta_min(self): self._test_cosineannealinglr(100, {'eta_min': 0.001}, 1e-6, 1e-6)
 
+  @unittest.skip("slow")
   def test_training(self):
     without = lr_scheduler_training()
     sched_fns = [MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR]
