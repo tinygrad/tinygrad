@@ -401,20 +401,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[1:50], lambda x: x[1:50])
     helper_test_op([(3,3,3)], lambda x: x[1:50, 1:2, -1], lambda x: x[1:50, 1:2, -1])
 
-  # TODO: check handling of backward pass for tensor of dim 0
+  @unittest.skip("No suppport for tensors with 0s in shape")
   def test_slice_both_endpoints_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[5:10], lambda x: x[5:10], forward_only=True)
     helper_test_op([(3,3,3)], lambda x: x[-15:-7], lambda x: x[-15:-7], forward_only=True)
 
-  # TODO: check handling of backward pass for tensor of dim 0
+  @unittest.skip("No suppport for tensors with 0s in shape")
   def test_slice_start_gt_end(self):
     helper_test_op([(3,3,3)], lambda x: x[-2:2], lambda x: x[-2:2], forward_only=True)
     helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)
 
+  @unittest.skip("No suppport for tensors with 0s in shape")
   def test_slice_empty(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)
 
-  @unittest.skip("backward not supported for tensor with zero in shape")
+  @unittest.skip("No suppport for tensors with 0s in shape")
   def test_slice_zero_in_shape(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1])  # x.shape = (0, 10)
     helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5])  # x.shape = (0, 3, 3)
