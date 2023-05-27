@@ -1,5 +1,6 @@
 import re
 import string
+from collections import Counter
 
 def levenshtein(a, b):
   n, m = len(a), len(b)
@@ -35,8 +36,8 @@ def normalize_string(s):
 def f1_score(x, y):
   xt = normalize_string(x).split()
   yt = normalize_string(y).split()
-  ct = set(xt) & set(yt)
-  if (ns := len(ct)) == 0:
+  ct = Counter(xt) & Counter(yt)
+  if (ns := sum(ct.values())) == 0:
     return 0.0
   p = ns / len(xt)
   r = ns / len(yt)
