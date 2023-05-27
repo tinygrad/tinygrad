@@ -53,12 +53,11 @@ def eval_unet3d():
   st = time.perf_counter()
   for i, (image, label) in enumerate(iterate(), start=1):
     mt = time.perf_counter()
-    image = image[np.newaxis, ...]
     pred, label = sliding_window_inference(mdl, image, label)
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
-    s += get_dice_score(pred, label).mean().item()
-    print(f"****** {s:.3f}/{i}  {s/i:.3f} Mean DICE score")
+    s += get_dice_score(pred, label).mean()
+    print(f"****** {s:.2f}/{i}  {s/i:.5f} Mean DICE score")
     st = time.perf_counter()
 
 def eval_rnnt():

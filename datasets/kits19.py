@@ -1,7 +1,6 @@
 import random
 import functools
 from pathlib import Path
-import pickle
 import requests
 import numpy as np
 import nibabel as nib
@@ -73,6 +72,7 @@ def iterate(val=True, shuffle=False):
   if shuffle: random.shuffle(order)
   for file in files:
     X, Y = preprocess(file)
+    X = np.expand_dims(X, axis=0)
     yield (X, Y)
 
 def gaussian_kernel(n, std):
@@ -88,9 +88,11 @@ def pad_input(volume, roi_shape, strides, padding_mode="constant", padding_val=-
   bounds = [(strides[i] - volume.shape[2:][i] % strides[i]) % strides[i] for i in range(dim)]
   bounds = [bounds[i] if (volume.shape[2:][i] + bounds[i]) >= roi_shape[i] else bounds[i] + strides[i] for i in range(dim)]
   paddings = [bounds[2]//2, bounds[2]-bounds[2]//2, bounds[1]//2, bounds[1]-bounds[1]//2, bounds[0]//2, bounds[0]-bounds[0]//2, 0, 0, 0, 0]
-  return F.pad(torch.tensor(volume), paddings, mode=padding_mode, value=padding_val).numpy(), paddings
+  return F.pad(torch.from_numpy(volume), paddings, mode=padding_mode, value=padding_val).numpy(), paddings
 
 def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5):
+  from tinygrad.jit import TinyJit
+  mdl_run = TinyJit(lambda x: model(x).realize())
   image_shape, dim = list(inputs.shape[2:]), len(inputs.shape[2:])
   strides = [int(roi_shape[i] * (1 - overlap)) for i in range(dim)]
   bounds = [image_shape[i] % strides[i] for i in range(dim)]
@@ -110,13 +112,14 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   inputs, paddings = pad_input(inputs, roi_shape, strides)
   padded_shape = inputs.shape[2:]
   size = [(inputs.shape[2:][i] - roi_shape[i]) // strides[i] + 1 for i in range(dim)]
-  result, norm_map = np.zeros((1, 3, *padded_shape)), np.zeros((1, 3, *padded_shape))
+  result = np.zeros((1, 3, *padded_shape), dtype=np.float32)
+  norm_map = np.zeros((1, 3, *padded_shape), dtype=np.float32)
   norm_patch = gaussian_kernel(roi_shape[0], 0.125 * roi_shape[0])
   norm_patch = np.expand_dims(norm_patch, axis=0)
   for i in range(0, strides[0] * size[0], strides[0]):
     for j in range(0, strides[1] * size[1], strides[1]):
       for k in range(0, strides[2] * size[2], strides[2]):
-        out = model(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k])).numpy()
+        out = mdl_run(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k])).numpy()
         result[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += out * norm_patch
         norm_map[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += norm_patch
   result /= norm_map
