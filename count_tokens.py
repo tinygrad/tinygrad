@@ -18,15 +18,12 @@ if __name__ == "__main__":
 
     for path, subdirs, files in os.walk("tinygrad"):
         for name in files:
-            if name.endswith(".py"):
-                token_count = 0
-                filepath = os.path.join(path, name)
-                with tokenize.open(filepath) as file_:
-                    tokens = tokenize.generate_tokens(file_.readline)
-                    for token in tokens:
-                        if token.type in TOKEN_WHITELIST:
-                            token_count += 1
-                count_by_file[filepath] = token_count
+            if not name.endswith(".py"):
+                continue
+            filepath = os.path.join(path, name)
+            with tokenize.open(filepath) as file_:
+                tokens = tokenize.generate_tokens(file_.readline)
+                count_by_file[filepath] = len([t for t in tokens if t.type in TOKEN_WHITELIST])
 
     max_length = max(len(k) for k in count_by_file.keys()) + 10
     print(f"{'File':<{max_length}}  {'Token count'}")
