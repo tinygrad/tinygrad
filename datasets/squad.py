@@ -102,9 +102,7 @@ def convert_example_to_features(example, tokenizer):
     for i in range(doc_length):
       split_token_index = doc_start + i
       token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
-
-      is_max_context = _check_is_max_context(doc_spans, di, split_token_index)
-      token_is_max_context[len(tokens)] = is_max_context
+      token_is_max_context[len(tokens)] = _check_is_max_context(doc_spans, di, split_token_index)
       tokens.append(all_doc_tokens[split_token_index])
       segment_ids.append(1)
     tokens.append("[SEP]")
@@ -141,10 +139,10 @@ def iterate(start=0):
   for i in range(start, len(examples)):
     example = examples[i]
     features = convert_example_to_features(example, tokenizer)
-    for feature in features:
-      yield feature, example
+    # we need to yield all features here as the f1 score is the maximum over all features
+    yield features, example
 
 if __name__ == "__main__":
   X, Y = next(iterate())
-  print(" ".join(X["tokens"]))
-  print(X["input_ids"].shape, Y)
+  print(" ".join(X[0]["tokens"]))
+  print(X[0]["input_ids"].shape, Y)

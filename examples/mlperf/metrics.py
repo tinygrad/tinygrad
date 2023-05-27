@@ -36,8 +36,8 @@ def f1_score(x, y):
   xt = normalize_string(x).split()
   yt = normalize_string(y).split()
   ct = set(xt) & set(yt)
-  if len(ct) == 0:
+  if (ns := len(ct)) == 0:
     return 0.0
-  p = len(ct) / len(xt)
-  r = len(ct) / len(yt)
+  p = ns / len(xt)
+  r = ns / len(yt)
   return 2 * p * r / (p + r)

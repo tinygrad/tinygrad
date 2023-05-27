@@ -84,18 +84,21 @@ def eval_bert():
   st = time.perf_counter()
   for X, Y in iterate():
     mt = time.perf_counter()
-    out = mdl(Tensor(X["input_ids"]), Tensor(X["input_mask"]), Tensor(X["segment_ids"])).numpy()
+    outs = []
+    for x in X:
+      outs.append(mdl(Tensor(x["input_ids"]), Tensor(x["input_mask"]), Tensor(x["segment_ids"])).numpy())
     et = time.perf_counter()
-    print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
-    st = time.perf_counter()
+    print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model over {len(X)} features")
 
-    pred = get_bert_qa_prediction(X, Y, out[0], out[1])
+    pred = get_bert_qa_prediction(X, Y, outs)
     print()
     print(pred)
     print(Y["answers"])
     c += 1
     f1 += max([f1_score(pred, ans) for ans in Y["answers"]])
     print(f"f1: {f1/c}, raw: {f1}, c: {c}")
+
+    st = time.perf_counter()
 
 
 if __name__ == "__main__":
