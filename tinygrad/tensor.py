@@ -204,12 +204,28 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: 
-    if not all(isinstance(elem, tuple) for elem in arg): arg = tuple((arg[i], arg[i+1]) for i in range(0, len(arg), 2))
-    return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
+  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: arg = self.clean_padding(arg); return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
   def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
 
   # ***** movement hlops *****
+  
+  #tuple of ints/tuples -> tuple of tuples for padding
+  def clean_padding(self, padding):
+    def flatten(t):
+      flat = []
+      for item in t:
+          if isinstance(item, (tuple, list)):
+              flat.extend(flatten(item))
+          else:
+              flat.append(item)
+      return tuple(flat)
+    
+    padding_ = flatten(padding)
+    assert len(padding_)%2==0 #padding goes by pairs (dim, value)
+
+    padding_ = tuple((padding_[i], padding_[i+1]) for i in range(0, len(padding_), 2))
+    
+    return padding_
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, int]]]) -> Tensor:
