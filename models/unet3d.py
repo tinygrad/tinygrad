@@ -1,46 +1,69 @@
-# https://github.com/wolny/pytorch-3dunet
 from pathlib import Path
-from extra.utils import download_file, fake_torch_load, get_child
-import tinygrad.nn as nn
+import torch
+from tinygrad import nn
+from tinygrad.tensor import Tensor
+from extra.utils import download_file, get_child
 
-class SingleConv:
-  def __init__(self, in_channels, out_channels):
-    self.groupnorm = nn.GroupNorm(1, in_channels) # 1 group?
-    # TODO: make 2D conv generic for 3D, might already work with kernel_size=(3,3,3)
-    self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(3,3,3), padding=(1,1,1,1,1,1), bias=False)
-  def __call__(self, x):
-    return self.conv(self.groupnorm(x)).relu()
+class ConvTranspose:
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+    self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
+    self.weight = Tensor.glorot_uniform(in_channels//groups, out_channels, *self.kernel_size)
+    self.bias = Tensor.zeros(out_channels) if bias else None
 
-class BasicModule:
-  def __init__(self, c0, c1, c2):
-    self.basic_module = {"SingleConv1": SingleConv(c0, c1), "SingleConv2": SingleConv(c1, c2)}
   def __call__(self, x):
-    return self.basic_module['SingleConv2'](self.basic_module['SingleConv1'](x))
+    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
+
+class DownsampleBlock:
+  def __init__(self, c0, c1, stride=2):
+    self.conv1 = [nn.Conv2d(c0, c1, kernel_size=(3, 3, 3), stride=stride, padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+
+  def __call__(self, x):
+    return x.sequential(self.conv1).sequential(self.conv2)
+
+class UpsampleBlock:
+  def __init__(self, c0, c1):
+    self.upsample_conv = [ConvTranspose(c0, c1, kernel_size=(2, 2, 2), stride=2)]
+    self.conv1 = [nn.Conv2d(2 * c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+    self.conv2 = [nn.Conv2d(c1, c1, kernel_size=(3, 3, 3), padding=(1, 1, 1, 1, 1, 1), bias=False), nn.InstanceNorm(c1), Tensor.relu]
+
+  def __call__(self, x, skip):
+    x = x.sequential(self.upsample_conv)
+    x = Tensor.cat(x, skip, dim=1)
+    return x.sequential(self.conv1).sequential(self.conv2)
 
 class UNet3D:
-  def __init__(self):
-    ups = [16,32,64,128,256]
-    self.encoders = [BasicModule(ups[i] if i != 0 else 1, ups[i], ups[i+1]) for i in range(4)]
-    self.decoders = [BasicModule(ups[-1-i] + ups[-2-i], ups[-2-i], ups[-2-i]) for i in range(3)]
-    self.final_conv = nn.Conv2d(32, 1, (1,1,1))
+  def __init__(self, in_channels=1, n_class=3):
+    filters = [32, 64, 128, 256, 320]
+    inp, out = filters[:-1], filters[1:]
+    self.input_block = DownsampleBlock(in_channels, filters[0], stride=1)
+    self.downsample = [DownsampleBlock(i, o) for i, o in zip(inp, out)]
+    self.bottleneck = DownsampleBlock(filters[-1], filters[-1])
+    self.upsample = [UpsampleBlock(filters[-1], filters[-1])] + [UpsampleBlock(i, o) for i, o in zip(out[::-1], inp[::-1])] 
+    self.output = {"conv": nn.Conv2d(filters[0], n_class, kernel_size=(1, 1, 1))}
 
   def __call__(self, x):
-    intermediates = [x]
-    for e in self.encoders: intermediates.append(e(intermediates[-1]))
-    ret = intermediates[-1]
-    for d,i in zip(self.decoders, intermediates[:-1][::-1]): ret = d(ret.cat(i, dim=1))
-    ret = self.final_conv(ret)
-    return ret
-
+    x = self.input_block(x)
+    outputs = [x]
+    for downsample in self.downsample:
+      x = downsample(x)
+      outputs.append(x)
+    x = self.bottleneck(x)
+    for upsample, skip in zip(self.upsample, outputs[::-1]):
+      x = upsample(x, skip)
+    x = self.output["conv"](x)
+    return x
+    
   def load_from_pretrained(self):
-    fn = Path(__file__).parent.parent / "weights/unet-3d.ckpt"
-    download_file("https://oc.embl.de/index.php/s/61s67Mg5VQy7dh9/download?path=%2FLateral-Root-Primordia%2Funet_bce_dice_ds1x&files=best_checkpoint.pytorch", fn)
-    import torch
-    # TODO: replace with fake_torch_load
-    # NOTE: the weights were serialized on a CUDA device, so we need to remap for non-CUDA users
-    state_dict = torch.load(fn, map_location=lambda storage, loc: storage)["model_state_dict"]
+    fn = Path(__file__).parent.parent / "weights" / "unet-3d.ckpt"
+    download_file("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)
+    state_dict = torch.jit.load(fn, map_location=torch.device("cpu")).state_dict()
     for k, v in state_dict.items():
-      print(k, v.shape)
       obj = get_child(self, k)
       assert obj.shape == v.shape, (k, obj.shape, v.shape)
       obj.assign(v.numpy())
+
+if __name__ == "__main__":
+  mdl = UNet3D()
+  mdl.load_from_pretrained()

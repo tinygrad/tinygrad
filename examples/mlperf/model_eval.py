@@ -45,7 +45,7 @@ def eval_resnet():
   
 def eval_unet3d():
   # UNet3D
-  from models.unet3d_v2 import UNet3D
+  from models.unet3d import UNet3D
   from datasets.kits19 import iterate, sliding_window_inference
   from examples.mlperf.metrics import get_dice_score
   mdl = UNet3D()
