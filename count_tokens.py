@@ -5,7 +5,7 @@ import token
 import tokenize
 
 
-VALID_TOKENS = [
+TOKEN_WHITELIST = [
     token.OP,
     token.NAME,
     token.NUMBER,
@@ -24,7 +24,7 @@ if __name__ == "__main__":
                 with tokenize.open(filepath) as file_:
                     tokens = tokenize.generate_tokens(file_.readline)
                     for token in tokens:
-                        if token.type in VALID_TOKENS:
+                        if token.type in TOKEN_WHITELIST:
                             token_count += 1
                 count_by_file[filepath] = token_count
 
