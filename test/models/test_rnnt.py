@@ -7,7 +7,7 @@ import torch
 
 class TestRNNT(unittest.TestCase):
   def test_lstm(self):
-    BS, SQ, IS, HS, L = 4, 220, 240, 1024, 2
+    BS, SQ, IS, HS, L = 2, 20, 40, 128, 2
 
     # create in torch
     with torch.no_grad():
