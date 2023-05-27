@@ -168,6 +168,7 @@ class Permute(Function):
 
 class Pad(Function):
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
+    if not all(isinstance(elem, tuple) for elem in arg): arg = tuple((arg[i], arg[i+1]) for i in range(0, len(arg), 2))
     self.narg = tuple((p[0], s+p[0]) for s,p in zip(x.shape, arg))
     return x.movement_op(MovementOps.PAD, arg)
 
