@@ -219,9 +219,13 @@ class Tensor:
           else:
               flat.append(item)
       return tuple(flat)
+
+    if all(isinstance(elem, int) for elem in padding): padding_ = padding
+    elif isinstance(padding, (tuple, list)): padding_ = flatten(padding)
+    elif isinstance(padding, int): padding_ = (padding, )*4
     
-    padding_ = flatten(padding)
-    assert len(padding_)%2==0 #padding goes by pairs (dim, value)
+    if len(padding_)<4: padding_ = (padding_[1], padding_[1], padding_[0], padding_[0])
+    else: assert len(padding_)%2==0 #padding goes by pairs (dim, value)
 
     padding_ = tuple((padding_[i], padding_[i+1]) for i in range(0, len(padding_), 2))
     
@@ -300,7 +304,8 @@ class Tensor:
 
   # (padding_left, padding_right, padding_top, padding_bottom)
   def pad2d(self, padding:Union[List[int], Tuple[int, ...]]):
-    slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
+    slc = [(-p[0], s+p[1]) for p,s in zip(self.clean_padding(padding), self.shape[::-1])][::-1]
+    print(slc)
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc)
 
   @property
