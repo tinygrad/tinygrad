@@ -14,6 +14,8 @@ class BertForQuestionAnswering:
   def load_from_pretrained(self):
     fn = Path(__file__).parent.parent / "weights/bert_for_qa.pt"
     download_file("https://zenodo.org/record/3733896/files/model.pytorch?download=1", fn)
+    fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
+    download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
 
     import torch
     with open(fn, "rb") as f:
@@ -102,12 +104,19 @@ class BertOutput:
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
 
+# approixmation of the error function
+def erf(x):
+  t = (1 + 0.3275911 * x.abs()).reciprocal()
+  return x.sign() * (1 - ((((1.061405429 * t + -1.453152027) * t + 1.421413741) * t + -0.284496736) * t + 0.254829592) * t * (-(x.square())).exp())
+
 class BertIntermediate:
   def __init__(self, hidden_size, intermediate_size):
     self.dense = Linear(hidden_size, intermediate_size)
 
   def __call__(self, hidden_states):
-    return self.dense(hidden_states).gelu()
+    x = self.dense(hidden_states)
+    # tinygrad gelu is openai gelu but we need the original bert gelu
+    return x * 0.5 * (1.0 + erf(x / 1.41421))
 
 class BertAttention:
   def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):
