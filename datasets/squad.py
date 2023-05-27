@@ -5,41 +5,43 @@ import numpy as np
 from extra.utils import download_file
 
 BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/squad"
-download_file("https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json", BASEDIR / "dev-v1.1.json")
-with open(BASEDIR / "dev-v1.1.json") as f:
-  data = json.load(f)["data"]
+def init_dataset():
+  download_file("https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json", BASEDIR / "dev-v1.1.json")
+  with open(BASEDIR / "dev-v1.1.json") as f:
+    data = json.load(f)["data"]
 
-def is_whitespace(c):
-  if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
-    return True
-  return False
+  def is_whitespace(c):
+    if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+      return True
+    return False
 
-examples = []
-for article in data:
-  for paragraph in article["paragraphs"]:
-    text = paragraph["context"]
-    doc_tokens = []
-    prev_is_whitespace = True
-    for c in text:
-      if is_whitespace(c):
-        prev_is_whitespace = True
-      else:
-        if prev_is_whitespace:
-          doc_tokens.append(c)
+  examples = []
+  for article in data:
+    for paragraph in article["paragraphs"]:
+      text = paragraph["context"]
+      doc_tokens = []
+      prev_is_whitespace = True
+      for c in text:
+        if is_whitespace(c):
+          prev_is_whitespace = True
         else:
-          doc_tokens[-1] += c
-        prev_is_whitespace = False
+          if prev_is_whitespace:
+            doc_tokens.append(c)
+          else:
+            doc_tokens[-1] += c
+          prev_is_whitespace = False
 
-    for qa in paragraph["qas"]:
-      qa_id = qa["id"]
-      q_text = qa["question"]
+      for qa in paragraph["qas"]:
+        qa_id = qa["id"]
+        q_text = qa["question"]
 
-      examples.append({
-        "id": qa_id,
-        "question": q_text,
-        "context": doc_tokens,
-        "answers": list(map(lambda x: x["text"], qa["answers"]))
-      })
+        examples.append({
+          "id": qa_id,
+          "question": q_text,
+          "context": doc_tokens,
+          "answers": list(map(lambda x: x["text"], qa["answers"]))
+        })
+  return examples
 
 def _check_is_max_context(doc_spans, cur_span_index, position):
   best_score, best_span_index = None, None
@@ -132,6 +134,7 @@ def convert_example_to_features(example, tokenizer):
   return outputs
 
 def iterate(start=0):
+  examples = init_dataset()
   print(f"there are {len(examples)} pairs in the dataset")
 
   tokenizer = BertTokenizer(str(BASEDIR / "vocab.txt"))
