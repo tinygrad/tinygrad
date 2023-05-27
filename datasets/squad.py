@@ -1,19 +1,14 @@
 import json
-import pathlib
+from pathlib import Path
 from transformers import BertTokenizer
 import numpy as np
 from extra.utils import download_file
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/squad"
+BASEDIR = Path(__file__).parent.parent / "datasets/squad"
 def init_dataset():
   download_file("https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json", BASEDIR / "dev-v1.1.json")
   with open(BASEDIR / "dev-v1.1.json") as f:
     data = json.load(f)["data"]
-
-  def is_whitespace(c):
-    if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
-      return True
-    return False
 
   examples = []
   for article in data:
@@ -22,7 +17,7 @@ def init_dataset():
       doc_tokens = []
       prev_is_whitespace = True
       for c in text:
-        if is_whitespace(c):
+        if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
           prev_is_whitespace = True
         else:
           if prev_is_whitespace:
@@ -133,11 +128,9 @@ def convert_example_to_features(example, tokenizer):
 
   return outputs
 
-def iterate(start=0):
+def iterate(tokenizer, start=0):
   examples = init_dataset()
   print(f"there are {len(examples)} pairs in the dataset")
-
-  tokenizer = BertTokenizer(str(BASEDIR / "vocab.txt"))
 
   for i in range(start, len(examples)):
     example = examples[i]
@@ -146,6 +139,8 @@ def iterate(start=0):
     yield features, example
 
 if __name__ == "__main__":
-  X, Y = next(iterate())
+  tokenizer = BertTokenizer(str(Path(__file__).parent.parent / "weights/bert_vocab.txt"))
+
+  X, Y = next(iterate(tokenizer))
   print(" ".join(X[0]["tokens"]))
   print(X[0]["input_ids"].shape, Y)
