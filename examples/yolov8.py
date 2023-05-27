@@ -1,5 +1,5 @@
 from tinygrad.nn import Conv2d,BatchNorm2d
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Function
 from tinygrad.nn import Conv2d,BatchNorm2d
 
 # Model architecture from https://github.com/ultralytics/ultralytics/issues/189
@@ -63,14 +63,36 @@ class C2f:
     concatenated = tuple([y] + y_chunks + y2)
     return self.cv2(concatenated)
 
+class DFL():
+    """
+    Integral module of Distribution Focal Loss (DFL).
+    Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
+    """
+    def __init__(self, c1=16):
+        """Initialize a convolutional layer with a given number of input channels."""
+        self.conv = Conv2d(c1, 1, 1, bias=False).requires_grad(False)
+        self.conv = Conv2d(c1, 1 , 1, bias=False)
+
+        # x = torch.arange(c1, dtype=torch.float)
+        # self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
+        # self.c1 = c1
+
+    def forward(self, x):
+        """Applies a transformer layer on input tensor 'x' and returns a tensor."""
+        b, c, a = x.shape  # batch, channels, anchors
+        return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
+        # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
+
+
+
 #  ****** incomplete and probably doesn't work yet*******
 # class Detect():
 #     """YOLOv8 Detect head for detection models."""
-# dynamic = False  # force grid reconstruction
-# export = False  # export mode
-# shape = None
-# anchors = Tensor.empty(0)  # init
-# strides = Tensor.empty(0)  # init
+  # dynamic = False  # force grid reconstruction
+  # export = False  # export mode
+  # shape = None
+  # anchors = Tensor.empty(0)  # init
+  # strides = Tensor.empty(0)  # init
 
 #     def __init__(self, nc=80, ch=()):  # detection layer
 #         super().__init__()
@@ -83,7 +105,7 @@ class C2f:
 #         self.cv2 = [Tensor.sequential([Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.reg_max, 1)]) for x in ch]
 #         self.cv3 = [Tensor.sequential([Conv_Block(x, c3, 3), Conv_Block(c3, c3, 3), Conv2d(c3, self.nc, 1)]) for x in ch]
 
-#         TODO: DFL block create
+#         TODO: a. DFL block create b. make_anchor create c. disttobox function 
 #         # self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
     
