@@ -66,7 +66,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0.):
   constant_padder = Tensor(np.pad(np.zeros(X.shape), np_pads, constant_values=constant_value), dtype=X.dtype)
   return zero_padded + constant_padder
 
-def Pad(x: Tensor, pads: Tensor, constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
+def Pad(x: Tensor, pads: Tensor | tuple, constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
   assert mode == "constant"
   constant_value = value if constant_value is None else constant_value.numpy()
   seq_pads = list(pads) if isinstance(pads, tuple) else pads.numpy().astype(np.int32).tolist()
