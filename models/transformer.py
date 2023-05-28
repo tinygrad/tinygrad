@@ -5,7 +5,7 @@ class TransformerBlock:
   def __init__(self, embed_dim, num_heads, ff_dim, prenorm=False, act=lambda x: x.relu(), dropout=0.):
     self.num_heads = num_heads
     self.head_size = embed_dim // num_heads
-    assert self.head_size * self.num_heads == embed_dim
+    assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
     self.prenorm, self.act = prenorm, act
     self.dropout = dropout
 
