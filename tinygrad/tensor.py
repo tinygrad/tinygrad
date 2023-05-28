@@ -136,6 +136,11 @@ class Tensor:
   @staticmethod
   def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
+  @staticmethod
+  def where(condition:Tensor, input:Union[Tensor, float], other:Union[Tensor, float]):
+    c = (condition != 0.0)
+    return c * input + (1.0 - c) * other
+
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
 
@@ -490,6 +495,7 @@ class Tensor:
   def __lt__(self, x) -> Tensor: return 1.0-(self>=x)
   def __gt__(self, x) -> Tensor: return 1.0-(self<=x)
   def __eq__(self, x) -> Tensor: return self.eq(x)  # type: ignore # mypy things this should be a bool
+  def __ne__(self, x) -> Tensor: return 1.0-self.eq(x)
 
   # ***** functional nn ops *****
 
