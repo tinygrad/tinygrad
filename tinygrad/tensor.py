@@ -495,7 +495,7 @@ class Tensor:
   def __lt__(self, x) -> Tensor: return 1.0-(self>=x)
   def __gt__(self, x) -> Tensor: return 1.0-(self<=x)
   def __eq__(self, x) -> Tensor: return self.eq(x)  # type: ignore # mypy things this should be a bool
-  def __ne__(self, x) -> Tensor: return 1.0-self.eq(x)
+  def __ne__(self, x) -> Tensor: return 1.0-self.eq(x)  # type: ignore
 
   # ***** functional nn ops *****
 
