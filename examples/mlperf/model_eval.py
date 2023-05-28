@@ -60,14 +60,15 @@ def eval_retinanet():
   from datasets.openimages import openimages, iterate
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
+  from contextlib import redirect_stdout
   coco = COCO(openimages())
   coco_eval = COCOeval(coco, iouType="bbox")
-  coco_results, evaluated_imgs = [], []
+  coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
   from tinygrad.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
-  n, bs, eval_freq = 0, 8, 200
+  n, bs = 0, 8
   st = time.perf_counter()
   for x, targets in iterate(coco, bs):
     dat = Tensor(x.astype(np.float32))
@@ -79,19 +80,25 @@ def eval_retinanet():
       outs =  mdl(input_fixup(dat)).numpy()
     et = time.perf_counter()
     predictions = mdl.postprocess_detections(outs, input_size=dat.shape[1:3], orig_image_sizes=[t["image_size"] for t in targets])
-    evaluated_imgs.extend([t["image_id"] for t in targets])
-    coco_results.extend([{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score}
-                    for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())])
     ext = time.perf_counter()
     n += len(targets)
     print(f"[{n}/{len(coco.imgs)}] == {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model, {(ext-et)*1000:.2f} ms for postprocessing")
-    if n % eval_freq // bs == 0 or n == len(coco.imgs):
+    img_ids = [t["image_id"] for t in targets]
+    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score} 
+      for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+    with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
-      coco_eval.params.imgIds = evaluated_imgs
+      coco_eval.params.imgIds = img_ids
       coco_eval.evaluate()
-      coco_eval.accumulate()
-      coco_eval.summarize()
+    evaluated_imgs.extend(img_ids)
+    coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
     st = time.perf_counter()
+
+  coco_eval.params.imgIds = evaluated_imgs
+  coco_eval._paramsEval.imgIds = evaluated_imgs
+  coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+  coco_eval.accumulate()
+  coco_eval.summarize()
 
 def eval_rnnt():
   # RNN-T
