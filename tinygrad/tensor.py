@@ -3,7 +3,7 @@ from __future__ import annotations
 import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, HALF, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from tinygrad.lazy import Device, LazyBuffer
 
 # An instantiation of the Function is the Context
@@ -31,7 +31,7 @@ class Tensor:
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
-  default_type: ClassVar[DType] = dtypes.float16 if HALF else dtypes.float32
+  default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     device = device.upper().replace(":0", "")  # canonicalize device
@@ -134,7 +134,7 @@ class Tensor:
   # TODO: below line, remove use of numpy here and make lazy
   # TODO: requires cumsum to remove numpy
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=Tensor.default_type.np), **kwargs)
+  def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
@@ -144,14 +144,12 @@ class Tensor:
   def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, Tensor.default_type.np), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor:
-    ret = Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
-    if Tensor.dtype == dtypes.float16: ret = ret.half()
-    return ret
+  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+
   # ***** rng hlops *****
 
   @staticmethod
@@ -513,9 +511,7 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
-    # TODO: why is this going through numpy?
-    _mask: np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=Tensor.default_type.np)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    return self * Tensor(Tensor._rng.binomial(1, 1.0-p, size=self.shape), requires_grad=False, device=self.device, dtype=self.dtype) * (1/(1.0 - p))
 
   # ***** cast ops *****
 

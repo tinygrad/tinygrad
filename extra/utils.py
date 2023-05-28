@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import tempfile, platform
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv, DEBUG, HALF, dtypes
+from tinygrad.helpers import prod, getenv, DEBUG, dtypes, DType
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyNumpyArray, Device
@@ -128,14 +128,14 @@ def create_casting_function(prev_func, dtype):
     return lna.astype(dtype)
   return casting_function
 
-def post_process(t: Tensor):
+def post_process(t: Tensor, load_dtype: DType):
   if t is not None:
-    if HALF:
-      t.lazydata.op.arg.fxn = create_casting_function(t.lazydata.op.arg.fxn, dtype=np.float16)
-      t.lazydata = t.lazydata.cast(dtypes.float16)
+    if load_dtype != t.dtype:
+      t.lazydata.op.arg.fxn = create_casting_function(t.lazydata.op.arg.fxn, dtype=load_dtype.np)
+      t.lazydata = t.lazydata.cast(load_dtype)
     t.realize()
 
-def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
+def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True, load_dtype=dtypes.float32):
   if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
 
   import zipfile
@@ -148,7 +148,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
             load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
-            post_process(v[2])
+            post_process(v[2], load_dtype=load_dtype)
       if multithreaded:
         import concurrent.futures
         # 2 seems fastest
