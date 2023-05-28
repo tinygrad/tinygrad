@@ -127,7 +127,8 @@ class Tensor:
 
   @staticmethod
   def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
-    return Tensor(LazyBuffer.empty(shape, Tensor.default_type if dtype is None else dtype, device), **kwargs)
+    # NOTE: we do the reshape to fix interpreted buffers
+    return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, device), dtype=dtype, device=device, **kwargs).reshape(*shape)
 
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)

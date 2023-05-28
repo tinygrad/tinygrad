@@ -1,5 +1,4 @@
 from __future__ import annotations
-import numpy as np
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
@@ -115,10 +114,7 @@ class LazyBuffer:
           if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
           self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
       elif self.op.op == LoadOps.EMPTY:
-        if isinstance(Device[self.device], Interpreted):
-          self.realized = Device[self.device].buffer.fromCPU(np.empty(self.shape, self.dtype.np))
-        else:
-          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
+        self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
