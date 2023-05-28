@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import io
 import unittest
+import syspathcfg
 from tinygrad.helpers import getenv
 from extra.utils import fetch, fake_torch_load_zipped
 from PIL import Image

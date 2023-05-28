@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import unittest
+import syspathcfg
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import Adam, get_parameters
 from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR
