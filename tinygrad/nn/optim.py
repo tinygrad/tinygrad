@@ -78,7 +78,8 @@ class LAMB(Optimizer):
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
       r1 = t.detach().square().sum().sqrt()
       r2 = up.square().sum().sqrt()
-      t.assign(t.detach() - self.lr * (1 if r1 == 0 or r2 == 0 or self.adam else r1 / r2) * up)
+      r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0) if not self.adam else 1.0
+      t.assign(t.detach() - self.lr * r * up)
     self.realize([self.t] + self.m + self.v)
 
 def get_state_dict(obj, prefix:str='') -> Dict[str, Tensor]:
