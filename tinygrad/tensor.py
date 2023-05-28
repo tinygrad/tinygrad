@@ -153,7 +153,7 @@ class Tensor:
   # ***** rng hlops *****
 
   @staticmethod
-  def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.uniform(low=low, high=high, size=lna.shape), shape, np.float32), **kwargs)
+  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.uniform(low=low, high=high, size=lna.shape), shape, np.float32), **kwargs)
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul(prod(shape)**-0.5)
