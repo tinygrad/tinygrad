@@ -62,6 +62,7 @@ class dtypes:
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
+  uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
   @staticmethod
   def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
 
