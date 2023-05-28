@@ -172,7 +172,6 @@ class Tensor:
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
     bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * prod(shape[2:]))
-    #return Tensor(LazyNumpyArray(lambda lna: np.random.uniform(low=-bound, high=bound, size=lna.shape), shape, np.float32))
     return Tensor.uniform(*shape, low=-bound, high=bound)
 
   # ***** toposort and backward pass *****
