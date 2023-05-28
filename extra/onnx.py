@@ -172,7 +172,7 @@ def get_run_onnx(onnx_model):
               real_fxn = fxn[k]
         else:
           real_fxn = fxn
-        ret = real_fxn(*inp, **opt)
+        ret = real_fxn(*inp, **{ k: v for k, v in opt.items() if k != 'is_test'})
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
