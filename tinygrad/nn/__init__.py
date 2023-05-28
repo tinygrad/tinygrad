@@ -45,7 +45,7 @@ class Conv2d:
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-class ConvTranspose2d(Conv2d):
+class ConvTranspose2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
