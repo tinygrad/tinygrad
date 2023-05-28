@@ -34,7 +34,7 @@ class Tensor:
   default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
-    device = device.upper().replace(":0", "")  # canonicalize device
+    device = (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")  # canonicalize device
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
