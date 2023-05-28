@@ -61,17 +61,22 @@ def eval_retinanet():
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   coco = COCO(openimages())
+  coco_eval = COCOeval(coco, iouType="bbox")
   coco_results, evaluated_imgs = [], []
 
   from tinygrad.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
-  n, bs = 0, 8
+  n, bs, eval_freq = 0, 8, 200
   st = time.perf_counter()
   for x, targets in iterate(coco, bs):
     dat = Tensor(x.astype(np.float32))
     mt = time.perf_counter()
-    outs = mdlrun(dat) if dat.shape[0] == bs else mdl(input_fixup(dat)).realize() # jit breaks when batch size changes
+    if dat.shape[0] == bs:
+      outs = mdlrun(dat).numpy()
+    else:
+      mdlrun.jit_cache = None
+      outs =  mdl(input_fixup(dat)).numpy()
     et = time.perf_counter()
     predictions = mdl.postprocess_detections(outs, input_size=dat.shape[1:3], orig_image_sizes=[t["image_size"] for t in targets])
     evaluated_imgs.extend([t["image_id"] for t in targets])
@@ -80,14 +85,13 @@ def eval_retinanet():
     ext = time.perf_counter()
     n += len(targets)
     print(f"[{n}/{len(coco.imgs)}] == {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model, {(ext-et)*1000:.2f} ms for postprocessing")
+    if n % eval_freq // bs == 0 or n == len(coco.imgs):
+      coco_eval.cocoDt = coco.loadRes(coco_results)
+      coco_eval.params.imgIds = evaluated_imgs
+      coco_eval.evaluate()
+      coco_eval.accumulate()
+      coco_eval.summarize()
     st = time.perf_counter()
-
-  coco_eval = COCOeval(coco, iouType="bbox")
-  coco_eval.cocoDt = coco.loadRes(coco_results)
-  coco_eval.params.imgIds = evaluated_imgs
-  coco_eval.evaluate()
-  coco_eval.accumulate()
-  coco_eval.summarize()
 
 def eval_rnnt():
   # RNN-T
