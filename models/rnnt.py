@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.nn import Linear
+from tinygrad.nn import Linear, Embedding
 import numpy as np
 from extra.utils import download_file
 from pathlib import Path
@@ -169,22 +169,6 @@ class Encoder:
     x, x_lens = self.stack_time(x, x_lens)
     x, _ = self.post_rnn(x, None)
     return x.transpose(0, 1), x_lens
-
-
-class Embedding:
-  def __init__(self, vocab_size: int, embed_size: int):
-    self.vocab_size = vocab_size
-    self.vocab_counter = Tensor(np.arange(vocab_size, dtype=np.float32), requires_grad=False)
-    self.weight = Tensor.scaled_uniform(vocab_size, embed_size)
-
-  def __call__(self, idx: Tensor) -> Tensor:
-    oha = []
-    for i in range(idx.shape[0]):
-      ohba = []
-      for j in range(idx.shape[1]):
-        ohba.append((self.vocab_counter == idx[i, j]).realize())
-      oha.append(Tensor.stack(ohba).realize())
-    return Tensor.stack(oha) @ self.weight
 
 
 class Prediction:

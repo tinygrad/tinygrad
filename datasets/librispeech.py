@@ -10,7 +10,7 @@ For mlperf validation the dev-clean dataset is used.
 
 Then all the flacs have to be converted to wav using something like:
 ```fish
-for file in **/*.flac; ffmpeg -i $file -ar 16k "$(dirname $file)/$(basename $file .flac).wav"; end
+for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/$(basename $file .flac).wav"; done
 ```
 
 Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `datasets/librispeech`.

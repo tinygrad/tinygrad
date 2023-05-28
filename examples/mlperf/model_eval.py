@@ -1,12 +1,9 @@
 import time
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 
-if __name__ == "__main__":
-  # inference only
-  Tensor.training = False
-  Tensor.no_grad = True
-
+def eval_resnet():
   # Resnet50-v1.5
   from tinygrad.jit import TinyJit
   from models.resnet import ResNet50
@@ -43,6 +40,7 @@ if __name__ == "__main__":
     print(f"****** {n}/{d}  {n*100.0/d:.2f}%")
     st = time.perf_counter()
 
+def eval_rnnt():
   # RNN-T
   from models.rnnt import RNNT
   mdl = RNNT()
@@ -70,3 +68,15 @@ if __name__ == "__main__":
     c += len(tt)
     print(f"WER: {scores/words}, {words} words, raw scores: {scores}, c: {c}")
     st = time.perf_counter()
+
+if __name__ == "__main__":
+  # inference only
+  Tensor.training = False
+  Tensor.no_grad = True
+
+  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
+  for m in models:
+    nm = f"eval_{m}"
+    if nm in globals():
+      print(f"eval {m}")
+      globals()[nm]()
