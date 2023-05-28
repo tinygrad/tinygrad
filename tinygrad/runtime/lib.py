@@ -36,7 +36,7 @@ class RawBufferMapped(RawBufferCopyIn):
 
 # this one is simple enough that i moved it out of the runtimes
 class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16}[dtype] * size)())
+  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.int8: ctypes.c_char}[dtype] * size)())
   def _buffer(self): return memoryview(self._buf)
 
 class RawBufferCopyInOut(RawBufferCopyIn):
