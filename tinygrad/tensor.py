@@ -136,6 +136,10 @@ class Tensor:
   @staticmethod
   def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
+  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
+    cond = (self != 0.0)
+    return cond * input_ + (1.0 - cond) * other
+
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
 
@@ -368,13 +372,12 @@ class Tensor:
   def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
-    assert stride == 1, "stride is not supported in transposed conv"
-    # TODO: stride support. i believe this is correct, but you have to SHRINK the output tensor
-    #stride = make_pair(stride, len(HW))
-    #if any(s>1 for s in stride):
-    #  x = x.reshape(bs, cin_, *flatten((k,1) for k in x.shape[2:]))
-    #  x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
-    #  x = x.reshape(bs, cin_, *[k*s for k,s in zip(x.shape[2::2], stride)])
+    stride = make_pair(stride, len(HW))
+    if any(s>1 for s in stride):
+      x = x.reshape(*x.shape[:2], *flatten((k,1) for k in x.shape[2:]))
+      x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
+      x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
+      x = x.shrink(((0,x.shape[0]), (0,x.shape[1]), *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
     # TODO: the make_pair on padding is wrong in the asymmetric padding case
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=flatten(((k-1)*d-p,(k-1)*d-p) for k,p,d in zip(HW, make_pair(padding, len(HW)), make_pair(dilation, len(HW)))))
 
@@ -490,6 +493,7 @@ class Tensor:
   def __lt__(self, x) -> Tensor: return 1.0-(self>=x)
   def __gt__(self, x) -> Tensor: return 1.0-(self<=x)
   def __eq__(self, x) -> Tensor: return self.eq(x)  # type: ignore # mypy things this should be a bool
+  def __ne__(self, x) -> Tensor: return 1.0-self.eq(x)  # type: ignore
 
   # ***** functional nn ops *****
 
