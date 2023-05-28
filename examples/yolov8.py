@@ -2,7 +2,7 @@ from tinygrad.nn import Conv2d,BatchNorm2d
 from tinygrad.tensor import Tensor, Function, cat
 from tinygrad.nn import Conv2d,BatchNorm2d
 from tinygrad.helpers import dtypes
-
+import numpy as np
 # Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 
 
@@ -16,6 +16,18 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     return c_xy.cat(wh, dim=1)  # xywh bbox
   return x1y1.cat(x2y2, dim=1) # xyxy bbox
 
+def make_anchors(feats, strides, grid_cell_offset=0.5):
+    anchor_points, stride_tensor = [], []
+    assert feats is not None
+    for i, stride in enumerate(strides):
+        _, _, h, w = feats[i].shape
+        sx = np.arange(w) + grid_cell_offset  # shift x
+        sy = np.arange(h) + grid_cell_offset  # shift y
+        sy, sx = np.meshgrid(sy, sx, indexing='ij')
+        anchor_points.append(np.stack((sx, sy), -1).reshape(-1, 2))
+        stride_tensor.append(np.full((h * w, 1), stride))
+    return np.concatenate(anchor_points), np.concatenate(stride_tensor)
+  
 class SPPF:
   def __init__(self, c1, c2, k=5):
     c_ = c1 // 2  # hidden channels
