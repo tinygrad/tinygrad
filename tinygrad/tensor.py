@@ -137,9 +137,9 @@ class Tensor:
   def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def where(condition:Tensor, input:Union[Tensor, float], other:Union[Tensor, float]):
+  def where(condition:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     c = (condition != 0.0)
-    return c * input + (1.0 - c) * other
+    return c * input_ + (1.0 - c) * other
 
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
