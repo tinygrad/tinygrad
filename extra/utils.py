@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import tempfile, platform
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv, DEBUG, HALF
+from tinygrad.helpers import prod, getenv, DEBUG, HALF, dtypes
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyNumpyArray, Device
@@ -34,7 +34,7 @@ def download_file(url, fp, skip_if_exists=True):
     os.rename(f.name, fp)
 
 
-def my_unpickle(fb0, load_half=False):
+def my_unpickle(fb0):
   key_prelookup = defaultdict(list)
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
@@ -46,7 +46,7 @@ def my_unpickle(fb0, load_half=False):
       if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {size}")
       ret = None
     else:
-      ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(size), np.float16 if load_half else storage_type))
+      ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(size), storage_type))
     key_prelookup[obj_key].append((storage_type, obj_size, ret, size, stride, storage_offset))
     return ret
 
@@ -78,9 +78,8 @@ def my_unpickle(fb0, load_half=False):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False, load_half=False):
-  target_dtype = np.float16 if load_half else dtype
-  bytes_size = np.dtype(target_dtype).itemsize
+def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False):
+  bytes_size = np.dtype(dtype).itemsize
   if t is None:
     myfile.seek(prod(shape) * bytes_size, 1)
     return
@@ -91,7 +90,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
     myfile.seek(bytes_offset)
 
   assert t.shape == shape or shape == tuple(), f"shape mismatch {t.shape} != {shape}"
-  assert t.dtype.np == target_dtype and t.dtype.itemsize == bytes_size
+  assert t.dtype.np == dtype and t.dtype.itemsize == bytes_size
   if any(s != 1 and st1 != st2 for s, st1, st2 in zip(shape, strides_for_shape(shape), strides)):
     # slow path
     buffer_size = sum(strides[i]*t.dtype.itemsize * (shape[i] - 1) for i in range(len(shape)))
@@ -103,7 +102,6 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
 
     lna = t.lazydata.op.arg
     lna.fxn = lambda _: np_array
-    t.realize()
     return
 
   # ["METAL", "CLANG", "LLVM"] support readinto for more speed
@@ -116,31 +114,41 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
   else:
     def _mmap(lna):
       assert myfile._compress_type == 0, "compressed data can't be mmaped"
-      ret = np.memmap(myfile._fileobj._file, dtype=dtype , mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
-      if load_half: ret = ret.astype(target_dtype)
-      return ret
+      return np.memmap(myfile._fileobj._file, dtype=lna.dtype , mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
     def _read(lna):
-      ret = np.empty(lna.shape, dtype=dtype)
+      ret = np.empty(lna.shape, dtype=lna.dtype)
       myfile.readinto(ret.data)
-      if load_half: ret = ret.astype(target_dtype)
       return ret
     if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
     else: t.lazydata.op.arg.fxn = _read
+
+def create_casting_function(prev_func, dtype):
+  def casting_function(lna):
+    lna = prev_func(lna)
+    return lna.astype(dtype)
+  return casting_function
+
+def post_process(t: Tensor):
+  if t is not None:
+    if HALF:
+      t.lazydata.op.arg.fxn = create_casting_function(t.lazydata.op.arg.fxn, dtype=np.float16)
+      t.lazydata = t.lazydata.cast(dtypes.float16)
     t.realize()
 
-def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True, load_half=HALF):
+def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True):
   if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
 
   import zipfile
   with zipfile.ZipFile(fb0, 'r') as myzip:
     base_name = myzip.namelist()[0].split('/', 1)[0]
     with myzip.open(f'{base_name}/data.pkl') as myfile:
-      ret = my_unpickle(myfile, load_half=load_half)
+      ret = my_unpickle(myfile)
     if load_weights:
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True, load_half=load_half)
+            load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
+            post_process(v[2])
       if multithreaded:
         import concurrent.futures
         # 2 seems fastest
