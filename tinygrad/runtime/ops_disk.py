@@ -10,13 +10,13 @@ class RawDiskBuffer(RawBufferMapped):
     if device is not None:
       with open(device, "a+b") as f:
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
-        buf = mmap.mmap(f.fileno(), size * dtype.itemsize)
+        buf = memoryview(mmap.mmap(f.fileno(), size * dtype.itemsize))
     super().__init__(size, dtype, buf)
   def _buffer(self): return self._buf
 
 def disk_shrink(x, arg):
   assert len(arg) == 1, "can't slice multidimensional disk tensor"
-  return RawDiskBuffer(arg[0][1]-arg[0][0], x.dtype, buf=x._buf[arg[0][0]*x.dtype.itemsize:arg[0][1]*x.dtype.itemsize])
+  return RawDiskBuffer(arg[0][1]-arg[0][0], x.dtype, buf=x._buffer()[arg[0][0]*x.dtype.itemsize:arg[0][1]*x.dtype.itemsize])
 
 disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x: x, MovementOps.RESHAPE: lambda x, arg: x, MovementOps.SHRINK: disk_shrink }
 

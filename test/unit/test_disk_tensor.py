@@ -35,6 +35,14 @@ class TestDiskTensor(unittest.TestCase):
     is_3 = slice_me[3:4].cpu()
     assert is_3.numpy()[0] == 3
 
+  def test_assign_slice(self):
+    pathlib.Path("/tmp/dt4").unlink(missing_ok=True)
+    cc = Tensor.arange(10, device="CPU").to("disk:/tmp/dt4").realize()
+    #cc.assign(np.ones(10)).realize()
+    print(cc[3:5].numpy())
+    cc[3:5].assign([13, 12]).realize()
+    print(cc.numpy())
+
 if __name__ == "__main__":
   unittest.main()
 

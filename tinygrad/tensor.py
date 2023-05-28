@@ -90,8 +90,13 @@ class Tensor:
     return self
 
   def assign(self, x) -> Tensor:
-    if not isinstance(x, Tensor): x = Tensor(x)
-    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
+    # TODO: this is a hack for writing to DISK
+    if self.device.startswith("DISK"):
+      if not isinstance(x, Tensor): x = Tensor(x, device="CPU", dtype=self.dtype)
+      self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
+      return self
+    if not isinstance(x, Tensor): x = Tensor(x, device=self.device, dtype=self.dtype)
+    assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
