@@ -114,7 +114,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
   else:
     def _mmap(lna):
       assert myfile._compress_type == 0, "compressed data can't be mmaped"
-      return np.memmap(myfile._fileobj._file, dtype=lna.dtype , mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
+      return np.memmap(myfile._fileobj._file, dtype=lna.dtype, mode='r', offset=myfile._orig_compress_start + bytes_offset, shape=lna.shape)
     def _read(lna):
       ret = np.empty(lna.shape, dtype=lna.dtype)
       myfile.readinto(ret.data)
