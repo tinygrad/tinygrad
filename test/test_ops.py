@@ -635,6 +635,12 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
 
+  def test_maxpool2d_dilation(self):
+    for dilation in [(2, 3), (3, 2), 2, 3]:
+      helper_test_op([(32,2,110,28)],
+        lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), dilation=dilation),
+        lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), dilation=dilation))
+
   def test_avgpool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
