@@ -86,5 +86,83 @@ class TestDtype(unittest.TestCase):
     assert c.dtype == dtypes.float32
     np.testing.assert_allclose(c.numpy(), [[1,2],[3,4]])
 
+  def test_int8_to_np(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.int8)
+    print(a)
+    na = a.numpy()
+    print(na, na.dtype, a.lazydata.realized)
+    assert na.dtype == np.int8
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_int8_add(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.int8)
+    b = Tensor([1,2,3,4], dtype=dtypes.int8)
+    c = a+b
+    print(c.numpy())
+    assert c.dtype == dtypes.int8
+    np.testing.assert_allclose(c.numpy(), [2,4,6,8])
+
+  def test_int8_mul(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.int8)
+    b = Tensor([1,2,3,4], dtype=dtypes.int8)
+    c = a*b
+    print(c.numpy())
+    assert c.dtype == dtypes.int8
+    np.testing.assert_allclose(c.numpy(), [1,4,9,16])
+
+  def test_int8_matmul(self):
+    a = Tensor([[1,2],[3,4]], dtype=dtypes.int8)
+    b = Tensor.eye(2, dtype=dtypes.int8)
+    c = a@b
+    print(c.numpy())
+    assert c.dtype == dtypes.int8
+    np.testing.assert_allclose(c.numpy(), [[1,2],[3,4]])
+
+  def test_int8_upcast_float(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.int8)
+    print(a)
+    fa = a.float()
+    assert a.device == fa.device
+    assert a.requires_grad == fa.requires_grad
+    na = fa.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.float32
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_int8_downcast_float(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.float32, requires_grad=False).cast(dtypes.int8)
+    print(a)
+    ha = a.cast(dtypes.int8)
+    assert a.device == ha.device
+    assert a.requires_grad == ha.requires_grad
+    na = ha.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.int8
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_int8_add_upcast(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.int8)
+    b = Tensor([1,2,3,4], dtype=dtypes.float32)
+    c = a+b
+    print(c.numpy())
+    assert c.dtype == dtypes.float32
+    np.testing.assert_allclose(c.numpy(), [2,4,6,8])
+
+  def test_int8_mul_upcast(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.int8)
+    b = Tensor([1,2,3,4], dtype=dtypes.float32)
+    c = a*b
+    print(c.numpy())
+    assert c.dtype == dtypes.float32
+    np.testing.assert_allclose(c.numpy(), [1,4,9,16])
+
+  def test_int8_matmul_upcast(self):
+    a = Tensor([[1,2],[3,4]], dtype=dtypes.int8)
+    b = Tensor.eye(2, dtype=dtypes.float32)
+    c = a@b
+    print(c.numpy())
+    assert c.dtype == dtypes.float32
+    np.testing.assert_allclose(c.numpy(), [[1,2],[3,4]])
+
 if __name__ == '__main__':
   unittest.main()
