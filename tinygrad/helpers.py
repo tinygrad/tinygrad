@@ -27,7 +27,12 @@ class DebugSingleton:
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
 
-DEBUG, IMAGE = DebugSingleton(), getenv("IMAGE", 0)
+class HalfSingleton:
+  def __init__(self): self.value = getenv("HALF", 0)
+  def __call__(self, x): self.value = x
+  def __bool__(self): return self.value != 0
+
+DEBUG, IMAGE, HALF = DebugSingleton(), getenv("IMAGE", 0), HalfSingleton()
 
 # **** tinygrad now supports dtypes! *****
 
