@@ -8,10 +8,11 @@ from tinygrad.lazy import Device, LazyBuffer
 
 # An instantiation of the Function is the Context
 class Function:
+  __slots__ = "device", "parents", "needs_input_grad", "requires_grad"
   def __init__(self, device:str, *tensors:Tensor):
     self.device, self.parents = device, tensors
     self.needs_input_grad = [t.requires_grad for t in self.parents]
-    self.requires_grad = True if any(self.needs_input_grad) else (None if any(x is None for x in self.needs_input_grad) else False)
+    self.requires_grad = True if any(self.needs_input_grad) else (None if any([x is None for x in self.needs_input_grad]) else False)
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
@@ -35,21 +36,21 @@ class Tensor:
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     device = (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")  # canonicalize device
-    if isinstance(data, list):
+    if data.__class__ == list:
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
-    elif isinstance(data, LazyBuffer) and data.device != device:
+    elif data.__class__ == LazyBuffer and data.device != device:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
     # all ndarrays are lazy now
-    if isinstance(data, np.ndarray): data = LazyNumpyArray(data, data.shape, data.dtype)
+    if data.__class__ == np.ndarray: data = LazyNumpyArray(data, data.shape, data.dtype)
 
     # by here, it's either LazyNumpyArray or LazyBuffer
     # TODO: it should all be LazyBuffer I think
-    if isinstance(data, LazyNumpyArray):
+    if data.__class__ == LazyNumpyArray:
       data = data if data.shape else data.reshape((1,))
       lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
-    elif isinstance(data, LazyBuffer):
+    elif data.__class__ == LazyBuffer:
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       lazydata = data
     else:
@@ -92,10 +93,10 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
-      if not isinstance(x, Tensor): x = Tensor(x, device="CPU", dtype=self.dtype)
+      if not x.__class__ == Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
       self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
       return self
-    if not isinstance(x, Tensor): x = Tensor(x, device=self.device, dtype=self.dtype)
+    if not x.__class__ == Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
@@ -210,21 +211,21 @@ class Tensor:
 
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
-    assert len(new_shape) > 0 and all(x != 0 for x in new_shape), f"zeros not allowed in shape {new_shape}"
-    return mlops.Reshape.apply(self, shape=tuple(-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape))
-  def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
+    assert len(new_shape) > 0 and all([x != 0 for x in new_shape]), f"zeros not allowed in shape {new_shape}"
+    return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape]))
+  def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
-  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
+  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Pad.apply(self, arg=arg) if any([x != (0,0) for x in arg]) else self
+  def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any([x != (0,s) for x,s in zip(arg, self.shape)]) else self
 
   # ***** movement hlops *****
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, int]]]) -> Tensor:
-    arg_ = tuple(a if a is not None else (0,s) for s,a in zip(self.shape, arg))
-    padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_))
-    return self.pad(padding).shrink(tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)))
+    arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
+    padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
+    return self.pad(padding).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
 
   # Tensors mostly follow the normal python indexing / slicing behavior for sequences
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
@@ -238,15 +239,15 @@ class Tensor:
   def __getitem__(self, val):
     def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))  # Fix negative idxs, clamp to [0,N]
     new_slice, new_shape = [], []
-    val = [val] if not isinstance(val, (list, tuple)) else val
-    assert sum(s is not None for s in val) <= len(self.shape)
-    assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
+    val = [val] if val.__class__ not in {list, tuple} else val
+    assert sum([s is not None for s in val]) <= len(self.shape)
+    assert all([s.step is None or s.step == 1 for s in val if s.__class__ == slice])
     for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
-      if isinstance(s, int) and not (-sz <= s < sz):
+      if s.__class__ == int and not (-sz <= s < sz):
         raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
-      new_slice.append((s%sz, s%sz+1) if isinstance(s, int) else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
+      new_slice += (s%sz, s%sz+1) if s.__class__ == int else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)),
     for s,sz in zip(val, [self.shape[i-1] for i in itertools.accumulate([int(s is not None) for s in val])]):  # Shape depends on slices + positions of Nones
-      if not isinstance(s, int):
+      if s.__class__ != int:
         new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
     new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
@@ -255,7 +256,7 @@ class Tensor:
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
     for y in args:
-      assert len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim)
+      assert len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim])
     catargs = [self] + list(args)
     shape_cumsum = [0, *itertools.accumulate([y.shape[dim] for y in catargs])]
     slc = [[(0, s) for s in self.shape] for _ in catargs]
@@ -307,10 +308,10 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False):
-    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
+    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if axis.__class__ == int else list(axis))
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
-    ret = fxn.apply(self, new_shape=tuple(1 if i in axis_ else self.shape[i] for i in range(len(self.shape))))
+    ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else self.shape[i] for i in range(len(self.shape))]))
     return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
 
   def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
@@ -391,7 +392,7 @@ class Tensor:
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) >= 4 else [padding[1], padding[1], padding[0], padding[0]])
+    padding_ = [padding]*4 if padding.__class__ == int else (padding if len(padding) >= 4 else [padding[1], padding[1], padding[0], padding[0]])
 
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
@@ -455,16 +456,16 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    x,y = [Tensor([t], device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
+    x,y = [Tensor([t], device=self.device, requires_grad=False) if not t.__class__ == Tensor else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
-    shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
+    shape_ret = tuple([max(sx, sy) for sx,sy in zip(x.shape, y.shape)])
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
-  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if isinstance(x, Tensor) or x != 0.0 else self
-  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if isinstance(x, Tensor) or x != 0.0 or reverse else self
-  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if isinstance(x, Tensor) or x != 1.0 else self
-  def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Pow, x, reverse) if isinstance(x, Tensor) or x != 1.0 or reverse else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if isinstance(x, Tensor) or reverse or x == 0.0 else self.mul(1/x)
+  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ == Tensor or x != 0.0 else self
+  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ == Tensor or x != 0.0 or reverse else self
+  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ == Tensor or x != 1.0 else self
+  def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Pow, x, reverse) if x.__class__ == Tensor or x != 1.0 or reverse else self
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ == Tensor or reverse or x == 0.0 else self.mul(1/x)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict
 import os, math, functools
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
@@ -8,9 +7,13 @@ ShapeType = Tuple[int, ...]
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
-def argfix(*x): return tuple() if len(x) == 0 else tuple(x[0]) if isinstance(x[0], (tuple, list)) else tuple(x)
+def argfix(*x): 
+  if x[0].__class__ in {tuple, list}:
+    try: return tuple(x[0])
+    except IndexError: return tuple()
+  return tuple(x)
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items): return all(x == items[0] for x in items) if len(items) > 0 else True
+def all_same(items): return all([x == items[0] for x in items]) if len(items) > 0 else True
 def colored(st, color, background=False, bright=False): return f"\u001b[{10*background+60*bright+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color)}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if not fxn(x)]
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
@@ -55,7 +58,6 @@ class LazyNumpyArray:
   def astype(self, typ): return LazyNumpyArray(self.fxn, self.shape, typ)
 
 
-@dataclass
 class dtypes:
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
@@ -64,8 +66,9 @@ class dtypes:
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
   @staticmethod
-  def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
-
+  def from_np(x) -> DType:
+    dtypes_dict = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(k)}
+    return dtypes_dict[np.dtype(x).name]
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0

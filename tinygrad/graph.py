@@ -1,12 +1,15 @@
 import os, atexit, itertools
+
+from tinygrad.shape.shapetracker import MOVEMENT_OPS
 try:
   import networkx as nx  # type: ignore
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
-from typing import Dict, List, Optional
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp, get_buffers, get_lazyops
-from tinygrad.lazy import LazyBuffer
+from typing import TYPE_CHECKING, Dict, List, Optional
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps, Op, OpType, LazyOp
+if TYPE_CHECKING:
+  from tinygrad.tensor import LazyBuffer
 from tinygrad.helpers import getenv, DEBUG, GlobalCounters
 from tinygrad.runtime.lib import RawConst
 
@@ -49,11 +52,11 @@ def str_dtype(dtyp):
   ret = str(dtyp)[7:]
   return "" if ret == 'float' else f"\n{ret}"
 
-def log_op(ret: LazyBuffer, ast: LazyOp, show_graph: Optional[bool] = None, phantom=False):
+def log_op(ret: 'LazyBuffer', ast: LazyOp, show_graph: Optional[bool] = None, phantom=False):
   if show_graph is None: show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
-  op: List[Op] = [x.op for x in get_lazyops(ast)]
-  inp: List[LazyBuffer] = [x for x in get_buffers(ast) if not isinstance(x.realized, RawConst) or GRAPH > 1]
+  op: List[Op] = [x.op if x.op not in MOVEMENT_OPS else MovementOps(x.op) for x in ast.get_lazyops()]
+  inp: List['LazyBuffer'] = [x for x in ast.get_buffers() if not isinstance(x.realized, RawConst) or GRAPH > 1]
   oporder = [LoadOps, FusedOps, ReduceOps, BinaryOps, UnaryOps, MovementOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1

@@ -32,7 +32,7 @@ CL = _CL()
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype, device='0'):
-    if isinstance(dtype, ImageDType):
+    if dtype.__class__ == ImageDType:
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
       buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
       assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
@@ -75,7 +75,7 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctx.devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
-    cl_bufs = [x._buf if isinstance(x, CLBuffer) else x for x in bufs]
+    cl_bufs = [x._buf if x.__class__ == CLBuffer else x for x in bufs]
     e = self.clprg(CL.cl_queue[cl_bufs[0].device], global_size, local_size, *cl_bufs)
     if wait:
       e.wait()

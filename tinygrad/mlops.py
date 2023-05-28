@@ -143,6 +143,7 @@ class Div(Function):
 
 # NOTE: this is sum in reverse
 class Expand(Function):
+  __slots__= 'input_shape'
   def forward(self, x:LazyBuffer, shape:ShapeType) -> LazyBuffer:
     self.input_shape = x.shape
     return x.movement_op(MovementOps.EXPAND, shape)
@@ -151,6 +152,7 @@ class Expand(Function):
     return grad_output.reduce_op(ReduceOps.SUM, self.input_shape)
 
 class Reshape(Function):
+  __slots__= 'input_shape'
   def forward(self, x:LazyBuffer, shape:ShapeType) -> LazyBuffer:
     self.input_shape = x.shape
     return x.movement_op(MovementOps.RESHAPE, shape)
@@ -159,6 +161,7 @@ class Reshape(Function):
     return grad_output.movement_op(MovementOps.RESHAPE, self.input_shape)
 
 class Permute(Function):
+  __slots__= 'input_order'
   def forward(self, x:LazyBuffer, order:Tuple[int, ...]) -> LazyBuffer:
     self.input_order = order
     return x.movement_op(MovementOps.PERMUTE, order)
@@ -167,24 +170,28 @@ class Permute(Function):
     return grad_output.movement_op(MovementOps.PERMUTE, argsort(self.input_order))
 
 class Pad(Function):
+  __slots__= 'narg'
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
-    self.narg = tuple((p[0], s+p[0]) for s,p in zip(x.shape, arg))
+    self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
     return x.movement_op(MovementOps.PAD, arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.movement_op(MovementOps.SHRINK, self.narg)
 
 class Shrink(Function):
+  __slots__= 'narg'
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
-    self.narg = tuple((p[0], s-p[1]) for s,p in zip(x.shape, arg))
+    self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
     return x.movement_op(MovementOps.SHRINK, arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.movement_op(MovementOps.PAD, self.narg)
 
 class Flip(Function):
+  __slots__= 'arg'
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]):
-    self.arg = tuple(-1 if i in axis else 1 for i in range(len(x.shape)))
+    axis = set(axis)
+    self.arg = tuple([-1 if i in axis else 1 for i in range(len(x.shape))])
     return x.movement_op(MovementOps.STRIDE, self.arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:

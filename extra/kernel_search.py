@@ -140,7 +140,7 @@ def apply_optimization(k, ast, max_interventions=1, cache=True):
 
 def randomize_buffers(ast):
   # before testing, we need to fill the buffers with randomness
-  bufs = get_buffers(ast)
+  bufs = ast.get_buffers()
   for b in bufs:
     randomness = np.random.default_rng().standard_normal(size=b._base_shape, dtype=np.float32)
     if b._buf is not None: b._buf.copyin(randomness)
@@ -183,7 +183,6 @@ def search(ast, start_interventions=[], depth=10):
   if not getenv("NOTEST"): test_ast(k)
   print(f"improved from {baseline/1e6:.2f} ms to {best_time/1e6:.2f} ms, a {baseline/best_time:.2f}x speedup @ {k.info.flops/best_time:.2f} GFLOPS")
 
-from tinygrad.ops import get_buffers
 def test_correctness(ast):
   randomize_buffers(ast)
   from extra.lib_test_ast import test_ast

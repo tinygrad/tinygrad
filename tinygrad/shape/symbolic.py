@@ -14,7 +14,7 @@ class Node:
   max: int
   def render(self, ops=None, ctx=None) -> str:
     if ops is None: ops = render_python
-    assert isinstance(self, (Variable, NumNode)) or self.min != self.max
+    assert self.__class__ in {Variable, NumNode}  or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -58,17 +58,17 @@ class Node:
 
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
-    new_nodes: List[Node] = []
+    mul_nodes: List[MulNode] = []
     sum_nodes: List[SumNode] = []
     num_nodes: List[NumNode] = []
-    mul_nodes: List[MulNode] = []
+    new_nodes: List[Node] = []
     for node in nodes:
-      if isinstance(node, NumNode):
-        num_nodes.append(node)
-      elif isinstance(node, MulNode):
-        mul_nodes.append(node)
-      elif isinstance(node, SumNode): # expand any sums inside one sum
-        sum_nodes.append(node)
+      if node.__class__ == MulNode:
+        mul_nodes += node,
+      elif node.__class__ == NumNode:
+        num_nodes += node,
+      elif node.__class__ == SumNode:
+        sum_nodes += node,
       else:
         new_nodes.append(node)
 
@@ -87,10 +87,10 @@ class Node:
     mul_nodes += [MulNode(x, 1) for x in new_nodes]
     mul_groups: Dict[str, Tuple[Node, List[MulNode]]] = defaultdict(lambda: (Node(), []))
     for node in mul_nodes: #NOTE can we somehow avoid rendering here?
-      key = node.a.render()
+      key = node.a.key
       mul_groups[key] = (node.a, mul_groups[key][1] + [node])
-    mul_nodes = [k * sum(x.b for x in g) for k, g in mul_groups.values()]
-    new_nodes = [x if not isinstance(x, MulNode) or x.b != 1 else x.a for x in mul_nodes]
+    mul_nodes = [k * sum([x.b for x in g]) for k, g in mul_groups.values()]
+    new_nodes = [x if not  x.__class__ == MulNode or x.b != 1 else x.a for x in mul_nodes]
 
     # filter 0s
     new_nodes = [x for x in new_nodes if x.min != 0 or x.max != 0]
@@ -98,7 +98,7 @@ class Node:
 
   @staticmethod
   def ands(nodes:List[Node]) -> Node:
-    if any((x.min == 0 and x.max == 0) for x in nodes): return NumNode(0)
+    if any([(x.min == 0 and x.max == 0) for x in nodes]): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
@@ -170,26 +170,26 @@ class SumNode(RedNode):
   def __mul__(self, b: int): return Variable.sum([x*b for x in self.nodes]) # distribute mul into sum
   def __floordiv__(self, b: int, factoring_allowed=True):
     if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-    factors, tmp_nofactor = partition(self.nodes, lambda x: (isinstance(x, (MulNode, NumNode))) and x.b%b == 0)
+    factors, tmp_nofactor = partition(self.nodes, lambda x:  x.__class__ in {MulNode, NumNode} and x.b%b == 0)
     nofactor = []
     # ugh, i doubt this is universally right
     for x in tmp_nofactor:
-      if isinstance(x, NumNode):
+      if x.__class__ == NumNode:
         if (x.b%b) != x.b:
           factors.append(Variable.num(x.b - (x.b%b)))  # python does floor division
         nofactor.append(Variable.num(x.b%b))
       else:
         nofactor.append(x)
-    gcd = [math.gcd(x.b, b) if isinstance(x, (MulNode, NumNode)) else None for x in nofactor]
+    gcd = [math.gcd(x.b, b) if  x.__class__ in {MulNode, NumNode} else None for x in nofactor]
     if len(factors) > 0:
       # these don't have to be the same, just having a common factor
       if len(gcd) > 0 and all_same(gcd) and gcd[0] is not None and gcd[0] > 1:
-        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if isinstance(x, MulNode) else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
+        nofactor_term = Variable.sum([(x.a * (x.b//gcd[0])) if  x.__class__ == MulNode else Variable.num(x.b//gcd[0]) for x in nofactor])//(b//gcd[0])
       else:
         nofactor_term = Variable.sum(nofactor)//b
-      return Variable.sum([(x.a * (x.b//b)) if isinstance(x, MulNode) else Variable.num(x.b//b) for x in factors] + [nofactor_term])
+      return Variable.sum([(x.a * (x.b//b)) if  x.__class__ == MulNode else Variable.num(x.b//b) for x in factors] + [nofactor_term])
     else:
-      muls = [x.b for x in nofactor if isinstance(x, MulNode)]
+      muls = [x.b for x in nofactor if  x.__class__ == MulNode]
       for m in muls:
         if m > 1 and b%m == 0:
           return (self//m)//(b//m)
@@ -197,8 +197,8 @@ class SumNode(RedNode):
   def __mod__(self, b: int): 
     new_nodes = []
     for x in self.nodes:
-      if isinstance(x, NumNode): new_nodes.append(Variable.num(x.b%b))
-      elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
+      if x.__class__ == NumNode: new_nodes.append(Variable.num(x.b%b))
+      elif x.__class__ == MulNode: new_nodes.append(x.a * (x.b%b))
       else: new_nodes.append(x)
     return Node.__mod__(Variable.sum(new_nodes), b)
 
