@@ -20,7 +20,14 @@ def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-DEBUG, IMAGE = getenv("DEBUG", 0), getenv("IMAGE", 0)
+# NOTE: hack to allow DEBUG(x) to set the debug value at runtime
+class DebugSingleton:
+  def __init__(self): self.value = getenv("DEBUG", 0)
+  def __call__(self, x): self.value = x
+  def __bool__(self): return self.value != 0
+  def __ge__(self, x): return self.value >= x
+
+DEBUG, IMAGE = DebugSingleton(), getenv("IMAGE", 0)
 
 # **** tinygrad now supports dtypes! *****
 

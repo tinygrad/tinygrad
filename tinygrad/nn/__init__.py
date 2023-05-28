@@ -1,5 +1,6 @@
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import prod
 
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -24,7 +25,7 @@ class BatchNorm2d:
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * batch_var.detach())
+        self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape) - y.shape[1]) * batch_var.detach() )
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
@@ -42,6 +43,16 @@ class Conv2d:
 
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
+
+class ConvTranspose2d:
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+    self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
+    self.weight = Tensor.glorot_uniform(in_channels, out_channels//groups, *self.kernel_size)
+    self.bias = Tensor.zeros(out_channels) if bias else None
+
+  def __call__(self, x):
+    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True, initialization: str='kaiming_uniform'):

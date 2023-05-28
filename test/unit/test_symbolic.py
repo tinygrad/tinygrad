@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import Variable, NumNode, Node
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -177,6 +177,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_combine_num(self):
     self.helper_test_variable(Variable.sum([Variable.num(29), Variable("a", 0, 10), Variable.num(-23)]), 6, 16, "(6+a)")
+
+  def test_sum_num_hoisted_and_factors_cancel_out(self):
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
   def test_div_factor(self):
     self.helper_test_variable(Variable.sum([Variable.num(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")

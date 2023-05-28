@@ -37,7 +37,7 @@ def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, moment
   else:
     invstd = (input_var + epsilon)**-0.5
     return X.batchnorm(scale, B, input_mean, invstd)
-  
+
 def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_type=1):
   assert stash_type == 1, "only float32 is supported"
   axis = tuple(i for i in range(axis if axis >= 0 else len(x.shape) + axis, len(x.shape)))
@@ -46,7 +46,7 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
 
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
-  
+
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
 # numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _format_padding(onnx_pads, ndims=None, axes=None):
@@ -90,6 +90,9 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
 
+def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
+  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
+
 # TODO: copied from tensor.py
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   # TODO: mask should be a boolean tensor
@@ -116,7 +119,7 @@ def Expand(input, shape):
   return input.reshape(x_shape).expand(shape_ret)
 
 def LRN(input, size, alpha=1e-4, beta=0.75, bias=1.0):
-  bs, c, iy, ix = input.shape 
+  bs, c, iy, ix = input.shape
   return input / input.mul(input).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def Identity(input): return input

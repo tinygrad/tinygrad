@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType
+from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
 from tinygrad.runtime.lib import RawConst, RawBuffer
@@ -111,6 +111,7 @@ class LazyBuffer:
         if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
           self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
         else:
+          if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
           self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
