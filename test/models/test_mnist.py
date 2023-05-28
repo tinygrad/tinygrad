@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+import syspathcfg
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate

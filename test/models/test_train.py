@@ -1,6 +1,7 @@
 import unittest
 import time
 import numpy as np
+import syspathcfg
 from tinygrad.nn import optim
 from tinygrad.tensor import Device
 from tinygrad.helpers import getenv
