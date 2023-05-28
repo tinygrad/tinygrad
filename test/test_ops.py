@@ -62,6 +62,17 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
+  def test_where(self):
+    helper_test_op(
+      [(100,)],
+      lambda x: torch.where(x > 0.5, 4, 2),
+      lambda x: Tensor.where(x > 0.5, 4, 2), forward_only=True)
+
+    for shps in [[(10,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
+      helper_test_op(
+        shps,
+        lambda x, a, b: torch.where(x > 0.5, a, b),
+        lambda x, a, b: Tensor.where(x > 0.5, a, b), forward_only=True)
 
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -131,14 +142,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), Tensor.sqrt, a=0)
-  
+
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin(), Tensor.sin, a=0)
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos(), Tensor.cos, a=0)
   def test_tan(self):
     helper_test_op([(45,65)], lambda x: x.tan(), Tensor.tan, a=0)
-    
+
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu(), Tensor.relu)
   def test_relu_exact(self):
@@ -186,6 +197,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
     helper_test_op([(64), (64,99)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+
+  @unittest.skipIf(IMAGE>0, "no batched matmul on images")
+  def test_matmul_batched(self):
+    helper_test_op([(3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
+
+  @unittest.skipIf(IMAGE>0, "no batched matmul on images")
+  def test_matmul_batched_vector(self):
+    helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_broadcastdot(self):
@@ -406,6 +425,39 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  # conv transpose
+
+  def test_simple_conv_transpose2d(self):
+    helper_test_op([(2,4,9,9), (4,4,3,3)],
+      lambda x,w: torch.nn.functional.conv_transpose2d(x,w).relu(),
+      lambda x,w: Tensor.conv_transpose2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_grouped_conv_transpose2d(self):
+    helper_test_op([(2,4,9,9), (4,4,3,3)],
+      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,groups=2).relu(),
+      lambda x,w: Tensor.conv_transpose2d(x,w,groups=2).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_padded_conv_transpose2d(self):
+    helper_test_op([(2,4,9,9), (4,4,3,3)],
+      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=1).relu(),
+      lambda x,w: Tensor.conv_transpose2d(x,w,padding=1).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_dilated_conv_transpose2d(self):
+    helper_test_op([(2,4,9,9), (4,4,3,3)],
+      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=2).relu(),
+      lambda x,w: Tensor.conv_transpose2d(x,w,dilation=2).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_strided_conv_transpose2d(self):
+    helper_test_op([(2,4,9,9), (4,4,3,3)],
+      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,stride=2).relu(),
+      lambda x,w: Tensor.conv_transpose2d(x,w,stride=2).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  @unittest.skipIf(IMAGE>0, "no conv3d on images")
+  def test_simple_conv_transpose3d(self):
+    helper_test_op([(2,4,9,9,9), (4,4,3,3,3)],
+      lambda x,w: torch.nn.functional.conv_transpose3d(x,w).relu(),
+      lambda x,w: Tensor.conv_transpose2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_conv2d(self):
     for bs in [1,8]:
