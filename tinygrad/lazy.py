@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
+from tinygrad.helpers import getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
+from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, map_buffers
 from tinygrad.runtime.lib import RawConst, RawBuffer

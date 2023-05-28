@@ -1,5 +1,5 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from math import prod
 from extra.onnx import safe_numpy
 import numpy as np
 import functools

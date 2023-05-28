@@ -64,11 +64,11 @@ class Node:
     new_nodes: List[Node] = []
     for node in nodes:
       if node.__class__ == MulNode:
-        mul_nodes += node,
+        mul_nodes.append(node)      
       elif node.__class__ == NumNode:
-        num_nodes += node,
+        num_nodes.append(node)
       elif node.__class__ == SumNode:
-        sum_nodes += node,
+        sum_nodes.append(node)
       else:
         new_nodes.append(node)
 

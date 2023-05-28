@@ -1,7 +1,8 @@
 import torch
 from typing import Dict, Callable, Optional
+from math import prod
 from tinygrad.ops import UnaryOps, BinaryOps, MovementOps, FusedOps, Op, Interpreted
-from tinygrad.helpers import getenv, dtypes, prod, DType
+from tinygrad.helpers import getenv, dtypes, DType
 from tinygrad.runtime.ops_cpu import base_fxn_for_op, einsum_mulacc
 from tinygrad.runtime.lib import RawBuffer
 

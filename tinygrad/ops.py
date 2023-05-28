@@ -2,7 +2,8 @@ from __future__ import annotations
 import functools, itertools, random, time
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
-from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.helpers import DEBUG, getenv, GlobalCounters, DType, colored
+from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
 

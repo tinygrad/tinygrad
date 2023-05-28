@@ -2,7 +2,8 @@
 from __future__ import annotations
 import functools
 from typing import Tuple, Union, List, Optional, Callable
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.helpers import DEBUG
+from math import prod
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, ModNode
 
 # these ops live here
@@ -38,8 +39,8 @@ def is_contiguous(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> bool: retur
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
   new_strides = []
   for stride, shp in zip(strides, shape):
-    if shp != 1: new_strides += stride,
-    else: new_strides += 0,
+    if shp != 1: new_strides.append(stride)
+    else: new_strides.append(0)
   return tuple(new_strides)
 
 class View:
@@ -118,6 +119,33 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
       if DEBUG >= 4: print("can't simplify", s, this_dim.render())
       break
   return View(vm1.shape, tuple(new_strides), new_offset.b, vm1.mask) if len(new_strides) == len(vm1.strides) else None
+
+@functools.lru_cache(maxsize=None)
+def _reshape(view: View, new_shape) -> Tuple[View, bool]:
+  shape, mask, strides, offset = view.shape, view.mask, view.strides, view.offset
+  # check if this is adding or removing 1s (only)
+  # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
+  if [x for x in shape if x != 1] == [x for x in new_shape if x != 1]:
+    strides = [y for x,y in zip(shape, strides) if x != 1]
+    new_strides_tuple = tuple([0 if x == 1 else strides.pop(0) for x in new_shape])
+    new_mask_tuple = None
+    if mask:
+      for x,y in zip(shape, mask):
+        if x == 1 and y != (0, 1):
+          new_mask_tuple = tuple([(0,0) for _ in new_shape])
+          break
+      else:
+        mask = [y for x,y in zip(shape, mask) if x != 1]
+        new_mask_tuple = tuple([(0,1) if x == 1 else mask.pop(0) for x in new_shape])
+    return View(new_shape, new_strides_tuple, offset, new_mask_tuple), False
+
+  new_view = View(new_shape, strides_for_shape(new_shape))
+  if view.contiguous: return new_view, False # NOTE: if it's contiguous it can't have an offset
+  else:
+    if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
+    else:
+      if DEBUG >= 4: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
+      return new_view, True
 
 @functools.lru_cache(maxsize=None)
 def get_pad_args(shape, arg: Tuple[Tuple[int, int], ...]):
@@ -220,36 +248,14 @@ class ShapeTracker:
       mask = None
       self.views[-1] = View(new_shape, strides, self.views[-1].offset, mask)
 
-  # @profile
   def reshape(self, new_shape: Tuple[int, ...]):
     if self.views[-1].shape == new_shape: return self
     for x in set(new_shape): assert x.__class__ == int and x > 0, f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
     assert prod(self.views[-1].shape) == prod(new_shape), f"can't reshape {self.views[-1].shape} -> {new_shape}"
-
-    # check if this is adding or removing 1s (only)
-    # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
-    if tuple([x for x in self.views[-1].shape if x != 1]) == tuple([x for x in new_shape if x != 1]):
-      old_strides = [y for x,y in zip(self.views[-1].shape, self.views[-1].strides) if x != 1]
-      new_strides_tuple = tuple([0 if x == 1 else old_strides.pop(0) for x in new_shape])
-      new_mask_tuple = None
-      if self.views[-1].mask:
-        for x,y in zip(self.views[-1].shape, self.views[-1].mask):
-          if x == 1 and y != (0, 1):
-            new_mask_tuple = tuple([(0,0) for _ in new_shape])
-            break
-        else:
-          old_mask = [y for x,y in zip(self.views[-1].shape, self.views[-1].mask) if x != 1]
-          new_mask_tuple = tuple([(0,1) if x == 1 else old_mask.pop(0) for x in new_shape])
-      self.views[-1] = View(new_shape, new_strides_tuple, self.views[-1].offset, new_mask_tuple)
-      return self
-
-    view = View(new_shape, strides_for_shape(new_shape))
-    if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
-    else:
-      if (merged_view := merge_views(self.views[-1], view)) is not None: self.views[-1] = merged_view
-      else:
-        if DEBUG >= 4: print(f"WARNING: creating new view with reshape {self} -> {new_shape}")
-        self.views.append(view)
+    new_view, extra = _reshape(self.views[-1], new_shape)
+    if extra: self.views.append(new_view)
+    else: self.views[-1] = new_view
+    return self
 
   def permute(self, axis: Tuple[int, ...]):
     for x in axis: assert x.__class__ == int and x >= 0 and x < len(self.views[-1].shape), f"invalid permute {axis} for {self.views[-1].shape}"

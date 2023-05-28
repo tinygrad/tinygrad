@@ -1,12 +1,11 @@
 from __future__ import annotations
-import os, math, functools
+import os, functools
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
-def prod(x:Union[List[int], Tuple[int, ...]]) -> int: return math.prod(x)
 def argfix(*x): 
   if x[0].__class__ in {tuple, list}:
     try: return tuple(x[0])

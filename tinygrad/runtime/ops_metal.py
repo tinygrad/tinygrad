@@ -3,7 +3,8 @@ import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
+from tinygrad.helpers import getenv, DEBUG, DType
+from math import prod
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 

@@ -2,7 +2,7 @@ import functools
 import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from math import prod
 from tinygrad.helpers import getenv, DEBUG
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
