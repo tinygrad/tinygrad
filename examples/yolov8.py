@@ -6,6 +6,8 @@ import numpy as np
 # Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 
 
+# UTIL FUNCTIONS
+
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
   x1y1 = anchor_points - lt
@@ -17,17 +19,28 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   return x1y1.cat(x2y2, dim=1) # xyxy bbox
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
-    anchor_points, stride_tensor = [], []
-    assert feats is not None
-    for i, stride in enumerate(strides):
-        _, _, h, w = feats[i].shape
-        sx = np.arange(w) + grid_cell_offset  # shift x
-        sy = np.arange(h) + grid_cell_offset  # shift y
-        sy, sx = np.meshgrid(sy, sx, indexing='ij')
-        anchor_points.append(np.stack((sx, sy), -1).reshape(-1, 2))
-        stride_tensor.append(np.full((h * w, 1), stride))
-    return np.concatenate(anchor_points), np.concatenate(stride_tensor)
-  
+  anchor_points, stride_tensor = [], []
+  assert feats is not None
+  for i, stride in enumerate(strides):
+    _, _, h, w = feats[i].shape
+    sx = np.arange(w) + grid_cell_offset  # shift x
+    sy = np.arange(h) + grid_cell_offset  # shift y
+    sy, sx = np.meshgrid(sy, sx, indexing='ij')
+    anchor_points.append(np.stack((sx, sy), -1).reshape(-1, 2))
+    stride_tensor.append(np.full((h * w, 1), stride))
+  return np.concatenate(anchor_points), np.concatenate(stride_tensor)
+
+# this function is from the original implementation
+def autopad(k, p=None, d=1):  # kernel, padding, dilation
+  """Pad to 'same' shape outputs."""
+  if d > 1:
+      k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
+  if p is None:
+      p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
+  return p
+
+
+# MODULE Definitions
 class SPPF:
   def __init__(self, c1, c2, k=5):
     c_ = c1 // 2  # hidden channels
@@ -41,15 +54,6 @@ class SPPF:
     x3 = self.maxpool(x2)
     x4 = self.maxpool(x3)
     return self.cv2(x.cat(x2, x3, x4, dim=1))
-  
-# this function is from the original implementation
-def autopad(k, p=None, d=1):  # kernel, padding, dilation
-  """Pad to 'same' shape outputs."""
-  if d > 1:
-      k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
-  if p is None:
-      p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
-  return p
 
 class Conv_Block:
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
