@@ -34,7 +34,7 @@ class Tensor:
   default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
-    device = device.upper().replace(":0", "")  # canonicalize device
+    device = (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")  # canonicalize device
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -90,8 +90,13 @@ class Tensor:
     return self
 
   def assign(self, x) -> Tensor:
-    if not isinstance(x, Tensor): x = Tensor(x)
-    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
+    # TODO: this is a hack for writing to DISK
+    if self.device.startswith("DISK"):
+      if not isinstance(x, Tensor): x = Tensor(x, device="CPU", dtype=self.dtype)
+      self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
+      return self
+    if not isinstance(x, Tensor): x = Tensor(x, device=self.device, dtype=self.dtype)
+    assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
@@ -126,7 +131,9 @@ class Tensor:
   def zeros_like(tensor, **kwargs): return Tensor.zeros(*tensor.shape, **kwargs)
 
   @staticmethod
-  def empty(*shape, **kwargs): return Tensor.zeros(*shape, **kwargs)
+  def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
+    # NOTE: we do the reshape to fix interpreted buffers
+    return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, device), dtype=dtype, device=device, **kwargs).reshape(*shape)
 
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
@@ -136,10 +143,9 @@ class Tensor:
   @staticmethod
   def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
-  @staticmethod
-  def where(condition:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
-    c = (condition != 0.0)
-    return c * input_ + (1.0 - c) * other
+  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
+    cond = (self != 0.0)
+    return cond * input_ + (1.0 - cond) * other
 
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
@@ -368,7 +374,7 @@ class Tensor:
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
-  def max_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).max(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
+  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
 
   def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
@@ -458,7 +464,7 @@ class Tensor:
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if isinstance(x, Tensor) or x != 0.0 or reverse else self
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if isinstance(x, Tensor) or x != 1.0 else self
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Pow, x, reverse) if isinstance(x, Tensor) or x != 1.0 or reverse else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if isinstance(x, Tensor) or reverse else self.mul(1/x)
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if isinstance(x, Tensor) or reverse or x == 0.0 else self.mul(1/x)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)

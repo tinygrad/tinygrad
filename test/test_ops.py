@@ -56,6 +56,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 class TestOps(unittest.TestCase):
   def test_zeros(self):
     helper_test_op([], lambda: torch.zeros(45,65), lambda: Tensor.zeros(45,65), forward_only=True)
+  def test_empty_0(self):
+    helper_test_op([], lambda: torch.empty(45,65)*0/0, lambda: Tensor.empty(45,65)*0/0, forward_only=True)
   def test_ones(self):
     helper_test_op([], lambda: torch.ones(45,65), lambda: Tensor.ones(45,65), forward_only=True)
   def test_eye(self):
@@ -66,13 +68,13 @@ class TestOps(unittest.TestCase):
     helper_test_op(
       [(100,)],
       lambda x: torch.where(x > 0.5, 4, 2),
-      lambda x: Tensor.where(x > 0.5, 4, 2), forward_only=True)
+      lambda x: (x > 0.5).where(4, 2), forward_only=True)
 
     for shps in [[(10,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
       helper_test_op(
         shps,
         lambda x, a, b: torch.where(x > 0.5, a, b),
-        lambda x, a, b: Tensor.where(x > 0.5, a, b), forward_only=True)
+        lambda x, a, b: (x > 0.5).where(a, b), forward_only=True)
 
   def _test_cmp(self, fxn, reverse=True):
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -634,6 +636,12 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
+
+  def test_maxpool2d_dilation(self):
+    for dilation in [(2, 3), (3, 2), 2, 3]:
+      helper_test_op([(32,2,110,28)],
+        lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), dilation=dilation),
+        lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), dilation=dilation))
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
