@@ -20,24 +20,26 @@ def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-context_defaults = { "DEBUG": 0, "IMAGE": 0 } # must be set for every context var
-context_stack = [ { key: getenv(key, v) for key, v in context_defaults.items() } ]
-
 class Context:
   def __init__(self, **kwargs): self.pvars = kwargs
-  def __enter__(self): context_stack.append({ key: self.pvars[key] if key in self.pvars else context_stack[-1][key] for key in context_defaults.keys() })
-  def __exit__(self, *args): context_stack.pop()
+  def __enter__(self): ContextVar.ctx_stack.append({ key: self.pvars[key] if key in self.pvars else ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() })
+  def __exit__(self, *args): ContextVar.ctx_stack.pop()
 
 class ContextVar:
-  def __init__(self, key): self.key = key
-  def __call__(self, x): context_stack[-1][self.key] = x
+  ctx_stack = [{}]
+  def __init__(self, key, default_value): 
+    self.key = key
+    if not key in ContextVar.ctx_stack[-1].keys():
+      assert len(ContextVar.ctx_stack) == 1, "All possible context vars must be registered before any context is entered"
+      ContextVar.ctx_stack[-1][key] = getenv(key, default_value)
+  def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   @property
-  def value(self): return context_stack[-1][self.key]
+  def value(self): return ContextVar.ctx_stack[-1][self.key]
 
-DEBUG, IMAGE = ContextVar("DEBUG"), ContextVar("IMAGE")
+DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 
 # **** tinygrad now supports dtypes! *****
 
