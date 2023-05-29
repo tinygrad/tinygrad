@@ -23,6 +23,8 @@ disassemblers/cuda_ioctl_sniffer
 datasets/cifar-10-python.tar.gz
 datasets/librispeech/
 datasets/imagenet/
+datasets/kits19/
 datasets/squad/
 datasets/img_align_celeba*
 datasets/open-images-v6-mlperf
+datasets/kits/
