@@ -239,6 +239,13 @@ class Tensor:
     def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))  # Fix negative idxs, clamp to [0,N]
     new_slice, new_shape = [], []
     val = [val] if not isinstance(val, (list, tuple)) else val
+    ellipsis_found = [i for i, v in enumerate(val) if v is Ellipsis]
+    if len(ellipsis_found) > 0:
+      # if we encounter an ellipsis, we need to expand it to fill all dimensions
+      # however, multiple ellipses are not allowed
+      assert len(ellipsis_found) == 1
+      fill_dim = len(self.shape) - len(val) + 1
+      val = tuple(val[:ellipsis_found[0]]) + tuple([slice(None)]) * fill_dim + tuple(val[ellipsis_found[0] + 1:])
     assert sum(s is not None for s in val) <= len(self.shape)
     assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
     for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
