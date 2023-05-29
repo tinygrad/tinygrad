@@ -99,5 +99,19 @@ class TestDtype(unittest.TestCase):
   def test_int8_matmul_upcast_float(self): self._test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int8), Tensor.eye(2, dtype=dtypes.float32), dtypes.float32, [[1,2],[3,4]])
   def test_int8_matmul_upcast_half(self): self._test_matmul_upcast(Tensor([[1,2],[3,4]], dtype=dtypes.int8), Tensor.eye(2, dtype=dtypes.float16), dtypes.float16, [[1,2],[3,4]])
 
+  def test_int8_to_uint8_negative(self):
+    a = Tensor([-1, -2, -3, -4], dtype=dtypes.int8)
+    print(a)
+    b = a.cast(dtypes.uint8)
+    print(b.numpy())
+    np.testing.assert_allclose(b.numpy(), [255, 254, 253, 252])
+
+  def test_uint8_to_int8_overflow(self):
+    a = Tensor([255, 254, 253, 252], dtype=dtypes.uint8)
+    print(a)
+    b = a.cast(dtypes.int8)
+    print(b.numpy())
+    np.testing.assert_allclose(b.numpy(), [-1, -2, -3, -4])
+
 if __name__ == '__main__':
   unittest.main()
