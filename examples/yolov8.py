@@ -1,8 +1,9 @@
 from tinygrad.nn import Conv2d,BatchNorm2d
-from tinygrad.tensor import Tensor, Function, cat
+from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d,BatchNorm2d
 from tinygrad.helpers import dtypes
 import numpy as np
+import math
 # Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 
 
@@ -32,7 +33,6 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
 
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
-  """Pad to 'same' shape outputs."""
   if d > 1:
       k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
   if p is None:
@@ -90,37 +90,55 @@ class C2f:
     concatenated = tuple([y] + y_chunks + y2)
     return self.cv2(concatenated)
 
-# TODO: test this
+# TODO: test this. for some reason DFL isn't working with 3d tensors inputs, and it's exactly how it should work.
 class DFL():
   def __init__(self, c1=16):
     self.conv = Conv2d(c1, 1, 1, bias=False)
     x = Tensor.arange(c1, dtypes.float32)
-    self.conv.weight.data[:] = x.reshape(1, c1, 1, 1)
+    self.conv.weight = x.reshape(1, c1, 1, 1)
     self.c1 = c1
 
   def forward(self, x):
     b, c, a = x.shape # batch, channels, anchors
     return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
+
   
-# incomplete
-# class Detect():
-#   dynamic = False  # force grid reconstruction
-#   export = False  # export mode
-#   shape = None
-#   anchors = Tensor.empty(0)  # init
-#   strides = Tensor.empty(0)  # init
+# incomplete and untested
+class DetectionHead():
+  anchors = Tensor.empty(0)
+  strides = Tensor.empty(0)
 
-#   def __init__(self, nc=80, ch=()):  # detection layer
-#     self.nc = nc  # number of classes
-#     self.nl = len(ch)  # number of detection layers
-#     self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
-#     self.no = nc + self.reg_max * 4  # number of outputs per anchor
-#     self.stride = Tensor.zeros(self.nl)  # strides computed during build
-#     c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)  # channels
-#     self.cv2 = [Tensor.sequential([Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.reg_max, 1)]) for x in ch]
-#     self.cv3 = [Tensor.sequential([Conv_Block(x, c3, 3), Conv_Block(c3, c3, 3), Conv2d(c3, self.nc, 1)]) for x in ch]
+  def __init__(self, nc=80, filters=()):
+    super().__init__()
+    self.ch = 16  # DFL channels
+    self.nc = nc  # number of classes
+    self.nl = len(filters)  # number of detection layers
+    self.no = nc + self.ch * 4  # number of outputs per anchor
+    self.stride = Tensor.zeros(self.nl)  # strides computed during build #TODO - figure this out
 
-#     # TODO: a. DFL block create b. make_anchor create c. disttobox function 
-#     # see if forward should exist
-#     self.dfl = DFL(self.reg_max) if self.reg_max > 1 else lambda x: x
+    c1 = math.max(filters[0], self.nc)
+    c2 = math.max((filters[0] // 4, self.ch * 4))
+
+    self.dfl = DFL(self.ch) #FIX this
+    self.cls = [[Conv_Block(x, c1, 3), Conv_Block(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
+    self.box = [[Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
+    
+  def forward(self, x):
+    for i in range(self.nl):
+      x[i] = self.box[i](x[i]).cat(self.cls[i](x[i]), dim=1)
+    self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
+    x = Tensor.stack([i.view(x[0].shape[0], self.no, -1) for i in x], dim=2)
+    box, cls = x.split((self.ch * 4, self.nc), 1)
+    a, b = self.dfl(box).chunk(2,1)
+    a = self.anchors.unsqueeze(0) - a
+    b = self.anchors.unsqueeze(0) + b
+    box = Tensor.stack(((a + b) / 2, b - a), dim=1)
+    return Tensor.stack((box * self.strides, cls.sigmoid()), dim=1)
+
+
+
+      
+    
+    
+
 
