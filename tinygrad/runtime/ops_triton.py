@@ -120,7 +120,7 @@ class _TritonBuffer:
   def exec_ast(self, ast:LazyOp, output, **kwargs):
     if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
 
-    output.realized = RawTritonBuffer(prod(output.shape), output.dtype, torch.empty(*output.shape, dtype=torch.float))
+    output.realized = RawTritonBuffer(prod(output.shape), output.dtype, torch.empty(*output.shape, dtype=torch.float, device='cuda'))
 
     k = TritonCodegen(ast, output)
 
@@ -132,7 +132,7 @@ class _TritonBuffer:
 
     print(tuple(reversed(output.shape)))
 
-    prg.prg[(1,10,30)](*[x.realized._buf.cuda() for x in k.bufs if x.realized is not None and not isinstance(x.realized, RawConst)])
+    prg.prg[(1,10,30)](*[x.realized._buf for x in k.bufs if x.realized is not None and not isinstance(x.realized, RawConst)])
 
     return output.realized
 
