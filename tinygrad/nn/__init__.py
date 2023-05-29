@@ -85,7 +85,7 @@ class InstanceNorm:
     self.bias: Optional[Tensor] = Tensor.zeros(num_features) if affine else None
 
   def __call__(self, x:Tensor):
-    x = x.reshape(x.shape[0], self.num_features, -1).instancenorm(eps=self.eps).reshape(x.shape)
+    x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
     if self.weight is None or self.bias is None: return x
     return x * self.weight.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)]) + self.bias.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)])
 

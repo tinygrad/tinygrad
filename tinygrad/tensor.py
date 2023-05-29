@@ -514,10 +514,6 @@ class Tensor:
     y = (self - self.mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
-  def instancenorm(self, axis=-1, eps:float=1e-5) -> Tensor: 
-    m, y = self.mean(axis, keepdim=True), (self*self).mean(axis, keepdim=True)
-    return (self - m) / ((y-m*m) + eps).sqrt()
-
   def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor) -> Tensor:
     x = (self - mean.reshape(shape=[1, -1, 1, 1]))
     if weight: x = x * weight.reshape(shape=[1, -1, 1, 1])
