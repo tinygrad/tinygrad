@@ -125,7 +125,7 @@ class DetectionHead():
     
   def forward(self, x):
     for i in range(self.nl):
-      x[i] = self.box[i](x[i]).cat(self.cls[i](x[i]), dim=1)
+      x[i] = x[i].sequential(self.box[i]).cat(x[i].sequential(self.cls[i]))
     self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
     x = Tensor.stack([i.view(x[0].shape[0], self.no, -1) for i in x], dim=2)
     box, cls = x.split((self.ch * 4, self.nc), 1)
