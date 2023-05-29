@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import math, functools, itertools
+import math, functools, itertools, operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
@@ -241,34 +241,50 @@ class Tensor:
     return self.pad(padding).shrink(tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)))
 
   def __getitem__(self, val):
+    def normalize_int(e, i, dim_sz):
+      if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
+      raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     val = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int)) for v in val)) > len(self.shape):
-      raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    else:
-      val += [slice(None) for _ in range(len(self.shape) - num_slices)]
-    it_shape = iter(self.shape)
-    new_shape, new_slice, zeros_in_shape = [], [], False
-    for i, e in enumerate(val):  # e either None, int or slice
-      if e is None:
-        new_shape.append(1)
-      else:
-        dim_sz = next(it_shape)
-        if isinstance(e, slice):
-          start, stop, stride = e.indices(dim_sz)  # let slice.indices() figure [i:j:k] for dim of size dim_sz
-          assert stride == 1, f"slices with stride > 1 not supported. stride = {stride} for dimension {i}"
-          if (y := stop - start) > 0:
-            new_shape.append(y)
-            new_slice.append((start, stop))
-          else: # y == 0 when [i:i] or [i:j] with (i, j) not in [-dim_sz, dim_sz), y < 0 when (i, j) in [-dim_sz, dim_sz) but i > j
-            new_slice.append((0, 0))
-            zeros_in_shape |= True
-        elif -dim_sz <= e < dim_sz:
-          e = e if e >= 0 else dim_sz + e
-          new_slice.append((e, e+1))
-        else:
-          raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
-    sliced_tensor = self.shrink(tuple(new_slice))
-    return sliced_tensor if zeros_in_shape else sliced_tensor.reshape(new_shape)
+       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    orig_slices = list(val) + [slice(None)] * (len(self.shape) - num_slices)
+    valid_slices = itertools.filterfalse(lambda x: x is None, orig_slices)
+    valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+
+    start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
+
+    new_slice = tuple((s, e) for s, e in zip(start, stop))
+    new_shape = tuple(e - s for s, e in new_slice)
+
+    # Call shrink to get sliced_tensor
+    sliced_tensor = self.shrink(new_slice)
+
+    if any(s > 1 for s in strides):
+      def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
+      # Do padding
+      paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
+      padded_tensor = sliced_tensor.pad(paddings)
+
+      # Do reshape for striding
+      new_shape = functools.reduce(operator.add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])
+      reshaped_tensor = padded_tensor.reshape(new_shape)
+
+      # Do slice for strides
+      new_shape = new_shape[::2]
+      final_slice = functools.reduce(operator.add, (((0, sh), (0, 1)) for sh in new_shape), ())
+      sliced_tensor = reshaped_tensor.shrink(final_slice)
+
+    final_shape = []
+    it_shape = iter(new_shape)
+    for i in orig_slices:
+      if isinstance(i, (int, slice)):
+        dim_shape = next(it_shape)
+        if isinstance(i, slice): final_shape.append(dim_shape)
+      else: # i is None
+        final_shape.append(1)
+
+    result_tensor = sliced_tensor.reshape(tuple(final_shape))
+    return result_tensor
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
