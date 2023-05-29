@@ -57,6 +57,7 @@ class LazyNumpyArray:
 
 @dataclass
 class dtypes:
+  bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
   int8: Final[DType] = DType(0, 1, "char", np.int8)
