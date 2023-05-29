@@ -31,7 +31,6 @@ class TritonProgram:
     if wait:
       start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
       start.record()
-    print([1]*(3-len(global_size)) + global_size)
     self.prg[tuple([1]*(3-len(global_size)) + global_size)](*[x._buf for x in args]) # TODO: detect launch params
     if wait:
       end.record()
@@ -57,10 +56,7 @@ class TritonCodegen(Linearizer):
 
     output_shape = self.info.shape
 
-    # copied from old ops_triton
-    kernel += [f"  idx{len(output_shape)-1-i} = tl.program_id({i})" for i in range(3)]
-
-    gid = [f"idx{i}" for i in range(3)]
+    gid = [f"tl.program_id({i})" for i in range(3)]
     code_for_op: Final[Dict[Op, Callable]] = {
       UnaryOps.EXP: lambda x: f"tl.exp({x})",
       UnaryOps.LOG: lambda x: f"tl.log({x})",
@@ -98,13 +94,12 @@ class TritonCodegen(Linearizer):
         else: kk(f"{newvar.render()} = {args}")
       elif uop == UOps.ALU:
         assert newvar is not None
-        if newvar in vin: kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])}")
+        kk(f"{newvar.render()} = {code_for_op[args](*[x.render() for x in vin])}")
       elif uop == UOps.LOAD:
         assert newvar is not None
         val = f"{bufnames[args.i]} + {args.idx.render()}" # defaults to render_python
-        print(args.valid)
         if args.valid.min == 1: kk(f"{newvar.render()} = tl.load({val})")
-        else: kk(f"{newvar.render()} = tl.load({val}) if ({args.valid.render()}) else 0.")
+        else: kk(f"{newvar.render()} = tl.where({args.valid.render()}, tl.load({val}, mask={args.valid.render()}), 0.0)")
       elif uop == UOps.STORE:
         assert vin[0].ltype == LocalTypes.float, "unimplemented: float4 store"
         assert not isinstance(self.bufs[args.i].dtype, ImageDType), "unimplemented: image store"
