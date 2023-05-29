@@ -386,6 +386,7 @@ class TestOps(unittest.TestCase):
 
   def test_slice_in_bounds_multidim(self):
     helper_test_op([(3,3,3)], lambda x: x[1:2], lambda x: x[1:2])
+    helper_test_op([(3,3,3)], lambda x: x[1:2, 2], lambda x: x[1:2, 2])
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2], lambda x: x[1:2, 1:2])
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, 0:-1], lambda x: x[1:2, 1:2, 0:-1])
 
@@ -400,6 +401,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[-6:4], lambda x: x[-6:4])
     helper_test_op([(3,3,3)], lambda x: x[1:50], lambda x: x[1:50])
     helper_test_op([(3,3,3)], lambda x: x[1:50, 1:2, -1], lambda x: x[1:50, 1:2, -1])
+
+  def test_slice_stride_gt_one(self):
+    helper_test_op([(7,5,10)], lambda x: x[::2, ::3, ::4], lambda x: x[::2, ::3, ::4])
+    helper_test_op([(7,5,10)], lambda x: x[1:5:2, ::3, ::4], lambda x: x[1:5:2, ::3, ::4])
+    helper_test_op([(7,5,10)], lambda x: x[1:5:2, 3, ::4], lambda x: x[1:5:2, 3, ::4])
+    helper_test_op([(7,5,10)], lambda x: x[1:5:2, None, None, 3, None, ::4], lambda x: x[1:5:2, None, None, 3, None, ::4])
 
   @unittest.skip("No suppport for tensors with 0s in shape")
   def test_slice_both_endpoints_out_of_bounds(self):
@@ -426,10 +433,6 @@ class TestOps(unittest.TestCase):
       a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
       a[1, 77]  # IndexError: (out of bounds).
       a[0, -77]
-
-    with self.assertRaises(AssertionError):
-      a[1::2]
-      a[1, ::2]
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
