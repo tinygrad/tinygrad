@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import io
 import unittest
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 from extra.utils import fetch, fake_torch_load_zipped
 from PIL import Image
 
@@ -37,24 +37,28 @@ class TestUtils(unittest.TestCase):
         )
 
     for isfloat16 in [True, False]:
-      model = torch.nn.Sequential(
-        torch.nn.Linear(4, 8),
-        torch.nn.Linear(8, 3),
-        LayerWithOffset()
-      )
-      if isfloat16: model = model.half()
+      for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (isfloat16, None)]:
+        if isfloat16 == loaded_is_float16:
+          print(f"Saving with float16={isfloat16}")
+          print(f"Loading with dtype={load_dtype}")
+          model = torch.nn.Sequential(
+            torch.nn.Linear(4, 8),
+            torch.nn.Linear(8, 3),
+            LayerWithOffset()
+          )
+          if isfloat16: model = model.half()
 
-      with tempfile.TemporaryDirectory() as tmpdirname:
-        path = tmpdirname + '/testloadmodel.pth'
-        torch.save(model.state_dict(), path)
-        model2 = fake_torch_load_zipped(path)
+          with tempfile.TemporaryDirectory() as tmpdirname:
+            path = tmpdirname + '/testloadmodel.pth'
+            torch.save(model.state_dict(), path)
+            model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
 
-      for name, a in model.state_dict().items():
-        b = model2[name]
-        a, b = a.numpy(), b.numpy()
-        assert a.shape == b.shape
-        assert a.dtype == b.dtype
-        assert np.array_equal(a, b)
+          for name, a in model.state_dict().items():
+            b = model2[name]
+            a, b = a.numpy(), b.numpy()
+            assert a.shape == b.shape
+            assert a.dtype == b.dtype
+            assert np.array_equal(a, b)
 
 if __name__ == '__main__':
   unittest.main()
