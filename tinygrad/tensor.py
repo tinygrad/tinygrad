@@ -391,7 +391,9 @@ class Tensor:
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) >= 4 else [padding[1], padding[1], padding[0], padding[0]])
+    # padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) >= 4 else [padding[1], padding[1], padding[0], padding[0]])
+    if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(HW), f"Expected padding of length {2*len(HW)} (got {len(padding)})"
+    padding_ = [padding]*2*len(HW) if isinstance(padding, int) else padding
 
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)

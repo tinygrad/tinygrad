@@ -90,12 +90,8 @@ def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=N
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   if len(X.shape) == 3 and len(W.shape) == 3: # detect conv_1d conv
-    X = X.unsqueeze(3)
-    W = W.unsqueeze(3)
-    if isinstance(dilations, tuple): dilations = dilations[0]
-    if isinstance(strides, tuple): strides = strides[0]
-    out = X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(0, 0, pads[0], pads[1]) if pads is not None else 0)
-    return out.reshape(out.shape[:-1])
+    return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[0], pads[1]) if pads is not None else 0)
+
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
 
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
