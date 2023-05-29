@@ -167,7 +167,6 @@ class Tensor:
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
-  # ***** kaiming uniform to weights *****
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
