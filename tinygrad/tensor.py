@@ -206,10 +206,9 @@ class Tensor:
       del t0._ctx
 
   # ***** movement mlops *****
-
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
-    assert len(new_shape) > 0 and all([x != 0 for x in new_shape]), f"zeros not allowed in shape {new_shape}"
+    assert len(new_shape) > 0 and all(new_shape), f"zeros not allowed in shape {new_shape}"
     return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape]))
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
@@ -243,7 +242,7 @@ class Tensor:
     for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
       if s.__class__ == int and not (-sz <= s < sz):
         raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
-      new_slice += (s%sz, s%sz+1) if s.__class__ == int else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)),
+      new_slice.append((s%sz, s%sz+1) if s.__class__ == int else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
     for s,sz in zip(val, [self.shape[i-1] for i in itertools.accumulate([int(s is not None) for s in val])]):  # Shape depends on slices + positions of Nones
       if s.__class__ != int:
         new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
@@ -459,11 +458,11 @@ class Tensor:
     shape_ret = tuple([max(sx, sy) for sx,sy in zip(x.shape, y.shape)])
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
-  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ == Tensor or x != 0.0 else self
-  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ == Tensor or x != 0.0 or reverse else self
+  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ == Tensor or x else self
+  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ == Tensor or x or reverse else self
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Mul, x, reverse) if x.__class__ == Tensor or x != 1.0 else self
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Pow, x, reverse) if x.__class__ == Tensor or x != 1.0 or reverse else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ == Tensor or reverse or x == 0.0 else self.mul(1/x)
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Div, x, reverse) if x.__class__ == Tensor or reverse or not x else self.mul(1/x)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return self._broadcasted(mlops.Maximum, x)

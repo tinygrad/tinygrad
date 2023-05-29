@@ -1,11 +1,13 @@
 from __future__ import annotations
 import functools, itertools, random, time
 from enum import Enum, auto
-from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
+from typing import TYPE_CHECKING, Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
 from tinygrad.helpers import DEBUG, getenv, GlobalCounters, DType, colored
 from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
+if TYPE_CHECKING:
+  from tinygrad.lazy import LazyBuffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -18,12 +20,10 @@ class LoadOps(Enum): EMPTY = auto(); FROMCPU = auto(); CONTIGUOUS = auto(); TOCP
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
 
-buffer_cache: Dict[Tuple[Any, ...], List[Any]] = dict()
 class LazyOp(NamedTuple):
   op: Op
-  # Any == Union[LazyOp, LazyBuffer]
-  src: Tuple[Any, ...]  # type: ignore
-  arg: Any = None
+  src: Tuple[Union[LazyOp, LazyBuffer], ...]
+  arg: Union[LazyOp, LazyBuffer] = None
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
 
   def map_buffers(self, real_srcs: Dict[Any, Any]): return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
@@ -33,6 +33,11 @@ class LazyOp(NamedTuple):
   def get_lazyops(self) -> List['LazyOp']: return [self] + [item for x in self.src for item in x.get_lazyops()]
   
   def get_weakop(self) -> LazyOp: return LazyOp(self.op, tuple([x.get_weakop() for x in self.src]), self.arg)
+
+  def replace_with_movement_ops(self: LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
+    from tinygrad.lazy import elementwise_op
+    assert self.op in BinaryOps or self.op in UnaryOps
+    return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
 
 # Any == Union[LazyBuffer, DeviceBuffer]
 def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
