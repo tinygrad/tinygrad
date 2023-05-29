@@ -18,15 +18,11 @@ class BasicBlock:
       ]
 
   def __call__(self, x):
-    y = x
-    x = self.bn1(self.conv1(x)).relu()
-    x = self.bn2(self.conv2(x))
-    if len(self.downsample) != 0:
-      y = y.sequential(self.downsample)
-      y.realize()
-    x = x + y
-    x = x.relu()
-    return x
+    out = self.bn1(self.conv1(x)).relu()
+    out = self.bn2(self.conv2(x))
+    out = out + x.sequential(self.downsample)
+    out = out.relu()
+    return out
 
 
 class Bottleneck:
