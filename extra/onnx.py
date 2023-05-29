@@ -147,6 +147,7 @@ def get_run_onnx(onnx_model):
         if n.op_type == "Pow": ret = inp[0] ** inp[1]
       elif n.op_type == "Split":
         if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
+        if 'axis' not in opt: opt['axis'] = 0
         i = 0
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
