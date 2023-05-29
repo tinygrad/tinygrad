@@ -521,11 +521,15 @@ class Tensor:
     ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
     return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
 
-  def dropout(self, p=0.5) -> Tensor:
-    if not Tensor.training: return self
+  def dropout(self, p=0.5, return_mask=False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
+    if not Tensor.training:
+      # if mask is requested as output it will contain all True's.
+      return (self, Tensor.ones(*self.shape, requires_grad=False, dtype=dtypes.bool)) if return_mask else self
     # TODO: why is this going through numpy?
-    _mask: np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    _mask: np.ndarray = Tensor._rng.choice(a=[False, True], size=self.shape, p=[p, 1-p])
+    mask = Tensor(_mask, requires_grad=False, device=self.device)
+    result = self * mask * (1/(1.0 - p))
+    return (result, mask) if return_mask else result
 
   # ***** cast ops *****
 
