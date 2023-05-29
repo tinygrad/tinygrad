@@ -140,6 +140,28 @@ class TestDtype(unittest.TestCase):
     assert na.dtype == np.int8
     np.testing.assert_allclose(na, [1,2,3,4])
 
+  def test_int8_upcast_half(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.int8)
+    print(a)
+    ha = a.half()
+    assert a.device == ha.device
+    assert a.requires_grad == ha.requires_grad
+    na = ha.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.float16
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_int8_downcast_half(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.float16, requires_grad=False).cast(dtypes.int8)
+    print(a)
+    ha = a.cast(dtypes.int8)
+    assert a.device == ha.device
+    assert a.requires_grad == ha.requires_grad
+    na = ha.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.int8
+    np.testing.assert_allclose(na, [1,2,3,4])
+
   def test_int8_add_upcast(self):
     a = Tensor([1,2,3,4], dtype=dtypes.int8)
     b = Tensor([1,2,3,4], dtype=dtypes.float32)
@@ -163,6 +185,69 @@ class TestDtype(unittest.TestCase):
     print(c.numpy())
     assert c.dtype == dtypes.float32
     np.testing.assert_allclose(c.numpy(), [[1,2],[3,4]])
+
+  def test_uint8_to_np(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.uint8)
+    print(a)
+    na = a.numpy()
+    print(na, na.dtype, a.lazydata.realized)
+    assert na.dtype == np.uint8
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_uint8_upcast_int8(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.uint8)
+    print(a)
+    ia = a.cast(dtypes.int8)
+    assert a.device == ia.device
+    assert a.requires_grad == ia.requires_grad
+    na = ia.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.int8
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_uint8_upcast_float(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.uint8)
+    print(a)
+    fa = a.float()
+    assert a.device == fa.device
+    assert a.requires_grad == fa.requires_grad
+    na = fa.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.float32
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_uint8_downcast_float(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.float32, requires_grad=False).cast(dtypes.uint8)
+    print(a)
+    ha = a.cast(dtypes.uint8)
+    assert a.device == ha.device
+    assert a.requires_grad == ha.requires_grad
+    na = ha.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.uint8
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_uint8_upcast_half(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.uint8)
+    print(a)
+    ha = a.half()
+    assert a.device == ha.device
+    assert a.requires_grad == ha.requires_grad
+    na = ha.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.float16
+    np.testing.assert_allclose(na, [1,2,3,4])
+
+  def test_uint8_downcast_half(self):
+    a = Tensor([1,2,3,4], dtype=dtypes.float16, requires_grad=False).cast(dtypes.uint8)
+    print(a)
+    ha = a.cast(dtypes.uint8)
+    assert a.device == ha.device
+    assert a.requires_grad == ha.requires_grad
+    na = ha.numpy()
+    print(na, na.dtype)
+    assert na.dtype == np.uint8
+    np.testing.assert_allclose(na, [1,2,3,4])
 
 if __name__ == '__main__':
   unittest.main()
