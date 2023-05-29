@@ -64,7 +64,7 @@ def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
 
-def iterate(bs=1, start=0):
+def iterate(bs=16, start=0):
   print(f"there are {len(ci)} samples in the dataset")
   for i in range(start, len(ci), bs):
     samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])

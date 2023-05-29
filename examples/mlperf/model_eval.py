@@ -136,7 +136,7 @@ def eval_rnnt():
   st = time.perf_counter()
   for X, Y in iterate():
     mt = time.perf_counter()
-    tt = mdl.decode(Tensor(X[0]), Tensor([X[1]]))
+    tt = mdl.decode(Tensor(X[0]), Tensor(X[1]))
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
     for n, t in enumerate(tt):

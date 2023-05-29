@@ -12,12 +12,11 @@ class RNNT:
     self.prediction = Prediction(vocab_size, pred_hidden_size, pred_layers, dropout)
     self.joint = Joint(vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout)
 
-  @TinyJit
   def __call__(self, x, y, hc=None):
     f, _ = self.encoder(x, None)
     g, _ = self.prediction(y, hc, Tensor.ones(1, requires_grad=False))
     out = self.joint(f, g)
-    return out.realize()
+    return out
 
   def decode(self, x, x_lens):
     logits, logit_lens = self.encoder(x, x_lens)
@@ -153,9 +152,10 @@ class StackTime:
     self.factor = factor
 
   def __call__(self, x, x_lens):
-    x = x.pad(((0, (-x.shape[0]) % self.factor), (0, 0), (0, 0)))
-    x = x.reshape(x.shape[0] // self.factor, x.shape[1], x.shape[2] * self.factor)
-    return x, x_lens / self.factor if x_lens is not None else None
+    x = x.transpose(0, 1)
+    x = x.pad(((0, 0), (0, (-x.shape[1]) % self.factor), (0, 0)))
+    x = x.reshape(x.shape[0], x.shape[1] // self.factor, x.shape[2] * self.factor)
+    return x.transpose(0, 1), x_lens / self.factor if x_lens is not None else None
 
 
 class Encoder:
