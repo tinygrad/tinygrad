@@ -71,7 +71,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
 
   # fromcpu aren't cached
-  if optype == LoadOps and op.op == LoadOps.FROMCPU: return LazyBuffer(device, st, optype, op, dtype)
+  if optype == LoadOps and op.op in [LoadOps.FROMCPU, LoadOps.EMPTY]: return LazyBuffer(device, st, optype, op, dtype)
 
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 

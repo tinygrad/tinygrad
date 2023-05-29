@@ -26,3 +26,4 @@ datasets/imagenet/
 datasets/squad/
 datasets/img_align_celeba*
 datasets/open-images-v6-mlperf
+datasets/kits/
