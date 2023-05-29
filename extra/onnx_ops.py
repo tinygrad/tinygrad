@@ -213,3 +213,5 @@ def Cast(input, to):
 def CastLike(input, target_type):
   assert isinstance(target_type, Tensor), "can only CastLike Tensor"
   return input
+
+def Binarizer(input, threshold=0.0): return input > threshold
