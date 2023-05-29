@@ -1,37 +1,32 @@
 import hashlib
-from typing import Any, Callable, Dict, Final, List, Optional, Tuple, Union
-import triton
-import triton.language as tl
-from triton.compiler import compile as triton_compile
-from triton.runtime import JITFunction
+from typing import Callable, Dict, Final, Optional
+from triton.compiler import compile as triton_compile # type: ignore
 import torch
 import math
 
-from tinygrad.ops import BinaryOps, Compiled, ASTRunner, FusedOps, LazyOp, Op, UnaryOps
-from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, LocalTypes, UOp, UOps
-from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, DType, ImageDType, prod, dtypes
-from tinygrad.runtime.lib import RawBuffer, RawConst
-from tinygrad.shape.shapetracker import MovementOps
+from tinygrad.ops import BinaryOps, Compiled, ASTRunner, FusedOps, Op, UnaryOps
+from tinygrad.codegen.linearizer import Linearizer, LocalBuffer, LocalTypes, UOps
+from tinygrad.helpers import DType, ImageDType, dtypes
 from tinygrad.shape.symbolic import NumNode
+from tinygrad.runtime.lib import RawBuffer
 
 class TritonProgram:
   def __init__(self, name:str, prg:str):
     self.name = name
     # hack to get the signature
     signature = ','.join(["*fp32" for _ in range(prg.splitlines()[1].count("data"))])
-    hash = hashlib.md5(prg.encode("utf-8")).hexdigest()
-    fn = f"/tmp/{hash}.py"
+    prg = "import triton\nimport triton.language as tl\n" + prg
+    fn = f"/tmp/{hashlib.md5(prg.encode('utf-8')).hexdigest()}.py"
     with open(fn, "w") as f: f.write(prg)
     codeobj = compile(prg, fn, "exec")
-    exec(codeobj, globals())
+    exec(codeobj, globals()) # pylint: disable=W0122
     self.prg = triton_compile(globals()[name], signature=signature)
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:
       start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
       start.record()
-    self.prg[tuple([1]*(3-len(global_size)) + global_size)](*[x._buf for x in args]) # TODO: detect launch params
+    self.prg[tuple([1]*(3-len(global_size)) + global_size)](*[x._buf for x in args])
     if wait:
       end.record()
       torch.cuda.synchronize()
@@ -43,8 +38,6 @@ class TritonCodegen(Linearizer):
 
     self.linearize()
 
-    loaded = set()
-
     kernel = []
     global_size = []
     depth = 0
@@ -53,8 +46,6 @@ class TritonCodegen(Linearizer):
     kk("@triton.jit")
     kk("def fxn("+','.join(f"data{i}" for i in range(len(self.bufs)))+"):")
     depth += 1
-
-    output_shape = self.info.shape
 
     gid = [f"tl.program_id({i})" for i in range(3)]
     code_for_op: Final[Dict[Op, Callable]] = {
@@ -75,16 +66,16 @@ class TritonCodegen(Linearizer):
           if isinstance(var, NumNode): continue # python doesnt have block scope
           else:
             if args[1] == "global":
-              if len(args[0]) >= 4 and len(args[0])-i > 2: raise Exception("unimplemented: global loop with more than 3 dims")
+              if len(args[0]) >= 4 and len(args[0])-i > 2: raise NotImplementedError("unimplemented: global loop with more than 3 dims")
               else:
                 global_size.append(var.max+1)
                 kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
-            elif args[1] == "local": raise Exception("unimplemented: local loop")
+            elif args[1] == "local": raise NotImplementedError("unimplemented: local loop")
             else:
               kk(f"for {var.expr} in range({var.min}, {var.max+1}):")
               depth += 1
       elif uop == UOps.ENDLOOP:
-        if args[1] == "local": raise Exception("unimplemented: local loop")
+        if args[1] == "local": raise NotImplementedError("unimplemented: local loop")
         else:
           depth -= 1
           kk(f"# end {args[1]}")
@@ -105,10 +96,10 @@ class TritonCodegen(Linearizer):
         assert not isinstance(self.bufs[args.i].dtype, ImageDType), "unimplemented: image store"
         assert args.valid.min == 1, "store must be valid"
         kk(f"tl.store({bufnames[args.i]} + {args.idx.render()}, {vin[0].render()})")
-      elif uop == UOps.CAST: raise Exception("unimplemented: cast")
-      elif uop == UOps.DEFINE_LOCAL: raise Exception("unimplemented: define local")
+      elif uop == UOps.CAST: raise NotImplementedError("unimplemented: cast")
+      elif uop == UOps.DEFINE_LOCAL: raise NotImplementedError("unimplemented: define local")
       else:
-        raise Exception(f"unimplemented: {uop}")
+        raise NotImplementedError(f"unimplemented: {uop}")
 
     prg = '\n'.join(kernel)
     return ASTRunner("fxn", prg, global_size[::-1] if len(global_size) else [1], op_estimate=self.info.flops)
