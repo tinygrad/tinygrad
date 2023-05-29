@@ -149,7 +149,7 @@ class Compiled:
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
     output.realized = output.output_buffer
-    if output.realized is not None:
+    if output.realized:
       if output.realized.__class__ == RawConst: output.realized = None  # can't assign to RawConst
       for a in ast.get_buffers():
         if a.realized == output.realized and not a.st.contiguous:
@@ -157,7 +157,7 @@ class Compiled:
           break
 
     # we don't have an output buffer, we have to create it
-    if output.realized is None:
+    if not output.realized:
       output.realized = self.buffer(prod(output.shape), output.dtype, **kwargs)
 
     # compilation time

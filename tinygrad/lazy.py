@@ -35,7 +35,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
-  if len(psrcs) >= 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and len(psrcs) == 1:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
     if psrc[1].optype == ReduceOps:
       top = _ast_reduceops(psrc[1])
@@ -246,7 +246,7 @@ def _push_movement_ops(srcs:Tuple[LazyBuffer, ...]) -> Tuple[LazyBuffer, ...]:
     mops: List[Tuple[MovementOps, Tuple[Any, ...]]] = []
     bx = x
     # backwalk all the movement ops. don't push PAD or EXPAND
-    while not bx.realized and bx.optype == MovementOps and bx.op.op != MovementOps.EXPAND and (bx.op.op != MovementOps.PAD or SHUFFLE_PAD_OPS) and len(bx.children) <= 1:
+    while not bx.realized and bx.optype == MovementOps and bx.op.op != MovementOps.EXPAND and (SHUFFLE_PAD_OPS or bx.op.op != MovementOps.PAD) and len(bx.children) <= 1:
       assert bx.op.op in MOVEMENT_OPS
       mops.append((bx.op.op, bx.op.arg))
       bx = bx.op.src[0]

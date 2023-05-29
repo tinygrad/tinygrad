@@ -252,8 +252,7 @@ class Tensor:
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
-    for y in args:
-      assert len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim])
+    assert all([len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim]) for y in args])
     catargs = [self] + list(args)
     shape_cumsum = [0, *itertools.accumulate([y.shape[dim] for y in catargs])]
     slc = [[(0, s) for s in self.shape] for _ in catargs]
@@ -453,9 +452,18 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    x,y = [Tensor([t], device=self.device, requires_grad=False) if not t.__class__ == Tensor else t for t in ([other,self] if reverse else [self,other])]
-    x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
-    shape_ret = tuple([max(sx, sy) for sx,sy in zip(x.shape, y.shape)])
+    x, y = self, Tensor([other], device=self.device, requires_grad=False) if not other.__class__ == Tensor else other
+    if reverse: x, y = y, x
+    if x.shape == y.shape: return fxn.apply(x, y)
+
+    x_shape, y_shape = x.shape, y.shape
+    len_x_shape, len_y_shape = len(x_shape), len(y.shape)
+    max_shape = max(len_x_shape, len_y_shape)
+
+    if len_x_shape != max_shape: x = x.reshape((1,) * (max_shape - len_x_shape) + x_shape)
+    if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y_shape)
+
+    shape_ret = tuple(map(max, zip(x.shape, y.shape)))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ == Tensor or x else self

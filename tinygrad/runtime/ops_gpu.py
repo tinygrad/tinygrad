@@ -57,7 +57,7 @@ class CLProgram:
     except cl.RuntimeError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
-    self.clprg = self._clprg.__getattr__(name)
+    self.clprg = cl.Kernel(self._clprg, name)
     if DEBUG >= 5 and not OSX:
       if 'Adreno' in CL.cl_ctx.devices[0].name:
         from disassemblers.adreno import disasm
