@@ -156,10 +156,11 @@ class TestTinygrad(unittest.TestCase):
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
   def test_zeros_like_has_same_dtype(self):
-    for dtype in dtypes.__annotations__:
-      a = Tensor([1, 2, 3], dtype=dtypes.float16)
+    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
+      a = Tensor([1, 2, 3], dtype=datatype)
       b = Tensor.zeros_like(a)
-      self.assertTrue(a.dtype == b.dtype)
+      assert a.dtype == b.dtype
+      assert a.shape == b.shape
 
 if __name__ == '__main__':
   unittest.main()
