@@ -50,5 +50,5 @@ class CUDACodegen(CStyleCodegen):
     half_prekernel = "#include <cuda_fp16.h>",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
-  supports_float4:bool = False
+  supports_float4_alu = False
 CUDABuffer = Compiled(RawCUDABuffer, CUDACodegen, CUDAProgram, cuda.Context.synchronize)

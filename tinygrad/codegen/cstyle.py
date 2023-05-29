@@ -146,7 +146,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
         else:
           if newvar.ltype == LocalTypes.float4:
-            val = f"{lang.float4}((({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}])"
+            val = f"({newvar.ltype.name})((({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}])"
           else:
             val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
@@ -190,6 +190,7 @@ class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
   supports_constant_folding: bool = True
   supports_float4: bool = True
+  supports_float4_alu: bool = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
