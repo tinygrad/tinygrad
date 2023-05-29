@@ -26,7 +26,7 @@ class Context:
   def __exit__(self, *args): ContextVar.ctx_stack.pop()
 
 class ContextVar:
-  ctx_stack = [{}]
+  ctx_stack: ClassVar[List[dict[str, Any]]] = [{}]
   def __init__(self, key, default_value): 
     self.key, self.initial_value = key, getenv(key, default_value)
     if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
