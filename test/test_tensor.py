@@ -157,7 +157,6 @@ class TestTinygrad(unittest.TestCase):
 
   def test_zeros_like_has_same_dtype(self):
     for dtype in dtypes.__annotations__:
-      print(dtype)
       a = Tensor([1, 2, 3], dtype=dtypes.float16)
       b = Tensor.zeros_like(a)
       self.assertTrue(a.dtype == b.dtype)
