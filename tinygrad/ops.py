@@ -30,10 +30,7 @@ class LazyOp(NamedTuple):
 
   def get_buffers(self) -> List[Any]: return [item for x in self.src for item in x.get_buffers()]
 
-  def get_lazyops(self) -> List['LazyOp']:
-    lazyops = [self]
-    lazyops.extend([item for x in self.src for item in x.get_lazyops()])
-    return lazyops
+  def get_lazyops(self) -> List['LazyOp']: return [self] + [item for x in self.src for item in x.get_lazyops()]
   
   def get_weakop(self) -> LazyOp: return LazyOp(self.op, tuple([x.get_weakop() for x in self.src]), self.arg)
 
@@ -53,22 +50,13 @@ class Interpreted:
     self.synchronize = lambda: None
     self.codegen = None
 
-<<<<<<< HEAD
   def exec_ast(self, ast:LazyOp, output=None, context=None, **kwargs):
-    if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-=======
-  def exec_ast(self, ast:LazyOp, output=None, context=None):
     if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and ast.src[0].__class__ == LazyOp and ast.src[0].op == BinaryOps.MUL:
->>>>>>> 0894de9 (ad-hoc optimizations)
       ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
     if context is None: context = dict()
     if not created_context and ast in context: return context[ast]
-<<<<<<< HEAD
-    srcs = [self.exec_ast(x, context=context, **kwargs) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
-=======
-    srcs = [self.exec_ast(x, context=context) if x.__class__ == LazyOp else self.from_lazybuffer(x) for x in ast.src]
->>>>>>> 0894de9 (ad-hoc optimizations)
+    srcs = [self.exec_ast(x, context=context, **kwargs) if x.__class__ == LazyOp else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")

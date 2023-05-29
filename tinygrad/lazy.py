@@ -103,35 +103,13 @@ class LazyBuffer:
       log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if not self.realized else self.realized} st:{self.st}>"
-  def _device_extra_args(self) -> Dict[str, int]: return {"device": int(self.device.split(":")[1])} if ":" in self.device else {}
+  def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":")[1]} if ":" in self.device else {}
 
-  # @profile
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
-      if self.op.op == LoadOps.FROMCPU:
-        if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
-          self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
-        else:
-          if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
-          self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
-      elif self.op.op == LoadOps.EMPTY:
-        self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
-      elif self.op.op == LoadOps.CONTIGUOUS:
-        realized = self.op.src[0].realize().realized
-        if self.op.src[0].st.contiguous and not realized.__class__ == RawConst and realized.size == prod(self.shape):
-          # no need to run an AST, this is already contiguous
-          self.realized = realized
-        else:
-          # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS. confusing with Compiled though
-          self.op = LazyOp(UnaryOps.NOOP, self.op.src)
-      elif self.op.op == LoadOps.CUSTOM:
-        # this needs to immediately realize
-        self.realized = self.op.arg(self, *[x.realize() for x in self.op.src])
-      # these can be late folded and change the op to go further back in the graph
-      elif self.optype == ReduceOps: self.op = _ast_reduceops(self)
-      elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
-
+      try: REALIZE_DISPATCHER[self.op.op](self)
+      except KeyError: pass
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.get_buffers(): x.realize()
@@ -192,13 +170,10 @@ class LazyBuffer:
     return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, tuple(srcs), new_shape), self.dtype)
 
   # shrink -> stride -> permute -> reshape -> pad -> expand
-  # @profile
   def movement_op(self:LazyBuffer, op:MovementOps, arg:Tuple[Any, ...]) -> LazyBuffer:
     shape, realized = self.shape, self.realized
     # very instant nop
     if op == MovementOps.RESHAPE and shape == arg: return self
-    key = (self, op, arg)
-    if key in lazycache: return lazycache[key]
 
     # TODO: look into why that copy is needed
     local_st = ShapeTracker(shape).movement_op(op, arg)
@@ -210,8 +185,8 @@ class LazyBuffer:
     if not realized and self.op.op == op:
       # TODO: why is deleting self from children needed? shouldn't GC do it?
       self.op.src[0].children.discard(self)
-      if op in MOVEMENT_OPS_DISPATCHER:
-        return MOVEMENT_OPS_DISPATCHER[op](self, op, arg)
+      try: MOVEMENT_OPS_DISPATCHER[op](self, op, arg)
+      except KeyError: pass
 
     # push permutes before reduce ops
     if op == MovementOps.PERMUTE:
@@ -253,7 +228,6 @@ class LazyBuffer:
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
         return root.movement_op(MovementOps.RESHAPE, ret.st.shape)
 
-    lazycache[key] = ret
     return ret
   
   def map_buffers(self, real_srcs: Dict[Any, Any]):
@@ -329,4 +303,48 @@ MOVEMENT_OPS_DISPATCHER = {
   MovementOps.PERMUTE: lambda buffer, op, arg: buffer.op.src[0].movement_op(op, tuple([buffer.op.arg[i] for i in arg])),
   MovementOps.PAD: lambda buffer, op, arg: buffer.op.src[0].movement_op(op, tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(buffer.op.arg, arg)])),
   MovementOps.STRIDE: lambda buffer, op, arg: buffer.op.src[0].movement_op(op, tuple([i*j for i,j in zip(arg, buffer.op.arg)])),
+}
+
+def _realize_fromcpu(buffer: LazyBuffer) -> None:
+  if prod(buffer.op.arg.shape) == 1 and hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
+    buffer.realized = RawConst(1, dtypes.from_np(buffer.op.arg.dtype), buffer.op.arg().flatten()[0])
+  else:
+    if DEBUG >= 4: print(f"copying {buffer.op.arg.shape}:{dtypes.from_np(buffer.op.arg.dtype)} -> {buffer.device}")
+    buffer.realized = Device[buffer.device].buffer.fromCPU(buffer.op.arg(), **buffer._device_extra_args())
+
+
+def _realize_contiguous(buffer: LazyBuffer) -> None:
+  realized = buffer.op.src[0].realize().realized
+  if buffer.op.src[0].st.contiguous and not realized.__class__ == RawConst and realized.size == prod(buffer.shape):
+    # no need to run an AST, this is already contiguous
+    buffer.realized = realized
+  else:
+    # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS. confusing with Compiled though
+    buffer.op = LazyOp(UnaryOps.NOOP, buffer.op.src)
+
+def _realize_custom(buffer: LazyBuffer) -> None:
+  # this needs to immediately realize
+  buffer.realized = buffer.op.arg(buffer, *[x.realize() for x in buffer.op.src])
+
+def _realize_empty(buffer: LazyBuffer) -> None:
+  buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+
+# these can be late folded and change the op to go further back in the graph
+def _realize_reduce(buffer: LazyBuffer) -> None: buffer.op = _ast_reduceops(buffer)
+def _realize_binary(buffer: LazyBuffer) -> None: buffer.op = _ast_binaryops(buffer) # ISSUE: this can include a reshape
+
+REALIZE_DISPATCHER = {
+  LoadOps.FROMCPU: _realize_fromcpu,
+  LoadOps.CONTIGUOUS: _realize_contiguous,
+  LoadOps.CUSTOM: _realize_custom,
+  LoadOps.EMPTY: _realize_empty,
+  ReduceOps.SUM: _realize_reduce,
+  ReduceOps.MAX: _realize_reduce,
+  BinaryOps.ADD: _realize_binary,
+  BinaryOps.SUB: _realize_binary,
+  BinaryOps.MUL: _realize_binary,
+  BinaryOps.DIV: _realize_binary,
+  BinaryOps.POW: _realize_binary,
+  BinaryOps.CMPEQ: _realize_binary,
+  BinaryOps.MAX: _realize_binary,
 }

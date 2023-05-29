@@ -37,6 +37,15 @@ class Tensor:
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     device = (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")  # canonicalize device
+    # tensors have gradients, buffers do not
+    self.grad: Optional[Tensor] = None
+
+    # NOTE: this can be in three states. False and None: no gradient, True: gradient
+    # None (the default) will be updated to True if it's put in an optimizer
+    self.requires_grad: Optional[bool] = requires_grad
+
+    # internal variables used for autograd graph construction
+    self._ctx: Optional[Function] = None
     if data.__class__ == list:
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif data.__class__ == LazyBuffer and data.device != device:
@@ -48,27 +57,15 @@ class Tensor:
 
     # by here, it's either LazyNumpyArray or LazyBuffer
     # TODO: it should all be LazyBuffer I think
+    if data.__class__ == LazyBuffer:
+      assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
+      self.lazydata: LazyBuffer = data
+      return
     if data.__class__ == LazyNumpyArray:
       data = data if data.shape else data.reshape((1,))
-      lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
-    elif data.__class__ == LazyBuffer:
-      assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      lazydata = data
-    else:
-      raise RuntimeError(f"can't create Tensor from {data}")
-
-    # this is set once we are here
-    self.lazydata: LazyBuffer = lazydata
-
-    # tensors have gradients, buffers do not
-    self.grad: Optional[Tensor] = None
-
-    # NOTE: this can be in three states. False and None: no gradient, True: gradient
-    # None (the default) will be updated to True if it's put in an optimizer
-    self.requires_grad: Optional[bool] = requires_grad
-
-    # internal variables used for autograd graph construction
-    self._ctx: Optional[Function] = None
+      self.lazydata: LazyBuffer = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
+      return
+    raise RuntimeError(f"can't create Tensor from {data}")
 
   def __repr__(self):
     return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
