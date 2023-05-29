@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 import functools, itertools, random, time
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
@@ -20,7 +21,8 @@ class LoadOps(Enum): EMPTY = auto(); FROMCPU = auto(); CONTIGUOUS = auto(); TOCP
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
 
-class LazyOp(NamedTuple):
+@dataclass(frozen=True)
+class LazyOp:
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Union[LazyOp, LazyBuffer] = None
@@ -31,8 +33,6 @@ class LazyOp(NamedTuple):
   def get_buffers(self) -> List[Any]: return [item for x in self.src for item in x.get_buffers()]
 
   def get_lazyops(self) -> List['LazyOp']: return [self] + [item for x in self.src for item in x.get_lazyops()]
-  
-  def get_weakop(self) -> LazyOp: return LazyOp(self.op, tuple([x.get_weakop() for x in self.src]), self.arg)
 
   def replace_with_movement_ops(self: LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
     from tinygrad.lazy import elementwise_op

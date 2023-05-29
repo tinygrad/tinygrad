@@ -71,7 +71,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
 
   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
   # get_weakop makes all the LazyBuffers in the op have a weakref
-  wop = (device, dtype, optype, op.get_weakop())
+  wop = (device, dtype, optype, weakref.ref(op))
 
   if wop not in lazycache: lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   else: ret = lazycache[wop]
@@ -234,7 +234,6 @@ class LazyBuffer:
   
   def get_buffers(self) -> List[Any]: return [self]
   def get_lazyops(self) -> List[Any]: return []
-  def get_weakop(self) -> Any: return weakref.ref(self)
   def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> LazyBuffer:
     y = self
     for op, arg in ops: y = y.movement_op(op, arg)
