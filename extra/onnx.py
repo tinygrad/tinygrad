@@ -155,7 +155,7 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        assert onnx_version == 10
+        assert onnx_version >= 10, f'only onnx version >= 10 supported for slice'
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
