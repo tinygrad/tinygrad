@@ -1,3 +1,4 @@
+import yaml
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import ASTRunner, BinaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
@@ -24,11 +25,6 @@ _start:
 .align 0x10
 .global code.kd
 .type code.kd,STT_OBJECT
-/*code.kd:
-.long 0,0,0,0
-.long 0xb00,0x00000000,0x00000000,0x00000000
-.long 0,0,0,0
-.long 0x60af0000,0x0000009e,0x00000408,0x00000000*/
 .amdhsa_kernel code
   .amdhsa_group_segment_fixed_size 0
   .amdhsa_private_segment_fixed_size 0
@@ -72,53 +68,6 @@ _start:
 code:
 """
 
-# TODO: generate this yaml
-boilerplate_end = """
-.amdgpu_metadata
-amdhsa.kernels:
-  - .args:
-      - .address_space:  global
-        .name:           a
-        .offset:         0
-        .size:           8
-        .type_name:      'float*'
-        .value_kind:     global_buffer
-      - .address_space:  global
-        .name:           b
-        .offset:         8
-        .size:           8
-        .type_name:      'float*'
-        .value_kind:     global_buffer
-      - .address_space:  global
-        .name:           c
-        .offset:         0x10
-        .size:           8
-        .type_name:      'float*'
-        .value_kind:     global_buffer
-    .group_segment_fixed_size: 0
-    .kernarg_segment_align: 8
-    .kernarg_segment_size: 0x18
-    .language:       OpenCL C
-    .language_version:
-      - 1
-      - 2
-    .max_flat_workgroup_size: 256
-    .name:           code
-    .private_segment_fixed_size: 0
-    .sgpr_count:     6
-    .sgpr_spill_count: 0
-    .symbol:         code.kd
-    .uses_dynamic_stack: false
-    .vgpr_count:     256
-    .vgpr_spill_count: 0
-    .wavefront_size: 32
-amdhsa.target:   amdgcn-amd-amdhsa--gfx1100
-amdhsa.version:
-  - 1
-  - 2
-.end_amdgpu_metadata
-"""
-
 # https://github.com/ROCm-Developer-Tools/ROCm-ComputeABI-Doc/blob/master/AMDGPU-ABI.md#initial-kernel-register-state
 # RDNA3 is actually a SIMD machine!
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
@@ -131,7 +80,19 @@ class AssemblyCodegen(Linearizer):
     self.hand_coded_optimizations()
     self.linearize()
 
-    local_size = [32]
+    args = []
+    for i,b in enumerate(self.bufs): args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'})
+
+    metadata = {'amdhsa.kernels': [{'.args': args,
+                  '.group_segment_fixed_size': 0, '.kernarg_segment_align': 8, '.kernarg_segment_size': len(self.bufs)*8,
+                  '.language': 'OpenCL C', '.language_version': [1, 2], '.max_flat_workgroup_size': 256,
+                  '.name': 'code', '.private_segment_fixed_size': 0, '.sgpr_count': 8, '.sgpr_spill_count': 0,
+                  '.symbol': 'code.kd', '.uses_dynamic_stack': False, '.vgpr_count': 256, '.vgpr_spill_count': 0,
+                  '.wavefront_size': 32}],
+                'amdhsa.target': 'amdgcn-amd-amdhsa--gfx1100', 'amdhsa.version': [1, 2]}
+
+    #local_size = [32]
+    local_size = [1]
 
     ins = []
 
@@ -142,9 +103,11 @@ class AssemblyCodegen(Linearizer):
     ins.append(f's_mul_i32 s3, s2, {local_size[0]}')  # TODO: how do i get this dynamicly?
     ins.append('v_add_co_u32 v0, vcc_lo, s3, v0')
 
-    # first three things are the buffers, load into s0-s5
-    ins.append('s_load_b64 s[4:5], s[0:1], 0x10')
-    ins.append('s_load_b128 s[0:3], s[0:1], null')
+    # TODO: combine the loads
+    pend_i = []
+    for i in list(range(len(self.bufs)))[::-1]:
+      ins.append(f's_load_b64 s[{i*2}:{i*2+1}], s[0:1], {i*8}')
+      pend_i.append(f"s[{i*2}:{i*2+1}]")
 
     # v0 is a float offset
     # TODO: compute indexes
@@ -153,7 +116,6 @@ class AssemblyCodegen(Linearizer):
     name_to_v = {}
     latest_v = 1
     ready = defaultdict(lambda: False)
-    pend_i = ["s[0:1]", "s[2:3]", "s[4:5]"]
     pend_v = []
     def get_i(i):
       nonlocal latest_v, name_to_v, pend_v, pend_i
@@ -193,6 +155,7 @@ class AssemblyCodegen(Linearizer):
       elif uop == UOps.ALU:
         if args == BinaryOps.ADD:
           ins.append(f'v_add_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
+          #ins.append('s_delay_alu instid0(VALU_DEP_1)')
         elif args == BinaryOps.SUB:
           ins.append(f'v_sub_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
         else:
@@ -220,7 +183,7 @@ class AssemblyCodegen(Linearizer):
     # exit asm
     ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
 
-    code = boilerplate_start + '\n'.join(ins) + boilerplate_end
+    code = boilerplate_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
     object = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
     asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], object))
 
