@@ -241,11 +241,12 @@ class Tensor:
     val = [val] if not isinstance(val, (list, tuple)) else val
     ellipsis_found = [i for i, v in enumerate(val) if v is Ellipsis]
     if len(ellipsis_found) > 0:
-      # if we encounter an ellipsis, we need to expand it to fill all dimensions
-      # however, multiple ellipses are not allowed
-      assert len(ellipsis_found) == 1
-      fill_dim = len(self.shape) - len(val) + 1
-      val = tuple(val[:ellipsis_found[0]]) + tuple([slice(None)]) * fill_dim + tuple(val[ellipsis_found[0] + 1:])
+      # If we encounter an ellipsis, we need to expand it to fill all dimensions by inserting N x slice(None)
+      assert len(ellipsis_found) == 1 # Multiple ellipses are not allowed
+      ellipsis_fill_count = len(self.shape) - len(val) + 1
+      # Since lists and tuples cannot be concatenated, make sure val is composed of 3 tuples:
+      # (slices before ellipsis) + (N * slice(None)) + (slices after ellipsis) 
+      val = tuple(val[:ellipsis_found[0]]) + tuple([slice(None)]) * ellipsis_fill_count + tuple(val[ellipsis_found[0] + 1:])
     assert sum(s is not None for s in val) <= len(self.shape)
     assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
     for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
