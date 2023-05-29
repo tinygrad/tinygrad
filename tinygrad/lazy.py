@@ -33,7 +33,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and x.realized is None and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
-  if len(psrcs) == 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
+  if len(psrcs) >= 1 and MERGE_ONE_REDUCE_INTO_ELEMENTWISE:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
     if psrc[1].optype == ReduceOps:
       top = _ast_reduceops(psrc[1])
