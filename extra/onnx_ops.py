@@ -1,9 +1,10 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
 import numpy as np
 import functools
 from typing import Union, Tuple
+import math
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -148,7 +149,6 @@ Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
 
-import math
 
 def Sin(x): return x.sin()
 def Cos(x): return x.cos()
@@ -157,11 +157,11 @@ def Cosh(x): return (math.e ** x + math.e ** -x) / 2
 def Sinh(x): return (math.e ** x - math.e ** -x) / 2
 def Tanh(x): return Sinh(x) / Cosh(x)
 
-def Less(x, y): return (x<y).numpy().astype(bool)
-def LessOrEqual(x, y): return (x<=y).numpy().astype(bool)
-def Greater(x, y): return (x>y).numpy().astype(bool)
-def GreaterOrEqual(x, y): return (x>=y).numpy().astype(bool)
-def Equal(x, y): return (x==y).numpy().astype(bool)
+def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
+def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
+def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
+def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
+def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
 
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return -functools.reduce(Tensor.maximum, [-x for x in data_0])
@@ -181,6 +181,7 @@ def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.s
 def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
+
 def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
 
@@ -192,7 +193,12 @@ def Tile(input, repeats):
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
-def Where(condition, X, Y): return condition*X + (1-condition)*Y
+def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y)
+
+def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
+def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
+def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
+def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 
 def ConstantOfShape(input, value=0.0):
   shape = [int(x) for x in safe_numpy(input)]
