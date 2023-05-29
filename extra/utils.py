@@ -108,8 +108,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
 
     lna = t.lazydata.op.arg
     lna.fxn = lambda _: np_array
-    post_process(t, load_dtype=load_dtype)
-    return
+    return post_process(t, load_dtype=load_dtype)
 
   # ["METAL", "CLANG", "LLVM"] support readinto for more speed
   # ["GPU", "CUDA"] use _mmap since they have to copy in to the GPU anyway
