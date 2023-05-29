@@ -1,5 +1,5 @@
 import hashlib
-from typing import Any, Callable, Dict, Final, List, Tuple, Union
+from typing import Any, Callable, Dict, Final, List, Optional, Tuple, Union
 import triton
 import triton.language as tl
 from triton.compiler import compile as triton_compile
@@ -16,19 +16,28 @@ from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.shape.symbolic import NumNode
 
 class TritonProgram:
-  def __init__(self, name:str, kernel:str, signature:str, key):
-    self.name, self.kernel, self.signature, self.key = name, kernel, signature, key
-    hash = hashlib.md5(key.encode("utf-8")).hexdigest()
-    self.fn = f"/tmp/{hash}.py"
-    with open(self.fn, "w") as f: f.write(kernel)
-    if DEBUG >= 4: print(kernel)
-
-  def build(self):
-    self.name, codeobj = self.name, compile(self.kernel, self.fn, "exec")
+  def __init__(self, name:str, prg:str):
+    self.name = name
+    # hack to get the signature
+    signature = ','.join(["*fp32" for _ in range(prg.splitlines()[1].count("data"))])
+    hash = hashlib.md5(prg.encode("utf-8")).hexdigest()
+    fn = f"/tmp/{hash}.py"
+    with open(fn, "w") as f: f.write(prg)
+    codeobj = compile(prg, fn, "exec")
     exec(codeobj, globals())
-    print(globals()[self.name])
-    self.prg = triton_compile(globals()[self.name], signature=self.signature)
+    self.prg = triton_compile(globals()[name], signature=signature)
 
+  def __call__(self, global_size, local_size, *args, wait=False):
+    if wait:
+      start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+      start.record()
+    print([1]*(3-len(global_size)) + global_size)
+    self.prg[tuple([1]*(3-len(global_size)) + global_size)](*[x._buf for x in args]) # TODO: detect launch params
+    if wait:
+      end.record()
+      torch.cuda.synchronize()
+      return start.elapsed_time(end)*1e-3
+  
 class TritonCodegen(Linearizer):
   def codegen(self):
     self.process()
@@ -38,6 +47,7 @@ class TritonCodegen(Linearizer):
     loaded = set()
 
     kernel = []
+    global_size = []
     depth = 0
     def kk(s): kernel.append("  "*depth+s)
 
@@ -71,6 +81,7 @@ class TritonCodegen(Linearizer):
             if args[1] == "global":
               if len(args[0]) >= 4 and len(args[0])-i > 2: raise Exception("unimplemented: global loop with more than 3 dims")
               else:
+                global_size.append(var.max+1)
                 kk(f"{var.expr} = {gid[len(args[0])-1-i]} # {var.max+1}")
             elif args[1] == "local": raise Exception("unimplemented: local loop")
             else:
@@ -105,35 +116,12 @@ class TritonCodegen(Linearizer):
         raise Exception(f"unimplemented: {uop}")
 
     prg = '\n'.join(kernel)
-    return ("fxn", prg, ','.join(["*fp32" for _ in range(len(self.bufs))]), self.key)
+    return ASTRunner("fxn", prg, global_size[::-1] if len(global_size) else [1], op_estimate=self.info.flops)
 
 class RawTritonBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType, buf:torch.Tensor): super().__init__(size, dtype, buf)
+  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf) if buf is not None else super().__init__(size, dtype, torch.empty(size, dtype=torch.float, device='cuda'))
   @classmethod
   def fromCPU(cls, x): return cls(x.size, dtypes.from_np(x.dtype), buf=torch.from_numpy(x).requires_grad_(False).to('cuda'))
   def toCPU(self): return self._buf.cpu().numpy()
 
-class _TritonBuffer:
-  def __init__(self):
-    self.buffer = RawTritonBuffer
-  
-  def exec_ast(self, ast:LazyOp, output, **kwargs):
-    if ast.op in MovementOps and not isinstance(ast.src[0], LazyOp) and ast.src[0].realized is not None: return ast.src[0].realized
-
-    output.realized = RawTritonBuffer(prod(output.shape), output.dtype, torch.empty(*output.shape, dtype=torch.float, device='cuda'))
-
-    k = TritonCodegen(ast, output)
-
-    prg = TritonProgram(*k.codegen())
-
-    prg.build()
-
-    print([x.realized._buf.shape for x in k.bufs if x.realized is not None])
-
-    print(tuple(reversed(output.shape)))
-
-    prg.prg[(1,10,30)](*[x.realized._buf for x in k.bufs if x.realized is not None and not isinstance(x.realized, RawConst)])
-
-    return output.realized
-
-TritonBuffer = _TritonBuffer()
+TritonBuffer = Compiled(RawTritonBuffer, TritonCodegen, TritonProgram)
