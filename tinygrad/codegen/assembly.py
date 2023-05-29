@@ -25,45 +25,9 @@ _start:
 .align 0x10
 .global code.kd
 .type code.kd,STT_OBJECT
-.amdhsa_kernel code
-  .amdhsa_group_segment_fixed_size 0
-  .amdhsa_private_segment_fixed_size 0
-  .amdhsa_kernarg_size 0
-  .amdhsa_next_free_vgpr 16  // this matters!
-  .amdhsa_reserve_vcc 0
-  .amdhsa_reserve_xnack_mask 0
-  .amdhsa_next_free_sgpr 8
-  .amdhsa_float_round_mode_32 0
-  .amdhsa_float_round_mode_16_64 0
-  .amdhsa_float_denorm_mode_32 3
-  .amdhsa_float_denorm_mode_16_64 3
-  .amdhsa_dx10_clamp 1
-  .amdhsa_ieee_mode 1
-  .amdhsa_fp16_overflow 0
-  .amdhsa_workgroup_processor_mode 1
-  .amdhsa_memory_ordered 1
-  .amdhsa_forward_progress 0
-  .amdhsa_enable_private_segment 0
-  .amdhsa_system_sgpr_workgroup_id_x 1
-  .amdhsa_system_sgpr_workgroup_id_y 0
-  .amdhsa_system_sgpr_workgroup_id_z 0
-  .amdhsa_system_sgpr_workgroup_info 0
-  .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_exception_fp_ieee_invalid_op 0
-  .amdhsa_exception_fp_denorm_src 0
-  .amdhsa_exception_fp_ieee_div_zero 0
-  .amdhsa_exception_fp_ieee_overflow 0
-  .amdhsa_exception_fp_ieee_underflow 0
-  .amdhsa_exception_fp_ieee_inexact 0
-  .amdhsa_exception_int_div_zero 0
-  .amdhsa_user_sgpr_dispatch_ptr 0
-  .amdhsa_user_sgpr_queue_ptr 0
-  .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  .amdhsa_user_sgpr_dispatch_id 0
-  .amdhsa_user_sgpr_private_segment_size 0
-  .amdhsa_wavefront_size32 1
-  .amdhsa_uses_dynamic_stack 0
-.end_amdhsa_kernel
+.amdhsa_kernel code"""
+
+code_start = """.end_amdhsa_kernel
 .text
 code:
 """
@@ -83,6 +47,17 @@ class AssemblyCodegen(Linearizer):
 
     args = []
     for i,b in enumerate(self.bufs): args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8, '.type_name': b.dtype.name+"*", '.value_kind': 'global_buffer'})
+
+    kernel_desc = {'.amdhsa_group_segment_fixed_size': 0, '.amdhsa_private_segment_fixed_size': 0, '.amdhsa_kernarg_size': 0,
+                   '.amdhsa_next_free_vgpr': 16,   # this matters!
+                   '.amdhsa_reserve_vcc': 0, '.amdhsa_reserve_xnack_mask': 0,
+                   '.amdhsa_next_free_sgpr': 8,
+                   '.amdhsa_float_round_mode_32': 0, '.amdhsa_float_round_mode_16_64': 0, '.amdhsa_float_denorm_mode_32': 3, '.amdhsa_float_denorm_mode_16_64': 3, '.amdhsa_dx10_clamp': 1, '.amdhsa_ieee_mode': 1,
+                   '.amdhsa_fp16_overflow': 0, '.amdhsa_workgroup_processor_mode': 1, '.amdhsa_memory_ordered': 1, '.amdhsa_forward_progress': 0, '.amdhsa_enable_private_segment': 0,
+                   '.amdhsa_system_sgpr_workgroup_id_x': 1, '.amdhsa_system_sgpr_workgroup_id_y': 0, '.amdhsa_system_sgpr_workgroup_id_z': 0, '.amdhsa_system_sgpr_workgroup_info': 0, '.amdhsa_system_vgpr_workitem_id': 0,
+                   '.amdhsa_exception_fp_ieee_invalid_op': 0, '.amdhsa_exception_fp_denorm_src': 0, '.amdhsa_exception_fp_ieee_div_zero': 0, '.amdhsa_exception_fp_ieee_overflow': 0, '.amdhsa_exception_fp_ieee_underflow': 0,
+                   '.amdhsa_exception_fp_ieee_inexact': 0, '.amdhsa_exception_int_div_zero': 0, '.amdhsa_user_sgpr_dispatch_ptr': 0, '.amdhsa_user_sgpr_queue_ptr': 0, '.amdhsa_user_sgpr_kernarg_segment_ptr': 1,
+                   '.amdhsa_user_sgpr_dispatch_id': 0, '.amdhsa_user_sgpr_private_segment_size': 0, '.amdhsa_wavefront_size32': 1, '.amdhsa_uses_dynamic_stack': 0}
 
     metadata = {'amdhsa.kernels': [{'.args': args,
                   '.group_segment_fixed_size': 0, '.kernarg_segment_align': 8, '.kernarg_segment_size': len(self.bufs)*8,
@@ -113,8 +88,8 @@ class AssemblyCodegen(Linearizer):
 
     # v0 is a float offset
     # TODO: compute indexes
-    #ins.append('v_lshlrev_b32 v0, 2, v0')
-    ins.append('v_lshlrev_b32 v0, 4, v0')
+    ins.append('v_lshlrev_b32 v0, 2, v0')
+    #ins.append('v_lshlrev_b32 v0, 4, v0')
 
     name_to_v = {}
     latest_v = 1
@@ -209,7 +184,7 @@ class AssemblyCodegen(Linearizer):
     # exit asm
     ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
 
-    code = boilerplate_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
+    code = boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" +  code_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
     object = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
     asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], object))
 
