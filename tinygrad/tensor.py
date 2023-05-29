@@ -122,16 +122,25 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor([0], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
+  def full(shape:Tuple[int, ...], fill_value, **kwargs):
+    new_shape = argfix(shape)
+    return Tensor([fill_value], **kwargs).reshape([1]*len(new_shape)).expand(new_shape).contiguous()
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor([1], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
+  def zeros(*shape, **kwargs): return Tensor.full(shape, 0, **kwargs)
 
   @staticmethod
-  def zeros_like(tensor, dtype:Optional[DType]=None, **kwargs): return Tensor.zeros(*tensor.shape, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(shape, 1, **kwargs)
 
   @staticmethod
-  def ones_like(tensor, dtype:Optional[DType]=None, **kwargs): return Tensor.ones(*tensor.shape, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
+    return Tensor.full(tensor.shape, fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+
+  @staticmethod
+  def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
+
+  @staticmethod
+  def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
   def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
