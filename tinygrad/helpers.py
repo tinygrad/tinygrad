@@ -34,6 +34,7 @@ class ContextVar:
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
+  def __lt__(self, x): return self.value < x
   @property
   def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
