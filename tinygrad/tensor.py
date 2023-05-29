@@ -30,6 +30,7 @@ import tinygrad.mlops as mlops
 # **** start with two base classes, Tensor and Function ****
 
 class Tensor:
+  __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
@@ -377,7 +378,7 @@ class Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
-    if any(s>1 for s in stride):
+    if any([s>1 for s in stride]):
       x = x.reshape(*x.shape[:2], *flatten((k,1) for k in x.shape[2:]))
       x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
       x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])

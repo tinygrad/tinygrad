@@ -23,9 +23,10 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 @dataclass(frozen=True)
 class LazyOp:
+  __slots__ = "op", "src", "arg", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
-  arg: Union[LazyOp, LazyBuffer] = None
+  arg: Union[LazyOp, LazyBuffer]
   # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
 
   def map_buffers(self, real_srcs: Dict[Any, Any]): return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)

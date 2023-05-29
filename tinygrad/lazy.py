@@ -1,4 +1,5 @@
 from __future__ import annotations
+from collections import deque
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, weakref, importlib, inspect, functools, pathlib
 from weakref import WeakValueDictionary
@@ -35,7 +36,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[int, ...] = self.shape
-  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and len(psrcs) == 1:
+  if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and len(psrcs) >= 1:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
     if psrc[1].optype == ReduceOps:
       top = _ast_reduceops(psrc[1])
@@ -78,6 +79,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   return ret
 
 class LazyBuffer:
+  __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', '__weakref__'
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
     self.st = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
@@ -108,7 +110,7 @@ class LazyBuffer:
         except KeyError: pass
       # run the ast if we still have to, and log the op
       if not self.realized:
-        for x in self.op.get_buffers(): x.realize()
+        deque(map(LazyBuffer.realize, self.op.get_buffers())) # NOTE: this looks crazy but it's actually slightly faster than a for loop and realize is one of the most expensive functions
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if self.optype != MovementOps and self.dtype.__class__ == ImageDType and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
@@ -158,7 +160,7 @@ class LazyBuffer:
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
-    return create_lazybuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)), self.dtype)
+    return create_lazybuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype)
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
@@ -319,7 +321,7 @@ def _realize_contiguous(buffer: LazyBuffer) -> None:
     buffer.realized = realized
   else:
     # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS. confusing with Compiled though
-    buffer.op = LazyOp(UnaryOps.NOOP, buffer.op.src)
+    buffer.op = LazyOp(UnaryOps.NOOP, buffer.op.src, None)
 
 def _realize_custom(buffer: LazyBuffer) -> None:
   # this needs to immediately realize

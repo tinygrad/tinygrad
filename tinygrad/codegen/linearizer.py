@@ -307,7 +307,7 @@ class Linearizer:
         loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
+        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",), None), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
 
         # end the late reduce loop
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))

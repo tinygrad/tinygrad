@@ -152,7 +152,7 @@ def get_pad_args(shape, arg: Tuple[Tuple[int, int], ...]):
   return tuple([(-b,s+e) for s,(b,e) in zip(shape, arg)]), tuple([(b,s+b) for s,(b,_) in zip(shape, arg)])
 
 class ShapeTracker:
-  __slots__ = "views"
+  __slots__ = "views", "__weakref__"
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else ([*shape.views] if shape.__class__ == ShapeTracker else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
@@ -230,7 +230,7 @@ class ShapeTracker:
   def expand(self, new_shape: Tuple[int, ...]):
     assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple((((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)) if self.views[-1].mask else None
+    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
 
   def reshape(self, new_shape: Tuple[int, ...]):
