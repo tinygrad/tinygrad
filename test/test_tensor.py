@@ -156,33 +156,11 @@ class TestTinygrad(unittest.TestCase):
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
   def test_zeros_like_has_same_dtype(self):
-    a = Tensor([1, 2, 3])
-    b = Tensor.zeros_like(a)
-    self.assertTrue(a.dtype == b.dtype)
-
-    a = Tensor([1, 2, 3], dtype=dtypes.float16)
-    b = Tensor.zeros_like(a)
-    self.assertTrue(a.dtype == b.dtype)
-
-    a = Tensor([1, 2, 3], dtype=dtypes.float32)
-    b = Tensor.zeros_like(a)
-    self.assertTrue(a.dtype == b.dtype)
-
-    a = Tensor([1, 2, 3], dtype=dtypes.int8)
-    b = Tensor.zeros_like(a)
-    self.assertTrue(a.dtype == b.dtype)
-
-    a = Tensor([1, 2, 3], dtype=dtypes.int32)
-    b = Tensor.zeros_like(a)
-    self.assertTrue(a.dtype == b.dtype)
-
-    a = Tensor([1, 2, 3], dtype=dtypes.int64)
-    b = Tensor.zeros_like(a)
-    self.assertTrue(a.dtype == b.dtype)
-
-    a = Tensor([1, 2, 3], dtype=dtypes.uint8)
-    b = Tensor.zeros_like(a)
-    self.assertTrue(a.dtype == b.dtype)
+    for dtype in dtypes.__annotations__:
+      print(dtype)
+      a = Tensor([1, 2, 3], dtype=dtypes.float16)
+      b = Tensor.zeros_like(a)
+      self.assertTrue(a.dtype == b.dtype)
 
 if __name__ == '__main__':
   unittest.main()
