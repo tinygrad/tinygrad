@@ -128,7 +128,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor([1], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
 
   @staticmethod
-  def zeros_like(tensor, **kwargs): return Tensor.zeros(*tensor.shape, **kwargs)
+  def zeros_like(tensor, **kwargs): return Tensor.zeros(*tensor.shape, dtype=tensor.dtype, **kwargs)
 
   @staticmethod
   def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
