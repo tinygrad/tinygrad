@@ -23,9 +23,6 @@ This project is maintained by [tiny corp](https://tinygrad.org/).
 ### Installation
 
 ```bash
-python3 -m pip install git+https://git@github.com/geohot/tinygrad.git
-
-# or
 git clone https://github.com/geohot/tinygrad.git
 cd tinygrad
 python3 -m pip install -e .
