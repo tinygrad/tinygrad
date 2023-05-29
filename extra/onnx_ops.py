@@ -3,6 +3,7 @@ from tinygrad.helpers import prod
 from extra.onnx import safe_numpy
 import numpy as np
 import functools
+from typing import Union, Tuple
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -37,7 +38,7 @@ def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, moment
   else:
     invstd = (input_var + epsilon)**-0.5
     return X.batchnorm(scale, B, input_mean, invstd)
-  
+
 def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_type=1):
   assert stash_type == 1, "only float32 is supported"
   axis = tuple(i for i in range(axis if axis >= 0 else len(x.shape) + axis, len(x.shape)))
@@ -46,7 +47,7 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
 
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
-  
+
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
 # numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _format_padding(onnx_pads, ndims=None, axes=None):
@@ -66,10 +67,10 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0.):
   constant_padder = Tensor(np.pad(np.zeros(X.shape), np_pads, constant_values=constant_value), dtype=X.dtype)
   return zero_padded + constant_padder
 
-def Pad(x: Tensor, pads: Tensor, constant_value: Tensor=None, axes: Tensor=None, mode="constant"):
+def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
   assert mode == "constant"
-  constant_value = 0. if constant_value is None else constant_value.numpy()
-  seq_pads = pads.numpy().astype(np.int32).tolist()
+  constant_value = value if constant_value is None else constant_value.numpy()
+  seq_pads = list(pads) if isinstance(pads, tuple) else pads.numpy().astype(np.int32).tolist()
   seq_axes = axes.numpy().astype(np.int32).tolist() if axes is not None else None
   return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
@@ -84,11 +85,14 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  assert ceil_mode == 0 and storage_order == 0 and dilations == 1
-  return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides)
+  assert ceil_mode == 0 and storage_order == 0
+  return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
+
+def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
+  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
 
 # TODO: copied from tensor.py
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
@@ -116,7 +120,7 @@ def Expand(input, shape):
   return input.reshape(x_shape).expand(shape_ret)
 
 def LRN(input, size, alpha=1e-4, beta=0.75, bias=1.0):
-  bs, c, iy, ix = input.shape 
+  bs, c, iy, ix = input.shape
   return input / input.mul(input).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def Identity(input): return input

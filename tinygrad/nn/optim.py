@@ -59,6 +59,29 @@ class AdamW(Optimizer):
 
 def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return AdamW(params, lr, b1, b2, eps, 0.0)
 
+class LAMB(Optimizer):
+  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
+    super().__init__(params)
+    self.lr, self.b1, self.b2, self.eps, self.wd, self.adam, self.t = lr, b1, b2, eps, wd, adam, Tensor([0], requires_grad=False).realize()
+    self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
+
+  def step(self) -> None:
+    self.t.assign(self.t + 1).realize()
+    for i, t in enumerate(self.params):
+      assert t.grad is not None
+      g = t.grad.realize()
+      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g).realize()
+      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).realize()
+      m_hat = self.m[i] / (1.0 - self.b1**self.t)
+      v_hat = self.v[i] / (1.0 - self.b2**self.t)
+      up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
+      r1 = t.detach().square().sum().sqrt()
+      r2 = up.square().sum().sqrt()
+      r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0) if not self.adam else 1.0
+      t.assign(t.detach() - self.lr * r * up)
+    self.realize([self.t] + self.m + self.v)
+
 def get_state_dict(obj, prefix:str='') -> Dict[str, Tensor]:
   if isinstance(obj, Tensor): return {prefix.strip('.'):obj}
   if hasattr(obj, '__dict__'): return get_state_dict(obj.__dict__, prefix)
