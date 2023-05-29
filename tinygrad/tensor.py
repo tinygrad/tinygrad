@@ -131,6 +131,9 @@ class Tensor:
   def zeros_like(tensor, dtype:Optional[DType]=None, **kwargs): return Tensor.zeros(*tensor.shape, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
 
   @staticmethod
+  def ones_like(tensor, dtype:Optional[DType]=None, **kwargs): return Tensor.ones(*tensor.shape, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+
+  @staticmethod
   def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
     # NOTE: we do the reshape to fix interpreted buffers
     return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, device), dtype=dtype, device=device, **kwargs).reshape(*shape)
