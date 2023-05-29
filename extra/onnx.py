@@ -147,6 +147,7 @@ def get_run_onnx(onnx_model):
         if n.op_type == "Pow": ret = inp[0] ** inp[1]
       elif n.op_type == "Split":
         if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
+        if 'axis' not in opt: opt['axis'] = 0
         i = 0
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
@@ -155,7 +156,7 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        assert onnx_version == 10
+        assert onnx_version >= 10, f'only onnx version >= 10 supported for slice'
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
@@ -164,6 +165,9 @@ def get_run_onnx(onnx_model):
         starts = starts + inp[0].shape[axis] if starts < 0 else starts
         arg[axis] = (starts, ends)
         ret = inp[0].slice(arg=arg)
+      elif n.op_type == "Shrink":
+        bias = opt['bias'] if 'bias' in opt else 0
+        ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):

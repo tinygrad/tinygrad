@@ -68,7 +68,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ResNet18()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(31): # NOTE: this should be 4 lower
+    with CLCache(26):
       model.forward(img).realize()
 
   def test_vit(self):
@@ -85,7 +85,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
-    with CLCache(86):
+    with CLCache(82):
       model(Tensor([[1,2,3,4]]), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")

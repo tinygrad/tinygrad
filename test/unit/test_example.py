@@ -8,6 +8,7 @@ def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
   def ret(self):
     for device in Device._buffers:
+      if device == "DISK": continue
       print(device)
       if device in exclude_devices:
         print(f"WARNING: {device} test is excluded")
