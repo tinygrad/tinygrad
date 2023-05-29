@@ -165,7 +165,8 @@ def get_run_onnx(onnx_model):
         arg[axis] = (starts, ends)
         ret = inp[0].slice(arg=arg)
       elif n.op_type == "Shrink":
-        ret = (inp[0] < -opt['lambd'])*(inp[0]+opt['bias']) + (inp[0] > opt['lambd'])*(inp[0]-opt['bias'])
+        bias = opt['bias'] if 'bias' in opt else 0
+        ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
