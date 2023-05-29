@@ -79,7 +79,6 @@ def my_unpickle(fb0):
   return MyPickle(fb0).load(), key_prelookup
 
 def post_process(t: Tensor, load_dtype: DType):
-  if t is not None:
     if load_dtype != t.dtype: t.lazydata = t.lazydata.cast(load_dtype)
     if not t.lazydata.realized: t.realize()
 
