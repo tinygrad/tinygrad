@@ -224,7 +224,7 @@ class Tensor:
 
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
-    assert len(new_shape) == 0 or all(x != 0 for x in new_shape), f"zeros not allowed in shape {new_shape}"
+    assert all(x != 0 for x in new_shape), f"zeros not allowed in shape {new_shape}"
     return mlops.Reshape.apply(self, shape=tuple(-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape))
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
@@ -240,40 +240,47 @@ class Tensor:
     padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_))
     return self.pad(padding).shrink(tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)))
 
+  # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
+  # - A slice i:j returns the elements with indices in [i, j)
+  #    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
+  #    - Negative values for i and j are taken relative to the end of the sequence
+  #    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
+  # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
+  # - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
+  # - Strides other than 1 are now allowed!:
+  #    - This works by applying Shrink -> [Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optionals)
+  #    - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
+  #        - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
+  #        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
+  #          is possible.
+  #        - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
   def __getitem__(self, val):
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
     val = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int)) for v in val)) > len(self.shape):
-       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+      raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     orig_slices = list(val) + [slice(None)] * (len(self.shape) - num_slices)
-    valid_slices = itertools.filterfalse(lambda x: x is None, orig_slices)
+    valid_slices = list(itertools.filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
-
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-
     new_slice = tuple((s, e) for s, e in zip(start, stop))
     new_shape = tuple(e - s for s, e in new_slice)
-
-    # Call shrink to get sliced_tensor
+    # Shrink
     sliced_tensor = self.shrink(new_slice)
-
     if any(s > 1 for s in strides):
       def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
-      # Do padding
+      # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
       paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
       padded_tensor = sliced_tensor.pad(paddings)
-
-      # Do reshape for striding
-      new_shape = functools.reduce(operator.add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])
+      # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
+      new_shape = functools.reduce(operator.add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])  # type: ignore
       reshaped_tensor = padded_tensor.reshape(new_shape)
-
-      # Do slice for strides
+      # Shrink: do [:, 0]
       new_shape = new_shape[::2]
       final_slice = functools.reduce(operator.add, (((0, sh), (0, 1)) for sh in new_shape), ())
       sliced_tensor = reshaped_tensor.shrink(final_slice)
-
     final_shape = []
     it_shape = iter(new_shape)
     for i in orig_slices:
@@ -282,9 +289,7 @@ class Tensor:
         if isinstance(i, slice): final_shape.append(dim_shape)
       else: # i is None
         final_shape.append(1)
-
-    result_tensor = sliced_tensor.reshape(tuple(final_shape))
-    return result_tensor
+    return sliced_tensor.reshape(tuple(final_shape))  # Reshape
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
