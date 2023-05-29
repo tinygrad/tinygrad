@@ -25,9 +25,7 @@ context_stack = [ { key: getenv(key, v) for key, v in context_defaults.items() }
 
 class Context:
   def __init__(self, **kwargs): self.pvars = kwargs
-  def __enter__(self):
-    vars = { key: self.pvars[key] if key in self.pvars else context_stack[-1][key] for key in context_defaults.keys() }
-    context_stack.append(vars)
+  def __enter__(self): context_stack.append({ key: self.pvars[key] if key in self.pvars else context_stack[-1][key] for key in context_defaults.keys() })
   def __exit__(self, *args): context_stack.pop()
 
 class ContextVar:
