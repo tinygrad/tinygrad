@@ -192,7 +192,7 @@ def Tile(input, repeats):
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
-def Where(condition:Tensor,X:Tensor,Y:Tensor): return (condition*X + (1-condition)*Y)
+def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
 def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
