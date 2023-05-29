@@ -1,3 +1,4 @@
+from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from datasets.imagenet import iterate, get_val_files
 
@@ -8,13 +9,12 @@ if __name__ == "__main__":
 
   idx = 0
   for x,y in iterate(shuffle=False):
-    print(x.shape, y.shape)
+    print(x.shape, y.shape, x.dtype, y.dtype)
     assert x.shape[0] == y.shape[0]
     bs = x.shape[0]
     if X is None:
-      # TODO: need uint8 support
-      X = Tensor.empty(sz, *x.shape[1:], device="disk:/tmp/imagenet_x")
-      Y = Tensor.empty(sz, *y.shape[1:], device="disk:/tmp/imagenet_y")
+      X = Tensor.empty(sz, *x.shape[1:], device="disk:/tmp/imagenet_x", dtype=dtypes.uint8)
+      Y = Tensor.empty(sz, *y.shape[1:], device="disk:/tmp/imagenet_y", dtype=dtypes.int64)
       print(X.shape, Y.shape)
     X[idx:idx+bs].assign(x)
     Y[idx:idx+bs].assign(y)
