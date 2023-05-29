@@ -164,7 +164,7 @@ class Tensor:
   # ***** rng hlops *****
 
   @staticmethod
-  def uniform(*shape, **kwargs) -> Tensor: return Tensor.rand(*shape, **kwargs) * 2 - 1
+  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul(prod(shape)**-0.5)
@@ -173,8 +173,13 @@ class Tensor:
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
-  # ***** toposort and backward pass *****
+  # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
+  @staticmethod
+  def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
+    bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * prod(shape[2:]))
+    return Tensor.uniform(*shape, low=-bound, high=bound)
 
+  # ***** toposort and backward pass *****
   def deepwalk(self):
     def _deepwalk(node, visited, nodes):
       visited.add(node)
