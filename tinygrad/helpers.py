@@ -20,14 +20,26 @@ def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-# NOTE: hack to allow DEBUG(x) to set the debug value at runtime
-class DebugSingleton:
-  def __init__(self): self.value = getenv("DEBUG", 0)
-  def __call__(self, x): self.value = x
+context_defaults = { "DEBUG": 0, "IMAGE": 0 } # must be set for every context var
+context_stack = [ { key: getenv(key, v) for key, v in context_defaults.items() } ]
+
+class Context:
+  def __init__(self, **kwargs): self.pvars = kwargs
+  def __enter__(self):
+    vars = { key: self.pvars[key] if key in self.pvars else context_stack[-1][key] for key in context_defaults.keys() }
+    context_stack.append(vars)
+  def __exit__(self, *args): context_stack.pop()
+
+class ContextVar:
+  def __init__(self, key): self.key = key
+  def __call__(self, x): context_stack[-1][self.key] = x
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
+  def __gt__(self, x): return self.value > x
+  @property
+  def value(self): return context_stack[-1][self.key]
 
-DEBUG, IMAGE = DebugSingleton(), getenv("IMAGE", 0)
+DEBUG, IMAGE = ContextVar("DEBUG"), ContextVar("IMAGE")
 
 # **** tinygrad now supports dtypes! *****
 
