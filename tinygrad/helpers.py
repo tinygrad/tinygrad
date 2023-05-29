@@ -28,9 +28,8 @@ class Context:
 class ContextVar:
   ctx_stack = [{}]
   def __init__(self, key, default_value): 
-    self.key = key
-    self.initial_value = getenv(key, default_value)
-    if not key in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
+    self.key, self.initial_value = key, getenv(key, default_value)
+    if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
   def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
