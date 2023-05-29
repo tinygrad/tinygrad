@@ -2,9 +2,9 @@ import numpy as np
 from tinygrad.tensor import Tensor
 
 class TransformerBlock:
-  def __init__(self, embed_dim, num_heads, ff_dim, prenorm=False, act=lambda x: x.relu(), dropout=0.):
+  def __init__(self, embed_dim, num_heads, ff_dim, prenorm=False, act=lambda x: x.relu(), dropout=0.1):
     assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
-    
+
     self.num_heads = num_heads
     self.head_size = embed_dim // num_heads
     self.prenorm, self.act = prenorm, act
