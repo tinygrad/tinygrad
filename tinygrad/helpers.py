@@ -22,21 +22,21 @@ def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 class Context:
   def __init__(self, **kwargs): self.pvars = kwargs
-  def __enter__(self): ContextVar.ctx_stack.append({ key: self.pvars[key] if key in self.pvars else ContextVar.ctx_stack[-1][key] for key in ContextVar.initial_values.keys() if key in self.pvars or key in ContextVar.ctx_stack[-1] })
+  def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ key: ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() if key not in self.pvars } })
   def __exit__(self, *args): ContextVar.ctx_stack.pop()
 
 class ContextVar:
-  ctx_stack, initial_values = [{}], {}
+  ctx_stack = [{}]
   def __init__(self, key, default_value): 
     self.key = key
-    if not key in ContextVar.initial_values:
-      ContextVar.ctx_stack[-1][key] = ContextVar.initial_values[key] = getenv(key, default_value)
+    self.initial_value = getenv(key, default_value)
+    if not key in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
   def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   @property
-  def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else ContextVar.initial_values[self.key]
+  def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 
