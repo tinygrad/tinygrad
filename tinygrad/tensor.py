@@ -135,7 +135,7 @@ class Tensor:
   # TODO: requires cumsum to remove numpy
   
   @staticmethod
-  def cumsum(x: Iterable): return Tensor(itertools.accumulate(x))
+  def cumsum(x: Iterable, **kwargs): return Tensor([i for i in itertools.accumulate(x)], **kwargs)
   
   @staticmethod
   def arange(stop, start=0, step=1, **kwargs): return Tensor([x for x in range(start, stop, step)], **kwargs)
