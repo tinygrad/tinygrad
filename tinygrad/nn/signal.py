@@ -189,7 +189,6 @@ class STFT:
       return Tensor.stack((spec_real, -spec_imag), -1)
 
   def inverse(self, X, onesided=True, length=None):
-    # TODO: inverse is not differentiable, due to col2im using numpy in-place add
     assert len(X.shape) == 4, (
         "Tensor must be in the shape of (batch, freq_bins, timesteps, 2)."
         "Where last dim is real and imaginary number dim")
@@ -310,14 +309,23 @@ def col2im(input: Tensor,
   indices_col = indices_along_dim(out_w, kernel_w, dilation_w, padding_w,
                                   stride_w)
 
-  # TODO: Fix this block to be 100% Tinygrad ops, so that gradient flow.
   output_padded_size = [o + 2 * p for o, p in zip(output_size, padding)]
   output = np.zeros([shape[0], shape[1] // math.prod(kernel_size)] +
                     output_padded_size).astype(dtype.np)
-  output[:, :, indices_row, indices_col] += input.numpy()
-  output = output[:, :, padding_w:(-padding_w if padding_w != 0 else None),
-                  padding_h:(-padding_h if padding_h != 0 else None)]
   output = Tensor(output)
+  output_shape = output.shape
+  input = input.reshape(input.shape[0], -1)
+  output = output.reshape(output.shape[0], -1)
+  indices_col = indices_col.flatten()
+  # TODO: SLOW, vectorize this
+  for i, idx_col in enumerate(indices_col):
+    out = Tensor.zeros_like(output)
+    idxs = (Tensor.arange(math.prod(out.shape[1:]))).reshape(out.shape[1:])[None,:].expand(out.shape[0],out.shape[1])
+    mask = idxs.eq(idx_col)
+    masked = input[:,i:i+1]*mask
+    output = output + masked
+  output = output.reshape(output_shape)
+  output = output[:, :, padding_w:(-padding_w if padding_w != 0 else None),padding_h:(-padding_h if padding_h != 0 else None)]
 
   if not batched_input:
     output = output.squeeze(0)
