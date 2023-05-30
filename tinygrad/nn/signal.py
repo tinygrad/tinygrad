@@ -1,6 +1,5 @@
 import math
 from tinygrad.tensor import Tensor, dtypes
-from tinygrad.helpers import make_pair
 from scipy.signal import get_window
 import numpy as np
 import math
