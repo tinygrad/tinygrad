@@ -6,17 +6,17 @@ from tinygrad.tensor import Tensor, dtypes
 
 
 def _test_to_np(a, np_dtype, target):
-    print(a)
-    na = a.numpy()
-    print(na, na.dtype, a.lazydata.realized)
-    assert na.dtype == np_dtype
-    np.testing.assert_allclose(na, target)
+  print(a)
+  na = a.numpy()
+  print(na, na.dtype, a.lazydata.realized)
+  assert na.dtype == np_dtype
+  np.testing.assert_allclose(na, target)
 
 def _test_op(fxn, target_dtype: DType, target):
-    c = fxn()
-    if DEBUG >= 2: print(c.numpy())
-    assert c.dtype == target_dtype
-    np.testing.assert_allclose(c.numpy(), target)
+  c = fxn()
+  if DEBUG >= 2: print(c.numpy())
+  assert c.dtype == target_dtype
+  np.testing.assert_allclose(c.numpy(), target)
 
 def _test_cast(a, target_dtype, target): _test_op(lambda: a.cast(target_dtype), target_dtype, target)
 def _test_add(a, b, target_dtype, target): _test_op(lambda: a+b, target_dtype, target)
