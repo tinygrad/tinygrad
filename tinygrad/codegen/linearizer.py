@@ -1,5 +1,5 @@
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, TypeVar, Dict
-import itertools, math
+import itertools, math, abc
 from collections import defaultdict
 from enum import Enum, auto
 
@@ -84,6 +84,76 @@ class UOp(NamedTuple):
   vin: List[Token]
   arg: Any
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.out) if self.out is not None else '':25s} {str(self.vin):32s} {self.arg}"
+
+class CodegenType(metaclass=abc.ABCMeta):
+  @abc.abstractmethod
+  def code_for_op(self, op: Op) -> Callable:
+    pass
+
+class SSATerm(NamedTuple):
+  name: str
+  dtype: CodegenType
+
+class UOpV2(NamedTuple):
+  uop: UOps
+  inputs: List[SSATerm]
+  output: Optiona[SSATerm]
+  constant_args: Any
+
+class LinearizerV2:
+  def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
+    # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
+    self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
+    self.optimization_passes = []
+
+  def canonicalize(self) -> None:
+    '''
+    Walks the AST to validate its correctness
+    '''
+    reduceops = [x for x in get_lazyops(self.ast) if x.op in ReduceOps]
+    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
+    self.reduceop = reduceops[0] if reduceops else None
+    self.prereduce_bufs = dedup(get_buffers(self.reduceop)) if self.reduceop else []
+
+  def optimize(self) -> None:
+    '''
+    Performs optimization passes over canonicalized AST. Optimization passes are
+    retrieved from self.optimization_passes, which is a list of functions.
+    '''
+    for opt in self.optimization_passes:
+      opt(self)
+
+  def ssa(self, base_name: str, dtype: CodegenType):
+    self.ssa[base_name] += 1
+    return SSATerm(f"{base_name}{self.ssa[base_name] - 1}", dtype)
+
+  def uop(
+      self,
+      uop: UOps,
+      name: str,
+      dtype: CodegenType,
+      inputs: List[SSATerm],
+      args: Any = None,
+  ) -> SSATerm:
+    term = ssa(name, dtype)
+    self.uops.append(UOpV2(uop, inputs, term, args))
+    return term
+
+  def init_linearize(self) -> None:
+    self.uops: List[UOpV2] = None
+    self.ssa: DefaultDict[str, int] = defaultdict(int)
+
+  def linearize(self) -> None:
+    '''
+    Walks the AST and transforms it into a linear SSA form.
+    '''
+    self.init_linearize()
+    gidx = self.uop(UOps.LOOP, "global_loop", None, ())
+    
+
+    self.linearize_prereduce()
+    self.linearize_postreduce()
+    
 
 class Linearizer:
   supports_float4: bool = False
