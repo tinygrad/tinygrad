@@ -36,33 +36,36 @@ class TestUtils(unittest.TestCase):
           d.as_strided([2, 2], [2, 3], storage_offset=4)
         )
 
-    for isfloat16_aftersave in [True, False]:
-      for isfloat16_beforesave in [True, False]:
-        for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (isfloat16_beforesave, None)]:
-          torch_finally_isfloat16 = isfloat16_aftersave or isfloat16_beforesave
-          if torch_finally_isfloat16 == loaded_is_float16:
-            print(f"isfloat16_aftersave={isfloat16_aftersave}")
-            print(f"isfloat16_beforesave={isfloat16_beforesave}")
-            print(f"load_dtype={load_dtype}")
-            model = torch.nn.Sequential(
-              torch.nn.Linear(4, 8),
-              torch.nn.Linear(8, 3),
-              LayerWithOffset()
-            )
-            if isfloat16_beforesave: model = model.half()
+    cases = [
+      # model is half, loaded dtype
+      [1, dtypes.float16],
+      [1, None],
+      [0, dtypes.float32],
+      [0, dtypes.float16], # fp32 -> fp16 cast while load
+      [0, None],
+    ]
 
-            with tempfile.TemporaryDirectory() as tmpdirname:
-              path = tmpdirname + '/testloadmodel.pth'
-              torch.save(model.state_dict(), path)
-              model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
+    for model_is_half, load_dtype in cases:
+      print(f"model_is_half={model_is_half}")
+      print(f"load_dtype={load_dtype}")
+      model = torch.nn.Sequential(
+        torch.nn.Linear(4, 8),
+        torch.nn.Linear(8, 3),
+        LayerWithOffset()
+      )
 
-            if isfloat16_aftersave: model = model.half()
-            for name, a in model.state_dict().items():
-              b = model2[name]
-              a, b = a.numpy(), b.numpy()
-              assert a.shape == b.shape
-              assert a.dtype == b.dtype
-              assert np.array_equal(a, b)
+      with tempfile.TemporaryDirectory() as tmpdirname:
+        path = tmpdirname + '/testloadmodel.pth'
+        torch.save(model.state_dict(), path)
+        model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
+
+      if load_dtype == dtypes.float16: model = model.half()
+      for name, a in model.state_dict().items():
+        b = model2[name]
+        a, b = a.numpy(), b.numpy()
+        assert a.shape == b.shape
+        assert a.dtype == b.dtype
+        assert np.array_equal(a, b)
 
 if __name__ == '__main__':
   unittest.main()
