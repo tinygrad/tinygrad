@@ -88,6 +88,7 @@ class UOp(NamedTuple):
 
 class Linearizer:
   supports_float4: bool = False
+  supports_float4_alu: bool = False
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -201,7 +202,7 @@ class Linearizer:
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
     # float4 grouping (optional)
-    should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    should_upcast = self.supports_float4 and (self.bufs[i].dtype not in (dtypes.float16, dtypes.int8, dtypes.uint8)) and len(self.float4_axis(i)) == 1
     if should_upcast:
       store_offset_new = {}
       for k,out_tokens in self._group_float4(i, store_offset).items():
@@ -340,9 +341,9 @@ class Linearizer:
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     # TODO: fold float4 into a single uop when possible.
     if isinstance(x.op, (ReduceOps, FusedOps)):
-      ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values)]
+      ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values, grouping_allowed=self.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=x.op!=BinaryOps.CMPEQ)]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:

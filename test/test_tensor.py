@@ -3,6 +3,7 @@ import torch
 import unittest
 import itertools
 from tinygrad.tensor import Tensor, Device
+from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -153,6 +154,34 @@ class TestTinygrad(unittest.TestCase):
         Tensor.manual_seed(1337)
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
+
+  def test_zeros_like_has_same_dtype(self):
+    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
+      a = Tensor([1, 2, 3], dtype=datatype)
+      b = Tensor.zeros_like(a)
+      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
+      assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+
+    a = Tensor([1, 2, 3])
+    b = Tensor.zeros_like(a, dtype=dtypes.int8)
+    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+  
+  def test_ones_like_has_same_dtype_and_shape(self):
+    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
+      a = Tensor([1, 2, 3], dtype=datatype)
+      b = Tensor.ones_like(a)
+      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
+      assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+
+    a = Tensor([1, 2, 3])
+    b = Tensor.ones_like(a, dtype=dtypes.int8)
+    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}" 
+
+  def test_numel(self): 
+    a = Tensor.empty(6, 12, 79)
+    self.assertTrue(a.numel() == 5688)
 
 if __name__ == '__main__':
   unittest.main()

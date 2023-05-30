@@ -1,9 +1,10 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
 import numpy as np
 import functools
 from typing import Union, Tuple
+import math
 
 def Unsqueeze(data, axes):
   axes = [len(data.shape) + int(x) if x < 0 else int(x) for x in safe_numpy(axes)]
@@ -38,6 +39,12 @@ def BatchNormalization(X, scale, B, input_mean, input_var, epsilon=1e-05, moment
   else:
     invstd = (input_var + epsilon)**-0.5
     return X.batchnorm(scale, B, input_mean, invstd)
+
+def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
+  axis = tuple(range(2, len(x.shape)))
+  mean = x.mean(axis=axis, keepdim=True)
+  invstd = x.sub(mean).pow(2).mean(axis=axis, keepdim=True).add(epsilon).pow(-0.5)
+  return x.sub(mean).mul(scale.reshape(shape=[-1, 1, 1])).mul(invstd).add(bias.reshape(shape=[-1, 1, 1]))
 
 def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_type=1):
   assert stash_type == 1, "only float32 is supported"
@@ -85,11 +92,12 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  assert ceil_mode == 0 and storage_order == 0 and dilations == 1
-  return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides)
+  assert ceil_mode == 0 and storage_order == 0
+  return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
+  padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0 # reorder padding
+  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
@@ -147,7 +155,6 @@ Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
 def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
 
-import math
 
 def Sin(x): return x.sin()
 def Cos(x): return x.cos()
@@ -156,11 +163,11 @@ def Cosh(x): return (math.e ** x + math.e ** -x) / 2
 def Sinh(x): return (math.e ** x - math.e ** -x) / 2
 def Tanh(x): return Sinh(x) / Cosh(x)
 
-def Less(x, y): return (x<y).numpy().astype(bool)
-def LessOrEqual(x, y): return (x<=y).numpy().astype(bool)
-def Greater(x, y): return (x>y).numpy().astype(bool)
-def GreaterOrEqual(x, y): return (x>=y).numpy().astype(bool)
-def Equal(x, y): return (x==y).numpy().astype(bool)
+def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
+def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
+def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
+def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
+def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
 
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return -functools.reduce(Tensor.maximum, [-x for x in data_0])
@@ -180,6 +187,7 @@ def ReduceL2(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.s
 def ReduceLogSum(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
+
 def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
 
@@ -191,7 +199,12 @@ def Tile(input, repeats):
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
-def Where(condition, X, Y): return condition*X + (1-condition)*Y
+def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y)
+
+def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
+def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
+def Xor(x:Tensor, y:Tensor): return Where((x==y), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
+def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.shape)).cast(dtypes.bool)
 
 def ConstantOfShape(input, value=0.0):
   shape = [int(x) for x in safe_numpy(input)]
@@ -206,3 +219,5 @@ def Cast(input, to):
 def CastLike(input, target_type):
   assert isinstance(target_type, Tensor), "can only CastLike Tensor"
   return input
+
+def Binarizer(input, threshold=0.0): return input > threshold

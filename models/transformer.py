@@ -2,11 +2,13 @@ import numpy as np
 from tinygrad.tensor import Tensor
 
 class TransformerBlock:
-  def __init__(self, embed_dim, num_heads, ff_dim, prenorm=False, act=lambda x: x.relu()):
+  def __init__(self, embed_dim, num_heads, ff_dim, prenorm=False, act=lambda x: x.relu(), dropout=0.1):
+    assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+
     self.num_heads = num_heads
     self.head_size = embed_dim // num_heads
-    assert self.head_size * self.num_heads == embed_dim
     self.prenorm, self.act = prenorm, act
+    self.dropout = dropout
 
     self.query = (Tensor.scaled_uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
     self.key = (Tensor.scaled_uniform(embed_dim, embed_dim), Tensor.zeros(embed_dim))
@@ -38,12 +40,12 @@ class TransformerBlock:
 
   def __call__(self, x):
     if self.prenorm:
-      x = x + self.attn(x.layernorm().linear(*self.ln1)).dropout(0.1)
-      x = x + self.act(x.layernorm().linear(*self.ln2).linear(*self.ff1)).linear(*self.ff2).dropout(0.1)
+      x = x + self.attn(x.layernorm().linear(*self.ln1)).dropout(self.dropout)
+      x = x + self.act(x.layernorm().linear(*self.ln2).linear(*self.ff1)).linear(*self.ff2).dropout(self.dropout)
     else:
-      x = x + self.attn(x).dropout(0.1)
+      x = x + self.attn(x).dropout(self.dropout)
       x = x.layernorm().linear(*self.ln1)
-      x = x + self.act(x.linear(*self.ff1)).linear(*self.ff2).dropout(0.1)
+      x = x + self.act(x.linear(*self.ff1)).linear(*self.ff2).dropout(self.dropout)
       x = x.layernorm().linear(*self.ln2)
     return x
 
