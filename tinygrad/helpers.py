@@ -75,6 +75,8 @@ class dtypes:
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
   @staticmethod
+  def is_int(x: DType): return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64) 
+  @staticmethod
   def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
 
 
