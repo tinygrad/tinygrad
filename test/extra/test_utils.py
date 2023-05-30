@@ -54,6 +54,8 @@ class TestUtils(unittest.TestCase):
         LayerWithOffset()
       )
 
+      if model_is_half: model = model.half()
+
       with tempfile.TemporaryDirectory() as tmpdirname:
         path = tmpdirname + '/testloadmodel.pth'
         torch.save(model.state_dict(), path)
