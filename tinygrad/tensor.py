@@ -150,16 +150,20 @@ class Tensor:
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
 
-  _rng: ClassVar[np.random.Generator] = np.random.default_rng()
+  _rng: ClassVar[Union[np.random.Generator, np.random.RandomState]] = np.random.default_rng()
   @staticmethod
-  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
+  def manual_seed(seed=None, legacy=False): Tensor._rng = np.random.default_rng(seed) if not legacy else np.random.RandomState(seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor:
+    random = lambda size, dtype: Tensor._rng.random(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.random(size).astype(dtype)
+    return Tensor(LazyNumpyArray(lambda lna: random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor:
+    standard_normal = lambda size, dtype: Tensor._rng.standard_normal(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.standard_normal(size).astype(dtype)
+    return Tensor(LazyNumpyArray(lambda lna: standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # ***** rng hlops *****
 
