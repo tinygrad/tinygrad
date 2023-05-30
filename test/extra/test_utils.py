@@ -37,22 +37,22 @@ class TestUtils(unittest.TestCase):
         )
 
     for isfloat16 in [True, False]:
-      for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (isfloat16, None)]:
+      for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (False, None)]:
         if isfloat16 == loaded_is_float16:
-          print(f"Saving with float16={isfloat16}")
+          print(f"Saving with float32 and loading with isfloat16={isfloat16}")
           print(f"Loading with dtype={load_dtype}")
           model = torch.nn.Sequential(
             torch.nn.Linear(4, 8),
             torch.nn.Linear(8, 3),
             LayerWithOffset()
           )
-          if isfloat16: model = model.half()
 
           with tempfile.TemporaryDirectory() as tmpdirname:
             path = tmpdirname + '/testloadmodel.pth'
             torch.save(model.state_dict(), path)
             model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
 
+          if isfloat16: model = model.half()
           for name, a in model.state_dict().items():
             b = model2[name]
             a, b = a.numpy(), b.numpy()
