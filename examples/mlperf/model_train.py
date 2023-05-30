@@ -1,6 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
+from tqdm import trange
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -10,19 +11,19 @@ def train_resnet():
   from models.resnet import ResNet50
   #from datasets.imagenet import iterate
   from extra.lr_scheduler import CosineAnnealingLR
-  from examples.mlperf.metrics import f1_score
+  from examples.mlperf.metrics import cross_entropy_loss
 
   model = ResNet50()
   optimizer = optim.SGD(optim.get_parameters(model), lr=1e-4, momentum = .875, weight_decay = 1/2**15)
   scheduler = CosineAnnealingLR(optimizer, 250)
+  args_epoch = 250
 
-  print("here")
   for epoch in (r := trange(args_epoch)):
     for image, label in iterate(val=False):
       for p in model.parameters():
         p.grad = None
       out = model(Tensor(image))
-      loss = f1_score(out, label)
+      loss = cross_entropy_loss(out, label)
       loss.backwards()
       optimizer.step()
     r.set_description("some data")

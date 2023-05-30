@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 import functools, pathlib
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/imagenet"
+BASEDIR = pathlib.Path(__file__).parent.parent / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
@@ -46,6 +46,8 @@ def fetch_batch(bs, val=False):
   return np.array(X), np.array(Y)
 
 if __name__ == "__main__":
-  X,Y = fetch_batch(64)
-  print(X.shape, Y)
+  #X,Y = fetch_batch(64)
+  #print(X.shape, Y)
+  X,Y = fetch_batch(32,val=True)
+  print(X.shape,Y)
 
