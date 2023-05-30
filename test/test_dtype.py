@@ -5,26 +5,26 @@ from tinygrad.lazy import Device
 from tinygrad.tensor import Tensor, dtypes
 
 
-def _test_to_np(a, np_dtype, target):
+def _test_to_np(a:Tensor, np_dtype, target):
   print(a)
   na = a.numpy()
   print(na, na.dtype, a.lazydata.realized)
   assert na.dtype == np_dtype
   np.testing.assert_allclose(na, target)
 
-def _test_op(fxn, target_dtype: DType, target):
+def _test_op(fxn, target_dtype:DType, target):
   c = fxn()
   if DEBUG >= 2: print(c.numpy())
   assert c.dtype == target_dtype
   np.testing.assert_allclose(c.numpy(), target)
 
-def _test_cast(a, target_dtype, target): _test_op(lambda: a.cast(target_dtype), target_dtype, target)
-def _test_add(a, b, target_dtype, target): _test_op(lambda: a+b, target_dtype, target)
-def _test_mul(a, b, target_dtype, target): _test_op(lambda: a*b, target_dtype, target)
-def _test_matmul(a, b, target_dtype, target): _test_op(lambda: a@b, target_dtype, target)
-def _test_add_upcast(a, b, target_dtype, target): _test_op(lambda: a+b, target_dtype, target)
-def _test_mul_upcast(a, b, target_dtype, target): _test_op(lambda: a*b, target_dtype, target)
-def _test_matmul_upcast(a, b, target_dtype, target): _test_op(lambda: a@b, target_dtype, target)
+def _test_cast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.cast(target_dtype), target_dtype, target)
+def _test_add(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a+b, target_dtype, target)
+def _test_mul(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a*b, target_dtype, target)
+def _test_matmul(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a@b, target_dtype, target)
+def _test_add_upcast(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a+b, target_dtype, target)
+def _test_mul_upcast(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a*b, target_dtype, target)
+def _test_matmul_upcast(a:Tensor, b:Tensor, target_dtype:DType, target): _test_op(lambda: a@b, target_dtype, target)
 
 # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
 # for LLVM, it segfaults because it can't link to the casting function
