@@ -79,8 +79,8 @@ def my_unpickle(fb0):
   return MyPickle(fb0).load(), key_prelookup
 
 def post_process(t: Tensor, load_dtype):
-    if load_dtype is not None and load_dtype != t.dtype: t.lazydata = t.lazydata.cast(load_dtype)
-    if not t.lazydata.realized: t.realize()
+  if load_dtype is not None and load_dtype != t.dtype: t.lazydata = t.lazydata.cast(load_dtype)
+  if not t.lazydata.realized: t.realize()
 
 def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False):
   bytes_size = np.dtype(dtype).itemsize
