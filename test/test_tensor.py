@@ -179,5 +179,9 @@ class TestTinygrad(unittest.TestCase):
     assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
     assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}" 
 
+  def test_numel(self): 
+    a = Tensor.empty(6, 12, 79)
+    self.assertTrue(a.numel() == 5688)
+
 if __name__ == '__main__':
   unittest.main()
