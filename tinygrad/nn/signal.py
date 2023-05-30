@@ -26,7 +26,6 @@ def create_fourier_kernels(
     sr=44100,
     freq_scale="linear",
     window="hann",
-    verbose=True,
 ):
   if freq_bins == None:
     freq_bins = n_fft // 2 + 1
@@ -46,10 +45,6 @@ def create_fourier_kernels(
   window_mask = pad_center(window_mask, n_fft)
 
   if freq_scale == "linear":
-    if verbose == True:
-      print(
-          f"sampling rate = {sr}. Please make sure the sampling rate is correct in order to"
-          f"get a valid freq range")
     start_bin = start_freq * n_fft / sr
     scaling_ind = (end_freq - start_freq) * (n_fft / sr) / freq_bins
 
@@ -62,10 +57,6 @@ def create_fourier_kernels(
                              n_fft)
 
   elif freq_scale == "log":
-    if verbose == True:
-      print(
-          f"sampling rate = {sr}. Please make sure the sampling rate is correct in order to"
-          f"get a valid freq range")
     start_bin = start_freq * n_fft / sr
     scaling_ind = np.log(end_freq / start_freq) / freq_bins
 
@@ -79,10 +70,6 @@ def create_fourier_kernels(
                              (np.exp(k * scaling_ind) * start_bin) * s / n_fft)
 
   elif freq_scale == "log2":
-    if verbose == True:
-      print(
-          f"sampling rate = {sr}. Please make sure the sampling rate is correct in order to"
-          f"get a valid freq range")
     start_bin = start_freq * n_fft / sr
     scaling_ind = np.log2(end_freq / start_freq) / freq_bins
 
@@ -102,7 +89,9 @@ def create_fourier_kernels(
       wsin[k, 0, :] = np.sin(2 * np.pi * k * s / n_fft)
       wcos[k, 0, :] = np.cos(2 * np.pi * k * s / n_fft)
   else:
-    print("Please select the correct frequency scale, 'linear' or 'log'")
+    raise NotImplementedError(
+        'Please select the correct frequency scale: "linear", "log", "log2", "no"'
+    )
   return (
       wsin.astype(np.float32),
       wcos.astype(np.float32),
