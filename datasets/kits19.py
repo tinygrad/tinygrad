@@ -2,12 +2,13 @@ import random
 import functools
 from pathlib import Path
 import requests
+import scipy
 import numpy as np
 import nibabel as nib
-from scipy import signal
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
+random.seed(-1)
 
 BASEDIR = Path(__file__).parent.parent.resolve() / "datasets" / "kits19" / "data"
 
@@ -23,6 +24,8 @@ mv kits datasets
 ```
 """
 
+# ***** training and validation set*****
+
 @functools.lru_cache(None)
 def get_train_files():
   return sorted([x for x in BASEDIR.iterdir() if x.stem.startswith("case") and int(x.stem.split("_")[-1]) < 210 and x not in get_val_files()])
@@ -31,6 +34,8 @@ def get_train_files():
 def get_val_files():
   eval_cases = requests.get("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt")
   return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in eval_cases.text.split("\n")])
+
+# ***** preprocess helpers *****
 
 def load_pair(file_path):
   image, label = nib.load(file_path / "imaging.nii.gz"), nib.load(file_path / "segmentation.nii.gz")
@@ -54,7 +59,7 @@ def normal_intensity(image, min_clip=-79.0, max_clip=304.0, mean=101.0, std=76.9
   image = (image - mean) / std
   return image
 
-def pad_to_min_shape(image, label, roi_shape=(128, 128, 128)):
+def pad_to_min_shape(image, label, roi_shape=(128,128,128)):
   current_shape = image.shape[1:]
   bounds = [max(0, roi_shape[i] - current_shape[i]) for i in range(3)]
   paddings = [(0, 0)] + [(bounds[i] // 2, bounds[i] - bounds[i] // 2) for i in range(3)]
@@ -62,11 +67,85 @@ def pad_to_min_shape(image, label, roi_shape=(128, 128, 128)):
   label = np.pad(label, paddings, mode="edge")
   return image, label
 
-def preprocess(file_path):
+# ***** transformation helpers (for training set) *****
+
+def rand_foreg_cropd(image, label, patch_size=(128,128,128)):
+  def adjust(foreg_slice, patch_size, label, idx):
+    diff = patch_size[idx-1] - (foreg_slice[idx].stop - foreg_slice[idx].start)
+    sign, diff = -1 if diff < 0 else 1, abs(diff)
+    ladj = 0 if diff == 0 else random.randrange(diff)
+    hadj = diff - ladj
+    low = max(0, foreg_slice[idx].start - sign * ladj)
+    high = min(label.shape[idx], foreg_slice[idx].stop + sign * hadj)
+    diff = patch_size[idx-1] - (high - low)
+    if diff > 0 and low == 0:
+      high += diff
+    elif diff > 0:
+      low -= diff
+    return low, high
+  cl = np.random.choice(np.unique(label[label>0]))
+  foreg_slices = scipy.ndimage.find_objects(scipy.ndimage.label(label==cl)[0])
+  foreg_slices = [x for x in foreg_slices if x is not None]
+  slice_volumes = [np.prod([s.stop - s.start for s in sl]) for sl in foreg_slices]
+  foreg_slices = [foreg_slices[i] for i in np.argsort(slice_volumes)[-2:]]
+  if not foreg_slices:
+    return self.rand_crop(image, label)
+  foreg_slice = foreg_slices[random.randrange(len(foreg_slices))]
+  low_x, high_x = adjust(foreg_slice, patch_size, label, 1)
+  low_y, high_y = adjust(foreg_slice, patch_size, label, 2)
+  low_z, high_z = adjust(foreg_slice, patch_size, label, 3)
+  image = image[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  label = label[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  return image, label
+
+def rand_crop(image, label, patch_size=(128,128,128)):
+  ranges = [s - p for s, p in zip(image.shape[1:], patch_size)]
+  cord = [0 if x == 0 else random.randrange(x) for x in ranges]
+  low_x, high_x = cord[0], cord[0] + patch_size[0]
+  low_y, high_y = cord[1], cord[1] + patch_size[1]
+  low_z, high_z = cord[2], cord[2] + patch_size[2]
+  image = image[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  label = label[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  return image, label
+
+def rand_balanced_crop(image, label, oversampling=0.4):
+  if random.random() < oversampling:
+    image, label = rand_foreg_cropd(image, label)
+  else:
+    image, label = rand_crop(image, label)
+  return image, label
+
+def rand_flip(image, label, axis=(1,2,3)):
+  if random.random() <  1 / len(axis):
+    image = np.flip(image, axis=axis).copy()
+    label = np.flip(label, axis=axis).copy()
+  return image, label
+
+def random_brightness_augmentation(image, factor=0.3, prob=0.1):
+  if random.random() < prob:
+    factor = np.random.uniform(low=1.0-factor, high=1.0+factor, size=1)
+    image = (image * (1 + factor)).astype(image.dtype)
+  return image
+
+def gaussian_noise(image, mean=0.0, std=0.1, prob=0.1):
+  if random.random() < prob:
+    scale = np.random.uniform(low=0.0, high=std)
+    noise = np.random.normal(loc=mean, scale=scale, size=image.shape).astype(image.dtype)
+    image += noise
+  return image
+
+# ***** preprocessing and dataset iterator *****
+
+def preprocess(file_path, val=False):
   image, label, image_spacings = load_pair(file_path)
   image, label = resample3d(image, label, image_spacings)
   image = normal_intensity(image.copy())
   image, label = pad_to_min_shape(image, label)
+  if not val:
+    image, label = rand_balanced_crop(image, label)
+    image, label = rand_flip(image, label)
+    image = random_brightness_augmentation(image)
+    image = gaussian_noise(image)
   return image, label
 
 def iterate(val=True, shuffle=False):
@@ -74,12 +153,14 @@ def iterate(val=True, shuffle=False):
   files = get_val_files() if val else get_train_files()
   if shuffle: random.shuffle(files)
   for file in files:
-    X, Y = preprocess(file)
+    X, Y = preprocess(file, val=val)
     X = np.expand_dims(X, axis=0)
     yield (X, Y)
 
+# ***** evaluation helpers *****
+
 def gaussian_kernel(n, std):
-  gaussian_1d = signal.gaussian(n, std)
+  gaussian_1d = scipy.signal.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
   gaussian_3d = np.outer(gaussian_2d, gaussian_1d)
   gaussian_3d = gaussian_3d.reshape(n, n, n)
@@ -92,6 +173,8 @@ def pad_input(volume, roi_shape, strides, padding_mode="constant", padding_val=-
   bounds = [bounds[i] if (volume.shape[2:][i] + bounds[i]) >= roi_shape[i] else bounds[i] + strides[i] for i in range(dim)]
   paddings = [bounds[2]//2, bounds[2]-bounds[2]//2, bounds[1]//2, bounds[1]-bounds[1]//2, bounds[0]//2, bounds[0]-bounds[0]//2, 0, 0, 0, 0]
   return F.pad(torch.from_numpy(volume), paddings, mode=padding_mode, value=padding_val).numpy(), paddings
+
+# ***** inference (for validation set) *****
 
 def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5):
   from tinygrad.jit import TinyJit
@@ -130,5 +213,5 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   return result, labels
 
 if __name__ == "__main__":
-  for X, Y in iterate():
+  for X, Y in iterate(val=False):
     print(X.shape, Y.shape)
