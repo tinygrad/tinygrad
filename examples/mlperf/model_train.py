@@ -1,3 +1,4 @@
+import time
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
@@ -24,6 +25,7 @@ def train_unet3d():
     loss.backward()
     opt.step()
     t.set_description(f"loss {loss.numpy().item()}")
+  s = 0
   for i, (image, label) in enumerate(iterate(), start=1):
     mt = time.perf_counter()
     pred, label = sliding_window_inference(mdl, image, label)
