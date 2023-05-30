@@ -26,7 +26,7 @@ class TritonProgram:
     if wait:
       start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
       start.record()
-    self.prg[tuple([1]*(3-len(global_size)) + global_size)](*[x._buf for x in args])
+    self.prg[tuple(global_size + [1]*(3-len(global_size)))](*[x._buf for x in args])
     if wait:
       end.record()
       torch.cuda.synchronize()
