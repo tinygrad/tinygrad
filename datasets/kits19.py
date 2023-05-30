@@ -24,9 +24,13 @@ mv kits datasets
 """
 
 @functools.lru_cache(None)
+def get_train_files():
+  return sorted([x for x in BASEDIR.iterdir() if x.stem.startswith("case") and int(x.stem.split("_")[-1]) < 210 and x not in get_val_files()])
+
+@functools.lru_cache(None)
 def get_val_files():
-  data = requests.get("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt")
-  return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in data.text.split("\n")])
+  eval_cases = requests.get("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt")
+  return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in eval_cases.text.split("\n")])
 
 def load_pair(file_path):
   image, label = nib.load(file_path / "imaging.nii.gz"), nib.load(file_path / "segmentation.nii.gz")
@@ -66,10 +70,9 @@ def preprocess(file_path):
   return image, label
 
 def iterate(val=True, shuffle=False):
-  if not val: raise NotImplementedError
-  files = get_val_files()
-  order = list(range(0, len(files)))
-  if shuffle: random.shuffle(order)
+  # TODO: support batch size > 1
+  files = get_val_files() if val else get_train_files()
+  if shuffle: random.shuffle(files)
   for file in files:
     X, Y = preprocess(file)
     X = np.expand_dims(X, axis=0)
