@@ -1,10 +1,69 @@
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit
 from tinygrad.nn import Linear, LayerNorm, Embedding
-import numpy as np
 from extra.utils import download_file, get_child
+from extra.training import sparse_categorical_crossentropy
 from pathlib import Path
 
+class BertForPreTraining:
+  def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
+    self.bert = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
+    self.cls = BertPreTrainingHeads(hidden_size, vocab_size)
+
+  def load_from_pretrained(self):
+    fn = Path(__file__).parent.parent / "weights/bert_for_pretraining.pt"
+    fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
+    download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
+
+    import torch
+    with open(fn, "rb") as f:
+      state_dict = torch.load(f, map_location="cpu")
+
+    for k, v in state_dict.items():
+      if "position_ids" in k: continue
+      get_child(self, k).assign(v.numpy()).realize()
+
+  def __call__(self, input_ids:Tensor, token_type_ids:Tensor, attention_mask:Tensor):
+    sequence_outputs, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
+    sequence_output = sequence_outputs[-1]
+    prediction_scores, seq_relationship_score = self.cls(sequence_output, pooled_output)
+    return prediction_scores, seq_relationship_score
+  
+  def loss(self, prediction_scores:Tensor, seq_relationship_score:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+    masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids.numpy())
+    next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels.numpy())
+    return masked_lm_loss + next_sentence_loss
+
+
+class BertPreTrainingHeads:
+  def __init__(self, hidden_size, vocab_size):
+    self.predictions = BertLMPredictionHead(hidden_size, vocab_size)
+    self.seq_relationship = Linear(hidden_size, 2)
+
+  def __call__(self, sequence_output:Tensor, pooled_output:Tensor):
+    prediction_scores = self.predictions(sequence_output)
+    seq_relationship_score = self.seq_relationship(pooled_output)
+    return prediction_scores, seq_relationship_score
+
+class BertLMPredictionHead:
+  def __init__(self, hidden_size, vocab_size):
+    self.transform = BertPredictionHeadTransform(hidden_size)
+    self.decoder = Linear(hidden_size, vocab_size)
+    self.bias = Tensor.zeros(vocab_size)
+
+  def __call__(self, hidden_states:Tensor):
+    hidden_states = self.transform(hidden_states)
+    hidden_states = self.decoder(hidden_states) + self.bias
+    return hidden_states
+
+class BertPredictionHeadTransform:
+  def __init__(self, hidden_size):
+    self.dense = Linear(hidden_size, hidden_size)
+    self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
+
+  def __call__(self, hidden_states:Tensor):
+    hidden_states = self.dense(hidden_states)
+    hidden_states = self.LayerNorm(hidden_states)
+    return hidden_states
 
 class BertForQuestionAnswering:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
@@ -27,7 +86,7 @@ class BertForQuestionAnswering:
       get_child(self, k).assign(v.numpy()).realize()
 
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
-    sequence_output = self.bert(input_ids, attention_mask, token_type_ids)
+    sequence_output, pooled_output = self.bert(input_ids, attention_mask, token_type_ids)
     logits = self.qa_outputs(sequence_output)
     start_logits, end_logits = logits.chunk(2, dim=-1)
     start_logits = start_logits.reshape(-1, 1)
@@ -39,6 +98,7 @@ class Bert:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob):
     self.embeddings = BertEmbeddings(hidden_size, max_position_embeddings, type_vocab_size, vocab_size, hidden_dropout_prob)
     self.encoder = BertEncoder(hidden_size, intermediate_size, num_attention_heads, num_hidden_layers, attention_probs_dropout_prob, hidden_dropout_prob)
+    self.pooler = BertPooler(hidden_size)
 
   def __call__(self, input_ids, attention_mask, token_type_ids):
     extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
@@ -47,7 +107,9 @@ class Bert:
     embedding_output = self.embeddings(input_ids, token_type_ids)
     encoder_outputs = self.encoder(embedding_output, extended_attention_mask)
 
-    return encoder_outputs
+    pooled_output = self.pooler(encoder_outputs)
+
+    return encoder_outputs, pooled_output
 
 class BertEmbeddings:
   def __init__(self, hidden_size, max_position_embeddings, type_vocab_size, vocab_size,  hidden_dropout_prob):
@@ -109,6 +171,9 @@ def erf(x):
   t = (1 + 0.3275911 * x.abs()).reciprocal()
   return x.sign() * (1 - ((((1.061405429 * t + -1.453152027) * t + 1.421413741) * t + -0.284496736) * t + 0.254829592) * t * (-(x.square())).exp())
 
+def fgelu(x):
+  return 0.5 * x * (1 + erf(x / 1.41421))
+
 class BertIntermediate:
   def __init__(self, hidden_size, intermediate_size):
     self.dense = Linear(hidden_size, intermediate_size)
@@ -116,7 +181,7 @@ class BertIntermediate:
   def __call__(self, hidden_states):
     x = self.dense(hidden_states)
     # tinygrad gelu is openai gelu but we need the original bert gelu
-    return x * 0.5 * (1.0 + erf(x / 1.41421))
+    return fgelu(x)
 
 class BertAttention:
   def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):
@@ -176,3 +241,13 @@ class BertSelfOutput:
     hidden_states = hidden_states.dropout(self.dropout)
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
+
+class BertPooler:
+  def __init__(self, hidden_size):
+    self.dense = Linear(hidden_size, hidden_size)
+
+  def __call__(self, hidden_states):
+    first_token_tensor = hidden_states[:, 0]
+    pooled_output = self.dense(first_token_tensor)
+    pooled_output = pooled_output.tanh()
+    return pooled_output
