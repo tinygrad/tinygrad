@@ -53,7 +53,6 @@ class TestUtils(unittest.TestCase):
         torch.nn.Linear(8, 3),
         LayerWithOffset()
       )
-
       if model_is_half: model = model.half()
 
       with tempfile.TemporaryDirectory() as tmpdirname:
