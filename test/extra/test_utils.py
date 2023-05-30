@@ -61,7 +61,7 @@ class TestUtils(unittest.TestCase):
         torch.save(model.state_dict(), path)
         model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
 
-      if load_dtype == dtypes.float16: model = model.half()
+      if load_dtype == dtypes.float16 and not model_is_half: model = model.half()
       for name, a in model.state_dict().items():
         b = model2[name]
         a, b = a.numpy(), b.numpy()
