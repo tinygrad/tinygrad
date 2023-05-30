@@ -78,9 +78,8 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def post_process(t: Tensor, stored_dtype: DType, load_dtype: DType):
-    if load_dtype is None: load_dtype = dtypes.from_np(stored_dtype)
-    if load_dtype != t.dtype: t.lazydata = t.lazydata.cast(load_dtype)
+def post_process(t: Tensor, load_dtype):
+    if load_dtype is not None and load_dtype != t.dtype: t.lazydata = t.lazydata.cast(load_dtype)
     if not t.lazydata.realized: t.realize()
 
 def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False):
@@ -141,7 +140,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True, load_dtyp
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
             load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
-            post_process(v[2], stored_dtype=v[0], load_dtype=load_dtype)
+            post_process(v[2], load_dtype=load_dtype)
       if multithreaded:
         import concurrent.futures
         # 2 seems fastest
@@ -187,7 +186,7 @@ def fake_torch_load(b0, load_dtype=None):
     assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
     assert storage_offset == 0, "not implemented"
     load_single_weight(tensor, fb0, np_shape, np_strides, storage_type, None)
-    post_process(tensor, stored_dtype=storage_type, load_dtype=load_dtype)
+    post_process(tensor, load_dtype=load_dtype)
   return ret
 
 def get_child(parent, key):
