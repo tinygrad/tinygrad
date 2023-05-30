@@ -1,8 +1,16 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
+from tinygrad.nn import optim
 
 def train_resnet():
   # TODO: Resnet50-v1.5
+  # cosine LR or OneCycleLR, use linear warmup for bigger batch sizes, weight decay, 250 epochs (best possible accuracy) 
+  # use mixup regularization
+  # for data augmentation - Norm, random croped, horizontal flip
+  from models.resnet import ResNet50
+  model = ResNet50()
+  optimizer = optim.SGD(optim.get_parameters(model), lr=1e-4, momentum = .875)
+
   pass
 
 def train_retinanet():
