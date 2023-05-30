@@ -59,3 +59,13 @@ def f1_score(x, y):
   p = ns / len(xt)
   r = ns / len(yt)
   return 2 * p * r / (p + r)
+
+def cross_entropy_loss(x, y, reduction="mean", label_smoothing=0.0):
+  epsilon = 1e-12
+  #y = np.multiply(y,(1-label_smoothing)) + label_smoothing/x.shape[1]
+  softmax = np.exp(x) / np.sum(np.exp(x), axis=1, keepdims=True)
+  loss = -np.log(np.maximum(epsilon, softmax[np.arange(len(y)), y]))
+  if reduction != "none":
+      return np.mean(loss) if reduction == "mean" else np.sum(loss)
+  return loss
+
