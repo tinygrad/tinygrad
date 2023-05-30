@@ -31,15 +31,15 @@ def word_error_rate(x, y):
   return float(scores) / words, float(scores), words
 
 def one_hot(arr, num_classes=3):
-  res = np.eye(num_classes)[np.array(arr).reshape(-1)]
+  res = np.eye(num_classes)[np.array(arr.astype(int)).reshape(-1)]
   arr = res.reshape(list(arr.shape) + [num_classes])
   arr = arr.transpose((0, 4, 1, 2, 3)).astype(np.float32)
   return arr
 
-def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6):
+def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True):
   channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))
   prediction = prediction.argmax(axis=channel_axis)
-  prediction, target= one_hot(prediction)[:, 1:], one_hot(target)[:, 1:]
+  prediction, target = one_hot(prediction)[:, 1:], one_hot(target)[:, 1:]
   intersection = np.sum(prediction * target, axis=reduce_axis)
   target_sum = np.sum(target, axis=reduce_axis)
   prediction_sum = np.sum(prediction, axis=reduce_axis)
@@ -47,9 +47,10 @@ def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-
   return result[0]
 
 def dice_ce_loss(y_pred, y_true):
-  cross_entroy = sparse_categorical_crossentropy(y_pred, y_true)
-  dice = np.mean(1.0 - dice_score(y_pred, y_true), axis=0)
-  return (cross_entrpy + dice) / 2
+  y_pred = y_pred.log_softmax()
+  cross_entropy = sparse_categorical_crossentropy(y_pred.permute(0,2,3,4,1), y_true)
+  dice = np.mean(1.0 - dice_score(y_pred.numpy(), y_true, argmax=False), axis=0)
+  return (cross_entropy + dice) / 2
 
 def normalize_string(s):
   s = "".join(c for c in s.lower() if c not in string.punctuation)
