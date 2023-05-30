@@ -31,7 +31,7 @@ class ContextVar:
     self.key, self.initial_value = key, getenv(key, default_value)
     if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
   def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
-  def __bool__(self): return self.value != 0
+  def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   @property

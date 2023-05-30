@@ -33,7 +33,8 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+    device = Device.DEFAULT if device is None else device
     device = (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")  # canonicalize device
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
@@ -143,7 +144,8 @@ class Tensor:
   def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
+  def empty(*shape, device=None, dtype:Optional[DType]=None, **kwargs):
+    device = Device.DEFAULT if device is None else device
     # NOTE: we do the reshape to fix interpreted buffers
     return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, device), dtype=dtype, device=device, **kwargs).reshape(*shape)
 
