@@ -8,7 +8,7 @@ import nibabel as nib
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
-random.seed(-1)
+random.seed(1)
 
 BASEDIR = Path(__file__).parent.parent.resolve() / "datasets" / "kits19" / "data"
 
