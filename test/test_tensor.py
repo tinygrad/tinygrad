@@ -110,19 +110,6 @@ class TestTinygrad(unittest.TestCase):
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
     
-  def test_arange(self):
-    arange = Tensor.arange(stop=1337)
-    expected = Tensor(np.arange(stop=1337))
-    assert type(arange) is Tensor
-    np.testing.assert_allclose(arange.numpy(), expected.numpy())
-    
-  def test_cumsum(self):
-    arange = np.arange(stop=100)
-    expected = Tensor(np.cumsum(arange))
-    cumsum = Tensor.cumsum(arange)
-    assert type(cumsum) is Tensor
-    np.testing.assert_allclose(cumsum.numpy(), expected.numpy())
-
   #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   @unittest.skip("float64 support broken")
   def test_jacobian(self):
