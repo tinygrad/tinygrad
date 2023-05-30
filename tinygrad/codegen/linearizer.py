@@ -5,7 +5,7 @@ from enum import Enum, auto
 from math import prod
 
 from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same
-from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, map_buffers, UnaryOps
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
@@ -101,7 +101,7 @@ class Linearizer:
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
     # mapping the buffers to integers is required because a-b != b-a (and how would you tell a and b apart?)
-    self.key = f"ASTKernelKey ast={str(map_buffers({x:i for i,x in enumerate(self.bufs)}, ast))} bufs={self.bufs}"
+    self.key = f"ASTKernelKey ast={str(ast.map_buffers({x:i for i,x in enumerate(self.bufs)}))} bufs={self.bufs}"
 
   def process(self) -> None:
     if hasattr(self, "sts"): return   # already processed
@@ -307,7 +307,7 @@ class Linearizer:
         loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, end_local_idxs+fake_reduce_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",), None), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
+        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",), None, (loaded_buffers["LOCAL_BUFFER"],)), [acc[off] for off in self.acc_offsets(-1)], loaded_buffers, ssa, do_reduce=True)
 
         # end the late reduce loop
         self.uop(UOps.ENDLOOP, None, [], (end_local_idxs, "late_reduce"))

@@ -6,7 +6,7 @@ from weakref import WeakValueDictionary
 from tinygrad.helpers import getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
 from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
-from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, map_buffers
+from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
 from tinygrad.runtime.lib import RawConst, RawBuffer
 from tinygrad.graph import log_op, GRAPH
 
@@ -31,7 +31,7 @@ def _ast_reduceops(self:LazyBuffer) -> LazyOp:
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(self:LazyBuffer) -> LazyOp:
-  real_srcs: Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in self.op.get_buffers()}
+  real_srcs: Dict[LazyBuffer, Union[None, LazyOp, LazyBuffer]] = {x:None for x in self.op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
@@ -41,7 +41,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
     if psrc[1].optype == ReduceOps:
       top = _ast_reduceops(psrc[1])
     real_srcs[psrc[0]] = top
-    real_srcs.update({x:x for x in top.get_buffers()})  # the reduce op buffers are not modified
+    real_srcs.update({x:x for x in top.buffers})  # the reduce op buffers are not modified
 
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrc[0].shape != psrc[1].shape:
@@ -52,7 +52,7 @@ def _ast_binaryops(self:LazyBuffer) -> LazyOp:
   # NOTE: these RESHAPEs will return self if they don't change the shape
   for x in real_srcs.keys():
     if not real_srcs[x]: real_srcs[x] = x.movement_op(MovementOps.RESHAPE, intermediate_shape)
-  ast = map_buffers(real_srcs, self.op)
+  ast = self.op.map_buffers(real_srcs)
   return LazyOp(MovementOps.RESHAPE, (ast, ), self.shape) if intermediate_shape != self.shape else ast
 
 # **** lazy operations ****
@@ -79,7 +79,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   return ret
 
 class LazyBuffer:
-  __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', '__weakref__'
+  __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
     self.st = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
@@ -90,7 +90,7 @@ class LazyBuffer:
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    for x in op.get_buffers(): x.children.add(self)
+    for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
@@ -110,7 +110,7 @@ class LazyBuffer:
         except KeyError: pass
       # run the ast if we still have to, and log the op
       if not self.realized:
-        deque(map(LazyBuffer.realize, self.op.get_buffers())) # NOTE: this looks crazy but it's actually slightly faster than a for loop and realize is one of the most expensive functions
+        deque(map(LazyBuffer.realize, self.op.buffers)) # NOTE: this looks crazy but it's actually slightly faster than a for loop and realize is one of the most expensive functions
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if self.optype != MovementOps and self.dtype.__class__ == ImageDType and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
@@ -160,7 +160,7 @@ class LazyBuffer:
   def binary_op(self:LazyBuffer, op:BinaryOps, y:LazyBuffer) -> LazyBuffer: return elementwise_op(op, self, y)
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op == LoadOps.CONTIGUOUS: return self  # two CONTIGUOUS in a row is one
-    return create_lazybuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype)
+    return create_lazybuffer(self.device, self.shape, LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,)), self.dtype)
 
   def reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[int, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
@@ -234,7 +234,7 @@ class LazyBuffer:
     else:
       return self
   
-  def get_buffers(self) -> List[Any]: return [self]
+  def get_buffers(self) -> Tuple[LazyBuffer]: return (self,)
   def get_lazyops(self) -> List[Any]: return []
   def replace_with_movement_ops(self: LazyBuffer, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> LazyBuffer:
     y = self
@@ -321,7 +321,7 @@ def _realize_contiguous(buffer: LazyBuffer) -> None:
     buffer.realized = realized
   else:
     # TODO: remove UnaryOps.NOOP, replace with LoadOps.CONTIGUOUS. confusing with Compiled though
-    buffer.op = LazyOp(UnaryOps.NOOP, buffer.op.src, None)
+    buffer.op = LazyOp(UnaryOps.NOOP, buffer.op.src)
 
 def _realize_custom(buffer: LazyBuffer) -> None:
   # this needs to immediately realize

@@ -152,7 +152,7 @@ def get_pad_args(shape, arg: Tuple[Tuple[int, int], ...]):
   return tuple([(-b,s+e) for s,(b,e) in zip(shape, arg)]), tuple([(b,s+b) for s,(b,_) in zip(shape, arg)])
 
 class ShapeTracker:
-  __slots__ = "views", "__weakref__"
+  __slots__ = "views"
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
     self.views: List[View] = views if views is not None else ([*shape.views] if shape.__class__ == ShapeTracker else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"

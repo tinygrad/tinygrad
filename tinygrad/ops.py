@@ -1,8 +1,7 @@
 from __future__ import annotations
-from dataclasses import dataclass
 import functools, itertools, random, time
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, ClassVar
 from tinygrad.helpers import DEBUG, getenv, GlobalCounters, DType, colored
 from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, MovementOps
@@ -21,28 +20,38 @@ class LoadOps(Enum): EMPTY = auto(); FROMCPU = auto(); CONTIGUOUS = auto(); TOCP
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, FusedOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[FusedOps]]
 
-@dataclass(frozen=True)
 class LazyOp:
-  __slots__ = "op", "src", "arg", "__weakref__"
+  # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
+  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Union[LazyOp, LazyBuffer]
-  # TODO: add dest to support multiple outputs. on second thought, multiple outputs will have multiple LazyOps.
+  buffers: Tuple[LazyBuffer]
 
-  def map_buffers(self, real_srcs: Dict[Any, Any]): return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Union[LazyOp, LazyBuffer] = None, buffers: Tuple[LazyBuffer] = None):
+    self.op = op
+    self.src = src
+    self.arg = arg
+    if not buffers:
+      buffers = tuple()
+      for s in src:
+        try: buffers += s.get_buffers()
+        except AttributeError: pass
+    self.buffers = buffers
 
-  def get_buffers(self) -> List[Any]: return [item for x in self.src for item in x.get_buffers()]
+  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
 
+  # Any == Union[LazyBuffer, DeviceBuffer]
+  def map_buffers(self, real_srcs: Dict[Any, Any]):
+    return LazyOp(self.op, tuple([y.map_buffers(real_srcs) for y in self.src]), self.arg)
+
+  def get_buffers(self) -> Tuple[LazyBuffer]: return self.buffers
   def get_lazyops(self) -> List['LazyOp']: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self: LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
     from tinygrad.lazy import elementwise_op
     assert self.op in BinaryOps or self.op in UnaryOps
     return elementwise_op(self.op, *[z.replace_with_movement_ops(ops) for z in self.src], arg=self.arg)   # type: ignore
-
-# Any == Union[LazyBuffer, DeviceBuffer]
-def map_buffers(real_srcs:Dict[Any, Any], x:Any) -> LazyOp:
-  return x.map_buffers(real_srcs)
 
 # **************** for Interpreted Buffers ****************
 
