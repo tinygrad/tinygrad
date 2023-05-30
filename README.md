@@ -165,7 +165,7 @@ python3 examples/efficientnet.py webcam
 
 **PROTIP**: Set `DEBUG=2` environment variable if you want to see why it's slow.
 
-### Tinygrad supports :-
+## Tinygrad supports :-
 #### 1. Stable Diffusion
 
 You might need to download the [weight](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt) of Stable Diffusion and put it into `weights/`
