@@ -78,12 +78,12 @@ def my_unpickle(fb0):
 
   return MyPickle(fb0).load(), key_prelookup
 
-def post_process(t: Tensor, load_dtype: DType):
+def post_process(t: Tensor, stored_dtype: DType, load_dtype: DType):
+    if load_dtype is None: load_dtype = dtypes.from_np(stored_dtype)
     if load_dtype != t.dtype: t.lazydata = t.lazydata.cast(load_dtype)
     if not t.lazydata.realized: t.realize()
 
-def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False, load_dtype=None):
-  if load_dtype is None: load_dtype = dtypes.from_np(dtype)
+def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, mmap_allowed=False):
   bytes_size = np.dtype(dtype).itemsize
   if t is None:
     myfile.seek(prod(shape) * bytes_size, 1)
@@ -107,7 +107,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
 
     lna = t.lazydata.op.arg
     lna.fxn = lambda _: np_array
-    return post_process(t, load_dtype=load_dtype)
+    return
 
   # ["METAL", "CLANG", "LLVM"] support readinto for more speed
   # ["GPU", "CUDA"] use _mmap since they have to copy in to the GPU anyway
@@ -126,7 +126,7 @@ def load_single_weight(t:Tensor, myfile, shape, strides, dtype, storage_offset, 
       return ret
     if mmap_allowed and not OSX and t.device in ["GPU", "CUDA"]: t.lazydata.op.arg.fxn = _mmap
     else: t.lazydata.op.arg.fxn = _read
-  post_process(t, load_dtype=load_dtype)
+
 
 def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True, load_dtype=None):
   if Device.DEFAULT in ["TORCH", "GPU", "CUDA"]: multithreaded = False  # multithreaded doesn't work with CUDA or TORCH. for GPU it's a wash with _mmap
@@ -140,7 +140,8 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True, load_dtyp
       def load_weight(k, vv):
         with myzip.open(f'{base_name}/data/{k}') as myfile:
           for v in vv:
-            load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True, load_dtype=load_dtype)
+            load_single_weight(v[2], myfile, v[3], v[4], v[0], v[5], mmap_allowed=True)
+            post_process(v[2], stored_dtype=v[0], load_dtype=load_dtype)
       if multithreaded:
         import concurrent.futures
         # 2 seems fastest
@@ -156,7 +157,7 @@ def fake_torch_load_zipped(fb0, load_weights=True, multithreaded=True, load_dtyp
           load_weight(k,v)
   return ret[0]
 
-def fake_torch_load(b0):
+def fake_torch_load(b0, load_dtype=None):
   import io
   import struct
 
@@ -186,7 +187,7 @@ def fake_torch_load(b0):
     assert ll == obj_size, f"size mismatch {ll} != {obj_size}"
     assert storage_offset == 0, "not implemented"
     load_single_weight(tensor, fb0, np_shape, np_strides, storage_type, None)
-
+    post_process(tensor, stored_dtype=storage_type, load_dtype=load_dtype)
   return ret
 
 def get_child(parent, key):
