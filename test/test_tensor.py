@@ -109,6 +109,12 @@ class TestTinygrad(unittest.TestCase):
     non_zeros = np.count_nonzero(w.cpu().numpy())
     expected = n * (1 - rate)
     np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
+    
+  def test_arange(self):
+    arange = Tensor.arange(stop=1337)
+    expected = Tensor(np.arange(stop=1337))
+    assert type(arange) is Tensor
+    np.testing.assert_allclose(arange.numpy(), expected.numpy())
 
   #@unittest.skipUnless(Device.DEFAULT == Device.CPU, "float64 not supported on GPU")
   @unittest.skip("float64 support broken")

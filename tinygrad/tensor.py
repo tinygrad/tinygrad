@@ -2,6 +2,7 @@
 from __future__ import annotations
 import math, functools, itertools
 import numpy as np
+from typing import Iterable
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from tinygrad.lazy import Device, LazyBuffer
@@ -133,9 +134,13 @@ class Tensor:
 
   # TODO: below line, remove use of numpy here and make lazy
   # TODO: requires cumsum to remove numpy
+  
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
-
+  def cumsum(x: Iterable): return Tensor(itertools.accumulate(x))
+  
+  @staticmethod
+  def arange(stop, start=0, step=1, **kwargs): return Tensor([x for x in range(start, stop, step)], **kwargs)
+  
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     cond = (self != 0.0)
     return cond * input_ + (1.0 - cond) * other
