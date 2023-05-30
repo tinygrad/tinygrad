@@ -2,8 +2,7 @@
 from __future__ import annotations
 import math, functools, itertools
 import numpy as np
-from typing import Iterable
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable
 from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from tinygrad.lazy import Device, LazyBuffer
 
