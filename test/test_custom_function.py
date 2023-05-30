@@ -24,7 +24,7 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
   return ret.realized
 
 def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
-  return Device[ret.device].buffer(np.arctan2(a.realized._buf, b.realized._buf))
+  return Device[ret.device].from_underlying(np.arctan2(a.realized._buf, b.realized._buf))
 
 # *** second, we write the ATan2 mlop ***
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
