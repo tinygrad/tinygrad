@@ -12,23 +12,17 @@ class TestSignal(unittest.TestCase):
     # tg_out = fft.fft(Tensor(data))
     
   def test_stft(self):
-    x = Tensor.ones(5,2048)
+    x = Tensor.ones(5,2000)
     stft_layer = STFT(n_fft=128, win_length=128, hop_length=64)
     y = stft_layer(x)
-    x_hat = stft_layer(y, inverse=True)
-    breakpoint()
-    
-    # from nnAudio.features import STFT as STFT2
-    # import torch
-    # spec_imag = torch.nn.functional.conv1d(torch.from_numpy(x.numpy()), torch.from_numpy(self.wsin.numpy()), stride=self.stride)
-    # spec_real = torch.nn.functional.conv1d(torch.from_numpy(x.numpy()), torch.from_numpy(self.wcos.numpy()), stride=self.stride)
-    # return torch.stack((spec_real, -spec_imag), -1) 
-    # import torch
-    # y = y.numpy()
-    # m = STFT2(pad_mode="constant",n_fft=128, win_length=128, hop_length=64, iSTFT=True)
-    # y2 = m(torch.from_numpy(x.numpy())).numpy()
-    # assert np.allclose(y,y2, atol=5e-5)
-    
+    x_hat = stft_layer(y, inverse=True) 
+
+    import torch
+    from nnAudio.features import STFT as STFT2
+    m = STFT2(pad_mode="constant",n_fft=128, win_length=128, hop_length=64, iSTFT=True)
+    y2 = m(torch.from_numpy(x.numpy())).numpy()
+    x_hat2 = m.inverse(torch.from_numpy(y2)).numpy()
+    assert np.allclose(y,y2, atol=.5e-5)
 
 if __name__ == '__main__':
   unittest.main()
