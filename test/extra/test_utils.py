@@ -36,29 +36,33 @@ class TestUtils(unittest.TestCase):
           d.as_strided([2, 2], [2, 3], storage_offset=4)
         )
 
-    for isfloat16 in [True, False]:
-      for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (False, None)]:
-        if isfloat16 == loaded_is_float16:
-          print(f"Saving with float32 and loading with isfloat16={isfloat16}")
-          print(f"Loading with dtype={load_dtype}")
-          model = torch.nn.Sequential(
-            torch.nn.Linear(4, 8),
-            torch.nn.Linear(8, 3),
-            LayerWithOffset()
-          )
+    for isfloat16_afterload in [True, False]:
+      for isfloat16_beforeload in [True, False]:
+        for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (isfloat16_beforeload, None)]:
+          torch_finally_isfloat16 = isfloat16_afterload or isfloat16_beforeload
+          if torch_finally_isfloat16 == loaded_is_float16:
+            print(f"isfloat16_afterload={isfloat16_afterload}")
+            print(f"isfloat16_beforeload={isfloat16_beforeload}")
+            print(f"load_dtype={load_dtype}")
+            model = torch.nn.Sequential(
+              torch.nn.Linear(4, 8),
+              torch.nn.Linear(8, 3),
+              LayerWithOffset()
+            )
+            if isfloat16_beforeload: model = model.half()
 
-          with tempfile.TemporaryDirectory() as tmpdirname:
-            path = tmpdirname + '/testloadmodel.pth'
-            torch.save(model.state_dict(), path)
-            model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
+            with tempfile.TemporaryDirectory() as tmpdirname:
+              path = tmpdirname + '/testloadmodel.pth'
+              torch.save(model.state_dict(), path)
+              model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
 
-          if isfloat16: model = model.half()
-          for name, a in model.state_dict().items():
-            b = model2[name]
-            a, b = a.numpy(), b.numpy()
-            assert a.shape == b.shape
-            assert a.dtype == b.dtype
-            assert np.array_equal(a, b)
+            if isfloat16_afterload: model = model.half()
+            for name, a in model.state_dict().items():
+              b = model2[name]
+              a, b = a.numpy(), b.numpy()
+              assert a.shape == b.shape
+              assert a.dtype == b.dtype
+              assert np.array_equal(a, b)
 
 if __name__ == '__main__':
   unittest.main()
