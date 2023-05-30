@@ -114,7 +114,6 @@ class STFT:
                fmax=6000,
                sr=16000,
                trainable=False,
-               verbose=True,
                eps=1e-10):
 
     super().__init__()
@@ -152,7 +151,6 @@ class STFT:
         fmin=fmin,
         fmax=fmax,
         sr=sr,
-        verbose=verbose,
     )
 
     kernel_sin = Tensor(kernel_sin, dtype=dtypes.float32)
