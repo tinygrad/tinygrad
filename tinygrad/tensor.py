@@ -156,14 +156,14 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, **kwargs) -> Tensor:
-    random = lambda size, dtype: Tensor._rng.random(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.random(size).astype(dtype)
-    return Tensor(LazyNumpyArray(lambda lna: random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+    def _random(size, dtype): return Tensor._rng.random(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.random(size).astype(dtype)
+    return Tensor(LazyNumpyArray(lambda lna: _random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
   def randn(*shape, **kwargs) -> Tensor:
-    standard_normal = lambda size, dtype: Tensor._rng.standard_normal(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.standard_normal(size).astype(dtype)
-    return Tensor(LazyNumpyArray(lambda lna: standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+    def _standard_normal(size, dtype): return Tensor._rng.standard_normal(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.standard_normal(size).astype(dtype)
+    return Tensor(LazyNumpyArray(lambda lna: _standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # ***** rng hlops *****
 
