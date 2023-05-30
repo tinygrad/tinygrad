@@ -47,7 +47,7 @@ def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-
   return result[0]
 
 def dice_ce_loss(y_pred, y_true):
-  y_pred = y_pred.log_softmax()
+  y_pred = y_pred.softmax()
   cross_entropy = sparse_categorical_crossentropy(y_pred.permute(0,2,3,4,1), y_true)
   dice = np.mean(1.0 - dice_score(y_pred.numpy(), y_true, argmax=False), axis=0)
   return (cross_entropy + dice) / 2
