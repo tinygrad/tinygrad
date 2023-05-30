@@ -4,8 +4,8 @@ from tinygrad.helpers import make_pair
 from scipy.signal import get_window
 import numpy as np
 import math
-from functools import partial
 from typing import List
+
 def pad_center(data, size, axis=-1, **kwargs):
     kwargs.setdefault("mode", "constant")
     n = data.shape[axis]
@@ -39,9 +39,6 @@ def create_fourier_kernels(
     bins2freq = []
     binslist = []
 
-    # num_cycles = start_freq*d/44000.
-    # scaling_ind = np.log(end_freq/start_freq)/k
-
     # Choosing window shape
     window_mask = get_window(window, int(win_length), fftbins=True)
     window_mask = pad_center(window_mask, n_fft)
@@ -56,7 +53,6 @@ def create_fourier_kernels(
         scaling_ind = (end_freq - start_freq) * (n_fft / sr) / freq_bins
 
         for k in range(freq_bins):  # Only half of the bins contain useful info
-            # print("linear freq = {}".format((k*scaling_ind+start_bin)*sr/n_fft))
             bins2freq.append((k * scaling_ind + start_bin) * sr / n_fft)
             binslist.append((k * scaling_ind + start_bin))
             wsin[k, 0, :] = np.sin(
@@ -134,7 +130,7 @@ class STFT:
         center=True,
         fmin=50,
         fmax=6000,
-        sr=22050,
+        sr=16000,
         trainable=False,
         verbose=True,
         eps=1e-10
@@ -201,30 +197,22 @@ class STFT:
             x = x.pad(((0, 0),(self.pad_amount, self.pad_amount)),)
         x = x[:,None,:]
 
-        # spec_imag = x.conv2d(self.wsin[:,:,:,None], stride=self.stride)[:,:,:,0] #(batch, freq_bins, time)
-        # spec_real = x.conv2d(self.wcos[:,:,:,None], stride=self.stride)[:,:,:,0]
-        spec_imag = x.conv2d(self.wsin, stride=self.stride)
-        spec_real = x.conv2d(self.wcos, stride=self.stride)
-        # remove redundant parts
-        spec_real = spec_real[:, : self.freq_bins, :]
-        spec_imag = spec_imag[:, : self.freq_bins, :]
-
+        spec_imag = x.conv2d(self.wsin, stride=self.stride)[:, : self.freq_bins, :]
+        spec_real = x.conv2d(self.wcos, stride=self.stride)[:, : self.freq_bins, :]
         if return_spec:
             spec = (spec_real.pow(2) + spec_imag.pow(2)).sqrt()
-            spec = spec + self.eps if self.trainable else spec
+            spec = (spec + self.eps) if self.trainable else spec
             return spec
         else:
             return Tensor.stack((spec_real, -spec_imag), -1) 
     
-        
-
     def inverse(
         self, X, onesided=True, length=None
     ):
-        assert len(X.shape)== 4, (
-            "Inverse iSTFT only works for complex number,"
-            "make sure our Tensor is in the shape of (batch, freq_bins, timesteps, 2)."
-            "\nIf you have a magnitude spectrogram, please consider using Griffin-Lim."
+        # TODO: inverse is not differentiable, due to col2im using numpy in-place add
+        assert len(X.shape) == 4, (
+            "Tensor must be in the shape of (batch, freq_bins, timesteps, 2)."
+            "Where last dim is real and imaginary number dim"
         )
         # If the input spectrogram contains only half of the n_fft
         # Use extend_fbins function to get back another half
@@ -246,32 +234,14 @@ class STFT:
         # Overlap and Add algorithm to connect all the frames
         n_fft = real.shape[1]
         output_len = n_fft + self.stride * (real.shape[2] - 1)
-
-        # import torch
-        # # real2 = torch.nn.functional.fold(torch.from_numpy(real.numpy()), (output_len,1), kernel_size=(n_fft,1), stride=self.stride).flatten(1)
-        # real2 = torch.nn.functional.fold(torch.from_numpy(real.numpy()), (1, output_len), kernel_size=(1, n_fft), stride=self.stride).flatten(1)
-        # def torch_window_sumsquare(win, n_frames, stride, n_fft, power=2):
-        #     win_stacks = win.unsqueeze(-1).repeat((1, n_frames)).unsqueeze(0)
-        #     output_len = win_stacks.shape[1] + stride * (win_stacks.shape[2] - 1)
-        #     # out = torch.nn.functional.fold(torch.from_numpy(win_stacks.numpy()) ** power,(output_len,1), (n_fft,1), stride=self.stride)
-        #     out = torch.nn.functional.fold(torch.from_numpy(win_stacks.numpy()) ** power,(1, output_len), (1, n_fft), stride=self.stride)
-        #     return out
-        # w_sum2 = torch_window_sumsquare(self.window_mask.flatten(), X.shape[2], self.stride, self.n_fft).flatten()
-        # real2 = real2 / w_sum2
-        # real2 = real2[:, self.pad_amount : -self.pad_amount]
-        # breakpoint()
-
-        # from torch._decomp.decompositions import col2im as pt_col2im
-        # pt_col2im(torch.from_numpy(real.numpy()), (1, output_len), kernel_size=[1, n_fft], stride=[self.stride,self.stride], dilation =[1,1], padding=[0,0])
-
         real = col2im(real, (1, output_len), kernel_size=(1, n_fft), stride=(self.stride,self.stride), dilation =(1,1), padding=(0,0)).flatten(1)
         win = self.window_mask.flatten()
         n_frames = X.shape[2]
         win_stacks = win[:,None].repeat((1, n_frames))[None,:]
         output_len = win_stacks.shape[1] + self.stride * (win_stacks.shape[2] - 1)
-
         w_sum = col2im(win_stacks**2,  (1, output_len), kernel_size=(1, n_fft), stride=(self.stride,self.stride), dilation =(1,1), padding=(0,0)).flatten(1)
         real = real / w_sum
+
         if length is None:
             if self.center:
                 real = real[:, self.pad_amount : -self.pad_amount]
@@ -289,8 +259,8 @@ def col2im(
     dilation: List[int],
     padding: List[int],
     stride: List[int],
+    dtype=dtypes.float32
 ) -> Tensor:
-    # TODO: This function is not differentiable, using in-place numpy add by index
     assert len(kernel_size) == 2, "only 2D kernel supported"
     assert len(dilation) == 2, "only 2D dilation supported"
     assert len(padding) == 2, "only 2D padding supported"
@@ -348,9 +318,8 @@ def col2im(
 
     def indices_along_dim(input_d, kernel_d, dilation_d, padding_d, stride_d):
         blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
-        arange_kw = np.arange
-        blocks_d_indices = arange_kw(0, blocks_d, stride_d)[None,...]
-        kernel_grid = arange_kw(0, kernel_d * dilation_d, dilation_d)[...,None]
+        blocks_d_indices = np.arange(0, blocks_d, stride_d)[None,...]
+        kernel_grid = np.arange(0, kernel_d * dilation_d, dilation_d)[...,None]
         return blocks_d_indices + kernel_grid
 
     indices_row = indices_along_dim(out_h, kernel_h, dilation_h, padding_h, stride_h)
@@ -358,8 +327,9 @@ def col2im(
         indices_row = indices_row[...,None]
     indices_col = indices_along_dim(out_w, kernel_w, dilation_w, padding_w, stride_w)
 
+    # TODO: Fix this block to be 100% Tinygrad ops, so that gradient flow.
     output_padded_size = [o + 2 * p for o, p in zip(output_size, padding)]
-    output = np.zeros([shape[0], shape[1] // math.prod(kernel_size)] + output_padded_size).astype(np.float32)
+    output = np.zeros([shape[0], shape[1] // math.prod(kernel_size)] + output_padded_size).astype(dtype.np)
     output = output
     output[:,:,indices_row,indices_col] += input.numpy()
     output = output[:,:,padding_w:(-padding_w if padding_w != 0 else None), padding_h:(-padding_h if padding_h != 0 else None)]
