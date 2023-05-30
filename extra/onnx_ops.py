@@ -97,8 +97,13 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
 
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
+  class _FakeRNG:
+    def __init__(self, seed): self.seed = seed
+    def random(self, size=None, dtype=None):
+      ret = np.random.RandomState(self.seed).random(size)
+      return ret.astype(dtype) if dtype else ret
   Tensor.training = training_mode
-  if seed is not None: Tensor._rng = np.random.RandomState(seed)  # Need to use RandomState because of how test data gets generated.
+  if seed is not None: Tensor._rng = _FakeRNG(seed)  # Need to use RandomState because of how test data gets generated.
   ratio = ratio.lazydata.realize().toCPU()[0] if isinstance(ratio, Tensor) else ratio
   return data.dropout(p=ratio, return_mask=True)
 

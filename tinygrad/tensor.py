@@ -525,9 +525,7 @@ class Tensor:
     if not Tensor.training:
       # if mask is requested as output it will contain all True's.
       return (self, Tensor.ones(*self.shape, requires_grad=False, dtype=dtypes.bool)) if return_mask else self
-    # TODO: why is this going through numpy?
-    _mask: np.ndarray = Tensor._rng.choice(a=[False, True], size=self.shape, p=[p, 1-p])
-    mask = Tensor(_mask, requires_grad=False, device=self.device)
+    mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     result = self * mask * (1/(1.0 - p))
     return (result, mask) if return_mask else result
 
