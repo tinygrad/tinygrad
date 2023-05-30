@@ -36,27 +36,27 @@ class TestUtils(unittest.TestCase):
           d.as_strided([2, 2], [2, 3], storage_offset=4)
         )
 
-    for isfloat16_afterload in [True, False]:
-      for isfloat16_beforeload in [True, False]:
-        for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (isfloat16_beforeload, None)]:
-          torch_finally_isfloat16 = isfloat16_afterload or isfloat16_beforeload
+    for isfloat16_aftersave in [True, False]:
+      for isfloat16_beforesave in [True, False]:
+        for loaded_is_float16, load_dtype in [(False, dtypes.float32), (True, dtypes.float16), (isfloat16_beforesave, None)]:
+          torch_finally_isfloat16 = isfloat16_aftersave or isfloat16_beforesave
           if torch_finally_isfloat16 == loaded_is_float16:
-            print(f"isfloat16_afterload={isfloat16_afterload}")
-            print(f"isfloat16_beforeload={isfloat16_beforeload}")
+            print(f"isfloat16_aftersave={isfloat16_aftersave}")
+            print(f"isfloat16_beforesave={isfloat16_beforesave}")
             print(f"load_dtype={load_dtype}")
             model = torch.nn.Sequential(
               torch.nn.Linear(4, 8),
               torch.nn.Linear(8, 3),
               LayerWithOffset()
             )
-            if isfloat16_beforeload: model = model.half()
+            if isfloat16_beforesave: model = model.half()
 
             with tempfile.TemporaryDirectory() as tmpdirname:
               path = tmpdirname + '/testloadmodel.pth'
               torch.save(model.state_dict(), path)
               model2 = fake_torch_load_zipped(path, load_dtype=load_dtype)
 
-            if isfloat16_afterload: model = model.half()
+            if isfloat16_aftersave: model = model.half()
             for name, a in model.state_dict().items():
               b = model2[name]
               a, b = a.numpy(), b.numpy()
