@@ -159,7 +159,7 @@ class Tensor:
     cond = (self != 0.0)
     return cond * input_ + (1.0 - cond) * other
   
-  def numel(self): return functools.reduce(lambda x,y:x*y,self.shape)
+  def numel(self): return prod(self.shape)
 
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
