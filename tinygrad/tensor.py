@@ -515,9 +515,7 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
-    # TODO: why is this going through numpy?
-    _mask: np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    return self * Tensor(Tensor._rng.binomial(1, 1.0 - p, size=self.shape), requires_grad=False, device=self.device, dtype=self.dtype) * (1 / (1.0 - p))
 
   # ***** cast ops *****
 
