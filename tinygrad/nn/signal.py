@@ -327,7 +327,6 @@ def col2im(input: Tensor,
   output_padded_size = [o + 2 * p for o, p in zip(output_size, padding)]
   output = np.zeros([shape[0], shape[1] // math.prod(kernel_size)] +
                     output_padded_size).astype(dtype.np)
-  output = output
   output[:, :, indices_row, indices_col] += input.numpy()
   output = output[:, :, padding_w:(-padding_w if padding_w != 0 else None),
                   padding_h:(-padding_h if padding_h != 0 else None)]
