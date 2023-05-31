@@ -113,7 +113,7 @@ class Tensor:
     if self.grad:
       self.grad.lazydata.device = device
 
-  def to(self, device:str) -> Tensor:
+  def to(self, device:str):
     ret = Tensor(self.lazydata, device)
     if self.grad:
       ret.grad = self.grad.to(device)
@@ -122,28 +122,28 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[int, ...], fill_value, **kwargs) -> Tensor:
+  def full(shape:Tuple[int, ...], fill_value, **kwargs):
     new_shape = argfix(shape)
     return Tensor([fill_value], **kwargs).reshape([1]*len(new_shape)).expand(new_shape).contiguous()
 
   @staticmethod
-  def zeros(*shape, **kwargs) -> Tensor: return Tensor.full(shape, 0, **kwargs)
+  def zeros(*shape, **kwargs): return Tensor.full(shape, 0, **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs) -> Tensor: return Tensor.full(shape, 1, **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(shape, 1, **kwargs)
 
   @staticmethod
-  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
     return Tensor.full(tensor.shape, fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
 
   @staticmethod
-  def zeros_like(tensor, **kwargs) -> Tensor: return Tensor.full_like(tensor, 0, **kwargs)
+  def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
 
   @staticmethod
-  def ones_like(tensor, **kwargs) -> Tensor: return Tensor.full_like(tensor, 1, **kwargs)
+  def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+  def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
     # NOTE: we do the reshape to fix interpreted buffers
     return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, device), dtype=dtype, device=device, **kwargs).reshape(*shape)
 
@@ -155,7 +155,7 @@ class Tensor:
   @staticmethod
   def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
-  def where(self, input_:Union[Tensor, float], other:Union[Tensor, float]) -> Tensor:
+  def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     cond = (self != 0.0)
     return cond * input_ + (1.0 - cond) * other
 
@@ -269,7 +269,7 @@ class Tensor:
     new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
     return self.slice(new_slice).reshape(new_shape if len(new_shape) else (1,))
 
-  def cat(self, *args, dim=0) -> Tensor:
+  def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
     for y in args:
       assert len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim)
@@ -288,7 +288,6 @@ class Tensor:
     return first.cat(*unsqueezed_tensors, dim=dim)
 
   def repeat(self, repeats):
-    ndim = len(self.shape)
     base_shape = self.shape
     if len(repeats) > self.ndim:
       base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
@@ -298,18 +297,18 @@ class Tensor:
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
   # TODO: make this nicer with syntactic sugar in slice
-  def chunk(self, num, dim) -> list[Tensor]:
+  def chunk(self, num, dim):
     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
     for i,k in enumerate(range(0, self.shape[dim], self.shape[dim]//num)):
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
 
-  def unsqueeze(self, dim) -> Tensor:
+  def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Union[List[int], Tuple[int, ...]]) -> Tensor:
+  def pad2d(self, padding:Union[List[int], Tuple[int, ...]]):
     slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc)
 
@@ -434,41 +433,41 @@ class Tensor:
 
   # ***** mlops (unary) *****
 
-  def contiguous(self) -> Tensor: return mlops.Contiguous.apply(self)
-  def log(self) -> Tensor: return mlops.Log.apply(self)
-  def exp(self) -> Tensor: return mlops.Exp.apply(self)
-  def relu(self) -> Tensor: return mlops.Relu.apply(self)
-  def sin(self) -> Tensor: return mlops.Sin.apply(self)
-  def cos(self) -> Tensor: return ((math.pi/2)-self).sin()
-  def tan(self) -> Tensor: return self.sin() / self.cos()
+  def contiguous(self): return mlops.Contiguous.apply(self)
+  def log(self): return mlops.Log.apply(self)
+  def exp(self): return mlops.Exp.apply(self)
+  def relu(self): return mlops.Relu.apply(self)
+  def sin(self): return mlops.Sin.apply(self)
+  def cos(self): return ((math.pi/2)-self).sin()
+  def tan(self): return self.sin() / self.cos()
   # ***** math functions (unary) *****
 
-  def __neg__(self) -> Tensor: return 0.0-self
-  def sqrt(self) -> Tensor: return self.pow(0.5)
-  def rsqrt(self) -> Tensor: return self.pow(-0.5)
-  def square(self) -> Tensor: return self*self
-  def clip(self, min_, max_) -> Tensor: return ((self-min_).relu()+min_) - (self-max_).relu()
-  def abs(self) -> Tensor: return self.relu() + (-self).relu()
-  def sign(self) -> Tensor: return self / (self.abs() + 1e-10)
-  def reciprocal(self) -> Tensor: return 1.0/self
+  def __neg__(self): return 0.0-self
+  def sqrt(self): return self.pow(0.5)
+  def rsqrt(self): return self.pow(-0.5)
+  def square(self): return self*self
+  def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
+  def abs(self): return self.relu() + (-self).relu()
+  def sign(self): return self / (self.abs() + 1e-10)
+  def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
 
-  def sigmoid(self) -> Tensor: return (1.0 + (-self).exp()).reciprocal()
-  def elu(self, alpha=1.0) -> Tensor: return self.relu() - alpha*(1-self.exp()).relu()
-  def celu(self, alpha=1.0) -> Tensor: return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
-  def swish(self) -> Tensor: return self * self.sigmoid()
-  def silu(self) -> Tensor: return self.swish()   # The SiLU function is also known as the swish function.
-  def relu6(self) -> Tensor: return self.relu() - (self-6).relu()
-  def hardswish(self) -> Tensor: return self * (self+3).relu6() * (1/6)
-  def tanh(self) -> Tensor: return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-  def hardtanh(self, min_val=-1, max_val=1) -> Tensor: return self.clip(min_val, max_val)
-  def gelu(self) -> Tensor: return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
-  def quick_gelu(self) -> Tensor: return self * (self * 1.702).sigmoid()
-  def leakyrelu(self, neg_slope=0.01) -> Tensor: return self.relu() - (-neg_slope*self).relu()
-  def mish(self) -> Tensor: return self * self.softplus().tanh()
-  def softplus(self, beta=1) -> Tensor: return (1/beta) * (1 + (self*beta).exp()).log()
-  def softsign(self) -> Tensor: return self / (1 + self.abs())
+  def sigmoid(self): return (1.0 + (-self).exp()).reciprocal()
+  def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
+  def celu(self, alpha=1.0): return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
+  def swish(self): return self * self.sigmoid()
+  def silu(self): return self.swish()   # The SiLU function is also known as the swish function.
+  def relu6(self): return self.relu() - (self-6).relu()
+  def hardswish(self): return self * (self+3).relu6() * (1/6)
+  def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+  def hardtanh(self, min_val=-1, max_val=1): return self.clip(min_val, max_val)
+  def gelu(self): return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
+  def quick_gelu(self): return self * (self * 1.702).sigmoid()
+  def leakyrelu(self, neg_slope=0.01): return self.relu() - (-neg_slope*self).relu()
+  def mish(self): return self * self.softplus().tanh()
+  def softplus(self, beta=1): return (1/beta) * (1 + (self*beta).exp()).log()
+  def softsign(self): return self / (1 + self.abs())
 
   # ***** broadcasted binary mlops *****
 
@@ -522,7 +521,7 @@ class Tensor:
 
   # ***** functional nn ops *****
 
-  def linear(self, weight:Tensor, bias:Optional[Tensor]=None) -> Tensor:
+  def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
