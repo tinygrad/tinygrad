@@ -28,7 +28,10 @@ onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  print(onnx_model)
+  # print('---')
+  # print(onnx_model)
+  # print('---')
+  # raise Exception("TODO: implement get_run_onnx")
 
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp):
@@ -78,7 +81,7 @@ def get_run_onnx(onnx_model: ModelProto):
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
   
-  onnx_version = onnx_model.opset_import[0].version
+  onnx_model_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=False):
     if getenv("DEBUGONNX"): debug = True
@@ -161,7 +164,7 @@ def get_run_onnx(onnx_model: ModelProto):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        assert onnx_version >= 10, f'only onnx version >= 10 supported for slice'
+        assert onnx_model_version >= 10, f'only onnx version >= 10 supported for slice'
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
@@ -177,7 +180,7 @@ def get_run_onnx(onnx_model: ModelProto):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
           for k in sorted(fxn.keys()):
-            if k < onnx_version:
+            if k < onnx_model_version:
               real_fxn = fxn[k]
         else:
           real_fxn = fxn
