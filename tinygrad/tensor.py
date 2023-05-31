@@ -1,15 +1,18 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import math, functools, itertools
+from functools import partialmethod, reduce
+from itertools import accumulate
+import sys
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
-from math import prod
+from math import ceil, pi, prod, sqrt
 from tinygrad.lazy import Device, LazyBuffer
 
 # An instantiation of the Function is the Context
 class Function:
   __slots__ = "device", "parents", "needs_input_grad", "requires_grad"
+
   def __init__(self, device:str, *tensors:Tensor):
     self.device, self.parents = device, tensors
     self.needs_input_grad = [t.requires_grad for t in self.parents]
@@ -190,7 +193,7 @@ class Tensor:
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
-    bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * prod(shape[2:]))
+    bound = sqrt(3.0) * sqrt(2.0 / (1 + a ** 2)) / sqrt(shape[1] * prod(shape[2:]))
     return Tensor.uniform(*shape, low=-bound, high=bound)
 
   # ***** toposort and backward pass *****
@@ -263,7 +266,7 @@ class Tensor:
       if s.__class__ == int and not (-sz <= s < sz):
         raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
       new_slice.append((s%sz, s%sz+1) if s.__class__ == int else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
-    for s,sz in zip(val, [self.shape[i-1] for i in itertools.accumulate([int(s is not None) for s in val])]):  # Shape depends on slices + positions of Nones
+    for s,sz in zip(val, [self.shape[i-1] for i in accumulate([int(s is not None) for s in val])]):  # Shape depends on slices + positions of Nones
       if s.__class__ != int:
         new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
@@ -274,11 +277,11 @@ class Tensor:
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all([len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim]) for y in args])
     catargs = [self] + list(args)
-    shape_cumsum = [0, *itertools.accumulate([y.shape[dim] for y in catargs])]
+    shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
     slc = [[(0, s) for s in self.shape] for _ in catargs]
     for s,k in zip(slc, shape_cumsum):
       s[dim] = (-k, shape_cumsum[-1]-k)
-    return functools.reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
+    return reduce(Tensor.__add__, [arg.slice(s) for arg,s in zip(catargs, slc)])
 
   @staticmethod
   def stack(tensors, dim=0):
@@ -363,7 +366,7 @@ class Tensor:
     slc_prefix, prefix, i_ = [(0,x) for x in self.shape[0:-len(k_)]], self.shape[0:-len(k_)], self.shape[-len(k_):]
     if any(k > s for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
       o_ = [(i - d * (k-1) - 1)//s + 1 for i,d,k,s in zip(i_, d_, k_, s_)]
-      e_ = [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)]  # expands such that we don't need padding
+      e_ = [ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)]  # expands such that we don't need padding
       xup = self.reshape(*prefix, *([1]*len(_insert_dims)), *flatten((1,i) for i in i_)).expand(*prefix, *_insert_dims, *flatten((e,i) for e,i in zip(e_, i_))).reshape(*prefix, *_insert_dims, *[e*i for e,i in zip(e_, i_)])
       # NOTE: _insert_dims is required because reduces can't be merged (yet)
       prefix += _insert_dims
@@ -439,7 +442,7 @@ class Tensor:
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
-  def cos(self): return ((math.pi/2)-self).sin()
+  def cos(self): return ((pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
   # ***** math functions (unary) *****
 
@@ -535,7 +538,7 @@ class Tensor:
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
-  def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
+  def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return reduce(lambda x,f: f(x), ll, self)
 
   def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
     y = (self - self.mean(axis, keepdim=True))
@@ -561,8 +564,8 @@ class Tensor:
 
 # register functions to move between devices
 for device in Device._buffers:
-  setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
-  setattr(Tensor, f"{device.lower()}_", functools.partialmethod(Tensor.to_, device))
+  setattr(Tensor, f"{device.lower()}", partialmethod(Tensor.to, device))
+  setattr(Tensor, f"{device.lower()}_", partialmethod(Tensor.to_, device))
 
 # if IMAGE>0 we install these replacement functions in Tensor (hack!)
 from tinygrad.nn.image import image_conv2d, image_dot

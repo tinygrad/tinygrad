@@ -1,6 +1,7 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 import functools
+import operator
 from typing import Tuple, Union, List, Optional, Callable
 from tinygrad.helpers import DEBUG
 from math import prod
@@ -207,7 +208,7 @@ class ShapeTracker:
   # *** under this line are the movement ops ***
 
   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
-    offset = sum([self.views[-1].strides[i]*x for i,(x,_) in enumerate(arg)])
+    offset = sum(map(operator.mul, self.views[-1].strides, map(operator.itemgetter(0), arg)))
     if self.views[-1].mask:
       # move the old mask
       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg)])
@@ -227,11 +228,12 @@ class ShapeTracker:
     assert all([(b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)]) and len(arg) == len(self.shape)
     self.__unsafe_resize(arg)
 
-  def expand(self, new_shape: Tuple[int, ...]):
+  def expand(self, new_shape: Tuple[int, ...]) -> ShapeTracker:
     assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
+    return self
 
   def reshape(self, new_shape: Tuple[int, ...]):
     if self.views[-1].shape == new_shape: return self
@@ -246,6 +248,7 @@ class ShapeTracker:
     assert all([x.__class__ == int and x >= 0 and x < len(self.views[-1].shape) for x in axis]), f"invalid permute {axis} for {self.views[-1].shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.views[-1].shape), f"can't permute {self.views[-1].shape} with {axis}"
     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
+    return self
 
   # except for the negative case, you can build this from the others. invertible in the negative case
   def stride(self, mul: Tuple[int, ...]):

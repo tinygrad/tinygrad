@@ -1,8 +1,9 @@
 from __future__ import annotations
 from collections import deque
+import operator
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
-import sys, weakref, importlib, inspect, functools, pathlib
-from weakref import WeakValueDictionary
+import sys, importlib, inspect, functools, pathlib
+from weakref import WeakSet, WeakValueDictionary, ref
 from tinygrad.helpers import getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
 from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
@@ -72,7 +73,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
 
   # NOTE: shape should be deterministic. annoying to cache with the ShapeTracker
   # get_weakop makes all the LazyBuffers in the op have a weakref
-  wop = (device, dtype, optype, weakref.ref(op))
+  wop = (device, dtype, optype, ref(op))
 
   if wop not in lazycache: lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   else: ret = lazycache[wop]
@@ -88,14 +89,13 @@ class LazyBuffer:
     self.realized: Optional[RawBuffer] = None
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
+    self.children: WeakSet[LazyBuffer] = WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
-    if GRAPH >= 3: 
-      log_op(self, self.op, phantom=True)
+    if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if not self.realized else self.realized} st:{self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":")[1]} if ":" in self.device else {}
@@ -110,7 +110,7 @@ class LazyBuffer:
         except KeyError: pass
       # run the ast if we still have to, and log the op
       if not self.realized:
-        deque(map(LazyBuffer.realize, self.op.buffers)) # NOTE: this looks crazy but it's actually slightly faster than a for loop and realize is one of the most expensive functions
+        deque(map(LazyBuffer.realize, self.op.buffers), maxlen=0) # NOTE: this looks crazy but it's actually slightly faster than a for loop and realize is one of the most expensive functions
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
         if self.optype != MovementOps and self.dtype.__class__ == ImageDType and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
@@ -183,7 +183,7 @@ class LazyBuffer:
     if not realized and self.op.op == op:
       # TODO: why is deleting self from children needed? shouldn't GC do it?
       self.op.src[0].children.discard(self)
-      try: MOVEMENT_OPS_DISPATCHER[op](self, op, arg)
+      try: return MOVEMENT_OPS_DISPATCHER[op](self, op, arg)
       except KeyError: pass
 
     # push permutes before reduce ops
