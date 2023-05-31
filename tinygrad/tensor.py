@@ -221,7 +221,6 @@ class Tensor:
     else: assert len(padding_)%2==0 #padding goes by pairs (dim, value)
 
     padding_ = tuple((padding_[i], padding_[i+1]) for i in range(0, len(padding_), 2))
-    
     return padding_
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
@@ -299,7 +298,7 @@ class Tensor:
   def pad2d(self, padding:Union[List[int], Tuple[int, ...]]):
     padding = self.clean_padding(padding)
     slc = [(-p[0], s+p[1]) for p,s in zip(padding, self.shape[::-1])][::-1]
-    return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc)
+    return self.slice([(0,s) for s in self.shape[:-(len(padding))]] + slc)
 
   @property
   def T(self) -> Tensor: return self.transpose()
