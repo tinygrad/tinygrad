@@ -152,12 +152,12 @@ class DetectionHead():
       b[-1].bias.assign(y)
   
 class Darknet():
-  def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
-    self.b1 = [Conv_Block(c1=3, c2=64*width_multiple, kernel_size=3, stride=2, padding=1), Conv_Block(64*width_multiple, 128*width_multiple, kernel_size=3, stride=2, padding=1)]
-    self.b2 = [C2f(c1=128*width_multiple, c2=128*width_multiple, n=3*depth_multiple, shortcut=True), Conv_Block(128*width_multiple, 256*width_multiple, 3, 2, 1), C2f(256*width_multiple, 256*width_multiple, 6*depth_multiple, True)]
-    self.b3 = [Conv_Block(256*width_multiple, 512*width_multiple, kernel_size=3, stride=2, padding=1), C2f(512*width_multiple, 512*width_multiple, 6*depth_multiple, True)]
-    self.b4 = [Conv_Block(512*width_multiple, 512*width_multiple*ratio_mutliple, kernel_size=3, stride=2, padding=1), C2f(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 3*depth_multiple, True)]
-    self.b5 = SPPF(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 5)
+  def __init__(self, w, r, d): #width_multiple, ratio_multiple, depth_multiple
+    self.b1 = [Conv_Block(c1=3, c2=64*w, kernel_size=3, stride=2, padding=1), Conv_Block(64*w, 128*w, kernel_size=3, stride=2, padding=1)]
+    self.b2 = [C2f(c1=128*w, c2=128*w, n=3*d, shortcut=True), Conv_Block(128*w, 256*w, 3, 2, 1), C2f(256*w, 256*w, 6*d, True)]
+    self.b3 = [Conv_Block(256*w, 512*w, kernel_size=3, stride=2, padding=1), C2f(512*w, 512*w, 6*d, True)]
+    self.b4 = [Conv_Block(512*w, 512*w*r, kernel_size=3, stride=2, padding=1), C2f(512*w*r, 512*w*r, 3*d, True)]
+    self.b5 = SPPF(512*w*r, 512*w*r, 5)
 
   def forward(self, x):
     x1 = x.sequential(self.b1)
@@ -168,14 +168,14 @@ class Darknet():
     return (x2, x3, x5)
   
 class Yolov8NECK():
-  def __init__(self, width_multiple, ratio_multiple, depth_multiple):
+  def __init__(self, w, r, d):  #width_multiple, ratio_multiple, depth_multiple
     self.up = Upsample(2, mode='nearest')
-    self.n1 = C2f(c1=512*width_multiple*(1+ratio_multiple), c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
-    self.n2 = C2f(c1=768*width_multiple, c2=256*width_multiple, n=3*depth_multiple, shortcut=False)
-    self.n3 = Conv_Block(c1=256*width_multiple, c2=256*width_multiple, kernel_size=3, stride=2, padding=1)
-    self.n4 = C2f(c1=768*width_multiple, c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
-    self.n5 = Conv_Block(c1=512* width_multiple, c2=512 * width_multiple, kernel_size=3, stride=2, padding=1)
-    self.n6 = C2f(c1=512*width_multiple*(1+ratio_multiple), c2=512*width_multiple*ratio_multiple, n=3*depth_multiple, shortcut=False)
+    self.n1 = C2f(c1=512*w*(1+r), c2=512*w, n=3*d, shortcut=False)
+    self.n2 = C2f(c1=768*w, c2=256*w, n=3*d, shortcut=False)
+    self.n3 = Conv_Block(c1=256*w, c2=256*w, kernel_size=3, stride=2, padding=1)
+    self.n4 = C2f(c1=768*w, c2=512*w, n=3*d, shortcut=False)
+    self.n5 = Conv_Block(c1=512* w, c2=512 * w, kernel_size=3, stride=2, padding=1)
+    self.n6 = C2f(c1=512*w*(1+r), c2=512*w*r, n=3*d, shortcut=False)
   
   def forward(self, p3, p4, p5):
     x =  self.n1(p4.cat(self.up(p5), dim=1))
@@ -186,9 +186,9 @@ class Yolov8NECK():
 
 class YOLOv8():
   # confirm filters. 
-  def __init__(self, width_multiple, ratio_multiple,  depth_multiple, num_classes, filters=(256, 512, 512)):
-    self.net = Darknet(width_multiple, ratio_multiple, depth_multiple)
-    self.fpn = Yolov8NECK(width_multiple, ratio_multiple, depth_multiple)
+  def __init__(self, w, r,  d, num_classes, filters=(256, 512, 512)): #width_multiple, ratio_multiple, depth_multiple
+    self.net = Darknet(w, r, d)
+    self.fpn = Yolov8NECK(w, r, d)
     img_dummy = Tensor.zeros(1, 3, 640, 640)
     self.head = DetectionHead(num_classes, filters)
     self.head.stride = Tensor([640 / x.shape[-2] for x in self.forward(img_dummy)])
