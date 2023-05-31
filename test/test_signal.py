@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.nn.signal import STFT
+from examples.mlperf.audio_helpers import STFT
 import numpy as np
 
 class TestSignal(unittest.TestCase):
