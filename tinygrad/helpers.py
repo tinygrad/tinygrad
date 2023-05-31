@@ -22,14 +22,24 @@ def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-# NOTE: hack to allow DEBUG(x) to set the debug value at runtime
-class DebugSingleton:
-  def __init__(self): self.value = getenv("DEBUG", 0)
-  def __call__(self, x): self.value = x
+class Context:
+  def __init__(self, **kwargs): self.pvars = kwargs
+  def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ key: ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() if key not in self.pvars } })
+  def __exit__(self, *args): ContextVar.ctx_stack.pop()
+
+class ContextVar:
+  ctx_stack: ClassVar[List[dict[str, Any]]] = [{}]
+  def __init__(self, key, default_value): 
+    self.key, self.initial_value = key, getenv(key, default_value)
+    if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
+  def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
   def __bool__(self): return self.value != 0
   def __ge__(self, x): return self.value >= x
+  def __gt__(self, x): return self.value > x
+  @property
+  def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
-DEBUG, IMAGE = DebugSingleton(), getenv("IMAGE", 0)
+DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 
 # **** tinygrad now supports dtypes! *****
 
@@ -58,12 +68,15 @@ class LazyNumpyArray:
 
 
 class dtypes:
+  bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
+
+  def is_int(x: DType): return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64) 
   @staticmethod
   def from_np(x) -> DType:
     dtypes_dict = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(k)}

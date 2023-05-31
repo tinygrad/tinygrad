@@ -122,13 +122,25 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor([0], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
+  def full(shape:Tuple[int, ...], fill_value, **kwargs):
+    new_shape = argfix(shape)
+    return Tensor([fill_value], **kwargs).reshape([1]*len(new_shape)).expand(new_shape).contiguous()
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor([1], **kwargs).reshape([1]*len(shape)).expand(shape).contiguous()
+  def zeros(*shape, **kwargs): return Tensor.full(shape, 0, **kwargs)
 
   @staticmethod
-  def zeros_like(tensor, **kwargs): return Tensor.zeros(*tensor.shape, dtype=tensor.dtype, **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(shape, 1, **kwargs)
+
+  @staticmethod
+  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
+    return Tensor.full(tensor.shape, fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+
+  @staticmethod
+  def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
+
+  @staticmethod
+  def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
   def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
@@ -146,6 +158,8 @@ class Tensor:
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     cond = (self != 0.0)
     return cond * input_ + (1.0 - cond) * other
+  
+  def numel(self): return prod(self.shape)
 
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
@@ -164,7 +178,7 @@ class Tensor:
   # ***** rng hlops *****
 
   @staticmethod
-  def uniform(*shape, **kwargs) -> Tensor: return Tensor.rand(*shape, **kwargs) * 2 - 1
+  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul(prod(shape)**-0.5)
@@ -173,8 +187,13 @@ class Tensor:
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
-  # ***** toposort and backward pass *****
+  # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
+  @staticmethod
+  def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
+    bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * prod(shape[2:]))
+    return Tensor.uniform(*shape, low=-bound, high=bound)
 
+  # ***** toposort and backward pass *****
   def deepwalk(self):
     def _deepwalk(node, visited, nodes):
       visited.add(node)
@@ -389,7 +408,8 @@ class Tensor:
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-    padding_ = [padding]*4 if padding.__class__ == int else (padding if len(padding) >= 4 else [padding[1], padding[1], padding[0], padding[0]])
+    if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
+    padding_ = [padding]*2*len(HW) if isinstance(padding, int) else (padding if len(padding) == 2*len(HW) else [p for p in padding for _ in range(2)][::-1])
 
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)

@@ -40,6 +40,10 @@ class LazyOp:
     self.buffers = buffers
 
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
+  def __eq__(self, __value: object) -> bool:
+    if not isinstance(__value, LazyOp): return False
+    return self.op == __value.op and self.src == __value.src and self.arg == __value.arg
+  def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
 
   # Any == Union[LazyBuffer, DeviceBuffer]
   def map_buffers(self, real_srcs: Dict[Any, Any]):

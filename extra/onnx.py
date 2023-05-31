@@ -137,16 +137,19 @@ def get_run_onnx(onnx_model):
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
         # TODO: add this to tinygrad? i don't think it's in torch
-        if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
-          inp[1] = inp[1].reshape(inp[0].shape)
+        inp_0 = inp[0] if isinstance(inp[0], Tensor) else Tensor(np.array(inp[0], dtype=np.float32), requires_grad=False)
+        inp_1 = inp[1] if isinstance(inp[1], Tensor) else Tensor(np.array(inp[1], dtype=np.float32), requires_grad=False)
+        if (len(inp_0.shape) != len(inp_1.shape)) and (prod(inp_0.shape) == prod(inp_1.shape)):
+          inp_1 = inp_1.reshape(inp_0.shape)
         # TODO: is this right?
-        if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
-        if n.op_type == "Add": ret = inp[0] + inp[1]
-        if n.op_type == "Sub": ret = inp[0] - inp[1]
-        if n.op_type == "Mul": ret = inp[0] * inp[1]
-        if n.op_type == "Pow": ret = inp[0] ** inp[1]
+        if 'broadcast' in opt: inp_1 = inp_1.reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp_0.shape))])
+        if n.op_type == "Add": ret = inp_0 + inp_1
+        if n.op_type == "Sub": ret = inp_0 - inp_1
+        if n.op_type == "Mul": ret = inp_0 * inp_1
+        if n.op_type == "Pow": ret = inp_0 ** inp_1
       elif n.op_type == "Split":
         if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
+        if 'axis' not in opt: opt['axis'] = 0
         i = 0
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
@@ -155,7 +158,7 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        assert onnx_version == 10
+        assert onnx_version >= 10, f'only onnx version >= 10 supported for slice'
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
@@ -164,6 +167,9 @@ def get_run_onnx(onnx_model):
         starts = starts + inp[0].shape[axis] if starts < 0 else starts
         arg[axis] = (starts, ends)
         ret = inp[0].slice(arg=arg)
+      elif n.op_type == "Shrink":
+        bias = opt['bias'] if 'bias' in opt else 0
+        ret = (inp[0] < -opt['lambd'])*(inp[0]+bias) + (inp[0] > opt['lambd'])*(inp[0]-bias)
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
