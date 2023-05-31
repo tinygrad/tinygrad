@@ -1,10 +1,10 @@
-import functools
+from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
-from onnx.onnx_pb import ModelProto, TensorProto
+from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -57,7 +57,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif a.type == 2: return int(a.i)
     elif a.type == 1: return float(a.f)
     else: raise Exception(f"can't parse {a.type} {a}")
-  def attribute_to_dict(a): return {x.name:attribute_parse(x) for x in a}
+  def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
   tensors = {}
 
