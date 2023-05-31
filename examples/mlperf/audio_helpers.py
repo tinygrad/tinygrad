@@ -469,7 +469,6 @@ class MelSpectrogram:
                norm=1,
                trainable_mel=False,
                trainable_STFT=False,
-               verbose=True,
                **kwargs):
     self.stride = hop_length
     self.center = center
@@ -487,24 +486,22 @@ class MelSpectrogram:
                      center=center,
                      sr=sr,
                      trainable=trainable_STFT,
-                     verbose=verbose,
                      **kwargs)
 
     mel_basis = get_mel(sr, n_fft, n_mels, fmin, fmax, htk=htk, norm=norm)
     self.mel_basis = Tensor(mel_basis, requires_grad=trainable_mel)
 
-  def __call__(self, x):
+  def __call__(self, x, return_log=False):
     spec = self.stft(x, return_spec=True)**self.power
-    melspec = self.mel_basis @ spec
-    return melspec
+    mel_spec = self.mel_basis @ spec
+    return mel_spec if not return_log else (mel_spec+self.stft.eps).log()
 
 
 class MFCC:
   def __init__(self,
-               sr=22050,
+               sr=1600,
                n_mfcc=20,
                norm="ortho",
-               verbose=True,
                ref=1.0,
                amin=1e-10,
                top_db=80.0,
@@ -512,6 +509,7 @@ class MFCC:
     super().__init__()
     self.melspec_layer = MelSpectrogram(sr=sr, **kwargs)
     self.m_mfcc = n_mfcc
+    self.norm = norm
 
     # attributes that will be used for _power_to_db
     assert amin <= 0, "amin must be strictly positive"
