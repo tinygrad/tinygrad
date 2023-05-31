@@ -543,7 +543,14 @@ class MFCC:
     N = x_shape[-1]
 
     v = x[:, :, ::2].cat(x[:, :, 1::2].flip([2]), dim=2)
-    Vc = fft(v)[:,0]
+    _, wcos, *_ = create_fourier_kernels(
+    n_fft=v.shape[2],
+    win_length=v.shape[2],
+    freq_bins=None,
+    sr=16000,
+    freq_scale="linear",
+    window="hann",)
+    Vc = wcos.dot(v)[:,0]
 
     k = -Tensor.arange(N, dtype=x.dtype, device=x.device)[None, :] * np.pi / (
         2 * N)
@@ -555,7 +562,7 @@ class MFCC:
     if norm == "ortho":
       V = Tensor.stack([
       V[:, :, 0] / math.sqrt(N) * 2,
-      V[:, :, 1:] / math.sqrt(N / 2) * 2], dim=2)
+      V[:, :, 1] / math.sqrt(N / 2) * 2], dim=2)
     V = 2 * V
 
     return V.permute(0, 2, 1)  # swapping back the time axis and freq axis
