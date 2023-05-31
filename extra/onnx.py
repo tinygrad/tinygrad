@@ -124,10 +124,10 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = inp[0].div(inp[1])
       elif n.op_type == "Constant":
         if 'value' in opt: ret = opt['value'] # tensor
-        elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32))
-        elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64))
-        elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32).reshape(opt['value_floats_shape']))
-        elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64).reshape(opt['value_ints_shape']))
+        elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
+        elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64), requires_grad=False)
+        elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32), requires_grad=False)
+        elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
         else: raise NotImplementedError(f'Constant not implemented')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Resize":
