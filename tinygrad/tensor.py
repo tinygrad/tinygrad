@@ -158,8 +158,6 @@ class Tensor:
   def where(self, input_:Union[Tensor, float], other:Union[Tensor, float]) -> Tensor:
     cond = (self != 0.0)
     return cond * input_ + (1.0 - cond) * other
-  
-  def numel(self) -> int: return prod(self.shape)
 
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
@@ -289,11 +287,11 @@ class Tensor:
     # checks for shapes and number of dimensions delegated to cat
     return first.cat(*unsqueezed_tensors, dim=dim)
 
-  def repeat(self, repeats) -> Tensor:
+  def repeat(self, repeats):
     ndim = len(self.shape)
     base_shape = self.shape
-    if len(repeats) > ndim:
-      base_shape = (1,) * (len(repeats) - ndim) + base_shape
+    if len(repeats) > self.ndim:
+      base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
     new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
     expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
@@ -550,6 +548,13 @@ class Tensor:
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
+
+  # ***** Convenience stuff *****
+  @property
+  def ndim(self) -> int: return len(self.shape)
+  def numel(self) -> int: return math.prod(self.shape)
+  def element_size(self) -> int: return self.dtype.itemsize
+  def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices
 for device in Device._buffers:
