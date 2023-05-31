@@ -7,9 +7,10 @@ import functools, pathlib
 import warnings 
 warnings.filterwarnings('ignore')
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "imagenet"
+BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v.split(",")[0]: k for k,v in ci.items()}
+cir_to = {k: i for i, (k,v) in enumerate(ci.items())}
 
 @functools.lru_cache(None)
 def get_train_files():
@@ -36,7 +37,7 @@ def iterate(bs=32, val=True, shuffle=True):
   if shuffle: random.shuffle(order)
   for i in range(0, len(files), bs):
     X = [image_load(files[i]) for i in order[i:i+bs]]
-    Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
+    Y = [cir_to[files[i].split("/")[-2]] for i in order[i:i+bs]]
     yield (np.array(X), np.array(Y))
 
 def fetch_batch(bs, val=False):
@@ -44,7 +45,8 @@ def fetch_batch(bs, val=False):
   samp = np.random.randint(0, len(files), size=(bs))
   files = [files[i] for i in samp]
   X = [image_load(x) for x in files]
-  Y = [x.split("/")[-2] for x in files]
+  Y = [cir_to[x.split("/")[-2]] for x in files]
+  print(cir_to.items())
   return np.array(X), np.array(Y)
 
 if __name__ == "__main__":
