@@ -4,8 +4,10 @@ from tinygrad.nn import Conv2d,BatchNorm2d
 from tinygrad.helpers import dtypes, prod
 import numpy as np
 import math
-# Model architecture from https://github.com/ultralytics/ultralytics/issues/189
+from itertools import chain
 
+#Model architecture from https://github.com/ultralytics/ultralytics/issues/189
+#the upsampling class has been taken from this pull request by dc-dc-dc. Now 2 models use upsampling. (retinet and this)
 
 # UTIL FUNCTIONS
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
@@ -39,6 +41,20 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
   return p
 
+#this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc
+class Upsample:
+  def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
+    assert mode == "nearest" # only mode supported for now
+    self.mode = mode
+    self.scale_factor = scale_factor
+
+  def __call__(self, x: Tensor) -> Tensor:
+    assert len(x.shape) > 2 and len(x.shape) <= 5
+    (b, c), _lens = x.shape[:2], len(x.shape[2:])
+    tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
+    return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
+  
+  
 # MODULE Definitions
 class SPPF:
   def __init__(self, c1, c2, k=5):
@@ -129,34 +145,53 @@ class DetectionHead():
     z = dbox.cat(cls.sigmoid(), dim=1)
     return (z, x)
   
-  # def initialize_biases(self):
-  #   # Initialize biases
-  #   # WARNING: requires stride availability
-  #   m = self
-  #   for a, b, s in zip(m.box, m.cls, m.stride):
-#       a[-1].bias = 1.0  # box
-#       # cls (.01 objects, 80 classes, 640 img)
-#       b[-1].bias[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)
-
-
+  def initialize_biases(self):
+    # Initialize biases
+    # WARNING: requires stride availability
+    m = self
+    for a, b, s in zip(m.box, m.cls, m.stride):
+      x = Tensor.ones(a[-1].bias.shape)
+      a[-1].bias.assign(x) # box
+      # cls (.01 objects, 80 classes, 640 img)
+      y = b[-1].bias
+      y[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)
+      b[-1].bias.assign(y)
+  
 class Darknet():
+  
   def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
-    self.w = width_multiple
-    self.r = ratio_mutliple
-    self.d = depth_multiple
-    self.n1 = [Conv_Block(c1=3, c2=64*width_multiple, kernel_size=3, stride=2, padding=1), Conv_Block(64*width_multiple, 128*width_multiple, 3, 2,1)]
-    self.n2 = [C2f(c1=128*width_multiple, c2=128*width_multiple, n=3*depth_multiple, shortcut=True), Conv_Block(128*width_multiple, 256*width_multiple, 3, 2, 1), C2f(256*width_multiple, 256*width_multiple, 6*depth_multiple, True)]
-    self.n3 = [Conv_Block(256*width_multiple, 512*width_multiple, 3, 2, 1), C2f(512*width_multiple, 512*width_multiple, 6*depth_multiple, True)]
-    self.n4 = [Conv_Block(512*width_multiple, 512*width_multiple*ratio_mutliple, 3, 2, 1), C2f(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 3*depth_multiple, True)]
-    self.final = SPPF(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 1)
+    self.b1 = [Conv_Block(c1=3, c2=64*width_multiple, kernel_size=3, stride=2, padding=1), Conv_Block(64*width_multiple, 128*width_multiple, 3, 2,1)]
+    self.b2 = [C2f(c1=128*width_multiple, c2=128*width_multiple, n=3*depth_multiple, shortcut=True), Conv_Block(128*width_multiple, 256*width_multiple, 3, 2, 1), C2f(256*width_multiple, 256*width_multiple, 6*depth_multiple, True)]
+    self.b3 = [Conv_Block(256*width_multiple, 512*width_multiple, 3, 2, 1), C2f(512*width_multiple, 512*width_multiple, 6*depth_multiple, True)]
+    self.b4 = [Conv_Block(512*width_multiple, 512*width_multiple*ratio_mutliple, 3, 2, 1), C2f(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 3*depth_multiple, True)]
+    self.b5 = SPPF(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 1)
 
   def forward(self, x):
-    x1 = x.sequential(self.n1)
-    x2 = x1.sequential(self.n2)
-    x3 = x2.sequential(self.n3)
-    x4 = x3.sequential(self.n4)
-    x5 = self.final(x4)
+    x1 = x.sequential(self.b1)
+    x2 = x1.sequential(self.b2)
+    x3 = x2.sequential(self.b3)
+    x4 = x3.sequential(self.b4)
+    x5 = self.b5(x4)
     return x2, x3, x5
+  
+class Yolov8NECK():
+  
+  def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
+    self.up = Upsample(2, mode='nearest')
+    self.n1 = C2f(c1=512*width_multiple*(1+ratio_mutliple), c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
+    self.n2 = C2f(c1=768*width_multiple, c2=256*width_multiple, n=3*depth_multiple, shortcut=False)
+    self.n3 = Conv_Block(c1=256*width_multiple, c2=256*width_multiple, kernel_size=3, stride=2, padding=1)
+    self.n4 = C2f(c1=768*width_multiple, c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
+    self.n5 = Conv_Block(c1=512* width_multiple, c2=512 * width_multiple, kernel_size=3, stride=2, padding=1)
+    self.n6 = C2f(c1=512*width_multiple*(1+ratio_mutliple), c2=512*width_multiple*ratio_mutliple, n=3*depth_multiple, shortcut=False)
+  
+  def forward(self, p3, p4, p5):
+    x =  self.n1.forward(p4.cat(self.up(p5), dim=1))
+    head_1 = self.n2.forward(p3.cat(self.up(x), dim=1))
+    head_2 = self.n4.forward(x.cat(self.n3.forward(head_1), dim=1))
+    head_3 = self.n6.forward(p5.cat(self.n5.forward(head_2), dim=1))
+    return head_1, head_2, head_3
+  
 
 # post processing
 # DETECTION PREDICTOR CLASS FOR PROCESSING RAW OUTPUTS FROM detection head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
