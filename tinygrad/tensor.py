@@ -211,8 +211,7 @@ class Tensor:
   
   #tuple of ints/tuples -> tuple of tuples for padding
   def clean_padding(self, padding):
-    def flatten(t):
-      return tuple(item for sublist in t for item in flatten(sublist)) if isinstance(t, (tuple, list)) else (t,)
+    flatten = lambda t: tuple(item for sublist in t for item in flatten(sublist)) if isinstance(t, (tuple, list)) else (t,)
 
     if isinstance(padding, int): padding_ = (padding, )*4
     elif all(isinstance(elem, int) for elem in padding): padding_ = padding
