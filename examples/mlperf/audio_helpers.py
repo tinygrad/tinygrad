@@ -5,6 +5,7 @@ import numpy as np
 import math
 from typing import List
 
+
 def create_fourier_kernels(
     n_fft,
     win_length=None,
@@ -36,7 +37,7 @@ def create_fourier_kernels(
   lengths[-1] = (lpad, int(n_fft - n - lpad))
   if lpad <= 0:
     print("Warning: positive lpad implies n_fft higher than window length")
-  window_mask =  np.pad(window_mask, lengths)
+  window_mask = np.pad(window_mask, lengths)
 
   if freq_scale == "linear":
     start_bin = start_freq * n_fft / sr
@@ -176,8 +177,7 @@ def get_mel(sr,
     fmax = float(sr) / 2
 
   assert norm is not None and norm != 1 and norm != np.inf, (
-    "Unsupported norm: {}".format(repr(norm))
-    )
+      "Unsupported norm: {}".format(repr(norm)))
 
   # Initialize the weights
   n_mels = int(n_mels)
@@ -495,4 +495,4 @@ class MelSpectrogram:
   def __call__(self, x, return_log=False):
     spec = self.stft(x, return_spec=True)**self.power
     mel_spec = self.mel_basis @ spec
-    return mel_spec if not return_log else (mel_spec+self.stft.eps).log()
+    return mel_spec if not return_log else (mel_spec + self.stft.eps).log()
