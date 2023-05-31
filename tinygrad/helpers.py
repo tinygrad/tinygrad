@@ -75,8 +75,10 @@ class dtypes:
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
-
-  def is_int(x: DType): return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64) 
+  @staticmethod
+  def is_int(x: DType): return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
+  @staticmethod
+  def is_unsigned(x: DType): return x in (dtypes.uint8)
   @staticmethod
   def from_np(x) -> DType:
     dtypes_dict = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(k)}
