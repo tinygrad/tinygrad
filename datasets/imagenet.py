@@ -5,17 +5,17 @@ import numpy as np
 from PIL import Image
 import functools, pathlib
 import warnings 
+from tinygrad.tensor import Tensor
 warnings.filterwarnings('ignore')
 
 BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
-cir = {v.split(",")[0]: k for k,v in ci.items()}
-cir_to = {k: i for i, (k,v) in enumerate(ci.items())}
+cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
 def get_train_files():
-  train_files = glob.glob(str(BASEDIR / "train/*/*"))
-  return train_files
+  train_files = open(BASEDIR / "train_files").read().strip().split("\n")
+  return [(BASEDIR / "train" / x) for x in train_files]
 
 @functools.lru_cache(None)
 def get_val_files():
@@ -23,40 +23,41 @@ def get_val_files():
   return val_files
 
 def normalization(image):
-  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-  image = image.permute([0,3,1,2]) / 255.0
+  image = Tensor(image)
+  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(-1, 1, 1)
+  input_std = Tensor([0.229, 0.224, 0.225]).reshape(-1, 1, 1)
+  image = image.permute([2,0,1]) / 255.0
   image -= input_mean
   image /= input_std
   return image
 
-def rand_flip(image, axis=(1,2,3)):
+def rand_flip(image, axis=(0,1)):
   if random.random() <  1 / len(axis):
     image = np.flip(image, axis=axis).copy()
   return image
 
-def random_scale(image, min_scale=0.8, max_scale=1.2):
-    scale_factor = np.random.uniform(min_scale, max_scale)
-    height, width = img_array.shape[:2]
-    new_height = int(height * scale_factor)
-    new_width = int(width * scale_factor)
-    return image.resize((new_width, new_height))
+def random_scale(array, min_scale=0.8, max_scale=1.2):
+  scale_factor = np.random.uniform(min_scale, max_scale)
+  new_size = int(array.size * scale_factor)
+  resized_array = np.resize(array, new_size)
+  scaled_array = resized_array.resize((int(new_size ** 0.5), int(new_size ** 0.5), -1))
+  return scaled_array
 
-def preprocess(image):
-  image = normalization(image)
+def preprocess(image, val):
+  image = normalization(image).numpy()
   if not val:
-    image = random_scale(image)
-    image, label = rand_flip(image)
+    #image = random_scale(image)
+    image= rand_flip(image)
   return image
 
 #rrc = transforms.RandomResizedCrop(224)
 import torchvision.transforms.functional as F
-def image_load(fn):
+def image_load(fn, val):
   img = Image.open(fn).convert('RGB')
   img = F.resize(img, 256, Image.BILINEAR)
   img = F.center_crop(img, 224)
   ret = np.array(img)
-  ret = preprocess(img)
+  ret = preprocess(ret, val)
   return ret
 
 def iterate(bs=32, val=True, shuffle=True):
@@ -65,7 +66,7 @@ def iterate(bs=32, val=True, shuffle=True):
   if shuffle: random.shuffle(order)
   for i in range(0, len(files), bs):
     X = [image_load(files[i]) for i in order[i:i+bs]]
-    Y = [cir_to[files[i].split("/")[-2]] for i in order[i:i+bs]]
+    Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
     yield (np.array(X), np.array(Y))
 
 def fetch_batch(bs, val=False):
@@ -73,10 +74,8 @@ def fetch_batch(bs, val=False):
   samp = np.random.randint(0, len(files), size=(bs))
   files = [files[i] for i in samp]
   X = [image_load(x) for x in files]
-  Y = [cir_to[x.split("/")[-2]] for x in files]
-  print(cir_to.items())
+  Y = [cir[x.split("/")[0]] for x in files]
   return np.array(X), np.array(Y)
-
 
 if __name__ == "__main__":
   #X,Y = fetch_batch(64)

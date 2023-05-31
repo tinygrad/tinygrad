@@ -10,14 +10,13 @@ def train_resnet():
   from datasets.imagenet import iterate
   from extra.lr_scheduler import CosineAnnealingLR
   from examples.mlperf.metrics import cross_entropy_loss
-  from tinygrad.jit import TinyJit
   from extra.training import sparse_categorical_crossentropy
 
   model = ResNet50()
   BS = 8
   lr = BS*1e-3
   optimizer = optim.SGD(optim.get_parameters(model), lr=lr, momentum = .875)
-  args_epoch = 50
+  args_epoch = 100
   scheduler = CosineAnnealingLR(optimizer, args_epoch)
   def warmup_factor(epoch, step):
     return min(1.0, (step+1)/warmup_period)
@@ -43,7 +42,7 @@ def train_resnet():
       loss.backward()
       optimizer.step()
       t.set_description(f"Training Loss : {loss.detach().cpu().numpy()} ; Learning Rate : {lr}")
-    lr = scheduler.get_lr() * warmup_factor(epoch, 8)
+    lr = scheduler.get_lr() if BS < 512 else scheduler.get_lr * warmup_factor(epoch, 8)
 
 def train_retinanet():
   # TODO: Retinanet
