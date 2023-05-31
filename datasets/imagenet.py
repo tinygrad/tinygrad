@@ -4,15 +4,17 @@ import json
 import numpy as np
 from PIL import Image
 import functools, pathlib
+import warnings 
+warnings.filterwarnings('ignore')
 
 BASEDIR = pathlib.Path(__file__).parent.parent / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
-cir = {v[0]: int(k) for k,v in ci.items()}
+cir = {v.split(",")[0]: k for k,v in ci.items()}
 
 @functools.lru_cache(None)
 def get_train_files():
-  train_files = open(BASEDIR / "train_files").read().strip().split("\n")
-  return [(BASEDIR / "train" / x) for x in train_files]
+  train_files = glob.glob(str(BASEDIR / "train/*/*"))
+  return train_files
 
 @functools.lru_cache(None)
 def get_val_files():
@@ -42,12 +44,12 @@ def fetch_batch(bs, val=False):
   samp = np.random.randint(0, len(files), size=(bs))
   files = [files[i] for i in samp]
   X = [image_load(x) for x in files]
-  Y = [cir[x.split("/")[0]] for x in files]
+  Y = [x.split("/")[-2] for x in files]
   return np.array(X), np.array(Y)
 
 if __name__ == "__main__":
   #X,Y = fetch_batch(64)
   #print(X.shape, Y)
-  X,Y = fetch_batch(32,val=True)
+  X,Y = fetch_batch(32,val=False)
   print(X.shape,Y)
 
