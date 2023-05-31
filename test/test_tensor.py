@@ -1,3 +1,4 @@
+import dataclasses
 import numpy as np
 import torch
 import unittest
@@ -166,7 +167,7 @@ class TestTinygrad(unittest.TestCase):
     b = Tensor.zeros_like(a, dtype=dtypes.int8)
     assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
     assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
-  
+
   def test_ones_like_has_same_dtype_and_shape(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
@@ -177,7 +178,23 @@ class TestTinygrad(unittest.TestCase):
     a = Tensor([1, 2, 3])
     b = Tensor.ones_like(a, dtype=dtypes.int8)
     assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}" 
+    assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+
+  def test_ndim(self):
+    assert Tensor.randn(1).ndim == 1
+    assert Tensor.randn(2,2,2).ndim == 3
+    assert Tensor.randn(1,1,1,1,1,1).ndim == 6
+
+  def test_numel(self):
+    assert Tensor.randn(10, 10).numel() == 100
+    assert Tensor.randn(1,2,5).numel() == 10
+    assert Tensor.randn(1,1,1,1,1,1) == 1
+    # assert Tensor.randn(1,0,2,5) == 0 # TODO: fix empty tensors
+
+  def test_element_size(self):
+    for f in dataclasses.fields(dtypes):
+      dtype = f.default
+      assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
 if __name__ == '__main__':
   unittest.main()

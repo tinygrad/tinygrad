@@ -38,7 +38,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
   module = ir.Module(name=__file__)
 
   # create llvm function
-  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1)}[buf.dtype] for buf in bufs]
+  func_dtypes = [{dtypes.float16:ir.HalfType(), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64)}[buf.dtype] for buf in bufs]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() for x in func_dtypes]), name='exec')
 
   # force llvmlite to allow us to add function attribute then add the attribute
@@ -88,13 +88,21 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
         val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[args.i], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[args[0]], 0))
       else:
         val = bb[-1].load(bb[-1].gep(func.args[args.i], [idx], inbounds=True))
-      if func_dtypes[args.i] != ir.FloatType(): val = bb[-1].fpext(val, ir.FloatType())
+      if func_dtypes[args.i] != ir.FloatType(): 
+        if dtypes.is_int(bufs[args.i].dtype):
+          val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].sitofp(val, ir.FloatType())
+        else:
+          val = bb[-1].fpext(val, ir.FloatType()) 
       lvars[newvar] = val
     if uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
       idx = args.idx.render(render_llvm, bb[-1])
       element = lvars[vin[0]]
-      if func_dtypes[0] != ir.FloatType(): element = bb[-1].fptrunc(element, func_dtypes[0])
+      if func_dtypes[0] != ir.FloatType():
+        if dtypes.is_int(bufs[args.i].dtype):
+          element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].fptosi(element, func_dtypes[0])
+        else: 
+          element = bb[-1].fptrunc(element, func_dtypes[0])
       bb[-1].store(element, bb[-1].gep(func.args[args.i], [idx], inbounds=True))
     if uop == UOps.ALU:
       lvars[newvar] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
