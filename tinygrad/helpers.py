@@ -22,7 +22,7 @@ def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
 class Context:
   def __init__(self, **kwargs): self.pvars = kwargs
-  def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ key: ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() if key not in self.pvars } })
+  def __enter__(self): ContextVar.ctx_stack.append({**ContextVar.ctx_stack[-1], **self.pvars})
   def __exit__(self, *args): ContextVar.ctx_stack.pop()
 
 class ContextVar:
