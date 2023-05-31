@@ -3,8 +3,11 @@ from __future__ import annotations
 import math, functools, itertools
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray, ContextVar
 from tinygrad.lazy import Device, LazyBuffer
+
+TRAINING=ContextVar("TRAINING", 0)
+NO_GRAD=ContextVar("NO_GRAD", 0)
 
 # An instantiation of the Function is the Context
 class Function:
@@ -20,7 +23,7 @@ class Function:
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x)
     ret = Tensor(ctx.forward(*[t.lazydata for t in x], **kwargs), device=ctx.device, requires_grad=ctx.requires_grad)
-    if ctx.requires_grad and not Tensor.no_grad: ret._ctx = ctx    # used by autograd engine
+    if ctx.requires_grad and not NO_GRAD: ret._ctx = ctx # used by autograd engine
     return ret
 
 import tinygrad.mlops as mlops
@@ -29,8 +32,6 @@ import tinygrad.mlops as mlops
 
 class Tensor:
   __deletable__ = ('_ctx',)
-  training: ClassVar[bool] = False
-  no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
@@ -537,7 +538,7 @@ class Tensor:
     return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
 
   def dropout(self, p=0.5) -> Tensor:
-    if not Tensor.training: return self
+    if not TRAINING: return self
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
     return self * mask * (1/(1.0 - p))
 

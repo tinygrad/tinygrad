@@ -1,5 +1,5 @@
 from typing import Optional, Union, Tuple
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, TRAINING
 from tinygrad.helpers import prod
 
 class BatchNorm2d:
@@ -13,7 +13,7 @@ class BatchNorm2d:
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
-    if Tensor.training:
+    if TRAINING:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
