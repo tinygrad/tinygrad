@@ -63,7 +63,7 @@ class TestRandomness(unittest.TestCase):
 
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
-    self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1), lambda x: np.random.rand(*x) * 2 - 1))
+    self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1), lambda x: np.random.uniform(low=-1, high=1, size=x)))
 
   def test_scaled_uniform(self):
     self.assertFalse(normal_test(Tensor.scaled_uniform))
@@ -72,6 +72,14 @@ class TestRandomness(unittest.TestCase):
   def test_glorot_uniform(self):
     self.assertFalse(normal_test(Tensor.glorot_uniform))
     self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)), lambda x: (np.random.rand(*x) * 2 - 1) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
+
+  def test_kaiming_uniform(self, shape=(20, 23), a=0.01):
+    Tensor.manual_seed(1337)
+    torch.manual_seed(1337)
+    np.random.seed(1337)
+
+    bound = (math.sqrt(3.0) * (math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * np.prod(shape[2:]))))
+    self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), lambda x: np.random.uniform(low=-bound, high=bound, size=shape)))
 
 if __name__ == "__main__":
   unittest.main()

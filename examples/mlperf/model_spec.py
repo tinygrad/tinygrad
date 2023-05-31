@@ -1,6 +1,7 @@
 # load each model here, quick benchmark
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import GlobalCounters, getenv
+import numpy as np
 
 def test_model(model, *inputs):
   GlobalCounters.reset()
@@ -16,14 +17,19 @@ def spec_resnet():
   test_model(mdl, img)
 
 def spec_retinanet():
-  # TODO: Retinanet
-  pass
+  # Retinanet with ResNet backbone
+  from models.resnet import ResNet50
+  from models.retinanet import RetinaNet
+  mdl = RetinaNet(ResNet50(), num_classes=91, num_anchors=9)
+  img = Tensor.randn(1, 3, 224, 224)
+  test_model(mdl, img)
 
 def spec_unet3d():
   # 3D UNET
   from models.unet3d import UNet3D
   mdl = UNet3D()
-  img = Tensor.randn(1, 1, 5, 224, 224)
+  mdl.load_from_pretrained()
+  img = Tensor.randn(1, 1, 128, 128, 128)
   test_model(mdl, img)
 
 def spec_rnnt():
@@ -35,8 +41,13 @@ def spec_rnnt():
   test_model(mdl, x, y)
 
 def spec_bert():
-  # TODO: BERT-large
-  pass
+  from models.bert import BertForQuestionAnswering
+  mdl = BertForQuestionAnswering()
+  mdl.load_from_pretrained()
+  x = Tensor.randn(1, 384)
+  am = Tensor.randn(1, 384)
+  tt = Tensor(np.random.randint(0, 2, (1, 384)).astype(np.float32))
+  test_model(mdl, x, am, tt)
 
 if __name__ == "__main__":
   # inference only for now

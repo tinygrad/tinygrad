@@ -132,7 +132,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
         assert newvar.ltype == LocalTypes.float, "const can't be float4"
         # nan? inf?
-        val = f"{bufs[args.i].realized._buf}f"
+        val = f"{bufs[args.i].realized._buf}" + ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
       elif isinstance(bufs[args.i].dtype, ImageDType):
         assert newvar.ltype == LocalTypes.float4, "image must be float4"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
@@ -146,7 +146,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
             val = f"vload_half({args.idx.render(render_cl)}, {bufnames[args.i]})"
         else:
           if newvar.ltype == LocalTypes.float4:
-            val = f"{lang.float4}((({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}])"
+            val = f"({newvar.ltype.name})((({lang.smem_prefix if isinstance(bufs[args.i], LocalBuffer) else lang.buffer_prefix}{bufs[args.i].dtype.name}4*){bufnames[args.i]})[{(args.idx//4).render(render_cl)}])"
           else:
             val = f"{bufnames[args.i]}[{args.idx.render(render_cl)}]"
       # NOTE: if min and max are both 0, it should be a CONST in the Linearizer
@@ -182,12 +182,15 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
+  if lang.half_prekernel:
+    prg =''.join([f"{lang.half_prekernel}", "\n", prg])
   return prg, global_size, local_size
 
 class CStyleCodegen(Linearizer):
   lang: ClassVar[CStyleLanguage] = CStyleLanguage()
   supports_constant_folding: bool = True
   supports_float4: bool = True
+  supports_float4_alu: bool = True
 
   # for renaming
   kernel_cnt: Final[DefaultDict[str, int]] = collections.defaultdict(int)
