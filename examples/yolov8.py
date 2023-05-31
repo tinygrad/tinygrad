@@ -9,6 +9,7 @@ from itertools import chain
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #the upsampling class has been taken from this pull request by dc-dc-dc. Now 2 models use upsampling. (retinet and this)
 
+
 # UTIL FUNCTIONS
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
@@ -32,7 +33,6 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
     stride_tensor.append(np.full((h * w, 1), stride))
   return np.concatenate(anchor_points), np.concatenate(stride_tensor)
 
-
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
   if d > 1:
@@ -53,7 +53,6 @@ class Upsample:
     (b, c), _lens = x.shape[:2], len(x.shape[2:])
     tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
     return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
-  
   
 # MODULE Definitions
 class SPPF:
@@ -77,8 +76,7 @@ class Conv_Block:
 
   def __call__(self, x):
     return self.conv(x).silu()
-  
-  
+   
 class Bottleneck:
   def __init__(self, c1, c2 , shortcut: bool, g=1, kernels: list = (3,3), channel_factor=0.5):
     c_ = int(c2 * channel_factor)
@@ -89,7 +87,6 @@ class Bottleneck:
   def forward(self, x):
     return x + self.cv2(self.cv1(x)) if self.residual else self.cv2(self.cv1(x))
                   
-
 class C2f:
   def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
     self.c = int(c2 * e)  # hidden channels
@@ -115,11 +112,9 @@ class DFL():
   def forward(self, x):
     b, c, a = x.shape # batch, channels, anchors
     return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
-
-  
+ 
 # int_bias untested
 class DetectionHead():
-
   def __init__(self, nc=80, filters=()):
     self.ch = 16  # DFL channels
     self.nc = nc  # number of classes
@@ -158,7 +153,6 @@ class DetectionHead():
       b[-1].bias.assign(y)
   
 class Darknet():
-  
   def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
     self.b1 = [Conv_Block(c1=3, c2=64*width_multiple, kernel_size=3, stride=2, padding=1), Conv_Block(64*width_multiple, 128*width_multiple, 3, 2,1)]
     self.b2 = [C2f(c1=128*width_multiple, c2=128*width_multiple, n=3*depth_multiple, shortcut=True), Conv_Block(128*width_multiple, 256*width_multiple, 3, 2, 1), C2f(256*width_multiple, 256*width_multiple, 6*depth_multiple, True)]
@@ -175,7 +169,6 @@ class Darknet():
     return x2, x3, x5
   
 class Yolov8NECK():
-  
   def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
     self.up = Upsample(2, mode='nearest')
     self.n1 = C2f(c1=512*width_multiple*(1+ratio_mutliple), c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
@@ -212,7 +205,6 @@ def clip_boxes(boxes, shape):
   else:  # np.array 
     boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, shape[1])  # x1, x2
     boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, shape[0])  # y1, y2
-
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   if ratio_pad is None:  # calculate from img0_shape
