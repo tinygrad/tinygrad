@@ -46,7 +46,7 @@ def get_run_onnx(onnx_model: ModelProto):
     return ret
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
-    # this is is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
+    # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
     if a.type == AttributeProto.FLOAT: return float(a.f)
     elif a.type == AttributeProto.INT: return int(a.i)
     elif a.type == AttributeProto.STRING: return a.s.decode("utf-8")
