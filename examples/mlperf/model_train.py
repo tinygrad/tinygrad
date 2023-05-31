@@ -14,7 +14,7 @@ def train_resnet():
   from extra.training import sparse_categorical_crossentropy
 
   model = ResNet50()
-  BS = 256
+  BS = 8
   lr = BS*1e-3
   optimizer = optim.SGD(optim.get_parameters(model), lr=lr, momentum = .875)
   args_epoch = 50
@@ -24,24 +24,25 @@ def train_resnet():
 
   for epoch in range(args_epoch):
     n,d = 0,0
-    for image, label in ( v:=tqdm(iterate(bs=BS, val=True))):
-      out = model(Tensor(image))
-      out = out.numpy()
-      loss = cross_entropy_loss(out, label)
-      out = out.argmax(axis=1)
-      n += (out==label).sum()
-      d += len(out)
-      v.set_description(f"Validation Loss : {loss} ; {n}/{d}  {n*100./d:.2f}%")
+    if epoch+1 % 10 == 0:
+      # image - (BS,C,X,X), label - (BS,) -> Int
+      for image, label in ( v:=tqdm(iterate(bs=BS, val=True))):
+        out = model(Tensor(image))
+        out = out.numpy()
+        loss = cross_entropy_loss(out, label)
+        out = out.argmax(axis=1)
+        n += (out==label).sum()
+        d += len(out)
+        v.set_description(f"Validation Loss : {loss} ; {n}/{d}  {n*100./d:.2f}%")
 
-    Tensor.training= True
     for image, label in (t :=tqdm(iterate(bs=BS,val=False))):
-      image = Tensor(image, requires_grad=False)
+      image = Tensor(image)
       optimizer.zero_grad()
       out = model.forward(image)
       loss = sparse_categorical_crossentropy(out, label) # using sparse categorical : labels -> int
       loss.backward()
       optimizer.step()
-      t.set_description(f"Training Loss : {loss.detach().cpu().numpy()}")
+      t.set_description(f"Training Loss : {loss.detach().cpu().numpy()} ; Learning Rate : {lr}")
     lr = scheduler.get_lr() * warmup_factor(epoch, 8)
 
 def train_retinanet():
