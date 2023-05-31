@@ -62,7 +62,7 @@ class SPPF:
     self.cv2 = Conv_Block(c_ * 4, c2, k, 1)
     self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=5, stride=1)
         
-  def forward(self, x):
+  def __call__(self, x):
     x = self.cv1(x)
     x2 = self.maxpool(x)
     x3 = self.maxpool(x2)
@@ -84,35 +84,34 @@ class Bottleneck:
     self.cv2 = Conv_Block(c_, c2, kernel_size=kernels[1], stride=1, padding=None, groups=g)
     self.residual = c1 == c2 and shortcut
     
-  def forward(self, x):
+  def __call__(self, x):
     return x + self.cv2(self.cv1(x)) if self.residual else self.cv2(self.cv1(x))
                   
 class C2f:
   def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
     self.c = int(c2 * e)  # hidden channels
-    self.cv1 = Conv_Block(c1, 2 * self.c, 1, 1)
+    self.cv1 = Conv_Block(c1, 2 * self.c, 1,)
     self.cv2 = Conv_Block((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
-    self.bottleneck = [Bottleneck(self.c, self.c, shortcut, g, k=[(3, 3), (3, 3)], e=1.0) for _ in range(n)]
-
-  def forward(self, x):
-    y = self.cv1(x)
-    # TODO: maybe can use 'Tensor.chunck' here
-    y_chunks = [y[:, :self.c], y[:, self.c:]]
-    y2 = [m(y_chunks[-1]) for m in self.bottleneck]
-    concatenated = tuple([y] + y_chunks + y2)
-    return self.cv2(concatenated)
+    self.bottleneck = [Bottleneck(self.c, self.c, shortcut, g, kernels=[(3, 3), (3, 3)], channel_factor=1.0) for _ in range(n)]
+   
+  def __call__(self, x):
+    y= list(self.cv1(x).chunk(2, 1))
+    y.extend(m(y[-1]) for m in self.bottleneck)
+    z = y[0]
+    for i in y[1:]: z = z.cat(i, dim=1)
+    return self.cv2(z)
 
 class DFL():
   def __init__(self, c1=16):
     self.conv = Conv2d(c1, 1, 1, bias=False)
-    x = Tensor.arange(c1, dtypes.float32)
+    x = Tensor.arange(c1)
     self.conv.weight = x.reshape(1, c1, 1, 1)
     self.c1 = c1
 
-  def forward(self, x):
+  def __call__(self, x):
     b, c, a = x.shape # batch, channels, anchors
     return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
- 
+  
 # int_bias untested
 class DetectionHead():
   def __init__(self, nc=80, filters=()):
@@ -136,13 +135,12 @@ class DetectionHead():
     x_cat = y[0].cat(y[1], y[2], dim=2)
     split_sizes = [self.ch * 4, self.nc]
     box, cls = [x_cat[:, :split_sizes[0], :], x_cat[:, split_sizes[0]:, :]]
-    dbox = dist2bbox(self.dfl.forward(box), Tensor(self.anchors).unsqueeze(0), xywh=True, dim=1) * Tensor(self.strides)
+    dbox = dist2bbox(self.dfl(box), Tensor(self.anchors).unsqueeze(0), xywh=True, dim=1) * Tensor(self.strides)
     z = dbox.cat(cls.sigmoid(), dim=1)
     return (z, x)
   
   def initialize_biases(self):
-    # Initialize biases
-    # WARNING: requires stride availability
+    # Initialize biases and WARNING: requires stride availability
     m = self
     for a, b, s in zip(m.box, m.cls, m.stride):
       x = Tensor.ones(a[-1].bias.shape)
@@ -166,29 +164,44 @@ class Darknet():
     x3 = x2.sequential(self.b3)
     x4 = x3.sequential(self.b4)
     x5 = self.b5(x4)
-    return x2, x3, x5
+    return (x2, x3, x5)
   
 class Yolov8NECK():
-  def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
+  def __init__(self, width_multiple, ratio_multiple, depth_multiple):
     self.up = Upsample(2, mode='nearest')
-    self.n1 = C2f(c1=512*width_multiple*(1+ratio_mutliple), c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
+    self.n1 = C2f(c1=512*width_multiple*(1+ratio_multiple), c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
     self.n2 = C2f(c1=768*width_multiple, c2=256*width_multiple, n=3*depth_multiple, shortcut=False)
     self.n3 = Conv_Block(c1=256*width_multiple, c2=256*width_multiple, kernel_size=3, stride=2, padding=1)
     self.n4 = C2f(c1=768*width_multiple, c2=512*width_multiple, n=3*depth_multiple, shortcut=False)
     self.n5 = Conv_Block(c1=512* width_multiple, c2=512 * width_multiple, kernel_size=3, stride=2, padding=1)
-    self.n6 = C2f(c1=512*width_multiple*(1+ratio_mutliple), c2=512*width_multiple*ratio_mutliple, n=3*depth_multiple, shortcut=False)
+    self.n6 = C2f(c1=512*width_multiple*(1+ratio_multiple), c2=512*width_multiple*ratio_multiple, n=3*depth_multiple, shortcut=False)
   
   def forward(self, p3, p4, p5):
-    x =  self.n1.forward(p4.cat(self.up(p5), dim=1))
-    head_1 = self.n2.forward(p3.cat(self.up(x), dim=1))
-    head_2 = self.n4.forward(x.cat(self.n3.forward(head_1), dim=1))
-    head_3 = self.n6.forward(p5.cat(self.n5.forward(head_2), dim=1))
-    return head_1, head_2, head_3
-  
+    x =  self.n1(p4.cat(self.up(p5), dim=1))
+    head_1 = self.n2(p3.cat(self.up(x), dim=1))
+    head_2 = self.n4(x.cat(self.n3(head_1), dim=1))
+    head_3 = self.n6(p5.cat(self.n5(head_2), dim=1))
+    return (head_1, head_2, head_3)
 
-# post processing
-# DETECTION PREDICTOR CLASS FOR PROCESSING RAW OUTPUTS FROM detection head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
-# (a. non max suppression b. scale boxes (done) c. clip boxes (done) d. xywh2xyxy e. box_iou - ops.py) (f. [Result - individial class] g. predict.cli h. init inherit i. steam_inference- basepredictor parent class)
+class YOLOv8():
+  # confirm filters. 
+  def __init__(self, width_multiple, ratio_multiple,  depth_multiple, num_classes, filters=(64,128,256)):
+    self.net = Darknet(width_multiple, ratio_multiple, depth_multiple)
+    self.fpn = Yolov8NECK(width_multiple, ratio_multiple, depth_multiple)
+    img_dummy = Tensor.zeros(1, 3, 256, 256)
+    self.head = DetectionHead(num_classes, filters)
+    self.head.stride = Tensor([256 / x.shape[-2] for x in self.forward(img_dummy)])
+    self.stride = self.head.stride
+    self.head.initialize_biases()
+
+  def forward(self, x):
+    x = self.net.forward(x)
+    x = self.fpn.forward(*x)
+    return self.head.forward(*x)
+
+yolo_infer = YOLOv8(1, 1, 1 , 80)  
+
+# post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
 
 #NMS --> xywh2xyxy + box_iou
 #Scale_boxes --> clip_boxes
