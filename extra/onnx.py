@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
-from onnx.onnx_pb import ModelProto
+from onnx.onnx_pb import ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -28,13 +28,14 @@ onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  # print('---')
-  # print(onnx_model)
-  # print('---')
-  # raise Exception("TODO: implement get_run_onnx")
+  print('---')
+  print(onnx_model)
+  print('---')
+  print(onnx_model.graph.initializer)
+  print('---')
 
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
-  def buffer_parse(inp):
+  def buffer_parse(inp: TensorProto):
     if inp.data_type in (1,10,6,7):
       # TODO: this is shared with below
       if len(inp.float_data) > 0:
