@@ -1,8 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-import os, math, functools
+import os, math, functools, itertools
 import numpy as np
-from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any, Iterable
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 
@@ -16,6 +16,7 @@ def partition(lst, fxn): return [x for x in lst if fxn(x)], [x for x in lst if n
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterator): return [item for sublist in l for item in sublist]
 def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
+def cumsum(x: Iterable, **kwargs): return [i for i in itertools.accumulate(x)]
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
