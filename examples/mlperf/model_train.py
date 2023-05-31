@@ -1,7 +1,7 @@
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor,Device
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
-from tqdm import trange
+from tqdm import tqdm
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -15,34 +15,34 @@ def train_resnet():
   from examples.mlperf.metrics import cross_entropy_loss
   from tinygrad.jit import TinyJit
   from extra.helpers import cross_process
+  from extra.training import sparse_categorical_crossentropy
 
   model = ResNet50()
-  optimizer = optim.SGD(optim.get_parameters(model), lr=1e-4, momentum = .875)
+  optimizer = optim.SGD(optim.get_parameters(model), lr=1e-4, momentum = .875, wd=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, 250)
   args_epoch = 250
 
-  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-  def input_fixup(x):
-    x = x.permute([0,3,1,2]) / 255.0
-    x -= input_mean
-    x /= input_std
-    return x
-
-  mdlrun = TinyJit(lambda x: model(input_fixup(x)).realize())
-
   for epoch in range(args_epoch):
-    for image, label in iterate(bs=8, val=True):
-      out = mdlrun(Tensor(image))
-      print(label)
-      loss = cross_entropy_loss(out.numpy(), label)
-    print("done")
-    for image, label in iterate(bs=8,val=False):
-      optimizer.zero_grad()
-      out = mdlrun(Tensor(image))
+    n,d = 0,0
+    for image, label in ( v:=tqdm(iterate(bs=8, val=True))):
+      out = model(Tensor(image))
+      out = out.numpy()
       loss = cross_entropy_loss(out, label)
-      loss.backwards()
+      out = out.argmax(axis=1)
+      n += (out==label).sum()
+      d += len(out)
+      v.set_description(f"Validation Loss : {loss} ; {n}/{d}  {n*100./d:.2f}%")
+      break
+
+    Tensor.training= True
+    for image, label in (t :=tqdm(iterate(bs=8,val=False))):
+      image = Tensor(image, requires_grad=False)
+      optimizer.zero_grad()
+      out = model.forward(image)
+      loss = sparse_categorical_crossentropy(out, label)
+      loss.backward()
       optimizer.step()
+      t.set_description(f"Training Loss : {loss.detach().cpu().numpy()}")
 
 def train_retinanet():
   # TODO: Retinanet
