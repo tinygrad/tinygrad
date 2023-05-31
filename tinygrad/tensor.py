@@ -166,7 +166,7 @@ class Tensor:
 
   _rng: ClassVar[np.random.Generator] = np.random.default_rng()
   @staticmethod
-  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
+  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed)
 
   @staticmethod
   def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
@@ -542,9 +542,8 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
-    # TODO: why is this going through numpy?
-    _mask: np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
+    return self * mask * (1/(1.0 - p))
 
   # ***** cast ops *****
 
