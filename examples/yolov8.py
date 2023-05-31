@@ -31,7 +31,6 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
   return np.concatenate(anchor_points), np.concatenate(stride_tensor)
 
 
-
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
   if d > 1:
@@ -73,7 +72,7 @@ class Bottleneck:
     
   def forward(self, x):
     return x + self.cv2(self.cv1(x)) if self.residual else self.cv2(self.cv1(x))
-
+                  
 
 class C2f:
   def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
@@ -140,9 +139,34 @@ class DetectionHead():
 #       b[-1].bias[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)
 
 
+class Darknet():
+  def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
+    self.w = width_multiple
+    self.r = ratio_mutliple
+    self.d = depth_multiple
+    self.n1 = [Conv_Block(c1=3, c2=64*width_multiple, kernel_size=3, stride=2, padding=1), Conv_Block(64*width_multiple, 128*width_multiple, 3, 2,1)]
+    self.n2 = [C2f(c1=128*width_multiple, c2=128*width_multiple, n=3*depth_multiple, shortcut=True), Conv_Block(128*width_multiple, 256*width_multiple, 3, 2, 1), C2f(256*width_multiple, 256*width_multiple, 6*depth_multiple, True)]
+    self.n3 = [Conv_Block(256*width_multiple, 512*width_multiple, 3, 2, 1), C2f(512*width_multiple, 512*width_multiple, 6*depth_multiple, True)]
+    self.n4 = [Conv_Block(512*width_multiple, 512*width_multiple*ratio_mutliple, 3, 2, 1), C2f(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 3*depth_multiple, True)]
+    self.final = SPPF(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 1)
+
+  def forward(self, x):
+    x1 = x.sequential(self.n1)
+    x2 = x1.sequential(self.n2)
+    x3 = x2.sequential(self.n3)
+    x4 = x3.sequential(self.n4)
+    x5 = self.final(x4)
+    return x2, x3, x5
+
+# post processing
 # DETECTION PREDICTOR CLASS FOR PROCESSING RAW OUTPUTS FROM detection head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
 # (a. non max suppression b. scale boxes (done) c. clip boxes (done) d. xywh2xyxy e. box_iou - ops.py) (f. [Result - individial class] g. predict.cli h. init inherit i. steam_inference- basepredictor parent class)
-# TODO: xywh2xyxy + box_iou --> NMS --> test NMS (others implict)
+
+#NMS --> xywh2xyxy + box_iou
+#Scale_boxes --> clip_boxes
+#Saving --> plotting functions. 
+#pre_process --> image process
+#yolo model --> results.
 
 def clip_boxes(boxes, shape):
   if isinstance(boxes, Tensor):  # TODO: maybe tensor.clip can be used here.
