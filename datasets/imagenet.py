@@ -36,11 +36,11 @@ def rand_flip(image, axis=(0,1)):
     image = np.flip(image, axis=axis).copy()
   return image
 
-def random_scale(array, min_scale=0.8, max_scale=1.2):
-  scale_factor = np.random.uniform(min_scale, max_scale)
-  new_size = int(array.size * scale_factor)
-  resized_array = np.resize(array, new_size)
-  scaled_array = resized_array.resize((int(new_size ** 0.5), int(new_size ** 0.5), -1))
+def random_scale(array, min_scale=0.08, max_scale=1.2):
+  scale_factor = np.random.uniform(min_scale, max_Scale)
+  max_scale_factor = 1.0 / scale_factor
+  new_scale_factor = np.random.uniform(1.0, max_scale_factor)
+  scaled_array = image * new_scale_factor
   return scaled_array
 
 def preprocess(image, val):
