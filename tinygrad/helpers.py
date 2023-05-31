@@ -35,7 +35,7 @@ class ContextVar:
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   @property
-  def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
+  def value(self): return ContextVar.ctx_stack[-1].get(self.key, self.initial_value)
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 
