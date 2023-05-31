@@ -48,16 +48,21 @@ def spec_bert():
   am = Tensor.randn(1, 384)
   tt = Tensor(np.random.randint(0, 2, (1, 384)).astype(np.float32))
   test_model(mdl, x, am, tt)
+def sepc_maskrcnn():
+  from models.maskrcnn import MaskRCNN
+  mdl = MaskRCNN()
+  mdl.load_from_pretrained()
+  x = Tensor.randn(1, 1)
+  y = Tensor.randn(1, 1)
+  test_model(mdl, x, y)
 
 if __name__ == "__main__":
   # inference only for now
   Tensor.training = False
   Tensor.no_grad = True
 
-  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(","):
+  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,rcnn").split(","):
     nm = f"spec_{m}"
-    if nm in globals():
-      print(f"testing {m}")
-      globals()[nm]()
-
-
+  if nm in globals():
+    print(f"testing {m}")
+  globals()[nm]()
