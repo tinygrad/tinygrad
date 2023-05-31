@@ -54,10 +54,26 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
 class TestOps(unittest.TestCase):
+  def test_full_like(self):
+    a = Tensor([[1,2,3],[4,5,6]])
+    b = torch.tensor([[1,2,3],[4,5,6]])
+    helper_test_op([], lambda: torch.full_like(b, 4), lambda: Tensor.full_like(a, 4), forward_only=True)
+  def test_full(self):
+    helper_test_op([], lambda: torch.full((45,65), 4), lambda: Tensor.full((45,65), 4), forward_only=True)
   def test_zeros(self):
     helper_test_op([], lambda: torch.zeros(45,65), lambda: Tensor.zeros(45,65), forward_only=True)
+  def test_zeros_like(self):
+    a = Tensor([[1,2,3],[4,5,6]])
+    b = torch.tensor([[1,2,3],[4,5,6]])
+    helper_test_op([], lambda: torch.zeros_like(b), lambda: Tensor.zeros_like(a), forward_only=True)
+  def test_empty_0(self):
+    helper_test_op([], lambda: torch.empty(45,65)*0/0, lambda: Tensor.empty(45,65)*0/0, forward_only=True)
   def test_ones(self):
     helper_test_op([], lambda: torch.ones(45,65), lambda: Tensor.ones(45,65), forward_only=True)
+  def test_ones_like(self):
+    a = Tensor([[1,2,3],[4,5,6]])
+    b = torch.tensor([[1,2,3],[4,5,6]])
+    helper_test_op([], lambda: torch.ones_like(b), lambda: Tensor.ones_like(a), forward_only=True)
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
   def test_arange(self):
@@ -439,9 +455,10 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv_transpose2d(x,w,groups=2).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_padded_conv_transpose2d(self):
-    helper_test_op([(2,4,9,9), (4,4,3,3)],
-      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=1).relu(),
-      lambda x,w: Tensor.conv_transpose2d(x,w,padding=1).relu(), atol=1e-4, grad_rtol=1e-5)
+    for padding in [(1,2), (2,1), 2, 1, 0]:
+      helper_test_op([(2,4,9,9), (4,4,3,3)],
+        lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=padding).relu(),
+        lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_dilated_conv_transpose2d(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
@@ -634,6 +651,12 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
+
+  def test_maxpool2d_dilation(self):
+    for dilation in [(2, 3), (3, 2), 2, 3]:
+      helper_test_op([(32,2,110,28)],
+        lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), dilation=dilation),
+        lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), dilation=dilation))
 
   def test_avgpool2d(self):
     shape = (32,2,111,28)
