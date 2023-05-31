@@ -13,6 +13,7 @@ from itertools import chain
 # UTIL FUNCTIONS
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
+  print(anchor_points.shape, lt.shape)
   x1y1 = anchor_points - lt
   x2y2 = anchor_points + rb
   if xywh:
@@ -26,8 +27,8 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
   assert feats is not None
   for i, stride in enumerate(strides):
     _, _, h, w = feats[i].shape
-    sx = np.arange(w) + grid_cell_offset  # shift x
-    sy = np.arange(h) + grid_cell_offset  # shift y
+    sx = np.arange(w, dtype=np.float32) + grid_cell_offset  # shift x
+    sy = np.arange(h, dtype=np.float32) + grid_cell_offset  # shift y
     sy, sx = np.meshgrid(sy, sx, indexing='ij')
     anchor_points.append(np.stack((sx, sy), -1).reshape(-1, 2))
     stride_tensor.append(np.full((h * w, 1), stride))
@@ -57,10 +58,10 @@ class Upsample:
 # MODULE Definitions
 class SPPF:
   def __init__(self, c1, c2, k=5):
-    c_ = c1 // 2  # hidden channels
-    self.cv1 = Conv_Block(c1, c_, k, 1)
-    self.cv2 = Conv_Block(c_ * 4, c2, k, 1)
-    self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=5, stride=1)
+      c_ = c1 // 2  # hidden channels
+      self.cv1 = Conv_Block(c1, c_, k, 1, padding=None)
+      self.cv2 = Conv_Block(c_ * 4, c2, k, 1, padding=None)
+      self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
         
   def __call__(self, x):
     x = self.cv1(x)
@@ -68,7 +69,7 @@ class SPPF:
     x3 = self.maxpool(x2)
     x4 = self.maxpool(x3)
     return self.cv2(x.cat(x2, x3, x4, dim=1))
-
+      
 class Conv_Block:
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
     self.conv = Conv2d(c1,c2, kernel_size, stride, padding= autopad(kernel_size, padding, dilation),bias=False, groups=groups, dilation=dilation)
@@ -152,11 +153,11 @@ class DetectionHead():
   
 class Darknet():
   def __init__(self, width_multiple, ratio_mutliple, depth_multiple):
-    self.b1 = [Conv_Block(c1=3, c2=64*width_multiple, kernel_size=3, stride=2, padding=1), Conv_Block(64*width_multiple, 128*width_multiple, 3, 2,1)]
+    self.b1 = [Conv_Block(c1=3, c2=64*width_multiple, kernel_size=3, stride=2, padding=1), Conv_Block(64*width_multiple, 128*width_multiple, kernel_size=3, stride=2, padding=1)]
     self.b2 = [C2f(c1=128*width_multiple, c2=128*width_multiple, n=3*depth_multiple, shortcut=True), Conv_Block(128*width_multiple, 256*width_multiple, 3, 2, 1), C2f(256*width_multiple, 256*width_multiple, 6*depth_multiple, True)]
-    self.b3 = [Conv_Block(256*width_multiple, 512*width_multiple, 3, 2, 1), C2f(512*width_multiple, 512*width_multiple, 6*depth_multiple, True)]
-    self.b4 = [Conv_Block(512*width_multiple, 512*width_multiple*ratio_mutliple, 3, 2, 1), C2f(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 3*depth_multiple, True)]
-    self.b5 = SPPF(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 1)
+    self.b3 = [Conv_Block(256*width_multiple, 512*width_multiple, kernel_size=3, stride=2, padding=1), C2f(512*width_multiple, 512*width_multiple, 6*depth_multiple, True)]
+    self.b4 = [Conv_Block(512*width_multiple, 512*width_multiple*ratio_mutliple, kernel_size=3, stride=2, padding=1), C2f(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 3*depth_multiple, True)]
+    self.b5 = SPPF(512*width_multiple*ratio_mutliple, 512*width_multiple*ratio_mutliple, 5)
 
   def forward(self, x):
     x1 = x.sequential(self.b1)
@@ -181,25 +182,28 @@ class Yolov8NECK():
     head_1 = self.n2(p3.cat(self.up(x), dim=1))
     head_2 = self.n4(x.cat(self.n3(head_1), dim=1))
     head_3 = self.n6(p5.cat(self.n5(head_2), dim=1))
-    return (head_1, head_2, head_3)
+    return [head_1, head_2, head_3]
 
 class YOLOv8():
   # confirm filters. 
-  def __init__(self, width_multiple, ratio_multiple,  depth_multiple, num_classes, filters=(64,128,256)):
+  def __init__(self, width_multiple, ratio_multiple,  depth_multiple, num_classes, filters=(256, 512, 512)):
     self.net = Darknet(width_multiple, ratio_multiple, depth_multiple)
     self.fpn = Yolov8NECK(width_multiple, ratio_multiple, depth_multiple)
-    img_dummy = Tensor.zeros(1, 3, 256, 256)
+    img_dummy = Tensor.zeros(1, 3, 640, 640)
     self.head = DetectionHead(num_classes, filters)
-    self.head.stride = Tensor([256 / x.shape[-2] for x in self.forward(img_dummy)])
+    self.head.stride = Tensor([640 / x.shape[-2] for x in self.forward(img_dummy)])
     self.stride = self.head.stride
     self.head.initialize_biases()
 
   def forward(self, x):
     x = self.net.forward(x)
+    print(len(x))
     x = self.fpn.forward(*x)
-    return self.head.forward(*x)
+    for i in x:
+      print(i.shape, i.dtype)
+    return self.head.forward(x)
 
-yolo_infer = YOLOv8(1, 1, 1 , 80)  
+yolo_infer = YOLOv8(1, 1, 1, 80)  
 
 # post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
 
