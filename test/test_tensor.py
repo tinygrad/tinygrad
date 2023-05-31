@@ -188,7 +188,8 @@ class TestTinygrad(unittest.TestCase):
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
     assert Tensor.randn(1,2,5).numel() == 10
-    assert Tensor.randn(1,1,1,1,1,1) == 1
+    assert Tensor.randn(1,1,1,1,1,1).numel() == 1
+    assert Tensor([]).numel() == 0
     # assert Tensor.randn(1,0,2,5) == 0 # TODO: fix empty tensors
 
   def test_element_size(self):
