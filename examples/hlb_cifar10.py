@@ -9,7 +9,7 @@ from datasets import fetch_cifar
 from tinygrad import nn
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.ops import GlobalCounters
 
 num_classes = 10
@@ -69,8 +69,8 @@ def fetch_batch(X_train, Y_train, BS):
   Y = Tensor(Y.reshape(BS, num_classes))
   return X.realize(), Y.realize()
 
+@Context(training=True)
 def train_cifar():
-  Tensor.training = True
   BS, STEPS = getenv("BS", 512), getenv("STEPS", 10)
   if getenv("FAKEDATA"):
     N = 2048

@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.lazy import Device
 from extra.helpers import Timing
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, NO_GRAD
 from tinygrad.nn import Embedding, Linear
 from tinygrad.ops import GlobalCounters
 from tinygrad.jit import TinyJit
@@ -186,7 +186,7 @@ def sample(logits, temperature):
 # **** main code ****
 
 if __name__ == "__main__":
-  Tensor.no_grad = True
+  NO_GRAD(True)
   print(f"using {Device.DEFAULT} backend")
   from sentencepiece import SentencePieceProcessor
   sp_model = SentencePieceProcessor(model_file=str(TOKENIZER_FILENAME))

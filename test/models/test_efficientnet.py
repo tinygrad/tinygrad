@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.tensor import Tensor
 from models.efficientnet import EfficientNet
 from models.vit import ViT
@@ -41,9 +41,8 @@ def preprocess(img, new=False):
     img /= np.array([0.229, 0.224, 0.225]).reshape((1, -1, 1, 1))
   return img
 
-
+@Context(training=False)
 def _infer(model: EfficientNet, img, bs=1):
-  Tensor.training = False
   img = preprocess(img)
   # run the net
   if bs > 1: img = img.repeat(bs, axis=0)

@@ -2,7 +2,7 @@ import ast
 import io
 import numpy as np
 from PIL import Image
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, TRAINING
 from tinygrad.helpers import getenv
 from models.vit import ViT
 from extra.utils import fetch
@@ -15,7 +15,7 @@ with tf.io.gfile.GFile(fn, "rb") as f:
     g.write(dat)
 """
 
-Tensor.training = False
+TRAINING(False)
 if getenv("LARGE", 0) == 1:
   m = ViT(embed_dim=768, num_heads=12)
 else:

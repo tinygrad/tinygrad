@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import trange
 from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 
 def sparse_categorical_crossentropy(out, Y):
   num_classes = out.shape[-1]
@@ -13,9 +13,9 @@ def sparse_categorical_crossentropy(out, Y):
   y = Tensor(y)
   return out.mul(y).mean()
 
+@Context(training=True)
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):
-  Tensor.training = True
   losses, accuracies = [], []
   for i in (t := trange(steps, disable=getenv('CI', False))):
     samp = np.random.randint(0, X_train.shape[0], size=(BS))
@@ -41,10 +41,9 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categoric
       accuracies.append(accuracy)
       t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
     
-
+@Context(training=False)
 def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False, transform=lambda x: x, 
              target_transform=lambda y: y):
-  Tensor.training = False
   def numpy_eval(Y_test, num_classes):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
     for i in trange((len(Y_test)-1)//BS+1, disable=getenv('CI', False)):

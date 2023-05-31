@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from examples.mlperf import helpers
 
 def eval_resnet():
@@ -186,12 +186,10 @@ def eval_bert():
 
 if __name__ == "__main__":
   # inference only
-  Tensor.training = False
-  Tensor.no_grad = True
-
-  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
-  for m in models:
-    nm = f"eval_{m}"
-    if nm in globals():
-      print(f"eval {m}")
-      globals()[nm]()
+  with Context(training=False, no_grad=True):
+    models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
+    for m in models:
+      nm = f"eval_{m}"
+      if nm in globals():
+        print(f"eval {m}")
+        globals()[nm]()

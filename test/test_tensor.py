@@ -4,7 +4,7 @@ import torch
 import unittest
 import itertools
 from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, Context
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -104,8 +104,8 @@ class TestTinygrad(unittest.TestCase):
     assert mm.grad is not None
     assert W.grad is not None
 
+  @Context(training=True)
   def test_dropout(self):
-    Tensor.training = True
     n, rate = 1_000_000, 0.1
     w = Tensor.ones(n).dropout(rate)
     non_zeros = np.count_nonzero(w.cpu().numpy())

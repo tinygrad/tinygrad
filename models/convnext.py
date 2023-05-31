@@ -1,4 +1,5 @@
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import Context
 from tinygrad.nn import Conv2d, LayerNorm, LayerNorm2d, Linear
 
 class Block:
@@ -57,8 +58,7 @@ if __name__ == "__main__":
   from test.models.test_efficientnet import chicken_img, preprocess, _LABELS
   img = Tensor(preprocess(chicken_img))
 
-  Tensor.training = False
-  Tensor.no_grad = True
+  with Context(no_grad=True, training=False):
+    out = model(img).numpy()
 
-  out = model(img).numpy()
   print(_LABELS[out.argmax()])

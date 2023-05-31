@@ -24,6 +24,7 @@ from tinygrad.runtime.ops_gpu import CL
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import Context
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/6c5693e965b9c63f8678f52b9e9b5abe35f23feb/selfdrive/modeld/models/supercombo.onnx"
 
@@ -45,9 +46,9 @@ def model_exec(run_onnx, using_graph, **inputs):
   print("realizing")
   return ret.realize()
 
+@Context(no_grad=True)
 def compile(dat, output_fn):
   Tensor.manual_seed(1337)
-  Tensor.no_grad = True
   using_graph = graph.GRAPH
   if getenv("GRAPH") < 3: graph.GRAPH = False
 

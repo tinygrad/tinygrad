@@ -4,10 +4,11 @@ import unittest
 import numpy as np
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import Context
 from datasets import fetch_mnist
 
+@Context(training=True)
 def compare_tiny_torch(model, model_torch, X, Y):
-  Tensor.training = True
   model_torch.train()
   model_state_dict = optim.get_state_dict(model)
   for k,v in model_torch.named_parameters():

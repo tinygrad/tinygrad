@@ -9,16 +9,18 @@ os.environ['OPT'] = '2'
 from tinygrad.tensor import Tensor
 from tinygrad.runtime.ops_gpu import CLImage
 from tinygrad.nn import Conv2d
-Tensor.no_grad = True
+from tinygrad.helpers import Context
 
 class TestImage(unittest.TestCase):
+  @Context(no_grad=True)
   def test_create_image(self):
     t = Tensor.ones(128, 128, 1)
     t = t.reshape(128, 32, 4) + 3
     t.realize()
     assert isinstance(t.lazydata.realized._buf, CLImage)
     np.testing.assert_array_equal(t.numpy(), np.ones((128,32,4))*4)
-
+  
+  @Context(no_grad=True)
   def test_sum_image(self):
     t1 = Tensor.ones(16, 16, 1).reshape(16, 4, 4) + 3
     t1.realize()
@@ -27,6 +29,7 @@ class TestImage(unittest.TestCase):
     t1.realize()
     assert t1.numpy()[0] == 16*4*4*4, f"got {t1.numpy()}"
   
+  @Context(no_grad=True)
   def test_add_image(self):
     t1 = Tensor.ones(16, 16, 1).reshape(16, 4, 4) + 3
     t2 = Tensor.ones(16, 16, 1).reshape(16, 4, 4) + 4
@@ -37,12 +40,14 @@ class TestImage(unittest.TestCase):
     assert isinstance(t3.lazydata.realized._buf, CLImage)
     np.testing.assert_array_equal(t3.numpy(), np.ones((16,4,4))*9)
 
+  @Context(no_grad=True)
   def test_padded_conv(self):
     bs, in_chans, out_chans = 1,12,32
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)
     tiny_dat = Tensor.ones(bs, 12, 64, 128)
     tiny_conv(tiny_dat).realize()
   
+  @Context(no_grad=True)
   def test_op_conv(self):
     bs, in_chans, out_chans = 1,12,32
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)

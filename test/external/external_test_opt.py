@@ -9,7 +9,7 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad import nn
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.nn import optim
 from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
 from tinygrad.lazy import PUSH_PERMUTES
@@ -38,9 +38,6 @@ from tinygrad.nn.optim import get_parameters
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestInferenceMinKernels(unittest.TestCase):
-  def setUp(self):
-    Tensor.training = False
-
   @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
   def test_convnext(self):
     model = ConvNeXt()
@@ -166,20 +163,17 @@ class TestOpt(unittest.TestCase):
       assert len(GlobalCounters.cache) == 1, "optimizer didn't fold reduce/elementwise"
     assert ret.numpy()[0] == 33
 
+  @Context(training=True)
   def test_fold_batchnorm(self):
-    # TODO: with Tensor.training
-    Tensor.training = True
     img = Tensor.ones(1,32,4,4)
     bn = nn.BatchNorm2d(32, track_running_stats=False)
     with CLCache():
       img_bn = bn(img).realize()
       print(img_bn)
       assert len(GlobalCounters.cache) == 3, f"optimizer didn't fold batchnorm, got {len(GlobalCounters.cache)}"
-    Tensor.training = False
 
+  @Context(training=True)
   def test_fold_conv_sgd(self):
-    # TODO: with Tensor.training
-    Tensor.training = True
     img = Tensor.ones(2,3,4,4)
     c1 = nn.Conv2d(3,32,3)
     opt = optim.SGD(optim.get_parameters(c1))
@@ -191,11 +185,9 @@ class TestOpt(unittest.TestCase):
       # with pushing_permutes it can be 3
       # TODO: broken with optim fixes
       assert len(GlobalCounters.cache) in [4,5,6], f"optimizer didn't fold conv-backward SGD, got {len(GlobalCounters.cache)}"
-    Tensor.training = False
 
+  @Context(training=True)
   def test_fold_2convs_sgd(self):
-    # TODO: with Tensor.training
-    Tensor.training = True
     img = Tensor.ones(2,3,64,64)
     c1 = nn.Conv2d(3,16,3,bias=False)
     c2 = nn.Conv2d(16,32,3,bias=False)
@@ -204,11 +196,9 @@ class TestOpt(unittest.TestCase):
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
       opt.step()
-    Tensor.training = False
 
+  @Context(training=True)
   def test_fold_4convs_sgd(self):
-    # TODO: with Tensor.training
-    Tensor.training = True
     img = Tensor.ones(2,3,64,64)
     c1 = nn.Conv2d(3,4,3,bias=False)
     c2 = nn.Conv2d(4,8,3,bias=False)
@@ -219,11 +209,9 @@ class TestOpt(unittest.TestCase):
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
       opt.step()
-    Tensor.training = False
 
+  @Context(training=True)
   def test_fold_conv_batchnorm_sgd(self):
-    # TODO: with Tensor.training
-    Tensor.training = True
     img = Tensor.ones(1,3,4,4)
     c1 = nn.Conv2d(3,32,3)
     bn = nn.BatchNorm2d(32, track_running_stats=False)
@@ -233,7 +221,6 @@ class TestOpt(unittest.TestCase):
       opt.zero_grad()
       img_bn.backward()
       opt.step()
-    Tensor.training = False
 
   def test_fold_conv_batchnorm_notrain(self):
     img = Tensor.ones(1,3,8,8)
@@ -245,8 +232,8 @@ class TestOpt(unittest.TestCase):
       img_conv = bn(c1(img)).relu().realize()
       assert len(GlobalCounters.cache) == 1, f"optimizer didn't fold conv-batchnorm at test time, got {len(GlobalCounters.cache)}"
 
+  @Context(training=True)
   def test_fold_conv_batchnorm(self):
-    Tensor.training = True
     img = Tensor.ones(1,3,8,8)
     c1 = nn.Conv2d(3,32,3)
     bn = nn.BatchNorm2d(32, track_running_stats=False)
@@ -254,7 +241,6 @@ class TestOpt(unittest.TestCase):
       img_conv = bn(c1(img)).relu().realize()
       print(img_conv)
       assert len(GlobalCounters.cache) == 4, f"optimizer didn't fold conv-batchnorm, got {len(GlobalCounters.cache)}"
-    Tensor.training = False
 
   def test_fold_conv_elu(self):
     img = Tensor.ones(1,4,8,8)

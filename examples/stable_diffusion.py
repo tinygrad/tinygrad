@@ -12,7 +12,7 @@ from collections import namedtuple
 import numpy as np
 from tqdm import tqdm
 
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, NO_GRAD
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
 from extra.utils import fake_torch_load_zipped, get_child, download_file
 
@@ -609,7 +609,7 @@ if __name__ == "__main__":
   parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
   args = parser.parse_args()
 
-  Tensor.no_grad = True
+  NO_GRAD(True)
   model = StableDiffusion()
 
   # load in weights
