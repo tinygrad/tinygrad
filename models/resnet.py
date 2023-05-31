@@ -52,9 +52,9 @@ class Bottleneck:
     return out
 
 class ResNet:
-  def __init__(self, num, num_classes):
+  def __init__(self, num, num_classes=None):
     self.num = num
-
+    self.num_classes = num_classes
     self.block = {
       18: BasicBlock,
       34: BasicBlock,
@@ -79,7 +79,8 @@ class ResNet:
     self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2)
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2)
     self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2)
-    self.fc = nn.Linear(512 * self.block.expansion, num_classes)
+    if num_classes is not None:
+      self.fc = nn.Linear(512 * self.block.expansion, num_classes)
 
   def _make_layer(self, block, planes, num_blocks, stride):
     strides = [stride] + [1] * (num_blocks-1)
@@ -92,13 +93,15 @@ class ResNet:
   def forward(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = out.pad2d([1,1,1,1]).max_pool2d((3,3), 2)
-    out = out.sequential(self.layer1)
-    out = out.sequential(self.layer2)
-    out = out.sequential(self.layer3)
-    out = out.sequential(self.layer4)
-    out = out.mean([2,3])
-    out = self.fc(out).log_softmax()
-    return out
+    out1 = out.sequential(self.layer1)
+    out2 = out1.sequential(self.layer2)
+    out3 = out2.sequential(self.layer3)
+    out4 = out3.sequential(self.layer4)
+    if self.num_classes is not None:
+      out = out4.mean([2,3])
+      out = self.fc(out).log_softmax()
+      return out
+    return [out1, out2, out3, out4]
 
   def __call__(self, x):
     return self.forward(x)

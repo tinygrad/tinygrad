@@ -5,33 +5,70 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from extra.utils import get_child, download_file, fake_torch_load
 from models.resnet import ResNet
+from torch.nn import functional as F
+import torch
+
+def upsample(x):
+  bs, c, py, px = x.shape
+  return x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py * 2, px * 2)
 
 
-class ExtraFPNBlock:
-  def __init__(self, in_channels, out_channels):
-    self.p6 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    self.p7 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    self.use_P5 = in_channels == out_channels
+class LastLevelMaxPool:
+  def __call__(self, x):
+    return [Tensor.max_pool2d(x, 1, 2)]
 
 
 class FPN:
-  def __init__(self, in_channels_list, out_channels, extra_blocks=None):
+  def __init__(self, in_channels_list, out_channels):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
       self.inner_blocks.append(nn.Conv2d(in_channels, out_channels, kernel_size=1))
       self.layer_blocks.append(nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1))
-    self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
+    self.top_block = LastLevelMaxPool()
 
+  def __call__(self, x: Tensor):
+    """
+    Arguments:
+        x (list[Tensor]): feature maps for each feature level.
+    Returns:
+        results (tuple[Tensor]): feature maps after FPN layers.
+            They are ordered from highest resolution first.
+    """
+    last_inner = self.inner_blocks[-1](x[-1])
+    results = []
+    results.append(self.layer_blocks[-1](last_inner))
+    for feature, inner_block, layer_block in zip(
+            x[:-1][::-1], self.inner_blocks[:-1][::-1], self.layer_blocks[:-1][::-1]
+    ):
+      if not inner_block:
+        continue
+      inner_top_down = Tensor(F.interpolate(torch.tensor(last_inner.numpy()), scale_factor=2, mode="nearest").numpy())
+      inner_lateral = inner_block(feature)
+      last_inner = inner_lateral + inner_top_down
+      results.insert(0, layer_block(last_inner))
+    last_results = self.top_block(results[-1])
+    results.extend(last_results)
+
+    return tuple(results)
 
 class ResNetFPN:
-  def __init__(self, resnet, out_channels=256, returned_layers=[2, 3, 4]):
+  def __init__(self, resnet, out_channels=256):
     self.out_channels = out_channels
     self.body = resnet
-    in_channels_list = [(self.body.in_planes // 8) * 2 ** (i - 1) for i in returned_layers]
+    in_channels_stage2 = 256
+    in_channels_list = [
+      in_channels_stage2,
+      in_channels_stage2 * 2,
+      in_channels_stage2 * 4,
+      in_channels_stage2 * 8,
+    ]
     self.fpn = FPN(in_channels_list, out_channels)
 
-  def compute_grid_sizes(self, input_size):
-    return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
+  def __call__(self, x):
+    x = self.body(x)
+    return self.fpn(x)
+
+
 
 
 class AnchorGenerator:
@@ -115,8 +152,6 @@ def make_conv3x3(
   dilation=1,
   stride=1,
   use_gn=False,
-  use_relu=False,
-  kaiming_init=True
 ):
   conv = nn.Conv2d(
     in_channels,
@@ -208,7 +243,7 @@ class RoIHeads:
 
 class MaskRCNN:
   def __init__(self, backbone: ResNet):
-    self.backbone = ResNetFPN(backbone, out_channels=256, returned_layers=[1, 2, 3, 4])
+    self.backbone = ResNetFPN(backbone, out_channels=256)
     self.rpn = RPN(self.backbone.out_channels)
     self.roi_heads = RoIHeads(self.backbone.out_channels, 91)
 
@@ -218,7 +253,7 @@ class MaskRCNN:
 
     with open(fn, "rb") as f:
       state_dict = fake_torch_load(f.read())['model']
-
+    loaded_keys = []
     for k, v in state_dict.items():
       if "module." in k:
         k = k.replace("module.", "")
@@ -231,7 +266,9 @@ class MaskRCNN:
         block_index = int(re.search(r"fpn_layer(\d+)", k).group(1))
         k = re.sub(r"fpn_layer\d+", f"layer_blocks.{block_index - 1}", k)
       print(k)
+      loaded_keys.append(k)
       get_child(self, k).assign(v.numpy()).realize()
+    return loaded_keys
 
   def __call__(self, x):
     # TODO: add __call__ for all children
@@ -242,6 +279,6 @@ class MaskRCNN:
 
 
 if __name__ == '__main__':
-  resnet = resnet = ResNet(50, num_classes=1000)
+  resnet = resnet = ResNet(50, num_classes=None)
   model = MaskRCNN(backbone=resnet)
   model.load_from_pretrained()
