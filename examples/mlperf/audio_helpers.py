@@ -169,7 +169,7 @@ def get_mel(sr,
             fmin=0.0,
             fmax=None,
             htk=False,
-            norm=1,
+            norm=2,
             dtype=np.float32):
 
   if fmax is None:
@@ -467,7 +467,7 @@ class MelSpectrogram:
                htk=False,
                fmin=0.0,
                fmax=None,
-               norm=1,
+               norm=2,
                trainable_mel=False,
                trainable_STFT=False,
                **kwargs):
@@ -496,78 +496,3 @@ class MelSpectrogram:
     spec = self.stft(x, return_spec=True)**self.power
     mel_spec = self.mel_basis @ spec
     return mel_spec if not return_log else (mel_spec+self.stft.eps).log()
-
-
-class MFCC:
-  def __init__(self,
-               sr=1600,
-               n_mfcc=20,
-               norm="ortho",
-               ref=1.0,
-               amin=1e-10,
-               top_db=80.0,
-               **kwargs):
-    super().__init__()
-    self.melspec_layer = MelSpectrogram(sr=sr, **kwargs)
-    self.m_mfcc = n_mfcc
-    self.norm = norm
-
-    # attributes that will be used for _power_to_db
-    assert amin <= 0, "amin must be strictly positive"
-    if top_db is not None:
-        assert top_db < 0, "top_db must be strictly positive"
-    self.amin = Tensor([amin])
-    self.ref = Tensor([ref]).abs()
-    self.top_db = top_db
-    self.n_mfcc = n_mfcc
-    self.log10denom = Tensor([10.]).log()
-    self.log10aminref = self.amin.maximum(self.ref).log()/self.log10denom
-
-  def _power_to_db(self, S):
-    log_spec = 10.0 * S.maximum(self.amin).log()/self.log10denom
-    log_spec -= 10.0 * self.log10aminref
-    if self.top_db is not None:
-      batch_wise_max = log_spec.flatten(1).max(1)[0].unsqueeze(1).unsqueeze(1)
-      log_spec = log_spec.maximum(batch_wise_max - self.top_db)
-    return log_spec
-
-  def _dct(self, x, norm=None):
-    """
-        Refer to https://github.com/zh217/torch-dct for the original implmentation.
-        """
-    x = x.permute(
-        0, 2,
-        1)  # make freq the last axis, since dct applies to the frequency axis
-    x_shape = x.shape
-    N = x_shape[-1]
-
-    v = x[:, :, ::2].cat(x[:, :, 1::2].flip([2]), dim=2)
-    _, wcos, *_ = create_fourier_kernels(
-    n_fft=v.shape[2],
-    win_length=v.shape[2],
-    freq_bins=None,
-    sr=16000,
-    freq_scale="linear",
-    window="hann",)
-    Vc = wcos.dot(v)[:,0]
-
-    k = -Tensor.arange(N, dtype=x.dtype, device=x.device)[None, :] * np.pi / (
-        2 * N)
-    W_r = k.cos()
-    W_i = k.sin()
-
-    V = Vc[:, :, :, 0] * W_r - Vc[:, :, :, 1] * W_i
-
-    if norm == "ortho":
-      V = Tensor.stack([
-      V[:, :, 0] / math.sqrt(N) * 2,
-      V[:, :, 1] / math.sqrt(N / 2) * 2], dim=2)
-    V = 2 * V
-
-    return V.permute(0, 2, 1)  # swapping back the time axis and freq axis
-
-  def __call__(self, x):
-    x = self.melspec_layer(x)
-    x = self._power_to_db(x)
-    x = self._dct(x, norm="ortho")[:, :self.m_mfcc, :]
-    return x
