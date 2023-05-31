@@ -34,7 +34,8 @@ def create_fourier_kernels(
   lpad = int((n_fft - n) // 2)
   lengths = [(0, 0)] * window_mask.ndim
   lengths[-1] = (lpad, int(n_fft - n - lpad))
-  assert lpad <= 0
+  if lpad <= 0:
+    print("Warning: positive lpad implies n_fft higher than window length")
   window_mask =  np.pad(window_mask, lengths)
 
   if freq_scale == "linear":

@@ -13,7 +13,7 @@ class TestSignal(unittest.TestCase):
     np.testing.assert_allclose(x[:, :x_hat.shape[1]].numpy(), x_hat.numpy(), atol=1e-3) # TODO: improve precision
 
   def test_stft_spectrogram(self):
-    x = Tensor.ones(2,2000)
+    x = Tensor.ones(3,2000)
     stft_layer = STFT(n_fft=512, window="hann", hop_length=160, win_length=320)
     spec = stft_layer(x, return_spec=True)
     np.testing.assert_((spec.numpy()>0).all())
@@ -21,14 +21,14 @@ class TestSignal(unittest.TestCase):
   def test_log_mel_spectrogram(self):
     x = Tensor.ones(2,2000)
     mel_spec_layer = MelSpectrogram(n_mels=80, n_fft=512, window="hann", hop_length=160, win_length=320,
-                                    sr=16000, n_fft=512, fmin=0, fmax=8000)
+                                    sr=16000, fmin=0, fmax=8000)
     spec = mel_spec_layer(x, return_log=True)
     np.testing.assert_((spec.numpy()>0).all())
   
   def test_mfcc(self):
     x = Tensor.ones(2,2000)
     mfcc_layer = MFCC(n_mfcc=20, n_mels=80, n_fft=512, window="hann", hop_length=160, win_length=320,
-                                    sr=16000, n_fft=512, fmin=0, fmax=8000)
+                                    sr=16000, fmin=0, fmax=8000)
     mfc = mfcc_layer(x, return_log=True)
     np.testing.assert_((mfc.numpy()>0).all())
 
