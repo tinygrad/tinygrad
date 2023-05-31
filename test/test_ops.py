@@ -259,13 +259,19 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)))
   def test_std(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False), lambda x: Tensor.std(x))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True), lambda x: Tensor.std(x, unbiased=True))
   def test_std_axis(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=0), lambda x: Tensor.std(x, axis=0))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=2), lambda x: Tensor.std(x, axis=2))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=[1, 2]), lambda x: Tensor.std(x, axis=[1, 2]))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=False, dim=None), lambda x: Tensor.std(x, axis=None))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=0), lambda x: Tensor.std(x, axis=0, unbiased=True))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=2), lambda x: Tensor.std(x, axis=2, unbiased=True))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=[1, 2]), lambda x: Tensor.std(x, axis=[1, 2], unbiased=True))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, unbiased=True, dim=None), lambda x: Tensor.std(x, axis=None, unbiased=True))
   def test_std_keepdim(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, keepdim=True, unbiased=True, dim=0), lambda x: Tensor.std(x, keepdim=True, unbiased=True, axis=0))
   def test_log_softmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
   def test_log_softmax_other_axis(self):
