@@ -14,6 +14,7 @@ def train_resnet():
   from extra.lr_scheduler import CosineAnnealingLR
   from examples.mlperf.metrics import cross_entropy_loss
   from tinygrad.jit import TinyJit
+  from extra.helpers import cross_process
 
   model = ResNet50()
   optimizer = optim.SGD(optim.get_parameters(model), lr=1e-4, momentum = .875)
@@ -30,14 +31,18 @@ def train_resnet():
 
   mdlrun = TinyJit(lambda x: model(input_fixup(x)).realize())
 
-  for epoch in (r := trange(args_epoch)):
-    for image, label in iterate(bs=64,val=False):
+  for epoch in range(args_epoch):
+    for image, label in iterate(bs=8, val=True):
+      out = mdlrun(Tensor(image))
+      print(label)
+      loss = cross_entropy_loss(out.numpy(), label)
+    print("done")
+    for image, label in iterate(bs=8,val=False):
       optimizer.zero_grad()
       out = mdlrun(Tensor(image))
       loss = cross_entropy_loss(out, label)
       loss.backwards()
       optimizer.step()
-    r.set_description("some data")
 
 def train_retinanet():
   # TODO: Retinanet
