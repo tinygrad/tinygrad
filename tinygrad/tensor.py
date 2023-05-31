@@ -150,20 +150,16 @@ class Tensor:
   # ***** (numpy) rng helper functions *****
   # TODO: move randomness generation out of numpy
 
-  _rng: ClassVar[Union[np.random.Generator, np.random.RandomState]] = np.random.default_rng()
+  _rng: ClassVar[np.random.Generator] = np.random.default_rng()
   @staticmethod
-  def manual_seed(seed=None, legacy=False): Tensor._rng = np.random.default_rng(seed) if not legacy else np.random.RandomState(seed)
+  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed)
 
   @staticmethod
-  def rand(*shape, **kwargs) -> Tensor:
-    def _random(size, dtype): return Tensor._rng.random(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.random(size).astype(dtype)
-    return Tensor(LazyNumpyArray(lambda lna: _random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor:
-    def _standard_normal(size, dtype): return Tensor._rng.standard_normal(size=size, dtype=dtype) if isinstance(Tensor._rng, np.random.Generator) else Tensor._rng.standard_normal(size).astype(dtype)
-    return Tensor(LazyNumpyArray(lambda lna: _standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
   # ***** rng hlops *****
 
@@ -525,13 +521,10 @@ class Tensor:
     ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
     return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
 
-  def dropout(self, p=0.5, return_mask=False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
-    if not Tensor.training:
-      # if mask is requested as output it will contain all True's.
-      return (self, Tensor.ones(*self.shape, requires_grad=False, dtype=dtypes.bool)) if return_mask else self
+  def dropout(self, p=0.5) -> Tensor:
+    if not Tensor.training: return self
     mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
-    result = self * mask * (1/(1.0 - p))
-    return (result, mask) if return_mask else result
+    return self * mask * (1/(1.0 - p))
 
   # ***** cast ops *****
 

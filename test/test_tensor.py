@@ -148,13 +148,12 @@ class TestTinygrad(unittest.TestCase):
 
   def test_random_fns_are_deterministic_with_seed(self):
     for random_fn in [Tensor.randn, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform]:
-      for legacy in [True, False, None]:
-        with self.subTest(msg=f"Tensor.{random_fn.__name__}.legacy_{legacy}"):
-          Tensor.manual_seed(1337) if legacy is None else Tensor.manual_seed(1337, legacy=legacy)
-          a = random_fn(10,10).realize()
-          Tensor.manual_seed(1337) if legacy is None else Tensor.manual_seed(1337, legacy=legacy)
-          b = random_fn(10,10).realize()
-          np.testing.assert_allclose(a.numpy(), b.numpy())
+      with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
+        Tensor.manual_seed(1337)
+        a = random_fn(10,10).realize()
+        Tensor.manual_seed(1337)
+        b = random_fn(10,10).realize()
+        np.testing.assert_allclose(a.numpy(), b.numpy())
 
   def test_zeros_like_has_same_dtype(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
