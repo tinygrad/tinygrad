@@ -46,7 +46,8 @@ class CUDAProgram:
 
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "__global__", smem_prefix = "__shared__ ", barrier = "__syncthreads();", float4 = "make_float4",
+    kernel_prefix = "using int64 = int64_t; using uchar = unsigned char;\n__global__", smem_prefix = "__shared__ ",
+    barrier = "__syncthreads();", float4 = "make_float4",
     half_prekernel = "#include <cuda_fp16.h>",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
