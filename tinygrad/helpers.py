@@ -3,6 +3,7 @@ from dataclasses import dataclass, asdict
 import os, math, functools
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from contextlib import ContextDecorator
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 
@@ -20,18 +21,18 @@ def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
 
-class Context:
-  def __init__(self, **kwargs): self.pvars = kwargs
-  def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ key: ContextVar.ctx_stack[-1][key] for key in ContextVar.ctx_stack[-1].keys() if key not in self.pvars } })
+class Context(ContextDecorator):
+  def __init__(self, **kwargs): self.pvars = { k.upper(): v for k, v in kwargs.items() }
+  def __enter__(self): ContextVar.ctx_stack.append({ **self.pvars, **{ k: v for k, v in ContextVar.ctx_stack[-1].items() if k not in self.pvars } })
   def __exit__(self, *args): ContextVar.ctx_stack.pop()
 
 class ContextVar:
   ctx_stack: ClassVar[List[dict[str, Any]]] = [{}]
-  def __init__(self, key, default_value):
-    self.key, self.initial_value = key, getenv(key, default_value)
-    if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
+  def __init__(self, key, default_value): 
+    self.key, self.initial_value = key.upper(), getenv(key.upper(), default_value)
+    if self.key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][self.key] = self.initial_value
   def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
-  def __bool__(self): return self.value != 0
+  def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   @property
