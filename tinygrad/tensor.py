@@ -515,7 +515,7 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
-    return self * (Tensor.rand(*self.shape) > p) * (1/(1.0 - p))
+    return self * (Tensor.rand(*self.shape, requires_grad=False, device=self.device) > p) * (1/(1.0 - p))
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
