@@ -5,26 +5,26 @@ from tqdm import tqdm
 
 def train_resnet():
   # TODO: Resnet50-v1.5
-  # cosine LR or OneCycleLR, use linear warmup for bigger batch sizes, weight decay, 250 epochs (best possible accuracy) 
-  # use mixup regularization, write cross entropy loss
-  # for data augmentation - Norm, random croped, horizontal flip
   # there's no weight decay for sgd ?
   from models.resnet import ResNet50
   from datasets.imagenet import iterate
   from extra.lr_scheduler import CosineAnnealingLR
   from examples.mlperf.metrics import cross_entropy_loss
   from tinygrad.jit import TinyJit
-  from extra.helpers import cross_process
   from extra.training import sparse_categorical_crossentropy
 
   model = ResNet50()
-  optimizer = optim.SGD(optim.get_parameters(model), lr=1e-4, momentum = .875, wd=1/2**15)
-  scheduler = CosineAnnealingLR(optimizer, 250)
-  args_epoch = 250
+  BS = 256
+  lr = BS*1e-3
+  optimizer = optim.SGD(optim.get_parameters(model), lr=lr, momentum = .875)
+  args_epoch = 50
+  scheduler = CosineAnnealingLR(optimizer, args_epoch)
+  def warmup_factor(epoch, step):
+    return min(1.0, (step+1)/warmup_period)
 
   for epoch in range(args_epoch):
     n,d = 0,0
-    for image, label in ( v:=tqdm(iterate(bs=8, val=True))):
+    for image, label in ( v:=tqdm(iterate(bs=BS, val=True))):
       out = model(Tensor(image))
       out = out.numpy()
       loss = cross_entropy_loss(out, label)
@@ -32,17 +32,17 @@ def train_resnet():
       n += (out==label).sum()
       d += len(out)
       v.set_description(f"Validation Loss : {loss} ; {n}/{d}  {n*100./d:.2f}%")
-      break
 
     Tensor.training= True
-    for image, label in (t :=tqdm(iterate(bs=8,val=False))):
+    for image, label in (t :=tqdm(iterate(bs=BS,val=False))):
       image = Tensor(image, requires_grad=False)
       optimizer.zero_grad()
       out = model.forward(image)
-      loss = sparse_categorical_crossentropy(out, label)
+      loss = sparse_categorical_crossentropy(out, label) # using sparse categorical : labels -> int
       loss.backward()
       optimizer.step()
       t.set_description(f"Training Loss : {loss.detach().cpu().numpy()}")
+    lr = scheduler.get_lr() * warmup_factor(epoch, 8)
 
 def train_retinanet():
   # TODO: Retinanet
