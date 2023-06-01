@@ -496,6 +496,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv_transpose3d(x,w).relu(),
       lambda x,w: Tensor.conv_transpose2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_conv1d(self):
     for bs in [1,8]:
       for cin in [1,3]:
@@ -506,6 +507,7 @@ class TestOps(unittest.TestCase):
                 lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
                 lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_simple_padding_conv1d(self):
     bs = 6
     cin = 2
@@ -516,12 +518,14 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
 
+  @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_strided_conv1d_simple(self):
     bs, H = 2, 3
     helper_test_op([(bs,1,5), (1,1,H)],
       lambda x,w: torch.nn.functional.conv1d(x,w,stride=2).relu(),
       lambda x,w: Tensor.conv2d(x,w,stride=2).relu(), atol=1e-4)
 
+  @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_asymmetric_padding_conv1d(self):
     for p in [(0,1), (2,1), (2,0)]:
       with self.subTest(padding := p):
