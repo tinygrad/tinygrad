@@ -1,4 +1,5 @@
 import subprocess
+from dataclasses import fields
 from typing import Optional
 import numpy as np
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
@@ -49,7 +50,7 @@ class CUDACodegen(CStyleCodegen):
     kernel_prefix = "using int64 = int64_t; using uchar = unsigned char;\n__global__", smem_prefix = "__shared__ ",
     barrier = "__syncthreads();", float4 = "make_float4",
     half_prekernel = "#include <cuda_fp16.h>",
-    float_conversion = {x.name: "__float2uint_rn" if dtypes.is_unsigned(x) else "__float2int_rn" for x in [dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]},
+    float_conversion = {x.name: "__float2uint_rn" if dtypes.is_unsigned(x) else "__float2int_rn" for x in map(lambda x: x.default, fields(dtypes)) if dtypes.is_int(x)},
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
   supports_float4_alu = False
