@@ -1,7 +1,6 @@
 from tinygrad.nn import Conv2d,BatchNorm2d
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d,BatchNorm2d
-from tinygrad.helpers import dtypes, prod
 import numpy as np
 import math
 from itertools import chain
@@ -13,7 +12,6 @@ from itertools import chain
 # UTIL FUNCTIONS
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
-  print(anchor_points.shape, lt.shape)
   x1y1 = anchor_points - lt
   x2y2 = anchor_points + rb
   if xywh:
@@ -27,12 +25,12 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
   assert feats is not None
   for i, stride in enumerate(strides):
     _, _, h, w = feats[i].shape
-    sx = np.arange(w, dtype=np.float32) + grid_cell_offset  # shift x
-    sy = np.arange(h, dtype=np.float32) + grid_cell_offset  # shift y
-    sy, sx = np.meshgrid(sy, sx, indexing='ij')
-    anchor_points.append(np.stack((sx, sy), -1).reshape(-1, 2))
-    stride_tensor.append(np.full((h * w, 1), stride))
-  return np.concatenate(anchor_points), np.concatenate(stride_tensor)
+    sx = np.arange(w, dtype='float32') + grid_cell_offset  # shift x
+    sy = np.arange(h, dtype='float32') + grid_cell_offset  # shift y
+    sy, sx = np.meshgrid(sx, sy, indexing='ij')
+    anchor_points.append(np.stack((sy, sx), -1).reshape(-1, 2))
+    stride_tensor.append(np.full((h * w, 1), stride.cpu().numpy()))
+  return np.concatenate(anchor_points).reshape(2, -1), np.concatenate(stride_tensor).reshape(1, -1)
 
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
@@ -106,21 +104,22 @@ class DFL():
   def __init__(self, c1=16):
     self.conv = Conv2d(c1, 1, 1, bias=False)
     x = Tensor.arange(c1)
-    self.conv.weight = x.reshape(1, c1, 1, 1)
+    self.conv.weight.assign(x.reshape(1, c1, 1, 1))
     self.c1 = c1
 
   def __call__(self, x):
     b, c, a = x.shape # batch, channels, anchors
     return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
-  
-# int_bias untested
+
+
+# stride = tensor([ 8., 16., 32.])
 class DetectionHead():
   def __init__(self, nc=80, filters=()):
     self.ch = 16  # DFL channels
     self.nc = nc  # number of classes
     self.nl = len(filters)  # number of detection layers
     self.no = nc + self.ch * 4  # number of outputs per anchor
-    self.stride = Tensor.zeros(self.nl)  # strides computed during build #TODO - figure this out
+    self.stride = Tensor([8, 16, 32])  # strides computed during build #TODO - figure this out
     c1 = max(filters[0], self.nc)
     c2 = max((filters[0] // 4, self.ch * 4))
 
@@ -138,18 +137,8 @@ class DetectionHead():
     box, cls = [x_cat[:, :split_sizes[0], :], x_cat[:, split_sizes[0]:, :]]
     dbox = dist2bbox(self.dfl(box), Tensor(self.anchors).unsqueeze(0), xywh=True, dim=1) * Tensor(self.strides)
     z = dbox.cat(cls.sigmoid(), dim=1)
-    return (z, x)
-  
-  def initialize_biases(self):
-    # Initialize biases and WARNING: requires stride availability
-    m = self
-    for a, b, s in zip(m.box, m.cls, m.stride):
-      x = Tensor.ones(a[-1].bias.shape)
-      a[-1].bias.assign(x) # box
-      # cls (.01 objects, 80 classes, 640 img)
-      y = b[-1].bias
-      y[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)
-      b[-1].bias.assign(y)
+    return z
+
   
 class Darknet():
   def __init__(self, w, r, d): #width_multiple, ratio_multiple, depth_multiple
@@ -189,22 +178,16 @@ class YOLOv8():
   def __init__(self, w, r,  d, num_classes, filters=(256, 512, 512)): #width_multiple, ratio_multiple, depth_multiple
     self.net = Darknet(w, r, d)
     self.fpn = Yolov8NECK(w, r, d)
-    img_dummy = Tensor.zeros(1, 3, 640, 640)
     self.head = DetectionHead(num_classes, filters)
-    self.head.stride = Tensor([640 / x.shape[-2] for x in self.forward(img_dummy)])
-    self.stride = self.head.stride
-    self.head.initialize_biases()
 
   def forward(self, x):
     x = self.net.forward(x)
-    print(len(x))
     x = self.fpn.forward(*x)
-    for i in x:
-      print(i.shape, i.dtype)
     return self.head.forward(x)
 
+test_inferece = Tensor.rand(1 ,3 , 640 , 640)
 yolo_infer = YOLOv8(1, 1, 1, 80)  
-
+print(yolo_infer.forward(test_inferece))
 # post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
 
 #NMS --> xywh2xyxy + box_iou
