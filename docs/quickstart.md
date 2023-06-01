@@ -86,7 +86,7 @@ class Linear:
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
 ```
-There are more neural network modules already implemented in [nn.py](/tinygrad/nn.py), and you can also implement your own.
+There are more neural network modules already implemented in [nn](/tinygrad/nn/__init__.py), and you can also implement your own.
 
 We will be implementing a simple neural network that can classify handwritten digits from the MNIST dataset.
 Our classifier will be a simple 2 layer neural network with a Leaky ReLU activation function.
@@ -216,7 +216,7 @@ for step in range(1000):
 print(f"Test Accuracy: {avg_acc / 1000}")
 ```
 
-And that's it!
+## And that's it!
 
 Highly recommend you check out the [examples/](/examples) folder for more examples of using tinygrad.
 Reading the source code of tinygrad is also a great way to learn how it works.
