@@ -26,6 +26,7 @@ class CStyleLanguage(NamedTuple):
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
+  float_conversion: Optional[Dict[str, str]] = None
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -159,6 +160,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       assert args.valid.min == 1, "store must be valid"
       if lang.uses_vload and bufs[args.i].dtype == dtypes.float16:
         kk(f"vstore_half({vin[0].render()}, {args.idx.render(render_cl)}, {bufnames[args.i]});")
+      elif dtypes.is_int(bufs[args.i].dtype) and lang.float_conversion:
+        kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {lang.float_conversion[bufs[args.i].dtype.name]}({vin[0].render()});")
       else:
         kk(f"{bufnames[args.i]}[{args.idx.render(render_cl)}] = {vin[0].render()};")
     elif uop == UOps.CAST and newvar is not None and newvar.ltype == LocalTypes.float4:

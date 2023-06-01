@@ -4,7 +4,7 @@ import numpy as np
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -49,6 +49,7 @@ class CUDACodegen(CStyleCodegen):
     kernel_prefix = "using int64 = int64_t; using uchar = unsigned char;\n__global__", smem_prefix = "__shared__ ",
     barrier = "__syncthreads();", float4 = "make_float4",
     half_prekernel = "#include <cuda_fp16.h>",
+    float_conversion={x.name: "__float2int_rn" for x in [dtypes.int8, dtypes.int32, dtypes.int64]} + {dtypes.uint8.name: "__float2uint_rn"},
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
   supports_float4_alu = False
