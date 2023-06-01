@@ -1,6 +1,10 @@
 name: cloc
 on:
-  pull_request:
+  pull_request_target:
+    branches:
+    - main
+    types:
+    - ready_for_review
 
 # Cancel the workflow in progress in newer build is about to start.
 concurrency:
@@ -21,6 +25,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           path: pr
       - name: Checkout base code
         uses: actions/checkout@v2
@@ -30,19 +36,34 @@ jobs:
       - name: Count Lines Of Code
         id: loc
         run: |
+          sudo apt install bc
           curl -sLO https://github.com/AlDanial/cloc/releases/download/v1.96/cloc-1.96.tar.gz && \
           tar xf cloc-1.96.tar.gz && mv cloc-1.96/cloc .
 
+          # pseudo rand EOF value
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "loc_content<<$EOF" >> "$GITHUB_ENV"
           echo "LOC|files|blank|comment|code" >> "$GITHUB_ENV"
           echo ":---|---:|---:|---:|---:" >> "$GITHUB_ENV"
-          ./cloc --include-ext="$EXT" --diff "base/$TARGET" "pr/$TARGET" | \
-            grep "SUM" -A4 | sed '1d;s/^\s*//g' | tr -s ' ' | tr ' ' '|' >> "$GITHUB_ENV"
+
+          # cloc diff bewteen base and PR code and pretty format
+          content=$(./cloc --include-ext="$EXT" --diff "base/$TARGET" "pr/$TARGET" | \
+            grep "Python" -A4 | sed '1d;s/^\s*//g' | tr -s ' ' | tr ' ' '|')
+          echo "$content" >> "$GITHUB_ENV"
+
+          # calculate total after PR
+          total_line="total"
+          for i in 2 3 4 5; do
+              total_line="$total_line|"
+              sum=$(echo "$content" | cut -d'|' -f"$i" | paste -sd+ | bc)
+              total_line="$total_line$sum"
+          done
+          echo "$total_line" >> "$GITHUB_ENV"
+
           echo "$EOF" >> "$GITHUB_ENV"
 
       - name: Comment Code Lines
-        continue-on-error: true
+        continue-on-error: false
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
