@@ -164,7 +164,7 @@ class Tensor:
 
   _rng: ClassVar[np.random.Generator] = np.random.default_rng()
   @staticmethod
-  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed=seed)
+  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed)
 
   @staticmethod
   def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
@@ -288,10 +288,9 @@ class Tensor:
     return first.cat(*unsqueezed_tensors, dim=dim)
 
   def repeat(self, repeats):
-    ndim = len(self.shape)
     base_shape = self.shape
-    if len(repeats) > ndim:
-      base_shape = (1,) * (len(repeats) - ndim) + base_shape
+    if len(repeats) > self.ndim:
+      base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
     new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
     expand_shape = [x for r,s in zip(repeats, base_shape) for x in [r,s]]
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
@@ -337,10 +336,9 @@ class Tensor:
   def mean(self, axis=None, keepdim=False):
     out = self.sum(axis=axis, keepdim=keepdim)
     return out * (prod(out.shape)/prod(self.shape))
-  # TODO: implement unbiased True option for torch bessel's correction (subtracting 1 from divisor causes 0.01 error)
-  def std(self, axis=None, keepdim=False):
-    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return (square_sum * (prod(square_sum.shape)/prod(self.shape))).sqrt()
+  def std(self, axis=None, keepdim=False, correction=1):
+    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)                           
+    return (square_sum / (prod(self.shape)/prod(square_sum.shape)-correction)).sqrt()
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
@@ -393,7 +391,7 @@ class Tensor:
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
 
-  def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
+  def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
@@ -402,7 +400,7 @@ class Tensor:
       x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
       x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
       x = x.shrink(((0,x.shape[0]), (0,x.shape[1]), *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
-    padding = flatten(((k-1)*d-p,(k-1)*d-p) for k,p,d in reversed(list(zip(HW, make_pair(padding, len(HW)), make_pair(dilation, len(HW))))))
+    padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
@@ -540,15 +538,21 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training: return self
-    # TODO: why is this going through numpy?
-    _mask: np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-p, size=self.shape), dtype=np.float32)
-    return self * Tensor(_mask, requires_grad=False, device=self.device) * (1/(1.0 - p))
+    mask = (Tensor.rand(*self.shape, requires_grad=False) >= p).cast(dtypes.bool)
+    return self * mask * (1/(1.0 - p))
 
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
+
+  # ***** Convenience stuff *****
+  @property
+  def ndim(self) -> int: return len(self.shape)
+  def numel(self) -> int: return math.prod(self.shape)
+  def element_size(self) -> int: return self.dtype.itemsize
+  def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices
 for device in Device._buffers:

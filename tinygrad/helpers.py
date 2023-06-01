@@ -27,7 +27,7 @@ class Context:
 
 class ContextVar:
   ctx_stack: ClassVar[List[dict[str, Any]]] = [{}]
-  def __init__(self, key, default_value): 
+  def __init__(self, key, default_value):
     self.key, self.initial_value = key, getenv(key, default_value)
     if key not in ContextVar.ctx_stack[-1]: ContextVar.ctx_stack[-1][key] = self.initial_value
   def __call__(self, x): ContextVar.ctx_stack[-1][self.key] = x
@@ -67,6 +67,14 @@ class LazyNumpyArray:
 
 @dataclass
 class dtypes:
+  @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
+  def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.uint8, dtypes.int32, dtypes.int64)
+  @staticmethod
+  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32)
+  @staticmethod
+  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8)
+  @staticmethod
+  def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
@@ -74,8 +82,6 @@ class dtypes:
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
-  @staticmethod
-  def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
 
 
 class GlobalCounters:
