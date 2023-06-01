@@ -103,13 +103,12 @@ def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=Non
 def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=(pads[1], pads[3], pads[0], pads[2]) if pads is not None else 0)
 
-# TODO: copied from tensor.py
+# Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
-  # TODO: mask should be a boolean tensor
-  if not training_mode: return data, Tensor.ones(*data.shape)  # if mask is requested as output it will contain all ones.
-  if seed is not None: Tensor.manual_seed(seed)
-  _mask : np.ndarray = np.asarray(Tensor._rng.binomial(1, 1.0-ratio, size=data.shape), dtype=data.dtype)
-  mask = Tensor(_mask, requires_grad=False, device=data.device)
+  if not training_mode: return data, Tensor.ones(*data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
+  rng = np.random.RandomState(seed)
+  ratio = ratio.lazydata.realize().toCPU()[0] if isinstance(ratio, Tensor) else ratio
+  mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
 def Shape(data, end=None, start=0): return list(data.shape)[start:end]
