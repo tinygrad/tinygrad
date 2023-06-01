@@ -408,6 +408,16 @@ class TestOps(unittest.TestCase):
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, 3, ::4], lambda x: x[1:5:2, 3, ::4])
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, None, None, 3, None, ::4], lambda x: x[1:5:2, None, None, 3, None, ::4])
 
+  def test_slice_negative_strides(self):
+    # Torch doesn't support slicing with negative steps
+    a = np.random.randn(10, 10, 10).astype(np.float32)
+    t = Tensor(a)
+    np.testing.assert_allclose(a[::-1], t[::-1].numpy())
+    np.testing.assert_allclose(a[::-2], t[::-2].numpy())
+    np.testing.assert_allclose(a[:, 2:0:-1], t[:, 2:0:-1].numpy())
+    np.testing.assert_allclose(a[:, 2:0:-1, 3:1:-2], t[:, 2:0:-1, 3:1:-2].numpy())
+    np.testing.assert_allclose(a[4:0:-3, 2:0:-1, -1:-5:-2], t[4:0:-3, 2:0:-1, -1:-5:-2].numpy())
+
   @unittest.skip("No suppport for tensors with 0s in shape")
   def test_slice_both_endpoints_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[5:10], lambda x: x[5:10], forward_only=True)
