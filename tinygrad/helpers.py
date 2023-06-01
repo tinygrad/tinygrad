@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, functools
 import numpy as np
-from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 
@@ -77,9 +77,9 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8)
   @staticmethod
-  def from_np(x) -> DType:
-    dtypes_dict = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(k)}
-    return dtypes_dict[np.dtype(x).name]
+  def from_np(x) -> DType: return dtypes.fields()[np.dtype(x).name]
+  @staticmethod
+  def fields() -> Dict[str, DType]: return {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod} # HACK: staticmethods are not callable in 3.8
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
