@@ -303,6 +303,51 @@ class Tensor:
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
 
+  def split(self, split_size_or_sections, dim=0):
+    ret_tensors = []
+    if dim < 0:
+      dim = len(self.shape)+dim
+    if isinstance(split_size_or_sections, int):
+      split_size = self.shape[dim]//split_size_or_sections
+      for n in range(0, self.shape[dim], split_size):
+        slice_list = [(0, size) if d != dim else (n, min(n+split_size, size)) for d, size in enumerate(self.shape)]
+        ret_tensors.append(self.slice(slice_list))
+      return ret_tensors
+    else:
+      raise NotImplementedError("Tensor.split does not support section wise split, split_size_or_sections must be int")
+
+  @staticmethod
+  def cartesian_prod(*tensors):
+    # TODO: This is Slow!!
+    arrays = [t.numpy() for t in tensors]; la = len(arrays); dtype = np.result_type(*arrays)
+    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
+    for i, a in enumerate(np.ix_(*arrays)): arr[...,i] = a
+    return Tensor(arr.reshape(-1, la), dtype=dtypes.from_np(dtype))
+
+  @staticmethod
+  def meshgrid(*tensors):
+    cartesian = Tensor.cartesian_prod(*tensors)
+    return cartesian.split(len(tensors))
+
+  @staticmethod
+  def sort(input, axis=-1, reverse=True):
+    # TODO: This is Slow!!
+    np_input = input.numpy()
+    sorted_np_idx = np.argsort(np_input, axis=axis)
+    sorted_np = np.sort(np_input, axis=axis)
+    if reverse:
+      sorted_np = sorted_np[::-1]
+      sorted_np_idx = sorted_np_idx[::-1]
+    return Tensor(sorted_np), Tensor(sorted_np_idx).numpy()
+
+  def topk(self, k, dim=-1, largest=True, sorted=True):
+    # TODO: This is Slow!!
+    if dim < 0:
+      dim = len(self.shape) + dim
+    slice_list = [(0, n) if d != dim else (0, k) for d, n in enumerate(self.shape)]
+    sort_, sort_idx = Tensor.sort(self, reverse=largest, axis=dim)
+    return sort_.slice(slice_list), Tensor(sort_idx).slice(slice_list).numpy()
+
   def unsqueeze(self, dim):
     if dim < 0: dim = len(self.shape) + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
