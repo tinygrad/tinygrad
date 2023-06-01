@@ -56,7 +56,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: python -m pytest -s -v -n=auto
+      run: python -m pytest -s -v -n=auto test/
 
   testimagenet:
     name: ImageNet to C Compile Test
@@ -92,7 +92,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[llvm,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: ENABLE_METHOD_CACHE=1 LLVM=1 python -m pytest -s -v -n=auto
+      run: ENABLE_METHOD_CACHE=1 LLVM=1 python -m pytest -s -v -n=auto test/
 
   testtorch:
     name: Torch Tests
@@ -108,7 +108,9 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: TORCH=1 python -m pytest -s -v -n=auto
+      run: TORCH=1 python -m pytest -s -v -n=auto test/
+    - name: Run ONNX
+      run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py || true
 
   testgpu:
     name: GPU Tests
@@ -130,13 +132,13 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Optimizer Test (OPT 2 and 3)
       run: |
         PYTHONPATH="." OPT=2 GPU=1 python test/external/external_test_opt.py
         PYTHONPATH="." OPT=3 GPU=1 python test/external/external_test_opt.py
     - name: Run Pytest (default)
-      run: GPU=1 python -m pytest -s -v -n=auto
+      run: GPU=1 python -m pytest -s -v -n=auto test/
 
   testopencl:
     name: openpilot (OpenCL) Test
@@ -158,7 +160,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Install Dependencies
-      run: pip install -e '.[gpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test GPU IMAGE ops
       run: |
         GPU=1 IMAGE=1 python3 test/test_ops.py

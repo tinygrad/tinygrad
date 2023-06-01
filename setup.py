@@ -8,7 +8,7 @@ with open(os.path.join(directory, 'README.md'), encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.5.0',
+      version='0.6.0',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
@@ -19,10 +19,9 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx'],
+      install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx', 'pyopencl'],
       python_requires='>=3.8',
       extras_require={
-        'gpu': ["pyopencl"],
         'llvm': ["llvmlite"],
         'cuda': ["pycuda"],
         'triton': ["triton>=2.0.0.dev20221202"],
@@ -40,6 +39,7 @@ setup(name='tinygrad',
             "onnx",
             "onnx2torch",
             "opencv-python",
+            "tabulate",
         ],
       },
       include_package_data=True)

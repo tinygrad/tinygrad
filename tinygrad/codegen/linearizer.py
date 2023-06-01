@@ -16,6 +16,7 @@ class LocalBuffer(NamedTuple):
   dtype: DType = dtypes.float32
   realized: None = None
 
+# NOTE: half and half4 are not actually used yet
 class LocalTypes(Enum): float = auto(); float4 = auto(); half = auto(); half4 = auto(); simdgroup_float8x8 = auto() # noqa: E702
 
 class Token(NamedTuple):
@@ -87,6 +88,7 @@ class UOp(NamedTuple):
 
 class Linearizer:
   supports_float4: bool = False
+  supports_float4_alu: bool = False
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -140,7 +142,7 @@ class Linearizer:
     if DEBUG >= 5: self.printbufs("early")
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] == 4]
+  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
   # TODO: this stride is only on the last view, and may not be real
   def upcasted_axis(self, i):
@@ -157,11 +159,11 @@ class Linearizer:
     store_offset_float4 = {}
     float4_axis = (self.upcasted-1) - self.float4_axis(i)[0]
     for uidxs, var in store_offset.items():
-      if uidxs[float4_axis] == 0:
+      if uidxs[float4_axis]%4 == 0:
         store_offset_float4[uidxs] = [var]
       else:
         uidxs2 = list(uidxs)
-        uidxs2[float4_axis] = 0
+        uidxs2[float4_axis] -= uidxs2[float4_axis]%4
         store_offset_float4[tuple(uidxs2)].append(var)
     return store_offset_float4
 
@@ -169,7 +171,7 @@ class Linearizer:
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(LocalTypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
     # float4 grouping (optional)
-    should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    should_upcast = self.supports_float4 and len(self.float4_axis(i)) == 1
     if should_upcast:
       load_offset_new = {}
       for k,out_tokens in self._group_float4(i, load_offset).items():
@@ -200,7 +202,7 @@ class Linearizer:
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
     # float4 grouping (optional)
-    should_upcast = self.supports_float4 and self.bufs[i].dtype != dtypes.float16 and len(self.float4_axis(i)) == 1
+    should_upcast = self.supports_float4 and (self.bufs[i].dtype not in (dtypes.float16, dtypes.int8, dtypes.uint8)) and len(self.float4_axis(i)) == 1
     if should_upcast:
       store_offset_new = {}
       for k,out_tokens in self._group_float4(i, store_offset).items():
@@ -339,9 +341,9 @@ class Linearizer:
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     # TODO: fold float4 into a single uop when possible.
     if isinstance(x.op, (ReduceOps, FusedOps)):
-      ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values)]
+      ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values, grouping_allowed=self.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=x.op!=BinaryOps.CMPEQ)]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:

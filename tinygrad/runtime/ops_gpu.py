@@ -23,7 +23,7 @@ class _CL:
   def __init__(self):
     platforms: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl.get_platforms()] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl.get_platforms()]) if len(y)]
     if DEBUG >= 1: print(f"using {platforms[getenv('CL_PLATFORM', 0)]}")
-    self.cl_ctx: cl.Context = cl.Context(devices=platforms[getenv('CL_PLATFORM', 0)])
+    self.cl_ctx: cl.Context = cl.Context(devices=[x for x in platforms[getenv('CL_PLATFORM', 0)] if x.name not in getenv('CL_EXCLUDE', "").split(",")])
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(self.cl_ctx, device=device, properties=cl.command_queue_properties.PROFILING_ENABLE) for device in self.cl_ctx.devices]
   def synchronize(self):
     for q in self.cl_queue: q.finish()
@@ -31,7 +31,7 @@ CL = _CL()
 
 # TODO: merge CLImage in here
 class CLBuffer(RawBufferCopyInOut):
-  def __init__(self, size, dtype, device=0):
+  def __init__(self, size, dtype, device='0'):
     if isinstance(dtype, ImageDType):
       fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
       buf = cl.Image(CL.cl_ctx, cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
@@ -39,7 +39,7 @@ class CLBuffer(RawBufferCopyInOut):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
     else:
       buf = cl.Buffer(CL.cl_ctx, cl.mem_flags.READ_WRITE, size * dtype.itemsize)
-    setattr(buf, 'device', device)  # device is tracked on the underlying buffer
+    setattr(buf, 'device', int(device))  # device is tracked on the underlying buffer
     super().__init__(size, dtype, buf)
   def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
@@ -87,9 +87,10 @@ class CLProgram:
 
 class CLCodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    kernel_prefix = "#define int64 long\n__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
     half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
-
+  supports_float4_alu = True
+  supports_float4 = True
 GPUBuffer = Compiled(CLBuffer, CLCodegen, CLProgram, CL.synchronize)
