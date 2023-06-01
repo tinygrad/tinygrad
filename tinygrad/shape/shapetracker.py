@@ -219,7 +219,7 @@ class ShapeTracker:
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
     assert len(arg) == len(self.views[-1].shape)
     assert all([(b>=0 and e>=0) for b,e in arg]) and len(arg) == len(self.shape)
-    if any([b or e for b, e in arg]): 
+    if any([b or e for b, e in arg]):
       zvarg, mask = get_pad_args(self.shape, arg)
       self.__unsafe_resize(zvarg, mask=mask)
       return self
@@ -249,7 +249,6 @@ class ShapeTracker:
     return self
 
   def permute(self, axis: Tuple[int, ...]):
-    assert len(axis) == len(self.views[-1].shape)
     assert all([x.__class__ == int and x >= 0 and x < len(self.views[-1].shape) for x in axis]), f"invalid permute {axis} for {self.views[-1].shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.views[-1].shape), f"can't permute {self.views[-1].shape} with {axis}"
     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)

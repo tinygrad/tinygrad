@@ -77,9 +77,9 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8)
   @staticmethod
-  def from_np(x) -> DType: return dtypes.fields()[np.dtype(x).name]
+  def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
-  def fields() -> Dict[str, DType]: return {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod} # HACK: staticmethods are not callable in 3.8
+  def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
   float32: Final[DType] = DType(1, 4, "float", np.float32)
@@ -87,6 +87,9 @@ class dtypes:
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
+
+# HACK: staticmethods are not callable in 3.8 so we have to compare the class
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0

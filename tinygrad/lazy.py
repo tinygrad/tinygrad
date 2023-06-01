@@ -111,7 +111,7 @@ class LazyBuffer:
         for x in self.op.buffers: x.realize()
 
         # HACK: image shape can be wrong, hot cast it back to a normal float
-        if self.optype != MovementOps and self.dtype.__class__ == ImageDType and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+        if self.optype != MovementOps and self.dtype.__class__ == ImageDType and (prod(self.shape) != prod(self.dtype.shape) or not any([self.shape[x]%4 == 0 for x in self.st.unit_stride_axes()])):
           if self.op.op == MovementOps.RESHAPE:
             # put CAST before the final RESHAPE
             self.op = LazyOp(MovementOps.RESHAPE, (LazyOp(UnaryOps.CAST, self.op.src, dtypes.float32),), self.op.arg)
@@ -183,9 +183,8 @@ class LazyBuffer:
     return ret
 
   def pad_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    shape, realized = self.shape, self.realized
-    local_st = ShapeTracker(shape).pad(arg)
-    if shape == local_st.shape and local_st.contiguous: return self
+    realized = self.realized
+    if all([b == 0 and e == 0 for b,e in arg]): return self
     if not realized and self.op.op == MovementOps.PAD:
       self.op.src[0].children.discard(self)
       return self.op.src[0].pad_op(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
@@ -199,8 +198,7 @@ class LazyBuffer:
 
   def expand_op(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     shape, realized = self.shape, self.realized
-    local_st = ShapeTracker(shape).expand(arg)
-    if shape == local_st.shape and local_st.contiguous: return self
+    if shape == arg: return self
     if not realized and self.op.op == MovementOps.EXPAND:
       self.op.src[0].children.discard(self)
       return self.op.src[0].expand_op(arg)
@@ -214,12 +212,10 @@ class LazyBuffer:
 
   def permute_op(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     shape, realized = self.shape, self.realized
-    local_st = ShapeTracker(shape).permute(arg)
-    if shape == local_st.shape and local_st.contiguous: return self
+    if arg == tuple(range(len(shape))): return self
     if not realized and self.op.op == MovementOps.PERMUTE:
       self.op.src[0].children.discard(self)
       return self.op.src[0].permute_op(tuple([self.op.arg[i] for i in arg]))
-    if local_st.contiguous: return self.reshape_op(tuple([shape[i] for i in arg]))
     if not realized:
       if PUSH_PERMUTES and self.optype == ReduceOps:
         # reduceops have one buffer input, permute it
@@ -253,8 +249,7 @@ class LazyBuffer:
   
   def shrink_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
     shape, realized = self.shape, self.realized
-    local_st = ShapeTracker(shape).shrink(arg)
-    if shape == local_st.shape and local_st.contiguous: return self
+    if all([b - a == s for s, (a, b) in zip(shape, arg)]): return self
     if not realized and self.op.op == MovementOps.SHRINK:
       self.op.src[0].children.discard(self)
       return self.op.src[0].shrink_op(tuple([(b1+b2, b1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
