@@ -2,10 +2,9 @@
 from __future__ import annotations
 from functools import partialmethod, reduce
 from itertools import accumulate
-import sys
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import argfix, get_canonical_device_name, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from math import ceil, pi, prod, sqrt
 from tinygrad.lazy import Device, LazyBuffer
 
@@ -40,7 +39,7 @@ class Tensor:
   default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
-    device = (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")  # canonicalize device
+    device = get_canonical_device_name(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
 

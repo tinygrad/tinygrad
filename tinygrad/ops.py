@@ -165,7 +165,7 @@ class Compiled:
     output.realized = output.output_buffer
     if output.realized:
       if output.realized.__class__ == RawConst: output.realized = None  # can't assign to RawConst
-      for a in ast.get_buffers():
+      for a in ast.buffers:
         if a.realized == output.realized and not a.st.contiguous:
           output.realized = None
           break

@@ -217,18 +217,22 @@ class ShapeTracker:
     self.views[-1] = View(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
+    assert len(arg) == len(self.views[-1].shape)
     assert all([(b>=0 and e>=0) for b,e in arg]) and len(arg) == len(self.shape)
     if any([b or e for b, e in arg]): 
       zvarg, mask = get_pad_args(self.shape, arg)
       self.__unsafe_resize(zvarg, mask=mask)
-      return
+      return self
     return self
 
   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
+    assert len(arg) == len(self.views[-1].shape)
     assert all([(b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)]) and len(arg) == len(self.shape)
     self.__unsafe_resize(arg)
+    return self
 
   def expand(self, new_shape: Tuple[int, ...]) -> ShapeTracker:
+    assert len(new_shape) == len(self.views[-1].shape)
     assert all(isinstance(x, int) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
@@ -245,6 +249,7 @@ class ShapeTracker:
     return self
 
   def permute(self, axis: Tuple[int, ...]):
+    assert len(axis) == len(self.views[-1].shape)
     assert all([x.__class__ == int and x >= 0 and x < len(self.views[-1].shape) for x in axis]), f"invalid permute {axis} for {self.views[-1].shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.views[-1].shape), f"can't permute {self.views[-1].shape} with {axis}"
     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
@@ -252,12 +257,14 @@ class ShapeTracker:
 
   # except for the negative case, you can build this from the others. invertible in the negative case
   def stride(self, mul: Tuple[int, ...]):
+    assert len(mul) == len(self.views[-1].shape)
     assert all([x.__class__ == int and x != 0 for x in mul]), f"invalid stride {mul} for {self.views[-1].shape}"
     strides = tuple([z*m for z,m in zip(self.views[-1].strides, mul)])
     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
     offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
     mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
     self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
+    return self
 
   # *** entry point for external ***
 

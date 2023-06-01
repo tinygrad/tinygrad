@@ -96,7 +96,7 @@ class Linearizer:
     self.ast = ast.src[0] if ast.op == MovementOps.RESHAPE else ast
 
     # get the output buffers
-    self.bufs = [output_buffer] + dedup(ast.get_buffers())
+    self.bufs = [output_buffer] + dedup(ast.buffers)
 
     # key for lookup in cache (can change, str might not be right)
     # bufs are needed because kernels like f(x) = x + x and f(x, y) = x + y have the same str(ast), but are different kernels.
@@ -116,7 +116,7 @@ class Linearizer:
     self.reduceop = reduceops[0] if reduceops else None
 
     # get earlybufs, before the one reduce op
-    self.earlybufs = dedup(self.reduceop.get_buffers()) if self.reduceop else []
+    self.earlybufs = dedup(self.reduceop.buffers) if self.reduceop else []
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: List[ShapeTracker] = [x.st.copy() for x in self.bufs]

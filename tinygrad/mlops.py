@@ -1,6 +1,6 @@
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort, ShapeType
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 import math
@@ -64,7 +64,7 @@ class Sum(Function):
     return x.reduce_op(ReduceOps.SUM, new_shape)
 
   def backward(self, grad_output):
-    return grad_output.movement_op(MovementOps.EXPAND, self.input_shape)
+    return grad_output.expand_op(self.input_shape)
 
 class Max(Function):
   __slots__ = "x", "ret"
@@ -74,13 +74,13 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.binary_op(BinaryOps.CMPEQ, self.ret.movement_op(MovementOps.EXPAND, self.x.shape))
+    max_is_1s = self.x.binary_op(BinaryOps.CMPEQ, self.ret.expand_op(self.x.shape))
 
     # sum of locations, averaged
-    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).movement_op(MovementOps.EXPAND, self.x.shape)
+    div = max_is_1s.reduce_op(ReduceOps.SUM, grad_output.shape).expand_op(self.x.shape)
     max_is_amount = max_is_1s.binary_op(BinaryOps.DIV, div)
 
-    grad_output_expanded = grad_output.movement_op(MovementOps.EXPAND, self.x.shape)
+    grad_output_expanded = grad_output.expand_op(self.x.shape)
     return max_is_amount.binary_op(BinaryOps.MUL, grad_output_expanded)
 
 # ************* binary ops *************
@@ -157,7 +157,7 @@ class Expand(Function):
   __slots__ = 'input_shape'
   def forward(self, x:LazyBuffer, shape:ShapeType) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.movement_op(MovementOps.EXPAND, shape)
+    return x.expand_op(shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.reduce_op(ReduceOps.SUM, self.input_shape)
@@ -166,44 +166,44 @@ class Reshape(Function):
   __slots__ = 'input_shape'
   def forward(self, x:LazyBuffer, shape:ShapeType) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.movement_op(MovementOps.RESHAPE, shape)
+    return x.reshape_op(shape)
 
   def backward(self, grad_output):
-    return grad_output.movement_op(MovementOps.RESHAPE, self.input_shape)
+    return grad_output.reshape_op(self.input_shape)
 
 class Permute(Function):
   __slots__ = 'input_order'
   def forward(self, x:LazyBuffer, order:Tuple[int, ...]) -> LazyBuffer:
     self.input_order = order
-    return x.movement_op(MovementOps.PERMUTE, order)
+    return x.permute_op(order)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.movement_op(MovementOps.PERMUTE, argsort(self.input_order))
+    return grad_output.permute_op(argsort(self.input_order))
 
 class Pad(Function):
   __slots__ = 'narg'
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
-    return x.movement_op(MovementOps.PAD, arg)
+    return x.pad_op(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.movement_op(MovementOps.SHRINK, self.narg)
+    return grad_output.shrink_op(self.narg)
 
 class Shrink(Function):
   __slots__ = 'narg'
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
-    return x.movement_op(MovementOps.SHRINK, arg)
+    return x.shrink_op(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.movement_op(MovementOps.PAD, self.narg)
+    return grad_output.pad_op(self.narg)
 
 class Flip(Function):
   __slots__ = 'arg'
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]):
     axis = set(axis)
     self.arg = tuple([-1 if i in axis else 1 for i in range(len(x.shape))])
-    return x.movement_op(MovementOps.STRIDE, self.arg)
+    return x.stride_op(self.arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.movement_op(MovementOps.STRIDE, self.arg)
+    return grad_output.stride_op(self.arg)
