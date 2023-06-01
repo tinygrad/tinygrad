@@ -1,9 +1,11 @@
-import functools
+from __future__ import annotations
+from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
+from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -26,9 +28,9 @@ onnx_ops = importlib.import_module('extra.onnx_ops')
 
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
-def get_run_onnx(onnx_model):
+def get_run_onnx(onnx_model: ModelProto):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
-  def buffer_parse(inp):
+  def buffer_parse(inp: TensorProto) -> Tensor:
     if inp.data_type in (1,10,6,7):
       # TODO: this is shared with below
       if len(inp.float_data) > 0:
@@ -43,14 +45,16 @@ def get_run_onnx(onnx_model):
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
 
-  def attribute_parse(a):
-    if a.type in [6,7]: return tuple([int(x) for x in a.ints])
-    elif a.type == 4: return buffer_parse(a.t)  # TENSOR
-    elif a.type == 3: return a.s.decode("utf-8")
-    elif a.type == 2: return int(a.i)
-    elif a.type == 1: return float(a.f)
+  def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
+    # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
+    if a.type == AttributeProto.FLOAT: return float(a.f)
+    elif a.type == AttributeProto.INT: return int(a.i)
+    elif a.type == AttributeProto.STRING: return a.s.decode("utf-8")
+    elif a.type == AttributeProto.TENSOR: return buffer_parse(a.t) # TENSOR
+    elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
+    elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
     else: raise Exception(f"can't parse {a.type} {a}")
-  def attribute_to_dict(a): return {x.name:attribute_parse(x) for x in a}
+  def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
   tensors = {}
 
@@ -75,7 +79,7 @@ def get_run_onnx(onnx_model):
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
   
-  onnx_version = onnx_model.opset_import[0].version
+  onnx_model_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=False):
     if getenv("DEBUGONNX"): debug = True
@@ -118,7 +122,13 @@ def get_run_onnx(onnx_model):
       elif n.op_type == "Div":
         # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
         ret = inp[0].div(inp[1])
-      elif n.op_type == "Constant": ret = opt['value'] if 'value' in opt else opt['value_float']
+      elif n.op_type == "Constant":
+        if 'value' in opt: ret = opt['value'] # tensor
+        elif 'value_float' in opt: ret = Tensor(np.array(opt['value_float'], dtype=np.float32), requires_grad=False)
+        elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64), requires_grad=False)
+        elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32), requires_grad=False)
+        elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
+        else: raise NotImplementedError(f'Constant not implemented')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Resize":
         # TODO: this is handcoded for YOLOv8
@@ -136,17 +146,14 @@ def get_run_onnx(onnx_model):
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        # TODO: add this to tinygrad? i don't think it's in torch
-        inp_0 = inp[0] if isinstance(inp[0], Tensor) else Tensor(np.array(inp[0], dtype=np.float32), requires_grad=False)
-        inp_1 = inp[1] if isinstance(inp[1], Tensor) else Tensor(np.array(inp[1], dtype=np.float32), requires_grad=False)
-        if (len(inp_0.shape) != len(inp_1.shape)) and (prod(inp_0.shape) == prod(inp_1.shape)):
-          inp_1 = inp_1.reshape(inp_0.shape)
+        if (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
+          inp[1] = inp[1].reshape(inp[0].shape)
         # TODO: is this right?
-        if 'broadcast' in opt: inp_1 = inp_1.reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp_0.shape))])
-        if n.op_type == "Add": ret = inp_0 + inp_1
-        if n.op_type == "Sub": ret = inp_0 - inp_1
-        if n.op_type == "Mul": ret = inp_0 * inp_1
-        if n.op_type == "Pow": ret = inp_0 ** inp_1
+        if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
+        if n.op_type == "Add": ret = inp[0] + inp[1]
+        if n.op_type == "Sub": ret = inp[0] - inp[1]
+        if n.op_type == "Mul": ret = inp[0] * inp[1]
+        if n.op_type == "Pow": ret = inp[0] ** inp[1]
       elif n.op_type == "Split":
         if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         if 'axis' not in opt: opt['axis'] = 0
@@ -158,7 +165,7 @@ def get_run_onnx(onnx_model):
           i = i+s
         continue
       elif n.op_type == "Slice":
-        assert onnx_version >= 10, f'only onnx version >= 10 supported for slice'
+        assert onnx_model_version >= 10, f'only onnx version >= 10 supported for slice'
         arg = [(0,x) for x in inp[0].shape]
         starts, ends, axes = inp[1:4]
         assert axes.shape == (1,)
@@ -174,7 +181,7 @@ def get_run_onnx(onnx_model):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
           for k in sorted(fxn.keys()):
-            if k < onnx_version:
+            if k < onnx_model_version:
               real_fxn = fxn[k]
         else:
           real_fxn = fxn
