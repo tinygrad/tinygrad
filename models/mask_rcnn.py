@@ -8,10 +8,6 @@ from models.resnet import ResNet
 from torch.nn import functional as F
 import torch
 
-def upsample(x):
-  bs, c, py, px = x.shape
-  return x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py * 2, px * 2)
-
 
 class LastLevelMaxPool:
   def __call__(self, x):
@@ -45,11 +41,13 @@ class FPN:
       inner_top_down = Tensor(F.interpolate(torch.tensor(last_inner.numpy()), scale_factor=2, mode="nearest").numpy())
       inner_lateral = inner_block(feature)
       last_inner = inner_lateral + inner_top_down
-      results.insert(0, layer_block(last_inner))
+      layer_result = layer_block(last_inner)
+      results.insert(0, layer_result)
     last_results = self.top_block(results[-1])
     results.extend(last_results)
 
     return tuple(results)
+  
 
 class ResNetFPN:
   def __init__(self, resnet, out_channels=256):
@@ -67,8 +65,6 @@ class ResNetFPN:
   def __call__(self, x):
     x = self.body(x)
     return self.fpn(x)
-
-
 
 
 class AnchorGenerator:
