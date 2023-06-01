@@ -501,10 +501,10 @@ class TestOps(unittest.TestCase):
       for cin in [1,3]:
         for groups in [1,3] if cin == 3 else [1]:
           for H in [1,2,5]:
-              with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
-                helper_test_op([(bs,cin,11), (6,cin//groups,H)],
-                  lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
-                  lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+            with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
+              helper_test_op([(bs,cin,11), (6,cin//groups,H)],
+                lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
+                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_simple_padding_conv1d(self):
     bs = 6
