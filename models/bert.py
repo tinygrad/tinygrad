@@ -1,7 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
-from extra.utils import download_file, get_child
 from extra.training import sparse_categorical_crossentropy
+from extra.utils import download_file, get_child
 from pathlib import Path
 
 class BertForPreTraining:
@@ -27,8 +27,16 @@ class BertForPreTraining:
     sequence_output = sequence_outputs[-1]
     prediction_scores, seq_relationship_score = self.cls(sequence_output, pooled_output)
     return prediction_scores, seq_relationship_score
-  
+
   def loss(self, prediction_scores:Tensor, seq_relationship_score:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+    prediction_scores = prediction_scores.log_softmax()
+    seq_relationship_score = seq_relationship_score.log_softmax()
+
+    # gather only the masked_lm_positions we care about
+    counter = Tensor.arange(prediction_scores.shape[0], requires_grad=False).unsqueeze(0).expand(masked_lm_positions.shape[0], prediction_scores.shape[0])
+    onehot = counter == masked_lm_positions.reshape(-1, 1)
+    prediction_scores = onehot @ prediction_scores
+
     masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids.numpy())
     next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels.numpy())
     return masked_lm_loss + next_sentence_loss

@@ -39,7 +39,7 @@ def train_bert():
       loss.backward()
       optimizer.step()
       optimizer.zero_grad()
-      t.set_description(f"loss {loss.numpy():.2f}")
+      t.set_description(f"loss {loss.numpy().item():.2f}")
 
 def train_maskrcnn():
   # TODO: Mask RCNN
