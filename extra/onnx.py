@@ -42,7 +42,7 @@ def get_run_onnx(onnx_model: ModelProto):
       return Tensor(np.array(inp.int64_data, dtype=dtype).reshape(inp.dims), requires_grad=False)
     elif inp.data_type in (TensorProto.FLOAT, TensorProto.FLOAT16, TensorProto.INT32, TensorProto.INT64) and len(inp.raw_data):
       return Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims), requires_grad=False)
-    else: raise NotImplementedError(f"Data type {inp.name} {inp.dims} {inp.data_type}")
+    else: raise NotImplementedError(f"Cannot convert TensorProto.data_type {inp.data_type} {inp.dims} {inp.name}")
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
     # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
