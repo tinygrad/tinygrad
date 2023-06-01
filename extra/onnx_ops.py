@@ -207,7 +207,7 @@ def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.s
 
 def ConstantOfShape(input, value=0.0):
   shape = [int(x) for x in safe_numpy(input)]
-  return Tensor.ones(*shape) * value
+  return Tensor.ones(*shape, dtype=value.dtype) * value if value > 0 and shape[0] > 0 else Tensor.zeros(*shape, dtype=value.dtype)
 
 # this is obviously wrong, but since we don't have types, it's better than nothing
 def Cast(input, to):
