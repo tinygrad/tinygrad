@@ -662,17 +662,11 @@ class MaskRCNNFPNFeatureExtractor:
     use_gn = False
     layers = (256, 256, 256, 256)
     dilation = 1
-
-    next_feature = input_size
-    self.blocks = []
-    for layer_idx, layer_features in enumerate(layers, 1):
-      layer_name = "mask_fcn{}".format(layer_idx)
-      module = make_conv3x3(next_feature, layer_features,
-                            dilation=dilation, stride=1, use_gn=use_gn
-                            )
-      exec(f"self.{layer_name} = module")
-      next_feature = layer_features
-      self.blocks.append(layer_name)
+    self.mask_fcn1 = make_conv3x3(input_size, layers[0], dilation=dilation, stride=1, use_gn=use_gn)
+    self.mask_fcn2 = make_conv3x3(layers[0], layers[1], dilation=dilation, stride=1, use_gn=use_gn)
+    self.mask_fcn3 = make_conv3x3(layers[1], layers[2], dilation=dilation, stride=1, use_gn=use_gn)
+    self.mask_fcn4 = make_conv3x3(layers[2], layers[3], dilation=dilation, stride=1, use_gn=use_gn)
+    self.blocks = [self.mask_fcn1, self.mask_fcn2, self.mask_fcn3, self.mask_fcn4]
 
 
 class MaskRCNNC4Predictor:
