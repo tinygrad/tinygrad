@@ -18,7 +18,6 @@ class LastLevelMaxPool:
   def __call__(self, x):
     return [Tensor.max_pool2d(x, 1, 2)]
 
-
 # transpose
 FLIP_LEFT_RIGHT = 0
 FLIP_TOP_BOTTOM = 1
@@ -30,16 +29,8 @@ def permute_and_flatten(layer:Tensor, N, A, C, H, W):
   layer = layer.reshape(N, -1, C)
   return layer
 
-class BoxList(object):
-  """
-  This class represents a set of bounding boxes.
-  The bounding boxes are represented as a Nx4 Tensor.
-  In order to uniquely determine the bounding boxes with respect
-  to an image, we also store the corresponding image dimensions.
-  They can contain extra information that is specific to each bounding box, such as
-  labels.
-  """
 
+class BoxList:
   def __init__(self, bbox, image_size, mode="xyxy"):
     if not isinstance(bbox, Tensor):
       bbox = Tensor(bbox)
@@ -59,6 +50,14 @@ class BoxList(object):
     self.size = image_size  # (image_width, image_height)
     self.mode = mode
     self.extra_fields = {}
+
+  def __repr__(self):
+    s = self.__class__.__name__ + "("
+    s += "num_boxes={}, ".format(len(self))
+    s += "image_width={}, ".format(self.size[0])
+    s += "image_height={}, ".format(self.size[1])
+    s += "mode={})".format(self.mode)
+    return s
 
   def add_field(self, field, field_data):
     self.extra_fields[field] = field_data
@@ -113,13 +112,6 @@ class BoxList(object):
       raise RuntimeError("Should not be here")
 
   def resize(self, size, *args, **kwargs):
-    """
-    Returns a resized copy of this bounding box
-
-    :param size: The requested size in pixels, as a 2-tuple:
-        (width, height).
-    """
-
     ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(size, self.size))
     if ratios[0] == ratios[1]:
       ratio = ratios[0]
@@ -151,13 +143,6 @@ class BoxList(object):
     return bbox.convert(self.mode)
 
   def transpose(self, method):
-    """
-    Transpose bounding box (flip or rotate in 90 degree steps)
-    :param method: One of :py:attr:`PIL.Image.FLIP_LEFT_RIGHT`,
-      :py:attr:`PIL.Image.FLIP_TOP_BOTTOM`, :py:attr:`PIL.Image.ROTATE_90`,
-      :py:attr:`PIL.Image.ROTATE_180`, :py:attr:`PIL.Image.ROTATE_270`,
-      :py:attr:`PIL.Image.TRANSPOSE` or :py:attr:`PIL.Image.TRANSVERSE`.
-    """
     if method not in (FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM):
       raise NotImplementedError(
         "Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented"
@@ -190,10 +175,11 @@ class BoxList(object):
 
   def clip_to_image(self, remove_empty=True):
     TO_REMOVE = 1
-    self.bbox[:, 0].clip(min_=0, max_=self.size[0] - TO_REMOVE)
-    self.bbox[:, 1].clip(min_=0, max_=self.size[1] - TO_REMOVE)
-    self.bbox[:, 2].clip(min_=0, max_=self.size[0] - TO_REMOVE)
-    self.bbox[:, 3].clip(min_=0, max_=self.size[1] - TO_REMOVE)
+    bb1 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:, 0]
+    bb2 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:, 1]
+    bb3 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:, 2]
+    bb4 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:, 3]
+    self.bbox = Tensor.stack((bb1, bb2, bb3, bb4), dim=1)
     if remove_empty:
       box = self.bbox
       keep = (box[:, 3] > box[:, 1]) & (box[:, 2] > box[:, 0])
@@ -211,13 +197,6 @@ class BoxList(object):
 
 
 def cat_boxlist(bboxes):
-  """
-  Concatenates a list of BoxList (having the same image size) into a
-  single BoxList
-
-  Arguments:
-      bboxes (list[BoxList])
-  """
   assert isinstance(bboxes, (list, tuple))
   assert all(isinstance(bbox, BoxList) for bbox in bboxes)
 
@@ -248,13 +227,6 @@ class FPN:
     self.top_block = LastLevelMaxPool()
 
   def __call__(self, x: Tensor):
-    """
-    Arguments:
-        x (list[Tensor]): feature maps for each feature level.
-    Returns:
-        results (tuple[Tensor]): feature maps after FPN layers.
-            They are ordered from highest resolution first.
-    """
     last_inner = self.inner_blocks[-1](x[-1])
     results = []
     results.append(self.layer_blocks[-1](last_inner))
@@ -450,30 +422,11 @@ class RPNHead:
 
 
 class BoxCoder(object):
-  """
-  This class encodes and decodes a set of bounding boxes into
-  the representation used for training the regressors.
-  """
-
   def __init__(self, weights, bbox_xform_clip=math.log(1000. / 16)):
-    """
-    Arguments:
-        weights (4-element tuple)
-        bbox_xform_clip (float)
-    """
     self.weights = weights
     self.bbox_xform_clip = bbox_xform_clip
 
   def encode(self, reference_boxes, proposals):
-    """
-    Encode a set of proposals with respect to some
-    reference boxes
-
-    Arguments:
-        reference_boxes (Tensor): reference boxes
-        proposals (Tensor): boxes to be encoded
-    """
-
     TO_REMOVE = 1  # TODO remove
     ex_widths = proposals[:, 2] - proposals[:, 0] + TO_REMOVE
     ex_heights = proposals[:, 3] - proposals[:, 1] + TO_REMOVE
@@ -495,15 +448,6 @@ class BoxCoder(object):
     return targets
 
   def decode(self, rel_codes, boxes):
-    """
-    From a set of original boxes and encoded relative box offsets,
-    get the decoded boxes.
-
-    Arguments:
-        rel_codes (Tensor): encoded boxes
-        boxes (Tensor): reference boxes.
-    """
-
     boxes = boxes.cast(rel_codes.dtype).numpy()
     rel_codes = rel_codes.numpy()
 
@@ -541,17 +485,6 @@ class BoxCoder(object):
 
 
 def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
-  """
-  Performs non-maximum suppression on a boxlist, with scores specified
-  in a boxlist field via score_field.
-
-  Arguments:
-      boxlist(BoxList)
-      nms_thresh (float)
-      max_proposals (int): if > 0, then only the top max_proposals are kept
-          after non-maximum suppression
-      score_field (str)
-  """
   if nms_thresh <= 0:
     return boxlist
   mode = boxlist.mode
@@ -559,7 +492,7 @@ def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
   boxes = boxlist.bbox
   score = boxlist.get_field(score_field)
   # TODO: remove torch
-  keep = _box_nms(torch.tensor(boxes.numpy()), torch.tensor(score.numpy()), nms_thresh)
+  keep = _box_nms(torch.tensor(boxes.numpy()), torch.tensor(score.numpy()), nms_thresh).numpy().tolist()
   if max_proposals > 0:
     keep = keep[: max_proposals]
   boxlist = boxlist[keep]
@@ -567,14 +500,6 @@ def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
 
 
 def remove_small_boxes(boxlist, min_size):
-  """
-  Only keep boxes with both sides >= min_size
-
-  Arguments:
-      boxlist (Boxlist)
-      min_size (int)
-  """
-  # TODO maybe add an API for querying the ws / hs
   xywh_boxes = boxlist.convert("xywh").bbox
   _, _, ws, hs = xywh_boxes.split(4, dim=1)
   keep = ((
@@ -584,11 +509,6 @@ def remove_small_boxes(boxlist, min_size):
 
 
 class RPNPostProcessor:
-  """
-  Performs post-processing on the outputs of the RPN boxes, before feeding the
-  proposals to the heads
-  """
-
   def __init__(
           self,
           pre_nms_top_n,
@@ -598,15 +518,6 @@ class RPNPostProcessor:
           box_coder=None,
           fpn_post_nms_top_n=None,
   ):
-    """
-    Arguments:
-        pre_nms_top_n (int)
-        post_nms_top_n (int)
-        nms_thresh (float)
-        min_size (int)
-        box_coder (BoxCoder)
-        fpn_post_nms_top_n (int)
-    """
     self.pre_nms_top_n = pre_nms_top_n
     self.post_nms_top_n = post_nms_top_n
     self.nms_thresh = nms_thresh
@@ -621,15 +532,8 @@ class RPNPostProcessor:
     self.fpn_post_nms_top_n = fpn_post_nms_top_n
 
   def forward_for_single_feature_map(self, anchors, objectness, box_regression):
-    """
-    Arguments:
-        anchors: list[BoxList]
-        objectness: tensor of size N, A, H, W
-        box_regression: tensor of size N, A * 4, H, W
-    """
     device = objectness.device
     N, A, H, W = objectness.shape
-
     # put in the same format as anchors
     objectness = permute_and_flatten(objectness, N, A, 1, H, W).reshape(N, -1)
     objectness = objectness.sigmoid()
@@ -670,16 +574,6 @@ class RPNPostProcessor:
     return result
 
   def __call__(self, anchors, objectness, box_regression):
-    """
-    Arguments:
-        anchors: list[list[BoxList]]
-        objectness: list[tensor]
-        box_regression: list[tensor]
-
-    Returns:
-        boxlists (list[BoxList]): the post-processed anchors, after
-            applying box decoding and NMS
-    """
     sampled_boxes = []
     num_levels = len(objectness)
     anchors = list(zip(*anchors))
@@ -829,19 +723,7 @@ class RoIHeads:
 
 
 class ImageList(object):
-  """
-  Structure that holds a list of images (of possibly
-  varying sizes) as a single tensor.
-  This works by padding the images to the same size,
-  and storing in a field the original sizes of each image
-  """
-
   def __init__(self, tensors, image_sizes):
-    """
-    Arguments:
-        tensors (tensor)
-        image_sizes (list[tuple[int, int]])
-    """
     self.tensors = tensors
     self.image_sizes = image_sizes
 
@@ -851,13 +733,6 @@ class ImageList(object):
 
 
 def to_image_list(tensors, size_divisible=0):
-  """
-  tensors can be an ImageList, a torch.Tensor or
-  an iterable of Tensors. It can't be a numpy array.
-  When tensors is an iterable of Tensors, it pads
-  the Tensors with zeros so that they have the same
-  shape
-  """
   if isinstance(tensors, Tensor) and size_divisible > 0:
     tensors = [tensors]
 
