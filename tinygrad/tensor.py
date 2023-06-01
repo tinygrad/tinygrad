@@ -247,8 +247,11 @@ class Tensor:
   #    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
   # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
   # - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
-  # - Strides other than 1 are now allowed!:
-  #    - This works by applying Shrink -> [Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optionals)
+  # - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
+  # - Strides > 1 and < 0 are now allowed!:
+  #    - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
+  #    - Idea of stride < 0 support:
+  #        - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below. 
   #    - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
   #        - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
   #        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
@@ -265,11 +268,16 @@ class Tensor:
     valid_slices = list(itertools.filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-    new_slice = tuple((s, e) for s, e in zip(start, stop))
+    new_slice = tuple((s, e)  if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
     new_shape = tuple(e - s for s, e in new_slice)
     # Shrink
     sliced_tensor = self.shrink(new_slice)
-    if any(s > 1 for s in strides):
+    # Flip
+    if (flip_axes := tuple(i for i, s in enumerate(strides) if s < 0)):
+      sliced_tensor = sliced_tensor.flip(axis=flip_axes)
+    if any(s > 1 or s < 0 for s in strides):
+      # normalize if negative strides
+      strides = tuple(abs(s) for s in strides)
       def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
       # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
       paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
