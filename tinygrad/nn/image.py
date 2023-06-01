@@ -7,6 +7,7 @@ base_image_type = (100, 2, "imageh", np.float16) if FLOAT16 else (100, 4, "image
 
 def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
+  if (n1:=len(self.shape))*(n2:=len(w.shape)) == 0: raise RuntimeError(f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D")
   bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
   cin, cout = w.shape[-2], w.shape[-1]
   out_shape_t = self.shape[0:-2] + (cout,-1)
