@@ -456,6 +456,11 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv_transpose2d(x,w).relu(),
       lambda x,w: Tensor.conv_transpose2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
+  def test_bias_conv_transpose2d(self):
+    helper_test_op([(2,4,9,9), (4,4,3,3), (4,)],
+      lambda x,w,b: torch.nn.functional.conv_transpose2d(x,w,b).relu(),
+      lambda x,w,b: Tensor.conv_transpose2d(x,w,b).relu(), atol=1e-4, grad_rtol=1e-5)
+
   def test_grouped_conv_transpose2d(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv_transpose2d(x,w,groups=2).relu(),
@@ -468,14 +473,22 @@ class TestOps(unittest.TestCase):
         lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_dilated_conv_transpose2d(self):
-    helper_test_op([(2,4,9,9), (4,4,3,3)],
-      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=2).relu(),
-      lambda x,w: Tensor.conv_transpose2d(x,w,dilation=2).relu(), atol=1e-4, grad_rtol=1e-5)
+    for dilation in [(1,2), (2,1), 2, 1]:
+      helper_test_op([(2,4,9,9), (4,4,3,3)],
+        lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=dilation).relu(),
+        lambda x,w: Tensor.conv_transpose2d(x,w,dilation=dilation).relu(), atol=1e-4, grad_rtol=1e-5)
 
   def test_strided_conv_transpose2d(self):
-    helper_test_op([(2,4,9,9), (4,4,3,3)],
-      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,stride=2).relu(),
-      lambda x,w: Tensor.conv_transpose2d(x,w,stride=2).relu(), atol=1e-4, grad_rtol=1e-5)
+    for stride in [(2,1), (1,2), 1]:
+      helper_test_op([(2,4,4,5), (4,4,3,3)],
+        lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
+        lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_output_padded_conv_transpose2d(self):
+    for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
+      helper_test_op([(2,4,6,5), (4,4,3,3),(4,)],
+        lambda x,w,b: torch.nn.functional.conv_transpose2d(x,w,b,output_padding=output_padding,stride=stride).relu(),
+        lambda x,w,b: Tensor.conv_transpose2d(x,w,b,output_padding=output_padding,stride=stride).relu(), atol=1e-4, grad_rtol=1e-5)
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_simple_conv_transpose3d(self):
