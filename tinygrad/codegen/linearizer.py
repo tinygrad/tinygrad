@@ -453,6 +453,15 @@ class Linearizer:
           self.shift_to(unit_stride_axes_mul_4[0], 4)
           self.upcast()
 
+  def limit_global_dims(self, limit):
+    # sometimes, there's more dimensions than len(self.lang.gid).
+    # compact all the dimensions into the first
+    # NOTE: this might make multiview shapetrackers
+    if limit and self.first_reduce > limit:
+      num_to_merge = (self.first_reduce - limit)+1
+      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
+      if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
+
   def hand_coded_optimizations(self):
     # if there's images in the earlybufs, we have to make an axis the 4 loading one
     self.required_optimizations(early_only=True)
@@ -526,6 +535,6 @@ class Linearizer:
 
     # if nothing at all is upcasted and it's easy to, do an upcast
     for splits in [4]:
-      if self.upcasted == 0 and self.full_unupcasted_shape[-1] % splits == 0:
+      if self.upcasted == 0 and len(self.full_unupcasted_shape) > 0 and self.full_unupcasted_shape[-1] % splits == 0:
         self.shift_to(len(self.full_unupcasted_shape)-1, splits, insert_before=len(self.full_unupcasted_shape))
         self.upcast()

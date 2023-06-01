@@ -188,15 +188,7 @@ class CStyleCodegen(Linearizer):
   def codegen(self):
     self.process()
     self.hand_coded_optimizations()
-
-    # sometimes, there's more dimensions than len(self.lang.gid).
-    # compact all the dimensions into the first
-    # NOTE: this might make multiview shapetrackers
-    if len(self.lang.gid) and self.first_reduce > len(self.lang.gid):
-      num_to_merge = (self.first_reduce - len(self.lang.gid))+1
-      self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
-      if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
-
+    self.limit_global_dims(len(self.lang.gid))
     self.linearize()
 
     prg, global_size, local_size = uops_to_cstyle(self.uops, self.bufs, self.lang)
