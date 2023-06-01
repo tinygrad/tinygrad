@@ -31,19 +31,18 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 def get_run_onnx(onnx_model: ModelProto):
   def shape_to_tuple(s): return tuple(x.dim_value for x in s.dim)
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (TensorProto.FLOAT, TensorProto.FLOAT16, TensorProto.INT32, TensorProto.INT64):
-      # TODO: this is shared with below
-      if len(inp.float_data) > 0:
-        ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
-      elif len(inp.int64_data) > 0:
-        ret = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
-      elif len(inp.int32_data) > 0:
-        ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
-      else:
-        ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
-    else:
-      raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
-    return ret
+    dtype = tensor_dtype_to_np_dtype(inp.data_type)
+    if inp.data_type == TensorProto.FLOAT and len(inp.float_data):
+      return Tensor(np.array(inp.float_data, dtype=dtype).reshape(inp.dims), requires_grad=False)
+    elif inp.data_type == TensorProto.FLOAT16 and len(inp.float_data):
+      return Tensor(np.array(inp.float_data, dtype=dtype).reshape(inp.dims), requires_grad=False)
+    elif inp.data_type == TensorProto.INT32 and len(inp.int32_data):
+      return Tensor(np.array(inp.int32_data, dtype=dtype).reshape(inp.dims), requires_grad=False)
+    elif inp.data_type == TensorProto.INT64 and len(inp.int64_data):
+      return Tensor(np.array(inp.int64_data, dtype=dtype).reshape(inp.dims), requires_grad=False)
+    elif inp.data_type in (TensorProto.FLOAT, TensorProto.FLOAT16, TensorProto.INT32, TensorProto.INT64) and len(inp.raw_data):
+      return Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims), requires_grad=False)
+    else: raise NotImplementedError(f"Data type {inp.name} {inp.dims} {inp.data_type}")
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
     # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
