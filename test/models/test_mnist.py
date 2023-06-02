@@ -13,8 +13,8 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 # create a model
 class TinyBobNet:
   def __init__(self):
-    self.l1 = Linear(784, 128)
-    self.l2 = Linear(128, 10)
+    self.l1 = Linear(784, 128, bias=False)
+    self.l2 = Linear(128, 10, bias=False)
 
   def parameters(self):
     return optim.get_parameters(self)
@@ -30,9 +30,9 @@ class TinyConvNet:
     conv = 3
     #inter_chan, out_chan = 32, 64
     inter_chan, out_chan = 8, 16   # for speed
-    self.c1 = Conv2d(inter_chan,1,conv,conv)
-    self.c2 = Conv2d(out_chan,inter_chan,conv,conv)
-    self.l1 = Linear(out_chan*5*5, 10)
+    self.c1 = Conv2d(1, inter_chan, conv, bias=False)
+    self.c2 = Conv2d(inter_chan, out_chan, conv, bias=False)
+    self.l1 = Linear(out_chan * 5 * 5, 10, bias=False)
     if has_batchnorm:
       self.bn1 = BatchNorm2d(inter_chan)
       self.bn2 = BatchNorm2d(out_chan)
