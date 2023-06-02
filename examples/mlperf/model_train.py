@@ -15,7 +15,7 @@ def train_resnet():
   classes = 100
   model = ResNet50(classes)
   parameters = optim.get_parameters(model)
-  BS = 8
+  BS = 256
   lr = BS*1e-3
   epochs = 50
   optimizer = optim.SGD(parameters, lr=lr, momentum=.875)
@@ -27,7 +27,7 @@ def train_resnet():
   Tensor.training = True
   for epoch in (r := tqdm(range(epochs))):
     losses,accs = 0,0
-    for X,Y in (t := tqdm(iterate(bs=BS, val=False), total=len(get_train_files())//4000//BS)):
+    for X,Y in (t := tqdm(iterate(bs=BS, val=False), total=len(get_train_files())//BS)):
       out = model.forward(Tensor(X, requires_grad=False))
       loss = sparse_categorical_crossentropy(out, Y)
       optimizer.zero_grad()
