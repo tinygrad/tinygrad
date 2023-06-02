@@ -150,8 +150,8 @@ def get_run_onnx(onnx_model: ModelProto):
         #ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         #ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type == "GatherElements":
-        data, indices = inp
         axis = opt['axis']
+        data, indices = inp
         data = data.transpose(ax1=0, ax2=axis)
         indices = indices.transpose(ax1=0, ax2=axis)
         ret = Tensor(np.choose(safe_numpy(indices), safe_numpy(data).astype('float32'), mode='wrap'))
