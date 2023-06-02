@@ -270,18 +270,18 @@ You will find that the evaluation time is much faster than before and that your 
 The standard weight format for tinygrad is [safetensors](https://github.com/huggingface/safetensors). This means that you can load the weights of any model also using safetensors into tinygrad.
 There are functions in [state.py](/tinygrad/state.py) to save and load models to and from this format.
 ```py
-from tinygrad.state import save_safe, load_safe, get_state_dict
+from tinygrad.state import safe_save, safe_load, get_state_dict
 
 # first we need the state dict of our model
 state_dict = get_state_dict(net)
 
 # then we can just save it to a file
-save_safe(state_dict, "model.safetensors")
+safe_save(state_dict, "model.safetensors")
 
-# and load it back i
-loaded_state_dict = load_safe("model.safetensors")
+# and load it back in
+loaded_state_dict = safe_load("model.safetensors")
 for k, v in state_dict.items():
-  state_dict[k].assign(loaded_state_dict[k])
+  state_dict[k].assign(loaded_state_dict[k].to(state_dict[k].device))
 ```
 
 Many of the models in the [models/](/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are pytorch weights meaning that you would need pytorch installed to load them.
