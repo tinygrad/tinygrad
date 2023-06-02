@@ -220,18 +220,14 @@ print(f"Test Accuracy: {avg_acc / 1000}")
 print(f"Time: {time.perf_counter() - st}")
 ```
 
-## Saving and Loading Models
-
-TODO
-
 ## And that's it!
 
 Highly recommend you check out the [examples/](/examples) folder for more examples of using tinygrad.
 Reading the source code of tinygrad is also a great way to learn how it works.
-Specifically the tests in [tests/](/tests) are a great place to see how some stuff works.
-There are also common models implemented in [models/](/models) that you can use as a reference.
+Specifically the tests in [tests/](/tests) are a great place to see how to use and the semantics of the different operations.
+There are also a bunch of models implemented in [models/](/models) that you can use as a reference.
 
-Additionally, feel free to ask questions in the `#learn-tinygrad` channel on the [discord](https://discord.gg/beYbxwxVdx). Don't ask to ask just ask!
+Additionally, feel free to ask questions in the `#learn-tinygrad` channel on the [discord](https://discord.gg/beYbxwxVdx). Don't ask to ask, just ask!
 
 ## Extras
 
@@ -268,3 +264,24 @@ print(f"Test Accuracy: {avg_acc / 1000}")
 print(f"Time: {time.perf_counter() - st}")
 ```
 You will find that the evaluation time is much faster than before and that your accelerator utilization is much higher.
+
+### Saving and Loading Models
+
+The standard weight format for tinygrad is [safetensors](https://github.com/huggingface/safetensors). This means that you can load the weights of any model also using safetensors into tinygrad.
+There are functions in [state.py](/tinygrad/state.py) to save and load models to and from this format.
+```py
+from tinygrad.state import save_safe, load_safe, get_state_dict
+
+# first we need the state dict of our model
+state_dict = get_state_dict(net)
+
+# then we can just save it to a file
+save_safe(state_dict, "model.safetensors")
+
+# and load it back i
+loaded_state_dict = load_safe("model.safetensors")
+for k, v in state_dict.items():
+  state_dict[k].assign(loaded_state_dict[k])
+```
+
+Many of the models in the [models/](/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are pytorch weights meaning that you would need pytorch installed to load them.
