@@ -584,6 +584,7 @@ class Tensor:
   def ndim(self) -> int: return len(self.shape)
   def numel(self) -> int: return math.prod(self.shape)
   def element_size(self) -> int: return self.dtype.itemsize
+  def nbytes(self) -> int: return self.numel() * self.element_size()
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices

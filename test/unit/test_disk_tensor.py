@@ -2,6 +2,38 @@ import pathlib
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.state import safe_load, safe_save, get_state_dict
+
+class TestSafetensors(unittest.TestCase):
+  def test_real_safetensors(self):
+    import torch
+    from safetensors.torch import save_file
+    torch.manual_seed(1337)
+    tensors = {
+      "weight1": torch.randn((16, 16)),
+      "weight2": torch.arange(0, 17, dtype=torch.uint8),
+      "weight3": torch.arange(0, 17, dtype=torch.int32).reshape(17,1,1),
+      "weight4": torch.arange(0, 2, dtype=torch.uint8),
+    }
+    save_file(tensors, "/tmp/model.safetensors")
+
+    ret = safe_load("/tmp/model.safetensors")
+    for k,v in tensors.items(): np.testing.assert_array_equal(ret[k].numpy(), v.numpy())
+    safe_save(ret, "/tmp/model.safetensors_alt")
+    with open("/tmp/model.safetensors", "rb") as f:
+      with open("/tmp/model.safetensors_alt", "rb") as g:
+        assert f.read() == g.read()
+    ret2 = safe_load("/tmp/model.safetensors_alt")
+    for k,v in tensors.items(): np.testing.assert_array_equal(ret2[k].numpy(), v.numpy())
+
+  def test_efficientnet_safetensors(self):
+    from models.efficientnet import EfficientNet
+    model = EfficientNet(0)
+    state_dict = get_state_dict(model)
+    safe_save(state_dict, "/tmp/eff0")
+    state_dict_loaded = safe_load("/tmp/eff0")
+    for k,v in state_dict.items():
+      np.testing.assert_array_equal(v.numpy(), state_dict_loaded[k].numpy())
 
 class TestDiskTensor(unittest.TestCase):
   def test_empty(self):
