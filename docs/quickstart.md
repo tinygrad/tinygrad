@@ -220,12 +220,18 @@ print(f"Test Accuracy: {avg_acc / 1000}")
 print(f"Time: {time.perf_counter() - st}")
 ```
 
+## Saving and Loading Models
+
+TODO
+
 ## And that's it!
 
 Highly recommend you check out the [examples/](/examples) folder for more examples of using tinygrad.
 Reading the source code of tinygrad is also a great way to learn how it works.
 Specifically the tests in [tests/](/tests) are a great place to see how some stuff works.
 There are also common models implemented in [models/](/models) that you can use as a reference.
+
+Additionally, feel free to ask questions in the `#learn-tinygrad` channel on the [discord](https://discord.gg/beYbxwxVdx). Don't ask to ask just ask!
 
 ## Extras
 
