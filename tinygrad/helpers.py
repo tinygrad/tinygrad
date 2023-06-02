@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os, functools
-from weakref import ref
+from weakref import KeyedRef, ref
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+from _weakref import _remove_dead_weakref
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 
@@ -102,18 +103,35 @@ class GlobalCounters:
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
 
-# Stripped down more performant version of a WeakSet
-class LightWeightWeakSet:
+# Stripped down version of a WeakSet
+class LightWeakSet:
+  __slots__ = 'data', '_remove', '__weakref__'
   def __init__(self):
     self.data = set()
     def _remove(item, selfref=ref(self)):
       self = selfref()
       try: self.data.discard(item)
-      except KeyError: pass
+      except AttributeError: pass
     self._remove = _remove
 
   def __len__(self): return len(self.data)
-
   def add(self, item): self.data.add(ref(item, self._remove))
-
   def discard(self, item): self.data.discard(ref(item))
+
+# Stripped down version of a WeakValueDictionary
+class LightWeakValueDictionary:
+  __slots__ = 'data', '_remove', '__weakref__'
+  def __init__(self):
+    def remove(wr, selfref=ref(self), _atomic_removal=_remove_dead_weakref):
+      self = selfref()
+      try: _atomic_removal(self.data, wr.key)
+      except AttributeError: pass
+    self._remove = remove
+    self.data = {}
+
+  def __getitem__(self, key):
+    o = self.data[key]()
+    if o is None: raise KeyError(key)
+    else: return o
+
+  def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)

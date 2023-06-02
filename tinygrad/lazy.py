@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
-from weakref import WeakSet, WeakValueDictionary, ref
-from tinygrad.helpers import LightWeightWeakSet, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
+from weakref import ref
+from tinygrad.helpers import LightWeakSet, LightWeakValueDictionary, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
 from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
@@ -60,7 +60,7 @@ def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(root.op.src[0], allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(x.op.src[0]) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
-lazycache: WeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer] = WeakValueDictionary()
+lazycache: LightWeakValueDictionary[Tuple[str, DType, OpType, LazyOp], LazyBuffer] = LightWeakValueDictionary()
 def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], optype:OpType, op:LazyOp, dtype:DType):
   st = shape if shape.__class__ == ShapeTracker else ShapeTracker(tuple(shape))
 
@@ -88,7 +88,7 @@ class LazyBuffer:
     self.realized: Optional[RawBuffer] = None
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children: WeakSet[LazyBuffer] = LightWeightWeakSet()
+    self.children: LightWeakSet[LazyBuffer] = LightWeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
