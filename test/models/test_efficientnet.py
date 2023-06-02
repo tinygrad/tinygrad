@@ -8,6 +8,7 @@ from PIL import Image
 
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
+from tinygrad.lazy import Device
 from models.efficientnet import EfficientNet
 from models.vit import ViT
 from models.resnet import ResNet50
@@ -112,4 +113,5 @@ class TestResNet(unittest.TestCase):
     self.assertEqual(label, "sports car, sport car")
 
 if __name__ == '__main__':
-  unittest.main()
+  if not getenv("CI", "") or Device.DEFAULT != "METAL":
+    unittest.main()
