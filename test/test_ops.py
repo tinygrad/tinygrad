@@ -301,7 +301,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10)], lambda x: x[1], lambda x: x[1])
 
   def test_pad2d(self):
-    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
+    paddings = ((1,1,2,2), (1,2,(3,4)), (0,(1,2,1),[3,3]))
+    for padding in paddings: 
+      helper_test_op([(1,1,2,2,3,3)], lambda x: torch.nn.functional.pad(x, padding), lambda x: x.pad2d(padding=padding))
 
   def test_transpose(self):
     helper_test_op([(3,3,3)], lambda x: x.transpose(1,2), lambda x: x.transpose(1,2))
