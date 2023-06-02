@@ -146,11 +146,11 @@ class DetectionHead():
                            
 class Darknet():
   def __init__(self, w, r, d): #width_multiple, ratio_multiple, depth_multiple
-    self.b1 = [Conv_Block(c1=3, c2=64*w, kernel_size=3, stride=2, padding=1), Conv_Block(64*w, 128*w, kernel_size=3, stride=2, padding=1)]
-    self.b2 = [C2f(c1=128*w, c2=128*w, n=3*d, shortcut=True), Conv_Block(128*w, 256*w, 3, 2, 1), C2f(256*w, 256*w, 6*d, True)]
-    self.b3 = [Conv_Block(256*w, 512*w, kernel_size=3, stride=2, padding=1), C2f(512*w, 512*w, 6*d, True)]
-    self.b4 = [Conv_Block(512*w, 512*w*r, kernel_size=3, stride=2, padding=1), C2f(512*w*r, 512*w*r, 3*d, True)]
-    self.b5 = [SPPF(512*w*r, 512*w*r, 1)]
+    self.b1 = [Conv_Block(c1=3, c2= int(64*w), kernel_size=3, stride=2, padding=1), Conv_Block(int(64*w), int(128*w), kernel_size=3, stride=2, padding=1)]
+    self.b2 = [C2f(c1=int(128*w), c2=int(128*w), n=round(3*d), shortcut=True), Conv_Block(int(128*w), int(256*w), 3, 2, 1), C2f(int(256*w), int(256*w), round(6*d), True)]
+    self.b3 = [Conv_Block(int(256*w), int(512*w), kernel_size=3, stride=2, padding=1), C2f(int(512*w), int(512*w), round(6*d), True)]
+    self.b4 = [Conv_Block(int(512*w), int(512*w*r), kernel_size=3, stride=2, padding=1), C2f(int(512*w*r), int(512*w*r), round(3*d), True)]
+    self.b5 = [SPPF(int(512*w*r), int(512*w*r), 1)]
     
   def return_modules(self):
     return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
@@ -166,12 +166,12 @@ class Darknet():
 class Yolov8NECK():
   def __init__(self, w, r, d):  #width_multiple, ratio_multiple, depth_multiple
     self.up = Upsample(2, mode='nearest')
-    self.n1 = C2f(c1=512*w*(1+r), c2=512*w, n=3*d, shortcut=False)
-    self.n2 = C2f(c1=768*w, c2=256*w, n=3*d, shortcut=False)
-    self.n3 = Conv_Block(c1=256*w, c2=256*w, kernel_size=3, stride=2, padding=1)
-    self.n4 = C2f(c1=768*w, c2=512*w, n=3*d, shortcut=False)
-    self.n5 = Conv_Block(c1=512* w, c2=512 * w, kernel_size=3, stride=2, padding=1)
-    self.n6 = C2f(c1=512*w*(1+r), c2=512*w*r, n=3*d, shortcut=False)
+    self.n1 = C2f(c1=int(512*w*(1+r)), c2=int(512*w), n=round(3*d), shortcut=False)
+    self.n2 = C2f(c1=int(768*w), c2=int(256*w), n=round(3*d), shortcut=False)
+    self.n3 = Conv_Block(c1=int(256*w), c2=int(256*w), kernel_size=3, stride=2, padding=1)
+    self.n4 = C2f(c1=int(768*w), c2=int(512*w), n=round(3*d), shortcut=False)
+    self.n5 = Conv_Block(c1=int(512* w), c2=int(512 * w), kernel_size=3, stride=2, padding=1)
+    self.n6 = C2f(c1=int(512*w*(1+r)), c2=int(512*w*r), n=round(3*d), shortcut=False)
   
   def return_modules(self):
     return [self.n1, self.n2, self.n3, self.n4, self.n5, self.n6]
@@ -188,7 +188,7 @@ class YOLOv8():
   def __init__(self, w, r,  d, num_classes): #width_multiple, ratio_multiple, depth_multiple
     self.net = Darknet(w, r, d)
     self.fpn = Yolov8NECK(w, r, d)
-    self.head = DetectionHead(num_classes, filters=(256*w, 512*w, 512*w*r))
+    self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(512*w*r)))
 
   def forward(self, x):
     x = self.net.forward(x)
@@ -196,7 +196,7 @@ class YOLOv8():
     return self.head.forward(x)
 
   def load_weights(self):
-    weights_path = Path(__file__).parent.parent / "weights" / "yolov8l.pt"
+    weights_path = Path(__file__).parent.parent / "weights" / "yolov8s.pt"
     state_dict = torch.load(weights_path)
     weights = state_dict['model'].state_dict().items()
     backbone_modules = [*range(10)]
@@ -213,7 +213,7 @@ class YOLOv8():
     
        
 test_inferece = Tensor.rand(1 ,3 , 640 , 640)
-yolo_infer = YOLOv8(1, 1, 1, 80)  
+yolo_infer = YOLOv8(w=0.5, r=2, d=0.33, num_classes=80)  
 print(yolo_infer.forward(test_inferece))
 yolo_infer.load_weights()
 
