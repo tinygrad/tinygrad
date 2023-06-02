@@ -12,6 +12,11 @@ import torch
 from models.retinanet import nms as _box_nms
 from maskrcnn_benchmark import _C
 
+def meshgrid(*tensors):
+  return [
+    Tensor(chunked).reshape(-1).unsqueeze(-1) for chunked in np.meshgrid(
+      *[t.numpy() for t in tensors], copy=False, indexing='ij'
+    )]
 
 class LastLevelMaxPool:
   def __call__(self, x):
@@ -332,7 +337,7 @@ class AnchorGenerator:
       shifts_y = Tensor.arange(
         start=0, stop=grid_height * stride, step=stride, dtype=dtypes.float32, device=device
       )
-      shift_y, shift_x = Tensor.meshgrid(shifts_y, shifts_x)
+      shift_y, shift_x = meshgrid(shifts_y, shifts_x)
       shift_x = shift_x.reshape(-1)
       shift_y = shift_y.reshape(-1)
       shifts = Tensor.stack((shift_x, shift_y, shift_x, shift_y), dim=1)
@@ -734,16 +739,6 @@ class FPN2MLPFeatureExtractor:
     return x
 
 
-def roi_align(input, roi, output_size, spatial_scale, sampling_ratio):
-  # TODO: remove torch
-  input = torch.tensor(input.numpy())
-  roi = torch.tensor(roi.numpy())
-  output = _C.roi_align_forward(
-    input, roi, spatial_scale, output_size[0], output_size[1], sampling_ratio
-  )
-  return output.numpy()
-
-
 class ROIAlign:
   def __init__(self, output_size, spatial_scale, sampling_ratio):
     self.output_size = output_size
@@ -751,9 +746,13 @@ class ROIAlign:
     self.sampling_ratio = sampling_ratio
 
   def __call__(self, input, rois):
-    return roi_align(
-      input, rois, self.output_size, self.spatial_scale, self.sampling_ratio
+    # TODO: remove torch
+    input = torch.tensor(input.numpy())
+    roi = torch.tensor(rois.numpy())
+    output = _C.roi_align_forward(
+      input, roi, self.spatial_scale, self.output_size[0], self.output_size[1], self.sampling_ratio
     )
+    return output.numpy()
 
 
 class LevelMapper:
@@ -772,7 +771,7 @@ class LevelMapper:
     target_lvls = (self.lvl0 + Tensor.log2(s / self.s0 + self.eps)).numpy()
     target_lvls = np.floor(target_lvls)
     target_lvls = np.clip(target_lvls, a_min=self.k_min, a_max=self.k_max)
-    return Tensor(target_lvls, dtype=dtypes.int64) - self.k_min
+    return Tensor(target_lvls, dtype=dtypes.float32) - self.k_min
 
 
 class Pooler:
@@ -822,17 +821,16 @@ class Pooler:
       num_channels = x[0].shape[1]
       output_size = self.output_size[0]
 
-      dtype, device = x[0].dtype, x[0].device
       result = np.zeros(
-        (num_rois, num_channels, output_size, output_size), dtype=dtype.np
+        (num_rois, num_channels, output_size, output_size), dtype=x[0].dtype.np
       )
       for level, (per_level_feature, pooler) in enumerate(zip(x, self.poolers)):
-        idx_in_level = [idx for idx, x in enumerate((levels == level).numpy()) if x != 0]
+        idx_in_level = [idx for idx, x in enumerate((levels.numpy() == level)) if x != 0]
         if len(idx_in_level) > 0:
           rois_per_level = Tensor(rois.numpy()[idx_in_level])
           result[idx_in_level] = pooler(per_level_feature, rois_per_level)
 
-      return Tensor(result, dtype=dtype, device=device)
+      return Tensor(result, dtype=x[0].dtype, device=x[0].device)
 
 
 class FPNPredictor:
@@ -1083,7 +1081,6 @@ class MaskRCNN:
         block_index = int(re.search(r"fpn_layer(\d+)", k).group(1))
         k = re.sub(r"fpn_layer\d+", f"layer_blocks.{block_index - 1}", k)
       loaded_keys.append(k)
-      print(k)
       get_child(self, k).assign(v.numpy()).realize()
     return loaded_keys
 

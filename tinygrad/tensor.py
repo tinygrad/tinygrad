@@ -310,9 +310,6 @@ class Tensor:
     return x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
 
   @staticmethod
-  def meshgrid(*tensors): return [Tensor(chunked).reshape(-1).unsqueeze(-1) for chunked in np.meshgrid(*[t.numpy() for t in tensors], copy=False, indexing='ij')]
-
-  @staticmethod
   def sort(input, axis=-1, reverse=True):
     np_input = input.numpy()
     sorted_np_idx = np.argsort(np_input, axis=axis)
@@ -461,7 +458,7 @@ class Tensor:
 
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
-  def log2(self): return mlops.Log.apply(self)/0.69314718056
+  def log2(self): return mlops.Log.apply(self)/0.69314718056  # (math.log(math.e)/math.log(2))
   def exp(self): return mlops.Exp.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
