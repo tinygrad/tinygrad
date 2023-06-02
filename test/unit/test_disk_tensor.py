@@ -3,6 +3,18 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.state import safe_load, safe_save, get_state_dict
+from tinygrad.helpers import dtypes
+from tinygrad.runtime.ops_disk import RawDiskBuffer
+from extra.helpers import Timing
+
+class TestRawDiskBuffer(unittest.TestCase):
+  def test_mmap_read_speed(self):
+    fn = pathlib.Path(__file__).parent.parent.parent / "weights/LLaMA/7B/consolidated.00.pth"
+    if not fn.exists(): return
+    db = RawDiskBuffer(1024*1024*1024*2, dtype=dtypes.uint8, device=fn)
+    tst = np.empty(db.size, np.uint8)
+    with Timing("copy in ", lambda et_ns: f" {db.size/et_ns:.2f} GB/s"):
+      np.copyto(tst, db.toCPU())
 
 class TestSafetensors(unittest.TestCase):
   def test_real_safetensors(self):
@@ -86,6 +98,7 @@ class TestDiskTensor(unittest.TestCase):
   def test_assign_slice(self):
     pathlib.Path("/tmp/dt4").unlink(missing_ok=True)
     cc = Tensor.arange(10, device="CPU").to("disk:/tmp/dt4").realize()
+
     #cc.assign(np.ones(10)).realize()
     print(cc[3:5].numpy())
     cc[3:5].assign([13, 12]).realize()
