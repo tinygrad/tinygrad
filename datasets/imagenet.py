@@ -23,36 +23,36 @@ def get_val_files():
   return val_files
 
 def normalization(image):
-  image = Tensor(image)
+  image = Tensor(image.astype(np.float32), requires_grad=False)
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(-1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(-1, 1, 1)
   image = image.permute([2,0,1]) / 255.0
   image -= input_mean
   image /= input_std
-  return image
+  return image.cpu().numpy()
 
 def rand_flip(image, axis=(0,1)):
   if random.random() <  1 / len(axis):
     image = np.flip(image, axis=axis).copy()
   return image
 
-def random_scale(array, min_scale=0.08, max_scale=1.2):
-  scale_factor = np.random.uniform(min_scale, max_Scale)
+def random_scale(image, min_scale=0.08, max_scale=1.2):
+  scale_factor = np.random.uniform(min_scale, max_scale)
   max_scale_factor = 1.0 / scale_factor
   new_scale_factor = np.random.uniform(1.0, max_scale_factor)
   scaled_array = image * new_scale_factor
   return scaled_array
 
 def preprocess(image, val):
-  image = normalization(image).numpy()
   if not val:
-    #image = random_scale(image)
+    image = random_scale(image)
     image= rand_flip(image)
+  image = normalization(image)
   return image
 
 #rrc = transforms.RandomResizedCrop(224)
 import torchvision.transforms.functional as F
-def image_load(fn, val):
+def image_load(fn, val=False):
   img = Image.open(fn).convert('RGB')
   img = F.resize(img, 256, Image.BILINEAR)
   img = F.center_crop(img, 224)
@@ -65,7 +65,7 @@ def iterate(bs=32, val=True, shuffle=True):
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   for i in range(0, len(files), bs):
-    X = [image_load(files[i]) for i in order[i:i+bs]]
+    X = [image_load(files[i], val) for i in order[i:i+bs]]
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
     yield (np.array(X), np.array(Y))
 
@@ -73,13 +73,11 @@ def fetch_batch(bs, val=False):
   files = get_val_files() if val else get_train_files()
   samp = np.random.randint(0, len(files), size=(bs))
   files = [files[i] for i in samp]
-  X = [image_load(x) for x in files]
+  X = [image_load(x, val) for x in files]
   Y = [cir[x.split("/")[0]] for x in files]
   return np.array(X), np.array(Y)
 
 if __name__ == "__main__":
-  #X,Y = fetch_batch(64)
-  #print(X.shape, Y)
-  X,Y = fetch_batch(32,val=False)
-  print(X.shape,Y)
+  X,Y = fetch_batch(64)
+  print(X.shape, Y)
 

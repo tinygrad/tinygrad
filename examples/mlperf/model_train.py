@@ -7,42 +7,41 @@ def train_resnet():
   # TODO: Resnet50-v1.5
   # there's no weight decay for sgd ?
   from models.resnet import ResNet50
-  from datasets.imagenet import iterate
+  from datasets.imagenet import iterate,get_train_files
   from extra.lr_scheduler import CosineAnnealingLR
   from examples.mlperf.metrics import cross_entropy_loss
   from extra.training import sparse_categorical_crossentropy
 
-  model = ResNet50()
+  classes = 100
+  model = ResNet50(classes)
+  parameters = optim.get_parameters(model)
   BS = 8
   lr = BS*1e-3
-  optimizer = optim.SGD(optim.get_parameters(model), lr=lr, momentum = .875)
-  args_epoch = 100
-  scheduler = CosineAnnealingLR(optimizer, args_epoch)
-  def warmup_factor(epoch, step):
-    return min(1.0, (step+1)/warmup_period)
+  epochs = 50
+  optimizer = optim.SGD(parameters, lr=lr, momentum=.875)
+  scheduler = CosineAnnealingLR(optimizer, epochs)
+  print(f"training with batch size {BS} for {epochs} epochs")
+  def warmup_factor(step, epochs):
+    return min(1.0, (step+1)/epochs)
 
-  for epoch in range(args_epoch):
-    n,d = 0,0
-    if epoch+1 % 10 == 0:
-      # image - (BS,C,X,X), label - (BS,) -> Int
-      for image, label in ( v:=tqdm(iterate(bs=BS, val=True))):
-        out = model(Tensor(image))
-        out = out.numpy()
-        loss = cross_entropy_loss(out, label)
-        out = out.argmax(axis=1)
-        n += (out==label).sum()
-        d += len(out)
-        v.set_description(f"Validation Loss : {loss} ; {n}/{d}  {n*100./d:.2f}%")
-
-    for image, label in (t :=tqdm(iterate(bs=BS,val=False))):
-      image = Tensor(image)
+  Tensor.training = True
+  for epoch in (r := tqdm(range(epochs))):
+    losses,accs = 0,0
+    for X,Y in (t := tqdm(iterate(bs=BS, val=False), total=len(get_train_files())//4000//BS)):
+      out = model.forward(Tensor(X, requires_grad=False))
+      loss = sparse_categorical_crossentropy(out, Y)
       optimizer.zero_grad()
-      out = model.forward(image)
-      loss = sparse_categorical_crossentropy(out, label) # using sparse categorical : labels -> int
       loss.backward()
       optimizer.step()
-      t.set_description(f"Training Loss : {loss.detach().cpu().numpy()} ; Learning Rate : {lr}")
-    lr = scheduler.get_lr() if BS < 512 else scheduler.get_lr * warmup_factor(epoch, 8)
+      loss = loss.cpu().numpy()
+      cat = out.cpu().numpy().argmax(axis=1)
+      accuracy = (cat == Y).mean()
+      losses += loss//len(get_train_files())//BS
+      accs += accuracy//len(get_train_files())//BS
+      t.set_description("loss %.2f accuracy %.2f : lr %.3f" % (loss, accuracy, scheduler.get_lr()))
+      del out, loss
+    scheduler.step()
+    r.set_description("loss %.2f accuracy %.2f : lr %.3f" % (losses, accs, scheduler.get_lr()))
 
 def train_retinanet():
   # TODO: Retinanet
