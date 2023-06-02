@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
 from weakref import WeakSet, WeakValueDictionary, ref
-from tinygrad.helpers import getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
+from tinygrad.helpers import LightWeightWeakSet, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
 from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
@@ -73,8 +73,9 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   # get_weakop makes all the LazyBuffers in the op have a weakref
   wop = (device, dtype, optype, ref(op))
 
-  if wop not in lazycache: lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
-  else: ret = lazycache[wop]
+  try: return lazycache[wop]
+  except KeyError: pass
+  lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
 
 class LazyBuffer:
@@ -87,7 +88,7 @@ class LazyBuffer:
     self.realized: Optional[RawBuffer] = None
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
-    self.children: WeakSet[LazyBuffer] = WeakSet()
+    self.children: WeakSet[LazyBuffer] = LightWeightWeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
     for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
@@ -95,7 +96,7 @@ class LazyBuffer:
     # log phantom ops to the graph
     if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
-  def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if not self.realized else self.realized} st:{self.st}>"
+  def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":")[1]} if ":" in self.device else {}
 
   def realize(self:LazyBuffer) -> LazyBuffer:

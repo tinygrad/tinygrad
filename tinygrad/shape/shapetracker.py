@@ -11,7 +11,7 @@ from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, M
 class MovementOps: 
   RESHAPE = 0; PERMUTE = 1; EXPAND = 2; PAD = 3; SHRINK = 4; STRIDE = 5 # noqa: E702
   def __init__(self, op: int) -> int: self.op = op
-  def __str__(self) -> str: return f"<MovementOps.{MOVEMENT_OPS[self.op]}: {self.op}>"
+  def __str__(self) -> str: return f"MovementOps.{MOVEMENT_OPS[self.op]}"
 
 MOVEMENT_OPS = {MovementOps.RESHAPE: "RESHAPE", MovementOps.PERMUTE: "PERMUTE", MovementOps.EXPAND: "EXPAND", 
                 MovementOps.PAD: "PAD", MovementOps.SHRINK: "SHRINK", MovementOps.STRIDE: "STRIDE"}

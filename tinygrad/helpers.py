@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, functools
+from weakref import ref
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
@@ -100,3 +101,19 @@ class GlobalCounters:
   cache: ClassVar[Optional[List[Tuple[Callable, Any]]]] = None
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
+
+# Stripped down more performant version of a WeakSet
+class LightWeightWeakSet:
+  def __init__(self):
+    self.data = set()
+    def _remove(item, selfref=ref(self)):
+      self = selfref()
+      try: self.data.discard(item)
+      except KeyError: pass
+    self._remove = _remove
+
+  def __len__(self): return len(self.data)
+
+  def add(self, item): self.data.add(ref(item, self._remove))
+
+  def discard(self, item): self.data.discard(ref(item))
