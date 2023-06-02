@@ -4,6 +4,10 @@ from tinygrad.nn import Conv2d,BatchNorm2d
 import numpy as np
 import math
 from itertools import chain
+from extra.utils import download_file, get_child
+from pathlib import Path
+import torch
+
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #the upsampling class has been taken from this pull request by dc-dc-dc. Now 2 models use upsampling. (retinet and this)
@@ -40,7 +44,7 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
   return p
 
-#this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc
+#this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
 class Upsample:
   def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
     assert mode == "nearest" # only mode supported for now
@@ -70,11 +74,11 @@ class SPPF:
       
 class Conv_Block:
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
-    self.conv = Conv2d(c1,c2, kernel_size, stride, padding= autopad(kernel_size, padding, dilation),bias=False, groups=groups, dilation=dilation)
+    self.conv = Conv2d(c1,c2, kernel_size, stride, padding= autopad(kernel_size, padding, dilation), bias=False, groups=groups, dilation=dilation)
     self.batch = BatchNorm2d(c2)
 
   def __call__(self, x):
-    return self.conv(x).silu()
+    return self.batch(self.conv(x)).silu()
    
 class Bottleneck:
   def __init__(self, c1, c2 , shortcut: bool, g=1, kernels: list = (3,3), channel_factor=0.5):
@@ -138,22 +142,26 @@ class DetectionHead():
     dbox = dist2bbox(self.dfl(box), Tensor(self.anchors).unsqueeze(0), xywh=True, dim=1) * Tensor(self.strides)
     z = dbox.cat(cls.sigmoid(), dim=1)
     return z
-
-  
+             
+                           
 class Darknet():
   def __init__(self, w, r, d): #width_multiple, ratio_multiple, depth_multiple
     self.b1 = [Conv_Block(c1=3, c2=64*w, kernel_size=3, stride=2, padding=1), Conv_Block(64*w, 128*w, kernel_size=3, stride=2, padding=1)]
     self.b2 = [C2f(c1=128*w, c2=128*w, n=3*d, shortcut=True), Conv_Block(128*w, 256*w, 3, 2, 1), C2f(256*w, 256*w, 6*d, True)]
     self.b3 = [Conv_Block(256*w, 512*w, kernel_size=3, stride=2, padding=1), C2f(512*w, 512*w, 6*d, True)]
     self.b4 = [Conv_Block(512*w, 512*w*r, kernel_size=3, stride=2, padding=1), C2f(512*w*r, 512*w*r, 3*d, True)]
-    self.b5 = SPPF(512*w*r, 512*w*r, 5)
+    self.b5 = [SPPF(512*w*r, 512*w*r, 5)]
+    
 
+  def return_modules(self):
+    return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
+  
   def forward(self, x):
     x1 = x.sequential(self.b1)
     x2 = x1.sequential(self.b2)
     x3 = x2.sequential(self.b3)
     x4 = x3.sequential(self.b4)
-    x5 = self.b5(x4)
+    x5 = self.b5[0](x4)
     return (x2, x3, x5)
   
 class Yolov8NECK():
@@ -175,26 +183,35 @@ class Yolov8NECK():
 
 class YOLOv8():
   # confirm filters. 
-  def __init__(self, w, r,  d, num_classes, filters=(256, 512, 512)): #width_multiple, ratio_multiple, depth_multiple
+  def __init__(self, w, r,  d, num_classes): #width_multiple, ratio_multiple, depth_multiple
     self.net = Darknet(w, r, d)
     self.fpn = Yolov8NECK(w, r, d)
-    self.head = DetectionHead(num_classes, filters)
+    self.head = DetectionHead(num_classes, filters=(256*w, 512*w, 512*w*r))
 
   def forward(self, x):
     x = self.net.forward(x)
     x = self.fpn.forward(*x)
     return self.head.forward(x)
 
+  def load_weights(self):
+    weights_path = Path(__file__).parent.parent / "weights" / "yolov8l.pt"
+    state_dict = torch.load(weights_path)
+    backbone_parameters = self.net.return_modules()
+    weights = state_dict['model'].state_dict().items()
+    backbone_parameters[0].conv.weight.assign(x)
+
 test_inferece = Tensor.rand(1 ,3 , 640 , 640)
 yolo_infer = YOLOv8(1, 1, 1, 80)  
 print(yolo_infer.forward(test_inferece))
-# post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
+yolo_infer.load_weights()
 
+
+# post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
 #NMS --> xywh2xyxy + box_iou
 #Scale_boxes --> clip_boxes
-#Saving --> plotting functions. 
+
+#Saving --> plotting function - write results. 
 #pre_process --> image process
-#yolo model --> results.
 
 def clip_boxes(boxes, shape):
   if isinstance(boxes, Tensor):  # TODO: maybe tensor.clip can be used here.
