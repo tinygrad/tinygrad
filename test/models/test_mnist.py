@@ -44,8 +44,8 @@ class TinyConvNet:
 
   def forward(self, x:Tensor):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
-    x = self.bn1(self.c1(x).relu().max_pool2d()
-    x = self.bn2(self.c2(x).relu().max_pool2d()
+    x = self.bn1(self.c1(x)).relu().max_pool2d()
+    x = self.bn2(self.c2(x)).relu().max_pool2d()
     x = x.reshape(shape=[x.shape[0], -1])
     return self.l1(x).log_softmax()
 
