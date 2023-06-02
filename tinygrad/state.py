@@ -6,6 +6,27 @@ from tinygrad.helpers import dtypes, prod
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
+def torch_load(fn:str):
+  import zipfile, pickle
+  myzip = zipfile.ZipFile(fn, 'r')
+  base_name = myzip.namelist()[0].split('/', 1)[0]
+  t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
+
+  def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
+    #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
+    with myzip.open(f'{base_name}/data/{storage[2]}') as myfile:
+      offset = myfile._orig_compress_start  # type: ignore
+    return t[offset:offset+prod(size)].cast(storage[1]).reshape(size)
+
+  intercept = {"HalfStorage": dtypes.float16, "_rebuild_tensor_v2": _rebuild_tensor_v2}
+  class TorchPickle(pickle.Unpickler):
+    def find_class(self, module, name):
+      if module.startswith("torch"): return intercept[name]
+      return super().find_class(module, name)
+    def persistent_load(self, pid): return pid
+
+  with myzip.open(f'{base_name}/data.pkl') as myfile: return TorchPickle(myfile).load()
+
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:1].cast(dtypes.int64).numpy()[0]
