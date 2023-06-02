@@ -182,6 +182,7 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 256, f, f)
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_gemm_unrolled(self):
     N = 512
     def f1(a, b): return a@b.T
