@@ -95,7 +95,7 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, steps=100)
     assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
 
-  @unittest.skipIf(getenv("CI") and Device.DEFAULT == "METAL", "METAL broken in some CI runners")
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "METAL broken in some CI runners")
   def test_conv_with_bn(self):
     np.random.seed(1337)
     model = TinyConvNet(has_batchnorm=True)
@@ -103,7 +103,7 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, steps=200)
     assert evaluate(model, X_test, Y_test) > 0.94
 
-  @unittest.skipIf(getenv("CI") and Device.DEFAULT == "METAL", "METAL broken in some CI runners")
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "METAL broken in some CI runners")
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
