@@ -8,6 +8,7 @@ This guide is also structured as a tutorial which at the end of it you will have
 We need some imports to get started:
 ```py
 import numpy as np
+import time
 ```
 
 ## Tensors
@@ -199,6 +200,7 @@ We will be using the same batch size of 64 and will be evaluating for 1000 of th
 # set training flag to false
 Tensor.training = False
 
+st = time.perf_counter()
 avg_acc = 0
 for step in range(1000):
   # random sample a batch
@@ -214,6 +216,7 @@ for step in range(1000):
   pred = np.argmax(out.numpy(), axis=-1)
   avg_acc += (pred == labels).mean()
 print(f"Test Accuracy: {avg_acc / 1000}")
+print(f"Time: {time.perf_counter() - st}")
 ```
 
 ## And that's it!
@@ -222,3 +225,39 @@ Highly recommend you check out the [examples/](/examples) folder for more exampl
 Reading the source code of tinygrad is also a great way to learn how it works.
 Specifically the tests in [tests/](/tests) are a great place to see how some stuff works.
 There are also common models implemented in [models/](/models) that you can use as a reference.
+
+## Extras
+
+### JIT
+
+Additionally, it is possible to speed up the computation of certain neural networks by using the JIT.
+Currently, this does not support models with varying input sizes and non tinygrad operations.
+
+To use the JIT we just need to add a function decorator to the forward pass of our neural network and ensure that the input and output are realized tensors.
+Or in this case we will create a wrapper function and decorate the wrapper function to speed up the evaluation of our neural network.
+```py
+from tinygrad.jit import TinyJit
+
+@TinyJit
+def jit(x):
+  return net(x).realize()
+
+st = time.perf_counter()
+avg_acc = 0
+for step in range(1000):
+  # random sample a batch
+  samp = np.random.randint(0, X_test.shape[0], size=(64))
+  batch = Tensor(X_test[samp], requires_grad=False)
+  # get the corresponding labels
+  labels = Y_test[samp]
+
+  # forward pass with jit
+  out = jit(batch)
+
+  # calculate accuracy
+  pred = np.argmax(out.numpy(), axis=-1)
+  avg_acc += (pred == labels).mean()
+print(f"Test Accuracy: {avg_acc / 1000}")
+print(f"Time: {time.perf_counter() - st}")
+```
+You will find that the evaluation time is much faster than before and that your accelerator utilization is much higher.
