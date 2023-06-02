@@ -9,14 +9,14 @@ from extra.utils import get_child, download_file, fake_torch_load
 from models.resnet import ResNet
 from torch.nn import functional as F
 import torch
-
+from models.retinanet import nms as _box_nms
 from maskrcnn_benchmark import _C
 
-_box_nms = _C.nms
 
 class LastLevelMaxPool:
   def __call__(self, x):
     return [Tensor.max_pool2d(x, 1, 2)]
+
 
 # transpose
 FLIP_LEFT_RIGHT = 0
@@ -514,10 +514,9 @@ def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
   boxlist = boxlist.convert("xyxy")
   boxes = boxlist.bbox
   score = boxlist.get_field(score_field)
-  # TODO: remove torch
-  keep = _box_nms(torch.tensor(boxes.numpy()), torch.tensor(score.numpy()), nms_thresh).numpy().tolist()
+  keep = _box_nms(boxes.numpy(), score.numpy(), nms_thresh)
   if max_proposals > 0:
-    keep = keep[: max_proposals]
+    keep = keep[:max_proposals]
   boxlist = boxlist[keep]
   return boxlist.convert(mode)
 
@@ -1048,15 +1047,6 @@ def to_image_list(tensors, size_divisible=0):
     return ImageList(tensors, image_sizes)
   elif isinstance(tensors, (tuple, list)):
     max_size = tuple(max(s) for s in zip(*[img.shape for img in tensors]))
-
-    # TODO Ideally, just remove this and let me model handle arbitrary
-    if size_divisible > 0:
-      stride = size_divisible
-      max_size = list(max_size)
-      max_size[1] = int(math.ceil(max_size[1] / stride) * stride)
-      max_size[2] = int(math.ceil(max_size[2] / stride) * stride)
-      max_size = tuple(max_size)
-
     batch_shape = (len(tensors),) + max_size
     batched_imgs = tensors[0].new(*batch_shape).zero_()
     for img, pad_img in zip(tensors, batched_imgs):
