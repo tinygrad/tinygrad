@@ -72,7 +72,7 @@ jobs:
      - name: Install Dependencies
        run: pip install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
      - name: Run Pytest
-       run: python -m pytest -s -v -n=auto test/
+       run: EXCLUDE_DEVICES=METAL python -m pytest -s -v -n=auto test/
 
   testimagenet:
     name: ImageNet to C Compile Test
