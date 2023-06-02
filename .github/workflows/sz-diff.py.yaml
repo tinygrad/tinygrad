@@ -1,0 +1,69 @@
+name: sz-diff
+on:
+  pull_request_target:
+    types:
+    - opened
+    - synchronize
+    - reopened
+    - ready_for_review
+    branches:
+    - master
+    paths:
+    - 'tinygrad/**'
+
+# Cancel the workflow in progress in newer build is about to start.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  sz-diff:
+    if: github.event.pull_request.draft == false
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          path: pr
+      - name: Checkout base code
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Count Lines Of Code
+        run: |
+          pip install tabulate
+
+          BASE="$GITHUB_WORKSPACE/base"
+          PR="$GITHUB_WORKSPACE/pr"
+
+          cp "$BASE/sz.py" .
+          cp "$BASE/.github/workflows/sz-diff.py" .
+
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "loc_content<<$EOF" >> "$GITHUB_ENV"
+          ./sz-diff.py "$BASE" "$PR" >> "$GITHUB_ENV"
+          echo "$EOF" >> "$GITHUB_ENV"
+
+      - name: Comment Code Lines
+        continue-on-error: false
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          recreate: true
+          header: LOC
+          message: |
+            ### Lines Of Code
+            ```
+            ${{ env.loc_content }}
+            ```
+
