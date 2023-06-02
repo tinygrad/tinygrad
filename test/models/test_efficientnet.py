@@ -64,14 +64,17 @@ class TestEfficientNet(unittest.TestCase):
   def tearDownClass(cls):
     del cls.model
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_chicken(self):
     label = _infer(self.model, chicken_img)
     self.assertEqual(label, "hen")
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_chicken_bigbatch(self):
     label = _infer(self.model, chicken_img, 4)
     self.assertEqual(label, "hen")
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_car(self):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "sports car, sport car")
@@ -86,10 +89,12 @@ class TestViT(unittest.TestCase):
   def tearDownClass(cls):
     del cls.model
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_chicken(self):
     label = _infer(self.model, chicken_img)
     self.assertEqual(label, "cock")
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_car(self):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "racer, race car, racing car")
@@ -104,14 +109,15 @@ class TestResNet(unittest.TestCase):
   def tearDownClass(cls):
     del cls.model
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_chicken(self):
     label = _infer(self.model, chicken_img)
     self.assertEqual(label, "hen")
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_car(self):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "sports car, sport car")
 
 if __name__ == '__main__':
-  if not getenv("CI", "") or Device.DEFAULT != "METAL":
-    unittest.main()
+  unittest.main()
