@@ -209,13 +209,11 @@ class Tensor:
 
   # ***** movement hlops *****
   
-  #tuple of ints/tuples -> tuple of tuples for padding
-  def clean_padding(self, padding):
-    flatten = lambda t: tuple(item for sublist in t for item in flatten(sublist)) if isinstance(t, (tuple, list)) else (t,)
-
+  def flatten_pad(self, t): return tuple(item for sublist in t for item in self.flatten_pad(sublist)) if isinstance(t, (tuple, list)) else (t,)
+  def clean_padding(self, padding): #tuple of ints/tuples -> tuple of tuples for padding
     if isinstance(padding, int): padding_ = (padding, )*4
     elif all(isinstance(elem, int) for elem in padding): padding_ = padding
-    elif isinstance(padding, (tuple, list)): padding_ = flatten(padding)
+    elif isinstance(padding, (tuple, list)): padding_ = self.flatten_pad(padding)
     
     if len(padding_)<4: padding_ = (padding_[1], padding_[1], padding_[0], padding_[0])
     else: assert len(padding_)%2==0 #padding goes by pairs (dim, value)
