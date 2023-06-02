@@ -151,6 +151,8 @@ class Tensor:
   # TODO: requires cumsum to remove numpy
   @staticmethod
   def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
+  @staticmethod
+  def linspace(start, stop, num=50, dtype=None, axis=0): return Tensor(np.linspace(start, stop, num=num, dtype=np.float32, axis=axis), dtype=dtype)
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     cond = (self != 0.0)
