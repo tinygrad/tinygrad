@@ -21,7 +21,7 @@ def train_unet3d(target=0.908):
     opt = optim.SGD(optim.get_parameters(mdl), lr=0.8)
     for image, label in (t := tqdm(iterate(val=False), total=len(get_train_files()))):
       opt.zero_grad()
-      out = mdl(Tensor(image))
+      out = mdl(Tensor(image).half())
       loss = dice_ce_loss(out, label)
       loss.backward()
       opt.step()
