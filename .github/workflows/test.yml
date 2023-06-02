@@ -65,10 +65,10 @@ jobs:
      steps:
      - name: Checkout Code
        uses: actions/checkout@v3
-     - name: Set up Python 3.8
+     - name: Set up Python 3.9
        uses: actions/setup-python@v4
        with:
-         python-version: 3.8
+         python-version: 3.9
      - name: Install Dependencies
        run: pip install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
      - name: Run Pytest
