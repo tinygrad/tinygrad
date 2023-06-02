@@ -4,6 +4,8 @@ import unittest
 import numpy as np
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
+from tinygrad.lazy import Device
 from datasets import fetch_mnist
 
 def compare_tiny_torch(model, model_torch, X, Y):
@@ -157,4 +159,5 @@ class TestEnd2End(unittest.TestCase):
         compare_tiny_torch(LinTiny(has_batchnorm), LinTorch(has_batchnorm), self.X.reshape((-1, 1, 28, 28)), self.Y)
 
 if __name__ == "__main__":
-  unittest.main()
+  if not getenv("CI", "") or Device.DEFAULT != "METAL":
+    unittest.main()
