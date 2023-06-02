@@ -4,8 +4,8 @@ from typing import TypeVar, Type, Any
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
 
 _T = TypeVar("_T")
-class RawBuffer:
-  def __init__(self, size:int, dtype:DType, buf:Any=None):  # pylint: disable=abstract-method
+class RawBuffer:  # pylint: disable=abstract-method
+  def __init__(self, size:int, dtype:DType, buf:Any=None):
     self.size: int = size
     self.dtype: DType = dtype
     self._buf = buf
