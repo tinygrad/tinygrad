@@ -138,17 +138,10 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = ret.expand([val for pair in zip(inp[0].shape, [int(x) for x in scales]) for val in pair])
         ret = ret.reshape([x*y for x,y in zip(inp[0].shape, [int(x) for x in scales])])
       elif n.op_type == "Gather":
-        # TODO: is this correct? seems to work for simple gather ops
         if 'axis' not in opt: opt['axis'] = 0
         axis = opt['axis']
         data, indices = [safe_numpy(i) for i in inp]
         ret = Tensor(np.take(data, indices, axis))
-        #shape = list(inp[0].shape)
-        #print(f'SHAPE: {shape}')
-        #indices = [shape[axis]+int(x) if x<0 else int(x) for x in safe_numpy(inp[1])]
-        #args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
-        #ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
-        #ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type == "GatherElements":
         axis = opt['axis']
         data, indices = inp
