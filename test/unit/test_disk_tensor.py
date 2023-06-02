@@ -7,13 +7,22 @@ from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from extra.helpers import Timing
 
+test_fn = pathlib.Path(__file__).parent.parent.parent / "weights/LLaMA/7B/consolidated.00.pth"
+test_size = 1024*1024*1024*2
+
+# sudo su -c 'sync; echo 1 > /proc/sys/vm/drop_caches' && python3 test/unit/test_disk_tensor.py TestRawDiskBuffer.test_readinto_read_speed
+@unittest.skipIf(not test_fn.exists(), "download LLaMA weights for read in speed tests")
 class TestRawDiskBuffer(unittest.TestCase):
+  def test_readinto_read_speed(self):
+    tst = np.empty(test_size, np.uint8)
+    with open(test_fn, "rb") as f:
+      with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
+        f.readinto(tst)
+
   def test_mmap_read_speed(self):
-    fn = pathlib.Path(__file__).parent.parent.parent / "weights/LLaMA/7B/consolidated.00.pth"
-    if not fn.exists(): return
-    db = RawDiskBuffer(1024*1024*1024*2, dtype=dtypes.uint8, device=fn)
-    tst = np.empty(db.size, np.uint8)
-    with Timing("copy in ", lambda et_ns: f" {db.size/et_ns:.2f} GB/s"):
+    db = RawDiskBuffer(test_size, dtype=dtypes.uint8, device=test_fn)
+    tst = np.empty(test_size, np.uint8)
+    with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
       np.copyto(tst, db.toCPU())
 
 class TestSafetensors(unittest.TestCase):

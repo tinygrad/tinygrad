@@ -13,7 +13,8 @@ class RawDiskBuffer(RawBufferMapped):
     if device is not None:
       with open(device, "a+b") as f:
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
-        buf = memoryview(mmap.mmap(f.fileno(), size * dtype.itemsize))
+        buf = mmap.mmap(f.fileno(), size * dtype.itemsize)
+        buf.madvise(mmap.MADV_SEQUENTIAL)
     # NOTE: we don't call super since disk tensors don't use RAM
     self.size, self.dtype, self._buf = size, dtype, buf
   def cast(self, new_dtype:DType): return RawDiskBuffer(self.size, new_dtype, buf=self._buf, shape=self.shape, offset=self.offset)
@@ -23,7 +24,7 @@ class RawDiskBuffer(RawBufferMapped):
     offset = arg[0][0]*prod(self.shape[1:])*self.dtype.itemsize
     size = (arg[0][1]-arg[0][0]) * prod(self.shape[1:])
     return RawDiskBuffer(size, self.dtype, buf=self._buf, offset=self.offset+offset, shape=(arg[0][1]-arg[0][0],)+self.shape[1:])
-  def _buffer(self): return self._buf[self.offset:self.offset+self.size*self.dtype.itemsize]
+  def _buffer(self): return memoryview(self._buf)[self.offset:self.offset+self.size*self.dtype.itemsize]
 
 disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.RESHAPE: RawDiskBuffer.reshape, MovementOps.SHRINK: RawDiskBuffer.shrink }
 
