@@ -109,11 +109,11 @@ class BoxList:
 
   def _split_into_xyxy(self):
     if self.mode == "xyxy":
-      xmin, ymin, xmax, ymax = self.bbox.split(4, dim=-1)
+      xmin, ymin, xmax, ymax = self.bbox.chunk(4, dim=-1)
       return xmin, ymin, xmax, ymax
     elif self.mode == "xywh":
       TO_REMOVE = 1
-      xmin, ymin, w, h = self.bbox.split(4, dim=-1)
+      xmin, ymin, w, h = self.bbox.chunk(4, dim=-1)
       return (
         xmin,
         ymin,
@@ -258,8 +258,7 @@ class FPN:
     ):
       if not inner_block:
         continue
-      # TODO: remove torch
-      inner_top_down = Tensor(F.interpolate(torch.tensor(last_inner.numpy()), scale_factor=2, mode="nearest").numpy())
+      inner_top_down = Tensor.interpolate(last_inner, scale_factor=2, mode="nearest")
       inner_lateral = inner_block(feature)
       last_inner = inner_lateral + inner_top_down
       layer_result = layer_block(last_inner)
@@ -523,7 +522,7 @@ def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
 
 def remove_small_boxes(boxlist, min_size):
   xywh_boxes = boxlist.convert("xywh").bbox
-  _, _, ws, hs = xywh_boxes.split(4, dim=1)
+  _, _, ws, hs = xywh_boxes.chunk(4, dim=1)
   keep = ((
           (ws.numpy() >= min_size) * (hs.numpy() >= min_size)
   ) > 0).squeeze(1)

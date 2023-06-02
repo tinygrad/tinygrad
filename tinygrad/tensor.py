@@ -303,35 +303,17 @@ class Tensor:
       slice_params[i][dim] = (k, min(self.shape[dim], k+self.shape[dim]//num))
     return [self.slice(p) for p in slice_params]
 
-  def split(self, split_size_or_sections, dim=0):
-    ret_tensors = []
-    if dim < 0:
-      dim = len(self.shape)+dim
-    if isinstance(split_size_or_sections, int):
-      split_size = self.shape[dim]//split_size_or_sections
-      for n in range(0, self.shape[dim], split_size):
-        slice_list = [(0, size) if d != dim else (n, min(n+split_size, size)) for d, size in enumerate(self.shape)]
-        ret_tensors.append(self.slice(slice_list))
-      return ret_tensors
-    else:
-      raise NotImplementedError("Tensor.split does not support section wise split, split_size_or_sections must be int")
+  @staticmethod
+  def interpolate(x, scale_factor, mode='nearest'):
+    assert mode == 'nearest', 'Only nearest interpolate available'
+    bs, c, py, px = x.shape
+    return x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, scale_factor, px, scale_factor).reshape(bs, c, py * scale_factor, px * scale_factor)
 
   @staticmethod
-  def cartesian_prod(*tensors):
-    # TODO: This is Slow!!
-    arrays = [t.numpy() for t in tensors]; la = len(arrays); dtype = np.result_type(*arrays)
-    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
-    for i, a in enumerate(np.ix_(*arrays)): arr[...,i] = a
-    return Tensor(arr.reshape(-1, la), dtype=dtypes.from_np(dtype))
-
-  @staticmethod
-  def meshgrid(*tensors):
-    cartesian = Tensor.cartesian_prod(*tensors)
-    return cartesian.split(len(tensors), dim=-1)
+  def meshgrid(*tensors): return [Tensor(chunked).reshape(-1).unsqueeze(-1) for chunked in np.meshgrid(*[t.numpy() for t in tensors], copy=False, indexing='ij')]
 
   @staticmethod
   def sort(input, axis=-1, reverse=True):
-    # TODO: This is Slow!!
     np_input = input.numpy()
     sorted_np_idx = np.argsort(np_input, axis=axis)
     if reverse:
