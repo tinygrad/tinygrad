@@ -138,6 +138,7 @@ def cross_entropy(out, Y):
 ```
 As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support.
 Namely, operations that are load/store like indexing a tensor with another tensor or assigning a value to a tensor at a certain index.
+Load/store ops are not supported in tinygrad because they add complexity when trying to port to different backends and 90% of the models out there don't use/need them.
 
 For our optimizer we will be using the traditional stochastic gradient descent optimizer with a learning rate of 3e-4.
 ```py
