@@ -8,6 +8,7 @@ from tinygrad.runtime.ops_disk import RawDiskBuffer
 from extra.helpers import Timing
 
 test_fn = pathlib.Path(__file__).parent.parent.parent / "weights/LLaMA/7B/consolidated.00.pth"
+#test_size = test_fn.stat().st_size
 test_size = 1024*1024*1024*2
 
 # sudo su -c 'sync; echo 1 > /proc/sys/vm/drop_caches' && python3 test/unit/test_disk_tensor.py TestRawDiskBuffer.test_readinto_read_speed
