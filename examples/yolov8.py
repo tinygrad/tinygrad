@@ -229,14 +229,15 @@ def clip_boxes(boxes, shape):
   return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
-  gain, pad = ratio_pad if ratio_pad else (min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]), ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2))
+  gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
+  pad = ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2)
   boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
   boxes_np[..., [0, 2]] -= pad[0]
   boxes_np[..., [1, 3]] -= pad[1]
   boxes_np[..., :4] /= gain
   boxes_np = clip_boxes(boxes_np, img0_shape)
-  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
-
+  return Tensor(boxes_np) if isinstance(boxes, Tensor) else 
+  
 def xywh2xyxy(x):
   x_np = x.numpy() if isinstance(x, Tensor) else x
   xy = x_np[..., :2]  # center x, y
