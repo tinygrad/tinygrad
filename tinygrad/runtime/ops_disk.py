@@ -6,7 +6,7 @@ from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps
 
 class RawDiskBuffer(RawBufferMapped):
-  def __init__(self, size, dtype:DType, device:Optional[str]=None, buf=None, shape=None, offset=0):
+  def __init__(self, size, dtype:DType, device:Optional[str]=None, buf=None, shape=None, offset=0):  # pylint: disable=super-init-not-called
     self.shape = (size, ) if shape is None else shape
     self.offset = offset  # this is an offset in bytes
     assert device is not None or buf is not None, "disk tensor needs a path or a buf"
@@ -14,7 +14,8 @@ class RawDiskBuffer(RawBufferMapped):
       with open(device, "a+b") as f:
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
         buf = memoryview(mmap.mmap(f.fileno(), size * dtype.itemsize))
-    super().__init__(size, dtype, buf)
+    # NOTE: we don't call super since disk tensors don't use RAM
+    self.size, self.dtype, self._buf = size, dtype, buf
   def cast(self, new_dtype:DType): return RawDiskBuffer(self.size, new_dtype, buf=self._buf, shape=self.shape, offset=self.offset)
   def reshape(self, arg): return RawDiskBuffer(self.size, self.dtype, buf=self._buf, shape=arg, offset=self.offset)
   def shrink(self, arg):

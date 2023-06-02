@@ -268,10 +268,11 @@ if __name__ == "__main__":
   from tinygrad.state import torch_load, get_state_dict
   state_dict = torch_load(WEIGHTS_7B_FILENAME)
   model = Transformer(**args_7B)
-  for k,v in tqdm(get_state_dict(model).items()):
-    if k not in state_dict: continue
-    v.assign(state_dict[k].to(v.device)).realize()
-
+  with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+    for k,v in (t := tqdm(get_state_dict(model).items())):
+      t.set_description(f"loading {k} ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+      if k not in state_dict: continue
+      v.assign(state_dict[k].to('cpu').to(v.device)).realize()
 
   # *** prompt engineers work here ****
 
