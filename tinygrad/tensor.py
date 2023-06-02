@@ -169,9 +169,8 @@ class Tensor:
   @staticmethod
   def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
-  # TODO: replace with a transformation from uniform -> gaussian
   @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
+  def randn(*shape, **kwargs) -> Tensor: return Tensor.rand(*shape, **kwargs).mul(2*math.pi).sin().mul(Tensor.rand(*shape, **kwargs).log().mul(-2).sqrt())
 
   # ***** rng hlops *****
 
