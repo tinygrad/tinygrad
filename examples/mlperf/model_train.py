@@ -18,7 +18,7 @@ def train_resnet():
   BS = 256
   lr = BS*1e-3
   epochs = 50
-  optimizer = optim.SGD(parameters, lr=lr, momentum=.875)
+  optimizer = optim.SGD(parameters, lr=lr, momentum=.875, weight_decay=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, epochs)
   print(f"training with batch size {BS} for {epochs} epochs")
   def warmup_factor(step, epochs):
