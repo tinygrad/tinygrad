@@ -111,7 +111,7 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   return data * mask * (1/(1.0 - ratio)), mask
 
 def Shape(data, end=None, start=0): return list(data.shape)[start:end]
-def Size(data): return prod(data.shape)
+def Size(data): return data.numel()
 
 # TODO: this doesn't match Tensor.flatten behavior
 def Flatten(input, axis=1):
