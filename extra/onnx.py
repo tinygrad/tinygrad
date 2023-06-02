@@ -108,9 +108,6 @@ def get_run_onnx(onnx_model: ModelProto):
       inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else (input_tensors[x] if x != str() else None)) for x in n.input]
       opt = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-      if debug:
-        print(f"n.input: {n.input}")
-        print(f"n.output: {n.output}")
 
       # free ones
       if n.op_type == "Relu": ret = inp[0].relu()
