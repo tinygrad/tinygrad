@@ -75,10 +75,10 @@ class SPPF:
 class Conv_Block:
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
     self.conv = Conv2d(c1,c2, kernel_size, stride, padding= autopad(kernel_size, padding, dilation), bias=False, groups=groups, dilation=dilation)
-    self.batch = BatchNorm2d(c2)
+    self.bn = BatchNorm2d(c2)
 
   def __call__(self, x):
-    return self.batch(self.conv(x)).silu()
+    return self.bn(self.conv(x)).silu()
    
 class Bottleneck:
   def __init__(self, c1, c2 , shortcut: bool, g=1, kernels: list = (3,3), channel_factor=0.5):
@@ -123,17 +123,17 @@ class DetectionHead():
     self.nc = nc  # number of classes
     self.nl = len(filters)  # number of detection layers
     self.no = nc + self.ch * 4  # number of outputs per anchor
-    self.stride = Tensor([8, 16, 32])  # strides computed during build #TODO - figure this out
+    self.stride = Tensor([8, 16, 32])
     c1 = max(filters[0], self.nc)
     c2 = max((filters[0] // 4, self.ch * 4))
 
     self.dfl = DFL(self.ch) 
-    self.cls = [[Conv_Block(x, c1, 3), Conv_Block(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
-    self.box = [[Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
-    
+    self.cv3 = [[Conv_Block(x, c1, 3), Conv_Block(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
+    self.cv2 = [[Conv_Block(x, c2, 3), Conv_Block(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
+  
   def forward(self, x):
     for i in range(self.nl):
-      x[i] = x[i].sequential(self.box[i]).cat(x[i].sequential(self.cls[i]), dim=1)
+      x[i] = x[i].sequential(self.cv2[i]).cat(x[i].sequential(self.cv3[i]), dim=1)
     self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
     y = [i.reshape(x[0].shape[0], self.no, -1) for i in x]
     x_cat = y[0].cat(y[1], y[2], dim=2)
@@ -150,9 +150,8 @@ class Darknet():
     self.b2 = [C2f(c1=128*w, c2=128*w, n=3*d, shortcut=True), Conv_Block(128*w, 256*w, 3, 2, 1), C2f(256*w, 256*w, 6*d, True)]
     self.b3 = [Conv_Block(256*w, 512*w, kernel_size=3, stride=2, padding=1), C2f(512*w, 512*w, 6*d, True)]
     self.b4 = [Conv_Block(512*w, 512*w*r, kernel_size=3, stride=2, padding=1), C2f(512*w*r, 512*w*r, 3*d, True)]
-    self.b5 = [SPPF(512*w*r, 512*w*r, 5)]
+    self.b5 = [SPPF(512*w*r, 512*w*r, 1)]
     
-
   def return_modules(self):
     return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
   
@@ -173,6 +172,9 @@ class Yolov8NECK():
     self.n4 = C2f(c1=768*w, c2=512*w, n=3*d, shortcut=False)
     self.n5 = Conv_Block(c1=512* w, c2=512 * w, kernel_size=3, stride=2, padding=1)
     self.n6 = C2f(c1=512*w*(1+r), c2=512*w*r, n=3*d, shortcut=False)
+  
+  def return_modules(self):
+    return [self.n1, self.n2, self.n3, self.n4, self.n5, self.n6]
   
   def forward(self, p3, p4, p5):
     x =  self.n1(p4.cat(self.up(p5), dim=1))
@@ -196,10 +198,20 @@ class YOLOv8():
   def load_weights(self):
     weights_path = Path(__file__).parent.parent / "weights" / "yolov8l.pt"
     state_dict = torch.load(weights_path)
-    backbone_parameters = self.net.return_modules()
     weights = state_dict['model'].state_dict().items()
-    backbone_parameters[0].conv.weight.assign(x)
-
+    backbone_modules = [*range(10)]
+    yolov8neck_modules = [12, 15, 16, 18, 19, 21]
+    yolov8_head_weights = [(22, self.head)]
+    all_trainable_weights = [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
+    for k, v in weights:
+      k = k.split('.')
+      for i in all_trainable_weights:
+        if int(k[1]) in i and type(i[1]).__name__ in ['C2f', 'SPPF', 'Conv_Block', 'DetectionHead']:
+          child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
+          get_child(i[1], child_key).assign(v.numpy())
+    print('successfully loaded all weights')
+    
+       
 test_inferece = Tensor.rand(1 ,3 , 640 , 640)
 yolo_infer = YOLOv8(1, 1, 1, 80)  
 print(yolo_infer.forward(test_inferece))
