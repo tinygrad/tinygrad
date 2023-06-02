@@ -34,7 +34,7 @@ class Tensor:
   default_type: ClassVar[DType] = dtypes.float32
 
   def __init__(self, data:Union[int, float, list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
-    device = (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")  # canonicalize device
+    device = Device.canonicalize(device)
     if isinstance(data, (int, float, list)):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif isinstance(data, LazyBuffer) and data.device != device:
@@ -109,13 +109,11 @@ class Tensor:
   def to_(self, device:str):
     assert self.lazydata.realized is None
     self.lazydata.device = device
-    if self.grad:
-      self.grad.lazydata.device = device
+    if self.grad: self.grad.to_(device)
 
   def to(self, device:str):
     ret = Tensor(self.lazydata, device)
-    if self.grad:
-      ret.grad = self.grad.to(device)
+    if self.grad: ret.grad = self.grad.to(device)
     return ret
 
   # ***** creation helper functions *****
@@ -142,7 +140,7 @@ class Tensor:
   @staticmethod
   def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
     # NOTE: we do the reshape to fix interpreted buffers
-    return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, device), dtype=dtype, device=device, **kwargs).reshape(*shape)
+    return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device)), dtype=dtype, device=device, **kwargs).reshape(*shape)
 
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
@@ -185,7 +183,7 @@ class Tensor:
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
-    bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(shape[1] * prod(shape[2:]))
+    bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(shape[1:]))
     return Tensor.uniform(*shape, low=-bound, high=bound)
 
   # ***** toposort and backward pass *****
@@ -251,7 +249,7 @@ class Tensor:
   # - Strides > 1 and < 0 are now allowed!:
   #    - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
   #    - Idea of stride < 0 support:
-  #        - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below. 
+  #        - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below.
   #    - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
   #        - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
   #        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
@@ -368,7 +366,7 @@ class Tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
     return out * (prod(out.shape)/prod(self.shape))
   def std(self, axis=None, keepdim=False, correction=1):
-    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)                           
+    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
     return (square_sum / (prod(self.shape)/prod(square_sum.shape)-correction)).sqrt()
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -584,6 +582,7 @@ class Tensor:
   def ndim(self) -> int: return len(self.shape)
   def numel(self) -> int: return math.prod(self.shape)
   def element_size(self) -> int: return self.dtype.itemsize
+  def nbytes(self) -> int: return self.numel() * self.element_size()
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices

@@ -40,6 +40,7 @@ setup(name='tinygrad',
             "onnx2torch",
             "opencv-python",
             "tabulate",
+            "safetensors",
         ],
       },
       include_package_data=True)
