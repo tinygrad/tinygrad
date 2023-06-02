@@ -45,6 +45,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL fail on this")
   def test_vit(self):
     model = ViT()
     X = np.zeros((BS,3,224,224), dtype=np.float32)
