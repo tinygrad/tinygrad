@@ -4,6 +4,8 @@ import unittest
 import numpy as np
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
+from tinygrad.lazy import Device
 from datasets import fetch_mnist
 
 def compare_tiny_torch(model, model_torch, X, Y):
