@@ -85,14 +85,18 @@ def train_cifar():
   model = SpeedyResNet()
 
   # init weights with torch
+  # TODO: it doesn't learn with the tinygrad weights, likely since kaiming init
   if getenv("TORCHWEIGHTS"):
     from examples.hlb_cifar10_torch import SpeedyResNet as SpeedyResNetTorch
     torch_model = SpeedyResNetTorch()
     model_state_dict = optim.get_state_dict(model)
     torch_state_dict = torch_model.state_dict()
     for k,v in torch_state_dict.items():
-      print(f"initting {k} from torch")
+      old_mean_std = model_state_dict[k].mean().numpy(), model_state_dict[k].std().numpy()
       model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
+      new_mean_std = model_state_dict[k].mean().numpy(), model_state_dict[k].std().numpy()
+      print(f"initted {k:40s} {str(model_state_dict[k].shape):20s} from torch mean:{old_mean_std[0]:8.5f} -> {new_mean_std[0]:8.5f} std:{old_mean_std[1]:8.5f} -> {new_mean_std[1]:8.5f}")
+    exit(0)
 
   if getenv("ADAM"):
     optimizer = optim.Adam(optim.get_parameters(model), lr=Tensor([0.001]).realize())
