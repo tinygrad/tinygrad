@@ -206,7 +206,7 @@ class YOLOv8():
     for k, v in weights:
       k = k.split('.')
       for i in all_trainable_weights:
-        if int(k[1]) in i and type(i[1]).__name__ in ['C2f', 'SPPF', 'Conv_Block', 'DetectionHead']:
+        if int(k[1]) in i:
           child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
           get_child(i[1], child_key).assign(v.numpy())
     print('successfully loaded all weights')
@@ -219,54 +219,44 @@ yolo_infer.load_weights()
 
 
 # post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
-#NMS --> xywh2xyxy + box_iou
-#Scale_boxes --> clip_boxes
-
 #Saving --> plotting function - write results. 
 #pre_process --> image process
 
 def clip_boxes(boxes, shape):
-  if isinstance(boxes, Tensor):  # TODO: maybe tensor.clip can be used here.
-   boxes[..., 0] = boxes[..., 0].maximum(0).minimum(shape[1])  # x1
-   boxes[..., 1] = boxes[..., 1].maximum(0).minimum(shape[0])  # y1
-   boxes[..., 2] = boxes[..., 2].maximum(0).minimum(shape[1])  # x2
-   boxes[..., 3] = boxes[..., 3].maximum(0).minimum(shape[0])  # y2
-  else:  # np.array 
-    boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, shape[1])  # x1, x2
-    boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, shape[0])  # y1, y2
+  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
+  boxes_np[..., [0, 2]] = np.clip(boxes_np[..., [0, 2]], 0, shape[1])  # x1, x2
+  boxes_np[..., [1, 3]] = np.clip(boxes_np[..., [1, 3]], 0, shape[0])  # y1, y2
+  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
-  if ratio_pad is None:  # calculate from img0_shape
-    gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
-    pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
-  else:
-    gain = ratio_pad[0][0]
-    pad = ratio_pad[1]
-  boxes[..., [0, 2]] -= pad[0]  # x padding
-  boxes[..., [1, 3]] -= pad[1]  # y padding
-  boxes[..., :4] /= gain
-  clip_boxes(boxes, img0_shape)
-  return boxes
+  gain, pad = ratio_pad if ratio_pad else (min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]), ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2))
+  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
+  boxes_np[..., [0, 2]] -= pad[0]
+  boxes_np[..., [1, 3]] -= pad[1]
+  boxes_np[..., :4] /= gain
+  boxes_np = clip_boxes(boxes_np, img0_shape)
+  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
 
-# # TODO: remove clone 
-# def xywh2xyxy(x):
-#   y = x.clone() if isinstance(x, Tensor) else np.copy(x)
-#   y[..., 0] = x[..., 0] - x[..., 2] / 2  # top left x
-#   y[..., 1] = x[..., 1] - x[..., 3] / 2  # top left y
-#   y[..., 2] = x[..., 0] + x[..., 2] / 2  # bottom right x
-#   y[..., 3] = x[..., 1] + x[..., 3] / 2  # bottom right y
-#   return y
+def xywh2xyxy(x):
+  x_np = x.numpy() if isinstance(x, Tensor) else x
+  xy = x_np[..., :2]  # center x, y
+  wh = x_np[..., 2:4]  # width, height
+  xy1 = xy - wh / 2  # top left x, y
+  xy2 = xy + wh / 2  # bottom right x, y
+  result = np.concatenate((xy1, xy2), axis=-1)
+  return Tensor(result) if isinstance(x, Tensor) else result
 
-# # TODO: fix prod and see about clamp
+# TODO: mismatch 5% with pytorch
 # def box_iou(box1, box2):
-#   (a1, a2), (b1, b2) = box1[:, None].chunk(2, 2), box2.chunk(2, 1)
-#   intersection = (a2.minimum(b2) - a1.maximum(b1)).maximum(0).prod(2)
-#   # IoU = intersection / (area1 + area2 - intersection)
-#   box1 = box1.T
-#   box2 = box2.T
-#   area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-#   area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-#   return intersection / (area1[:, None] + area2 - intersection)
+#   box1_np = box1.numpy() if isinstance(box1, Tensor) else box1
+#   box2_np = box2.numpy() if isinstance(box2, Tensor) else box2
+#   a1, a2 = np.split(box1_np[:, None], 2, axis=2)
+#   b1, b2 = np.split(box2_np, 2, axis=1)
+#   intersection = (np.minimum(a2, b2) - np.maximum(a1, b1)).clip(0).prod(2)
+#   area1 = (box1_np[:, 2] - box1_np[:, 0]) * (box1_np[:, 3] - box1_np[:, 1])
+#   area2 = (box2_np[:, 2] - box2_np[:, 0]) * (box2_np[:, 3] - box2_np[:, 1])
+#   result = intersection / (area1[:, None] + area2 - intersection)
+#   return Tensor(result) if isinstance(box1, Tensor) else result
     
 
 
