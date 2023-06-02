@@ -208,6 +208,7 @@ if __name__ == "__main__":
   chatbot = args.prompt == None
 
   # load model (you have to find the weights yourself)
+  """
   from extra.utils import fake_torch_load_zipped, get_child
 
   if args.large:
@@ -262,6 +263,15 @@ if __name__ == "__main__":
       get_child(model, k).assign(v).realize()
 
     del weights
+  """
+
+  from tinygrad.state import torch_load, get_state_dict
+  state_dict = torch_load(WEIGHTS_7B_FILENAME)
+  model = Transformer(**args_7B)
+  for k,v in tqdm(get_state_dict(model).items()):
+    if k not in state_dict: continue
+    v.assign(state_dict[k].to(v.device)).realize()
+
 
   # *** prompt engineers work here ****
 

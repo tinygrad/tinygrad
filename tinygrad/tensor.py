@@ -109,13 +109,11 @@ class Tensor:
   def to_(self, device:str):
     assert self.lazydata.realized is None
     self.lazydata.device = device
-    if self.grad:
-      self.grad.lazydata.device = device
+    if self.grad: self.grad.to_(device)
 
   def to(self, device:str):
     ret = Tensor(self.lazydata, device)
-    if self.grad:
-      ret.grad = self.grad.to(device)
+    if self.grad: ret.grad = self.grad.to(device)
     return ret
 
   # ***** creation helper functions *****
