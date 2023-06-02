@@ -333,7 +333,6 @@ class AnchorGenerator:
       shifts_y = Tensor.arange(
         start=0, stop=grid_height * stride, step=stride, dtype=dtypes.float32, device=device
       )
-      print(shifts_y.shape, shifts_x.shape, len(Tensor.meshgrid(shifts_y, shifts_x)))
       shift_y, shift_x = Tensor.meshgrid(shifts_y, shifts_x)
       shift_x = shift_x.reshape(-1)
       shift_y = shift_y.reshape(-1)
@@ -714,10 +713,6 @@ class MaskRCNNC4Predictor:
 
 
 class FPN2MLPFeatureExtractor:
-  """
-  Heads for FPN for classification
-  """
-
   def __init__(self, cfg):
     resolution = 7
     scales = (0.25, 0.125, 0.0625, 0.03125)
@@ -764,19 +759,7 @@ class ROIAlign:
 
 
 class LevelMapper:
-  """Determine which FPN level each RoI in a set of RoIs should map to based
-  on the heuristic in the FPN paper.
-  """
-
   def __init__(self, k_min, k_max, canonical_scale=224, canonical_level=4, eps=1e-6):
-    """
-    Arguments:
-        k_min (int)
-        k_max (int)
-        canonical_scale (int)
-        canonical_level (int)
-        eps (float)
-    """
     self.k_min = k_min
     self.k_max = k_max
     self.s0 = canonical_scale
@@ -784,10 +767,6 @@ class LevelMapper:
     self.eps = eps
 
   def __call__(self, boxlists):
-    """
-    Arguments:
-        boxlists (list[BoxList])
-    """
     # Compute level ids
     s = Tensor.sqrt(Tensor.cat(*[boxlist.area() for boxlist in boxlists]))
 
@@ -828,20 +807,11 @@ class Pooler:
       ],
       dim=0,
     )
-    print(concat_boxes.shape)
-    print(ids.shape)
     if concat_boxes.shape[0] != 0:
       rois = Tensor.cat(*[ids, concat_boxes], dim=1)
       return rois
 
   def __call__(self, x, boxes):
-    """
-    Arguments:
-        x (list[Tensor]): feature maps for each level
-        boxes (list[BoxList]): boxes to be used to perform the pooling operation.
-    Returns:
-        result (Tensor)
-    """
     num_levels = len(self.poolers)
     rois = self.convert_to_roi_format(boxes)
     if rois:
@@ -860,7 +830,6 @@ class Pooler:
       )
       for level, (per_level_feature, pooler) in enumerate(zip(x, self.poolers)):
         idx_in_level = [idx for idx, x in enumerate((levels == level).numpy()) if x != 0]
-        print(idx_in_level)
         if len(idx_in_level) > 0:
           rois_per_level = Tensor(rois.numpy()[idx_in_level])
           result[idx_in_level] = pooler(per_level_feature, rois_per_level)
@@ -883,12 +852,6 @@ class FPNPredictor:
 
 
 class PostProcessor:
-  """
-  From a set of classification scores, box regression and proposals,
-  computes the post-processed boxes, and applies NMS to obtain the
-  final results
-  """
-
   def __init__(
           self,
           score_thresh=0.05,
@@ -897,13 +860,6 @@ class PostProcessor:
           box_coder=None,
           cls_agnostic_bbox_reg=False
   ):
-    """
-    Arguments:
-        score_thresh (float)
-        nms (float)
-        detections_per_img (int)
-        box_coder (BoxCoder)
-    """
     self.score_thresh = score_thresh
     self.nms = nms
     self.detections_per_img = detections_per_img
@@ -913,20 +869,8 @@ class PostProcessor:
     self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
 
   def __call__(self, x, boxes):
-    """
-    Arguments:
-        x (tuple[tensor, tensor]): x contains the class logits
-            and the box_regression from the model.
-        boxes (list[BoxList]): bounding boxes that are used as
-            reference, one for ech image
-
-    Returns:
-        results (list[BoxList]): one BoxList for each image, containing
-            the extra fields labels and scores
-    """
     class_logits, box_regression = x
     class_prob = Tensor.softmax(class_logits, -1)
-
     # TODO think about a representation of batch of boxes
     image_shapes = [box.size for box in boxes]
     boxes_per_image = [len(box) for box in boxes]
@@ -939,11 +883,9 @@ class PostProcessor:
     )
     if self.cls_agnostic_bbox_reg:
       proposals = proposals.repeat([1, class_prob.shape[1]])
-
     num_classes = class_prob.shape[1]
-    proposals = proposals.split(boxes_per_image[0], dim=0)
-    class_prob = class_prob.split(boxes_per_image[0], dim=0)
-
+    proposals = proposals.unsqueeze(0)
+    class_prob = class_prob.unsqueeze(0)
     results = []
     for prob, boxes_per_img, image_shape in zip(
             class_prob, proposals, image_shapes
@@ -955,18 +897,6 @@ class PostProcessor:
     return results
 
   def prepare_boxlist(self, boxes, scores, image_shape):
-    """
-    Returns BoxList from `boxes` and adds probability scores information
-    as an extra field
-    `boxes` has shape (#detections, 4 * #classes), where each row represents
-    a list of predicted bounding boxes for each of the object classes in the
-    dataset (including the background class). The detections in each row
-    originate from the same object proposal.
-    `scores` has shape (#detection, #classes), where each row represents a list
-    of object detection confidence scores for each of the object classes in the
-    dataset (including the background class). `scores[i, j]`` corresponds to the
-    box at `boxes[i, j * 4:(j + 1) * 4]`.
-    """
     boxes = boxes.reshape(-1, 4)
     scores = scores.reshape(-1)
     boxlist = BoxList(boxes, image_shape, mode="xyxy")
@@ -974,10 +904,7 @@ class PostProcessor:
     return boxlist
 
   def filter_results(self, boxlist, num_classes):
-    """Returns bounding-box detection results by thresholding on scores and
-    applying non-maximum suppression (NMS).
-    """
-    # unwrap the boxlist to avoid additional overhead.
+     # unwrap the boxlist to avoid additional overhead.
     # if we had multi-class NMS, we could perform this directly on the boxlist
     boxes = boxlist.bbox.reshape(-1, num_classes * 4)
     scores = boxlist.get_field("scores").reshape(-1, num_classes)
@@ -990,7 +917,7 @@ class PostProcessor:
     boxes = boxes.numpy()
     inds_all = scores > self.score_thresh
     for j in range(1, num_classes):
-      inds = [x for x in inds_all[:, j] if x != 0]
+      inds = [idx for idx, x in enumerate(inds_all[:, j]) if x != 0]
       scores_j = scores[inds, j]
       boxes_j = boxes[inds, j * 4: (j + 1) * 4]
       boxes_j = Tensor(boxes_j)
@@ -1092,10 +1019,8 @@ class RoIHeads:
     self.mask = Mask()
 
   def __call__(self, features, proposals, targets=None):
-    # TODO rename x to roi_box_features, if it doesn't increase memory consumption
     x, detections, _ = self.box(features, proposals, targets)
-    mask_features = features
-    x, detections, _ = self.mask(mask_features, detections, targets)
+    x, detections, _ = self.mask(features, detections, targets)
     return x, detections, {}
 
 
@@ -1167,8 +1092,8 @@ class MaskRCNN:
       if "fpn_layer" in k:
         block_index = int(re.search(r"fpn_layer(\d+)", k).group(1))
         k = re.sub(r"fpn_layer\d+", f"layer_blocks.{block_index - 1}", k)
-      print(k)
       loaded_keys.append(k)
+      print(k)
       get_child(self, k).assign(v.numpy()).realize()
     return loaded_keys
 
