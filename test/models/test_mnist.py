@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.nn import optim, BatchNorm2d
+from tinygrad.nn import Linear, optim, Conv2d, BatchNorm2d
 from tinygrad.helpers import getenv
 from extra.training import train, evaluate
 from datasets import fetch_mnist
@@ -13,14 +13,15 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 # create a model
 class TinyBobNet:
   def __init__(self):
-    self.l1 = Tensor.scaled_uniform(784, 128)
-    self.l2 = Tensor.scaled_uniform(128, 10)
+    self.l1 = Linear(784, 128)
+    self.l2 = Linear(128, 10)
 
   def parameters(self):
     return optim.get_parameters(self)
 
   def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
+    x = self.l1(x).relu()
+    return self.l2(x).log_softmax()
 
 # create a model with a conv layer
 class TinyConvNet:
@@ -29,9 +30,9 @@ class TinyConvNet:
     conv = 3
     #inter_chan, out_chan = 32, 64
     inter_chan, out_chan = 8, 16   # for speed
-    self.c1 = Tensor.scaled_uniform(inter_chan,1,conv,conv)
-    self.c2 = Tensor.scaled_uniform(out_chan,inter_chan,conv,conv)
-    self.l1 = Tensor.scaled_uniform(out_chan*5*5, 10)
+    self.c1 = Conv2d(inter_chan,1,conv,conv)
+    self.c2 = Conv2d(out_chan,inter_chan,conv,conv)
+    self.l1 = Linear(out_chan*5*5, 10)
     if has_batchnorm:
       self.bn1 = BatchNorm2d(inter_chan)
       self.bn2 = BatchNorm2d(out_chan)
@@ -43,10 +44,10 @@ class TinyConvNet:
 
   def forward(self, x:Tensor):
     x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
-    x = self.bn1(x.conv2d(self.c1)).relu().max_pool2d()
-    x = self.bn2(x.conv2d(self.c2)).relu().max_pool2d()
+    x = self.bn1(self.c1(x).relu().max_pool2d()
+    x = self.bn2(self.c2(x).relu().max_pool2d()
     x = x.reshape(shape=[x.shape[0], -1])
-    return x.dot(self.l1).log_softmax()
+    return self.l1(x).log_softmax()
 
 class TestMNIST(unittest.TestCase):
   def test_sgd_onestep(self):
@@ -95,7 +96,6 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, steps=100)
     assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
 
-  @unittest.skipIf(getenv("CI") and Device.DEFAULT == "METAL", "METAL broken in some CI runners")
   def test_conv_with_bn(self):
     np.random.seed(1337)
     model = TinyConvNet(has_batchnorm=True)
@@ -103,7 +103,6 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, steps=200)
     assert evaluate(model, X_test, Y_test) > 0.94
 
-  @unittest.skipIf(getenv("CI") and Device.DEFAULT == "METAL", "METAL broken in some CI runners")
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
