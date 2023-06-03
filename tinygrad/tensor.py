@@ -53,7 +53,7 @@ class Tensor:
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       lazydata = data
     elif isinstance(data, (int, float)):
-      lazydata = LazyBuffer.loadop(LoadOps.CONST, [], dtype if dtype is not None else Tensor.default_type, device, data)
+      lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)
     else:
       raise RuntimeError(f"can't create Tensor from {data}")
 
@@ -149,7 +149,8 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs): return Tensor.full(tensor.shape, fill_value=fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
+    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
 
   @staticmethod
   def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)

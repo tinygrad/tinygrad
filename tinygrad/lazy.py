@@ -181,7 +181,7 @@ class LazyBuffer:
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
-    return create_lazybuffer(self.device, (1,), LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), LazyNumpyArray([val], (1,), self.dtype.np)), self.dtype) \
+    return self.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val) \
       .movement_op(MovementOps.RESHAPE, (1,)*len(self.shape)).movement_op(MovementOps.EXPAND, self.shape)
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?

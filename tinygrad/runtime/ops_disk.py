@@ -13,7 +13,7 @@ class RawDiskBuffer(RawBufferMapped):
     if device is not None:
       with open(device, "a+b") as f:
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
-        buf = mmap.mmap(f.fileno(), size * dtype.itemsize, flags=mmap.MAP_SHARED)
+        buf = mmap.mmap(f.fileno(), size * dtype.itemsize)
     # NOTE: we don't call super since disk tensors don't use RAM
     self.size, self.dtype, self._buf = size, dtype, buf
   def cast(self, new_dtype:DType): return RawDiskBuffer(self.size, new_dtype, buf=self._buf, shape=self.shape, offset=self.offset)
