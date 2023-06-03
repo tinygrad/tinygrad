@@ -12,11 +12,13 @@ import torch
 from models.retinanet import nms as _box_nms
 from maskrcnn_benchmark import _C
 
+
 def meshgrid(*tensors):
   return [
     Tensor(chunked).reshape(-1).unsqueeze(-1) for chunked in np.meshgrid(
       *[t.numpy() for t in tensors], copy=False, indexing='ij'
     )]
+
 
 class LastLevelMaxPool:
   def __call__(self, x):
@@ -966,12 +968,13 @@ class MaskPostProcessor:
     labels = Tensor.cat(*labels).numpy()
     index = np.arange(num_masks)
     mask_prob = mask_prob[index, labels][:, None]
-
-    boxes_per_image = [len(box) for box in boxes]
-    mask_prob = np.array_split(mask_prob, boxes_per_image, axis=0)
+    boxes_per_image, cumsum = [], 0
+    for box in boxes:
+      cumsum += len(box)
+      boxes_per_image.append(cumsum)
+    mask_prob = np.split(mask_prob, boxes_per_image, axis=0)
     if self.masker:
       mask_prob = self.masker(mask_prob, boxes)
-
     results = []
     for prob, box in zip(mask_prob, boxes):
       bbox = BoxList(box.bbox, box.size, mode="xyxy")
