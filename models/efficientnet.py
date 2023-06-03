@@ -159,12 +159,11 @@ class EfficientNet:
       #print(k, v.shape)
       mv = get_child(self, k)
       vnp = v #.astype(np.float32)
-      vnp = vnp.cpu()
-      vnp = vnp if k != '_fc' else vnp.T
+      vnp = vnp if k != '_fc' else vnp.cpu().T
       #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
-        mv.assign(vnp.numpy())
+        mv.assign(vnp.to(mv.device))
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 
