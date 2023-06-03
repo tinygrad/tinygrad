@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, weakref, importlib, inspect, functools, pathlib
+import numpy as np
 from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
@@ -71,7 +72,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
 
   # fromcpu aren't cached
-  if optype == LoadOps and op.op in [LoadOps.FROMCPU, LoadOps.EMPTY]: return LazyBuffer(device, st, optype, op, dtype)
+  if optype == LoadOps and op.op in [LoadOps.FROMCPU, LoadOps.EMPTY, LoadOps.RAND]: return LazyBuffer(device, st, optype, op, dtype)
 
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 
@@ -108,13 +109,24 @@ class LazyBuffer:
     if self.realized is None:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
-        if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
-          self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
-        else:
-          if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
-          self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
+        if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
+        self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
       elif self.op.op == LoadOps.EMPTY:
+        if DEBUG >= 4: print(f"empty {self.shape} {self.dtype}")
         self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
+      elif self.op.op == LoadOps.RAND:
+        if DEBUG >= 4: print(f"rand {self.shape} {self.dtype}")
+        rng = np.random.default_rng(self.op.arg)
+        self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **self._device_extra_args())
+      elif self.op.op == LoadOps.RANGE:
+        if DEBUG >= 4: print(f"range {self.shape} {self.dtype}")
+        self.realized = Device[self.device].buffer.fromCPU(np.arange(prod(self.shape), dtype=self.dtype.np), **self._device_extra_args())
+      elif self.op.op == LoadOps.CONST:
+        if DEBUG >= 4: print(f"const {self.shape} {self.dtype} {self.op.arg}")
+        if hasattr(Device[self.device].codegen, 'supports_constant_folding'):
+          self.realized = RawConst(1, self.dtype, float(self.op.arg))
+        else:
+          self.realized = Device[self.device].buffer.fromCPU(np.array(self.op.arg, dtype=self.dtype.np), **self._device_extra_args())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
@@ -158,14 +170,14 @@ class LazyBuffer:
       del self.op
     return self
 
+  @staticmethod
+  def loadop(op, shape, dtype, device, arg=None) -> LazyBuffer:
+    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple(), arg), dtype)
+
   # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
   def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
     return create_lazybuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x), dtypes.from_np(x.dtype))
-
-  @staticmethod
-  def empty(shape, dtype, device) -> LazyBuffer:
-    return create_lazybuffer(device, shape, LoadOps, LazyOp(LoadOps.EMPTY, tuple()), dtype)
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
