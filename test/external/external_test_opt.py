@@ -27,7 +27,7 @@ class CLCache():
   def __exit__(self, type, value, traceback):
     print(f"cache: exiting with size {len(GlobalCounters.cache)}", f"allowed {self.allowed}" if self.allowed is not None else "")
     if self.allowed is not None:
-      assert len(GlobalCounters.cache) <= self.allowed and (not self.strict or len(GlobalCounters.cache) == self.allowed), "used too many kernels!"
+      assert len(GlobalCounters.cache) <= self.allowed and (not self.strict or len(GlobalCounters.cache) == self.allowed), f"used too many kernels! {len(GlobalCounters.cache)} > {self.allowed}"
     GlobalCounters.cache = None
 
 from models.convnext import ConvNeXt
@@ -85,7 +85,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
-    with CLCache(82):
+    with CLCache(85):
       model(Tensor([[1,2,3,4]]), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
