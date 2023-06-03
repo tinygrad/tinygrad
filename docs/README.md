@@ -29,13 +29,13 @@ This is currently a big work in progress.
 
 ## Resources
 
-### Community
-
-[![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
-
 ### Environment Variables
 
 [env_vars.md](/docs/env_vars.md)
+
+### Community
+
+[![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
 
 ## Contributing
 
