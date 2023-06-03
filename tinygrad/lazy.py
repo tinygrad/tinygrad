@@ -129,8 +129,6 @@ class LazyBuffer:
         elif self.op.op == LoadOps.RAND:
           rng = np.random.default_rng(self.op.arg)
           self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **self._device_extra_args())
-        elif self.op.op == LoadOps.RANGE:
-          self.realized = Device[self.device].buffer.fromCPU(np.arange(prod(self.shape), dtype=self.dtype.np), **self._device_extra_args())
         elif self.op.op == LoadOps.CONST:
           if hasattr(Device[self.device].codegen, 'supports_constant_folding'):
             self.realized = RawConst(1, self.dtype, float(self.op.arg))

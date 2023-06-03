@@ -132,9 +132,6 @@ class Tensor:
     Tensor._seed += 1
     return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
 
-  @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor._loadop(LoadOps.RANGE, (stop-start)//step, **kwargs)*step+start
-
   # ***** creation helper functions *****
 
   @staticmethod
@@ -145,6 +142,9 @@ class Tensor:
 
   @staticmethod
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
+
+  @staticmethod
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -460,6 +460,9 @@ class Tensor:
     w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
     r = (x*w).sum(-1)
     return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
+
+  # TODO: make this work for n-dimensional inputs
+  def cumsum(self): return self.reshape(1, 1, 1, self.shape[0]).conv2d(Tensor.ones(1, 1, 1, self.shape[0]), padding=(self.shape[0] - 1, 0, 0, 0)).flatten()
 
   # ***** mlops (unary) *****
 

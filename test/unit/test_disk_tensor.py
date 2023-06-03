@@ -90,7 +90,7 @@ class TestDiskTensor(unittest.TestCase):
 
   def test_slice(self):
     pathlib.Path("/tmp/dt3").unlink(missing_ok=True)
-    Tensor.arange(10, device="disk:/tmp/dt3").realize()
+    Tensor.arange(10, device="CPU").to("disk:/tmp/dt3").realize()
 
     slice_me = Tensor.empty(10, device="disk:/tmp/dt3")
     print(slice_me)
