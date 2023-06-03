@@ -18,7 +18,7 @@ normalize_transform = T.Normalize(
 transforms = T.Compose(
   [
     T.ToPILImage(),
-    T.Resize(size=(1024, 1024)),
+    T.Resize(size=800, max_size=1333),
     T.ToTensor(),
     to_bgr_transform,
     normalize_transform,
@@ -136,9 +136,7 @@ masker = Masker(threshold=0.5, padding=1)
 
 def compute_prediction(original_image, model_type='tiny'):
   # apply pre-processing to image
-  image = transforms(np.asarray(original_image))
-  print(image.shape)
-  image = image.reshape(-1, image.shape[0], image.shape[1], image.shape[2]).numpy()
+  image = transforms(np.asarray(original_image)).numpy()
   image = Tensor(image, requires_grad=False)
 
   predictions = model_tiny(image)
