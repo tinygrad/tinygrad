@@ -7,53 +7,65 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
+#include <thread>
 #include <chrono>
 
-#define SZ (unsigned long long)(16*1000*1000)
-#define CNT 100LL
+#define SZ (unsigned long long)(512*1024*1024)
+#define CNT 10LL
 
-void *test_read() {
+void test_read() {
   int f = open("/dev/nvme0n1", O_RDONLY|O_DIRECT);
   printf("open %d\n", f);
 
-  // 16 MB
-  void *buf = malloc(SZ);
+  /*void *buf = malloc(CNT*SZ);
+  printf("malloc %p\n", buf);
+  mlock(buf, CNT*SZ);*/
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  void *buf = mmap(NULL, SZ*CNT, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
   auto t1 = std::chrono::high_resolution_clock::now();
+  mlock(buf, CNT*SZ);
   for (int i = 0; i < CNT; i++) {
-    read(f, buf, SZ);
+    read(f, (unsigned char*)buf+SZ*i, SZ);
   }
   auto t2 = std::chrono::high_resolution_clock::now();
-  printf("read %.2f GB, %.2f GB/s\n", SZ/1e9*CNT, (SZ*CNT)/(float)std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count());
 
-  return buf;
+  //free(buf);
+  printf("malloc %p\n", buf);
+  float ns = (float)std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count();
+  float pns = (float)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
+  printf("read %.2f GB in %.2f s (%.2f s to prepare), %.2f GB/s\n", SZ/1e9*CNT, ns*1e-9, pns*1e-9, (SZ*CNT)/ns);
+
+  close(f);
+  munmap(buf, SZ*CNT);
 }
 
-void *test_mmap() {
+void test_mmap() {
   int f = open("/dev/nvme0n1", O_RDONLY|O_DIRECT);
   printf("open %d\n", f);
 
-  // 16 MB
-  void *buf = malloc(SZ);
-
-  void *dat = mmap(NULL, SZ*CNT, PROT_READ, MAP_SHARED, f, 0);
-  printf("mmap %p\n", dat);
+  void *dat = mmap(NULL, SZ*CNT, PROT_READ, MAP_PRIVATE, f, 0);
 
   auto t1 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < CNT; i++) {
-    memcpy(buf, (unsigned char*)dat+SZ*i, SZ);
-  }
+  mlock(dat, SZ*CNT);
   auto t2 = std::chrono::high_resolution_clock::now();
-  printf("read %.2f GB, %.2f GB/s\n", SZ/1e9*CNT, (SZ*CNT)/(float)std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count());
 
-  return buf;
+  printf("mmap %p\n", dat);
+
+  float ns = (float)std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count();
+  printf("read %.2f GB in %.2f s, %.2f GB/s\n", SZ/1e9*CNT, ns*1e-9, (SZ*CNT)/ns);
+
+  close(f);
+  munlock(dat, SZ*CNT);
+  munmap(dat, SZ*CNT);
 }
 
 int main() {
   system("sync; echo 1 > /proc/sys/vm/drop_caches");
-  test_read();
+  test_mmap();
 
-  system("sync; echo 1 > /proc/sys/vm/drop_caches");
-  free(test_mmap());
+  //system("sync; echo 1 > /proc/sys/vm/drop_caches");
+  //test_read();
 }
 
