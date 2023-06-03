@@ -65,14 +65,12 @@ jobs:
      steps:
      - name: Checkout Code
        uses: actions/checkout@v3
-     - name: Set up Python 3.9
-       uses: actions/setup-python@v4
-       with:
-         python-version: 3.9
      - name: Install Dependencies
        run: pip install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
      - name: Run Pytest
-       run: CI=1 EXCLUDE_DEVICES=METAL python -m pytest -s -v -n=auto test/
+       run: python3.9 -m pytest -s -v -n=auto test/
+     - name: Run Pytest2
+       run: python3 -m pytest -s -v -n=auto test/
 
   testimagenet:
     name: ImageNet to C Compile Test

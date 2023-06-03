@@ -4,8 +4,6 @@ import unittest
 import numpy as np
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
-from tinygrad.lazy import Device
 from datasets import fetch_mnist
 
 def compare_tiny_torch(model, model_torch, X, Y):
@@ -68,7 +66,6 @@ class TestEnd2End(unittest.TestCase):
   def setUpClass(cls):
     cls.X, cls.Y = get_mnist_data()
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_linear_mnist(self):
     class LinTiny:
       def __init__(self, has_batchnorm=False):
@@ -86,7 +83,6 @@ class TestEnd2End(unittest.TestCase):
         return self.l2(self.l1(x)).relu().log_softmax(-1)
     compare_tiny_torch(LinTiny(), LinTorch(), self.X, self.Y)
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_bn_mnist(self):
     class LinTiny:
       def __init__(self):
@@ -105,14 +101,12 @@ class TestEnd2End(unittest.TestCase):
         return self.l2(self.bn1(self.l1(x).reshape(x.shape[0], -1, 1, 1)).reshape(x.shape[0], -1).relu()).log_softmax(-1)
     compare_tiny_torch(LinTiny(), LinTorch(), self.X, self.Y)
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_bn_alone(self):
     np.random.seed(1337)
     X = Tensor(np.random.randn(32, 10, 1, 1).astype(np.float32))
     Y = Tensor(np.random.randn(32, 10, 1, 1).astype(np.float32))
     compare_tiny_torch(BatchNorm2d(10), nn.BatchNorm2d(10), X, Y)
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_bn_linear(self):
     BS, K = 2, 1
     eps = 0
@@ -134,7 +128,6 @@ class TestEnd2End(unittest.TestCase):
       model_torch.l1.weight[:] = 1.
     compare_tiny_torch(LinTiny(), model_torch, X, Y)
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_conv_mnist(self):
     class LinTiny:
       def __init__(self, has_batchnorm=False):
