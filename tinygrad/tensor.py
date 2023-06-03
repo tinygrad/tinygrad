@@ -129,7 +129,7 @@ class Tensor:
   def empty(*shape, **kwargs): return Tensor.zeros(*shape, **kwargs)
 
   @staticmethod
-  def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
+  def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),), clean_padding=False).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),), clean_padding=False).reshape(dim, dim)
 
   # TODO: below line, remove use of numpy here and make lazy
   # TODO: requires cumsum to remove numpy
@@ -204,7 +204,7 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple(x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: arg = self.clean_padding(arg); return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
+  def pad(self, arg:Tuple[Tuple[int, int], ...], clean_padding=True) -> Tensor: arg = self.clean_padding(arg) if clean_padding else arg; return mlops.Pad.apply(self, arg=arg) if any(x != (0,0) for x in arg) else self
   def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
 
   # ***** movement hlops *****
@@ -217,15 +217,13 @@ class Tensor:
     
     if len(padding_)<4: padding_ = (padding_[1], padding_[1], padding_[0], padding_[0])
     else: assert len(padding_)%2==0 #padding goes by pairs (dim, value)
-
-    padding_ = tuple((padding_[i], padding_[i+1]) for i in range(0, len(padding_), 2))
-    return padding_
+    return tuple((padding_[i], padding_[i+1]) for i in range(0, len(padding_), 2))
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
-  def slice(self, arg:Sequence[Optional[Tuple[int, int]]]) -> Tensor:
+  def slice(self, arg:Sequence[Optional[Tuple[int, int]]], **kwargs) -> Tensor:
     arg_ = tuple(a if a is not None else (0,s) for s,a in zip(self.shape, arg))
     padding = tuple((max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_))
-    return self.pad(padding).shrink(tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)))
+    return self.pad(padding, **kwargs).shrink(tuple((p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)))
 
   # Tensors mostly follow the normal python indexing / slicing behavior for sequences
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
