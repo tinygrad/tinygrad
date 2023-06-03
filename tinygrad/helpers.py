@@ -110,8 +110,7 @@ class LightWeakSet:
     self.data = set()
     def _remove(item, selfref=ref(self)):
       self = selfref()
-      try: self.data.discard(item)
-      except AttributeError: pass
+      self.data.discard(item)
     self._remove = _remove
 
   def __len__(self): return len(self.data)
@@ -124,8 +123,7 @@ class LightWeakValueDictionary:
   def __init__(self):
     def remove(wr, selfref=ref(self), _atomic_removal=_remove_dead_weakref):
       self = selfref()
-      try: _atomic_removal(self.data, wr.key)
-      except AttributeError: pass
+      _atomic_removal(self.data, wr.key)
     self._remove = remove
     self.data = {}
 
