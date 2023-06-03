@@ -285,3 +285,10 @@ for k, v in state_dict.items():
 ```
 
 Many of the models in the [models/](/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are pytorch weights meaning that you would need pytorch installed to load them.
+
+### Environment Variables
+
+There exist a bunch of environment variables that control the runtime behavior of tinygrad.
+Some of the commons ones are `DEBUG` and the different backend enablement variables.
+
+You can find a full list and their descriptions in [env_vars.md](/docs/env_vars.md).
