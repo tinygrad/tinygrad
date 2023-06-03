@@ -13,15 +13,23 @@ def sparse_categorical_crossentropy(out, Y):
   y = Tensor(y)
   return out.mul(y).mean()
 
-def focal_loss(out, targets, alpha:float=0.25, gamma=2):
-  out, targets = out.float(), targets.float()
-  p_t = out * targets + (1.0 - out) * (1.0 - targets)
+def focal_loss(out, target, alpha:float=0.25, gamma=2):
+  out, target = out.float(), target.float()
+  p_t = out * target + (1.0 - out) * (1.0 - target)
   ce_loss = -p_t.log()
   loss = ce_loss * ((1.0 - p_t) ** gamma)
   if alpha >= 0:
-    alpha_t = alpha * targets + (1.0 - alpha) * (1.0 - targets)
-    loss *= alpha_t
+    alpha_t = alpha * target + (1.0 - alpha) * (1.0 - target)
+    loss *= alpha_t.float()
   return loss.mean()
+
+def smooth_l1_loss(out: Tensor, target: Tensor) -> Tensor:
+  out, target = out.float(), target.float()
+  beta = 1.0
+  n = (out - target).abs()
+  cond = n < beta
+  loss = cond.where(0.5 * n**2 / beta, n - 0.5 * beta)
+  return loss.mean() if loss.numel() > 0 else 0.0 * loss.sum()
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):
