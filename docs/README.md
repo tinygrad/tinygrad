@@ -19,7 +19,7 @@ Don't forget the `.` at the end!
 
 Then go on to read the quick start guide [here](/docs/quickstart.md).
 
-Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](/docs/abstractions.md) documentation.
+Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](/docs/abstractions.py) documentation.
 
 Or if you want to see some examples, you can look at the examples in the [examples](/examples) directory.
 
