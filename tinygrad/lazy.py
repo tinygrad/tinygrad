@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, weakref, importlib, inspect, functools, pathlib
 import numpy as np
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
 from tinygrad.runtime.lib import RawConst, RawBuffer
@@ -110,7 +110,7 @@ class LazyBuffer:
       # get real ops first
       if self.op.op == LoadOps.FROMCPU:
         if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
-        self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
+        self.realized = Device[self.device].buffer.fromCPU(self.op.arg, **self._device_extra_args())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
@@ -171,11 +171,6 @@ class LazyBuffer:
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None) -> LazyBuffer:
     return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple(), arg), dtype)
-
-  # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
-  @staticmethod
-  def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
-    return create_lazybuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x), dtypes.from_np(x.dtype))
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:

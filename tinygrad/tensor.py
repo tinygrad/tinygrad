@@ -3,7 +3,7 @@ from __future__ import annotations
 import math, functools, itertools, operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
@@ -34,7 +34,7 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     device = Device.canonicalize(device)
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
@@ -42,16 +42,11 @@ class Tensor:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
-    # all ndarrays are lazy now
-    if isinstance(data, np.ndarray): data = LazyNumpyArray(data, data.shape, data.dtype)
-
-    # by here, it's either LazyNumpyArray or LazyBuffer
-    # TODO: it should all be LazyBuffer I think
-    if isinstance(data, LazyNumpyArray):
-      lazydata = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
-    elif isinstance(data, LazyBuffer):
+    if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       lazydata = data
+    elif isinstance(data, np.ndarray):
+      lazydata = LazyBuffer.loadop(LoadOps.FROMCPU, data.shape, dtypes.from_np(data.dtype), device, data)
     elif isinstance(data, (int, float)):
       lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)
     else:
