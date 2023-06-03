@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 import unittest
+import numpy as np
 import networkx as nx  # type: ignore
 from tinygrad.tensor import Tensor
 from tinygrad.graph import G, log_op, prune_graph
 from tinygrad.ops import BinaryOps, LazyOp, MovementOps, ReduceOps
 
-def buf(*shp): return Tensor.ones(*shp, device="CPU").lazydata
+def buf(*shp): return Tensor(np.ones(shp, dtype=np.float32), device="CPU").lazydata
 
 class TestGraph(unittest.TestCase):
   def setUp(self):

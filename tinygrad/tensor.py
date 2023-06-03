@@ -130,6 +130,9 @@ class Tensor:
 
   _seed: int = 1337
   @staticmethod
+  def manual_seed(seed=None): Tensor._seed = seed
+
+  @staticmethod
   def rand(*shape, **kwargs):
     Tensor._seed += 1
     return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)

@@ -111,22 +111,6 @@ class LazyBuffer:
       if self.op.op == LoadOps.FROMCPU:
         if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
         self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
-      elif self.op.op == LoadOps.EMPTY:
-        if DEBUG >= 4: print(f"empty {self.shape} {self.dtype}")
-        self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
-      elif self.op.op == LoadOps.RAND:
-        if DEBUG >= 4: print(f"rand {self.shape} {self.dtype}")
-        rng = np.random.default_rng(self.op.arg)
-        self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **self._device_extra_args())
-      elif self.op.op == LoadOps.RANGE:
-        if DEBUG >= 4: print(f"range {self.shape} {self.dtype}")
-        self.realized = Device[self.device].buffer.fromCPU(np.arange(prod(self.shape), dtype=self.dtype.np), **self._device_extra_args())
-      elif self.op.op == LoadOps.CONST:
-        if DEBUG >= 4: print(f"const {self.shape} {self.dtype} {self.op.arg}")
-        if hasattr(Device[self.device].codegen, 'supports_constant_folding'):
-          self.realized = RawConst(1, self.dtype, float(self.op.arg))
-        else:
-          self.realized = Device[self.device].buffer.fromCPU(np.array(self.op.arg, dtype=self.dtype.np), **self._device_extra_args())
       elif self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
@@ -138,6 +122,20 @@ class LazyBuffer:
       elif self.op.op == LoadOps.CUSTOM:
         # this needs to immediately realize
         self.realized = self.op.arg(self, *[x.realize() for x in self.op.src])
+      elif self.optype == LoadOps:
+        if DEBUG >= 4: print(f"{self.op.op} {self.shape} {self.dtype} {self.op.arg}")
+        if self.op.op == LoadOps.EMPTY:
+          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
+        elif self.op.op == LoadOps.RAND:
+          rng = np.random.default_rng(self.op.arg)
+          self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **self._device_extra_args())
+        elif self.op.op == LoadOps.RANGE:
+          self.realized = Device[self.device].buffer.fromCPU(np.arange(prod(self.shape), dtype=self.dtype.np), **self._device_extra_args())
+        elif self.op.op == LoadOps.CONST:
+          if hasattr(Device[self.device].codegen, 'supports_constant_folding'):
+            self.realized = RawConst(1, self.dtype, float(self.op.arg))
+          else:
+            self.realized = Device[self.device].buffer.fromCPU(np.array(self.op.arg, dtype=self.dtype.np), **self._device_extra_args())
       # these can be late folded and change the op to go further back in the graph
       elif self.optype == ReduceOps: self.op = _ast_reduceops(self)
       elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
