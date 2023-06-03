@@ -1,12 +1,23 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/logo.png">
-</p>
+# tinygrad
+<div align="center">
 
---------------------------------------------------------------------
+[![logo](https://raw.githubusercontent.com/geohot/tinygrad/master/docs/logo.png)](https://tinygrad.org)
 
-![Unit Tests](https://github.com/geohot/tinygrad/workflows/Unit%20Tests/badge.svg)
+tinygrad: Something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
-[![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
+<h3>
+
+[tiny corp](https://tinygrad.org) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md)
+
+</h3>
+
+[![GitHub Repo stars](https://img.shields.io/github/stars/geohot/tinygrad)](https://github.com/geohot/tinygrad/stargazers)
+[![Unit Tests](https://github.com/geohot/tinygrad/actions/workflows/test.yml/badge.svg)](https://github.com/geohot/tinygrad/actions/workflows/test.yml)
+[![Discord](https://img.shields.io/discord/1068976834382925865)](https://discord.gg/ZjZadyC7PK)
+
+</div>
+
+---
 
 For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
