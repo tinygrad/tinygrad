@@ -102,11 +102,10 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
-      if self.optype == ReduceOps: self.op = _ast_reduceops(self)
-      elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
-      else:
-        try: REALIZE_DISPATCHER[self.op.op](self)
-        except KeyError: pass
+      if self.optype in REALIZE_DISPATCHER:
+        self.op = REALIZE_DISPATCHER[self.optype](self)
+      elif self.op.op in REALIZE_DISPATCHER:
+        REALIZE_DISPATCHER[self.op.op](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.buffers: x.realize()
@@ -388,4 +387,6 @@ REALIZE_DISPATCHER = {
   LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.EMPTY: _realize_empty,
+  ReduceOps: _ast_reduceops,
+  BinaryOps: _ast_binaryops,
 }
