@@ -1,6 +1,6 @@
 # Welcome to the tinygrad documentation!
 
-Here you will find documentation for the tinygrad library, as well as some examples and tutorials.
+Here you will find documentation for tinygrad, as well as some examples and tutorials.
 
 ## Getting Started
 
