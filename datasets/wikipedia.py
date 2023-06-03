@@ -190,13 +190,13 @@ def iterate(tokenizer, start=0, val=True):
       next_sentence_label = 1 if all_instances[i]["is_random_next"] else 0
 
       features = {
-        "input_ids": np.expand_dims(np.array(input_ids), 0).astype(np.float32),
-        "input_mask": np.expand_dims(np.array(input_mask), 0).astype(np.float32),
-        "segment_ids": np.expand_dims(np.array(segment_ids), 0).astype(np.float32),
+        "input_ids": np.expand_dims(np.array(input_ids, dtype=np.float32), 0),
+        "input_mask": np.expand_dims(np.array(input_mask, dtype=np.float32), 0),
+        "segment_ids": np.expand_dims(np.array(segment_ids, dtype=np.float32), 0),
         "masked_lm_positions": masked_lm_positions,
         "masked_lm_ids": masked_lm_ids,
         "masked_lm_weights": masked_lm_weights,
-        "next_sentence_labels": [next_sentence_label]
+        "next_sentence_labels": np.array([next_sentence_label], dtype=np.float32),
       }
 
       yield features, all_instances[i]

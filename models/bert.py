@@ -1,6 +1,6 @@
+from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
-from extra.training import sparse_categorical_crossentropy
 from extra.utils import download_file, get_child
 from pathlib import Path
 
@@ -20,7 +20,8 @@ class BertForPreTraining:
 
     for k, v in state_dict.items():
       if "position_ids" in k: continue
-      get_child(self, k).assign(v.numpy()).realize()
+      child = get_child(self, k)
+      child.assign(Tensor(v.numpy(), dtype=dtypes.float32).to(child.device)).realize()
 
   def __call__(self, input_ids:Tensor, token_type_ids:Tensor, attention_mask:Tensor):
     sequence_outputs, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
@@ -29,6 +30,13 @@ class BertForPreTraining:
     return prediction_scores, seq_relationship_score
 
   def loss(self, prediction_scores:Tensor, seq_relationship_score:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+    def sparse_categorical_crossentropy(out, Y):
+      num_classes = out.shape[-1]
+      y_counter = Tensor.arange(num_classes, requires_grad=False).unsqueeze(0).expand(Y.numel(), num_classes)
+      y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0 * num_classes, 0)
+      y = y.reshape(*Y.shape, num_classes)
+      return out.mul(y).mean()
+
     prediction_scores = prediction_scores.log_softmax()
     seq_relationship_score = seq_relationship_score.log_softmax()
 
@@ -37,8 +45,8 @@ class BertForPreTraining:
     onehot = counter == masked_lm_positions.reshape(-1, 1)
     prediction_scores = onehot @ prediction_scores
 
-    masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids.numpy())
-    next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels.numpy())
+    masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids)
+    next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
 
 
