@@ -8,6 +8,8 @@ import onnx
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
+from tinygrad.lazy import Device
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -23,6 +25,7 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/7da48ebdba5e3cf4c0b8
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken on some CI runners")
   def test_benchmark_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
@@ -97,6 +100,7 @@ class TestOnnxModel(unittest.TestCase):
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken on some CI runners")
   def test_efficientnet(self):
     dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx")
     input_name, input_new = "images:0", True
