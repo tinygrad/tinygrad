@@ -39,14 +39,12 @@ class Tensor:
     device = Device.canonicalize(device)
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
-    elif isinstance(data, LazyBuffer) and data.device != device:
-      # TODO: this has to realize, it shouldn't have to
-      data = data.realize().toCPU()
 
     if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      lazydata = data
+      lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
     elif isinstance(data, np.ndarray):
+      # TODO: create CPUBuffer directly
       lazydata = LazyBuffer.loadop(LoadOps.FROMCPU, data.shape, dtypes.from_np(data.dtype), device, data)
     elif isinstance(data, (int, float)):
       lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)

@@ -6,7 +6,8 @@ from weakref import WeakValueDictionary
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
-from tinygrad.runtime.lib import RawConst, RawBuffer
+from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped
+from tinygrad.runtime.ops_disk import RawDiskBuffer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -122,6 +123,14 @@ class LazyBuffer:
       elif self.op.op == LoadOps.CUSTOM:
         # this needs to immediately realize
         self.realized = self.op.arg(self, *[x.realize() for x in self.op.src])
+      elif self.op.op == LoadOps.FROM:
+        rawbuf = self.op.src[0].realize()
+        # TODO: make this generic
+        if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[self.device].buffer, RawBufferMapped):
+          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
+          rawbuf.realized.readinto(cast(RawBufferMapped, self.realized)._buffer())
+        else:
+          self.realized = Device[self.device].buffer.fromCPU(rawbuf.toCPU(), **self._device_extra_args())
       elif self.optype == LoadOps:
         if DEBUG >= 4: print(f"{self.op.op} {self.shape} {self.dtype} {self.op.arg}")
         if self.op.op == LoadOps.EMPTY:
@@ -167,8 +176,8 @@ class LazyBuffer:
     return self
 
   @staticmethod
-  def loadop(op, shape, dtype, device, arg=None) -> LazyBuffer:
-    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple(), arg), dtype)
+  def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
+    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
