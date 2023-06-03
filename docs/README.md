@@ -33,6 +33,10 @@ This is currently a big work in progress.
 
 [![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
 
+### Environment Variables
+
+[env_vars.md](/docs/env_vars.md)
+
 ## Contributing
 
 The documentation mainly follows the core contributing guidelines in the [README.md](/README.md).
