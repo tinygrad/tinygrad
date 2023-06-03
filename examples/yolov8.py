@@ -236,8 +236,8 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   boxes_np[..., [1, 3]] -= pad[1]
   boxes_np[..., :4] /= gain
   boxes_np = clip_boxes(boxes_np, img0_shape)
-  return Tensor(boxes_np) if isinstance(boxes, Tensor) else 
-  
+  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
+
 def xywh2xyxy(x):
   x_np = x.numpy() if isinstance(x, Tensor) else x
   xy = x_np[..., :2]  # center x, y
@@ -247,17 +247,17 @@ def xywh2xyxy(x):
   result = np.concatenate((xy1, xy2), axis=-1)
   return Tensor(result) if isinstance(x, Tensor) else result
 
-# TODO: mismatch 5% with pytorch
-# def box_iou(box1, box2):
-#   box1_np = box1.numpy() if isinstance(box1, Tensor) else box1
-#   box2_np = box2.numpy() if isinstance(box2, Tensor) else box2
-#   a1, a2 = np.split(box1_np[:, None], 2, axis=2)
-#   b1, b2 = np.split(box2_np, 2, axis=1)
-#   intersection = (np.minimum(a2, b2) - np.maximum(a1, b1)).clip(0).prod(2)
-#   area1 = (box1_np[:, 2] - box1_np[:, 0]) * (box1_np[:, 3] - box1_np[:, 1])
-#   area2 = (box2_np[:, 2] - box2_np[:, 0]) * (box2_np[:, 3] - box2_np[:, 1])
-#   result = intersection / (area1[:, None] + area2 - intersection)
-#   return Tensor(result) if isinstance(box1, Tensor) else result
+
+def box_iou(box1, box2, eps=1e-7):  
+  # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
+  a1, a2 =  box1.unsqueeze(1).chunk(2, 2)
+  b1, b2 =  box2.unsqueeze(0).chunk(2, 2)
+  a1, a2 = a1.cpu().numpy(), a2.cpu().numpy()
+  b1, b2 = b1.cpu().numpy(), b2.cpu().numpy()
+  inter = (np.minimum(a2, b2) - np.maximum(a1, b1))
+  inter = np.clip(inter, 0, None).prod(2)
+  # IoU = inter / (area1 + area2 - inter)
+  return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
     
 
 
