@@ -20,6 +20,15 @@ def fetch(url):
   with open(fp, "rb") as f:
     return f.read()
 
+def fetch_as_file(url):
+  if url.startswith("/"):
+    with open(url, "rb") as f:
+      return f.read()
+  import os, hashlib, tempfile
+  fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
+  download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
+  return fp
+
 def download_file(url, fp, skip_if_exists=True):
   import requests, os, pathlib
   if skip_if_exists and os.path.isfile(fp) and os.stat(fp).st_size > 0:
