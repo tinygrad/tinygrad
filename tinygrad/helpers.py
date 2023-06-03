@@ -108,7 +108,7 @@ class LightWeakSet:
     self.data = set()
     def _remove(item, selfref=ref(self)):
       self = selfref()
-      self.data.discard(item)
+      if self: self.data.discard(item)
     self._remove = _remove
 
   def __len__(self): return len(self.data)
@@ -121,7 +121,7 @@ class LightWeakValueDictionary:
   def __init__(self):
     def remove(wr, selfref=ref(self), _atomic_removal=_remove_dead_weakref):
       self = selfref()
-      _atomic_removal(self.data, wr.key)
+      if self: _atomic_removal(self.data, wr.key)
     self._remove = remove
     self.data = {}
 
