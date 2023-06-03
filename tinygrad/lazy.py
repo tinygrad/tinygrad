@@ -180,7 +180,7 @@ class LazyBuffer:
   def toCPU(self):
     realized = self.cast(dtypes.from_np(self.dtype.np)).contiguous().realize().realized
     ret = cast(RawBuffer, realized).toCPU().reshape(self.shape)
-    return ret.copy()
+    return ret
 
   def cast(self:LazyBuffer, arg:DType) -> LazyBuffer: return elementwise_op(UnaryOps.CAST, self, arg=arg) if self.dtype != arg else self
   def unary_op(self:LazyBuffer, op:UnaryOps) -> LazyBuffer: return elementwise_op(op, self)
