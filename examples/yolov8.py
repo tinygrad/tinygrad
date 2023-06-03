@@ -87,34 +87,34 @@ def box_iou(box1, box2, eps=1e-7):
     
 
 def prepare_boxes_scores_for_nms(prediction, conf_thres=0.25, agnostic=False, nc=0, max_wh=7680):
-    prediction_np = prediction.cpu().numpy()
-    print(prediction_np.shape)
-    nc = nc or (prediction_np.shape[1] - 4)  # number of classes
-    mi = 4 + nc  # mask start index
-    xc = np.amax(prediction_np[:, 4:mi], axis=1) > conf_thres    
-    output = []
-    for xi, x in enumerate(prediction_np):
-      x = x.swapaxes(0, -1)[xc[xi]]
-      if not x.shape[0]:
-        continue
+  prediction_np = prediction.cpu().numpy()
+  print(prediction_np.shape)
+  nc = nc or (prediction_np.shape[1] - 4)  # number of classes
+  mi = 4 + nc  # mask start index
+  xc = np.amax(prediction_np[:, 4:mi], axis=1) > conf_thres    
+  output = []
+  for xi, x in enumerate(prediction_np):
+    x = x.swapaxes(0, -1)[xc[xi]]
+    if not x.shape[0]:
+      continue
 
-      box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
-      box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+    box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
+    box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
 
-      conf = np.max(cls, axis=1, keepdims=True)  # confidence
-      j = np.argmax(cls, axis=1, keepdims=True)  # index
-      x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
-      x = x[conf.ravel() > conf_thres]
-      n = x.shape[0]  # number of boxes    
-      if not n:  # no boxes
-        continue    
-      # a very small mismatch (1%) happening here in comparison to torch. 
-      x = x[np.argsort(-x[:, 4])]
-      
-      c = x[:, 5:6] * (0 if agnostic else max_wh) 
-      boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-      output.append((boxes,scores))
-    return output
+    conf = np.max(cls, axis=1, keepdims=True)  # confidence
+    j = np.argmax(cls, axis=1, keepdims=True)  # index
+    x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
+    x = x[conf.ravel() > conf_thres]
+    n = x.shape[0]  # number of boxes    
+    if not n:  # no boxes
+      continue    
+    # a very small mismatch (1%) happening here in comparison to torch. 
+    x = x[np.argsort(-x[:, 4])]
+    
+    c = x[:, 5:6] * (0 if agnostic else max_wh) 
+    boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+    output.append((boxes,scores))
+  return output
   
   
 #this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
