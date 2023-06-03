@@ -68,8 +68,6 @@ jobs:
      - name: Install Dependencies
        run: pip install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
      - name: Run Pytest
-       run: python3.9 -m pytest -s -v -n=auto test/
-     - name: Run Pytest2
        run: python3 -m pytest -s -v -n=auto test/
 
   testimagenet:
