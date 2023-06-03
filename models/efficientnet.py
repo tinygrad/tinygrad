@@ -144,9 +144,9 @@ class EfficientNet:
       7: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b7-dcc49843.pth"
     }
 
-    from torch.hub import load_state_dict_from_url
-    b0 = load_state_dict_from_url(model_urls[self.number], progress=True)
-    #b0 = torch_load(fetch_as_file(model_urls[self.number]))
+    from extra.utils import fetch_as_file
+    from tinygrad.state import torch_load
+    b0 = torch_load(fetch_as_file(model_urls[self.number]))
     for k,v in b0.items():
       if k.endswith("num_batches_tracked"): continue
       for cat in ['_conv_head', '_conv_stem', '_depthwise_conv', '_expand_conv', '_fc', '_project_conv', '_se_reduce', '_se_expand']:
@@ -157,11 +157,11 @@ class EfficientNet:
       #print(k, v.shape)
       mv = get_child(self, k)
       vnp = v #.astype(np.float32)
-      vnp = vnp if k != '_fc' else vnp.T
+      vnp = vnp if k != '_fc' else vnp.cpu().T
       #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
-        mv.assign(vnp.numpy())
+        mv.assign(vnp.to(mv.device))
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 

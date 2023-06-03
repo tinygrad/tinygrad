@@ -2,7 +2,8 @@
 import io
 import unittest
 from tinygrad.helpers import getenv
-from extra.utils import fetch, fake_torch_load_zipped
+from extra.utils import fetch
+from tinygrad.state import torch_load
 from PIL import Image
 
 @unittest.skipIf(getenv("CI", "") != "", "no internet tests in CI")
@@ -30,10 +31,10 @@ class TestUtils(unittest.TestCase):
         super(LayerWithOffset, self).__init__()
         d = torch.randn(16)
         self.param1 = torch.nn.Parameter(
-          d.as_strided([2, 2], [2, 3], storage_offset=5)
+          d.as_strided([2, 2], [1, 2], storage_offset=5)
         )
         self.param2 = torch.nn.Parameter(
-          d.as_strided([2, 2], [2, 3], storage_offset=4)
+          d.as_strided([2, 2], [1, 2], storage_offset=4)
         )
 
     for isfloat16 in [True, False]:
@@ -47,7 +48,7 @@ class TestUtils(unittest.TestCase):
       with tempfile.TemporaryDirectory() as tmpdirname:
         path = tmpdirname + '/testloadmodel.pth'
         torch.save(model.state_dict(), path)
-        model2 = fake_torch_load_zipped(path)
+        model2 = torch_load(path)
 
       for name, a in model.state_dict().items():
         b = model2[name]
