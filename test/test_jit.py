@@ -75,11 +75,9 @@ class TestJit(unittest.TestCase):
     def add(a, b): return (a+b).realize()
     for i in range(20):
       if i < 10:
-        a = Tensor.randn(10, 10)
-        b = Tensor.randn(10, 10)
+        a,b = Tensor.randn(10, 10),Tensor.randn(10, 10)
       else:
-        a = Tensor.randn(20, 20)
-        b = Tensor.randn(20, 20)
+        a,b = Tensor.randn(20, 20),Tensor.randn(20, 20)
       d = add(a,b)
       np.testing.assert_equal(d.numpy(), a.numpy()+b.numpy())
 

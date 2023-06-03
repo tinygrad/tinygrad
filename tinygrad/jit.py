@@ -19,6 +19,8 @@ class TinyJit:
 
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in ["GPU", "CLANG", "METAL", "CUDA"]: return self.fxn(*args, **kwargs)  # only jit on the GPU codegen
+
+    # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
     input_rawbuffers: Dict[Union[int, str], RawBuffer] = {cast(Union[int, str], k):cast(RawBuffer, v.realize().lazydata.realized) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}
     specialised_key = f'{hash("".join([str(input_rawbuffers[i].size) for i,k in input_rawbuffers.items()]))}'
     #initiate call count and jit cache for different instances
@@ -27,7 +29,6 @@ class TinyJit:
     return self._jit_call(specialised_key, input_rawbuffers, *args, **kwargs)
 
   def _jit_call(self, specialised_key, input_rawbuffers, *args, **kwargs) -> Any:
-    # NOTE: this cast is needed since although we know realize will create a ".realized" DeviceBuffer, the type checker doesn't
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
     if self.cnt[specialised_key] >= 2:
