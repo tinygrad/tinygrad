@@ -8,6 +8,8 @@ from datasets import fetch_mnist
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()
+X_train = X_train.astype(np.float16)
+X_test = X_test.astype(np.float16)
 
 # create a model
 class TinyBobNet:
@@ -19,7 +21,7 @@ class TinyBobNet:
     return optim.get_parameters(self)
 
   def forward(self, x):
-    return x.half().dot(self.l1).relu().dot(self.l2).log_softmax()
+    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
 
 # create a model with a conv layer
 class TinyConvNet:
@@ -41,7 +43,7 @@ class TinyConvNet:
     return optim.get_parameters(self)
 
   def forward(self, x:Tensor):
-    x = x.half().reshape(shape=(-1, 1, 28, 28)) # hacks
+    x = x.reshape(shape=(-1, 1, 28, 28)) # hacks
     x = self.bn1(x.conv2d(self.c1)).relu().max_pool2d()
     x = self.bn2(x.conv2d(self.c2)).relu().max_pool2d()
     x = x.reshape(shape=[x.shape[0], -1])

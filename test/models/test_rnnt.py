@@ -29,17 +29,17 @@ class TestRNNT(unittest.TestCase):
 
     # test initial hidden
     for _ in range(3):
-      x = Tensor.randn(SQ, BS, IS).half()
+      x = Tensor.randn(SQ, BS, IS)
       z, hc = layer(x, None)
-      torch_x = torch.tensor(x.cpu().numpy())
+      torch_x = torch.tensor(x.numpy())
       torch_z, torch_hc = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
     # test passing hidden
     for _ in range(3):
-      x = Tensor.randn(SQ, BS, IS).half()
+      x = Tensor.randn(SQ, BS, IS)
       z, hc = layer(x, hc)
-      torch_x = torch.tensor(x.cpu().numpy())
+      torch_x = torch.tensor(x.numpy())
       torch_z, torch_hc = torch_layer(torch_x, torch_hc)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
