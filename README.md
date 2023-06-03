@@ -1,13 +1,12 @@
-# tinygrad
 <div align="center">
 
 [![logo](https://raw.githubusercontent.com/geohot/tinygrad/master/docs/logo.png)](https://tinygrad.org)
 
-tinygrad: Something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd)
+tinygrad: For when you want something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
 <h3>
 
-[tiny corp](https://tinygrad.org) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md)
+[Homepage](https://github.com/geohot/tinygrad) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
 
 </h3>
 
@@ -18,8 +17,6 @@ tinygrad: Something between [PyTorch](https://github.com/pytorch/pytorch) and [k
 </div>
 
 ---
-
-For something in between a [pytorch](https://github.com/pytorch/pytorch) and a [karpathy/micrograd](https://github.com/karpathy/micrograd)
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
