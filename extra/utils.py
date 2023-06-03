@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import tempfile, platform
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import Device
@@ -46,7 +46,7 @@ def my_unpickle(fb0):
       if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {size}")
       ret = None
     else:
-      ret = Tensor.empty(*size, dtype=storage_type)
+      ret = Tensor.empty(*size, dtype=dtypes.from_np(storage_type))
     key_prelookup[obj_key].append((storage_type, obj_size, ret, size, stride, storage_offset))
     return ret
 
