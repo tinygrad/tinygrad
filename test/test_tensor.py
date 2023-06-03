@@ -14,6 +14,13 @@ W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
+  def test_zerodim_initialization(self):
+    a = Tensor(55)
+    b = Tensor(3.14)
+
+    self.assertEqual(a.shape, ())
+    self.assertEqual(b.shape, ())
+
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
     b = Tensor.randn(10,10)
@@ -22,20 +29,6 @@ class TestTinygrad(unittest.TestCase):
     a += b
     val2 = a.numpy()
     np.testing.assert_allclose(val1, val2)
-
-  def test_slicing(self):
-    x = Tensor.randn(10,10)
-    slices = [0,1,9,-1,-10,None] + [slice(s,e) for s,e in itertools.combinations([0,1,-1,None], r=2)] + [slice(9,11), slice(-11,-9)]
-    fmt = lambda s: f'{s.start}:{s.stop}' if isinstance(s, slice) else str(s)
-    for s in list(itertools.product(slices, slices)) + [(None,0,None,0,None), (slice(0,2),None,None,slice(2,4),None,None)]:
-      np.testing.assert_equal(x.numpy()[s], x[s].numpy(), f'Test failed for slice x[{",".join(fmt(x) for x in s)}]')
-    for s in [-11,10]:
-      with self.assertRaises(IndexError):
-        x[s]
-    with self.assertRaises(AssertionError):
-      x[::2]
-    with self.assertRaises(AssertionError):
-      x[0,0,0]
 
   def test_backward_pass(self):
     def test_tinygrad():

@@ -1,10 +1,11 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 from functools import partialmethod, reduce
-from itertools import accumulate
+from itertools import accumulate, filterfalse
+import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import argfix, get_canonical_device_name, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
 from math import ceil, pi, prod, sqrt
 from tinygrad.lazy import Device, LazyBuffer
 
@@ -52,8 +53,8 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
-    device = get_canonical_device_name(device)
+  def __init__(self, data:Union[int, float, list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+    device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
 
@@ -63,7 +64,7 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
-    if data.__class__ == list:
+    if data.__class__ in {int, float, list}:
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
     elif data.__class__ == LazyBuffer and data.device != device:
       # TODO: this has to realize, it shouldn't have to
@@ -79,7 +80,6 @@ class Tensor:
       self.lazydata: LazyBuffer = data
       return
     if data.__class__ == LazyNumpyArray:
-      data = data if data.shape else data.reshape((1,))
       self.lazydata: LazyBuffer = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
       return
     raise RuntimeError(f"can't create Tensor from {data}")
@@ -126,27 +126,23 @@ class Tensor:
   def to_(self, device:str):
     assert self.lazydata.realized is None
     self.lazydata.device = device
-    if self.grad:
-      self.grad.lazydata.device = device
+    if self.grad: self.grad.to_(device)
 
   def to(self, device:str):
     ret = Tensor(self.lazydata, device)
-    if self.grad:
-      ret.grad = self.grad.to(device)
+    if self.grad: ret.grad = self.grad.to(device)
     return ret
 
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[int, ...], fill_value, **kwargs):
-    new_shape = argfix(shape)
-    return Tensor([fill_value], **kwargs).reshape([1]*len(new_shape)).expand(new_shape).contiguous()
+  def full(shape:Tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape).contiguous()
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor.full(shape, 0, **kwargs)
+  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor.full(shape, 1, **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -161,7 +157,7 @@ class Tensor:
   @staticmethod
   def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
     # NOTE: we do the reshape to fix interpreted buffers
-    return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, device), dtype=dtype, device=device, **kwargs).reshape(*shape)
+    return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device)), dtype=dtype, device=device, **kwargs).reshape(*shape)
 
   @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
@@ -219,11 +215,11 @@ class Tensor:
     return _deepwalk(self, set(), [])
 
   def backward(self):
-    assert self.shape == (1,)
+    assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor([1], device=self.device, requires_grad=False)
+    self.grad = Tensor(1, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       if not any(x.requires_grad for x in t0._ctx.parents):
@@ -242,7 +238,7 @@ class Tensor:
   # ***** movement mlops *****
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
-    assert len(new_shape) > 0 and all(new_shape), f"zeros not allowed in shape {new_shape}"
+    assert 0 not in new_shape, f"zeros not allowed in shape {new_shape}"
     return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape]))
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
@@ -258,36 +254,70 @@ class Tensor:
     padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
     return self.pad(padding).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
 
-  # Tensors mostly follow the normal python indexing / slicing behavior for sequences
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
   # - A slice i:j returns the elements with indices in [i, j)
-  #   - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
-  #   - Negative values for i and j are taken relative to the end of the sequence
-  #   - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
+  #    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
+  #    - Negative values for i and j are taken relative to the end of the sequence
+  #    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
   # - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
-  # - Empty slices are not allowed
-  # - Strides other than 1 are not allowed
+  # - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
+  # - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
+  # - Strides > 1 and < 0 are now allowed!:
+  #    - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
+  #    - Idea of stride < 0 support:
+  #        - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below.
+  #    - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
+  #        - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
+  #        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
+  #          is possible.
+  #        - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
   def __getitem__(self, val):
-    def slcfix(i, sz, default): return default if i is None else max(0, min(sz, sz+i if i < 0 else i))  # Fix negative idxs, clamp to [0,N]
-    new_slice, new_shape = [], []
-    val = [val] if val.__class__ not in {list, tuple} else val
-    assert sum([s is not None for s in val]) <= len(self.shape)
-    assert all([s.step is None or s.step == 1 for s in val if s.__class__ == slice])
-    for i,(sz,s) in enumerate(zip(self.shape, [v for v in val if v is not None])):  # Slicing only depends on ints + slices
-      if s.__class__ == int and not (-sz <= s < sz):
-        raise IndexError(f"index {s} is out of bounds for dimension {i} with size {sz}")
-      new_slice.append((s%sz, s%sz+1) if s.__class__ == int else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz)))
-    for s,sz in zip(val, [self.shape[i-1] for i in accumulate([int(s is not None) for s in val])]):  # Shape depends on slices + positions of Nones
-      if s.__class__ != int:
-        new_shape.append(1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0))
-    new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
-    new_slice += [(0,self.shape[i]) for i in range(len(new_slice), len(self.shape))]
-    return self.slice(new_slice).reshape(new_shape if len(new_shape) else (1,))
+    def normalize_int(e, i, dim_sz):
+      if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
+      raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
+    val = list(val) if isinstance(val, tuple) else [val]
+    if (num_slices := sum(isinstance(v, (slice, int)) for v in val)) > len(self.shape):
+      raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    orig_slices = list(val) + [slice(None)] * (len(self.shape) - num_slices)
+    valid_slices = list(filterfalse(lambda x: x is None, orig_slices))
+    valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+    start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
+    new_slice = tuple((s, e)  if st > 0 else (e+1, s+1) for s, e, st in zip(start, stop, strides))
+    new_shape = tuple(e - s for s, e in new_slice)
+    # Shrink
+    sliced_tensor = self.shrink(new_slice)
+    # Flip
+    if (flip_axes := tuple(i for i, s in enumerate(strides) if s < 0)):
+      sliced_tensor = sliced_tensor.flip(axis=flip_axes)
+    if any(s > 1 or s < 0 for s in strides):
+      # normalize if negative strides
+      strides = tuple(abs(s) for s in strides)
+      def num_zeros(step, dim_sz): return 0 if step == 1 or (y := dim_sz % step) == 0 else (step - y)
+      # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
+      paddings = tuple((0, num_zeros(s, dim_sz)) for s, dim_sz in zip(strides, sliced_tensor.shape))
+      padded_tensor = sliced_tensor.pad(paddings)
+      # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
+      new_shape = reduce(operator.add, [[sh // s, s] for sh, s in zip(padded_tensor.shape, strides)], [])  # type: ignore
+      reshaped_tensor = padded_tensor.reshape(new_shape)
+      # Shrink: do [:, 0]
+      new_shape = new_shape[::2]
+      final_slice = reduce(operator.add, (((0, sh), (0, 1)) for sh in new_shape), ())
+      sliced_tensor = reshaped_tensor.shrink(final_slice)
+    final_shape = []
+    it_shape = iter(new_shape)
+    for i in orig_slices:
+      if isinstance(i, (int, slice)):
+        dim_shape = next(it_shape)
+        if isinstance(i, slice): final_shape.append(dim_shape)
+      else: # i is None
+        final_shape.append(1)
+    return sliced_tensor.reshape(tuple(final_shape))  # Reshape
 
   def cat(self, *args, dim=0):
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all([len(y.shape) == len(self.shape) and all([y.shape[i] == s for i,s in enumerate(self.shape) if i != dim]) for y in args])
     catargs = [self] + list(args)
+    assert all(len(t.shape) != 0 for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shape_cumsum = [0, *accumulate([y.shape[dim] for y in catargs])]
     slc = [[(0, s) for s in self.shape] for _ in catargs]
     for s,k in zip(slc, shape_cumsum):
@@ -341,7 +371,7 @@ class Tensor:
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = [self.shape[i] for i in range(len(self.shape)) if i not in axis_]
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else self.shape[i] for i in range(len(self.shape))]))
-    return ret if keepdim else ret.reshape(shape=[1] if shape == [] else shape)
+    return ret if keepdim else ret.reshape(shape=shape)
 
   def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
   def max(self, axis=None, keepdim=False): return self._reduce(mlops.Max, axis, keepdim)
@@ -351,7 +381,7 @@ class Tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
     return out * (prod(out.shape)/prod(self.shape))
   def std(self, axis=None, keepdim=False, correction=1):
-    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)                           
+    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
     return (square_sum / (prod(self.shape)/prod(square_sum.shape)-correction)).sqrt()
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -405,7 +435,7 @@ class Tensor:
   def avg_pool2d(self, kernel_size=(2,2), stride=None): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
 
-  def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
+  def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
@@ -414,7 +444,7 @@ class Tensor:
       x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
       x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
       x = x.shrink(((0,x.shape[0]), (0,x.shape[1]), *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
-    padding = flatten(((k-1)*d-p,(k-1)*d-p) for k,p,d in reversed(list(zip(HW, make_pair(padding, len(HW)), make_pair(dilation, len(HW))))))
+    padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
@@ -439,6 +469,7 @@ class Tensor:
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
 
   def dot(self, w:Tensor) -> Tensor:
+    if (n1:=len(self.shape))*(n2:=len(w.shape)) == 0: raise RuntimeError(f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D")
     x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
     w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
     r = (x*w).sum(-1)
@@ -485,7 +516,7 @@ class Tensor:
   # ***** broadcasted binary mlops *****
 
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    x, y = self, Tensor([other], device=self.device, requires_grad=False) if not other.__class__ == Tensor else other
+    x, y = self, Tensor(other, device=self.device, requires_grad=False) if not other.__class__ == Tensor else other
     if reverse: x, y = y, x
     if x.shape == y.shape: return fxn.apply(x, y)
 
@@ -575,6 +606,7 @@ class Tensor:
   def ndim(self) -> int: return len(self.shape)
   def numel(self) -> int: return prod(self.shape)
   def element_size(self) -> int: return self.dtype.itemsize
+  def nbytes(self) -> int: return self.numel() * self.element_size()
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices

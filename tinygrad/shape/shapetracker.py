@@ -91,13 +91,12 @@ class View:
 
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
-  strides = [1]
+  strides = [1] if shape else []
   for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
   return tuple([st if s != 1 else 0 for st, s in zip(strides, shape)])
 
 @functools.lru_cache(maxsize=None)
 def view_from_shape(shape:Tuple[int, ...]) -> View:
-  assert len(shape) != 0
   assert all([x.__class__ == int for x in shape])
   return View(tuple(shape), strides_for_shape(shape))
 
