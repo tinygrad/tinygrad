@@ -1,4 +1,4 @@
-import math, io
+import math
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d
@@ -134,7 +134,6 @@ class EfficientNet:
   def load_from_pretrained(self):
     model_urls = {
       0: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth",
-      #0: "https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth",
       1: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b1-f1951068.pth",
       2: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b2-8bb594d6.pth",
       3: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b3-5fb5a3c3.pth",

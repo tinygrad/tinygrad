@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, functools
+import time
 from weakref import KeyedRef, ref
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
@@ -42,6 +43,13 @@ class ContextVar:
   def value(self): return ContextVar.ctx_stack[-1][self.key] if self.key in ContextVar.ctx_stack[-1] else self.initial_value
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
+
+class Timing(object):
+  def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
+  def __enter__(self): self.st = time.perf_counter_ns()
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.et = time.perf_counter_ns() - self.st
+    if self.enabled: print(f"{self.prefix}{self.et*1e-6:.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
 # **** tinygrad now supports dtypes! *****
 

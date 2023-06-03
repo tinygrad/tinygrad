@@ -18,7 +18,6 @@ def stop_profile(pr, sort='cumtime'):
   ps.strip_dirs()
   ps.sort_stats(sort)
   ps.print_stats(0.2)
-  pr.dump_stats('profile.prof')
 
 class TestConvSpeed(unittest.TestCase):
 

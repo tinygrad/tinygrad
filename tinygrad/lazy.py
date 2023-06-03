@@ -136,8 +136,8 @@ class LazyBuffer:
     return self
 
   @staticmethod
-  def loadop(op, shape, dtype, device, arg=None) -> LazyBuffer:
-    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple(), arg), dtype)
+  def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
+    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
@@ -359,7 +359,7 @@ MOVEMENT_OPS_DISPATCHER = {
 
 def _realize_fromcpu(buffer: LazyBuffer) -> None:
   if DEBUG >= 4: print(f"copying {buffer.op.arg.shape}:{dtypes.from_np(buffer.op.arg.dtype)} -> {buffer.device}")
-  buffer.realized = Device[buffer.device].buffer.fromCPU(buffer.op.arg(), **buffer._device_extra_args())
+  buffer.realized = Device[buffer.device].buffer.fromCPU(buffer.op.arg, **buffer._device_extra_args())
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized

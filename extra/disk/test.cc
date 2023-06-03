@@ -10,11 +10,19 @@
 #include <thread>
 #include <chrono>
 
+//#define FN "/dev/nvme0n1"
+#define FN "../../weights/LLaMA/7B/consolidated.00.pth"
+
 #define SZ (unsigned long long)(512*1024*1024)
 #define CNT 10LL
 
 void test_read() {
-  int f = open("/dev/nvme0n1", O_RDONLY|O_DIRECT);
+#ifdef O_DIRECT
+  int f = open(FN, O_RDONLY|O_DIRECT);
+#else
+  int f = open(FN, O_RDONLY);
+  //fcntl(f, F_NOCACHE, 1);
+#endif
   printf("open %d\n", f);
 
   /*void *buf = malloc(CNT*SZ);
@@ -42,7 +50,11 @@ void test_read() {
 }
 
 void test_mmap() {
-  int f = open("/dev/nvme0n1", O_RDONLY|O_DIRECT);
+#ifdef O_DIRECT
+  int f = open(FN, O_RDONLY|O_DIRECT);
+#else
+  int f = open(FN, O_RDONLY);
+#endif
   printf("open %d\n", f);
 
   void *dat = mmap(NULL, SZ*CNT, PROT_READ, MAP_PRIVATE, f, 0);
@@ -62,10 +74,13 @@ void test_mmap() {
 }
 
 int main() {
-  system("sync; echo 1 > /proc/sys/vm/drop_caches");
-  test_mmap();
+  //system("sync; echo 1 > /proc/sys/vm/drop_caches");
+  //system("sudo purge");
+  //test_mmap();
 
   //system("sync; echo 1 > /proc/sys/vm/drop_caches");
-  //test_read();
+  system("sudo purge");
+  test_read();
+  test_read();
 }
 
