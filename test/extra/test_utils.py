@@ -20,6 +20,7 @@ class TestFetch(unittest.TestCase):
     pimg = Image.open(io.BytesIO(img))
     assert pimg.size == (705, 1024)
 
+@unittest.skip("use torch_load in state")
 class TestUtils(unittest.TestCase):
   def test_fake_torch_load_zipped(self):
     import torch
