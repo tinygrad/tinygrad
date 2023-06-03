@@ -17,12 +17,12 @@ class TinyJit:
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
 
-  def _get_instance_key(self, *args, **kwargs):
+  def _get_instance_key(self):
     return f'{id(self)}'
 
   def __call__(self, *args, **kwargs) -> Any:
     if Device.DEFAULT not in ["GPU", "CLANG", "METAL", "CUDA"]: return self.fxn(*args, **kwargs)  # only jit on the GPU codegen
-    instance_key = self._get_instance_key(*args, **kwargs)
+    instance_key = self._get_instance_key()
     #initiate call count and jit cache for different instances
     if instance_key not in self.jit_cache: self.jit_cache[instance_key] = []
     if instance_key not in self.cnt: self.cnt[instance_key] = 0
