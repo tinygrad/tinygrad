@@ -40,7 +40,8 @@ def torch_load(fn:str):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in offsets: return None
-    ret = t[offsets[storage[2]]:offsets[storage[2]]+prod(size)].cast(storage[1])
+    byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
+    ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
 
     # 6 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
