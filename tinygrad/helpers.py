@@ -57,14 +57,6 @@ class ImageDType(DType):
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-class LazyNumpyArray:
-  def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
-  def __call__(self) -> np.ndarray: return np.ascontiguousarray(self.fxn(self) if callable(self.fxn) else self.fxn).reshape(self.shape).astype(self.dtype)
-  def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
-  def copy(self): return self if callable(self.fxn) else LazyNumpyArray(self.fxn.copy(), self.shape, self.dtype)
-  def astype(self, typ): return LazyNumpyArray(self.fxn, self.shape, typ)
-
-
 @dataclass
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool

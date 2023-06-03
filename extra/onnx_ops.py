@@ -71,7 +71,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0.):
   if pads is None: return X
   np_pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   zero_padded = X.pad(tuple(np_pads))
-  constant_padder = Tensor(np.pad(np.zeros(X.shape), np_pads, constant_values=constant_value), dtype=X.dtype)
+  constant_padder = Tensor(np.pad(np.zeros(X.shape, dtype=np.float32), np_pads, constant_values=constant_value), dtype=X.dtype)
   return zero_padded + constant_padder
 
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
@@ -208,7 +208,7 @@ def Not(x:Tensor): return Where((x==1), Tensor.zeros(*x.shape), Tensor.ones(*x.s
 def ConstantOfShape(input, value:Tensor=None):
   if value is None: value=Tensor([0.0])
   shape = [int(x) for x in safe_numpy(input)]
-  return Tensor.ones(*shape, dtype=value.dtype) * (value if input.shape !=(0,) else 1)
+  return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
 
 # this is obviously wrong, but since we don't have types, it's better than nothing
 def Cast(input, to):

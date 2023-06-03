@@ -134,7 +134,7 @@ assert len(lazyop.src) == 2
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 print(lazyop.src[0].op)
 assert lazyop.src[0].op.op == LoadOps.FROMCPU
-assert lazyop.src[0].op.arg.fxn == [2], "the arg of the FROMCPU LazyOP is the [2.]"
+assert lazyop.src[0].op.arg == [2], "the arg of the FROMCPU LazyOP is the [2.]"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
