@@ -103,7 +103,7 @@ MODEL | [resnet,retinanet,unet3d,rnnt,bert,maskrcnn] | what models to use
 Variable | Possible Value(s) | Description
 ---|---|---
 CNT      | [10] | the amount of times to loop the benchmark
-BACKWARD | [1]  | enable backward call
+BACKWARD | [1]  | enable backward pass
 TRAINING | [1]  | set Tensor.training
 CLCACHE  | [1]  | enable cache for OpenCL
 
@@ -112,7 +112,7 @@ CLCACHE  | [1]  | enable cache for OpenCL
 Variable | Possible Value(s) | Description
 ---|---|---
 TORCHWEIGHTS     | [1] | use torch to initialize weights
-DISABLE_BACKWARD | [1] | don't use backward operations
+DISABLE_BACKWARD | [1] | don't do backward pass
 
 ### examples/benchmark_train_efficientnet.py & examples/hlb_cifar10.py
 
