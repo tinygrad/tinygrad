@@ -19,7 +19,7 @@ def torch_load(fn:str):
       offset = myfile._orig_compress_start  # type: ignore
     return t[offset:offset+prod(size)].cast(storage[1]).reshape(size)
 
-  intercept = {"HalfStorage": dtypes.float16, "_rebuild_tensor_v2": _rebuild_tensor_v2}
+  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2}
   class TorchPickle(pickle.Unpickler):
     def find_class(self, module, name):
       if module.startswith("torch"): return intercept[name]

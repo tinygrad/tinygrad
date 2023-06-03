@@ -2,7 +2,9 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, importlib, inspect, functools, pathlib
 from weakref import ref
-from tinygrad.helpers import LightWeakSet, LightWeakValueDictionary, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
+
+import numpy as np
+from tinygrad.helpers import LightWeakSet, LightWeakValueDictionary, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from math import prod
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
@@ -65,7 +67,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   st = shape if shape.__class__ == ShapeTracker else ShapeTracker(tuple(shape))
 
   # fromcpu aren't cached
-  if optype == LoadOps and op.op in {LoadOps.FROMCPU, LoadOps.EMPTY}: return LazyBuffer(device, st, optype, op, dtype)
+  if optype == LoadOps and op.op in {LoadOps.FROMCPU, LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
 
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 
@@ -102,10 +104,10 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if not self.realized:
       # get real ops first
-      if self.optype in REALIZE_DISPATCHER:
-        self.op = REALIZE_DISPATCHER[self.optype](self)
-      elif self.op.op in REALIZE_DISPATCHER:
-        REALIZE_DISPATCHER[self.op.op](self)
+      if self.op.op in REALIZE_DISPATCHER:
+        self.op = REALIZE_DISPATCHER[self.op.op](self)
+      elif self.optype in REALIZE_DISPATCHER:
+        REALIZE_DISPATCHER[self.optype](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.buffers: x.realize()
@@ -133,18 +135,13 @@ class LazyBuffer:
       del self.op
     return self
 
-  # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
-  def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
-    return create_lazybuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x), dtypes.from_np(x.dtype))
-
-  @staticmethod
-  def empty(shape, dtype, device) -> LazyBuffer:
-    return create_lazybuffer(device, shape, LoadOps, LazyOp(LoadOps.EMPTY, tuple()), dtype)
+  def loadop(op, shape, dtype, device, arg=None) -> LazyBuffer:
+    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple(), arg), dtype)
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
-    return create_lazybuffer(self.device, (1,), LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), LazyNumpyArray([val], (1,), self.dtype.np)), self.dtype) \
+    return self.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val) \
       .reshape_op((1,)*len(self.shape)).expand_op(self.shape)
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
@@ -361,12 +358,8 @@ MOVEMENT_OPS_DISPATCHER = {
 }
 
 def _realize_fromcpu(buffer: LazyBuffer) -> None:
-  if prod(buffer.op.arg.shape) == 1 and hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
-    buffer.realized = RawConst(1, dtypes.from_np(buffer.op.arg.dtype), buffer.op.arg().flatten()[0])
-  else:
-    if DEBUG >= 4: print(f"copying {buffer.op.arg.shape}:{dtypes.from_np(buffer.op.arg.dtype)} -> {buffer.device}")
-    buffer.realized = Device[buffer.device].buffer.fromCPU(buffer.op.arg(), **buffer._device_extra_args())
-
+  if DEBUG >= 4: print(f"copying {buffer.op.arg.shape}:{dtypes.from_np(buffer.op.arg.dtype)} -> {buffer.device}")
+  buffer.realized = Device[buffer.device].buffer.fromCPU(buffer.op.arg(), **buffer._device_extra_args())
 
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized
@@ -384,11 +377,23 @@ def _realize_custom(buffer: LazyBuffer) -> None:
 def _realize_empty(buffer: LazyBuffer) -> None:
   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
+def _realize_rand(buffer: LazyBuffer) -> None:
+  rng = np.random.default_rng(buffer.op.arg)
+  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=buffer.shape, dtype=buffer.dtype.np), **buffer._device_extra_args())
+        
+def _realize_const(buffer: LazyBuffer) -> None:
+  if hasattr(Device[buffer.device].codegen, 'supports_constant_folding'):
+    buffer.realized = RawConst(1, buffer.dtype, float(buffer.op.arg))
+  else:
+    buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
+
 REALIZE_DISPATCHER = {
   LoadOps.FROMCPU: _realize_fromcpu,
   LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.EMPTY: _realize_empty,
+  LoadOps.RAND: _realize_rand,
+  LoadOps.CONST: _realize_const,
   ReduceOps: _ast_reduceops,
   BinaryOps: _ast_binaryops,
 }

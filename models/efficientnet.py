@@ -1,8 +1,8 @@
-import math
+import math, io
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d
-from extra.utils import fetch, fake_torch_load, get_child
+from extra.utils import get_child
 
 class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se, track_running_stats=True):
@@ -134,6 +134,7 @@ class EfficientNet:
   def load_from_pretrained(self):
     model_urls = {
       0: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth",
+      #0: "https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth",
       1: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b1-f1951068.pth",
       2: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b2-8bb594d6.pth",
       3: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b3-5fb5a3c3.pth",
@@ -143,8 +144,9 @@ class EfficientNet:
       7: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b7-dcc49843.pth"
     }
 
-
-    b0 = fake_torch_load(fetch(model_urls[self.number]))
+    from torch.hub import load_state_dict_from_url
+    b0 = load_state_dict_from_url(model_urls[self.number], progress=True)
+    #b0 = torch_load(fetch_as_file(model_urls[self.number]))
     for k,v in b0.items():
       if k.endswith("num_batches_tracked"): continue
       for cat in ['_conv_head', '_conv_stem', '_depthwise_conv', '_expand_conv', '_fc', '_project_conv', '_se_reduce', '_se_expand']:
@@ -155,11 +157,11 @@ class EfficientNet:
       #print(k, v.shape)
       mv = get_child(self, k)
       vnp = v #.astype(np.float32)
-      vnp = vnp if k != '_fc' else vnp.transpose()
+      vnp = vnp if k != '_fc' else vnp.T
       #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
-        mv.assign(vnp)
+        mv.assign(vnp.numpy())
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 

@@ -10,8 +10,8 @@ N = 200  # has to be bigger than the cache to fail
 
 class TestAssign(unittest.TestCase):
   def test_simple_assignment(self):
-    a = Tensor.arange(N*N).reshape(N,N)
-    b = Tensor.arange(N*N).reshape(N,N)
+    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
+    b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     a.realize()
     b.realize()
     ba1 = a.lazydata.realized
@@ -23,8 +23,8 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), (np.arange(N*N)*2).reshape((N,N)))
 
   def test_permuted_assignment(self):
-    a = Tensor.arange(N*N).reshape(N,N)
-    b = Tensor.arange(N*N).reshape(N,N)
+    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
+    b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     a.realize()
     b.realize()
     ba1 = a.lazydata.realized
@@ -37,8 +37,8 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   def test_post_permuted_assignment(self):
-    a = Tensor.arange(N*N).reshape(N,N)
-    b = Tensor.arange(N*N).reshape(N,N)
+    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
+    b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     a.realize()
     b.realize()
     #GlobalCounters.cache = []

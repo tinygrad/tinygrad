@@ -5,9 +5,10 @@ from itertools import accumulate, filterfalse
 import operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, LazyNumpyArray
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from math import ceil, pi, prod, sqrt
 from tinygrad.lazy import Device, LazyBuffer
+from tinygrad.ops import LoadOps
 
 # An instantiation of the Function is the Context
 class Function:
@@ -53,7 +54,8 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, LazyBuffer, LazyNumpyArray, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+    assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
@@ -64,25 +66,21 @@ class Tensor:
 
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
-    if data.__class__ in {int, float, list}:
+    if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
-    elif data.__class__ == LazyBuffer and data.device != device:
+    elif isinstance(data, LazyBuffer) and data.device != device:
       # TODO: this has to realize, it shouldn't have to
       data = data.realize().toCPU()
 
-    # all ndarrays are lazy now
-    if data.__class__ == np.ndarray: data = LazyNumpyArray(data, data.shape, data.dtype)
-
-    # by here, it's either LazyNumpyArray or LazyBuffer
-    # TODO: it should all be LazyBuffer I think
-    if data.__class__ == LazyBuffer:
+    if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-      self.lazydata: LazyBuffer = data
-      return
-    if data.__class__ == LazyNumpyArray:
-      self.lazydata: LazyBuffer = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None else data, device)
-      return
-    raise RuntimeError(f"can't create Tensor from {data}")
+      self.lazydata = data
+    elif isinstance(data, np.ndarray):
+      self.lazydata = LazyBuffer.loadop(LoadOps.FROMCPU, data.shape, dtypes.from_np(data.dtype), device, data)
+    elif isinstance(data, (int, float)):
+      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)
+    else:
+      raise RuntimeError(f"can't create Tensor from {data}")
 
   def __repr__(self):
     return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -133,6 +131,24 @@ class Tensor:
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
+  # ***** creation llop entrypoint *****
+
+  @staticmethod
+  def _loadop(op, sz, device=Device.DEFAULT, dtype:Optional[DType]=None, arg=None, **kwargs):
+    return Tensor(LazyBuffer.loadop(op, [sz], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
+
+  @staticmethod
+  def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, prod(shape), **kwargs).reshape(shape)
+
+  _seed: int = 1337
+  @staticmethod
+  def manual_seed(seed=None): Tensor._seed = seed
+
+  @staticmethod
+  def rand(*shape, **kwargs):
+    Tensor._seed += 1
+    return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
+
   # ***** creation helper functions *****
 
   @staticmethod
@@ -145,8 +161,11 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step).cumsum() + (start - step)
+
+  @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
-    return Tensor.full(tensor.shape, fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+    return Tensor.full(tensor.shape, fill_value=fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
 
   @staticmethod
   def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
@@ -155,37 +174,19 @@ class Tensor:
   def ones_like(tensor, **kwargs): return Tensor.full_like(tensor, 1, **kwargs)
 
   @staticmethod
-  def empty(*shape, device=Device.DEFAULT, dtype:Optional[DType]=None, **kwargs):
-    # NOTE: we do the reshape to fix interpreted buffers
-    return Tensor(LazyBuffer.empty([prod(shape)], Tensor.default_type if dtype is None else dtype, Device.canonicalize(device)), dtype=dtype, device=device, **kwargs).reshape(*shape)
-
-  @staticmethod
   def eye(dim, **kwargs): return Tensor([1], **kwargs).slice(((0,dim+1),)).reshape(1, dim+1).expand(dim, dim+1).reshape(dim*(dim+1)).slice(((0,dim*dim),)).reshape(dim, dim)
-
-  # TODO: below line, remove use of numpy here and make lazy
-  # TODO: requires cumsum to remove numpy
-  @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor(np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs)
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     cond = (self != 0.0)
     return cond * input_ + (1.0 - cond) * other
 
-  # ***** (numpy) rng helper functions *****
-  # TODO: move randomness generation out of numpy
-
-  _rng: ClassVar[np.random.Generator] = np.random.default_rng()
-  @staticmethod
-  def manual_seed(seed=None): Tensor._rng = np.random.default_rng(seed)
-
-  @staticmethod
-  def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
-
-  # TODO: replace with a transformation from uniform -> gaussian
-  @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
-
   # ***** rng hlops *****
+
+  @staticmethod
+  def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+    # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
+    src = Tensor.rand(2, *shape, **kwargs)
+    return src[0].mul(2*pi).cos().mul(src[1].log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
 
   @staticmethod
   def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
@@ -200,8 +201,8 @@ class Tensor:
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
-    bound = sqrt(3.0) * sqrt(2.0 / (1 + a ** 2)) / sqrt(shape[1] * prod(shape[2:]))
-    return Tensor.uniform(*shape, low=-bound, high=bound)
+    bound = sqrt(3.0) * sqrt(2.0 / (1 + a ** 2)) / sqrt(prod(shape[1:]))
+    return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
@@ -474,6 +475,9 @@ class Tensor:
     w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
     r = (x*w).sum(-1)
     return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
+
+  # TODO: make this work for n-dimensional inputs
+  def cumsum(self): return self.reshape(1, 1, 1, self.shape[0]).conv2d(Tensor.ones(1, 1, 1, self.shape[0]), padding=(self.shape[0] - 1, 0, 0, 0)).flatten()
 
   # ***** mlops (unary) *****
 
