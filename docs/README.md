@@ -23,6 +23,12 @@ Or if you want to jump right in to how tinygrad works, you can read the [abstrac
 
 Or if you want to see some examples, you can look at the examples in the [examples](/examples) directory.
 
+## Resources
+
+### Community
+
+[![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
+
 ## Contributing
 
 TODO: link/add contributing guide
