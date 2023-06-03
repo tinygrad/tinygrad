@@ -6,8 +6,6 @@ Here you will find documentation for tinygrad, as well as some examples and tuto
 
 ### Installation
 
-Installing tinygrad is super simple!
-
 ```sh
 git clone https://github.com/geohot/tinygrad.git
 cd tinygrad
@@ -23,7 +21,11 @@ Or if you want to jump right in to how tinygrad works, you can read the [abstrac
 
 Or if you want to see some examples, you can look at the examples in the [examples](/examples) directory.
 
-Or if you just want to see what tinygrad can do, check out the [showcase](/docs/showcase.md).
+Or if you just want to see some of the things tinygrad can do, check out the [showcase](/docs/showcase.md).
+
+## API
+
+This is currently a big work in progress.
 
 ## Resources
 
@@ -33,12 +35,6 @@ Or if you just want to see what tinygrad can do, check out the [showcase](/docs/
 
 ## Contributing
 
-Some basic contributing guidelines can be found below:
+The documentation mainly follows the core contributing guidelines in the [README.md](/README.md).
 
-- Bug fixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
-- If you don't understand the code you are changing, don't change it!
-- All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
-- Features are welcome, but you must add tests!
-- Improving test coverage is great, with reliable non-brittle tests.
-
-Additional contributing guidelines and some things you should follow can be found in [contributing.md](/docs/contributing.md).
+Additionally, we always welcome documentation contributions, especially for features that are currently under documented.
