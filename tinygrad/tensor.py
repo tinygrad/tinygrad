@@ -128,8 +128,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
-    return Tensor.full(tensor.shape, fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
+  def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs): return Tensor.full(tensor.shape, fill_value, dtype=tensor.dtype if dtype is None else dtype, **kwargs)
 
   @staticmethod
   def zeros_like(tensor, **kwargs): return Tensor.full_like(tensor, 0, **kwargs)
@@ -164,11 +163,13 @@ class Tensor:
   @staticmethod
   def rand(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.random(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
 
-  # TODO: replace with a transformation from uniform -> gaussian
-  @staticmethod
-  def randn(*shape, **kwargs) -> Tensor: return Tensor(LazyNumpyArray(lambda lna: Tensor._rng.standard_normal(size=lna.shape, dtype=lna.dtype), shape, np.float32), **kwargs)
-
   # ***** rng hlops *****
+
+  @staticmethod
+  def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+    # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
+    src = Tensor.rand(2, *shape, **kwargs)
+    return src[0].mul(2*math.pi).cos().mul(src[1].log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
 
   @staticmethod
   def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor: return ((high-low) * Tensor.rand(*shape, **kwargs)) + low
@@ -184,7 +185,7 @@ class Tensor:
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
     bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(shape[1:]))
-    return Tensor.uniform(*shape, low=-bound, high=bound)
+    return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
