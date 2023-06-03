@@ -72,11 +72,14 @@ class Tensor:
     if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-    elif isinstance(data, np.ndarray):
+      return
+    if isinstance(data, np.ndarray):
       # TODO: create CPUBuffer directly
       self.lazydata = LazyBuffer.loadop(LoadOps.FROMCPU, data.shape, dtypes.from_np(data.dtype), device, data)
-    elif isinstance(data, (int, float)):
+      return
+    if isinstance(data, (int, float)):
       self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)
+      return
     else:
       raise RuntimeError(f"can't create Tensor from {data}")
 

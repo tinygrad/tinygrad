@@ -6,9 +6,10 @@ from weakref import ref
 import numpy as np
 from tinygrad.helpers import LightWeakSet, LightWeakValueDictionary, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from math import prod
+from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
-from tinygrad.runtime.lib import RawConst, RawBuffer
+from tinygrad.runtime.lib import RawBufferMapped, RawConst, RawBuffer
 from tinygrad.graph import log_op, GRAPH
 
 # lazy can recurse a lot
@@ -105,9 +106,9 @@ class LazyBuffer:
     if not self.realized:
       # get real ops first
       if self.op.op in REALIZE_DISPATCHER:
-        self.op = REALIZE_DISPATCHER[self.op.op](self)
+        REALIZE_DISPATCHER[self.op.op](self)
       elif self.optype in REALIZE_DISPATCHER:
-        REALIZE_DISPATCHER[self.optype](self)
+        self.op = REALIZE_DISPATCHER[self.optype](self)
       # run the ast if we still have to, and log the op
       if not self.realized:
         for x in self.op.buffers: x.realize()
@@ -374,6 +375,15 @@ def _realize_custom(buffer: LazyBuffer) -> None:
   # this needs to immediately realize
   buffer.realized = buffer.op.arg(buffer, *[x.realize() for x in buffer.op.src])
 
+def _realize_from(buffer: LazyBuffer) -> None:
+  rawbuf = buffer.op.src[0].realize()
+  # TODO: make this generic
+  if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
+    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+    rawbuf.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
+  else:
+    buffer.realized = Device[buffer.device].buffer.fromCPU(rawbuf.toCPU(), **buffer._device_extra_args())
+
 def _realize_empty(buffer: LazyBuffer) -> None:
   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
@@ -391,6 +401,7 @@ REALIZE_DISPATCHER = {
   LoadOps.FROMCPU: _realize_fromcpu,
   LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
+  LoadOps.FROM: _realize_from,
   LoadOps.EMPTY: _realize_empty,
   LoadOps.RAND: _realize_rand,
   LoadOps.CONST: _realize_const,
