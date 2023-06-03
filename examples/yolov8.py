@@ -10,7 +10,7 @@ import torch
 
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
-#the upsampling class has been taken from this pull request by dc-dc-dc. Now 2 models use upsampling. (retinet and this)
+#the upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2 models use upsampling. (retinet and this)
 
 
 # UTIL FUNCTIONS
@@ -44,6 +44,79 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
   return p
 
+# post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
+#Saving --> plotting function - write results. 
+#pre_process --> image process
+
+def clip_boxes(boxes, shape):
+  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
+  boxes_np[..., [0, 2]] = np.clip(boxes_np[..., [0, 2]], 0, shape[1])  # x1, x2
+  boxes_np[..., [1, 3]] = np.clip(boxes_np[..., [1, 3]], 0, shape[0])  # y1, y2
+  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
+
+def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
+  gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
+  pad = ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2)
+  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
+  boxes_np[..., [0, 2]] -= pad[0]
+  boxes_np[..., [1, 3]] -= pad[1]
+  boxes_np[..., :4] /= gain
+  boxes_np = clip_boxes(boxes_np, img0_shape)
+  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
+
+def xywh2xyxy(x):
+  x_np = x.numpy() if isinstance(x, Tensor) else x
+  xy = x_np[..., :2]  # center x, y
+  wh = x_np[..., 2:4]  # width, height
+  xy1 = xy - wh / 2  # top left x, y
+  xy2 = xy + wh / 2  # bottom right x, y
+  result = np.concatenate((xy1, xy2), axis=-1)
+  return Tensor(result) if isinstance(x, Tensor) else result
+
+
+def box_iou(box1, box2, eps=1e-7):  
+  # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
+  a1, a2 =  box1.unsqueeze(1).chunk(2, 2)
+  b1, b2 =  box2.unsqueeze(0).chunk(2, 2)
+  a1, a2 = a1.cpu().numpy(), a2.cpu().numpy()
+  b1, b2 = b1.cpu().numpy(), b2.cpu().numpy()
+  inter = (np.minimum(a2, b2) - np.maximum(a1, b1))
+  inter = np.clip(inter, 0, None).prod(2)
+  # IoU = inter / (area1 + area2 - inter)
+  return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
+    
+
+def prepare_boxes_scores_for_nms(prediction, conf_thres=0.25, agnostic=False, nc=0, max_wh=7680):
+    prediction_np = prediction.cpu().numpy()
+    print(prediction_np.shape)
+    nc = nc or (prediction_np.shape[1] - 4)  # number of classes
+    mi = 4 + nc  # mask start index
+    xc = np.amax(prediction_np[:, 4:mi], axis=1) > conf_thres    
+    output = []
+    for xi, x in enumerate(prediction_np):
+      x = x.swapaxes(0, -1)[xc[xi]]
+      if not x.shape[0]:
+        continue
+
+      box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
+      box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+
+      conf = np.max(cls, axis=1, keepdims=True)  # confidence
+      j = np.argmax(cls, axis=1, keepdims=True)  # index
+      x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
+      x = x[conf.ravel() > conf_thres]
+      n = x.shape[0]  # number of boxes    
+      if not n:  # no boxes
+        continue    
+      # a very small mismatch (1%) happening here in comparison to torch. 
+      x = x[np.argsort(-x[:, 4])]
+      
+      c = x[:, 5:6] * (0 if agnostic else max_wh) 
+      boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+      output.append((boxes,scores))
+    return output
+  
+  
 #this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
 class Upsample:
   def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
@@ -142,8 +215,7 @@ class DetectionHead():
     dbox = dist2bbox(self.dfl(box), Tensor(self.anchors).unsqueeze(0), xywh=True, dim=1) * Tensor(self.strides)
     z = dbox.cat(cls.sigmoid(), dim=1)
     return z
-             
-                           
+                                 
 class Darknet():
   def __init__(self, w, r, d): #width_multiple, ratio_multiple, depth_multiple
     self.b1 = [Conv_Block(c1=3, c2= int(64*w), kernel_size=3, stride=2, padding=1), Conv_Block(int(64*w), int(128*w), kernel_size=3, stride=2, padding=1)]
@@ -210,54 +282,9 @@ class YOLOv8():
           child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
           get_child(i[1], child_key).assign(v.numpy())
     print('successfully loaded all weights')
-    
        
 test_inferece = Tensor.rand(1 ,3 , 640 , 640)
 yolo_infer = YOLOv8(w=0.5, r=2, d=0.33, num_classes=80)  
-print(yolo_infer.forward(test_inferece))
 yolo_infer.load_weights()
-
-
-# post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
-#Saving --> plotting function - write results. 
-#pre_process --> image process
-
-def clip_boxes(boxes, shape):
-  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
-  boxes_np[..., [0, 2]] = np.clip(boxes_np[..., [0, 2]], 0, shape[1])  # x1, x2
-  boxes_np[..., [1, 3]] = np.clip(boxes_np[..., [1, 3]], 0, shape[0])  # y1, y2
-  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
-
-def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
-  gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
-  pad = ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2)
-  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
-  boxes_np[..., [0, 2]] -= pad[0]
-  boxes_np[..., [1, 3]] -= pad[1]
-  boxes_np[..., :4] /= gain
-  boxes_np = clip_boxes(boxes_np, img0_shape)
-  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
-
-def xywh2xyxy(x):
-  x_np = x.numpy() if isinstance(x, Tensor) else x
-  xy = x_np[..., :2]  # center x, y
-  wh = x_np[..., 2:4]  # width, height
-  xy1 = xy - wh / 2  # top left x, y
-  xy2 = xy + wh / 2  # bottom right x, y
-  result = np.concatenate((xy1, xy2), axis=-1)
-  return Tensor(result) if isinstance(x, Tensor) else result
-
-
-def box_iou(box1, box2, eps=1e-7):  
-  # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
-  a1, a2 =  box1.unsqueeze(1).chunk(2, 2)
-  b1, b2 =  box2.unsqueeze(0).chunk(2, 2)
-  a1, a2 = a1.cpu().numpy(), a2.cpu().numpy()
-  b1, b2 = b1.cpu().numpy(), b2.cpu().numpy()
-  inter = (np.minimum(a2, b2) - np.maximum(a1, b1))
-  inter = np.clip(inter, 0, None).prod(2)
-  # IoU = inter / (area1 + area2 - inter)
-  return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
-    
 
 
