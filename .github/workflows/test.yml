@@ -66,7 +66,7 @@ jobs:
      - name: Checkout Code
        uses: actions/checkout@v3
      - name: Install Dependencies
-       run: pip install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+       run: pip3 install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
      - name: Run Pytest
        run: python3 -m pytest -s -v -n=auto test/
 
