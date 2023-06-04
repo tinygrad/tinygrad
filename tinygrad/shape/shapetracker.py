@@ -204,11 +204,10 @@ class ShapeTracker:
 
     view = View(new_shape, strides_for_shape(new_shape))
     if self.contiguous: self.views[-1] = view   # NOTE: if it's contiguous it can't have an offset
-    else:
-      if (merged_view := merge_views(self.views[-1], view)) is not None: self.views[-1] = merged_view
-      else:
-        if DEBUG >= 4: print(f"WARNING: creating new view with reshape {self} -> {new_shape}")
-        self.views.append(view)
+    elif (merged_view := merge_views(self.views[-1], view)) is None:
+      if DEBUG >= 4: print(f"WARNING: creating new view with reshape {self} -> {new_shape}")
+      self.views.append(view)
+    else: self.views[-1] = merged_view
 
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
