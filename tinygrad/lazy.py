@@ -76,8 +76,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   # get_weakop makes all the LazyBuffers in the op have a weakref
   wop = (device, dtype, optype, ref(op))
 
-  try: return lazycache[wop]
-  except KeyError: pass
+  if wop in lazycache: return lazycache[wop]
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype)
   return ret
 
