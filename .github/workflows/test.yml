@@ -65,11 +65,10 @@ jobs:
      steps:
      - name: Checkout Code
        uses: actions/checkout@v3
-     - name: Set up Homebrew
-       id: set-up-homebrew
-       uses: Homebrew/actions/setup-homebrew@master
-     - name: Set up Python 3.11
-       run: brew reinstall python@3.11
+     - name: Create virtual environment
+       run: python3 -m venv env
+     - name: Activate virtual environment
+       run: source env/bin/activate
      - name: Install Dependencies
        run: pip install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
      - name: Run Pytest
