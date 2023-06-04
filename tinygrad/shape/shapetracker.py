@@ -212,7 +212,7 @@ class ShapeTracker:
 
   def permute(self, axis: Tuple[int, ...]):
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
+    assert (len(set(axis)) == len(axis) == len(self.shape)), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View(tuple(self.shape[a] for a in axis), tuple(self.views[-1].strides[a] for a in axis), self.views[-1].offset, tuple(self.views[-1].mask[a] for a in axis) if self.views[-1].mask is not None else None)
 
   # except for the negative case, you can build this from the others. invertible in the negative case
