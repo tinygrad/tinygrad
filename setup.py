@@ -22,7 +22,7 @@ setup(name='tinygrad',
       install_requires=['numpy', 'requests', 'pillow', 'tqdm', 'networkx', 'pyopencl'],
       python_requires='>=3.8',
       extras_require={
-        'llvm': ["llvmlite"],
+        'llvm': ["llvmlite", "pytz", "requests-oauthlib", "Click", "scikit-learn", "scipy"],
         'cuda': ["pycuda"],
         'triton': ["triton>=2.0.0.dev20221202"],
         'metal': ["pyobjc-framework-Metal", "pyobjc-framework-Cocoa", "pyobjc-framework-libdispatch"],
