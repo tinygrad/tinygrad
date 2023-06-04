@@ -460,9 +460,10 @@ class Tensor:
     r = (x*w).sum(-1)
     return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
 
-  # TODO: make this work for n-dimensional inputs
-  def cumsum(self): return self.reshape(1, 1, 1, self.shape[0]).conv2d(Tensor.ones(1, 1, 1, self.shape[0]), padding=(self.shape[0] - 1, 0, 0, 0)).flatten()
-
+  def cumsum(self, axis=0):
+    x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
+    return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis]), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
+  
   # ***** mlops (unary) *****
 
   def contiguous(self): return mlops.Contiguous.apply(self)
