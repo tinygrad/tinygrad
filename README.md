@@ -19,33 +19,105 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 ---
 
+## Why tinygrad?
+
 This may not be the best deep learning framework, but it is a deep learning framework.
 
-The sub 1000 line core of it is in `tinygrad/`
+Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training.
 
-Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. Support the simple basic ops, and you get SOTA [vision](https://arxiv.org/abs/1905.11946) `models/efficientnet.py` and [language](https://arxiv.org/abs/1706.03762) `models/transformer.py` models.
+Eventually, we will have a [tinygrad accelerator](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html), then tinygrad will be ***fast***. But, for now, it is slow.
 
-We are working on support for the Apple Neural Engine and the Google TPU in the `accel/` folder. Eventually, [we will build custom hardware](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html) for tinygrad, and it will be blindingly fast. Now, it is slow.
+### Laziness
 
-This project is maintained by [tiny corp](https://tinygrad.org/).
+Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
 
-### Installation
+`cat lazy_matmul.py`
+```py
+from tinygrad.tensor import Tensor
+N = 1024
+a = Tensor.randn(N, N)
+b = Tensor.randn(N, N)
 
-```bash
-git clone https://github.com/geohot/tinygrad.git
-cd tinygrad
-python3 -m pip install -e .
+# matmul
+c = (a.reshape(N, 1, N) * b.reshape(1, N, N)).sum(axis=2)
+
+print((c.numpy() - (a.numpy() @ b.numpy())).mean())
+```
+```sh
+DEBUG=3 OPTLOCAL=1 python3 lazy_matmul.py
 ```
 
-### Contributing
+And we can change `DEBUG` to `4` to see the generated code.
 
-There's a lot of interest in tinygrad lately. Here's some guidelines for contributing:
+### Neural networks
 
-* Bugfixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
+As it turns out, 90% of what you need for neural networks are a decent autograd/tensor library.
+Throw in an optimizer, a data loader, and some compute, and you have all you need.
+
+#### Neural network example (from test/models/test_mnist.py)
+
+```python
+from tinygrad.tensor import Tensor
+import tinygrad.nn.optim as optim
+
+class TinyBobNet:
+  def __init__(self):
+    self.l1 = Tensor.uniform(784, 128)
+    self.l2 = Tensor.uniform(128, 10)
+
+  def forward(self, x):
+    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
+
+model = TinyBobNet()
+optim = optim.SGD([model.l1, model.l2], lr=0.001)
+
+# ... complete data loader here
+
+out = model.forward(x)
+loss = out.mul(y).mean()
+optim.zero_grad()
+loss.backward()
+optim.step()
+```
+
+## Installation
+
+The current recommended way to install tinygrad is from source.
+
+### From source
+
+```sh
+git clone https://github.com/geohot/tinygrad.git
+cd tinygrad
+python3 -m pip install -e . # or `py3 -m pip install -e .` if you are on windows
+```
+Don't forget the `.` at the end!
+
+## Documentation
+
+Documentation along with a quick start guide can be found in the [docs/](/docs) directory.
+
+## Contributing
+
+There has been a lot of interest in tinygrad lately. Here are some basic guidelines for contributing:
+
+* Bug fixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
 * If you don't understand the code you are changing, don't change it!
 * All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
 * Features are welcome. Though if you are adding a feature, you need to include tests.
-* Improving test coverage is great, with reliable non brittle tests.
+* Improving test coverage is great, with reliable non-brittle tests.
+
+### Running tests
+
+For more examples on how to run the full test suite please refer to the [CI workflow](.github/workflows/test.yml).
+
+Some examples:
+```sh
+python3 -m pip install -e '.[testing]'
+python3 -m pytest
+python3 -m pytest -v -k TestTrain
+python3 ./test/models/test_train.py TestTrain.test_efficientnet
+```
 
 ### Example
 
@@ -73,49 +145,6 @@ z.backward()
 
 print(x.grad)  # dz/dx
 print(y.grad)  # dz/dy
-```
-
-## Is tinygrad fast?
-
-Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
-
-```python
-DEBUG=3 OPTLOCAL=1 python3 -c "from tinygrad.tensor import Tensor;
-N = 1024; a, b = Tensor.randn(N, N), Tensor.randn(N, N);
-c = (a.reshape(N, 1, N) * b.permute(1,0).reshape(1, N, N)).sum(axis=2);
-print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-```
-
-Change to `DEBUG=4` to see the generated code.
-
-## Neural networks?
-
-It turns out, a decent autograd tensor library is 90% of what you need for neural networks. Add an optimizer (SGD, Adam, AdamW implemented) from tinygrad.nn.optim, write some boilerplate minibatching code, and you have all you need.
-
-### Neural network example (from test/models/test_mnist.py)
-
-```python
-from tinygrad.tensor import Tensor
-import tinygrad.nn.optim as optim
-
-class TinyBobNet:
-  def __init__(self):
-    self.l1 = Tensor.uniform(784, 128)
-    self.l2 = Tensor.uniform(128, 10)
-
-  def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
-
-model = TinyBobNet()
-optim = optim.SGD([model.l1, model.l2], lr=0.001)
-
-# ... and complete like pytorch, with (x,y) data
-
-out = model.forward(x)
-loss = out.mul(y).mean()
-optim.zero_grad()
-loss.backward()
-optim.step()
 ```
 
 ## GPU and Accelerator Support
@@ -156,60 +185,6 @@ binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)              # A + A -> A (all t
 movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
 fused_op [[optional]] (MULACC)                               # A * A -> B
 ```
-
-## ImageNet inference
-
-Despite being tiny, tinygrad supports the full EfficientNet. Pass in a picture to discover what it is.
-
-```bash
-python3 examples/efficientnet.py https://media.istockphoto.com/photos/hen-picture-id831791190
-```
-
-Or, if you have a webcam and cv2 installed
-
-```bash
-python3 examples/efficientnet.py webcam
-```
-
-PROTIP: Set "DEBUG=2" environment variable if you want to see why it's slow.
-
-### tinygrad supports Stable Diffusion!
-
-You might need to download the [weight](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt) of Stable Diffusion and put it into weights/
-
-Run `python3 examples/stable_diffusion.py`
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/stable_diffusion_by_tinygrad.jpg">
-</p>
-
-<p align="center">
-"a horse sized cat eating a bagel"
-</p>
-
-### tinygrad supports LLaMA
-
-After putting the weights in weights/LLaMA, you can have a chat with Stacy. She lives inside tinygrad.
-
-```bash
-python3 examples/llama.py
-```
-
-### tinygrad supports GANs
-
-See `examples/mnist_gan.py`
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/mnist_by_tinygrad.jpg">
-</p>
-
-### tinygrad supports yolo
-
-See `examples/yolov3.py`
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/geohot/tinygrad/master/docs/yolo_by_tinygrad.jpg">
-</p>
 
 ### Drawing Execution Graph
 
