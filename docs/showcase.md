@@ -41,8 +41,6 @@ Take a look at [mnist_gan.py](/examples/mnist_gan.py).
 
 ### Stable Diffusion
 
-You will need to download the [weights](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt) of Stable Diffusion and put it into the [weights/](/weights) directory.
-
 ```sh
 python3 examples/stable_diffusion.py
 ```
@@ -53,7 +51,7 @@ python3 examples/stable_diffusion.py
 
 ### LLaMA
 
-You will need to download and put the weights into the [weights/LLaMA](/weightsLLaMA) directory, which may need to be created.
+You will need to download and put the weights into the `weights/LLaMA` directory, which may need to be created.
 
 Then you can have a chat with Stacy:
 ```sh
