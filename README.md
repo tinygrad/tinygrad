@@ -27,6 +27,10 @@ Eventually, we will have a [tinygrad accelerator](https://geohot.github.io/blog/
 
 ## Features
 
+### LLaMA and Stable Diffusion
+
+tinygrad can run [LLaMA](/docs/showcase.md#llama) and [Stable Diffusion](/docs/showcase.md#stable-diffusion)!
+
 ### Laziness
 
 Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
@@ -138,8 +142,8 @@ y = torch.tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
-print(x.grad)  # dz/dx
-print(y.grad)  # dz/dy
+print(x.grad.numpy())  # dz/dx
+print(y.grad.numpy())  # dz/dy
 ```
 
 ## Contributing
