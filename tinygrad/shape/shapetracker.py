@@ -152,6 +152,10 @@ def _reshape(view: View, new_shape) -> Tuple[View, bool]:
 def get_pad_args(shape, arg: Tuple[Tuple[int, int], ...]):
   return tuple([(-b,s+e) for s,(b,e) in zip(shape, arg)]), tuple([(b,s+b) for s,(b,_) in zip(shape, arg)])
 
+@functools.lru_cache(maxsize=None)
+def get_unsafe_resize_offset(strides, arg):
+  return sum(map(operator.mul, strides, map(operator.itemgetter(0), arg)))
+
 class ShapeTracker:
   __slots__ = "views"
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
@@ -166,7 +170,7 @@ class ShapeTracker:
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
 
   @property
-  def key(self) -> Tuple[int, ...]: return (self.views[-1].shape, tuple(map(View.key, self.views)))
+  def key(self) -> Tuple[int, ...]: return tuple(map(View.key, self.views))
 
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
@@ -211,7 +215,7 @@ class ShapeTracker:
   # *** under this line are the movement ops ***
 
   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
-    offset = sum(map(operator.mul, self.views[-1].strides, map(operator.itemgetter(0), arg)))
+    offset = get_unsafe_resize_offset(self.views[-1].strides, arg)
     if self.views[-1].mask:
       # move the old mask
       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg)])

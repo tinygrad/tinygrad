@@ -133,3 +133,5 @@ class LightWeakValueDictionary:
     else: return o
 
   def __setitem__(self, key, value): self.data[key] = KeyedRef(value, self._remove, key)
+
+  def __contains__(self, key): return key in self.data
