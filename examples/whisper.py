@@ -8,6 +8,7 @@ import numpy as np
 from typing import Optional
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
+from tinygrad.helpers import getenv
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 
@@ -176,7 +177,7 @@ def img(x):
   plt.show()
 
 RATE = 16000
-CHUNK = 3200
+CHUNK = 1600
 RECORD_SECONDS = 10
 
 def listener(q):
@@ -192,8 +193,13 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", BASE / "whisper-tiny.en.pt")
-  state = torch_load(BASE / "whisper-tiny.en.pt")
+  if getenv("SMALL"):
+    fn = BASE / "whisper-small.en.pt"
+    download_file("https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt", fn)
+  else:
+    fn = BASE / "whisper-tiny.en.pt"
+    download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", fn)
+  state = torch_load(fn)
   model = Whisper(state['dims'])
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
@@ -220,18 +226,22 @@ if __name__ == "__main__":
 
     lst = [enc._special_tokens["<|startoftranscript|>"]]
     total = None
+    did_read = False
     for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
       while not q.empty() or total is None:
         waveform = q.get()
         if total is None: total = waveform
         else: total = np.concatenate([total, waveform], axis=1)
-      log_spec = prep_audio(torch.Tensor(total), RATE)
-      dat = model.encoder(Tensor(log_spec)).realize()
-      out = model.decoder(Tensor([lst]), dat).realize()
+        did_read = True
+      if did_read:
+        last_total = total.shape[1]
+        log_spec = prep_audio(torch.Tensor(total), RATE)
+        encoded_audio = model.encoder(Tensor(log_spec)).realize()
+      out = model.decoder(Tensor([lst]), encoded_audio).realize()
       idx = out[0,-1].numpy().argmax()
       lst.append(idx)
       dec = enc.decode(lst)
-      print(dec)
+      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
       if dec.endswith("<|endoftext|>"):
-        total = None
+        #total = total[:, 320*(len(lst)-1):]
         lst = [enc._special_tokens["<|startoftranscript|>"]]
