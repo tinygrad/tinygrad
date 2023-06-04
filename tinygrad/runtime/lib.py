@@ -25,7 +25,6 @@ class RawBufferCopyIn(RawBuffer):
 
   @classmethod
   def fromCPU(cls, x:np.ndarray, **kwargs):
-    if x.size == 0: return EmptyBuffer.fromCPU(x)
     ret = cls(prod(x.shape), dtypes.from_np(x.dtype), **kwargs)
     ret._copyin(x)
     return ret
@@ -37,7 +36,7 @@ class RawBufferMapped(RawBufferCopyIn):
 
 # this one is simple enough that i moved it out of the runtimes
 class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.int64: ctypes.c_int64}[dtype] * size)())
+  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int64: ctypes.c_int64}[dtype] * size)())
   def _buffer(self): return memoryview(self._buf)
 
 class RawBufferCopyInOut(RawBufferCopyIn):
@@ -50,8 +49,3 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 
 class RawConst(RawBuffer): # pylint: disable=abstract-method
   def __repr__(self): return f"const<{self._buf}, {self.dtype}>"
-
-class EmptyBuffer(RawBuffer):
-  @classmethod
-  def fromCPU(cls, x:np.ndarray): return cls(0, dtypes.from_np(x.dtype))
-  def toCPU(self) -> np.ndarray: return np.empty(0, dtype=self.dtype.np)
