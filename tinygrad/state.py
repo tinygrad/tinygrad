@@ -45,10 +45,12 @@ def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values(
 
 def load_state_dict(model, state_dict, strict=True):
   with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
-    for k,v in (t := tqdm(get_state_dict(model).items())):
+    model_state_dict = get_state_dict(model)
+    if DEBUG >= 1 and len(state_dict) > len(model_state_dict): print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
+    for k,v in (t := tqdm(model_state_dict.items())):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
       if k not in state_dict and not strict:
-        if DEBUG >= 2: print(f"WARNING: not loading {k}")
+        if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
       v.assign(state_dict[k].to(v.device)).realize()
 

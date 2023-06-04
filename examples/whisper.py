@@ -3,6 +3,7 @@
 import sys
 import pathlib
 import base64
+import numpy as np
 from typing import Optional
 from extra.utils import download_file
 from tinygrad.state import torch_load, load_state_dict
@@ -48,8 +49,8 @@ class ResidualAttentionBlock:
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
     self.mlp_ln = nn.LayerNorm(n_state)
 
-  def __call__(self, x, xa=None):
-    x = x + self.attn(self.attn_ln(x))
+  def __call__(self, x, xa=None, mask=None):
+    x = x + self.attn(self.attn_ln(x), mask=mask)
     if self.cross_attn: x = x + self.cross_attn(self.cross_attn_ln(x), xa)
     x = x + self.mlp_ln(x).sequential(self.mlp)
     return x
@@ -60,11 +61,13 @@ class AudioEncoder:
     self.conv2 = nn.Conv1d(n_audio_state, n_audio_state, kernel_size=3, stride=2, padding=1)
     self.blocks = [ResidualAttentionBlock(n_audio_state, n_audio_head) for _ in range(n_audio_layer)]
     self.ln_post = nn.LayerNorm(n_audio_state)
+    self.positional_embedding = Tensor.empty(n_audio_ctx, n_audio_state)
 
   def __call__(self, x):
     x = self.conv1(x).gelu()
     x = self.conv2(x).gelu()
     x = x.permute(0, 2, 1)
+    x = x + self.positional_embedding[:x.shape[1]]
     x = x.sequential(self.blocks)
     x = self.ln_post(x)
     return x
@@ -73,17 +76,21 @@ class TextDecoder:
   def __init__(self, n_vocab, n_text_ctx, n_text_state, n_text_head, n_text_layer, **_):
     self.token_embedding = nn.Embedding(n_vocab, n_text_state)
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
-    self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head) for _ in range(n_text_layer)]
+    self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, cross_attention=True) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
     #mask = torch.empty(n_ctx, n_ctx).fill_(-np.inf).triu_(1)
 
   def __call__(self, x, xa):
     offset = 0
     x = self.token_embedding(x) + self.positional_embedding[offset : offset + x.shape[-1]]
-    # TODO: mask
-    for block in self.blocks:
-      print(x.shape)
-      x = block(x, xa)
+
+    seqlen, start_pos = x.shape[1], 0
+
+    mask = np.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=np.float32)
+    mask = np.triu(mask, k=start_pos + 1)  # TODO: this is hard to do in tinygrad
+    mask = Tensor(mask)
+
+    for block in self.blocks: x = block(x, xa, mask)
     x = self.ln(x)
     return x @ self.token_embedding.weight.T
 
@@ -158,21 +165,33 @@ def get_encoding(n_vocab_in):
     mergeable_ranks=ranks,
     special_tokens=special_tokens)
 
+def img(x):
+  import matplotlib.pyplot as plt
+  plt.imshow(x.numpy())
+  plt.show()
 
 if __name__ == "__main__":
   download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", BASE / "whisper-tiny.en.pt")
   state = torch_load(BASE / "whisper-tiny.en.pt")
   model = Whisper(state['dims'])
   load_state_dict(model, state['model_state_dict'])
-  encoding = get_encoding(state['dims']['n_vocab'])
+  enc = get_encoding(state['dims']['n_vocab'])
 
   log_spec = prep_audio(sys.argv[1])
-  print(log_spec)
+  #img(log_spec[0])
 
-  text = Tensor([[1, 2]])
-  print(text.shape)
-  out = model(log_spec, text)
-  out.realize()
-  idx = out[0,0].numpy().argmax()
-  print(out)
-  print(idx)
+  lst = [enc._special_tokens["<|startoftranscript|>"]]
+  print(log_spec.shape)
+  dat = model.encoder(log_spec).realize()
+  print(dat.shape)
+  #img(dat[0])
+  #exit(0)
+
+  for i in range(100):
+    text = Tensor([lst])
+    out = model.decoder(text, dat)
+    out.realize()
+    #print(out.numpy())
+    idx = out[0,-1].numpy().argmax()
+    lst.append(idx)
+    print(enc.decode(lst))
