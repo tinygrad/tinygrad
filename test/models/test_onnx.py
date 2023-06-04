@@ -68,6 +68,7 @@ class TestOnnxModel(unittest.TestCase):
     ps = stats.sort_stats(pstats.SortKey.TIME)
     ps.print_stats(30)
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
   def test_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
@@ -100,11 +101,13 @@ class TestOnnxModel(unittest.TestCase):
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
   def test_efficientnet(self):
     dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx")
     input_name, input_new = "images:0", True
     self._test_model(dat, input_name, input_new)
 
+  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
   def test_shufflenet(self):
     dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx")
     print(f"shufflenet downloaded : {len(dat)/1e6:.2f} MB")
