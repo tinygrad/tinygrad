@@ -21,6 +21,16 @@ Take a look at [yolov3.py](/examples/yolov3.py).
 
 ![yolo by tinygrad](/docs/showcase/yolo_by_tinygrad.jpg)
 
+## Audio
+
+### Whisper
+
+Take a look at [whisper.py](/examples/whisper.py). You need pyaudio and torchaudio installed.
+
+```sh
+SMALL=1 python3 examples/whisper.py
+```
+
 ## Generative
 
 ### Generative Adversarial Networks
