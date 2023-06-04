@@ -271,7 +271,7 @@ class Tensor:
       ellipsis_idx = ellipses_found[0]
       orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
     else:
-      orig_slices+= [slice(None)] * (len(self.shape) - num_slices)
+      orig_slices += [slice(None)] * (len(self.shape) - num_slices)
     valid_slices = list(itertools.filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
