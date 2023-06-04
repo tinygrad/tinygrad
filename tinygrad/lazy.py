@@ -87,7 +87,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
 
 class LazyBuffer:
   __deletable__ = ('op',)
-  def __init__(self, device:str, st: ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, buf:Optional[RawBuffer]):
+  def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, buf:Optional[RawBuffer]):
     self.st = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
     self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
     self.realized: Optional[RawBuffer] = buf
@@ -179,8 +179,7 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray, device: str) -> LazyBuffer:
-    buf = Device[device].buffer.fromCPU(x, **Device.extra_args(device))
-    return LazyBuffer(device, ShapeTracker(tuple(x.shape)), LoadOps, None, dtypes.from_np(x.dtype), buf)
+    return LazyBuffer(device, ShapeTracker(tuple(x.shape)), LoadOps, None, dtypes.from_np(x.dtype), Device[device].buffer.fromCPU(x, **Device.extra_args(device)))
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
