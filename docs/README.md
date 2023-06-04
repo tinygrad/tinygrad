@@ -22,6 +22,10 @@ This is currently a big work in progress.
 
 [env_vars.md](/docs/env_vars.md)
 
+### Adding New Accelerators
+
+[adding_new_accelerators.md](/docs/adding_new_accelerators.md)
+
 ### Community
 
 [![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
