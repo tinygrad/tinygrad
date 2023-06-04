@@ -278,7 +278,7 @@ class YOLOv8():
     for k, v in weights:
       k = k.split('.')
       for i in all_trainable_weights:
-        if int(k[1]) in i:
+        if int(k[1]) in i and k[-1] != "num_batches_tracked":
           child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
           get_child(i[1], child_key).assign(v.numpy())
     print('successfully loaded all weights')
