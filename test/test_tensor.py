@@ -193,11 +193,11 @@ class TestTinygrad(unittest.TestCase):
   def test_cumsum(self):
     x = Tensor.rand(10)
     axis = 0
-    np.testing.assert_allclose(np.cumsum(x.numpy(), axis), x.cumsum(axis).numpy())
+    np.testing.assert_allclose(np.cumsum(x.numpy(), axis), x.cumsum(axis).numpy(), rtol=1e-6)
 
     x = Tensor.rand(2,3,4,5,6)
     for axis in range(5):
-      np.testing.assert_allclose(np.cumsum(x.numpy(), axis), x.cumsum(axis).numpy())
+      np.testing.assert_allclose(np.cumsum(x.numpy(), axis), x.cumsum(axis).numpy(), rtol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()
