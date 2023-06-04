@@ -136,8 +136,7 @@ class ShapeTracker:
 
   def simplify(self):
     if len(self.views) >= 2:
-      new_view = merge_views(self.views[-2], self.views[-1])
-      if new_view:
+      if new_view := merge_views(self.views[-2], self.views[-1]):
         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
         self.views = self.views[:-2] + [new_view]
         self.simplify()
