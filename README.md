@@ -17,13 +17,15 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 </div>
 
-## Why tinygrad?
+---
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
 Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training.
 
 Eventually, we will have a [tinygrad accelerator](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html), then tinygrad will be ***fast***. But, for now, it is slow.
+
+## Features
 
 ### Laziness
 
@@ -156,8 +158,7 @@ print(x.grad.numpy())  # dz/dx
 print(y.grad.numpy())  # dz/dy
 ```
 
-Then compare to PyTorch
-
+The same thing but in PyTorch:
 ```py
 import torch
 
@@ -174,11 +175,13 @@ print(y.grad)  # dz/dy
 
 There has been a lot of interest in tinygrad lately. Here are some basic guidelines for contributing:
 
-* Bug fixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
-* If you don't understand the code you are changing, don't change it!
-* All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
-* Features are welcome. Though if you are adding a feature, you need to include tests.
-* Improving test coverage is great, with reliable non-brittle tests.
+- Bug fixes are the best and always welcome! Like [this one](https://github.com/geohot/tinygrad/pull/421/files).
+- If you don't understand the code you are changing, don't change it!
+- All code golf PRs will be closed, but [conceptual cleanups](https://github.com/geohot/tinygrad/pull/372/files) are great.
+- Features are welcome. Though if you are adding a feature, you need to include tests.
+- Improving test coverage is great, with reliable non-brittle tests.
+
+Additional guidelines can be found in [CONTRIBUTING.md](/CONTRIBUTING.md).
 
 ### Running tests
 
