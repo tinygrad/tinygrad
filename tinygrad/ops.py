@@ -54,12 +54,11 @@ class Interpreted:
     ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
     if DEBUG >= 3: print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter() - st) * 1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):",list({x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf)for x in srcs}), ast.arg if ast.arg is not None else "")
     if not created_context: context[ast] = ret
-    if output is not None and output.output_buffer is not None:
-      assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
-      output.output_buffer._buf = ret._buf
-      return output.output_buffer
-    else:
+    if output is None or output.output_buffer is None:
       return ret
+    assert output.output_buffer.size == ret.size, output.output_buffer.dtype == ret.dtype
+    output.output_buffer._buf = ret._buf
+    return output.output_buffer
 
 class FlopCounter:
   def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
