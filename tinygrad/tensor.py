@@ -474,7 +474,7 @@ class Tensor:
   def tan(self): return self.sin() / self.cos()
   # ***** math functions (unary) *****
 
-  def __neg__(self): return 0.0-self
+  def __neg__(self): return Tensor([0.0], dtype=self.dtype)-self
   def sqrt(self): return self.pow(0.5)
   def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
@@ -502,7 +502,6 @@ class Tensor:
   def softsign(self): return self / (1 + self.abs())
 
   # ***** broadcasted binary mlops *****
-
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
     x,y = [Tensor(t, device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
