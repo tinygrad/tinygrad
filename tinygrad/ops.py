@@ -47,7 +47,7 @@ class Interpreted:
     if FusedOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(FusedOps.MULACC, ast.src[0].src, ast.arg)
     created_context = context is None
-    if context is None: context = dict()
+    if context is None: context = {}
     if not created_context and ast in context: return context[ast]
     srcs = [self.exec_ast(x, context=context, **kwargs) if isinstance(x, LazyOp) else self.from_lazybuffer(x) for x in ast.src]
     if DEBUG >= 3: st = time.perf_counter()
