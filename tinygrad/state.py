@@ -45,10 +45,12 @@ def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values(
 
 def load_state_dict(model, state_dict, strict=True):
   with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
-    for k,v in (t := tqdm(get_state_dict(model).items())):
+    model_state_dict = get_state_dict(model)
+    if DEBUG >= 1 and len(state_dict) > len(model_state_dict): print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
+    for k,v in (t := tqdm(model_state_dict.items())):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
       if k not in state_dict and not strict:
-        if DEBUG >= 2: print(f"WARNING: not loading {k}")
+        if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
       v.assign(state_dict[k].to(v.device)).realize()
 
@@ -72,7 +74,7 @@ def torch_load(fn:str):
     if tuple(permute_indexes) != tuple(range(len(permute_indexes))):
       intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
-      if DEBUG >= 2: print(f"WARNING: this torch load is slow. it has to convert to CPU to permute {permute_indexes}")
+      if DEBUG >= 2: print(f"WARNING: this torch load is slow. CPU to permute {intermediate_shape} with {permute_indexes}")
       # TODO: find a nice way to support all shapetracker on disktensors
       ret = ret.cpu().reshape(intermediate_shape).permute(permute_indexes)
 
