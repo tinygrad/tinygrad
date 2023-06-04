@@ -93,7 +93,7 @@ class TestMNIST(unittest.TestCase):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=200)
+    train(model, X_train, Y_train, optimizer, steps=100)
     assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
 
   @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
