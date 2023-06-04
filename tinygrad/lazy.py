@@ -7,6 +7,7 @@ from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, D
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
 from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped
+from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 
 # lazy can recurse a lot
@@ -105,6 +106,7 @@ class LazyBuffer:
     if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op:{self.op.op if self.realized is None else self.realized} st:{self.st}>"
+  def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":")[1]} if ":" in self.device else {}
 
   def realize(self:LazyBuffer) -> LazyBuffer:
     if self.realized is None:
@@ -124,22 +126,22 @@ class LazyBuffer:
         rawbuf = self.op.src[0].realize()
         # TODO: make this generic
         if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[self.device].buffer, RawBufferMapped):
-          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **Device.extra_args(self.device))
+          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
           rawbuf.realized.readinto(cast(RawBufferMapped, self.realized)._buffer())
         else:
-          self.realized = Device[self.device].buffer.fromCPU(rawbuf.toCPU(), **Device.extra_args(self.device))
+          self.realized = Device[self.device].buffer.fromCPU(rawbuf.toCPU(), **self._device_extra_args())
       elif self.optype == LoadOps:
         if DEBUG >= 4: print(f"{self.op.op} {self.shape} {self.dtype} {self.op.arg}")
         if self.op.op == LoadOps.EMPTY:
-          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **Device.extra_args(self.device))
+          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
         elif self.op.op == LoadOps.RAND:
           rng = np.random.default_rng(self.op.arg)
-          self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **Device.extra_args(self.device))
+          self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **self._device_extra_args())
         elif self.op.op == LoadOps.CONST:
           if hasattr(Device[self.device].codegen, 'supports_constant_folding'):
             self.realized = RawConst(1, self.dtype, float(self.op.arg))
           else:
-            self.realized = Device[self.device].buffer.fromCPU(np.array(self.op.arg, dtype=self.dtype.np), **Device.extra_args(self.device))
+            self.realized = Device[self.device].buffer.fromCPU(np.array(self.op.arg, dtype=self.dtype.np), **self._device_extra_args())
       # these can be late folded and change the op to go further back in the graph
       elif self.optype == ReduceOps: self.op = _ast_reduceops(self)
       elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
@@ -157,7 +159,7 @@ class LazyBuffer:
             self.op = LazyOp(UnaryOps.CAST, (self.op,), dtypes.float32)
           self.dtype = dtypes.float32
 
-        self.realized = Device[self.device].exec_ast(self.op, output=self, **Device.extra_args(self.device))
+        self.realized = Device[self.device].exec_ast(self.op, output=self, **self._device_extra_args())
 
       assert isinstance(self.realized, (RawConst, Device[self.device].buffer)), f"device mismatch on realized got {type(self.realized)} expected {self.device}"
       # HACK: allow hot casting of images
@@ -175,6 +177,10 @@ class LazyBuffer:
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
     return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
+
+  @staticmethod
+  def fromCPU(x: np.ndarray) -> LazyBuffer:
+    return LazyBuffer("CPU", ShapeTracker(x.shape), LoadOps, RawNumpyBuffer.fromCPU(x), dtypes.from_np(x.dtype))
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
@@ -308,7 +314,6 @@ class _Device:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, self._default_device())
   def canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")
-  def extra_args(self, device: str) -> Dict[str, str]: return {"device": device.split(":")[1]} if ":" in device else {}
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return self._get_device(x.split(":")[0].upper())
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _get_device(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]

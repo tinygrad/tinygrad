@@ -6,7 +6,6 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.shape.shapetracker import ShapeTracker
 
 # An instantiation of the Function is the Context
 class Function:
@@ -40,12 +39,12 @@ class Tensor:
     device = Device.canonicalize(device)
     if isinstance(data, list):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
+    if isinstance(data, np.ndarray):
+      data = LazyBuffer.fromCPU(data)
 
     if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-    elif isinstance(data, np.ndarray):
-      lazydata = LazyBuffer(device, ShapeTracker(tuple(data.shape)), LoadOps, Device[device].buffer.fromCPU(data, **Device.extra_args(device)), dtypes.from_np(data.dtype))
     elif isinstance(data, (int, float)):
       lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)
     else:
