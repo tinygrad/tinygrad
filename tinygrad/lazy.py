@@ -6,6 +6,7 @@ from weakref import ref
 import numpy as np
 from tinygrad.helpers import LightWeakSet, LightWeakValueDictionary, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from math import prod
+from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp
@@ -68,7 +69,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   st = shape if shape.__class__ == ShapeTracker else ShapeTracker(tuple(shape))
 
   # fromcpu aren't cached
-  if optype == LoadOps and op.op in {LoadOps.FROMCPU, LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
+  if optype == LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}: return LazyBuffer(device, st, optype, op, dtype)
 
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 
@@ -83,16 +84,17 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
 class LazyBuffer:
   __slots__ = 'st', 'device', 'shape', 'optype', 'dtype', 'op', 'realized', 'output_buffer', 'children', 'node_id', '__weakref__'
   __deletable__ = ('op',)
-  def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
+  def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, src:Optional[RawBuffer]=None):
     self.st = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
     self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
-    self.op: LazyOp = op
-    self.realized: Optional[RawBuffer] = None
+    self.realized: Optional[RawBuffer] = src
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: LightWeakSet[LazyBuffer] = LightWeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    for x in op.buffers: x.children.add(self)
+    if op:
+      self.op: LazyOp = op
+      for x in op.buffers: x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
@@ -143,6 +145,10 @@ class LazyBuffer:
   @staticmethod
   def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
     return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
+
+  @staticmethod
+  def fromCPU(x: np.ndarray) -> LazyBuffer:
+    return LazyBuffer("CPU", ShapeTracker(x.shape), LoadOps, LazyOp(LoadOps.EMPTY, (), None, ()), dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
@@ -354,10 +360,6 @@ MOVEMENT_OPS_DISPATCHER = {
   MovementOps.STRIDE: LazyBuffer.stride_op,
 }
 
-def _realize_fromcpu(buffer: LazyBuffer) -> None:
-  if DEBUG >= 4: print(f"copying {buffer.op.arg.shape}:{dtypes.from_np(buffer.op.arg.dtype)} -> {buffer.device}")
-  buffer.realized = Device[buffer.device].buffer.fromCPU(buffer.op.arg, **buffer._device_extra_args())
-
 def _realize_contiguous(buffer: LazyBuffer) -> None:
   realized = buffer.op.src[0].realize().realized
   if buffer.op.src[0].st.contiguous and not realized.__class__ == RawConst and realized.size == prod(buffer.shape):
@@ -394,7 +396,6 @@ def _realize_const(buffer: LazyBuffer) -> None:
     buffer.realized = Device[buffer.device].buffer.fromCPU(np.array(buffer.op.arg, dtype=buffer.dtype.np), **buffer._device_extra_args())
 
 REALIZE_DISPATCHER = {
-  LoadOps.FROMCPU: _realize_fromcpu,
   LoadOps.CONTIGUOUS: _realize_contiguous,
   LoadOps.CUSTOM: _realize_custom,
   LoadOps.FROM: _realize_from,

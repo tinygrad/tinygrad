@@ -54,7 +54,7 @@ class Tensor:
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
 
-  def __init__(self, data:Union[int, float, list, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[int, float, list, tuple, LazyBuffer, np.ndarray], device=Device.DEFAULT, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
@@ -71,21 +71,22 @@ class Tensor:
       self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
       return
 
-    if data.__class__ == list:
-      data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
-
-    if isinstance(data, np.ndarray):
-      # TODO: create CPUBuffer directly
-      self.lazydata = LazyBuffer.loadop(LoadOps.FROMCPU, data.shape, dtypes.from_np(data.dtype), device, data)
-      return
     if isinstance(data, (int, float)):
-      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)
+      self.lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
       return
-    else:
-      raise RuntimeError(f"can't create Tensor from {data}")
+
+    if data.__class__ == list:
+      data = np.array(data, dtype=(dtype or Tensor.default_type).np)
+
+    if data.__class__ == np.ndarray:
+      data = LazyBuffer.fromCPU(data)
+      self.lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
+      return
+
+    raise RuntimeError(f"can't create Tensor from {data}")
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata if self.lazydata.realized is None else self.lazydata.realized!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
+    return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
@@ -496,7 +497,7 @@ class Tensor:
   def sqrt(self): return self.pow(0.5)
   def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
-  def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
+  def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
   def reciprocal(self): return 1.0/self

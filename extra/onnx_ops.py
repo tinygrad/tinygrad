@@ -153,8 +153,10 @@ def Softmax_1(input, axis=1): return input.softmax(axis)
 def Softmax_13(input, axis=-1): return input.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
-def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
-
+def Clip(input, min=None, max=None):
+  if min is None: min = -3.4e38
+  if max is None: max = 3.4e38
+  return input.clip(min, max)
 
 def Sin(x): return x.sin()
 def Cos(x): return x.cos()
