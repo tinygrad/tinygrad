@@ -72,7 +72,7 @@ def torch_load(fn:str):
     if tuple(permute_indexes) != tuple(range(len(permute_indexes))):
       intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
-      if DEBUG >= 2: print(f"WARNING: this torch load is slow. it has to convert to CPU to permute {permute_indexes}")
+      if DEBUG >= 2: print(f"WARNING: this torch load is slow. CPU to permute {intermediate_shape} with {permute_indexes}")
       # TODO: find a nice way to support all shapetracker on disktensors
       ret = ret.cpu().reshape(intermediate_shape).permute(permute_indexes)
 
