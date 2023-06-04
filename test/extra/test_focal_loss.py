@@ -37,6 +37,11 @@ class TestFocalLoss(unittest.TestCase):
       with self.subTest(alpha=alpha):
         self.assertAlmostEqual(self._torch_sigmoid_focal_loss(a, b, alpha=alpha), self._tinygrad_sigmoid_focal_loss(a, b, alpha=alpha), places=5)
 
+  def test_numerical_stability(self):
+    a = np.array([-10000], dtype=np.float32)
+    b = np.array([1], dtype=np.int32)
+    self.assertNotEqual(self._tinygrad_sigmoid_focal_loss(a, b), float('inf'))
+
   def _random_targets_np_array(self, shape) -> np.ndarray:
     ret = np.zeros(shape, dtype=np.int32)
     if len(shape) == 1:
