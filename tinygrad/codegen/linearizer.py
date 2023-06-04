@@ -88,6 +88,7 @@ class UOp(NamedTuple):
 
 class Linearizer:
   supports_float4: bool = False
+  supports_float4_alu: bool = False
 
   def __init__(self, ast:LazyOp, output_buffer:LazyBuffer):
     # NOTE: if there's a RESHAPE, we skip it. the output shape is set from the reduce op or a latebuf
@@ -340,9 +341,9 @@ class Linearizer:
     values = [self.ast_parse(v, acc, loaded_buffers, ssa) for v in x.src]
     # TODO: fold float4 into a single uop when possible.
     if isinstance(x.op, (ReduceOps, FusedOps)):
-      ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values)]
+      ret = [(idx, self.uop(UOps.ALU, val[0], list(val), {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, FusedOps.MULACC:FusedOps.MULACC}[x.op])) for idx, val in get_grouped_maybe_float4(acc, *values, grouping_allowed=self.supports_float4_alu)]
     else:
-      ret = [(idx, self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=x.op!=BinaryOps.CMPEQ)]
+      ret = [(idx, self.uop(UOps.ALU, ssa('alu', LocalTypes.float4) if any(x.ltype == LocalTypes.float4 and x.offset is None for x in val) else ssa('alu'), list(val), x.op)) for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.supports_float4_alu and x.op!=BinaryOps.CMPEQ)]
     ordered_ret: List[Optional[Token]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
@@ -413,6 +414,7 @@ class Linearizer:
   def simplify_ones(self):
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
+    if self.shape_len == 0: return
     all_ones = [all(st.shape[i]==1 for st in self.sts) for i in range(self.shape_len)]
     # keep at least 1 one
     if all(all_ones): all_ones[-1] = False
@@ -446,7 +448,7 @@ class Linearizer:
     for buf_index,buf in enumerate(self.bufs):
       unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes() if self.sts[buf_index].shape[i]%4 == 0]
       if (not early_only or buf in self.earlybufs) and isinstance(self.bufs[buf_index].dtype, ImageDType):
-        assert len(unit_stride_axes_mul_4) >= 1, "needs a unit stride axis"
+        assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
         if all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
           self.shift_to(unit_stride_axes_mul_4[0], 4)
           self.upcast()
