@@ -17,8 +17,6 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 </div>
 
----
-
 ## Why tinygrad?
 
 This may not be the best deep learning framework, but it is a deep learning framework.
