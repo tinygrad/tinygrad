@@ -6,6 +6,28 @@ from tinygrad.state import safe_load, safe_save, get_state_dict
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from extra.helpers import Timing
+from extra.utils import fetch_as_file
+from tinygrad.state import torch_load, get_state_dict
+
+def compare_weights_both(url):
+  import torch
+  fn = fetch_as_file(url)
+  tg_weights = get_state_dict(torch_load(fn))
+  torch_weights = get_state_dict(torch.load(fn), tensor_type=torch.Tensor)
+  assert list(tg_weights.keys()) == list(torch_weights.keys())
+  for k in tg_weights:
+    np.testing.assert_equal(tg_weights[k].numpy(), torch_weights[k].numpy(), err_msg=f"mismatch at {k}, {tg_weights[k].shape}")
+  print(f"compared {len(tg_weights)} weights")
+
+class TestTorchLoad(unittest.TestCase):
+  # pytorch pkl format
+  def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
+  # pytorch zip format
+  def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
+  # pytorch zip format
+  def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
+  # TODO: support pytorch tar format with minimal lines
+  #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
 
 test_fn = pathlib.Path(__file__).parent.parent.parent / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size
@@ -90,7 +112,7 @@ class TestDiskTensor(unittest.TestCase):
 
   def test_slice(self):
     pathlib.Path("/tmp/dt3").unlink(missing_ok=True)
-    Tensor.arange(10, device="disk:/tmp/dt3").realize()
+    Tensor.arange(10, device="CPU").to("disk:/tmp/dt3").realize()
 
     slice_me = Tensor.empty(10, device="disk:/tmp/dt3")
     print(slice_me)

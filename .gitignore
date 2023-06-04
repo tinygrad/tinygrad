@@ -29,4 +29,5 @@ datasets/img_align_celeba*
 datasets/open-images-v6-mlperf
 datasets/kits/
 datasets/wikipedia/
+datasets/audio*
 venv
