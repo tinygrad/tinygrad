@@ -54,6 +54,7 @@ class View:
     self.contiguous: bool = offset == 0 and is_contiguous(shape, self.strides) and mask is None
 
   def __repr__(self): return f"View({self.shape}, {self.strides}, {self.offset}, {self.mask})"
+  def key(self): return (self.shape, self.strides, self.offset, self.mask)
 
   def expr_node_mask(self, idx, valid=None) -> Node:
     expr = [valid] if valid is not None else []
@@ -163,6 +164,9 @@ class ShapeTracker:
 
   @property
   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
+
+  @property
+  def key(self) -> Tuple[int, ...]: return (self.views[-1].shape, tuple(map(View.key, self.views)))
 
   # this is the real size (ish)
   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])

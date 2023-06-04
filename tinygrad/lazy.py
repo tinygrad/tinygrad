@@ -100,6 +100,9 @@ class LazyBuffer:
     if GRAPH >= 3: log_op(self, self.op, phantom=True)
 
   def __repr__(self): return f"<LB {self.shape} {self.dtype} op={self.op.op if not self.realized else self.realized} st={self.st}>"
+  @property
+  def key(self): return (self.shape, self.dtype.key, self.op.op if not self.realized else self.realized.key, self.st.key)
+
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":")[1]} if ":" in self.device else {}
 
   def realize(self:LazyBuffer) -> LazyBuffer:
@@ -164,15 +167,14 @@ class LazyBuffer:
     return create_lazybuffer(self.device, new_shape, ReduceOps, LazyOp(op, srcs, new_shape), self.dtype)
 
   def reshape_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    shape, realized = self.shape, self.realized
-    if shape == arg: return self
-    if not realized and self.op.op == MovementOps.RESHAPE:
+    if self.shape == arg: return self
+    if not self.realized and self.op.op == MovementOps.RESHAPE:
       self.op.src[0].children.discard(self)
       return self.op.src[0].reshape_op(arg)
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not realized and self.op.op in UnaryOps and len(self.children) == 0:
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and self.op.op in UnaryOps and len(self.children) == 0:
       return self.op.replace_with_movement_ops([(MovementOps.RESHAPE, arg)])
     ret = create_lazybuffer(self.device, ShapeTracker(self.st).reshape(arg), MovementOps, LazyOp(MovementOps.RESHAPE, (self,), arg, (self,)), self.dtype)
-    if REMOVE_MOVEMENT_NOPS and not ret.realized and not realized and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and not ret.realized and not self.realized and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
@@ -181,13 +183,12 @@ class LazyBuffer:
     return ret
 
   def pad_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    realized = self.realized
     if all([b == 0 and e == 0 for b,e in arg]): return self
-    if not realized and self.op.op == MovementOps.PAD:
+    if not self.realized and self.op.op == MovementOps.PAD:
       self.op.src[0].children.discard(self)
       return self.op.src[0].pad_op(tuple([(b1+b2, e1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
     ret = create_lazybuffer(self.device, ShapeTracker(self.st).pad(arg), MovementOps, LazyOp(MovementOps.PAD, (self,), arg, (self,)), self.dtype)
-    if REMOVE_MOVEMENT_NOPS and not ret.realized and not realized and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and not ret.realized and not self.realized and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
@@ -195,13 +196,12 @@ class LazyBuffer:
     return ret
 
   def expand_op(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    shape, realized = self.shape, self.realized
-    if shape == arg: return self
-    if not realized and self.op.op == MovementOps.EXPAND:
+    if self.shape == arg: return self
+    if not self.realized and self.op.op == MovementOps.EXPAND:
       self.op.src[0].children.discard(self)
       return self.op.src[0].expand_op(arg)
     ret = create_lazybuffer(self.device, ShapeTracker(self.st).expand(arg), MovementOps, LazyOp(MovementOps.EXPAND, (self,), arg, (self,)), self.dtype)
-    if REMOVE_MOVEMENT_NOPS and not ret.realized and not realized and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and not ret.realized and not self.realized and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
@@ -209,12 +209,11 @@ class LazyBuffer:
     return ret
 
   def permute_op(self: LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    shape, realized = self.shape, self.realized
-    if arg == tuple(range(len(shape))): return self
-    if not realized and self.op.op == MovementOps.PERMUTE:
+    if arg == tuple(range(len(self.shape))): return self
+    if not self.realized and self.op.op == MovementOps.PERMUTE:
       self.op.src[0].children.discard(self)
       return self.op.src[0].permute_op(tuple([self.op.arg[i] for i in arg]))
-    if not realized:
+    if not self.realized:
       if PUSH_PERMUTES and self.optype == ReduceOps:
         # reduceops have one buffer input, permute it
         narg = tuple([self.op.arg[arg[i]] for i in range(len(arg))])
@@ -230,14 +229,14 @@ class LazyBuffer:
 
       # move permutes before reshapes if we can
       if PUSH_PERMUTES and self.op.op == MovementOps.RESHAPE and self.op.src[0].__class__ == LazyBuffer:
-        if shape_idx_groups := get_contraction(self.op.src[0].shape, shape):
+        if shape_idx_groups := get_contraction(self.op.src[0].shape, self.shape):
           self.op.src[0].children.discard(self)   # this changes nothing?
           return self.op.src[0].permute_op(tuple(flatten(shape_idx_groups[i] for i in arg))) \
             .reshape_op(ShapeTracker(self.st).permute(arg).shape)
-      if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not realized and len(self.children) == 0:
+      if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and len(self.children) == 0:
         return self.op.replace_with_movement_ops([(MovementOps.PERMUTE, arg)])
     ret = create_lazybuffer(self.device, ShapeTracker(self.st).permute(arg), MovementOps, LazyOp(MovementOps.PERMUTE, (self,), arg, (self,)), self.dtype)
-    if REMOVE_MOVEMENT_NOPS and not ret.realized and not realized and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and not ret.realized and not self.realized and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
@@ -246,15 +245,14 @@ class LazyBuffer:
     return ret
   
   def shrink_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    shape, realized = self.shape, self.realized
-    if all([b - a == s for s, (a, b) in zip(shape, arg)]): return self
-    if not realized and self.op.op == MovementOps.SHRINK:
+    if all([b - a == s for s, (a, b) in zip(self.shape, arg)]): return self
+    if not self.realized and self.op.op == MovementOps.SHRINK:
       self.op.src[0].children.discard(self)
       return self.op.src[0].shrink_op(tuple([(b1+b2, b1+e2) for (b1,e1),(b2,e2) in zip(self.op.arg, arg)]))
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not realized and len(self.children) == 0:
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and len(self.children) == 0:
       return self.op.replace_with_movement_ops([(MovementOps.SHRINK, arg)])
     ret = create_lazybuffer(self.device, ShapeTracker(self.st).shrink(arg), MovementOps, LazyOp(MovementOps.SHRINK, (self,), arg, (self,)), self.dtype)
-    if REMOVE_MOVEMENT_NOPS and not ret.realized and not realized and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and not ret.realized and not self.realized and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
@@ -262,16 +260,15 @@ class LazyBuffer:
     return ret
   
   def stride_op(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer:
-    shape, realized = self.shape, self.realized
-    local_st = ShapeTracker(shape).stride(arg)
-    if shape == local_st.shape and local_st.contiguous: return self
-    if not realized and self.op.op == MovementOps.STRIDE:
+    local_st = ShapeTracker(self.shape).stride(arg)
+    if self.shape == local_st.shape and local_st.contiguous: return self
+    if not self.realized and self.op.op == MovementOps.STRIDE:
       self.op.src[0].children.discard(self)
       return self.op.src[0].stride_op(tuple([i*j for i,j in zip(arg, self.op.arg)]))
-    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not realized and len(self.children) == 0:
+    if SHUFFLE_MOVEMENT_OPS and self.optype == BinaryOps and not self.realized and len(self.children) == 0:
       return self.op.replace_with_movement_ops([(MovementOps.STRIDE, arg)])
     ret = create_lazybuffer(self.device, ShapeTracker(self.st).stride(arg), MovementOps, LazyOp(MovementOps.STRIDE, (self,), arg, (self,)), self.dtype)
-    if REMOVE_MOVEMENT_NOPS and not ret.realized and not realized and ret.st.contiguous:
+    if REMOVE_MOVEMENT_NOPS and not ret.realized and not self.realized and ret.st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(ret.st.shape) == prod(root.shape):
@@ -279,10 +276,8 @@ class LazyBuffer:
     return ret
 
   def map_buffers(self, real_srcs: Dict[Any, Any]):
-    if self in real_srcs:
-      return real_srcs[self]
-    else:
-      return self
+    if self in real_srcs: return real_srcs[self]
+    return self
   
   def get_buffers(self) -> Tuple[LazyBuffer]: return (self,)
   def get_lazyops(self) -> List[Any]: return []
