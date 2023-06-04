@@ -171,7 +171,7 @@ class Linearizer:
     load_offset: Dict[Tuple[int, ...], Any] = {uidxs:(LocalTypes.float,uidxs)+self.sts[i].expr_idxs(idxs+[Variable.num(x) for x in uidxs[::-1]]) for uidxs in self.shape_offsets(i)}
 
     # float4 grouping (optional)
-    if should_upcast := self.supports_float4 and len(self.float4_axis(i)) == 1:
+    if self.supports_float4 and len(self.float4_axis(i)) == 1:
       load_offset_new = {}
       for k,out_tokens in self._group_float4(i, load_offset).items():
         idxs = [x[2]-out_tokens[0][2] for x in out_tokens]
@@ -201,7 +201,7 @@ class Linearizer:
     store_offset: Dict[Tuple[int, ...], Token] = dict(zip(self.shape_offsets(i), store))
 
     # float4 grouping (optional)
-    if (should_upcast := self.supports_float4 and (self.bufs[i].dtype not in (dtypes.float16, dtypes.int8, dtypes.uint8)) and len(self.float4_axis(i)) == 1):
+    if (self.supports_float4 and (self.bufs[i].dtype not in (dtypes.float16, dtypes.int8, dtypes.uint8)) and len(self.float4_axis(i)) == 1):
       store_offset_new = {k: Token(out_tokens[0].name, LocalTypes.float4) if all_same([x.name for x in out_tokens])and tuple(range(4)) == tuple(x.offset for x in out_tokens) else self.uop(UOps.CAST, ssa("alu", LocalTypes.float4), out_tokens)for k, out_tokens in self._group_float4(i, store_offset).items() }
       store_offset = store_offset_new
 
