@@ -878,7 +878,6 @@ class TestOps(unittest.TestCase):
     for dim in range(-1, 2):
       helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
   def test_stack(self):
     x = Tensor.randn(45, 65, 3)
 

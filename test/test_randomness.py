@@ -3,8 +3,6 @@ import unittest
 import numpy as np
 import torch
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
-from tinygrad.lazy import Device
 import tinygrad.nn as nn
 
 # https://gist.github.com/devries/11405101
@@ -58,7 +56,6 @@ def equal_distribution(tiny_func, torch_func, numpy_func=None, shape=(20, 23), a
   return (numpy_func is None or kstest(x, y) >= alpha) and kstest(x, z) >= alpha
 
 class TestRandomness(unittest.TestCase):
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
   def test_rand(self):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
