@@ -31,7 +31,7 @@ Eventually, we will have a [tinygrad accelerator](https://geohot.github.io/blog/
 
 Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
 
-`cat lazy_matmul.py`
+In `lazy_matmul.py`:
 ```py
 from tinygrad.tensor import Tensor
 N = 1024
@@ -43,6 +43,8 @@ c = (a.reshape(N, 1, N) * b.reshape(1, N, N)).sum(axis=2)
 
 print((c.numpy() - (a.numpy() @ b.numpy())).mean())
 ```
+
+Then run with
 ```sh
 DEBUG=3 OPTLOCAL=1 python3 lazy_matmul.py
 ```
