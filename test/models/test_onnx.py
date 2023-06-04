@@ -100,7 +100,6 @@ class TestOnnxModel(unittest.TestCase):
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken on some CI runners")
   def test_efficientnet(self):
     dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx")
     input_name, input_new = "images:0", True

@@ -102,7 +102,7 @@ class Tensor:
     return self
 
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self) -> np.ndarray: return self.lazydata.toCPU()
+  def numpy(self) -> np.ndarray: return self.lazydata.toCPU() if Device.DEFAULT != "METAL" else self.lazydata.toCPU().copy()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
