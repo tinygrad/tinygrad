@@ -56,7 +56,7 @@ Throw in an optimizer, a data loader, and some compute, and you have all you nee
 
 #### Neural network example (from test/models/test_mnist.py)
 
-```python
+```py
 from tinygrad.tensor import Tensor
 import tinygrad.nn.optim as optim
 
@@ -80,6 +80,51 @@ loss.backward()
 optim.step()
 ```
 
+## Accelerators
+
+tinygrad already supports numerous accelerators, including:
+
+- [x] CPU
+- [x] GPU (OpenCL)
+- [x] C Code (Clang)
+- [x] LLVM
+- [x] METAL
+- [x] CUDA
+- [x] Triton
+- [x] PyTorch
+
+And it is easy to add more! Your accelerator of choice only need to support a total of 20 (optional 21) low level ops.
+
+### llops
+
+```
+Buffer                                                       # class of memory on this device
+unary_op  (NOOP, EXP, LOG, CAST, SIN)                        # A -> A
+reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
+binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)              # A + A -> A (all the same size)
+movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
+fused_op [[optional]] (MULACC)                               # A * A -> B
+```
+
+Then tinygrad takes care of the rest, handling derivatives and syntactic sugar.
+
+### mlops
+
+These are the mid level ops that handle the derivatives.
+```
+Relu, Log, Exp, Sin                            # unary ops
+Sum, Max                                       # reduce ops (with axis argument)
+Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, use expand)
+Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
+```
+These are implemented in [mlops.py](/tinygrad/mlops.py).
+
+### hlops
+
+These are the syntax sugar. They are built on top of the mlops and support most of the things that you could expect from a tensor library.
+
+These are implemented in [tensor.py](/tinygrad/tensor.py).
+
 ## Installation
 
 The current recommended way to install tinygrad is from source.
@@ -96,6 +141,34 @@ Don't forget the `.` at the end!
 ## Documentation
 
 Documentation along with a quick start guide can be found in the [docs/](/docs) directory.
+
+### Quick example comparing to PyTorch
+
+```py
+from tinygrad.tensor import Tensor
+
+x = Tensor.eye(3, requires_grad=True)
+y = Tensor([[2.0,0,-2.0]], requires_grad=True)
+z = y.matmul(x).sum()
+z.backward()
+
+print(x.grad.numpy())  # dz/dx
+print(y.grad.numpy())  # dz/dy
+```
+
+Then compare to PyTorch
+
+```py
+import torch
+
+x = torch.eye(3, requires_grad=True)
+y = torch.tensor([[2.0,0,-2.0]], requires_grad=True)
+z = y.matmul(x).sum()
+z.backward()
+
+print(x.grad)  # dz/dx
+print(y.grad)  # dz/dy
+```
 
 ## Contributing
 
@@ -118,89 +191,3 @@ python3 -m pytest
 python3 -m pytest -v -k TestTrain
 python3 ./test/models/test_train.py TestTrain.test_efficientnet
 ```
-
-### Example
-
-```python
-from tinygrad.tensor import Tensor
-
-x = Tensor.eye(3, requires_grad=True)
-y = Tensor([[2.0,0,-2.0]], requires_grad=True)
-z = y.matmul(x).sum()
-z.backward()
-
-print(x.grad.numpy())  # dz/dx
-print(y.grad.numpy())  # dz/dy
-```
-
-### Same example in torch
-
-```python
-import torch
-
-x = torch.eye(3, requires_grad=True)
-y = torch.tensor([[2.0,0,-2.0]], requires_grad=True)
-z = y.matmul(x).sum()
-z.backward()
-
-print(x.grad)  # dz/dx
-print(y.grad)  # dz/dy
-```
-
-## GPU and Accelerator Support
-
-tinygrad supports GPUs through PyOpenCL.
-
-```python
-from tinygrad.tensor import Tensor
-(Tensor.ones(4,4).gpu() + Tensor.ones(4,4).gpu()).cpu()
-```
-
-### hlops (in tensor.py)
-
-hlops are syntactic sugar around mlops. They support most things torch does.
-
-### mlops
-
-mlops are mid level ops. They understand derivatives. They are very simple.
-
-```
-Relu, Log, Exp, Sin                            # unary ops
-Sum, Max                                       # reduce ops (with axis argument)
-Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, use expand)
-Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
-```
-
-You no longer need to write mlops for a new accelerator
-
-### Adding an accelerator (llops)
-
-The autodiff stuff is all in mlops now so you can focus on the raw operations
-
-```
-Buffer                                                       # class of memory on this device
-unary_op  (NOOP, EXP, LOG, CAST, SIN)                        # A -> A
-reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)              # A + A -> A (all the same size)
-movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
-fused_op [[optional]] (MULACC)                               # A * A -> B
-```
-
-### Drawing Execution Graph
-
-```bash
-GRAPH=1 python3 test/models/test_mnist.py TestMNIST.test_sgd_onestep
-# requires dot, outputs /tmp/net.svg
-```
-
-### Running tests
-
-For more examples on how to run the full test suite please refer to the [CI workflow](.github/workflows/test.yml).
-
-```bash
-python3 -m pip install -e '.[testing]'
-python3 -m pytest
-python3 -m pytest -v -k TestTrain
-python3 ./test/models/test_train.py TestTrain.test_efficientnet
-```
-
