@@ -81,6 +81,7 @@ class TestOps(unittest.TestCase):
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
 
+  @unittest.skipIF(IMAGE>0, "no arange on images")
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
   def test_where(self):
@@ -247,6 +248,8 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       a = Tensor(3.14)
       a.matmul(a)
+
+  @unittest.skipIF(IMAGE>0, "no multidimensional cumsum on images")
   def test_cumsum(self):
     helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
