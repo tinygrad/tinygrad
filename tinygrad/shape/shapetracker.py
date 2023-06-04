@@ -250,6 +250,6 @@ def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Opt
       axis_groups[i].append(old_shape_i)
       # Move to next axes group if total size of all dimensions match.
       if prod([old_shape[x] for x in axis_groups[i]]) == new_shape[i] and i < len(new_shape) - 1:
-          i += 1
+        i += 1
       old_shape_i += 1
   return axis_groups
