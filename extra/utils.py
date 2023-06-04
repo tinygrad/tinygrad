@@ -3,10 +3,10 @@ import numpy as np
 from tqdm import tqdm
 import tempfile, platform
 from collections import defaultdict
-from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from tinygrad.ops import GlobalCounters
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import LazyNumpyArray, Device
+from tinygrad.lazy import Device
 from tinygrad.shape.shapetracker import strides_for_shape
 OSX = platform.system() == "Darwin"
 
@@ -19,6 +19,15 @@ def fetch(url):
   download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
   with open(fp, "rb") as f:
     return f.read()
+
+def fetch_as_file(url):
+  if url.startswith("/"):
+    with open(url, "rb") as f:
+      return f.read()
+  import os, hashlib, tempfile
+  fp = os.path.join(tempfile.gettempdir(), hashlib.md5(url.encode('utf-8')).hexdigest())
+  download_file(url, fp, skip_if_exists=not getenv("NOCACHE"))
+  return fp
 
 def download_file(url, fp, skip_if_exists=True):
   import requests, os, pathlib
@@ -46,7 +55,7 @@ def my_unpickle(fb0):
       if DEBUG: print(f"unsupported type {storage_type} on {obj_key} with shape {size}")
       ret = None
     else:
-      ret = Tensor(LazyNumpyArray(lambda lst: np.zeros(lst.shape, dtype=lst.dtype), tuple(size), storage_type))
+      ret = Tensor.empty(*size, dtype=dtypes.from_np(storage_type))
     key_prelookup[obj_key].append((storage_type, obj_size, ret, size, stride, storage_offset))
     return ret
 

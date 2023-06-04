@@ -40,6 +40,8 @@ def kstest(l1, l2):
   return prob
 
 def normal_test(func, shape=(20, 23), alpha=0.05):
+  Tensor.manual_seed(1337)
+  np.random.seed(1337)
   x = func(*shape).cpu().numpy().flatten()
   y = np.random.randn(*shape).flatten()
   return kstest(x, y) >= alpha
