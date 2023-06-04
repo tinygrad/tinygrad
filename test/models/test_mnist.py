@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.nn import optim, BatchNorm2d
-from tinygrad.helpers import getenv
 from extra.training import train, evaluate
 from datasets import fetch_mnist
 
@@ -92,10 +91,9 @@ class TestMNIST(unittest.TestCase):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=100)
+    train(model, X_train, Y_train, optimizer, steps=200)
     assert evaluate(model, X_test, Y_test) > 0.94   # torch gets 0.9415 sometimes
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
   def test_conv_with_bn(self):
     np.random.seed(1337)
     model = TinyConvNet(has_batchnorm=True)
@@ -103,7 +101,6 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, steps=200)
     assert evaluate(model, X_test, Y_test) > 0.94
 
-  @unittest.skipIf(getenv("CI", "") and Device.DEFAULT == "METAL", "broken for some CI runners")
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
