@@ -190,5 +190,14 @@ class TestTinygrad(unittest.TestCase):
       dtype = f.default
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
+  def test_cumsum(self):
+    x = Tensor.rand(10)
+    axis = 0
+    np.testing.assert_allclose(np.cumsum(x.numpy(), axis), x.cumsum(axis).numpy())
+
+    x = Tensor.rand(2,3,4,5,6)
+    for axis in range(5):
+      np.testing.assert_allclose(np.cumsum(x.numpy(), axis), x.cumsum(axis).numpy())
+
 if __name__ == '__main__':
   unittest.main()
