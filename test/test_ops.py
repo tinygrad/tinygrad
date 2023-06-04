@@ -8,14 +8,14 @@ from tinygrad.lazy import Device
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
-def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
+def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3, torch_dtype=torch.float32):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   torch.manual_seed(0)
   np.random.seed(0)
   if shps is None:
-    ts = [torch.tensor(x, requires_grad=True) for x in vals]
+    ts = [torch.tensor(x, requires_grad=torch_dtype.is_floating_point) for x in vals]
   else:
-    ts = [torch.tensor((np.random.random(size=x)+a)*b, requires_grad=True, dtype=torch.float32) for x in shps]
+    ts = [torch.tensor((np.random.random(size=x)+a)*b, requires_grad=torch_dtype.is_floating_point, dtype=torch_dtype) for x in shps]
 
   tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
 
@@ -145,8 +145,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
     helper_test_op([(), ()], lambda x,y: x-y, Tensor.sub)
   def test_neg(self):
-    helper_test_op([(45,65)], lambda x: -x)
-    helper_test_op([()], lambda x: -x)
+    for args in (dict(), dict(forward_only=True, torch_dtype=torch.int32)):
+      helper_test_op([(45,65)], lambda x: -x, **args)
+      helper_test_op([()], lambda x: -x, **args)
   def test_mul(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
