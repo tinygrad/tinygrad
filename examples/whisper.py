@@ -3,6 +3,7 @@
 import sys
 import pathlib
 import base64
+import multiprocessing
 import numpy as np
 from typing import Optional
 from extra.utils import download_file
@@ -103,24 +104,28 @@ class Whisper:
     return self.decoder(tokens, self.encoder(mel))
 
 # TODO: this is tragic. remove this
+import functools
 import torch
 import torchaudio
 import librosa
-def prep_audio(fn:str) -> Tensor:
+
+@functools.lru_cache(None)
+def get_filters(sample_rate, n_fft, n_mels):return torch.tensor(librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels))
+@functools.lru_cache(None)
+def get_window(n_fft): return torch.hann_window(n_fft)
+
+def prep_audio(waveform, sample_rate) -> Tensor:
   N_FFT = 400
   HOP_LENGTH = 160
   N_MELS = 80
-  waveform, sample_rate = torchaudio.load(fn, normalize=True)
-  assert sample_rate == 16000
-  window = torch.hann_window(N_FFT)
-  stft = torch.stft(waveform, N_FFT, HOP_LENGTH, window=window, return_complex=True)
+  stft = torch.stft(waveform, N_FFT, HOP_LENGTH, window=get_window(N_FFT), return_complex=True)
   magnitudes = stft[..., :-1].abs() ** 2
-  filters = torch.tensor(librosa.filters.mel(sr=sample_rate, n_fft=N_FFT, n_mels=N_MELS))
-  mel_spec = filters @ magnitudes
+  mel_spec = get_filters(sample_rate, N_FFT, N_MELS) @ magnitudes
   log_spec = torch.clamp(mel_spec, min=1e-10).log10()
   log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
-  return Tensor(log_spec.numpy())
+  #print(waveform.shape, log_spec.shape)
+  return log_spec.numpy()
 
 LANGUAGES = {
   "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
@@ -170,6 +175,22 @@ def img(x):
   plt.imshow(x.numpy())
   plt.show()
 
+RATE = 16000
+CHUNK = 3200
+RECORD_SECONDS = 10
+
+def listener(q):
+  prep_audio(torch.zeros(300), RATE)
+  import pyaudio
+  p = pyaudio.PyAudio()
+  stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
+  print("listening")
+  for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    data = stream.read(CHUNK)
+    waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3).reshape(1, -1)
+    q.put(waveform)
+  print("done listening")
+
 if __name__ == "__main__":
   download_file("https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt", BASE / "whisper-tiny.en.pt")
   state = torch_load(BASE / "whisper-tiny.en.pt")
@@ -177,21 +198,40 @@ if __name__ == "__main__":
   load_state_dict(model, state['model_state_dict'])
   enc = get_encoding(state['dims']['n_vocab'])
 
-  log_spec = prep_audio(sys.argv[1])
-  #img(log_spec[0])
+  if len(sys.argv) > 1:
+    # offline
+    waveform, sample_rate = torchaudio.load(sys.argv[1], normalize=True)
+    log_spec = prep_audio(waveform, sample_rate)
+    lst = [enc._special_tokens["<|startoftranscript|>"]]
+    dat = model.encoder(Tensor(log_spec)).realize()
+    for i in range(50):
+      out = model.decoder(Tensor([lst]), dat)
+      out.realize()
+      idx = out[0,-1].numpy().argmax()
+      lst.append(idx)
+      print(enc.decode(lst))
+  else:
+    # online
 
-  lst = [enc._special_tokens["<|startoftranscript|>"]]
-  print(log_spec.shape)
-  dat = model.encoder(log_spec).realize()
-  print(dat.shape)
-  #img(dat[0])
-  #exit(0)
+    q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=listener, args=(q,))
+    p.daemon = True
+    p.start()
 
-  for i in range(100):
-    text = Tensor([lst])
-    out = model.decoder(text, dat)
-    out.realize()
-    #print(out.numpy())
-    idx = out[0,-1].numpy().argmax()
-    lst.append(idx)
-    print(enc.decode(lst))
+    lst = [enc._special_tokens["<|startoftranscript|>"]]
+    total = None
+    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+      while not q.empty() or total is None:
+        waveform = q.get()
+        if total is None: total = waveform
+        else: total = np.concatenate([total, waveform], axis=1)
+      log_spec = prep_audio(torch.Tensor(total), RATE)
+      dat = model.encoder(Tensor(log_spec)).realize()
+      out = model.decoder(Tensor([lst]), dat).realize()
+      idx = out[0,-1].numpy().argmax()
+      lst.append(idx)
+      dec = enc.decode(lst)
+      print(dec)
+      if dec.endswith("<|endoftext|>"):
+        total = None
+        lst = [enc._special_tokens["<|startoftranscript|>"]]
