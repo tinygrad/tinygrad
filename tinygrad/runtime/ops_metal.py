@@ -23,8 +23,8 @@ METAL = _METAL()
 class RawMetalBuffer(RawBufferMapped):
   def __init__(self, size:int, dtype:DType): super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
   def __del__(self):
-    self._buf.release()
     super().__del__()
+    self._buf.release()
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
