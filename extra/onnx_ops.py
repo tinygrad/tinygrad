@@ -152,8 +152,10 @@ def Softmax_1(input, axis=1): return input.softmax(axis)
 def Softmax_13(input, axis=-1): return input.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(input, axis=-1): return input.log_softmax(axis)
-def Clip(input, min=-3.4e38, max=3.4e38): return input.clip(min, max)
-
+def Clip(input, min=None, max=None):
+  if min is None: min = -3.4e38
+  if max is None: max = 3.4e38
+  return input.clip(min, max)
 
 def Sin(x): return x.sin()
 def Cos(x): return x.cos()
@@ -169,7 +171,7 @@ def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
 def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
 
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
-def Min(*data_0): return -functools.reduce(Tensor.maximum, [-x for x in data_0])
+def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 
