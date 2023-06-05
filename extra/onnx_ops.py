@@ -171,7 +171,7 @@ def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
 def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
 
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
-def Min(*data_0): return -functools.reduce(Tensor.maximum, [-x for x in data_0])
+def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 
