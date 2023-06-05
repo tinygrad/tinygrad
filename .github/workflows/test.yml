@@ -56,7 +56,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: python -m pytest -s -v -n=auto --cache-clear test/
+      run: python -m pytest -s -v -n=auto test/
 
   testmetal:
      name: Metal Tests
@@ -72,7 +72,7 @@ jobs:
      - name: Install Dependencies
        run: pip install -e '.[metal,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
      - name: Run Pytest
-       run: python3 -m pytest -s -v -n=auto test/
+       run: python3 -m pytest -s -v -n=auto --cache-clear test/
 
   testimagenet:
     name: ImageNet to C Compile Test
