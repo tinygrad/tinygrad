@@ -21,7 +21,7 @@ class UnaryFunction(Function):
   def __init__(self, device:str, a:Tensor):
     self.device, self.parents = device, (a,)
     self.needs_input_grad = (a.requires_grad,)
-    self.requires_grad = True if any(self.needs_input_grad) else (None if any([x is None for x in self.needs_input_grad]) else False)
+    self.requires_grad = a.requires_grad
 
   @classmethod
   def apply(fxn:Type[Function], a:Tensor, **kwargs) -> Tensor:
