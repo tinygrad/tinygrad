@@ -88,7 +88,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] Triton
 - [x] PyTorch
 
-And it is easy to add more! Your accelerator of choice only needs to support a total of 20 (optionally 21) low level ops.
+And it is easy to add more! Your accelerator of choice only needs to support a total of 26 (optionally 27) low level ops.
 More information can be found in the [documentation for adding new accelerators](/docs/adding_new_accelerators.md).
 
 ## Installation

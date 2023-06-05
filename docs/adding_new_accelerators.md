@@ -1,16 +1,17 @@
 # Adding a new accelerator to tinygrad
 
-It's pretty easy to add a new accelerator to tinygrad. All you need to do is implement a total of 20 (optionally 21) low level ops. Then tinygrad takes care of the rest, handling derivatives and syntactic sugar.
+It's pretty easy to add a new accelerator to tinygrad. All you need to do is implement a total of 26 (optionally 27) low level ops. Then tinygrad takes care of the rest, handling derivatives and syntactic sugar.
 
 ## llops
 
-These are the ops that you must implement for your accelerator of choice.
+These are the ops that you must implement for your accelerator of choice. Compiled Accelerators do not need to implement movement_ops, as they are handled b the ShapeTracker.
 ```
 Buffer                                                       # class of memory on this device
 unary_op  (NOOP, EXP, LOG, CAST, SIN)                        # A -> A
 reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, POW, CMPEQ, MAX)              # A + A -> A (all the same size)
 movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
+load_op   (EMPTY, RAND, CONST, FROM, CONTIGUOUS, CUSTOM)     # -> A   (initialize data on device)
 fused_op [[optional]] (MULACC)                               # A * A -> B
 ```
 
