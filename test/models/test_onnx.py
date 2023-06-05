@@ -8,8 +8,6 @@ import onnx
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
-from tinygrad.lazy import Device
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
