@@ -1,6 +1,7 @@
+from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
-from tinygrad.state import torch_load, load_state_dict
+from tinygrad.state import torch_load, load_state_dict, get_state_dict
 from extra.utils import download_file, get_child
 from pathlib import Path
 
@@ -16,6 +17,8 @@ class BertForPreTraining:
 
     state_dict = torch_load(str(fn))
     load_state_dict(self, state_dict)
+    # for _, v in get_state_dict(self).items():
+    #   v.lazydata = v.lazydata.cast(dtypes.float16).realize()
 
   def __call__(self, input_ids:Tensor, token_type_ids:Tensor, attention_mask:Tensor):
     sequence_outputs, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
@@ -95,7 +98,7 @@ class BertForQuestionAnswering:
       get_child(self, k).assign(v.numpy()).realize()
 
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
-    sequence_output, pooled_output = self.bert(input_ids, attention_mask, token_type_ids)
+    sequence_output, _ = self.bert(input_ids, attention_mask, token_type_ids)
     logits = self.qa_outputs(sequence_output)
     start_logits, end_logits = logits.chunk(2, dim=-1)
     start_logits = start_logits.reshape(-1, 1)
@@ -132,15 +135,14 @@ class BertEmbeddings:
     input_shape = input_ids.shape
     seq_length = input_shape[1]
 
-    position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
     words_embeddings = self.word_embeddings(input_ids)
+    position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
     position_embeddings = self.position_embeddings(position_ids)
     token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
     embeddings = words_embeddings + position_embeddings + token_type_embeddings
     embeddings = self.LayerNorm(embeddings)
-    embeddings = embeddings.dropout(self.dropout)
-    return embeddings
+    return embeddings.dropout(self.dropout)
 
 class BertEncoder:
   def __init__(self, hidden_size, intermediate_size, num_attention_heads, num_hidden_layers, attention_probs_dropout_prob, hidden_dropout_prob):
@@ -160,8 +162,7 @@ class BertLayer:
   def __call__(self, hidden_states, attention_mask):
     attention_output = self.attention(hidden_states, attention_mask)
     intermediate_output = self.intermediate(attention_output)
-    layer_output = self.output(intermediate_output, attention_output)
-    return layer_output
+    return self.output(intermediate_output, attention_output)
 
 class BertOutput:
   def __init__(self, hidden_size, intermediate_size, hidden_dropout_prob):
@@ -172,8 +173,7 @@ class BertOutput:
   def __call__(self, hidden_states, input_tensor):
     hidden_states = self.dense(hidden_states)
     hidden_states = hidden_states.dropout(self.dropout)
-    hidden_states = self.LayerNorm(hidden_states + input_tensor)
-    return hidden_states
+    return self.LayerNorm(hidden_states + input_tensor)
 
 # approixmation of the error function
 def erf(x):
@@ -199,8 +199,7 @@ class BertAttention:
 
   def __call__(self, hidden_states, attention_mask):
     self_output = self.self(hidden_states, attention_mask)
-    attention_output = self.output(self_output, hidden_states)
-    return attention_output
+    return self.output(self_output, hidden_states)
 
 class BertSelfAttention:
   def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob):
@@ -231,9 +230,7 @@ class BertSelfAttention:
 
     context_layer = attention_probs @ value_layer
     context_layer = context_layer.transpose(1, 2)
-    context_layer = context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
-
-    return context_layer
+    return context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
 
   def transpose_for_scores(self, x):
     x = x.reshape(x.shape[0], x.shape[1], self.num_attention_heads, self.attention_head_size)
@@ -248,8 +245,7 @@ class BertSelfOutput:
   def __call__(self, hidden_states, input_tensor):
     hidden_states = self.dense(hidden_states)
     hidden_states = hidden_states.dropout(self.dropout)
-    hidden_states = self.LayerNorm(hidden_states + input_tensor)
-    return hidden_states
+    return self.LayerNorm(hidden_states + input_tensor)
 
 class BertPooler:
   def __init__(self, hidden_size):
@@ -257,6 +253,4 @@ class BertPooler:
 
   def __call__(self, hidden_states):
     first_token_tensor = hidden_states[:, 0]
-    pooled_output = self.dense(first_token_tensor)
-    pooled_output = pooled_output.tanh()
-    return pooled_output
+    return self.dense(first_token_tensor).tanh()
