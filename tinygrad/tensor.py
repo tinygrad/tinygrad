@@ -482,9 +482,10 @@ class Tensor:
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
   
-  def _tri(self, r:int, c:int, k:int=0) -> Tensor: return Tensor.arange(r).unsqueeze(1).expand(r,c) <= Tensor.arange(c-k, start=-k).unsqueeze(0).expand(r,c)
-  def triu(self, k:int=0) -> Tensor: return self._tri(*self.shape[-2:], k=k).where(self, Tensor.zeros_like(self))
-  def tril(self, k:int=0) -> Tensor: return self._tri(*self.shape[-2:], k=k+1).where(Tensor.zeros_like(self), self)
+  @staticmethod
+  def _tri(r:int, c:int, k:int=0) -> Tensor: return Tensor.arange(r).unsqueeze(1).expand(r,c) <= Tensor.arange(c-k, start=-k).unsqueeze(0).expand(r,c)
+  def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[0], self.shape[1], k=k).where(self, Tensor.zeros_like(self))
+  def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[0], self.shape[1], k=k+1).where(Tensor.zeros_like(self), self)
   
   # ***** math functions (unary) *****
 
