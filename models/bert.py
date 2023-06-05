@@ -1,6 +1,6 @@
-from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
+from tinygrad.state import torch_load, load_state_dict
 from extra.utils import download_file, get_child
 from pathlib import Path
 
@@ -14,14 +14,8 @@ class BertForPreTraining:
     fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
     download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
 
-    import torch
-    with open(fn, "rb") as f:
-      state_dict = torch.load(f, map_location="cpu")
-
-    for k, v in state_dict.items():
-      if "position_ids" in k: continue
-      child = get_child(self, k)
-      child.assign(Tensor(v.numpy(), dtype=dtypes.float32).to(child.device)).realize()
+    state_dict = torch_load(str(fn))
+    load_state_dict(self, state_dict)
 
   def __call__(self, input_ids:Tensor, token_type_ids:Tensor, attention_mask:Tensor):
     sequence_outputs, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
@@ -48,7 +42,6 @@ class BertForPreTraining:
     masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids)
     next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
-
 
 class BertPreTrainingHeads:
   def __init__(self, hidden_size, vocab_size):
