@@ -475,7 +475,7 @@ class Tensor:
   def tan(self): return self.sin() / self.cos()
   # ***** math functions (unary) *****
 
-  def __neg__(self): return Tensor(0, dtype=self.dtype)-self
+  def __neg__(self): return Tensor(0, dtype=self.dtype if not isinstance(self.dtype,ImageDType) else dtypes.float32)-self
   def sqrt(self): return self.pow(0.5)
   def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
