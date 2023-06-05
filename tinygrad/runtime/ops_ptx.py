@@ -77,7 +77,7 @@ class PTXCodegen(AssemblyCodegen):
         ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
         ins.append(f"ld.global.f32 {reg[newvar]}, [%bt0];")
       elif uop == UOps.ALU:
-        alu = {BinaryOps.ADD: "add.f32", BinaryOps.SUB: "sub.f32", BinaryOps.MUL: "mul.f32"}
+        alu = {BinaryOps.ADD: "add.f32", BinaryOps.SUB: "sub.f32", BinaryOps.MUL: "mul.f32", BinaryOps.MAX: "max.f32"}
         ins.append(f"{alu[args]} {reg[newvar]}, {', '.join([reg[x] for x in vin])};")
       elif uop == UOps.STORE:
         ins.append(f"// STORE {args}")
