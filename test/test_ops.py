@@ -457,6 +457,13 @@ class TestOps(unittest.TestCase):
       a[1, 77]  # IndexError: (out of bounds).
       a[0, -77]
 
+  def test_slice_ellipsis(self):
+    helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])
+    helper_test_op([(3,3,3,3)], lambda x: x[0, ...], lambda x: x[0, ...])
+    helper_test_op([(3,3,3,3)], lambda x: x[0, ..., 0], lambda x: x[0, ..., 0])
+    helper_test_op([(3,3,3,3)], lambda x: x[0:3, ..., 2:3], lambda x: x[0:3, ..., 2:3])
+    helper_test_op([(3,3,3,3)], lambda x: x[None, 0:3, ..., 0, None], lambda x: x[None, 0:3, ..., 0, None])
+
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
 
