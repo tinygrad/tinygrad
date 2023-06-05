@@ -21,12 +21,19 @@ class PTXCodegen(AssemblyCodegen):
     # TODO: work out non overlapping regs
     reg = {}
     for _,newvar,_,_ in self.uops:
-      if newvar is not None:
+      if newvar is not None and newvar not in reg:
         reg[newvar] = f"%f{len(reg)}"
+
+    reduce_vars = {}
+    def new_reduce_var(vv):
+      nonlocal reduce_vars
+      assert vv.expr not in reduce_vars
+      reduce_vars[vv.expr] = f"%t{len(reduce_vars)}"
+      ins.append(f"mov.u32 {reduce_vars[vv.expr]}, {vv.min};")
 
     def idx_to_t(idx):
       from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
-      v = 0
+      v = len(reduce_vars)
       def new_var():
         nonlocal v
         v += 1
@@ -37,8 +44,11 @@ class PTXCodegen(AssemblyCodegen):
           v = new_var()
           ins.append(f"mov.u32 {v}, {global_regs[int(self.expr[4:])]};")
           return v
+        elif self.expr in reduce_vars:
+          return reduce_vars[self.expr]
         else:
           raise RuntimeError(f"unknown variable {self.expr}")
+
       def render_numnode(self, ops, ctx):
         v = new_var()
         ins.append(f"mov.u32 {v}, {self.b};")
@@ -71,6 +81,18 @@ class PTXCodegen(AssemblyCodegen):
             #ins.append(f"mov.u32 %r{i}, %tid.{'xyz'[i]};")
             #ins.append(f"cvt.u64.u32 {global_regs[-1]}, %lt{i};")
             #ins.append(f"mul.wide.u32 {global_regs[-1]}, %r{i}, 4;")
+        elif args[1] == "reduce":
+          for var in args[0]:
+            new_reduce_var(var)
+            ins.append(f"// LOOP {var} as {reduce_vars[var.expr]}")
+            ins.append(f"$loop_{var.expr}:")
+      elif uop == UOps.ENDLOOP:
+        if args[1] == "reduce":
+          for var in args[0][::-1]:
+            ins.append(f"// ENDLOOP {var} as {reduce_vars[var.expr]}")
+            ins.append(f"setp.ne.s32 %p0, {reduce_vars[var.expr]}, {var.max};")
+            ins.append(f"add.u32 {reduce_vars[var.expr]}, {reduce_vars[var.expr]}, 1;")
+            ins.append(f"@%p0 bra $loop_{var.expr};")
       elif uop == UOps.LOAD:
         ins.append(f"// LOAD {args}")
         ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
@@ -89,6 +111,7 @@ class PTXCodegen(AssemblyCodegen):
                       f".reg .f32 %f<{len(reg)}>;",
                       f".reg .b64 %bt<1>;",
                       f".reg .b32 %t<8>;",
+                      f".reg .pred %p<1>;",
                       f".reg .b32 %global<{len(global_regs)}>;"] + ins[4:]
     ins += ["ret;", "}"]
     return "test", '\n'.join(ins), global_size, local_size
