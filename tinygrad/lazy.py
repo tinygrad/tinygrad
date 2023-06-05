@@ -1,11 +1,14 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Union, List, Dict, Any, cast
 import sys, weakref, importlib, inspect, functools, pathlib
+import numpy as np
 from weakref import WeakValueDictionary
-from tinygrad.helpers import prod, getenv, DType, dtypes, LazyNumpyArray, flatten, ImageDType, DEBUG
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.ops import Compiled, Interpreted, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, get_lazyops, get_buffers, map_buffers
-from tinygrad.runtime.lib import RawConst, RawBuffer
+from tinygrad.runtime.lib import RawConst, RawBuffer, RawBufferMapped
+from tinygrad.runtime.ops_cpu import RawNumpyBuffer
+from tinygrad.runtime.ops_disk import RawDiskBuffer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -71,7 +74,7 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
   st = shape if isinstance(shape, ShapeTracker) else ShapeTracker(tuple(shape))
 
   # fromcpu aren't cached
-  if optype == LoadOps and op.op in [LoadOps.FROMCPU, LoadOps.EMPTY]: return LazyBuffer(device, st, optype, op, dtype)
+  if optype == LoadOps and op.op in [LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST]: return LazyBuffer(device, st, optype, op, dtype)
 
   #print("create_lazybuffer", device, shape, optype, op, dtype)
 
@@ -85,16 +88,17 @@ def create_lazybuffer(device:str, shape:Union[ShapeTracker, Tuple[int, ...]], op
 
 class LazyBuffer:
   __deletable__ = ('op',)
-  def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType):
+  def __init__(self, device:str, st:ShapeTracker, optype:OpType, src:Union[LazyOp, RawBuffer], dtype:DType):
     self.st = st  # NOTE: this is not a copy! this should be a "read-only" ShapeTracker
     self.device, self.shape, self.optype, self.dtype = device, self.st.shape, optype, dtype
-    self.op: LazyOp = op
-    self.realized: Optional[RawBuffer] = None
+    self.realized: Optional[RawBuffer] = src if isinstance(src, RawBuffer) else None
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: weakref.WeakSet[LazyBuffer] = weakref.WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer
-    for x in get_buffers(op): x.children.add(self)
+    if isinstance(src, LazyOp):
+      self.op: LazyOp = src
+      for x in get_buffers(self.op): x.children.add(self)
     if not LAZY: self.realize()
 
     # log phantom ops to the graph
@@ -107,15 +111,7 @@ class LazyBuffer:
   def realize(self:LazyBuffer) -> LazyBuffer:
     if self.realized is None:
       # get real ops first
-      if self.op.op == LoadOps.FROMCPU:
-        if prod(self.op.arg.shape) == 1 and hasattr(Device[self.device].codegen, 'supports_constant_folding'):
-          self.realized = RawConst(1, dtypes.from_np(self.op.arg.dtype), self.op.arg().flatten()[0])
-        else:
-          if DEBUG >= 4: print(f"copying {self.op.arg.shape}:{dtypes.from_np(self.op.arg.dtype)} -> {self.device}")
-          self.realized = Device[self.device].buffer.fromCPU(self.op.arg(), **self._device_extra_args())
-      elif self.op.op == LoadOps.EMPTY:
-        self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
-      elif self.op.op == LoadOps.CONTIGUOUS:
+      if self.op.op == LoadOps.CONTIGUOUS:
         realized = self.op.src[0].realize().realized
         if self.op.src[0].st.contiguous and not isinstance(realized, RawConst) and realized.size == prod(self.shape):
           # no need to run an AST, this is already contiguous
@@ -126,6 +122,26 @@ class LazyBuffer:
       elif self.op.op == LoadOps.CUSTOM:
         # this needs to immediately realize
         self.realized = self.op.arg(self, *[x.realize() for x in self.op.src])
+      elif self.op.op == LoadOps.FROM:
+        rawbuf = self.op.src[0].realize()
+        # TODO: make this generic
+        if isinstance(rawbuf.realized, RawDiskBuffer) and issubclass(Device[self.device].buffer, RawBufferMapped):
+          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
+          rawbuf.realized.readinto(cast(RawBufferMapped, self.realized)._buffer())
+        else:
+          self.realized = Device[self.device].buffer.fromCPU(rawbuf.toCPU(), **self._device_extra_args())
+      elif self.optype == LoadOps:
+        if DEBUG >= 4: print(f"{self.op.op} {self.shape} {self.dtype} {self.op.arg}")
+        if self.op.op == LoadOps.EMPTY:
+          self.realized = Device[self.device].buffer(prod(self.shape), self.dtype, **self._device_extra_args())
+        elif self.op.op == LoadOps.RAND:
+          rng = np.random.default_rng(self.op.arg)
+          self.realized = Device[self.device].buffer.fromCPU(rng.random(size=self.shape, dtype=self.dtype.np), **self._device_extra_args())
+        elif self.op.op == LoadOps.CONST:
+          if hasattr(Device[self.device].codegen, 'supports_constant_folding'):
+            self.realized = RawConst(1, self.dtype, float(self.op.arg))
+          else:
+            self.realized = Device[self.device].buffer.fromCPU(np.array(self.op.arg, dtype=self.dtype.np), **self._device_extra_args())
       # these can be late folded and change the op to go further back in the graph
       elif self.optype == ReduceOps: self.op = _ast_reduceops(self)
       elif self.optype == BinaryOps: self.op = _ast_binaryops(self)  # ISSUE: this can include a reshape
@@ -158,18 +174,18 @@ class LazyBuffer:
       del self.op
     return self
 
-  # NOTE: we have to make a copy of the numpy array here in case the user changes it. expose this? LazyNumpyArray doesn't have this problem
   @staticmethod
-  def fromCPU(x:LazyNumpyArray, device) -> LazyBuffer:
-    return create_lazybuffer(device, x.shape, LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), x), dtypes.from_np(x.dtype))
+  def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
+    return create_lazybuffer(device, shape, LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
   @staticmethod
-  def empty(shape, dtype, device) -> LazyBuffer:
-    return create_lazybuffer(device, shape, LoadOps, LazyOp(LoadOps.EMPTY, tuple()), dtype)
+  def fromCPU(x: np.ndarray) -> LazyBuffer:
+    return LazyBuffer("CPU", ShapeTracker(x.shape), LoadOps, RawNumpyBuffer.fromCPU(x), dtypes.from_np(x.dtype))
 
   # create a constant with the shape and dtype of self
   def const_like(self, val) -> LazyBuffer:
-    return create_lazybuffer(self.device, (1,), LoadOps, LazyOp(LoadOps.FROMCPU, tuple(), LazyNumpyArray([val], (1,), self.dtype.np)), self.dtype) \
+    # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
+    return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val) \
       .movement_op(MovementOps.RESHAPE, (1,)*len(self.shape)).movement_op(MovementOps.EXPAND, self.shape)
 
   # NOTE: we also have to copy the numpy array on the way out...otherwise the underlying Tensor could be freed and use after free. improve this?
@@ -297,6 +313,7 @@ class _Device:
   def __init__(self) -> None:
     self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self.DEFAULT: str = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, self._default_device())
+  def canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]: return self._get_device(x.split(":")[0].upper())
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _get_device(self, x:str) -> Union[Interpreted, Compiled]: return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]

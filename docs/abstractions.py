@@ -98,16 +98,17 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
   arg: Optional[Any] = None                    # and an optional static argument
 
-# there's currently 20 Ops you have to implement for an accelerator.
-class UnaryOps(Enum):    NOOP = auto(); EXP = auto(); LOG = auto(); NEG = auto(); NOT = auto()
-class BinaryOps(Enum):   ADD = auto();  SUB = auto(); MUL = auto(); DIV = auto(); POW = auto(); CMPEQ = auto(); MAX = auto()
+# there's currently 27 Ops you have to implement for an accelerator.
+class UnaryOps(Enum):    NOOP = auto(); EXP = auto(); LOG = auto(); CAST = auto(); SIN = auto()
+class BinaryOps(Enum):   ADD = auto();  SUB = auto(); MUL = auto(); DIV = auto();  POW = auto(); CMPEQ = auto(); MAX = auto()
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
-class LoadOps(Enum):     FROMCPU = auto()
+class FusedOps(Enum):    MULACC = auto()
+class LoadOps(Enum):     EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
 # NOTE: if you have a CompiledBuffer(DeviceBuffer)
 #       you do not need to implement the MovementOps
 #       as they are handled by the ShapeTracker(in tinygrad/shape/shapetracker.py, code 7/10)
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, FusedOps, LoadOps]
 
 # most of tinygrad/lazy.py is concerned with fusing Ops into LazyOps ASTs that map to GPUKernels
 # it's beyond the scope of this tutorial, but you can read the file if interested
@@ -130,11 +131,11 @@ assert lazyop.op == BinaryOps.ADD
 assert len(lazyop.src) == 2
 
 # the first source is the 2, it comes from the CPU
-# the source is a LazyBuffer, since FROMCPU cannot be folded into LazyOp ASTs
+# the source is a LazyBuffer, holding the data as an ndarray
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 print(lazyop.src[0].op)
-assert lazyop.src[0].op.op == LoadOps.FROMCPU
-assert lazyop.src[0].op.arg.fxn == [2], "the arg of the FROMCPU LazyOP is the [2.]"
+assert lazyop.src[0].op.op == LoadOps.FROM
+assert lazyop.src[0].op.src[0].realized.toCPU()[0] == 2, "the arg of the FROM LazyOP is a LazyBuffer holding [2.]"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer

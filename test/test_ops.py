@@ -153,6 +153,10 @@ class TestOps(unittest.TestCase):
   def test_mul(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
+  def test_mul_const(self):
+    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
+    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
+    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
@@ -162,6 +166,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 1/x, lambda x: 1/x)
     helper_test_op([(45,65)], lambda x: x/2, lambda x: x/2)
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
+    helper_test_op([(45,65)], lambda x: x/float("inf"),  lambda x: x/float("inf"))
+    helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
+    helper_test_op([(45,65)], lambda x: x/float("nan"),  lambda x: x/float("nan"))
+    helper_test_op([(45,65)], lambda x: float("inf")/x,    lambda x: float("inf")/x)
+    helper_test_op([(45,65)], lambda x: (-float("inf"))/x, lambda x: (-float("inf"))/x)
+    helper_test_op([(45,65)], lambda x: float("nan")/x,    lambda x: float("nan")/x)
     helper_test_op([()], lambda x: x/2, lambda x: x/2)
     helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
   def test_pow(self):
@@ -250,6 +260,12 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       a = Tensor(3.14)
       a.matmul(a)
+
+  def test_cumsum(self):
+    helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
+    helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
+    helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1), atol=1e-6)
+    helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2), atol=1e-6)
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
@@ -308,8 +324,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)))
   def test_std(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x), lambda x: Tensor.std(x))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=0), lambda x: Tensor.std(x, correction=0))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=5), lambda x: Tensor.std(x, correction=5))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, correction=0), lambda x: Tensor.std(x, correction=0))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, correction=5), lambda x: Tensor.std(x, correction=5))
   def test_std_axis(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=0), lambda x: Tensor.std(x, axis=0))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=2), lambda x: Tensor.std(x, axis=2))
@@ -320,8 +336,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=0, dim=[1, 2]), lambda x: Tensor.std(x, axis=[1, 2], correction=0))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=0, dim=None), lambda x: Tensor.std(x, axis=None, correction=0))
   def test_std_keepdim(self):
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, keepdim=True, correction=0, dim=0), lambda x: Tensor.std(x, keepdim=True, correction=0, axis=0))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
+    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=0, keepdim=True, correction=0), lambda x: Tensor.std(x, keepdim=True, correction=0, axis=0))
   def test_log_softmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.nn.LogSoftmax(dim=0)(x), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
@@ -453,6 +469,13 @@ class TestOps(unittest.TestCase):
       a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
       a[1, 77]  # IndexError: (out of bounds).
       a[0, -77]
+
+  def test_slice_ellipsis(self):
+    helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])
+    helper_test_op([(3,3,3,3)], lambda x: x[0, ...], lambda x: x[0, ...])
+    helper_test_op([(3,3,3,3)], lambda x: x[0, ..., 0], lambda x: x[0, ..., 0])
+    helper_test_op([(3,3,3,3)], lambda x: x[0:3, ..., 2:3], lambda x: x[0:3, ..., 2:3])
+    helper_test_op([(3,3,3,3)], lambda x: x[None, 0:3, ..., 0, None], lambda x: x[None, 0:3, ..., 0, None])
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))

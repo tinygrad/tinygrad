@@ -8,6 +8,9 @@ from torch import optim
 from datasets import fetch_cifar
 from tinygrad.helpers import getenv
 
+# allow TF32
+torch.set_float32_matmul_precision('high')
+
 OSX = platform.system() == "Darwin"
 device = 'mps' if OSX else 'cuda'
 
