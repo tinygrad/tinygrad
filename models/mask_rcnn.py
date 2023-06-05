@@ -5,7 +5,8 @@ from pathlib import Path
 from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
-from extra.utils import get_child, download_file, fake_torch_load
+from extra.utils import get_child, download_file
+from tinygrad.state import torch_load
 from models.resnet import ResNet
 import torch
 from models.retinanet import nms as _box_nms
@@ -791,8 +792,8 @@ class Pooler:
     self.output_size = output_size
     # get the levels in the feature map by leveraging the fact that the network always
     # downsamples by a factor of 2 at each level.
-    lvl_min = -Tensor.log2(Tensor([scales[0]], dtype=dtypes.float32)).numpy()[0]
-    lvl_max = -Tensor.log2(Tensor([scales[-1]], dtype=dtypes.float32)).numpy()[0]
+    lvl_min = float(-Tensor.log2(Tensor([scales[0]], dtype=dtypes.float32)).numpy()[0])
+    lvl_max = float(-Tensor.log2(Tensor([scales[-1]], dtype=dtypes.float32)).numpy()[0])
     self.map_levels = LevelMapper(lvl_min, lvl_max)
 
   def convert_to_roi_format(self, boxes):
@@ -1059,8 +1060,7 @@ class MaskRCNN:
     fn = Path('./') / "weights/maskrcnn.pt"
     download_file("https://download.pytorch.org/models/maskrcnn/e2e_mask_rcnn_R_50_FPN_1x.pth", fn)
 
-    with open(fn, "rb") as f:
-      state_dict = fake_torch_load(f.read())['model']
+    state_dict = torch_load(fn)['model']
     loaded_keys = []
     for k, v in state_dict.items():
       if "module." in k:
