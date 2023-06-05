@@ -21,9 +21,9 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 This may not be the best deep learning framework, but it is a deep learning framework.
 
-Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training.
+Due to its extreme simplicity, it aims to be the easiest framework to add new accelerators to, with support for both inference and training. If XLA is CISC, tinygrad is RISC.
 
-Eventually, we will have a [tinygrad accelerator](https://geohot.github.io/blog/jekyll/update/2021/06/13/a-breakdown-of-ai-chip-companies.html), then tinygrad will be ***fast***. But, for now, it is slow.
+tinygrad is still alpha software, but we [raised some money](https://geohot.github.io/blog/jekyll/update/2023/05/24/the-tiny-corp-raised-5M.html) to make it good. Someday, we will tape out chips.
 
 ## Features
 
