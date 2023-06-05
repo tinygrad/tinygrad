@@ -23,13 +23,10 @@ def train_rnnt():
 
 def train_bert():
   from models.bert import BertForPreTraining
-  from datasets.wikipedia import iterate
-  from transformers import BertTokenizer
+  from datasets.wikipedia import iterate, get_val_files
 
   mdl = BertForPreTraining()
   mdl.load_from_pretrained()
-
-  tokenizer = BertTokenizer(str(Path(__file__).parent.parent.parent / "weights/bert_vocab.txt"))
 
   params = optim.get_parameters(mdl)
   optimizer = optim.SGD(params, lr=0.001)
@@ -44,7 +41,7 @@ def train_bert():
     return loss.realize()
 
   for i in range(1000):
-    for X, Y in (t := tqdm(iterate(tokenizer), total=53)):
+    for X, Y in (t := tqdm(iterate(), total=len(get_val_files()))):
       input_ids, input_mask, segment_ids = Tensor(X["input_ids"], requires_grad=False), Tensor(X["input_mask"], requires_grad=False), Tensor(X["segment_ids"], requires_grad=False)
       masked_lm_positions, masked_lm_ids, next_sentence_labels = Tensor(X["masked_lm_positions"], requires_grad=False), Tensor(X["masked_lm_ids"], requires_grad=False), Tensor(X["next_sentence_labels"], requires_grad=False)
       loss = train_step(input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, next_sentence_labels + 1 - 1)

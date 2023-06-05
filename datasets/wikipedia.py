@@ -1,10 +1,10 @@
-import json
-import os
+import sys
+import pickle
 from pathlib import Path
 from transformers import BertTokenizer
 import numpy as np
-from extra.utils import download_file
 import random
+from tqdm import tqdm
 
 BASEDIR = Path(__file__).parent.parent / "datasets/wikipedia"
 
@@ -63,111 +63,113 @@ def create_masked_lm_predictions(tokens, rng, tokenizer):
 
   return output_tokens, masked_lm_positions, masked_lm_labels
 
-def iterate(tokenizer, start=0, val=True):
+def get_documents(rng, tokenizer, fn):
+  documents = [[]]
+  with open(BASEDIR / "raw" / fn) as f:
+    for line in tqdm(f.readlines()):
+      if not line: break
+      if not (line := line.strip()):
+        documents.append([])
+      tokens = tokenizer.tokenize(line)
+      if tokens: documents[-1].append(tokens)
+  documents = [x for x in documents if x]
+  rng.shuffle(documents)
+  return documents
+
+def get_instances(rng, tokenizer, documents):
+  instances = []
+  for di, doc in tqdm(enumerate(documents)):
+    max_num_tokens = 512 - 3
+
+    target_seq_length = max_num_tokens
+    if rng.random() < 0.1:
+      target_seq_length = rng.randint(2, max_num_tokens)
+
+    doc_instances = []
+    current_chunk = []
+    current_length = 0
+    i = 0
+    while i < len(doc):
+      segment = doc[i]
+      current_chunk.append(segment)
+      current_length += len(segment)
+      if i == len(doc) - 1 or current_length >= target_seq_length:
+        if current_chunk:
+          a_end = 1
+          if len(current_chunk) >= 2:
+            a_end = rng.randint(1, len(current_chunk) - 1)
+
+          tokens_a = []
+          for j in range(a_end):
+            tokens_a.extend(current_chunk[j])
+
+          tokens_b = []
+          is_random_next = False
+          if len(current_chunk) == 1 or rng.random() < 0.5:
+            is_random_next = True
+            target_b_length = target_seq_length - len(tokens_a)
+
+            for _ in range(10):
+              random_document_index = rng.randint(0, len(documents) - 1)
+              if random_document_index != di:
+                break
+
+            random_document = documents[random_document_index]
+            random_start = rng.randint(0, len(random_document) - 1)
+            for j in range(random_start, len(random_document)):
+              tokens_b.extend(random_document[j])
+              if len(tokens_b) >= target_b_length:
+                break
+
+            num_unused_segments = len(current_chunk) - a_end
+            i -= num_unused_segments
+          else:
+            is_random_next = False
+            for j in range(a_end, len(current_chunk)):
+              tokens_b.extend(current_chunk[j])
+          truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng)
+
+          tokens = []
+          segment_ids = []
+          tokens.append("[CLS]")
+          segment_ids.append(0)
+          for token in tokens_a:
+            tokens.append(token)
+            segment_ids.append(0)
+          tokens.append("[SEP]")
+          segment_ids.append(0)
+          for token in tokens_b:
+            tokens.append(token)
+            segment_ids.append(1)
+          tokens.append("[SEP]")
+          segment_ids.append(1)
+
+          tokens, masked_lm_positions, masked_lm_labels = create_masked_lm_predictions(tokens, rng, tokenizer)
+          doc_instances.append({
+            "tokens": tokens,
+            "segment_ids": segment_ids,
+            "masked_lm_positions": masked_lm_positions,
+            "masked_lm_labels": masked_lm_labels,
+            "is_random_next": is_random_next
+          })
+        current_chunk = []
+        current_length = 0
+      i += 1
+    instances.extend(doc_instances)
+  return instances
+
+def process_iterate(tokenizer, start=0, val=True):
   rng = random.Random(12345)
 
   if val:
-    documents = [[]]
-    with open(BASEDIR / "eval.txt") as f:
-      for line in f:
-        if not line:
-          break
-        line = line.strip()
-        if not line:
-          documents.append([])
-          if len(documents) > 2:
-            break
-        tokens = tokenizer.tokenize(line)
-        if tokens: documents[-1].append(tokens)
-    documents = [x for x in documents if x]
-    rng.shuffle(documents)
+    documents = get_documents(rng, tokenizer, "eval.txt")
+    instances = get_instances(rng, tokenizer, documents)
 
-    all_instances = []
-    for di, doc in enumerate(documents):
-      print(f"processing document {di} of {len(documents)}")
-      max_num_tokens = 512 - 3
-
-      target_seq_length = max_num_tokens
-      if rng.random() < 0.1:
-        target_seq_length = rng.randint(2, max_num_tokens)
-
-      instances = []
-      current_chunk = []
-      current_length = 0
-      i = 0
-      while i < len(doc):
-        segment = doc[i]
-        current_chunk.append(segment)
-        current_length += len(segment)
-        if i == len(doc) - 1 or current_length >= target_seq_length:
-          if current_chunk:
-            a_end = 1
-            if len(current_chunk) >= 2:
-              a_end = rng.randint(1, len(current_chunk) - 1)
-
-            tokens_a = []
-            for j in range(a_end):
-              tokens_a.extend(current_chunk[j])
-
-            tokens_b = [] 
-            is_random_next = False
-            if len(current_chunk) == 1 or rng.random() < 0.5:
-              is_random_next = True
-              target_b_length = target_seq_length - len(tokens_a)
-
-              for _ in range(10):
-                random_document_index = rng.randint(0, len(documents) - 1)
-                if random_document_index != di:
-                  break
-
-              random_document = documents[random_document_index]
-              random_start = rng.randint(0, len(random_document) - 1)
-              for j in range(random_start, len(random_document)):
-                tokens_b.extend(random_document[j])
-                if len(tokens_b) >= target_b_length:
-                  break
-
-              num_unused_segments = len(current_chunk) - a_end
-              i -= num_unused_segments
-            else:
-              is_random_next = False
-              for j in range(a_end, len(current_chunk)):
-                tokens_b.extend(current_chunk[j])
-            truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng)
-
-            tokens = []
-            segment_ids = []
-            tokens.append("[CLS]")
-            segment_ids.append(0)
-            for token in tokens_a:
-              tokens.append(token)
-              segment_ids.append(0)
-            tokens.append("[SEP]")
-            segment_ids.append(0)
-            for token in tokens_b:
-              tokens.append(token)
-              segment_ids.append(1)
-            tokens.append("[SEP]")
-            segment_ids.append(1)
-
-            tokens, masked_lm_positions, masked_lm_labels = create_masked_lm_predictions(tokens, rng, tokenizer)
-            instances.append({
-              "tokens": tokens,
-              "segment_ids": segment_ids,
-              "masked_lm_positions": masked_lm_positions,
-              "masked_lm_labels": masked_lm_labels,
-              "is_random_next": is_random_next
-            })
-          current_chunk = []
-          current_length = 0
-        i += 1
-      all_instances.extend(instances)
-
-    print(f"there are {len(all_instances)} samples in the dataset")
-    for i in range(start, len(all_instances)):
-      input_ids = tokenizer.convert_tokens_to_ids(all_instances[i]["tokens"])
+    print(f"there are {len(instances)} samples in the dataset")
+    for i in range(start, len(instances)):
+      input_ids = tokenizer.convert_tokens_to_ids(instances[i]["tokens"])
       input_mask = [1] * len(input_ids)
-      segment_ids = all_instances[i]["segment_ids"]
+      segment_ids = instances[i]["segment_ids"]
 
       assert len(input_ids) <= 512
       while len(input_ids) < 512:
@@ -178,8 +180,8 @@ def iterate(tokenizer, start=0, val=True):
       assert len(input_mask) == 512
       assert len(segment_ids) == 512
 
-      masked_lm_positions = all_instances[i]["masked_lm_positions"]
-      masked_lm_ids = tokenizer.convert_tokens_to_ids(all_instances[i]["masked_lm_labels"])
+      masked_lm_positions = instances[i]["masked_lm_positions"]
+      masked_lm_ids = tokenizer.convert_tokens_to_ids(instances[i]["masked_lm_labels"])
       masked_lm_weights = [1.0] * len(masked_lm_ids)
 
       while len(masked_lm_positions) < 76:
@@ -187,7 +189,7 @@ def iterate(tokenizer, start=0, val=True):
         masked_lm_ids.append(0)
         masked_lm_weights.append(0.0)
 
-      next_sentence_label = 1 if all_instances[i]["is_random_next"] else 0
+      next_sentence_label = 1 if instances[i]["is_random_next"] else 0
 
       features = {
         "input_ids": np.expand_dims(np.array(input_ids, dtype=np.float32), 0),
@@ -199,10 +201,27 @@ def iterate(tokenizer, start=0, val=True):
         "next_sentence_labels": np.array([next_sentence_label], dtype=np.float32),
       }
 
-      yield features, all_instances[i]
+      yield features, instances[i]
+
+def get_val_files():
+  return sorted(list((BASEDIR / "eval").glob("*.pkl")))
+
+def iterate(start=0, val=True):
+  if val:
+    # scan directory for files
+    files = get_val_files()
+    for i in range(start, len(files)):
+      with open(files[i], "rb") as f:
+        yield pickle.load(f)
 
 if __name__ == "__main__":
   tokenizer = BertTokenizer(str(Path(__file__).parent.parent / "weights/bert_vocab.txt"))
 
-  X, Y = next(iterate(tokenizer))
-  print(" ".join(map(str, Y["tokens"])))
+  if len(sys.argv) <= 1:
+    X, Y = next(iterate())
+    print(" ".join(map(str, Y["tokens"])))
+  else:
+    if sys.argv[1] == "pre-eval":
+      for i, (X, Y) in tqdm(enumerate(process_iterate(tokenizer))):
+        with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
+          pickle.dump((X, Y), f)
