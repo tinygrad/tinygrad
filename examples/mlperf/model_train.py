@@ -33,8 +33,7 @@ def train_bert():
   optimizer = optim.SGD(params, lr=0.001)
   optimizer.zero_grad()
 
-  wandb.init(project="tinygrad-mlperf")
-  wandb.config.update({"model": "bert", "optimizer": "sgd", "lr": 0.001})
+  wandb.init(project="tinygrad-mlperf", settings=wandb.Settings(_disable_stats=True))
 
   @TinyJit
   def train_step(input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, next_sentence_labels):
