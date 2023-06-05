@@ -56,7 +56,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
-      run: python -m pytest -s -v -n=auto test/
+      run: python -m pytest -s -v -n=auto --cache-clear test/
 
   testmetal:
      name: Metal Tests
