@@ -31,3 +31,4 @@ datasets/kits/
 datasets/wikipedia/
 datasets/audio*
 venv
+wandb/

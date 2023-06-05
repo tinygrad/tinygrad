@@ -8,7 +8,7 @@ from pathlib import Path
 class BertForPreTraining:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
     self.bert = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
-    self.cls = BertPreTrainingHeads(hidden_size, vocab_size)
+    self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
 
   def load_from_pretrained(self):
     fn = Path(__file__).parent.parent / "weights/bert_for_pretraining.pt"
@@ -47,8 +47,8 @@ class BertForPreTraining:
     return masked_lm_loss + next_sentence_loss
 
 class BertPreTrainingHeads:
-  def __init__(self, hidden_size, vocab_size):
-    self.predictions = BertLMPredictionHead(hidden_size, vocab_size)
+  def __init__(self, hidden_size, vocab_size, embeddings_weight):
+    self.predictions = BertLMPredictionHead(hidden_size, vocab_size, embeddings_weight)
     self.seq_relationship = Linear(hidden_size, 2)
 
   def __call__(self, sequence_output:Tensor, pooled_output:Tensor):
@@ -57,9 +57,10 @@ class BertPreTrainingHeads:
     return prediction_scores, seq_relationship_score
 
 class BertLMPredictionHead:
-  def __init__(self, hidden_size, vocab_size):
+  def __init__(self, hidden_size, vocab_size, embeddings_weight):
     self.transform = BertPredictionHeadTransform(hidden_size)
-    self.decoder = Linear(hidden_size, vocab_size)
+    self.decoder = Linear(hidden_size, vocab_size, bias=False)
+    self.decoder.weight = embeddings_weight
     self.bias = Tensor.zeros(vocab_size)
 
   def __call__(self, hidden_states:Tensor):
