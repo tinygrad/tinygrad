@@ -81,15 +81,19 @@ void matrix_multiply(big_matrix<T1, M, N> &C, big_matrix<T2, M, K> &A, big_matri
 
   queue q;
   auto start = std::chrono::steady_clock::now();
-  q.submit(program).wait();
+  auto e = q.submit(program);
+  auto submit = std::chrono::steady_clock::now();
+  e.wait();
   auto end = std::chrono::steady_clock::now();
-  std::cout << "compute: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
+  std::cout << "submit:  " << std::chrono::duration_cast<std::chrono::milliseconds>(submit - start).count() << " ms" << std::endl;
+  std::cout << "compute: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - submit).count() << " ms" << std::endl;
 
   // ahh, freeing is slow
 }
 
 //#define SCALE 1024
-#define SCALE 64
+//#define SCALE 64
+#define SCALE 256
 static constexpr size_t MATRIX_M = TM * SCALE;
 static constexpr size_t MATRIX_N = TN * SCALE;
 static constexpr size_t MATRIX_K = TK * SCALE;

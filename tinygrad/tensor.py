@@ -39,13 +39,12 @@ class Tensor:
     device = Device.canonicalize(device)
     if isinstance(data, (list, tuple)):
       data = np.array(data, dtype=(dtype if dtype is not None else Tensor.default_type).np)
+    if isinstance(data, np.ndarray):
+      data = LazyBuffer.fromCPU(data)
 
     if isinstance(data, LazyBuffer):
       assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
       lazydata = data if data.device == device else LazyBuffer.loadop(LoadOps.FROM, data.shape, data.dtype, device, src=data)
-    elif isinstance(data, np.ndarray):
-      # TODO: create CPUBuffer directly
-      lazydata = LazyBuffer.loadop(LoadOps.FROMCPU, data.shape, dtypes.from_np(data.dtype), device, data)
     elif isinstance(data, (int, float)):
       lazydata = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype if dtype is not None else Tensor.default_type, device, data)
     else:
@@ -461,9 +460,10 @@ class Tensor:
     r = (x*w).sum(-1)
     return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
 
-  # TODO: make this work for n-dimensional inputs
-  def cumsum(self): return self.reshape(1, 1, 1, self.shape[0]).conv2d(Tensor.ones(1, 1, 1, self.shape[0]), padding=(self.shape[0] - 1, 0, 0, 0)).flatten()
-
+  def cumsum(self, axis=0):
+    x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
+    return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis]), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
+  
   # ***** mlops (unary) *****
 
   def contiguous(self): return mlops.Contiguous.apply(self)
@@ -479,7 +479,7 @@ class Tensor:
   def sqrt(self): return self.pow(0.5)
   def rsqrt(self): return self.pow(-0.5)
   def square(self): return self*self
-  def clip(self, min_, max_): return ((self-min_).relu()+min_) - (self-max_).relu()
+  def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return self / (self.abs() + 1e-10)
   def reciprocal(self): return 1.0/self
