@@ -7,10 +7,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
 from extra.utils import get_child, download_file, fake_torch_load
 from models.resnet import ResNet
-from torch.nn import functional as F
 import torch
 from models.retinanet import nms as _box_nms
-from maskrcnn_benchmark import _C
+import torchvision.ops
 
 
 def meshgrid(*tensors):
@@ -751,8 +750,8 @@ class ROIAlign:
     # TODO: remove torch
     input = torch.tensor(input.numpy())
     roi = torch.tensor(rois.numpy())
-    output = _C.roi_align_forward(
-      input, roi, self.spatial_scale, self.output_size[0], self.output_size[1], self.sampling_ratio
+    output = torchvision.ops.roi_align(
+      input, roi, spatial_scale=self.spatial_scale, output_size=(self.output_size[0], self.output_size[1]), sampling_ratio=self.sampling_ratio
     )
     return output.numpy()
 
@@ -902,8 +901,6 @@ class PostProcessor:
     return boxlist
 
   def filter_results(self, boxlist, num_classes):
-     # unwrap the boxlist to avoid additional overhead.
-    # if we had multi-class NMS, we could perform this directly on the boxlist
     boxes = boxlist.bbox.reshape(-1, num_classes * 4)
     scores = boxlist.get_field("scores").reshape(-1, num_classes)
 
@@ -956,9 +953,6 @@ class RoIBoxHead:
 
 
 class MaskPostProcessor:
-  def __init__(self, masker=None):
-    self.masker = masker
-
   def __call__(self, x, boxes):
     mask_prob = x.sigmoid().numpy()
 
@@ -973,8 +967,6 @@ class MaskPostProcessor:
       cumsum += len(box)
       boxes_per_image.append(cumsum)
     mask_prob = np.split(mask_prob, boxes_per_image, axis=0)
-    if self.masker:
-      mask_prob = self.masker(mask_prob, boxes)
     results = []
     for prob, box in zip(mask_prob, boxes):
       bbox = BoxList(box.bbox, box.size, mode="xyxy")
@@ -1094,6 +1086,6 @@ class MaskRCNN:
 
 
 if __name__ == '__main__':
-  resnet = resnet = ResNet(50, num_classes=None)
+  resnet = resnet = ResNet(50, num_classes=None, stride_in_1x1=True)
   model = MaskRCNN(backbone=resnet)
   model.load_from_pretrained()

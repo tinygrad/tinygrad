@@ -1,7 +1,10 @@
 from models.mask_rcnn import MaskRCNN
 from models.resnet import ResNet
-from models.mask_rcnn import BoxList, F
+from models.mask_rcnn import BoxList
+from torch.nn import functional as F
 from torchvision import transforms as T
+from torchvision.transforms import functional as Ft
+import random
 from tinygrad.tensor import Tensor
 from PIL import Image
 import numpy as np
@@ -9,20 +12,66 @@ import torch
 import argparse
 import cv2
 
-to_bgr_transform = T.Lambda(lambda x: x * 255)
 
-normalize_transform = T.Normalize(
-  mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.]
-)
+class Resize(object):
+    def __init__(self, min_size, max_size):
+        if not isinstance(min_size, (list, tuple)):
+            min_size = (min_size,)
+        self.min_size = min_size
+        self.max_size = max_size
+
+    # modified from torchvision to add support for max size
+    def get_size(self, image_size):
+        w, h = image_size
+        size = random.choice(self.min_size)
+        max_size = self.max_size
+        if max_size is not None:
+            min_original_size = float(min((w, h)))
+            max_original_size = float(max((w, h)))
+            if max_original_size / min_original_size * size > max_size:
+                size = int(round(max_size * min_original_size / max_original_size))
+
+        if (w <= h and w == size) or (h <= w and h == size):
+            return (h, w)
+
+        if w < h:
+            ow = size
+            oh = int(size * h / w)
+        else:
+            oh = size
+            ow = int(size * w / h)
+
+        return (oh, ow)
+
+    def __call__(self, image):
+        size = self.get_size(image.size)
+        image = Ft.resize(image, size)
+        return image
+
+
+class Normalize(object):
+    def __init__(self, mean, std, to_bgr255=True):
+        self.mean = mean
+        self.std = std
+        self.to_bgr255 = to_bgr255
+
+    def __call__(self, image):
+        if self.to_bgr255:
+            image = image[[2, 1, 0]] * 255
+        else:
+            image = image[[0, 1, 2]] * 255
+        image = Ft.normalize(image, mean=self.mean, std=self.std)
+        return image
+
 
 transforms = T.Compose(
-  [
-    T.ToPILImage(),
-    T.Resize(size=800, max_size=1333),
-    T.ToTensor(),
-    to_bgr_transform,
-    normalize_transform,
-  ]
+    [
+        Resize(800, 1333),
+        T.ToTensor(),
+        Normalize(
+          mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+        ),
+    ]
 )
 
 
@@ -136,16 +185,13 @@ masker = Masker(threshold=0.5, padding=1)
 
 def compute_prediction(original_image, model_type='tiny'):
   # apply pre-processing to image
-  image = transforms(np.asarray(original_image)).numpy()
+  image = transforms(original_image).numpy()
   image = Tensor(image, requires_grad=False)
-
   predictions = model_tiny(image)
-
   # always single image is passed at a time
   prediction = predictions[0]
-
   # reshape prediction (a BoxList) into the original image size
-  height, width = original_image.shape[:-1]
+  width, height = original_image.size
   prediction = prediction.resize((width, height))
 
   if prediction.has_field("mask"):
@@ -292,14 +338,13 @@ if __name__ == '__main__':
   parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
   args = parser.parse_args()
 
-  resnet = ResNet(50, num_classes=None)
+  resnet = ResNet(50, num_classes=None, stride_in_1x1=True)
   model_tiny = MaskRCNN(resnet)
   model_tiny.load_from_pretrained()
-  img = cv2.imread(args.image, cv2.IMREAD_COLOR)
-  img_rbg = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+  img = Image.open(args.image)
   result = compute_prediction(img)
   top_result_tiny = select_top_predictions(result, confidence_threshold=args.threshold)
-  bbox_image = overlay_boxes(img_rbg, top_result_tiny)
+  bbox_image = overlay_boxes(img, top_result_tiny)
   mask_image = overlay_mask(bbox_image, top_result_tiny)
   final_image = overlay_class_names(mask_image, top_result_tiny)
 
