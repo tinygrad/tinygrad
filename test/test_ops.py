@@ -15,7 +15,9 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if shps is None:
     ts = [torch.tensor(x, requires_grad=torch_dtype.is_floating_point) for x in vals]
   else:
-    ts = [torch.tensor((np.random.random(size=x)+a)*b, requires_grad=torch_dtype.is_floating_point, dtype=torch_dtype) for x in shps]
+    lims = {torch.int32:dict(low=-pow(2,31),high=pow(2,31)-1)}
+    dats = [(np.random.random(size=x)+a)*b if torch_dtype.is_floating_point else np.random.randint(**lims[torch_dtype], size=x) for x in shps]
+    ts = [torch.tensor(x, requires_grad=torch_dtype.is_floating_point, dtype=torch_dtype) for x in dats]
 
   tst = [Tensor(x.detach().numpy(), requires_grad=not FORWARD_ONLY) for x in ts]
 
