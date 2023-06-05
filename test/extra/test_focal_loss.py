@@ -37,6 +37,14 @@ class TestFocalLoss(unittest.TestCase):
       with self.subTest(alpha=alpha):
         self.assertAlmostEqual(self._torch_sigmoid_focal_loss(a, b, alpha=alpha), self._tinygrad_sigmoid_focal_loss(a, b, alpha=alpha), places=5)
 
+  def test_reduction(self):
+    a = np.random.standard_normal((10, 10)).astype(np.float32)
+    b = np.zeros((10, 10), dtype=np.int32)
+    for row in range(10): b[row, random.randint(0,9)] = 1
+    for reduction in ['mean', 'sum']:
+      with self.subTest(reduction=reduction):
+        self.assertAlmostEqual(self._torch_sigmoid_focal_loss(a, b, reduction=reduction), self._tinygrad_sigmoid_focal_loss(a, b, reduction=reduction), places=3)
+
   def test_numerical_stability(self):
     a = np.array([-10000], dtype=np.float32)
     b = np.array([1], dtype=np.int32)
@@ -51,11 +59,11 @@ class TestFocalLoss(unittest.TestCase):
       np.put_along_axis(ret, rand_indices, 1, axis=-1)
     return ret
 
-  def _torch_sigmoid_focal_loss(self, a: np.ndarray, b: np.ndarray, alpha=0.1, gamma=1) -> float:
-    return torch_sigmoid_focal_loss(torch.Tensor(a), torch.Tensor(b), alpha=alpha, gamma=gamma, reduction='mean').item()
+  def _torch_sigmoid_focal_loss(self, a: np.ndarray, b: np.ndarray, alpha=0.1, gamma=1, reduction='mean') -> float:
+    return torch_sigmoid_focal_loss(torch.Tensor(a), torch.Tensor(b), alpha=alpha, gamma=gamma, reduction=reduction).item()
 
-  def _tinygrad_sigmoid_focal_loss(self, a: np.ndarray, b: np.ndarray, alpha=0.1, gamma=1) -> float:
-    return float(focal_loss(Tensor(a).sigmoid(), Tensor(b), alpha=alpha, gamma=gamma).numpy())
+  def _tinygrad_sigmoid_focal_loss(self, a: np.ndarray, b: np.ndarray, alpha=0.1, gamma=1, reduction='mean') -> float:
+    return float(focal_loss(Tensor(a).sigmoid(), Tensor(b), alpha=alpha, gamma=gamma, reduction=reduction).numpy())
 
 if __name__ == '__main__':
   unittest.main()

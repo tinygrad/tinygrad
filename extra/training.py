@@ -13,8 +13,8 @@ def sparse_categorical_crossentropy(out, Y):
   y = Tensor(y)
   return out.mul(y).mean()
 
-# TODO: use the log-sum-exp trick to improve numerical stability.
-def focal_loss(out, target, alpha:float=0.25, gamma=2):
+# TODO: use the log-sum-exp trick to improve the numerical stability of cross-entropy.
+def focal_loss(out, target, alpha:float=0.25, gamma=2, reduction='mean'):
   out, target = out.float(), target.float()
   p_t = out * target + (1.0 - out) * (1.0 - target)
   ce_loss = -(p_t + 1e-10).log()  # adding an epsilon in order to avoid log(0) case
@@ -22,14 +22,16 @@ def focal_loss(out, target, alpha:float=0.25, gamma=2):
   if alpha >= 0:
     alpha_t = alpha * target + (1.0 - alpha) * (1.0 - target)
     loss = alpha_t * loss
-  return loss.mean()
+  assert reduction in ['mean', 'sum']
+  return loss.sum() if reduction == 'sum' else loss.mean()
 
-def smooth_l1_loss(out: Tensor, target: Tensor) -> Tensor:
+def smooth_l1_loss(out: Tensor, target: Tensor, beta:float=1.0, reduction='mean') -> Tensor:
   out, target = out.float(), target.float()
-  beta = 1.0
   n = (out - target).abs()
-  loss = (n < beta).where(0.5 * n**2 / beta, n - 0.5 * beta)
-  return loss.mean() if loss.numel() > 0 else 0.0 * loss.sum()
+  loss = ((1 - (n - beta).sign()) * 0.5 * n**2 / beta + (1 + (n - beta).sign()) * (n - 0.5*beta)) / 2
+  if loss.numel() <= 0: return 0.0 * loss.sum()
+  assert reduction in ['mean', 'sum']
+  return loss.sum() if reduction == 'sum' else loss.mean()
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):
