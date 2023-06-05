@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-import os, math, functools
+import os, math, functools, time
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 ShapeType = Tuple[int, ...]
@@ -39,6 +39,13 @@ class ContextVar:
 
 DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
 
+class Timing(object):
+  def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
+  def __enter__(self): self.st = time.perf_counter_ns()
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.et = time.perf_counter_ns() - self.st
+    if self.enabled: print(f"{self.prefix}{self.et*1e-6:.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
+
 # **** tinygrad now supports dtypes! *****
 
 class DType(NamedTuple):
@@ -56,14 +63,6 @@ class ImageDType(DType):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
-
-class LazyNumpyArray:
-  def __init__(self, fxn, shape, dtype): self.fxn, self.shape, self.dtype = fxn, shape, dtype
-  def __call__(self) -> np.ndarray: return np.require(self.fxn(self) if callable(self.fxn) else self.fxn, dtype=self.dtype, requirements='C').reshape(self.shape)
-  def reshape(self, new_shape): return LazyNumpyArray(self.fxn, new_shape, self.dtype)
-  def copy(self): return self if callable(self.fxn) else LazyNumpyArray(self.fxn, self.shape, self.dtype)
-  def astype(self, typ): return LazyNumpyArray(self.fxn, self.shape, typ)
-
 
 @dataclass
 class dtypes:

@@ -207,6 +207,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
   chatbot = args.prompt == None
 
+  """
   # load model (you have to find the weights yourself)
   from extra.utils import fake_torch_load_zipped, get_child
 
@@ -262,6 +263,12 @@ if __name__ == "__main__":
       get_child(model, k).assign(v).realize()
 
     del weights
+  """
+
+  # disktensor loader isn't fast yet
+  model = Transformer(**args_7B)
+  from tinygrad.state import torch_load, load_state_dict
+  load_state_dict(model, torch_load(WEIGHTS_7B_FILENAME), strict=False)
 
   # *** prompt engineers work here ****
 

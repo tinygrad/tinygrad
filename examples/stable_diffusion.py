@@ -2,10 +2,7 @@
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 
 from pathlib import Path
-import gzip
-import argparse
-import math
-import re
+import gzip, argparse, math, re
 from functools import lru_cache
 from collections import namedtuple
 
@@ -14,7 +11,8 @@ from tqdm import tqdm
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
-from extra.utils import fake_torch_load_zipped, get_child, download_file
+from extra.utils import download_file
+from tinygrad.state import torch_load, load_state_dict
 
 # TODO: refactor AttnBlock, CrossAttention, CLIPAttention to share code
 
@@ -613,24 +611,10 @@ if __name__ == "__main__":
   model = StableDiffusion()
 
   # load in weights
-  download_file(
-    'https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt',
-    FILENAME
-  )
-  dat = fake_torch_load_zipped(open(FILENAME, "rb"))
-  for k,v in dat['state_dict'].items():
-    try:
-      w = get_child(model, k)
-    except (AttributeError, KeyError, IndexError):
-      #traceback.print_exc()
-      w = None
-    #print(f"{str(v.shape):30s}" if v is not None else v, w.shape if w is not None else w, k)
-    if w is not None:
-      assert w.shape == v.shape and w.dtype == v.dtype, f"shape or dtype mismatch. {w.shape} != {v.shape} or {w.dtype} != {v.dtype}"
-      w.assign(v)
+  download_file('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', FILENAME)
+  load_state_dict(model, torch_load(FILENAME)['state_dict'], strict=False)
 
   # run through CLIP to get context
-
   tokenizer = ClipTokenizer()
   prompt = tokenizer.encode(args.prompt)
   context = model.cond_stage_model.transformer.text_model(prompt).realize()
