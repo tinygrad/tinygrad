@@ -181,7 +181,7 @@ def get_run_onnx(onnx_model: ModelProto):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
           for k in sorted(fxn.keys()):
-            if k < onnx_model_version:
+            if k <= onnx_model_version:
               real_fxn = fxn[k]
         else:
           real_fxn = fxn
