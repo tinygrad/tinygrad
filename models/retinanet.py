@@ -1,4 +1,5 @@
 import math
+from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten
 import tinygrad.nn as nn
 from models.resnet import ResNet
@@ -148,16 +149,21 @@ class RetinaNet:
 class ClassificationHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.num_classes = num_classes
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
+    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1, initialization='randn'), lambda x: x.relu()) for _ in range(4)])
+    for conv_layer in self.conv[::2]: conv_layer.weight = conv_layer.weight / 100  # std. of 0.01
+    self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1, bias=True, initialization='randn')
+    self.cls_logits.weight = self.cls_logits.weight / 100
+    self.cls_logits.bias = Tensor.full(shape=(num_anchors * num_classes,), fill_value=-math.log((1-0.01) / 0.01))
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     return out[0].cat(*out[1:], dim=1).sigmoid()
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1)
+    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1, initialization='randn'), lambda x: x.relu()) for _ in range(4)])
+    for conv_layer in self.conv[::2]: conv_layer.weight = conv_layer.weight / 100
+    self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1, initialization='randn')
+    self.bbox_reg.weight = self.bbox_reg.weight / 100
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
