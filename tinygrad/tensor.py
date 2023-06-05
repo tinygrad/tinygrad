@@ -535,7 +535,10 @@ class Tensor:
     if len_y_shape != max_shape: y = y.reshape((1,) * (max_shape - len_y_shape) + y_shape)
 
     shape_ret = tuple(map(max, zip(x.shape, y.shape)))
-    return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))
+    if x.shape != shape_ret: x = x.expand(shape_ret)
+    if y.shape != shape_ret: y = y.expand(shape_ret)
+
+    return fxn.apply(x, y)
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Add, x, reverse) if x.__class__ == Tensor or x else self
   def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return self._broadcasted(mlops.Sub, x, reverse) if x.__class__ == Tensor or x or reverse else self
