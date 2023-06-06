@@ -2,7 +2,7 @@ from typing import Any
 from tinygrad.ops import Compiled
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.runtime.ops_cuda import RawCUDABuffer, CUDAProgram, cuda
-from tinygrad.ops import BinaryOps, UnaryOps
+from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
 import functools
 
@@ -67,7 +67,7 @@ class PTXCodegen(AssemblyCodegen):
       return idx.render({ Variable: render_variable, NumNode: render_numnode, MulNode: render_mulnode,
         SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_add(a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),}, ins)
 
-    local_size = [1]
+    local_size = []  # TODO: make this work
     global_size = []
     global_regs = []
     for uop,newvar,vin,args in self.uops:
@@ -76,16 +76,18 @@ class PTXCodegen(AssemblyCodegen):
           for i,var in enumerate(args[0]):
             global_size.append(var.max+1)
             global_regs.append(f"%global{i}")
-            ins.append(f"mov.u32 {global_regs[-1]}, %ctaid.{'xyz'[i]};")
+            ins.append(f"mov.u32 {global_regs[-1]}, %ctaid.{'xyz'[len(args[0])-1-i]};")
             # and %ntid.x
             #ins.append(f"mov.u32 %r{i}, %tid.{'xyz'[i]};")
             #ins.append(f"cvt.u64.u32 {global_regs[-1]}, %lt{i};")
             #ins.append(f"mul.wide.u32 {global_regs[-1]}, %r{i}, 4;")
         elif args[1] == "reduce":
           for var in args[0]:
+            ins.append(f"// LOOP {var}")
             new_reduce_var(var)
-            ins.append(f"// LOOP {var} as {reduce_vars[var.expr]}")
             ins.append(f"$loop_{var.expr}:")
+        else:
+          assert f"loop {args[1]} not implemented"
       elif uop == UOps.ENDLOOP:
         if args[1] == "reduce":
           for var in args[0][::-1]:
@@ -95,11 +97,13 @@ class PTXCodegen(AssemblyCodegen):
             ins.append(f"@%p0 bra $loop_{var.expr};")
       elif uop == UOps.LOAD:
         ins.append(f"// LOAD {args}")
+        assert args.valid.min == 1, "must be valid"
         ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
         ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
         ins.append(f"ld.global.f32 {reg[newvar]}, [%bt0];")
       elif uop == UOps.ALU:
-        alu = {BinaryOps.ADD: "add.f32", BinaryOps.SUB: "sub.f32", BinaryOps.MUL: "mul.f32", BinaryOps.MAX: "max.f32"}
+        alu = {BinaryOps.ADD: "add.f32", BinaryOps.SUB: "sub.f32", BinaryOps.MUL: "mul.f32", BinaryOps.MAX: "max.f32", FusedOps.MULACC: "fma.rn.f32"}
+        if args == FusedOps.MULACC: vin = (vin[1], vin[2], vin[0])  # TODO: reorder MULACC everywhere
         ins.append(f"{alu[args]} {reg[newvar]}, {', '.join([reg[x] for x in vin])};")
       elif uop == UOps.STORE:
         ins.append(f"// STORE {args}")
@@ -110,10 +114,10 @@ class PTXCodegen(AssemblyCodegen):
     ins = ins[0:4] + [f".reg .b64 %rd<{len(self.bufs)}>;",
                       f".reg .f32 %f<{len(reg)}>;",
                       f".reg .b64 %bt<1>;",
-                      f".reg .b32 %t<8>;",
+                      f".reg .b32 %t<10>;",  # TODO: make this dynamic
                       f".reg .pred %p<1>;",
                       f".reg .b32 %global<{len(global_regs)}>;"] + ins[4:]
     ins += ["ret;", "}"]
-    return "test", '\n'.join(ins), global_size, local_size
+    return "test", '\n'.join(ins), global_size, [1]*len(global_size)
 
 PTXBuffer = Compiled(RawCUDABuffer, PTXCodegen, CUDAProgram, cuda.Context.synchronize)
