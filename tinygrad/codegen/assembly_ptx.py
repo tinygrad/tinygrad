@@ -1,7 +1,5 @@
 from typing import Any
-from tinygrad.ops import Compiled
 from tinygrad.codegen.assembly import AssemblyCodegen
-from tinygrad.runtime.ops_cuda import RawCUDABuffer, CUDAProgram, cuda
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
@@ -211,5 +209,3 @@ class PTXCodegen(AssemblyCodegen):
                       f".reg .b32 %global<{len(global_regs)}>;"] + ins[4:]
     ins += ["ret;", "}"]
     return "test", '\n'.join(ins), global_size, local_size
-
-PTXBuffer = Compiled(RawCUDABuffer, PTXCodegen, CUDAProgram, cuda.Context.synchronize)
