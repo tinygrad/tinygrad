@@ -106,7 +106,7 @@ def ConvTranspose(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_
 def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   if not training_mode: return data, Tensor.ones(*data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   rng = np.random.RandomState(seed)
-  ratio = ratio.lazydata.realize().toCPU()[0] if isinstance(ratio, Tensor) else ratio
+  ratio = ratio.realize().numpy() if isinstance(ratio, Tensor) else ratio
   mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
