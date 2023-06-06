@@ -3,7 +3,7 @@ from __future__ import annotations
 import math, functools, itertools, operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes
+from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, ImageDType
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
@@ -262,7 +262,15 @@ class Tensor:
     val = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int)) for v in val)) > len(self.shape):
       raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    orig_slices = list(val) + [slice(None)] * (len(self.shape) - num_slices)
+    orig_slices = list(val)
+    ellipses_found = [i for i, v in enumerate(val) if v is Ellipsis]
+    if len(ellipses_found) > 0:
+      if len(ellipses_found) != 1:
+        raise IndexError("an index can only have a single ellipsis ('...')")
+      ellipsis_idx = ellipses_found[0]
+      orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+    else:
+      orig_slices += [slice(None)] * (len(self.shape) - num_slices)
     valid_slices = list(itertools.filterfalse(lambda x: x is None, orig_slices))
     valid_slices = [v if isinstance(v, slice) else slice(y := normalize_int(v, i, dim_sz), y+1) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
@@ -503,9 +511,9 @@ class Tensor:
   def softsign(self): return self / (1 + self.abs())
 
   # ***** broadcasted binary mlops *****
-
   def _broadcasted(self, fxn:Type[Function], other:Union[Tensor, float], reverse:bool=False) -> Tensor:
-    x,y = [Tensor(t, device=self.device, requires_grad=False) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
+    dtype = self.dtype if self.dtype != dtypes.bool and not isinstance(self.dtype,ImageDType) else dtypes.float32
+    x,y = [Tensor(t, device=self.device, requires_grad=False, dtype=dtype) if not isinstance(t, Tensor) else t for t in ([other,self] if reverse else [self,other])]
     x,y = [t.reshape([1]*(max(len(x.shape), len(y.shape))-len(t.shape)) + list(t.shape)) for t in [x,y]]
     shape_ret = tuple(max(sx, sy) for sx,sy in zip(x.shape, y.shape))
     return fxn.apply(x.expand(shape_ret), y.expand(shape_ret))

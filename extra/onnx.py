@@ -153,7 +153,7 @@ def get_run_onnx(onnx_model: ModelProto):
         if n.op_type == "Add": ret = inp[0] + inp[1]
         if n.op_type == "Sub": ret = inp[0] - inp[1]
         if n.op_type == "Mul": ret = inp[0] * inp[1]
-        if n.op_type == "Pow": ret = inp[0] ** inp[1]
+        if n.op_type == "Pow": ret = (inp[0] ** inp[1]).cast(inp[0].dtype)
       elif n.op_type == "Split":
         if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         if 'axis' not in opt: opt['axis'] = 0
@@ -181,7 +181,7 @@ def get_run_onnx(onnx_model: ModelProto):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
           for k in sorted(fxn.keys()):
-            if k < onnx_model_version:
+            if k <= onnx_model_version:
               real_fxn = fxn[k]
         else:
           real_fxn = fxn
