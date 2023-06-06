@@ -238,7 +238,7 @@ def ArrayFeatureExtractor(input, indices):
 
 def GatherElements(input, indices, axis):
   if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
-  input, indices = safe_numpy(input), safe_numpy(indices).astype("int")
+  input, indices = safe_numpy(input), safe_numpy(indices)
   assert indices.shape[0] == 1
   out_shape = indices.shape
   out = np.zeros(out_shape)
