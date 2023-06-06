@@ -151,9 +151,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
     helper_test_op([(), ()], lambda x,y: x*y, Tensor.mul)
   def test_mul_const(self):
-    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x.mul(float("inf"),reverse=True))
-    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x.mul(-float("inf"),reverse=True))
-    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x.mul(float("nan"),reverse=True))
+    helper_test_op([(45,65)], lambda x: x*float("inf"),  lambda x: x*float("inf"))
+    helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
+    helper_test_op([(45,65)], lambda x: x*float("nan"),  lambda x: x*float("nan"))
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
