@@ -14,11 +14,9 @@ class PTXCodegen(AssemblyCodegen):
   def generate(self):
     ins = [".version 7.8", ".target sm_86", ".address_size 64", f".visible .entry test({', '.join(f'.param .u64 buf_{i}' for i in range(len(self.bufs)))}) {{"]
 
-    # load buffers
+    # load buffers, is the cvta.to needed?
     ins += [f"ld.param.u64 %rd{i}, [buf_{i}];" for i in range(len(self.bufs))]
-
-    # is this needed?
-    #ins += [f"cvta.to.global.u64 %rd{i}, %rd{i};" for i in range(len(self.bufs))]
+    ins += [f"cvta.to.global.u64 %rd{i}, %rd{i};" for i in range(len(self.bufs))]
 
     # register allocation
     # TODO: work out non overlapping regs
@@ -31,21 +29,27 @@ class PTXCodegen(AssemblyCodegen):
     def new_reduce_var(vv):
       nonlocal reduce_vars
       assert vv.expr not in reduce_vars
-      reduce_vars[vv.expr] = f"%t{len(reduce_vars)}"
+      reduce_vars[vv.expr] = f"%v{len(reduce_vars)}"
       ins.append(f"mov.u32 {reduce_vars[vv.expr]}, {vv.min};")
 
-    def idx_to_t(idx):
-      v = len(reduce_vars)
-      def new_var():
-        nonlocal v
-        v += 1
-        return f"%t{v-1}"
+    v, p = len(reduce_vars), 0
+    max_v, max_p = v, 1
+    def new_var():
+      nonlocal v, max_v
+      v += 1
+      max_v = max(v, max_v)
+      return f"%v{v-1}"
 
-      p = 0
-      def new_pred_var():
-        nonlocal p
-        p += 1
-        return f"%p{p-1}"
+    def new_pred_var():
+      nonlocal p, max_p
+      p += 1
+      max_p = max(p, max_p)
+      return f"%p{p-1}"
+
+    def idx_to_t(idx):
+      nonlocal v, p
+      # reset this
+      v, p = len(reduce_vars), 0
 
       def render_variable(self, ops, ctx):
         if self.expr.startswith("gidx"):
@@ -81,6 +85,11 @@ class PTXCodegen(AssemblyCodegen):
         ins.append(f"mul.lo.u32 {v}, {self.a.render(ops, ctx)}, {self.b};")
         return v
 
+      def render_add(a, b):
+        v = new_var()
+        ins.append(f"add.u32 {v}, {a}, {b};")
+        return v
+
       # NOTE: do we need both of these?
       def render_ltnode(self, ops, ctx):
         p = new_pred_var()
@@ -94,11 +103,6 @@ class PTXCodegen(AssemblyCodegen):
         p = new_pred_var()
         ins.append(f"and.pred {p}, {a}, {b};")
         return p
-
-      def render_add(a, b):
-        v = new_var()
-        ins.append(f"add.u32 {v}, {a}, {b};")
-        return v
 
       return idx.render({ Variable: render_variable, NumNode: render_numnode, MulNode: render_mulnode, GeNode: render_genode,
                           LtNode: render_ltnode, DivNode: render_divnode, ModNode: render_modnode,
@@ -122,7 +126,7 @@ class PTXCodegen(AssemblyCodegen):
           for i,var in enumerate(args[0]):
             global_size.append(var.max+1)
             global_regs.append(f"%global{i}")
-            # TODO: this should be fixed a
+            # is this needed?
             ins.append(f"mov.u32 %temp0, %ctaid.{'xyz'[len(args[0])-1-i]};")
             ins.append(f"mov.u32 %temp1, %ntid.{'xyz'[len(args[0])-1-i]};")
             ins.append(f"mov.u32 %temp2, %tid.{'xyz'[len(args[0])-1-i]};")
@@ -203,8 +207,8 @@ class PTXCodegen(AssemblyCodegen):
                       f".reg .f32 %f<{len(reg)}>;",
                       f".reg .b64 %bt<2>;",
                       f".reg .b32 %temp<3>;",
-                      f".reg .b32 %t<300>;",  # TODO: make this dynamic, does it matter?
-                      f".reg .pred %p<15>;",
+                      f".reg .b32 %v<{max_v}>;",  # TODO: make this dynamic, does it matter?
+                      f".reg .pred %p<{max_p}>;",
                       f".reg .b32 %local<{len(local_regs)}>;",
                       f".reg .b32 %global<{len(global_regs)}>;"] + ins[4:]
     ins += ["ret;", "}"]
