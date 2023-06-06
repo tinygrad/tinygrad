@@ -82,6 +82,14 @@ class dtypes:
   int64: Final[DType] = DType(2, 8, "int64", np.int64)
   uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
 
+class NPArray(np.ndarray):
+  def __new__(cls, arr, buffer=None):
+    obj = np.asarray(arr).view(cls)
+    obj.buffer = buffer
+    return obj
+
+  def __array_finalize__(self, obj):
+    if obj is not None: self.buffer = getattr(obj, "buffer", None)
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
