@@ -1,3 +1,4 @@
+import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
@@ -34,31 +35,37 @@ class BatchNorm2d:
 
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
 
-# TODO: is this good weight init?
+# TODO: these Conv lines are terrible
+def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+  return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)
+
 class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
-    self.weight = Tensor.glorot_uniform(out_channels, in_channels//groups, *self.kernel_size)
-    self.bias = Tensor.zeros(out_channels) if bias else None
+    self.weight = Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5))
+    bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
+    self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
 
   def __call__(self, x):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
 class ConvTranspose2d:
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
-    self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
-    self.weight = Tensor.glorot_uniform(in_channels, out_channels//groups, *self.kernel_size)
-    self.bias = Tensor.zeros(out_channels) if bias else None
+    self.stride, self.padding, self.output_padding, self.dilation, self.groups = stride, padding, output_padding, dilation, groups
+    self.weight = Tensor.kaiming_uniform(in_channels, out_channels//groups, *self.kernel_size, a=math.sqrt(5))
+    bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
+    self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
 
   def __call__(self, x):
-    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
+    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
-    self.weight = Tensor.glorot_uniform(out_features, in_features)
-    self.bias = Tensor.zeros(out_features) if bias else None
+    self.weight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
+    bound = 1 / math.sqrt(self.weight.shape[1])
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
   def __call__(self, x):
     return x.linear(self.weight.transpose(), self.bias)
@@ -76,6 +83,17 @@ class GroupNorm:
 
     if self.weight is None or self.bias is None: return x
     # elementwise_affine on channels
+    return x * self.weight.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)]) + self.bias.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)])
+
+class InstanceNorm:
+  def __init__(self, num_features:int, eps:float=1e-5, affine:bool=True):
+    self.num_features, self.eps = num_features, eps
+    self.weight: Optional[Tensor] = Tensor.ones(num_features) if affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(num_features) if affine else None
+
+  def __call__(self, x:Tensor):
+    x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
+    if self.weight is None or self.bias is None: return x
     return x * self.weight.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)]) + self.bias.reshape(1, -1, *[1 for _ in range(len(x.shape)-2)])
 
 class LayerNorm:

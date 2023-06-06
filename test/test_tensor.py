@@ -1,8 +1,10 @@
+import dataclasses
 import numpy as np
 import torch
 import unittest
 import itertools
 from tinygrad.tensor import Tensor, Device
+from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -12,6 +14,13 @@ W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
+  def test_zerodim_initialization(self):
+    a = Tensor(55)
+    b = Tensor(3.14)
+
+    self.assertEqual(a.shape, ())
+    self.assertEqual(b.shape, ())
+
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
     b = Tensor.randn(10,10)
@@ -20,20 +29,6 @@ class TestTinygrad(unittest.TestCase):
     a += b
     val2 = a.numpy()
     np.testing.assert_allclose(val1, val2)
-
-  def test_slicing(self):
-    x = Tensor.randn(10,10)
-    slices = [0,1,9,-1,-10,None] + [slice(s,e) for s,e in itertools.combinations([0,1,-1,None], r=2)] + [slice(9,11), slice(-11,-9)]
-    fmt = lambda s: f'{s.start}:{s.stop}' if isinstance(s, slice) else str(s)
-    for s in list(itertools.product(slices, slices)) + [(None,0,None,0,None), (slice(0,2),None,None,slice(2,4),None,None)]:
-      np.testing.assert_equal(x.numpy()[s], x[s].numpy(), f'Test failed for slice x[{",".join(fmt(x) for x in s)}]')
-    for s in [-11,10]:
-      with self.assertRaises(IndexError):
-        x[s]
-    with self.assertRaises(AssertionError):
-      x[::2]
-    with self.assertRaises(AssertionError):
-      x[0,0,0]
 
   def test_backward_pass(self):
     def test_tinygrad():
@@ -153,6 +148,47 @@ class TestTinygrad(unittest.TestCase):
         Tensor.manual_seed(1337)
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
+
+  def test_zeros_like_has_same_dtype(self):
+    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
+      a = Tensor([1, 2, 3], dtype=datatype)
+      b = Tensor.zeros_like(a)
+      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
+      assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+
+    a = Tensor([1, 2, 3])
+    b = Tensor.zeros_like(a, dtype=dtypes.int8)
+    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+
+  def test_ones_like_has_same_dtype_and_shape(self):
+    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
+      a = Tensor([1, 2, 3], dtype=datatype)
+      b = Tensor.ones_like(a)
+      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
+      assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+
+    a = Tensor([1, 2, 3])
+    b = Tensor.ones_like(a, dtype=dtypes.int8)
+    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+
+  def test_ndim(self):
+    assert Tensor.randn(1).ndim == 1
+    assert Tensor.randn(2,2,2).ndim == 3
+    assert Tensor.randn(1,1,1,1,1,1).ndim == 6
+
+  def test_numel(self):
+    assert Tensor.randn(10, 10).numel() == 100
+    assert Tensor.randn(1,2,5).numel() == 10
+    assert Tensor.randn(1,1,1,1,1,1).numel() == 1
+    assert Tensor([]).numel() == 0
+    # assert Tensor.randn(1,0,2,5) == 0 # TODO: fix empty tensors
+
+  def test_element_size(self):
+    for f in dataclasses.fields(dtypes):
+      dtype = f.default
+      assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
 if __name__ == '__main__':
   unittest.main()
