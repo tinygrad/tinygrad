@@ -457,7 +457,9 @@ class CLIPTextTransformer:
 
   def __call__(self, input_ids):
     x = self.embeddings(input_ids, list(range(len(input_ids))))
-    x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1))
+    causal_attention_mask = np.triu(np.ones((1,1,77,77), dtype=np.float32) * -np.inf, k=1)
+    x = self.encoder(x, Tensor(causal_attention_mask, device=x.device))
+    # x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1)) # TODO: Pending(#942)
     return self.final_layer_norm(x)
 
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
