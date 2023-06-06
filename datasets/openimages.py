@@ -153,8 +153,9 @@ def prepare_target(annotations, img_id, img_size):
   classes = classes[keep]
   return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
 
-def iterate(coco, bs=8):
+def iterate(coco, bs=8, shuffle=False):
   image_ids = sorted(coco.imgs.keys())
+  if shuffle: np.random.shuffle(image_ids)
   for i in range(0, len(image_ids), bs):
     X, targets  = [], []
     for img_id in image_ids[i:i+bs]:

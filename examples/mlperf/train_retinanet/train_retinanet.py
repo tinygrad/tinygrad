@@ -1,4 +1,5 @@
 from tinygrad.tensor import Tensor
+from tinygrad.jit import TinyJit
 from tinygrad.nn import optim
 import numpy as np
 from models.resnet import ResNeXt50_32X4D
@@ -7,9 +8,16 @@ from typing import List
 from examples.mlperf.train_retinanet.utils.bbox_transformations import bbox_transform, resize_box_based_on_new_image_size
 from extra.training import smooth_l1_loss, focal_loss
 import random
+from datasets.openimages import openimages, iterate
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
+from contextlib import redirect_stdout
+import time
+from itertools import islice
 
 NUM_CLASSES = 264
 INPUT_IMG_SHAPE = (800, 800, 3)
+TRAIN_BS = 8
 
 
 # Compute the IoU between all <box,query_box> pairs. A box is represented as (x1, y1, x2, y2).
@@ -58,7 +66,8 @@ def train_retinanet():
   model.backbone.body.fc = None  # it's not used by RetinaNet and would break the training loop because of .requires_grad
 
   anchors = model.anchor_gen(input_size=INPUT_IMG_SHAPE[:2])
-  anchors = np.array([a for sublist in anchors for a in sublist])
+  def flatten(l): return [item for sublist in l for item in sublist]
+  anchors = np.array(flatten(anchors))
   print('Number of anchors:', len(anchors))
 
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
@@ -69,46 +78,89 @@ def train_retinanet():
     x /= input_std
     return x
 
-  from datasets.openimages import openimages, iterate
-  from pycocotools.coco import COCO
   coco = COCO(openimages())
 
   optimizer = optim.SGD(optim.get_parameters(model), lr=0.001, weight_decay=0.0001, momentum=0.9)
-  n, BS = 0, 4
+
+  def evaluate_model():
+    print('Evaluating model...')
+    Tensor.training = False
+    coco_eval = COCOeval(coco, iouType="bbox")
+    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+    mdlrun = TinyJit(lambda x: model(input_fixup(x)).realize())
+    eval_bs = TRAIN_BS*2
+    n = 0
+    st = time.perf_counter()
+    for x, targets in islice(iterate(coco, eval_bs, shuffle=True), 120):
+      dat = Tensor(x.astype(np.float32))
+      mt = time.perf_counter()
+      if dat.shape[0] == eval_bs:
+        outs = mdlrun(dat).numpy()
+      else:
+        mdlrun.jit_cache = None
+        outs =  model(input_fixup(dat)).numpy()
+      et = time.perf_counter()
+      predictions = model.postprocess_detections(outs, input_size=dat.shape[1:3], orig_image_sizes=[t["image_size"] for t in targets])
+      ext = time.perf_counter()
+      n += len(targets)
+      print(f"[{n}/{len(coco.imgs)}] == {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model, {(ext-et)*1000:.2f} ms for postprocessing")
+      img_ids = [t["image_id"] for t in targets]
+      coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score}
+        for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+      with redirect_stdout(None):
+        coco_eval.cocoDt = coco.loadRes(coco_results)
+        coco_eval.params.imgIds = img_ids
+        coco_eval.evaluate()
+      evaluated_imgs.extend(img_ids)
+      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+      st = time.perf_counter()
+
+    coco_eval.params.imgIds = evaluated_imgs
+    coco_eval._paramsEval.imgIds = evaluated_imgs
+    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    coco_eval.accumulate()
+    coco_eval.summarize()
+
+  @TinyJit
+  def train_step(dat, annotations):
+    optimizer.zero_grad()
+
+    outs = model(input_fixup(dat))
+    regression_preds, classif_preds = outs[:, :, :4], outs[:, :, 4:]
+
+    target = compute_batch_targets(anchors, annotations, model.num_classes)
+    regression_targets, classif_targets = Tensor(target['regression_targets'], requires_grad=False), Tensor(target['classif_targets'], requires_grad=False)
+
+    regression_mask = Tensor(np.repeat(target['positive_anchors_mask'][:, :, np.newaxis], repeats=4, axis=2))
+    regression_preds = regression_mask.where(regression_preds, regression_targets)
+    regression_losses = [smooth_l1_loss(regression_preds[img_idx], regression_targets[img_idx], reduction='sum') for img_idx in range(TRAIN_BS)]
+    regression_loss = Tensor.stack(regression_losses).mean()
+
+    classif_mask = Tensor(np.repeat((target['positive_anchors_mask'] + target['negative_anchors_mask'])[:, :, np.newaxis], repeats=NUM_CLASSES, axis=2))
+    classif_preds = classif_mask.where(classif_preds, classif_targets)
+    classif_losses = [focal_loss(classif_preds[img_idx], classif_targets[img_idx], reduction='sum') / max(1, np.count_nonzero(target['positive_anchors_mask'][img_idx])) for img_idx in range(TRAIN_BS)]
+    classif_loss = Tensor.stack(classif_losses).mean()
+
+    loss = regression_loss + classif_loss
+    loss.backward()
+
+    optimizer.step()
+    return loss.realize()
+
+  n = 0
   for epoch in range(1, 11):
     Tensor.training = True
-    for imgs, annotations in iterate(coco, BS):
-      dat = Tensor(imgs.astype(np.float32))
-
-      optimizer.zero_grad()
-      outs = model(input_fixup(dat))
-      regression_preds, classif_preds = outs[:, :, :4], outs[:, :, 4:]
-
-      target = compute_batch_targets(anchors, annotations, model.num_classes)
-      regression_targets, classif_targets = Tensor(target['regression_targets']), Tensor(target['classif_targets'])
-
-      # TODO: something's still wrong with the loss calculation.
-      regression_mask = Tensor(np.repeat(target['positive_anchors_mask'][:, :, np.newaxis], repeats=4, axis=2))
-      regression_preds = regression_mask.where(regression_preds, regression_targets)
-      regression_loss = smooth_l1_loss(regression_preds, regression_targets, reduction='sum')
-
-      classif_mask = Tensor(np.repeat((target['positive_anchors_mask'] + target['negative_anchors_mask'])[:, :, np.newaxis], repeats=NUM_CLASSES, axis=2))
-      classif_preds = classif_mask.where(classif_preds, classif_targets)
-      classif_loss = focal_loss(classif_preds, classif_targets, reduction='sum')
-
-      loss = regression_loss + classif_loss  # alternative option: lambda * regression_loss + classif_loss
-      loss = loss / max(1, np.count_nonzero(target['positive_anchors_mask']))
-      loss.backward()
-
-      optimizer.step()
-
+    train_losses = []
+    for imgs, annotations in iterate(coco, TRAIN_BS, shuffle=True):
+      if imgs.shape[0] != TRAIN_BS: break  # for JIT
+      loss = train_step(Tensor(imgs.astype(np.float32)), annotations)
+      train_losses.append(loss.numpy().item())
       n += len(annotations)
       print(f"[Epoch {epoch}, {n}/{len(coco.imgs)}]")
-      print('Training loss for last batch:', loss.numpy())
-
-    # At the end of each epoch:
-    # TODO: evaluate results on test set with COCOeval
-
+      if len(train_losses) >= 10:
+        print('Training loss (per batch, last 10):', (sum(train_losses) / len(train_losses)))
+        train_losses = []
+    evaluate_model()
 
 if __name__ == "__main__":
   Tensor.manual_seed(0)
