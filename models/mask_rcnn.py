@@ -931,6 +931,15 @@ class PostProcessor:
       result.append(boxlist_for_class)
 
     result = cat_boxlist(result)
+    number_of_detections = len(result)
+
+    # Limit to max_per_image detections **over all classes**
+    if number_of_detections > self.detections_per_img > 0:
+      cls_scores = result.get_field("scores")
+      image_thresh, _ = cls_scores.topk(k=number_of_detections - 100)
+      image_thresh = image_thresh.numpy()[-1]
+      keep = [idx for idx, score in enumerate(cls_scores.numpy()) if score >= image_thresh]
+      result = result[keep]
     return result
 
 
