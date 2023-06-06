@@ -128,10 +128,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: x.tril(), lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
     helper_test_op([(3,3)], lambda x: x.tril(-1), lambda x: x.tril(-1))
+    helper_test_op([(5,3,3)], lambda x: x.tril(), lambda x: x.tril())
+    helper_test_op([(5,3,3)], lambda x: x.tril(1), lambda x: x.tril(1))
   def test_triu(self):
     helper_test_op([(3,3)], lambda x: x.triu(), lambda x: x.triu())
     helper_test_op([(3,3)], lambda x: x.triu(1), lambda x: x.triu(1))
     helper_test_op([(3,3)], lambda x: x.triu(-1), lambda x: x.triu(-1))
+    helper_test_op([(5,3,3)], lambda x: x.triu(), lambda x: x.triu())
+    helper_test_op([(5,3,3)], lambda x: x.triu(1), lambda x: x.triu(1))
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
