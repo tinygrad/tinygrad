@@ -4,7 +4,10 @@ from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.runtime.ops_cuda import RawCUDABuffer, CUDAProgram, cuda
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
-import functools
+from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
+import functools, struct
+
+def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
@@ -34,7 +37,6 @@ class PTXCodegen(AssemblyCodegen):
       ins.append(f"mov.u32 {reduce_vars[vv.expr]}, {vv.min};")
 
     def idx_to_t(idx):
-      from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
       v = len(reduce_vars)
       def new_var():
         nonlocal v
@@ -109,38 +111,57 @@ class PTXCodegen(AssemblyCodegen):
     local_regs = []
     global_size = []
     global_regs = []
+    shared_name = None
     skipload_branch = 0
     for uop,newvar,vin,args in self.uops:
-      if uop == UOps.LOOP:
+      if uop == UOps.DEFINE_LOCAL:
+        ins.append(f".shared .align 4 .b8 {args[0]}[{args[1]*4}];")
+        shared_name = args[0]
+      elif uop == UOps.CONST:
+        ins.append(f"mov.f32 {reg[newvar]}, 0f{float_to_hex(args)};")
+      elif uop == UOps.LOOP:
         if args[1] == "global":
           for i,var in enumerate(args[0]):
             global_size.append(var.max+1)
             global_regs.append(f"%global{i}")
-            ins.append(f"mov.u32 {global_regs[-1]}, %ctaid.{'xyz'[len(args[0])-1-i]};")
+            # TODO: this should be fixed a
+            ins.append(f"mov.u32 %temp0, %ctaid.{'xyz'[len(args[0])-1-i]};")
+            ins.append(f"mov.u32 %temp1, %ntid.{'xyz'[len(args[0])-1-i]};")
+            ins.append(f"mov.u32 %temp2, %tid.{'xyz'[len(args[0])-1-i]};")
+            ins.append(f"mad.lo.s32 {global_regs[-1]}, %temp0, %temp1, %temp2;")
         elif args[1] == "local":
           for i,var in enumerate(args[0]):
             local_size.append(var.max+1)
+            global_size[i] *= local_size[i]
             local_regs.append(f"%local{i}")
-            ins.append(f"mov.u32 {local_regs[-1]}, %ctaid.{'xyz'[len(args[0])-1-i]};")
+            ins.append(f"mov.u32 {local_regs[-1]}, %tid.{'xyz'[len(args[0])-1-i]};")
         else:
           for var in args[0]:
-            ins.append(f"// LOOP {var}")
-            new_reduce_var(var)
-            ins.append(f"$loop_{var.expr}:")
+            if not isinstance(var, NumNode):  # TODO: why is this coming through?
+              ins.append(f"// LOOP {var}")
+              new_reduce_var(var)
+              ins.append(f"$loop_{var.expr}:")
       elif uop == UOps.ENDLOOP:
-        if args[1] == "reduce":
+        if args[1] not in ["global", "local"]:
           for var in args[0][::-1]:
-            ins.append(f"// ENDLOOP {var} as {reduce_vars[var.expr]}")
-            ins.append(f"setp.ne.s32 %p0, {reduce_vars[var.expr]}, {var.max};")
-            ins.append(f"add.u32 {reduce_vars[var.expr]}, {reduce_vars[var.expr]}, 1;")
-            ins.append(f"@%p0 bra $loop_{var.expr};")
+            if not isinstance(var, NumNode):  # TODO: why is this coming through?
+              ins.append(f"// ENDLOOP {var} as {reduce_vars[var.expr]}")
+              ins.append(f"setp.ne.s32 %p0, {reduce_vars[var.expr]}, {var.max};")
+              ins.append(f"add.u32 {reduce_vars[var.expr]}, {reduce_vars[var.expr]}, 1;")
+              ins.append(f"@%p0 bra $loop_{var.expr};")
       elif uop == UOps.LOAD:
         ins.append(f"// LOAD {args}")
         if args.valid.min != 1:
+          ins.append(f"mov.f32 {reg[newvar]}, 0f00000000;")  # 0.0 is the alt value
           ins.append(f"@!{idx_to_t(args.valid)} bra $skipload_{skipload_branch};")
         ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
-        ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
-        ins.append(f"ld.global.f32 {reg[newvar]}, [%bt0];")
+        if args.i == -1:
+          ins.append(f"mov.u64 %bt1, {shared_name};")
+          ins.append(f"add.u64 %bt0, %bt1, %bt0;")
+          ins.append(f"ld.shared.f32 {reg[newvar]}, [%bt0];")
+        else:
+          ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
+          ins.append(f"ld.global.f32 {reg[newvar]}, [%bt0];")
         if args.valid.min != 1:
           ins.append(f"$skipload_{skipload_branch}:")
           skipload_branch += 1
@@ -170,12 +191,18 @@ class PTXCodegen(AssemblyCodegen):
       elif uop == UOps.STORE:
         ins.append(f"// STORE {args}")
         ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
-        ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
-        ins.append(f"st.global.f32 [%bt0], {reg[vin[0]]};")
+        if args.i == -1:
+          ins.append(f"mov.u64 %bt1, {shared_name};")
+          ins.append(f"add.u64 %bt0, %bt1, %bt0;")
+          ins.append(f"st.shared.f32 [%bt0], {reg[vin[0]]};")
+        else:
+          ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
+          ins.append(f"st.global.f32 [%bt0], {reg[vin[0]]};")
 
     ins = ins[0:4] + [f".reg .b64 %rd<{len(self.bufs)}>;",
                       f".reg .f32 %f<{len(reg)}>;",
-                      f".reg .b64 %bt<1>;",
+                      f".reg .b64 %bt<2>;",
+                      f".reg .b32 %temp<3>;",
                       f".reg .b32 %t<50>;",  # TODO: make this dynamic
                       f".reg .pred %p<10>;",
                       f".reg .b32 %local<{len(local_regs)}>;",
