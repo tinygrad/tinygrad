@@ -19,7 +19,7 @@ for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/
 
 Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `datasets/librispeech`.
 """
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/librispeech"
+BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/"
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
 WINDOW = librosa.filters.get_window("hann", 320)
@@ -59,15 +59,15 @@ def dataset_preprocessing():
       f.extractall(BASEDIR)
       progress_bar.update(len(f.getmembers()))
 
-    # Move extracted files to librispeech from LibriSpeech
-    extracted_path = BASEDIR / "LibriSpeech"
-    for file_path in extracted_path.glob("**/*"):
-        new_file_path = BASEDIR / file_path.relative_to(extracted_path)
-        new_file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.rename(new_file_path)
+    # # Move extracted files to librispeech from LibriSpeech
+    # extracted_path = BASEDIR / "LibriSpeech"
+    # for file_path in extracted_path.glob("**/*"):
+    #     new_file_path = BASEDIR / file_path.relative_to(extracted_path)
+    #     new_file_path.parent.mkdir(parents=True, exist_ok=True)
+    #     file_path.rename(new_file_path)
     
-    # Remove LibriSpeech folder
-    extracted_path.rmdir()
+    # # Remove LibriSpeech folder
+    # extracted_path.rmdir()
   else:
     print("Folder LibriSpeech already exists. Skipping extraction.")
 
@@ -79,16 +79,14 @@ def dataset_preprocessing():
   elif len(wav_files) > 0:
     print("Wav files already exist. Skipping conversion.")
   else:
-    wav_folder = BASEDIR / "dev-clean-wav"
+    wav_folder = BASEDIR / "LibriSpeech" / "dev-clean-wav"
     wav_folder.mkdir(parents=True, exist_ok=True)
 
     with tqdm(total=len(flac_files), unit='file', desc='Converting .flac to .wav') as progress_bar:
       for file in flac_files:
-        # relative_path = file.relative_to(BASEDIR / "LibriSpeech")
         relative_path = file.relative_to(BASEDIR / "LibriSpeech" / "dev-clean").parent / file.name
-        print(f"Relative Path: {relative_path}")
-        wav_file = wav_folder / relative_path.with_suffix(".wav")
-        print(f"Wav File: {wav_file}")
+        (wav_folder / relative_path).mkdir(parents=True, exist_ok=True)
+        wav_file = (wav_folder / relative_path).with_suffix(".wav")
         soundfile.write(wav_file, soundfile.read(file)[0], 16000)
         progress_bar.update(1)
 
@@ -97,7 +95,7 @@ def dataset_preprocessing():
     r.raise_for_status()
     total_size = int(r.headers.get('content-length', 0))
 
-    with open(BASEDIR / "dev-clean-wav.json", "wb") as f, tqdm(
+    with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", "wb") as f, tqdm(
       total=total_size, unit='B', unit_scale=True, unit_divisor=1024, 
       desc='Downloading dev-clean-wav.json') as progress_bar:
       for chunk in r.iter_content(chunk_size=8192):
@@ -148,9 +146,9 @@ def load_wav(file):
 
 def iterate(bs=1, start=0, val=True):
   if val:
-    print(f"there are {len(ci)} samples in the dataset")
+    print(f"Number of samples in the dataset: {len(ci)}")
     for i in range(start, len(ci), bs):
-      samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
+      samples, sample_lens = zip(*[load_wav(BASEDIR / "LibriSpeech" / v["files"][0]["fname"]) for v in ci[i : i + bs]])
       samples = list(samples)
       # pad to same length
       max_len = max(sample_lens)
@@ -160,9 +158,9 @@ def iterate(bs=1, start=0, val=True):
 
       yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in ci[i : i + bs]])
   else:
-    print(f"there are {len(ci)} samples in the dataset")
+    print(f"Number of samples in the dataset: {len(ci)}")
     for i in range(start, len(ci), bs):
-      samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
+      samples, sample_lens = zip(*[load_wav(BASEDIR / "LibriSpeech" / v["files"][0]["fname"]) for v in ci[i : i + bs]])
       samples = list(samples)
       # pad to same length
       max_len = max(sample_lens)
@@ -176,7 +174,7 @@ def iterate(bs=1, start=0, val=True):
 
 if __name__ == "__main__":
   dataset_preprocessing()
-  with open(BASEDIR / "dev-clean-wav.json", encoding="utf-8") as f:
+  with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", encoding="utf-8") as f:
     ci = json.load(f)
   X, Y = next(iterate())
-  print(X[0].shape, Y.shape)
+  print(f"Shape of X: X[0].shape ; Shape of Y: {Y.shape}")
