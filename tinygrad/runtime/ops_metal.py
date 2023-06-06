@@ -63,10 +63,10 @@ class MetalProgram:
       os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
-  def __call__(self, global_size, local_size, *bufs, wait=False):
-    global_size += [1] * (3-len(global_size))
-    if local_size is None: local_size: list[int] = [32]
+  def __call__(self, global_size:List[int], local_size:List[int], *bufs, wait=False):
+    if not local_size: local_size = [32]
     local_size += [1] * (3-len(local_size))
+    global_size += [1] * (3-len(global_size))
 
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
