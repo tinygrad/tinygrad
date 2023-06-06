@@ -153,18 +153,20 @@ class PTXCodegen(AssemblyCodegen):
         ins.append(f"// LOAD {args}")
         if args.valid.min != 1:
           ins.append(f"mov.f32 {reg[newvar]}, 0f00000000;")  # 0.0 is the alt value
-          ins.append(f"@!{idx_to_t(args.valid)} bra $skipload_{skipload_branch};")
-        ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
-        if args.i == -1:
-          ins.append(f"mov.u64 %bt1, {shared_name};")
-          ins.append(f"add.u64 %bt0, %bt1, %bt0;")
-          ins.append(f"ld.shared.f32 {reg[newvar]}, [%bt0];")
-        else:
-          ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
-          ins.append(f"ld.global.f32 {reg[newvar]}, [%bt0];")
-        if args.valid.min != 1:
-          ins.append(f"$skipload_{skipload_branch}:")
-          skipload_branch += 1
+          if args.valid.max == 1:
+            ins.append(f"@!{idx_to_t(args.valid)} bra $skipload_{skipload_branch};")
+        if args.valid.max == 1:
+          ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
+          if args.i == -1:
+            ins.append(f"mov.u64 %bt1, {shared_name};")
+            ins.append(f"add.u64 %bt0, %bt1, %bt0;")
+            ins.append(f"ld.shared.f32 {reg[newvar]}, [%bt0];")
+          else:
+            ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
+            ins.append(f"ld.global.f32 {reg[newvar]}, [%bt0];")
+          if args.valid.min != 1:
+            ins.append(f"$skipload_{skipload_branch}:")
+            skipload_branch += 1
       elif uop == UOps.ALU:
         if args == BinaryOps.CMPEQ:
           ins.append(f"setp.eq.f32 %p0, {reg[vin[0]]}, {reg[vin[1]]};")
@@ -203,8 +205,8 @@ class PTXCodegen(AssemblyCodegen):
                       f".reg .f32 %f<{len(reg)}>;",
                       f".reg .b64 %bt<2>;",
                       f".reg .b32 %temp<3>;",
-                      f".reg .b32 %t<50>;",  # TODO: make this dynamic
-                      f".reg .pred %p<10>;",
+                      f".reg .b32 %t<300>;",  # TODO: make this dynamic, does it matter?
+                      f".reg .pred %p<15>;",
                       f".reg .b32 %local<{len(local_regs)}>;",
                       f".reg .b32 %global<{len(global_regs)}>;"] + ins[4:]
     ins += ["ret;", "}"]
