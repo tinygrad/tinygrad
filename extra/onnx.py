@@ -2,6 +2,7 @@ from __future__ import annotations
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
+import math
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from typing import List,Dict
@@ -78,7 +79,7 @@ def get_run_onnx(onnx_model: ModelProto):
   attribute_dict = {}
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
-  
+
   onnx_model_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=False):
@@ -166,8 +167,13 @@ def get_run_onnx(onnx_model: ModelProto):
         if n.op_type == "Mul": ret = inp[0] * inp[1]
         if n.op_type == "Pow": ret = (inp[0] ** inp[1]).cast(inp[0].dtype)
       elif n.op_type == "Split":
-        if 'split' not in opt: opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
         if 'axis' not in opt: opt['axis'] = 0
+        if 'split' not in opt:
+          if len(inp) > 1:
+            opt['split'] = [int(x) for x in safe_numpy(inp[1])]  # split can be a tensor
+          else:
+            opt['split'] = [math.ceil(inp[0].shape[opt['axis']] / len(n.output))] * len(n.output)
+            opt['split'][-1] -= sum(opt['split']) - inp[0].shape[opt['axis']]
         i = 0
         arg = [(0,x) for x in inp[0].shape]
         for o,s in zip(n.output, opt['split']):
@@ -204,7 +210,7 @@ def get_run_onnx(onnx_model: ModelProto):
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       if debug: print("outputs:")
-      for i in range(len(n.output)): 
+      for i in range(len(n.output)):
         if debug: print(f"\t{n.output[i]} - {ret[i]}")
         intermediate_tensors[n.output[i]] = ret[i]
       #print(ret[0].numpy().mean())
