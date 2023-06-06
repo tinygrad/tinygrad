@@ -122,7 +122,7 @@ class Tensor:
   @staticmethod
   def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, prod(shape), **kwargs).reshape(shape)
 
-  _seed: int = None
+  _seed: Optional[int] = None
   @staticmethod
   def manual_seed(seed=None): Tensor._seed = seed
 
