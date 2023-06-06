@@ -9,16 +9,37 @@ import tarfile
 from tqdm import tqdm
 
 """
-The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `datasets/librispeech`.
-For mlperf validation the dev-clean dataset is used.
+This script downloads, verifies and extracts these datasets from https://www.openslr.org/12/ and converts their flacs to wav:
+1. train-clean-100.tar.gz   [6.3G]    (training set of 100 hours "clean" speech)
+2. train-clean-360.tar.gz   [23G]     (training set of 360 hours "clean" speech)
+3. train-other-500.tar.gz   [30G]     (training set of 500 hours "other" speech)
+4. dev-clean.tar.gz         [337M]    (development set, "clean" speech)
 
-Then all the flacs have to be converted to wav using something like:
-```fish
-for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/$(basename $file .flac).wav"; done
-```
+Additionally, the script generates the JSON files for the training and validation datasets:
+1. train-clean-100-wav.json
+2. train-clean-360-wav.json
+3. train-other-500-wav.json
+4. dev-clean-wav.json
 
-Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `datasets/librispeech`.
+
+TODO:
+1. Modify code to reflect file changes
+2. Add code to generate JSON files
+
+File download url and md5 hash:
+http://www.openslr.org/resources/12/train-clean-100.tar.gz
+2a93770f6d5c6c964bc36631d331a522
+
+http://www.openslr.org/resources/12/train-clean-360.tar.gz
+c0e676e450a7ff2f54aeade5171606fa
+
+http://www.openslr.org/resources/12/train-other-500.tar.gz
+d1a0fd59409feb2c614ce4d30c387708
+
+http://www.openslr.org/resources/12/dev-clean.tar.gz
+42e2234ba48799c1f50f24a7926300a1
 """
+
 BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/"
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
@@ -177,4 +198,4 @@ if __name__ == "__main__":
   with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", encoding="utf-8") as f:
     ci = json.load(f)
   X, Y = next(iterate())
-  print(f"Shape of X: X[0].shape ; Shape of Y: {Y.shape}")
+  print(f"Shape of X: {X[0].shape} ; Shape of Y: {Y.shape}")
