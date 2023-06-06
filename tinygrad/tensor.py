@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import math, functools, itertools, operator
+import math, functools, itertools, operator, time
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
 from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, ImageDType
@@ -122,14 +122,13 @@ class Tensor:
   @staticmethod
   def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, prod(shape), **kwargs).reshape(shape)
 
-  _seed: Optional[int] = None
+  _seed: Optional[int] = int(time.time())
   @staticmethod
   def manual_seed(seed=None): Tensor._seed = seed
 
   @staticmethod
   def rand(*shape, **kwargs):
-    if Tensor._seed is not None:
-      Tensor._seed += 1
+    Tensor._seed += 1
     return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
 
   # ***** creation helper functions *****
