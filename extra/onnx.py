@@ -118,7 +118,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
-      elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])
+      elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])  if 'axes' in opt else inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in inp[1].numpy()]) #HACK inp[1] is axes for some tests
       elif n.op_type == "Div":
         # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
         ret = inp[0].div(inp[1])
@@ -139,12 +139,19 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = ret.reshape([x*y for x,y in zip(inp[0].shape, [int(x) for x in scales])])
       elif n.op_type == "Gather":
         # TODO: is this correct? seems to work for simple gather ops
-        axis = opt['axis']
-        shape = list(inp[0].shape)
-        indices = [shape[axis]+int(x) if x<0 else int(x) for x in safe_numpy(inp[1])]
-        args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
-        ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
-        ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
+        if 'axis' not in opt: #HACK NegativeLogLikelihoodLoss and CenterCropPad tests has inputs: ['weight' or 'all_dim', 'target']
+          input = safe_numpy(inp[0]) if isinstance(inp[0], Tensor) else np.array(inp[0])
+          target = safe_numpy(inp[1])
+          f = lambda x: input[x]
+          ret = Tensor(f(target))
+        else:
+          inp[1] = inp[1].float()
+          axis = opt['axis']
+          shape = list(inp[0].shape)
+          indices = [shape[axis]+int(x) if x<0 else int(x) for x in safe_numpy(inp[1])]
+          args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
+          ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
+          ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
         if (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
           inp[1] = inp[1].reshape(inp[0].shape)

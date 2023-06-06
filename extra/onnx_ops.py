@@ -200,7 +200,7 @@ def Tile(input, repeats):
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
-def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y)
+def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).float()
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
 def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
@@ -228,3 +228,20 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   data_mean = input.mean(axis=axis, keepdim=True)
   std = ((input**2).mean(axis=axis, keepdim=True) - data_mean**2).sqrt()
   return (input - data_mean) / (std + 1e-9)
+
+def ArrayFeatureExtractor(input, indices):
+  axis = input.ndim-1 # indices are applied to the last axes of the tensor
+  shape = input.shape
+  indices = [shape[-1]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
+  args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
+  return input.slice(arg=args[0]).cat(*[input.slice(arg=arg) for arg in args[1:]], dim=axis)
+
+def GatherElements(input, indices, axis):
+  if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
+  input, indices = safe_numpy(input), safe_numpy(indices).astype("int")
+  assert indices.shape[0] == 1
+  out_shape = indices.shape
+  out = np.zeros(out_shape)
+  for indexes in np.ndindex(out_shape):
+    out.__setitem__(indexes, input.__getitem__((int(indices.__getitem__(indexes)), *indexes[1:])))
+  return Tensor(out.astype('float32')).transpose(ax1=axis, ax2=0) if axis != 0 else Tensor(out.astype('float32'))
