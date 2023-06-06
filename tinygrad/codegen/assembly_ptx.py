@@ -3,8 +3,10 @@ from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
+from tinygrad.helpers import dtypes
 import functools, struct
 
+dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
@@ -46,6 +48,13 @@ class PTXCodegen(AssemblyCodegen):
       max_p = max(p, max_p)
       return f"%p{p-1}"
 
+    def render_xnode(node, pred=False):
+      def _render_xnode(self, ops, ctx):
+        v = new_pred_var() if pred else new_var()
+        ins.append(f"{node} {v}, {self.a.render(ops, ctx)}, {self.b};")
+        return v
+      return _render_xnode
+
     def idx_to_t(idx):
       nonlocal v, p
       # reset this
@@ -70,42 +79,19 @@ class PTXCodegen(AssemblyCodegen):
         ins.append(f"mov.u32 {v}, {self.b};")
         return v
 
-      def render_modnode(self, ops, ctx):
-        v = new_var()
-        ins.append(f"rem.u32 {v}, {self.a.render(ops, ctx)}, {self.b};")
-        return v
-
-      def render_divnode(self, ops, ctx):
-        v = new_var()
-        ins.append(f"div.u32 {v}, {self.a.render(ops, ctx)}, {self.b};")
-        return v
-
-      def render_mulnode(self, ops, ctx):
-        v = new_var()
-        ins.append(f"mul.lo.u32 {v}, {self.a.render(ops, ctx)}, {self.b};")
-        return v
-
       def render_add(a, b):
         v = new_var()
         ins.append(f"add.u32 {v}, {a}, {b};")
         return v
 
-      # NOTE: do we need both of these?
-      def render_ltnode(self, ops, ctx):
-        p = new_pred_var()
-        ins.append(f"setp.lt.s32 {p}, {self.a.render(ops, ctx)}, {self.b};")
-        return p
-      def render_genode(self, ops, ctx):
-        p = new_pred_var()
-        ins.append(f"setp.ge.s32 {p}, {self.a.render(ops, ctx)}, {self.b};")
-        return p
       def render_and(a, b):
         p = new_pred_var()
         ins.append(f"and.pred {p}, {a}, {b};")
         return p
 
-      return idx.render({ Variable: render_variable, NumNode: render_numnode, MulNode: render_mulnode, GeNode: render_genode,
-                          LtNode: render_ltnode, DivNode: render_divnode, ModNode: render_modnode,
+      return idx.render({ Variable: render_variable, NumNode: render_numnode, MulNode: render_xnode("mul.lo.u32"),
+                          GeNode: render_xnode("setp.ge.s32", True), LtNode: render_xnode("setp.lt.s32", True),
+                          DivNode: render_xnode("div.u32"), ModNode: render_xnode("rem.u32"),
         SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_add(a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
         AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_and(a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),}, ins)
 
@@ -158,14 +144,21 @@ class PTXCodegen(AssemblyCodegen):
           if args.valid.max == 1:
             ins.append(f"@!{idx_to_t(args.valid)} bra $skipload_{skipload_branch};")
         if args.valid.max == 1:
-          ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
+          ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*self.bufs[args.i].dtype.itemsize)};")
+          # doing a real load
+          sreg = reg[newvar]
+          stype = dtype_to_nvtype[self.bufs[args.i].dtype]
+          if self.bufs[args.i].dtype == dtypes.float16:
+            sreg = "%h"
           if args.i == -1:
             ins.append(f"mov.u64 %bt1, {shared_name};")
             ins.append(f"add.u64 %bt0, %bt1, %bt0;")
-            ins.append(f"ld.shared.f32 {reg[newvar]}, [%bt0];")
+            ins.append(f"ld.shared.{stype} {sreg}, [%bt0];")
           else:
             ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
-            ins.append(f"ld.global.f32 {reg[newvar]}, [%bt0];")
+            ins.append(f"ld.global.{stype} {sreg}, [%bt0];")
+          if self.bufs[args.i].dtype == dtypes.float16:
+            ins.append(f"cvt.f32.f16 {reg[newvar]}, %h;")
           if args.valid.min != 1:
             ins.append(f"$skipload_{skipload_branch}:")
             skipload_branch += 1
@@ -194,17 +187,23 @@ class PTXCodegen(AssemblyCodegen):
           ins.append(f"{alu[args]} {reg[newvar]}, {', '.join([reg[x] for x in vin])};")
       elif uop == UOps.STORE:
         ins.append(f"// STORE {args}")
-        ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*4)};")
+        ins.append(f"cvt.u64.u32 %bt0, {idx_to_t(args.idx*self.bufs[args.i].dtype.itemsize)};")
+        sreg = reg[vin[0]]
+        stype = dtype_to_nvtype[self.bufs[args.i].dtype]
+        if self.bufs[args.i].dtype == dtypes.float16:
+          ins.append(f"cvt.rn.f16.f32 %h, {sreg};")
+          sreg = "%h"
         if args.i == -1:
           ins.append(f"mov.u64 %bt1, {shared_name};")
           ins.append(f"add.u64 %bt0, %bt1, %bt0;")
-          ins.append(f"st.shared.f32 [%bt0], {reg[vin[0]]};")
+          ins.append(f"st.shared.{stype} [%bt0], {sreg};")
         else:
           ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
-          ins.append(f"st.global.f32 [%bt0], {reg[vin[0]]};")
+          ins.append(f"st.global.{stype} [%bt0], {sreg};")
 
     ins = ins[0:4] + [f".reg .b64 %rd<{len(self.bufs)}>;",
                       f".reg .f32 %f<{len(reg)}>;",
+                      f".reg .b16 %h;",
                       f".reg .b64 %bt<2>;",
                       f".reg .b32 %temp<3>;",
                       f".reg .b32 %v<{max_v}>;",  # TODO: make this dynamic, does it matter?

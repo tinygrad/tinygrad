@@ -51,5 +51,6 @@ class CUDACodegen(CStyleCodegen):
     half_prekernel = "#include <cuda_fp16.h>",
     gid = [f'blockDim.{chr(120+i)}*blockIdx.{chr(120+i)}+threadIdx.{chr(120+i)}' for i in range(3)],
     lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
+  supports_float4 = False  # float4 itself works, but half4 doesn't, so we just disable this
   supports_float4_alu = False
 CUDABuffer = Compiled(RawCUDABuffer, PTXCodegen if getenv("PTX") else CUDACodegen, CUDAProgram, cuda.Context.synchronize)
