@@ -118,7 +118,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt.get('alpha', 1.0))
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
-      elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])  if 'axes' in opt else inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in inp[1].numpy()]) #HACK inp[1] is axes for some tests
+      elif n.op_type == "Squeeze": ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in opt['axes']])  if 'axes' in opt else inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in safe_numpy(inp[1])]) #HACK inp[1] is axes for some tests
       elif n.op_type == "Div":
         # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
         ret = inp[0].div(inp[1])
