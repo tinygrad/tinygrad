@@ -206,7 +206,7 @@ def eval_mrcnn():
     batch_imgs = []
     for image_row in batch:
       image_name = image_row['file_name']
-      img = Image.open(BASEDIR/f'val2017/{image_name}')
+      img = Image.open(BASEDIR/f'val2017/{image_name}').convert("RGB")
       batch_imgs.append(img)
     batch_result = compute_prediction_batched(batch_imgs, mdl)
     for image_row, result in zip(batch, batch_result):
