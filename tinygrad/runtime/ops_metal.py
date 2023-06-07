@@ -29,7 +29,7 @@ class RawMetalBuffer(RawBufferMapped):
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
-  def toCPU(self) -> NDArray:
+  def toCPU(self) -> NPArray:
     METAL.synchronize()
     return NPArray(np.frombuffer(self._buf.contents().as_buffer(self._buf.length()), dtype=self.dtype, buffer=self))
 
