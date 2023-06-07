@@ -36,10 +36,10 @@ class BertForPreTraining:
     params = get_parameters(self)
     count = 0
     for p in params:
-        param_count = 1
-        for s in p.shape:
-            param_count *= s
-        count += param_count
+      param_count = 1
+      for s in p.shape:
+        param_count *= s
+      count += param_count
     print(f"Total parameters: {count / 1000 / 1000}M")
 
   def __call__(self, input_ids:Tensor, token_type_ids:Tensor, attention_mask:Tensor):
@@ -81,7 +81,7 @@ class BertForPreTraining:
     masked_lm_predictions = np.argmax(prediction_scores.numpy(), axis=-1) * valid
     masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids.numpy()) * valid
 
-    return masked_lm_accuracy.sum() / valid.sum(), masked_lm_predictions
+    return masked_lm_accuracy.sum() / valid.sum()
 
 class BertPreTrainingHeads:
   def __init__(self, hidden_size, vocab_size, embeddings_weight):

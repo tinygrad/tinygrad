@@ -59,8 +59,7 @@ def train_bert():
       input_ids, input_mask, segment_ids = Tensor(X["input_ids"], requires_grad=False), Tensor(X["input_mask"], requires_grad=False), Tensor(X["segment_ids"], requires_grad=False)
       masked_lm_positions, masked_lm_ids = Tensor(X["masked_lm_positions"], requires_grad=False), Tensor(X["masked_lm_ids"], requires_grad=False)
       pred = eval_step(input_ids, input_mask, segment_ids)
-      acc, pred_ids = mdl.accuracy(pred, masked_lm_positions, masked_lm_ids)
-      print(tokenizer.convert_ids_to_tokens(pred_ids[0]))
+      acc = mdl.accuracy(pred, masked_lm_positions, masked_lm_ids)
       accuracies.append(acc.item())
       t.set_description(f"acc {acc.item():.8f} avg {sum(accuracies) / len(accuracies):.8f}")
 
