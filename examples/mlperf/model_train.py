@@ -23,7 +23,7 @@ def train_rnnt():
 
 def train_bert():
   from models.bert import BertForPreTraining
-  from datasets.wikipedia import iterate, get_val_files
+  from datasets.wikipedia import iterate, get_val_files, Tokenizer
   import wandb
 
   mdl = BertForPreTraining()
@@ -36,6 +36,11 @@ def train_bert():
   wandb.init(project="tinygrad-mlperf", settings=wandb.Settings(_disable_stats=True))
 
   @TinyJit
+  def eval_step(input_ids, input_mask, segment_ids):
+    pred, _ = mdl(input_ids, input_mask, segment_ids)
+    return pred.realize()
+
+  @TinyJit
   def train_step(input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, next_sentence_labels):
     pred, seq = mdl(input_ids, input_mask, segment_ids)
     loss = mdl.loss(pred, seq, masked_lm_positions, masked_lm_ids, next_sentence_labels)
@@ -44,23 +49,39 @@ def train_bert():
     optimizer.zero_grad()
     return loss.realize()
 
+  tokenizer = Tokenizer("/home/woze/projects/tinygrad/weights/bert_vocab.txt")
+
   for i in range(1000):
-    for X, Y in (t := tqdm(iterate(), total=len(get_val_files()))):
+    # eval loop
+    Tensor.training = False
+    accuracies = []
+    for X, Y in (t := tqdm(iterate(val=True), total=len(get_val_files()))):
       input_ids, input_mask, segment_ids = Tensor(X["input_ids"], requires_grad=False), Tensor(X["input_mask"], requires_grad=False), Tensor(X["segment_ids"], requires_grad=False)
-      masked_lm_positions, masked_lm_ids, next_sentence_labels = Tensor(X["masked_lm_positions"], requires_grad=False), Tensor(X["masked_lm_ids"], requires_grad=False), Tensor(X["next_sentence_labels"], requires_grad=False)
-      loss = train_step(input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, next_sentence_labels + 1 - 1)
+      masked_lm_positions, masked_lm_ids = Tensor(X["masked_lm_positions"], requires_grad=False), Tensor(X["masked_lm_ids"], requires_grad=False)
+      pred = eval_step(input_ids, input_mask, segment_ids)
+      acc, pred_ids = mdl.accuracy(pred, masked_lm_positions, masked_lm_ids)
+      print(tokenizer.convert_ids_to_tokens(pred_ids[0]))
+      accuracies.append(acc.item())
+      t.set_description(f"acc {acc.item():.8f} avg {sum(accuracies) / len(accuracies):.8f}")
 
-      # update progress bar
-      t.set_description(f"loss {loss.numpy().item():.2f}")
-
-      # update wandb
-      wandb.log({
-        "loss": loss.numpy().item(),
-        "time_remaining": (t.total - t.n) / t.format_dict["rate"] if t.format_dict["rate"] and t.total else 0,
-      })
+    # train loop
+    # Tensor.training = True
+    # for X, Y in (t := tqdm(iterate(), total=len(get_val_files()))):
+    #   input_ids, input_mask, segment_ids = Tensor(X["input_ids"], requires_grad=False), Tensor(X["input_mask"], requires_grad=False), Tensor(X["segment_ids"], requires_grad=False)
+    #   masked_lm_positions, masked_lm_ids, next_sentence_labels = Tensor(X["masked_lm_positions"], requires_grad=False), Tensor(X["masked_lm_ids"], requires_grad=False), Tensor(X["next_sentence_labels"], requires_grad=False)
+    #   loss = train_step(input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, next_sentence_labels + 1 - 1)
+    #
+    #   # update progress bar
+    #   t.set_description(f"loss {loss.numpy().item():.2f}")
+    #
+    #   # update wandb
+    #   wandb.log({
+    #     "loss": loss.numpy().item(),
+    #     "time_remaining": (t.total - t.n) / t.format_dict["rate"] if t.format_dict["rate"] and t.total else 0,
+    #   })
 
     # save checkpoint
-    safe_save(get_state_dict(mdl), f"weights/ckpt_{i}.bert.safetensors")
+    # safe_save(get_state_dict(mdl), f"weights/ckpt_{i}.bert.safetensors")
 
 def train_maskrcnn():
   # TODO: Mask RCNN
