@@ -176,10 +176,8 @@ def get_run_onnx(onnx_model: ModelProto):
         continue
       elif n.op_type == "Slice":
         assert onnx_model_version >= 10, f'only onnx version >= 10 supported for slice'
-        # print("INPUTS", len(inp))
         arg = [(0,x) for x in inp[0].shape]
         starts, ends = inp[1:3]
-        # print(starts, ends)
         axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
         steps = safe_numpy(inp[4])[0] if len(inp) > 4 else 1
         starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
@@ -206,7 +204,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       if debug: print("outputs:")
       for i in range(len(n.output)): 
-        if debug: print(f"\t{n.output[i]} shape - {ret[i].shape if isinstance(ret[i], Tensor) else ret[i]} dtype - {ret[i].dtype if isinstance(ret[i], Tensor) else ret[i]}")
+        if debug: print(f"\t{n.output[i]} - {ret[i]}")
         intermediate_tensors[n.output[i]] = ret[i]
       #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:
