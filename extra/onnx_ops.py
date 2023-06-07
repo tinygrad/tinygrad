@@ -229,26 +229,26 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   std = ((input**2).mean(axis=axis, keepdim=True) - data_mean**2).sqrt()
   return (input - data_mean) / (std + 1e-9)
 
+def _gather(input, indices):
+  reshape_arg = [1]*input.ndim + [input.shape[-1]]
+  return Tensor.where(indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]), input, 0,).sum(indices.ndim)
+
+def Gather(input, indices, axis):
+  if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
+  ret = _gather(input, indices)
+  if axis != 0: ret = ret.transpose(ax1=axis, ax2=0)
+  return ret
+
 def ArrayFeatureExtractor(input, indices):
-  axis = input.ndim-1
-  shape = input.shape
-  indices = [shape[-1]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
-  args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
-  return input.slice(arg=args[0]).cat(*[input.slice(arg=arg) for arg in args[1:]], dim=axis)
+  indices = indices.float() # "y" does not have AttributeProto
+  repeat_arg = [1]*(input.ndim-1) + [input.shape[-2]]
+  indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
+  ret = _gather(input, indices).T
+  return ret
 
 def GatherElements(input, indices, axis):
+  indices = indices.float()
   if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
-  outshape = indices.shape
-  indices = [int(i) for i in safe_numpy(indices.flatten())]
-  args = []
-  for idx, i in enumerate(indices): # https://stackoverflow.com/questions/5996566/get-the-coordinates-of-a-matrix-from-its-flatten-index
-    l = []
-    for j in range(len(input.shape)):
-      if j == 0: l.append((i, i+1))
-      else:
-        x = idx // prod(input.shape[j+1:]) if j+1 < len(input.shape) else idx
-        idx %= prod(input.shape[j+1:])
-        l.append((x, x+1)) 
-    args.append(l)
-  ret = input.slice(arg=args[0]).reshape(1,).cat(*[input.slice(arg=arg).reshape(1,) for arg in args[1:]]).reshape(outshape) #BUG problem with very large matrices
-  return ret.transpose(ax1=axis, ax2=0) if axis != 0 else ret
+  ret = _gather(input.T, indices)
+  if axis != 0: ret = ret.transpose(ax1=0, ax2=axis)
+  return ret
