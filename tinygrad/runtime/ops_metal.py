@@ -26,10 +26,9 @@ class RawMetalBuffer(RawBufferMapped):
     self.release()
     super().__del__()
   def release(self) -> None:
-    if self._buf is not None:
-      purgeable_state = 2  # 2 represents the MTLPurgeableState.Empty state
-      self._buf.setPurgeableState_(purgeable_state)
-      self._buf = None
+    purgeable_state = 2  # 2 represents the MTLPurgeableState.Empty state
+    self._buf.setPurgeableState_(purgeable_state)
+    self._buf = None
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
