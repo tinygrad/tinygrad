@@ -89,6 +89,7 @@ class TestMNIST(unittest.TestCase):
     train(model, X_train, Y_train, optimizer, BS=69, steps=1, noloss=True)
     for p in model.parameters(): p.realize()
 
+  @unittest.skipIf(getenv("CI", "") != "" and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()

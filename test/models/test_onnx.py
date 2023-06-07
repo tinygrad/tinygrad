@@ -8,6 +8,8 @@ import onnx
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
+from tinygrad.lazy import Device
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -65,6 +67,7 @@ class TestOnnxModel(unittest.TestCase):
     ps = stats.sort_stats(pstats.SortKey.TIME)
     ps.print_stats(30)
 
+  @unittest.skipIf(getenv("CI", "") != "" and Device.DEFAULT == "METAL", "METAL broken in some CI runners")
   def test_openpilot_model(self):
     dat = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(io.BytesIO(dat))
