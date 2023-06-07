@@ -3,8 +3,7 @@ from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
@@ -93,22 +92,32 @@ def get_run_onnx(onnx_model: ModelProto):
       shape = shape_to_tuple(inp.type.tensor_type.shape)
       if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
-        input_shape = inputs[inp.name].shape
-        if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
-        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
+        input_shape = input_tensors[inp.name].shape
+        if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
+        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items(): v.realize()
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
 
+    def fetch_tensor(x: str):
+      if x in tensors: return tensors[x]
+      if x in intermediate_tensors: return intermediate_tensors[x]
+      if x != str(): return input_tensors[x]
+      return None
+
     for num,n in enumerate(onnx_model.graph.node):
-      inp = [tensors[x] if x in tensors else (intermediate_tensors[x] if x in intermediate_tensors else (input_tensors[x] if x != str() else None)) for x in n.input]
+      inp = []
+      if debug: print("inputs:")
+      for x in n.input:
+        t = fetch_tensor(x)
+        if debug: print(f"\t{x} - {t}")
+        inp.append(t)
       opt = attribute_dict[num]
       if debug: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-
       # free ones
       if n.op_type == "Relu": ret = inp[0].relu()
       elif n.op_type == "Sigmoid": ret = inp[0].sigmoid()
@@ -128,7 +137,7 @@ def get_run_onnx(onnx_model: ModelProto):
         elif 'value_int' in opt: ret = Tensor(np.array(opt['value_int'], dtype=np.int64), requires_grad=False)
         elif 'value_floats' in opt: ret = Tensor(np.array(opt['value_floats'], dtype=np.float32), requires_grad=False)
         elif 'value_ints' in opt: ret = Tensor(np.array(opt['value_ints'], dtype=np.int64), requires_grad=False)
-        else: raise NotImplementedError(f'Constant not implemented')
+        else: raise NotImplementedError(f'Constant not implemented for {opt}')
       elif n.op_type == "Reshape": ret = inp[0].reshape([int(x) if x != 0 else inp[0].shape[i] for i,x in enumerate(safe_numpy(inp[1]))])
       elif n.op_type == "Resize":
         # TODO: this is handcoded for YOLOv8
@@ -139,14 +148,14 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = ret.reshape([x*y for x,y in zip(inp[0].shape, [int(x) for x in scales])])
       elif n.op_type == "Gather":
         # TODO: is this correct? seems to work for simple gather ops
-        axis = opt['axis']
+        axis = opt['axis'] if 'axis' in opt else 0
         shape = list(inp[0].shape)
         indices = [shape[axis]+int(x) if x<0 else int(x) for x in safe_numpy(inp[1])]
         args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
         ret = inp[0].slice(arg=args[0]).cat(*[inp[0].slice(arg=arg) for arg in args[1:]], dim=axis)
         ret = ret.reshape([s for i,s in enumerate(shape) if i != axis]) if len(indices) == 1 else ret # squeeze if needed
       elif n.op_type in ["Add", "Sub", "Mul", "Pow"]:
-        if (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
+        if all([isinstance(x, Tensor) for x in inp]) and (len(inp[0].shape) != len(inp[1].shape)) and (prod(inp[0].shape) == prod(inp[1].shape)):
           inp[1] = inp[1].reshape(inp[0].shape)
         # TODO: is this right?
         if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
@@ -166,13 +175,15 @@ def get_run_onnx(onnx_model: ModelProto):
         continue
       elif n.op_type == "Slice":
         assert onnx_model_version >= 10, f'only onnx version >= 10 supported for slice'
+        # print("INPUTS", len(inp))
         arg = [(0,x) for x in inp[0].shape]
-        starts, ends, axes = inp[1:4]
-        assert axes.shape == (1,)
-        axis, starts, ends  = int(safe_numpy(axes)[0]), int(safe_numpy(starts)[0]), int(safe_numpy(ends)[0])
-        ends = min(ends, inp[0].shape[axis])
-        starts = starts + inp[0].shape[axis] if starts < 0 else starts
-        arg[axis] = (starts, ends)
+        starts, ends = inp[1:3]
+        # print(starts, ends)
+        axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3])
+        steps = safe_numpy(inp[4])[0] if len(inp) > 4 else 1
+        starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
+        for i,axis in enumerate(axes.tolist()):
+          arg[axis] = (starts[i], ends[i])
         ret = inp[0].slice(arg=arg)
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
@@ -192,7 +203,10 @@ def get_run_onnx(onnx_model: ModelProto):
       if not isinstance(ret, tuple): ret = (ret, )
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug: print([x.shape if isinstance(x, Tensor) else None for x in ret])
-      for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
+      if debug: print("outputs:")
+      for i in range(len(n.output)): 
+        if debug: print(f"\t{n.output[i]} shape - {ret[i].shape if isinstance(ret[i], Tensor) else ret[i]} dtype - {ret[i].dtype if isinstance(ret[i], Tensor) else ret[i]}")
+        intermediate_tensors[n.output[i]] = ret[i]
       #print(ret[0].numpy().mean())
       if num == ONNXLIMIT:
         output_tensor_names = n.output

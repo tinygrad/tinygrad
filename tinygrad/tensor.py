@@ -143,7 +143,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step).cumsum() + (start - step)
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
@@ -470,7 +470,7 @@ class Tensor:
 
   def cumsum(self, axis=0):
     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
-    return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis]), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
+    return x.reshape(1, 1, -1, self.shape[axis]).conv2d(Tensor.ones(1, 1, 1, self.shape[axis], dtype=self.dtype), padding=(self.shape[axis]-1, 0, 0, 0)).reshape(*x.shape).permute(*range(axis), self.ndim - 1, *range(axis, self.ndim-1))
   
   # ***** mlops (unary) *****
 
