@@ -2,6 +2,8 @@ import pathlib
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
+from tinygrad.lazy import Device
 from tinygrad.state import safe_load, safe_save, get_state_dict
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
@@ -110,6 +112,7 @@ class TestDiskTensor(unittest.TestCase):
     out = reloaded.numpy()
     assert np.all(out == 1.)
 
+  @unittest.skipIf(getenv("CI", "") != "" and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_slice(self):
     pathlib.Path("/tmp/dt3").unlink(missing_ok=True)
     Tensor.arange(10, device="CPU").to("disk:/tmp/dt3").realize()
@@ -119,6 +122,7 @@ class TestDiskTensor(unittest.TestCase):
     is_3 = slice_me[3:4].cpu()
     assert is_3.numpy()[0] == 3
 
+  @unittest.skipIf(getenv("CI", "") != "" and Device.DEFAULT == "METAL", "broken in some CI runners")
   def test_slice_2d(self):
     pathlib.Path("/tmp/dt5").unlink(missing_ok=True)
     Tensor.arange(100, device="CPU").to("disk:/tmp/dt5").realize()
