@@ -3,7 +3,7 @@ from __future__ import annotations
 import math, functools, itertools, operator
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence
-from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, ImageDType, NPArray
+from tinygrad.helpers import prod, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, ImageDType
 from tinygrad.lazy import Device, LazyBuffer
 from tinygrad.ops import LoadOps
 
@@ -100,7 +100,7 @@ class Tensor:
     return self
 
   def detach(self): return Tensor(self.lazydata, device=self.device, requires_grad=False)
-  def numpy(self) -> NPArray: return NPArray(self.lazydata.toCPU(), buffer=self.lazydata)
+  def numpy(self) -> NPArray: return self.lazydata.toCPU()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):

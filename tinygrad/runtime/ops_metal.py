@@ -3,7 +3,7 @@ import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
+from tinygrad.helpers import prod, getenv, DEBUG, DType, NDArray
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
@@ -28,6 +28,9 @@ class RawMetalBuffer(RawBufferMapped):
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
+  def toCPU(self) -> NDArray:
+    METAL.synchronize()
+    return NPArray(np.frombuffer(self._buf.contents().as_buffer(self._buf.length()), dtype=self.dtype, buffer=self)
 
 def unwrap(x):
   ret, err = x
