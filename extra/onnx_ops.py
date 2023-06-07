@@ -230,7 +230,7 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   return (input - data_mean) / (std + 1e-9)
 
 def ArrayFeatureExtractor(input, indices):
-  axis = input.ndim-1 # indices are applied to the last axes of the tensor
+  axis = input.ndim-1 
   shape = input.shape
   indices = [shape[-1]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
   args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
@@ -238,10 +238,17 @@ def ArrayFeatureExtractor(input, indices):
 
 def GatherElements(input, indices, axis):
   if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
-  input, indices = safe_numpy(input), safe_numpy(indices)
-  assert indices.shape[0] == 1
-  out_shape = indices.shape
-  out = np.zeros(out_shape)
-  for indexes in np.ndindex(out_shape):
-    out.__setitem__(indexes, input.__getitem__((int(indices.__getitem__(indexes)), *indexes[1:])))
-  return Tensor(out.astype('float32')).transpose(ax1=axis, ax2=0) if axis != 0 else Tensor(out.astype('float32'))
+  outshape = indices.shape
+  indices = [int(i) for i in safe_numpy(indices.flatten())]
+  args = []
+  for idx, i in enumerate(indices): # https://stackoverflow.com/questions/5996566/get-the-coordinates-of-a-matrix-from-its-flatten-index
+    l = []
+    for j in range(len(input.shape)):
+      if j == 0: l.append((i, i+1))
+      else:
+        x = idx // prod(input.shape[j+1:]) if j+1 < len(input.shape) else idx
+        idx %= prod(input.shape[j+1:])
+        l.append((x, x+1)) 
+    args.append(l)
+  ret = input.slice(arg=args[0]).cat(*[input.slice(arg=arg) for arg in args[1:]]).flatten().reshape(outshape)
+  return ret.transpose(ax1=axis, ax2=0) if axis != 0 else ret
