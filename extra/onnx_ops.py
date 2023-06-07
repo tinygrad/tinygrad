@@ -230,7 +230,7 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   return (input - data_mean) / (std + 1e-9)
 
 def ArrayFeatureExtractor(input, indices):
-  axis = input.ndim-1 
+  axis = input.ndim-1
   shape = input.shape
   indices = [shape[-1]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
   args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(shape)] for i in indices]
@@ -250,5 +250,5 @@ def GatherElements(input, indices, axis):
         idx %= prod(input.shape[j+1:])
         l.append((x, x+1)) 
     args.append(l)
-  ret = input.slice(arg=args[0]).cat(*[input.slice(arg=arg) for arg in args[1:]]).flatten().reshape(outshape)
+  ret = input.slice(arg=args[0]).reshape(1,).cat(*[input.slice(arg=arg).reshape(1,) for arg in args[1:]]).reshape(outshape) #BUG problem with very large matrices
   return ret.transpose(ax1=axis, ax2=0) if axis != 0 else ret
