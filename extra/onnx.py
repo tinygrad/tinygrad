@@ -79,7 +79,6 @@ def get_run_onnx(onnx_model: ModelProto):
   attribute_dict = {}
   for num,n in enumerate(onnx_model.graph.node):
     attribute_dict[num] = attribute_to_dict(n.attribute)
-
   onnx_model_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=False):
@@ -131,7 +130,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt.get('perm', list(range(len(inp[0].shape))[::-1])))
       elif n.op_type == "Squeeze":
-        axes = (inp[1].numpy() + len(inp[0].shape)) % len(inp[0].shape)
+        axes = (safe_numpy(inp[1]) + len(inp[0].shape)) % len(inp[0].shape)
         ret = inp[0].reshape([s for i,s in enumerate(inp[0].shape) if i not in axes])
       elif n.op_type == "Div":
         # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
