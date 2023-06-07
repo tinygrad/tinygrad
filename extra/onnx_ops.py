@@ -20,7 +20,7 @@ def Unsqueeze(data, axes):
 def Gemm(A, B, C=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=None):
   ret = alpha * ((A.transpose() if transA == 1 else A) @ (B.transpose() if transB == 1 else B))
   if C is not None:
-      if broadcast: C = C.reshape([-1 if i == broadcast else 1 for i in range(len(ret.shape))]) # onnx.py:152
+    if broadcast: C = C.reshape([-1 if i == broadcast else 1 for i in range(len(ret.shape))]) # onnx.py:152
     ret += beta * C
   return ret
 
