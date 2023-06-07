@@ -1,8 +1,9 @@
 from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
-from tinygrad.state import torch_load, load_state_dict, get_state_dict
-from extra.utils import download_file, get_child
+from tinygrad.state import torch_load, load_state_dict, get_state_dict, get_parameters
+from extra.utils import download_file
+import numpy as np
 from pathlib import Path
 
 class BertForPreTraining:
@@ -11,40 +12,76 @@ class BertForPreTraining:
     self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
 
   def load_from_pretrained(self):
-    fn = Path(__file__).parent.parent / "weights/bert_for_pretraining.pt"
+    # fn = Path(__file__).parent.parent / "weights/bert_for_pretraining.pt"
+    fn = Path(__file__).parent.parent / "weights/bert-large-uncased.bin"
     fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
     download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
 
     state_dict = torch_load(str(fn))
-    load_state_dict(self, state_dict)
+    # load_state_dict(self, state_dict, strict=False)
+    for k, v in state_dict.items():
+      if ".gamma" in k:
+        k = k.replace(".gamma", ".weight")
+      if ".beta" in k:
+        k = k.replace(".beta", ".bias")
+      if "cls.predictions.decoder" in k:
+        continue
+      print(k, v.shape)
+      child = get_state_dict(self)[k]
+      child.assign(v.to(child.device)).realize()
+
     # for _, v in get_state_dict(self).items():
     #   v.lazydata = v.lazydata.cast(dtypes.float16).realize()
 
+    params = get_parameters(self)
+    count = 0
+    for p in params:
+        param_count = 1
+        for s in p.shape:
+            param_count *= s
+        count += param_count
+    print(f"Total parameters: {count / 1000 / 1000}M")
+
   def __call__(self, input_ids:Tensor, token_type_ids:Tensor, attention_mask:Tensor):
-    sequence_outputs, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
-    sequence_output = sequence_outputs[-1]
+    sequence_output, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
     prediction_scores, seq_relationship_score = self.cls(sequence_output, pooled_output)
     return prediction_scores, seq_relationship_score
 
   def loss(self, prediction_scores:Tensor, seq_relationship_score:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
-    def sparse_categorical_crossentropy(out, Y):
+    def sparse_categorical_crossentropy(out, Y, ignore_index=-1):
       num_classes = out.shape[-1]
       y_counter = Tensor.arange(num_classes, requires_grad=False).unsqueeze(0).expand(Y.numel(), num_classes)
-      y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0 * num_classes, 0)
+      y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0)
+      loss_mask = Y != ignore_index
+      y = y * loss_mask.reshape(-1, 1)
       y = y.reshape(*Y.shape, num_classes)
-      return out.mul(y).mean()
+      return out.mul(y).sum() / loss_mask.sum()
+
+    # gather only the masked_lm_positions we care about
+    counter = Tensor.arange(prediction_scores.shape[1], requires_grad=False).reshape(1, 1, prediction_scores.shape[1]).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
+    onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
+    prediction_scores = onehot @ prediction_scores
 
     prediction_scores = prediction_scores.log_softmax()
     seq_relationship_score = seq_relationship_score.log_softmax()
 
-    # gather only the masked_lm_positions we care about
-    counter = Tensor.arange(prediction_scores.shape[0], requires_grad=False).unsqueeze(0).expand(masked_lm_positions.shape[0], prediction_scores.shape[0])
-    onehot = counter == masked_lm_positions.reshape(-1, 1)
-    prediction_scores = onehot @ prediction_scores
-
-    masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids)
+    masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids, ignore_index=0)
     next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
+
+  def accuracy(self, prediction_scores:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor):
+    # gather only the masked_lm_positions we care about
+    counter = Tensor.arange(prediction_scores.shape[1], requires_grad=False).reshape(1, 1, prediction_scores.shape[1]).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
+    onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
+    prediction_scores = onehot @ prediction_scores
+
+    prediction_scores = prediction_scores.log_softmax()
+
+    valid = masked_lm_ids.numpy() != 0
+    masked_lm_predictions = np.argmax(prediction_scores.numpy(), axis=-1) * valid
+    masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids.numpy()) * valid
+
+    return masked_lm_accuracy.sum() / valid.sum(), masked_lm_predictions
 
 class BertPreTrainingHeads:
   def __init__(self, hidden_size, vocab_size, embeddings_weight):
@@ -59,13 +96,12 @@ class BertPreTrainingHeads:
 class BertLMPredictionHead:
   def __init__(self, hidden_size, vocab_size, embeddings_weight):
     self.transform = BertPredictionHeadTransform(hidden_size)
-    self.decoder = Linear(hidden_size, vocab_size, bias=False)
-    self.decoder.weight = embeddings_weight
+    self.embedding_weight = embeddings_weight
     self.bias = Tensor.zeros(vocab_size)
 
   def __call__(self, hidden_states:Tensor):
     hidden_states = self.transform(hidden_states)
-    hidden_states = self.decoder(hidden_states) + self.bias
+    hidden_states = hidden_states @ self.embedding_weight.T + self.bias
     return hidden_states
 
 class BertPredictionHeadTransform:
@@ -75,6 +111,7 @@ class BertPredictionHeadTransform:
 
   def __call__(self, hidden_states:Tensor):
     hidden_states = self.dense(hidden_states)
+    hidden_states = fgelu(hidden_states)
     hidden_states = self.LayerNorm(hidden_states)
     return hidden_states
 
@@ -89,14 +126,8 @@ class BertForQuestionAnswering:
     fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
     download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
 
-    import torch
-    with open(fn, "rb") as f:
-      state_dict = torch.load(f, map_location="cpu")
-
-    for k, v in state_dict.items():
-      if "dropout" in k: continue # skip dropout
-      if "pooler" in k: continue # skip pooler
-      get_child(self, k).assign(v.numpy()).realize()
+    state_dict = torch_load(str(fn))
+    load_state_dict(self, state_dict)
 
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
     sequence_output, _ = self.bert(input_ids, attention_mask, token_type_ids)
@@ -133,11 +164,8 @@ class BertEmbeddings:
     self.dropout = hidden_dropout_prob
 
   def __call__(self, input_ids, token_type_ids):
-    input_shape = input_ids.shape
-    seq_length = input_shape[1]
-
     words_embeddings = self.word_embeddings(input_ids)
-    position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
+    position_ids = Tensor.arange(input_ids.shape[1], requires_grad=False).unsqueeze(0).expand(*input_ids.shape)
     position_embeddings = self.position_embeddings(position_ids)
     token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
