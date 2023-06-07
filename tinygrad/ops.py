@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, operator, random, time
 from enum import Enum, auto
 from typing import Union, Type, NamedTuple, Tuple, Any, List, Optional, Dict, Callable, ClassVar
-from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType, colored
+from tinygrad.helpers import prod, DEBUG, getenv, GlobalCounters, DType, colored, ansilen
 from tinygrad.shape.shapetracker import MovementOps
 from tinygrad.runtime.lib import RawBuffer, RawConst
 
@@ -96,7 +96,7 @@ class ASTRunner:
     if getenv("OPTLOCAL") and self.global_size is not None and self.local_size is None: self.local_size = self.optimize_local_size(rawbufs, allow_cache=(getenv("OPTLOCAL") >= 2))
     if et := self.clprg(self.global_size, self.local_size, *rawbufs, wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
     if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(29-len(self.name))) if self.display_name is not None else self.name:26s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(29-ansilen(self.display_name))) if self.display_name is not None else self.name:26s} arg {len(rawbufs):3d} sz {str(self.global_size):18s} {str(self.local_size):12s} OPs {int(self.op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({self.op_estimate/(et*1e9):8.2f} GFLOPS, {self.mem_estimate/(et*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += self.op_estimate
