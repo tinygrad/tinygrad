@@ -55,7 +55,7 @@ def _clean_text(text):
   return "".join(output)
 
 def _is_chinese_char(cp):
-    return cp in range(0x4E00, 0x9FFF+1) or cp in range(0x3400, 0x4DBF+1) or cp in range(0x20000, 0x2A6DF+1) or cp in range(0x2A700, 0x2B73F+1) or cp in range(0x2B740, 0x2B81F+1) or cp in range(0x2B820, 0x2CEAF+1) or cp in range(0xF900, 0xFAFF+1) or cp in range(0x2F800, 0x2FA1F+1)
+  return cp in range(0x4E00, 0x9FFF+1) or cp in range(0x3400, 0x4DBF+1) or cp in range(0x20000, 0x2A6DF+1) or cp in range(0x2A700, 0x2B73F+1) or cp in range(0x2B740, 0x2B81F+1) or cp in range(0x2B820, 0x2CEAF+1) or cp in range(0xF900, 0xFAFF+1) or cp in range(0x2F800, 0x2FA1F+1)
 
 def _tokenize_chinese_chars(text):
   output = []
