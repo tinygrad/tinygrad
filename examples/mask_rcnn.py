@@ -183,7 +183,7 @@ class Masker(object):
 
 masker = Masker(threshold=0.5, padding=1)
 
-def compute_prediction(original_image, model_type='tiny'):
+def compute_prediction(original_image, model):
   # apply pre-processing to image
   image = transforms(original_image).numpy()
   image = Tensor(image, requires_grad=False)
@@ -200,10 +200,18 @@ def compute_prediction(original_image, model_type='tiny'):
     masks = prediction.get_field("mask")
     # always single image is passed at a time
     masks = masker([masks], [prediction])[0]
-    if model_type != 'tiny':
-      masks = torch.tensor(masks.numpy())
     prediction.add_field("mask", masks)
   return prediction
+
+def compute_prediction_batched(batch, model):
+  # apply pre-processing to image
+  imgs = []
+  for img in batch:
+    imgs.append(transforms(img).numpy())
+  image = [Tensor(image, requires_grad=False) for image in imgs]
+  predictions = model(image)
+  del image
+  return predictions
 
 palette = torch.tensor([2 ** 25 - 1, 2 ** 15 - 1, 2 ** 21 - 1])
 
@@ -342,7 +350,7 @@ if __name__ == '__main__':
   model_tiny = MaskRCNN(resnet)
   model_tiny.load_from_pretrained()
   img = Image.open(args.image)
-  result = compute_prediction(img)
+  result = compute_prediction(img, model_tiny)
   top_result_tiny = select_top_predictions(result, confidence_threshold=args.threshold)
   bbox_image = overlay_boxes(img, top_result_tiny)
   mask_image = overlay_mask(bbox_image, top_result_tiny)
