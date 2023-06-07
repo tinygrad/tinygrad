@@ -4,6 +4,7 @@ import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
+from typing import List
 from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
@@ -110,7 +111,7 @@ def get_run_onnx(onnx_model: ModelProto):
       return None
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp = []
+      inp: List[Tensor] = []
       if debug: print("inputs:")
       for x in n.input:
         t = fetch_tensor(x)
