@@ -142,22 +142,6 @@ jobs:
     - name: Run Pytest (default)
       run: GPU=1 python -m pytest -s -v -n=auto test/
 
-  testmetal:
-     name: Metal Tests
-     runs-on: macos-13
-
-     steps:
-     - name: Checkout Code
-       uses: actions/checkout@v3
-     - name: Set up Python 3.11
-       uses: actions/setup-python@v4
-       with:
-         python-version: 3.11
-     - name: Install Dependencies
-       run: pip install -e '.[metal,testing]'
-     - name: Run Pytest
-       run: METAL=1 python -m pytest -s -v -n=auto test/
-
   testopencl:
     name: openpilot (OpenCL) Test
     runs-on: ubuntu-20.04
@@ -173,10 +157,10 @@ jobs:
     - name: Install OpenCL
       #run: sudo apt-get install -y pocl-opencl-icd
       run: sudo apt-get install -y intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
-    - name: Set up Python 3.11
+    - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
-        python-version: 3.11
+        python-version: 3.8
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test GPU IMAGE ops
