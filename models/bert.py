@@ -4,7 +4,10 @@ from tinygrad.nn import Linear, LayerNorm, Embedding
 from tinygrad.state import torch_load, load_state_dict, get_state_dict, get_parameters
 from extra.utils import download_file
 import numpy as np
+import functools
 from pathlib import Path
+import re
+from typing import cast
 
 class BertForPreTraining:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
@@ -12,23 +15,41 @@ class BertForPreTraining:
     self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
 
   def load_from_pretrained(self):
-    # fn = Path(__file__).parent.parent / "weights/bert_for_pretraining.pt"
-    fn = Path(__file__).parent.parent / "weights/bert-large-uncased.bin"
+    fn = Path(__file__).parent.parent / "weights/model.ckpt-28252"
     fn_vocab = Path(__file__).parent.parent / "weights/bert_vocab.txt"
     download_file("https://zenodo.org/record/3733896/files/vocab.txt?download=1", fn_vocab)
 
-    state_dict = torch_load(str(fn))
-    # load_state_dict(self, state_dict, strict=False)
+    # load from tensorflow
+    import tensorflow as tf
+    state_dict = {}
+    for name, _ in tf.train.list_variables(str(fn)):
+      state_dict[name] = tf.train.load_variable(str(fn), name)
+
     for k, v in state_dict.items():
-      if ".gamma" in k:
-        k = k.replace(".gamma", ".weight")
-      if ".beta" in k:
-        k = k.replace(".beta", ".bias")
-      if "cls.predictions.decoder" in k:
+      m = k.split("/")
+      if any(n in ["adam_v", "adam_m", "global_step", "LAMB", "LAMB_1", "beta1_power", "beta2_power"] for n in m):
         continue
-      print(k, v.shape)
-      child = get_state_dict(self)[k]
-      child.assign(v.to(child.device)).realize()
+
+      pointer = self
+      n = m[-1] # this is just to stop python from complaining about possibly unbound local variable
+      for n in m:
+        if re.fullmatch(r'[A-Za-z]+_\d+', n):
+          l = re.split(r'_(\d+)', n)[:-1]
+        else:
+          l = [n]
+        if l[0] in ["kernel", "gamma", "output_weights"]:
+          pointer = getattr(pointer, "weight")
+        elif l[0] in ["output_bias", "beta"]:
+          pointer = getattr(pointer, "bias")
+        else:
+          pointer = getattr(pointer, l[0])
+        if len(l) == 2: # layers
+          pointer = pointer[int(l[1])]
+      if n[-11:] == "_embeddings":
+        pointer = getattr(pointer, "weight")
+      elif n == "kernel":
+        v = np.transpose(v)
+      cast(Tensor, pointer).assign(v).realize()
 
     # for _, v in get_state_dict(self).items():
     #   v.lazydata = v.lazydata.cast(dtypes.float16).realize()
@@ -177,10 +198,8 @@ class BertEncoder:
   def __init__(self, hidden_size, intermediate_size, num_attention_heads, num_hidden_layers, attention_probs_dropout_prob, hidden_dropout_prob):
     self.layer = [BertLayer(hidden_size, intermediate_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob) for _ in range(num_hidden_layers)]
 
-  def __call__(self, hidden_states, attention_mask):
-    for layer in self.layer:
-      hidden_states = layer(hidden_states, attention_mask)
-    return hidden_states
+  def __call__(self, hidden_states:Tensor, attention_mask):
+    return hidden_states.sequential([functools.partial(layer, attention_mask=attention_mask) for layer in self.layer])
 
 class BertLayer:
   def __init__(self, hidden_size, intermediate_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):
