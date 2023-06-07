@@ -1,5 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib
+import numpy as np
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
