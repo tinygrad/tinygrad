@@ -219,7 +219,7 @@ def eval_mrcnn():
     del batch_result
 
   evaluate_predictions_on_coco(bbox_output, iou_type='bbox')
-  evaluate_predictions_on_coco(bbox_output, iou_type='segm')
+  evaluate_predictions_on_coco(mask_output, iou_type='segm')
 
 if __name__ == "__main__":
   # inference only
