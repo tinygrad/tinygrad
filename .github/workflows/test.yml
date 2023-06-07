@@ -74,7 +74,7 @@ jobs:
      - name: Install Dependencies
        run: pip install -e '.[metal,testing]'
      - name: Run Pytest
-       run: python -m pytest -s -v -n=auto test/
+       run: METAL=1 python -m pytest -s -v -n=auto test/
 
   testimagenet:
     name: ImageNet to C Compile Test

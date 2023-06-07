@@ -72,7 +72,7 @@ class TestOptim(unittest.TestCase):
   def test_multistep_adam_high_lr(self): self._test_adam(10, {'lr': 10}, 1e-5, 3e-4)
 
   def test_multistep_adamw(self): self._test_adamw(10, {'lr': 0.001}, 1e-5, 0)
-  def test_multistep_adamw_high_lr(self): self._test_adamw(10, {'lr': 10}, 3e-4, 1e-3)
+  def test_multistep_adamw_high_lr(self): self._test_adamw(10, {'lr': 10}, 1e-5, 3e-4)
 
 if __name__ == '__main__':
   unittest.main()
