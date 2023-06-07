@@ -1,12 +1,14 @@
 import json
-import pathlib
 import numpy as np
 import librosa
 import soundfile
 import requests
 import hashlib
 import tarfile
+
+from pathlib import Path
 from tqdm import tqdm
+from concurrent import futures
 
 """
 This script downloads, verifies and extracts these datasets from https://www.openslr.org/12/ and converts their flacs to wav:
@@ -23,8 +25,7 @@ Additionally, the script generates the JSON files for the training and validatio
 
 
 TODO:
-1. Modify code to reflect file changes
-2. Add code to generate JSON files
+1. Add code to generate JSON files
 
 File download url and md5 hash:
 http://www.openslr.org/resources/12/train-clean-100.tar.gz
@@ -40,58 +41,70 @@ http://www.openslr.org/resources/12/dev-clean.tar.gz
 42e2234ba48799c1f50f24a7926300a1
 """
 
-BASEDIR = pathlib.Path(__file__).parent.parent / "datasets/"
+BASEDIR = Path(__file__).parent.parent / "datasets/"
+
+DATASETS = {
+  "train-clean-100": {"url": "http://www.openslr.org/resources/12/train-clean-100.tar.gz", "md5": "2a93770f6d5c6c964bc36631d331a522"},
+  "train-clean-360": {"url": "http://www.openslr.org/resources/12/train-clean-360.tar.gz", "md5": "c0e676e450a7ff2f54aeade5171606fa"},
+  "train-other-500": {"url": "http://www.openslr.org/resources/12/train-other-500.tar.gz", "md5": "d1a0fd59409feb2c614ce4d30c387708"},
+  "dev-clean": {"url": "http://www.openslr.org/resources/12/dev-clean.tar.gz", "md5": "42e2234ba48799c1f50f24a7926300a1"}
+}
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
 WINDOW = librosa.filters.get_window("hann", 320)
 
-DATASET_URL = "http://www.openslr.org/resources/12/dev-clean.tar.gz"
-HASH = "42e2234ba48799c1f50f24a7926300a1"
+NUM_THREADS = 8
 
-DEV_CLEAN_WAV = "https://raw.githubusercontent.com/mlcommons/inference/master/speech_recognition/rnnt/dev-clean-wav.json"
 
-def dataset_preprocessing():
-  BASEDIR.mkdir(parents=True, exist_ok=True)
+def extract_file(tar_file, member, destination):
+    # Remove the leading "LibriSpeech/" folder from the extracted member path
+    member.name = "/".join(member.name.split("/")[1:])
+    tar_file.extract(member, destination)
+    return member
 
-  # Download and verify dev-clean.tar.gz
-  if not (BASEDIR / "dev-clean.tar.gz").exists():
-    with requests.get(DATASET_URL, stream=True) as r:
-      r.raise_for_status()
-      total_size = int(r.headers.get('content-length', 0))
 
-      with open(BASEDIR / "dev-clean.tar.gz", "wb") as f, tqdm(
-        total=total_size, unit='B', unit_scale=True, unit_divisor=1024, 
-        desc='Downloading dev-clean.tar.gz') as progress_bar:
-        for chunk in r.iter_content(chunk_size=8192):
-          f.write(chunk)
-          progress_bar.update(len(chunk))
+def dataset_download(dataset, url, hash, num_threads=4):
+    BASEDIR.mkdir(parents=True, exist_ok=True)
 
-    print("Verifying hash...")
-    with open(BASEDIR / "dev-clean.tar.gz", "rb") as f:
-      assert hashlib.md5(f.read()).hexdigest() == HASH
-  else:
-    print("File dev-clean.tar.gz already exists. Skipping download.")
+    dataset_path = BASEDIR / f"{dataset}.tar.gz"
 
-  # Extract dev-clean.tar.gz
-  if not (BASEDIR / "LibriSpeech").exists():
-    with tarfile.open(BASEDIR / "dev-clean.tar.gz", "r:gz") as f, tqdm(
-        total=len(f.getmembers()), unit='file', 
-        desc='Extracting dev-clean.tar.gz') as progress_bar:
-      f.extractall(BASEDIR)
-      progress_bar.update(len(f.getmembers()))
+    if dataset_path.exists():
+        print("File already exists. Skipping download.")
+    else:
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            total_size = int(r.headers.get('content-length', 0))
 
-    # # Move extracted files to librispeech from LibriSpeech
-    # extracted_path = BASEDIR / "LibriSpeech"
-    # for file_path in extracted_path.glob("**/*"):
-    #     new_file_path = BASEDIR / file_path.relative_to(extracted_path)
-    #     new_file_path.parent.mkdir(parents=True, exist_ok=True)
-    #     file_path.rename(new_file_path)
-    
-    # # Remove LibriSpeech folder
-    # extracted_path.rmdir()
-  else:
-    print("Folder LibriSpeech already exists. Skipping extraction.")
+            with open(dataset_path, "wb") as f, tqdm(
+                    total=total_size, unit='B', unit_scale=True, unit_divisor=1024,
+                    desc=f"Downloading {dataset}") as progress_bar:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    progress_bar.update(len(chunk))
 
+        print("Verifying hash...")
+        with open(dataset_path, "rb") as f:
+            assert hashlib.md5(f.read()).hexdigest() == hash
+
+    if not (BASEDIR / "LibriSpeech").exists():
+        with tarfile.open(dataset_path, "r:gz") as tar, \
+                futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+
+            members = tar.getmembers()
+            progress_bar = tqdm(total=len(members), unit='file', desc=f"Extracting {dataset}")
+
+            futures_list = [executor.submit(extract_file, tar, member, BASEDIR / "LibriSpeech" / dataset)
+                            for member in members]
+
+            for _ in futures.as_completed(futures_list):
+                progress_bar.update(1)
+
+            progress_bar.close()
+    else:
+        print("Directory already exists. Skipping extraction.")
+
+
+def dataset_processing(dataset):
   # Convert flac to wav
   flac_files = list(BASEDIR.glob("**/*.flac"))
   wav_files = list(BASEDIR.glob("**/*.wav"))
@@ -100,28 +113,17 @@ def dataset_preprocessing():
   elif len(wav_files) > 0:
     print("Wav files already exist. Skipping conversion.")
   else:
-    wav_folder = BASEDIR / "LibriSpeech" / "dev-clean-wav"
+    wav_folder = BASEDIR / "LibriSpeech" / f"{dataset}-wav"
     wav_folder.mkdir(parents=True, exist_ok=True)
 
     with tqdm(total=len(flac_files), unit='file', desc='Converting .flac to .wav') as progress_bar:
       for file in flac_files:
-        relative_path = file.relative_to(BASEDIR / "LibriSpeech" / "dev-clean").parent / file.name
+        relative_path = file.relative_to(BASEDIR / "LibriSpeech" / dataset).parent / file.name
         (wav_folder / relative_path).mkdir(parents=True, exist_ok=True)
         wav_file = (wav_folder / relative_path).with_suffix(".wav")
         soundfile.write(wav_file, soundfile.read(file)[0], 16000)
         progress_bar.update(1)
 
-  # Download dev-clean-wav.json
-  with requests.get(DEV_CLEAN_WAV, stream=True) as r:
-    r.raise_for_status()
-    total_size = int(r.headers.get('content-length', 0))
-
-    with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", "wb") as f, tqdm(
-      total=total_size, unit='B', unit_scale=True, unit_divisor=1024, 
-      desc='Downloading dev-clean-wav.json') as progress_bar:
-      for chunk in r.iter_content(chunk_size=8192):
-        f.write(chunk)
-        progress_bar.update(len(chunk))
 
 def feature_extract(x, x_lens):
   x_lens = np.ceil((x_lens / 160) / 3).astype(np.int32)
@@ -161,9 +163,11 @@ def feature_extract(x, x_lens):
 
   return features.transpose(2, 0, 1), x_lens.astype(np.float32)
 
+
 def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
+
 
 def iterate(bs=1, start=0, val=True):
   if val:
@@ -193,9 +197,14 @@ def iterate(bs=1, start=0, val=True):
       transcript_labels = [[LABELS.index(c) for c in v["transcript"]] for v in ci[i:i + bs]]
       yield feature_extract(samples, sample_lens), np.array(transcript_labels).astype(np.float32), np.array([v["transcript"] for v in ci[i : i + bs]])
 
+
 if __name__ == "__main__":
-  dataset_preprocessing()
-  with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", encoding="utf-8") as f:
-    ci = json.load(f)
-  X, Y = next(iterate())
-  print(f"Shape of X: {X[0].shape} ; Shape of Y: {Y.shape}")
+  for dataset, info in DATASETS.items():
+    dataset_download(dataset, info["url"], info["md5"], NUM_THREADS)
+    dataset_processing(dataset)
+
+
+  # with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", encoding="utf-8") as f:
+  #   ci = json.load(f)
+  # X, Y = next(iterate())
+  # print(f"Shape of X: {X[0].shape} ; Shape of Y: {Y.shape}")
