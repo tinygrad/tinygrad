@@ -31,7 +31,7 @@ class RawMetalBuffer(RawBufferMapped):
     return self._buf.contents().as_buffer(self._buf.length())
   def toCPU(self) -> NDArray:
     METAL.synchronize()
-    return NPArray(np.frombuffer(self._buf.contents().as_buffer(self._buf.length()), dtype=self.dtype, buffer=self)
+    return NPArray(np.frombuffer(self._buf.contents().as_buffer(self._buf.length()), dtype=self.dtype, buffer=self))
 
 def unwrap(x):
   ret, err = x
