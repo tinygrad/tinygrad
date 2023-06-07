@@ -351,9 +351,9 @@ class Tensor:
     np_input = input.numpy()
     sorted_np_idx = np.argsort(np_input, axis=axis)
     if reverse:
-      sorted_np_idx = np.flip(sorted_np_idx, axis=axis)
+      sorted_np_idx = np.flip(sorted_np_idx, axis=axis).copy(order='C').astype(np.int32)
     sorted_np = np.take_along_axis(np_input, sorted_np_idx, axis=axis)
-    return Tensor(sorted_np), Tensor(sorted_np_idx).numpy()
+    return Tensor(sorted_np), sorted_np_idx
 
   def topk(self, k, dim=-1, largest=True, sorted=True):
     # TODO: This is Slow!!

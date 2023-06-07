@@ -16,7 +16,7 @@ import torchvision.ops
 def meshgrid(*tensors):
   return [
     Tensor(chunked).reshape(-1).unsqueeze(-1) for chunked in np.meshgrid(
-      *[t.numpy() for t in tensors], copy=False, indexing='ij'
+      *[t.numpy() for t in tensors], copy=True, indexing='ij'
     )]
 
 
@@ -926,7 +926,7 @@ class PostProcessor:
         )
       num_labels = len(boxlist_for_class)
       boxlist_for_class.add_field(
-        "labels", Tensor.full((num_labels,), j, dtype=dtypes.int64, device=device)
+        "labels", Tensor.full((num_labels,), j, dtype=dtypes.int32, device=device)
       )
       result.append(boxlist_for_class)
 
@@ -936,7 +936,7 @@ class PostProcessor:
     # Limit to max_per_image detections **over all classes**
     if number_of_detections > self.detections_per_img > 0:
       cls_scores = result.get_field("scores")
-      image_thresh, _ = cls_scores.topk(k=number_of_detections - 100)
+      image_thresh, _ = cls_scores.topk(k=self.detections_per_img)
       image_thresh = image_thresh.numpy()[-1]
       keep = [idx for idx, score in enumerate(cls_scores.numpy()) if score >= image_thresh]
       result = result[keep]
