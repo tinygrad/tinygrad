@@ -1,10 +1,10 @@
-from typing import Tuple
+from typing import Tuple, List
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.ops import ASTRunner
 
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
 class AssemblyCodegen(Linearizer):
-  def generate(self) -> Tuple[str, str, Tuple[int, ...], Tuple[int, ...]]:
+  def generate(self) -> Tuple[str, str, List[int], List[int]]:
     raise NotImplementedError("must be implemented")
 
   # s registers are the addresses and non local indexes

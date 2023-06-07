@@ -1,4 +1,5 @@
 import yaml
+from typing import DefaultDict
 from tinygrad.ops import Compiled
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.codegen.linearizer import UOps, LocalTypes
@@ -89,7 +90,7 @@ class RDNACodegen(AssemblyCodegen):
 
     name_to_v = {}
     latest_v = 1
-    ready = defaultdict(lambda: False)
+    ready:DefaultDict[str, bool] = defaultdict(lambda: False)
     pend_v = []
     def get_i(i):
       nonlocal latest_v, name_to_v, pend_v, pend_i
@@ -117,7 +118,7 @@ class RDNACodegen(AssemblyCodegen):
           ins.append('s_waitcnt vmcnt(0)')
           for x in pend_v: ready[x] = True
           pend_v = []
-      if var.offset != None:
+      if var.offset is not None:
         # ugh
         vv = int(name_to_v[var.name].split("[")[1].split(":")[0]) + var.offset
         return f"v{vv}"
@@ -129,11 +130,11 @@ class RDNACodegen(AssemblyCodegen):
       if uop == UOps.LOOP:
         if args[1] == "global":
           for i,var in enumerate(args[0]):
-            global_size.append(var.max+1)
-      elif uop == UOps.LOAD:
+            global_size.append(var.max+1)  # type: ignore
+      elif uop == UOps.LOAD and newvar is not None:
         # TODO: indexing and valid
-        ins.append(f'global_load_{"b128" if "4" in newvar.ltype.name else "b32"} {get_v(newvar, True)}, v0, {get_i(args.i)}')
-      elif uop == UOps.ALU:
+        ins.append(f'global_load_{"b128" if "4" in newvar.ltype.name else "b32"} {get_v(newvar, True)}, v0, {get_i(args.i)}')  # type: ignore
+      elif uop == UOps.ALU and newvar is not None:
         if args == BinaryOps.ADD:
           if newvar.ltype == LocalTypes.float4:
             v1, v2, v3 = get_v(newvar), get_v(vin[0]), get_v(vin[1])
@@ -158,7 +159,7 @@ class RDNACodegen(AssemblyCodegen):
         else:
           raise NotImplementedError(f"missing imp for ALU op {args}")
       elif uop == UOps.STORE:
-        ins.append(f'global_store_{"b128" if "4" in vin[0].ltype.name else "b32"} v0, {get_v(vin[0])}, {get_i(args.i)}')
+        ins.append(f'global_store_{"b128" if "4" in vin[0].ltype.name else "b32"} v0, {get_v(vin[0])}, {get_i(args.i)}') # type: ignore
 
       #print(uop)
 
@@ -181,8 +182,8 @@ class RDNACodegen(AssemblyCodegen):
     ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
 
     code = boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" +  code_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
-    object = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
-    asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], object))
+    obj = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
+    asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], obj))
 
     #from hexdump import hexdump
     #hexdump(asm)

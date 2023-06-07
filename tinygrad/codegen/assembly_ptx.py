@@ -1,7 +1,7 @@
-from typing import Any
+from typing import Dict
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
-from tinygrad.codegen.linearizer import UOps
+from tinygrad.codegen.linearizer import UOps, Token
 from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
 from tinygrad.helpers import dtypes
 import functools, struct
@@ -22,12 +22,12 @@ class PTXCodegen(AssemblyCodegen):
 
     # register allocation
     # TODO: work out non overlapping regs
-    reg = {}
+    reg: Dict[Token, str] = {}
     for _,newvar,_,_ in self.uops:
       if newvar is not None and newvar not in reg:
         reg[newvar] = f"%f{len(reg)}"
 
-    reduce_vars = {}
+    reduce_vars: Dict[str, str] = {}
     def new_reduce_var(vv):
       nonlocal reduce_vars
       assert vv.expr not in reduce_vars
@@ -105,7 +105,7 @@ class PTXCodegen(AssemblyCodegen):
       if uop == UOps.DEFINE_LOCAL:
         ins.append(f".shared .align 4 .b8 {args[0]}[{args[1]*4}];")
         shared_name = args[0]
-      elif uop == UOps.CONST:
+      elif uop == UOps.CONST and newvar is not None:
         ins.append(f"mov.f32 {reg[newvar]}, 0f{float_to_hex(args)};")
       elif uop == UOps.LOOP:
         if args[1] == "global":
@@ -137,7 +137,7 @@ class PTXCodegen(AssemblyCodegen):
               ins.append(f"setp.ne.s32 %p0, {reduce_vars[var.expr]}, {var.max};")
               ins.append(f"add.u32 {reduce_vars[var.expr]}, {reduce_vars[var.expr]}, 1;")
               ins.append(f"@%p0 bra $loop_{var.expr};")
-      elif uop == UOps.LOAD:
+      elif uop == UOps.LOAD and newvar is not None:
         ins.append(f"// LOAD {args}")
         if args.valid.min != 1:
           ins.append(f"mov.f32 {reg[newvar]}, 0f00000000;")  # 0.0 is the alt value
@@ -152,7 +152,7 @@ class PTXCodegen(AssemblyCodegen):
             sreg = "%h"
           if args.i == -1:
             ins.append(f"mov.u64 %bt1, {shared_name};")
-            ins.append(f"add.u64 %bt0, %bt1, %bt0;")
+            ins.append("add.u64 %bt0, %bt1, %bt0;")
             ins.append(f"ld.shared.{stype} {sreg}, [%bt0];")
           else:
             ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
@@ -162,7 +162,7 @@ class PTXCodegen(AssemblyCodegen):
           if args.valid.min != 1:
             ins.append(f"$skipload_{skipload_branch}:")
             skipload_branch += 1
-      elif uop == UOps.ALU:
+      elif uop == UOps.ALU and newvar is not None:
         if args == BinaryOps.CMPEQ:
           ins.append(f"setp.eq.f32 %p0, {reg[vin[0]]}, {reg[vin[1]]};")
           ins.append(f"selp.f32 {reg[newvar]}, 0f3F800000, 0f00000000, %p0;")
@@ -183,7 +183,7 @@ class PTXCodegen(AssemblyCodegen):
                  BinaryOps.MUL: "mul.f32", BinaryOps.DIV: "div.rn.f32",
                  BinaryOps.MAX: "max.f32", UnaryOps.SIN: "sin.approx.f32",
                  FusedOps.MULACC: "fma.rn.f32"}
-          if args == FusedOps.MULACC: vin = (vin[1], vin[2], vin[0])  # TODO: reorder MULACC everywhere
+          if args == FusedOps.MULACC: vin = [vin[1], vin[2], vin[0]]  # TODO: reorder MULACC everywhere
           ins.append(f"{alu[args]} {reg[newvar]}, {', '.join([reg[x] for x in vin])};")
       elif uop == UOps.STORE:
         ins.append(f"// STORE {args}")
@@ -195,7 +195,7 @@ class PTXCodegen(AssemblyCodegen):
           sreg = "%h"
         if args.i == -1:
           ins.append(f"mov.u64 %bt1, {shared_name};")
-          ins.append(f"add.u64 %bt0, %bt1, %bt0;")
+          ins.append("add.u64 %bt0, %bt1, %bt0;")
           ins.append(f"st.shared.{stype} [%bt0], {sreg};")
         else:
           ins.append(f"add.u64 %bt0, %rd{args.i}, %bt0;")
@@ -203,9 +203,9 @@ class PTXCodegen(AssemblyCodegen):
 
     ins = ins[0:4] + [f".reg .b64 %rd<{len(self.bufs)}>;",
                       f".reg .f32 %f<{len(reg)}>;",
-                      f".reg .b16 %h;",
-                      f".reg .b64 %bt<2>;",
-                      f".reg .b32 %temp<3>;",
+                      ".reg .b16 %h;",
+                      ".reg .b64 %bt<2>;",
+                      ".reg .b32 %temp<3>;",
                       f".reg .b32 %v<{max_v}>;",  # TODO: make this dynamic, does it matter?
                       f".reg .pred %p<{max_p}>;",
                       f".reg .b32 %local<{len(local_regs)}>;",
