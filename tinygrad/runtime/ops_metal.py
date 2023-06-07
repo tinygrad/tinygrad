@@ -4,7 +4,7 @@ import numpy as np
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType, NDArray
+from tinygrad.helpers import prod, getenv, DEBUG, DType, NPArray
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
