@@ -15,7 +15,7 @@ except ImportError:
 
 # global numpy cache for parameters
 numpy_cache = {}
-def safe_numpy(t):
+def safe_numpy(t) -> np.ndarray:
   if not isinstance(t, Tensor): return t
   global numpy_cache
   if t not in numpy_cache:
