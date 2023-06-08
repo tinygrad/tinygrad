@@ -1,7 +1,6 @@
 import sys
 import pickle
 from pathlib import Path
-from transformers import BertTokenizer
 import numpy as np
 from tqdm import tqdm
 import random
@@ -284,7 +283,7 @@ def create_instances_from_document(rng, tokenizer, doc, di, documents):
 
 def get_instances(rng, tokenizer, documents):
   instances = []
-  for i in range(1):
+  for i in range(10):
     for di, doc in tqdm(enumerate(documents), desc=f"dupe {i}", total=len(documents)):
       instances.extend(create_instances_from_document(rng, tokenizer, doc, di, documents))
   rng.shuffle(instances)
@@ -372,7 +371,6 @@ def iterate(bs=1, start=0, val=True):
       }, instances
 
 if __name__ == "__main__":
-  # tokenizer = BertTokenizer(str(Path(__file__).parent.parent / "weights/bert_vocab.txt"), do_lower_case=True)
   tokenizer = Tokenizer(Path(__file__).parent.parent / "weights/bert_vocab.txt")
 
   if len(sys.argv) <= 1:
