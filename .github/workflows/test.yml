@@ -114,6 +114,22 @@ jobs:
     - name: Run ONNX
       run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py || true
 
+  testmetal:
+    name: Metal Tests
+    runs-on: macos-13
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    - name: Install Dependencies
+      run: pip install -e '.[metal,testing]'
+    - name: Run Pytest
+      run: METAL=1 python -m pytest -s -v -n=auto --cache-clear test/
+
   testgpu:
     name: GPU Tests
     runs-on: ubuntu-20.04
@@ -173,24 +189,6 @@ jobs:
         python3 -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
         DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
         VALIDHACKS=1 DEBUGCL=1 GPU=1 IMAGE=2 python3 openpilot/compile.py
-
-  testmetal:
-    name: Metal Tests
-    runs-on: macos-13
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-    - name: Install Dependencies
-      run: pip install -e '.[metal,testing]'
-    - name: Install pytest-cache
-      run: pip install pytest-cache
-    - name: Run Pytest
-      run: METAL=1 python -m pytest -s -v -n=auto --clear-cache test/
 
   # disabled, this test is flaky
   testdocker:
