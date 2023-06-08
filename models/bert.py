@@ -66,7 +66,7 @@ class BertForPreTraining:
   def __call__(self, input_ids:Tensor, token_type_ids:Tensor, attention_mask:Tensor):
     sequence_output, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
     prediction_scores, seq_relationship_score = self.cls(sequence_output, pooled_output)
-    return prediction_scores, seq_relationship_score
+    return prediction_scores.log_softmax(), seq_relationship_score.log_softmax()
 
   def loss(self, prediction_scores:Tensor, seq_relationship_score:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
     def sparse_categorical_crossentropy(out, Y, ignore_index=-1):
@@ -83,24 +83,19 @@ class BertForPreTraining:
     onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
     prediction_scores = onehot @ prediction_scores
 
-    prediction_scores = prediction_scores.log_softmax()
-    seq_relationship_score = seq_relationship_score.log_softmax()
-
     masked_lm_loss = sparse_categorical_crossentropy(prediction_scores, masked_lm_ids, ignore_index=0)
     next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
 
-  def accuracy(self, prediction_scores:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor):
+  def accuracy(self, prediction_scores:Tensor, masked_lm_positions:Tensor, masked_lm_ids:np.ndarray):
     # gather only the masked_lm_positions we care about
     counter = Tensor.arange(prediction_scores.shape[1], requires_grad=False).reshape(1, 1, prediction_scores.shape[1]).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
     onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
     prediction_scores = onehot @ prediction_scores
 
-    prediction_scores = prediction_scores.log_softmax()
-
-    valid = masked_lm_ids.numpy() != 0
-    masked_lm_predictions = np.argmax(prediction_scores.numpy(), axis=-1) * valid
-    masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids.numpy()) * valid
+    valid = masked_lm_ids != 0
+    masked_lm_predictions = np.argmax(prediction_scores.numpy(), axis=-1)
+    masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
 
     return masked_lm_accuracy.sum() / valid.sum()
 
