@@ -9,14 +9,46 @@ from extra.utils import get_child, download_file
 from tinygrad.state import torch_load
 from models.resnet import ResNet
 import torch
+from tinygrad.jit import TinyJit
 from models.retinanet import nms as _box_nms
 import torchvision.ops
 
 
-def meshgrid(*tensors):
-    grid_x = Tensor.cat(*[tensors[0][idx:idx+1].expand(tensors[1].shape).unsqueeze(0) for idx in range(tensors[0].shape[0])])
-    grid_y = Tensor.cat(*[tensors[1].unsqueeze(0)]*tensors[0].shape[0])
+def meshgrid(x, y):
+    grid_x = Tensor.cat(*[x[idx:idx+1].expand(y.shape).unsqueeze(0) for idx in range(x.shape[0])])
+    grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
     return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
+
+
+def _gather(array, indices):
+  reshape_arg = [1]*array.ndim + [array.shape[-1]]
+  return Tensor.where(
+    indices.unsqueeze(indices.ndim).expand(*indices.shape, array.shape[-1]) == Tensor.arange(array.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, array.shape[-1]), 
+    array, 0,
+  ).sum(indices.ndim)
+
+
+def tensor_gather(tensor, indices):
+  if not isinstance(indices, Tensor):
+      indices = Tensor(indices, requires_grad=False)
+  if len(tensor.shape) > 2:
+    rem_shape = list(tensor.shape)[1:]
+    tensor = tensor.reshape(tensor.shape[0], -1)
+  else:
+    rem_shape = None
+  if len(tensor.shape) > 1:
+    tensor = tensor.T
+    indices = indices.float() 
+    repeat_arg = [1]*(tensor.ndim-1) + [tensor.shape[-2]]
+    indices = indices.unsqueeze(indices.ndim).repeat(repeat_arg)
+    ret = _gather(tensor, indices)
+    if rem_shape:
+      ret = ret.reshape([indices.shape[0]] + rem_shape)
+  else:
+    ret = _gather(tensor, indices)
+  del indices
+  return ret
+
 
 
 class LastLevelMaxPool:
@@ -187,9 +219,11 @@ class BoxList:
     return self
 
   def __getitem__(self, item):
-    bbox = BoxList(self.bbox.numpy()[item], self.size, self.mode)
+    if sum(item) == len(item) and isinstance(item[0], bool):
+      return self
+    bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode)
     for k, v in self.extra_fields.items():
-      bbox.add_field(k, Tensor(v.numpy()[item]))
+      bbox.add_field(k, tensor_gather(v, item))
     return bbox
 
   def __len__(self):
@@ -448,8 +482,8 @@ class BoxCoder(object):
     return targets
 
   def decode(self, rel_codes, boxes):
-    boxes = boxes.cast(rel_codes.dtype).numpy()
-    rel_codes = rel_codes.numpy()
+    boxes = boxes.cast(rel_codes.dtype)
+    rel_codes = rel_codes
 
     TO_REMOVE = 1  # TODO remove
     widths = boxes[:, 2] - boxes[:, 0] + TO_REMOVE
@@ -464,20 +498,19 @@ class BoxCoder(object):
     dh = rel_codes[:, 3::4] / wh
 
     # Prevent sending too large values into Tensor.exp()
-    dw = np.clip(dw, a_min=dw.min(), a_max=self.bbox_xform_clip)
-    dh = np.clip(dh, a_min=dh.min(), a_max=self.bbox_xform_clip)
+    dw = dw.clip(min_=dw.min(), max_=self.bbox_xform_clip)
+    dh = dh.clip(min_=dh.min(), max_=self.bbox_xform_clip)
 
     pred_ctr_x = dx * widths[:, None] + ctr_x[:, None]
     pred_ctr_y = dy * heights[:, None] + ctr_y[:, None]
-    pred_w = np.exp(dw) * widths[:, None]
-    pred_h = np.exp(dh) * heights[:, None]
-    pred_boxes = np.zeros_like(rel_codes)
-    pred_boxes[:, 0::4] += pred_ctr_x - 0.5 * pred_w
-    pred_boxes[:, 1::4] += pred_ctr_y - 0.5 * pred_h
-    pred_boxes[:, 2::4] += pred_ctr_x + 0.5 * pred_w - 1
-    pred_boxes[:, 3::4] += pred_ctr_y + 0.5 * pred_h - 1
-
-    return Tensor(pred_boxes)
+    pred_w = dw.exp() * widths[:, None]
+    pred_h = dh.exp() * heights[:, None]
+    x = pred_ctr_x - 0.5 * pred_w
+    y = pred_ctr_y - 0.5 * pred_h
+    w = pred_ctr_x + 0.5 * pred_w - 1
+    h = pred_ctr_y + 0.5 * pred_h - 1
+    pred_boxes = Tensor.stack([x, y, w, h]).permute(1,2,0).reshape(rel_codes.shape[0], rel_codes.shape[1])
+    return pred_boxes
 
 
 def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
@@ -498,9 +531,9 @@ def remove_small_boxes(boxlist, min_size):
   xywh_boxes = boxlist.convert("xywh").bbox
   _, _, ws, hs = xywh_boxes.chunk(4, dim=1)
   keep = ((
-          (ws.numpy() >= min_size) * (hs.numpy() >= min_size)
-  ) > 0).squeeze(1)
-  return boxlist[keep.tolist()]
+          (ws >= min_size) * (hs >= min_size)
+  ) > 0).reshape(-1).numpy().astype(bool).tolist()
+  return boxlist[keep]
 
 
 class RPNPostProcessor:
@@ -538,13 +571,18 @@ class RPNPostProcessor:
 
     pre_nms_top_n = min(self.pre_nms_top_n, num_anchors)
     objectness, topk_idx = objectness.topk(pre_nms_top_n, dim=1, sorted=True)
-
-    batch_idx = Tensor.arange(N, device=device)[:, None]
-    box_regression = Tensor(box_regression.numpy()[batch_idx.numpy().astype(np.intc), topk_idx.astype(np.intc)])
-
+    concat_anchors = Tensor.cat(*[a.bbox for a in anchors], dim=0).reshape(N, -1, 4)
     image_shapes = [box.size for box in anchors]
-    concat_anchors = Tensor.cat(*[a.bbox for a in anchors], dim=0)
-    concat_anchors = Tensor(concat_anchors.reshape(N, -1, 4).numpy()[batch_idx.numpy().astype(np.intc), topk_idx.astype(np.intc)])
+
+    box_regression_list = []
+    concat_anchors_list = []
+
+    for batch_idx in range(N):
+      box_regression_list.append(tensor_gather(box_regression[batch_idx], topk_idx[batch_idx]))
+      concat_anchors_list.append(tensor_gather(concat_anchors[batch_idx], topk_idx[batch_idx]))
+
+    box_regression = Tensor.stack(box_regression_list)
+    concat_anchors = Tensor.stack(concat_anchors_list)
 
     proposals = self.box_coder.decode(
       box_regression.reshape(-1, 4), concat_anchors.reshape(-1, 4)
@@ -732,6 +770,7 @@ class LevelMapper:
     self.eps = eps
 
   def __call__(self, boxlists):
+    # TODO: remove numpy
     s = Tensor.sqrt(Tensor.cat(*[boxlist.area() for boxlist in boxlists]))
     target_lvls = (self.lvl0 + Tensor.log2(s / self.s0 + self.eps)).numpy()
     target_lvls = np.floor(target_lvls)
@@ -790,7 +829,7 @@ class Pooler:
       for level, (per_level_feature, pooler) in enumerate(zip(x, self.poolers)):
         idx_in_level = [idx for idx, x in enumerate((levels.numpy() == level)) if x != 0]
         if len(idx_in_level) > 0:
-          rois_per_level = Tensor(rois.numpy()[idx_in_level])
+          rois_per_level = tensor_gather(rois, idx_in_level)
           result[idx_in_level] = pooler(per_level_feature, rois_per_level)
 
       return Tensor(result, dtype=x[0].dtype, device=x[0].device)
@@ -811,6 +850,7 @@ class FPNPredictor:
 
 
 class PostProcessor:
+  # Not used in training
   def __init__(
           self,
           score_thresh=0.05,
@@ -884,7 +924,7 @@ class PostProcessor:
         )
       num_labels = len(boxlist_for_class)
       boxlist_for_class.add_field(
-        "labels", Tensor.full((num_labels,), j, dtype=dtypes.int32, device=device)
+        "labels", Tensor.full((num_labels,), j, device=device)
       )
       result.append(boxlist_for_class)
 
@@ -924,7 +964,7 @@ class MaskPostProcessor:
     mask_prob = x.sigmoid().numpy()
     num_masks = x.shape[0]
     labels = [bbox.get_field("labels") for bbox in boxes]
-    labels = Tensor.cat(*labels).numpy()
+    labels = Tensor.cat(*labels).numpy().astype(np.int32)
     index = np.arange(num_masks)
     mask_prob = mask_prob[index, labels][:, None]
     boxes_per_image, cumsum = [], 0

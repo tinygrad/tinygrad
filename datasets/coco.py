@@ -86,7 +86,7 @@ def convert_prediction_to_coco_bbox(file_name, prediction):
     scores = prediction.get_field("scores").numpy().tolist()
     labels = prediction.get_field("labels").numpy().tolist()
 
-    mapped_labels = [contiguous_category_id_to_json_id[i] for i in labels]
+    mapped_labels = [contiguous_category_id_to_json_id[int(i)] for i in labels]
 
     coco_results.extend(
       [
@@ -129,7 +129,7 @@ def convert_prediction_to_coco_mask(file_name, prediction):
     for rle in rles:
       rle["counts"] = rle["counts"].decode("utf-8")
 
-    mapped_labels = [contiguous_category_id_to_json_id[i] for i in labels]
+    mapped_labels = [contiguous_category_id_to_json_id[int(i)] for i in labels]
 
     coco_results.extend(
       [

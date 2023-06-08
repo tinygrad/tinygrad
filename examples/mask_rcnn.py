@@ -169,11 +169,17 @@ class Masker:
 
 masker = Masker(threshold=0.5, padding=1)
 
-def compute_prediction(original_image, model, size_scale=1.0):
+def select_top_predictions(predictions, confidence_threshold=0.9):
+  scores = predictions.get_field("scores").numpy()
+  keep = [idx for idx, score in enumerate(scores) if score > confidence_threshold]
+  return predictions[keep]
+
+def compute_prediction(original_image, model, confidence_threshold, size_scale=1.0):
   image = transforms(size_scale)(original_image).numpy()
   image = Tensor(image, requires_grad=False)
   predictions = model(image)
   prediction = predictions[0]
+  prediction = select_top_predictions(prediction, confidence_threshold)
   width, height = original_image.size
   prediction = prediction.resize((width, height))
 
@@ -255,7 +261,7 @@ def overlay_boxes(image, predictions):
 def overlay_class_names(image, predictions):
   scores = predictions.get_field("scores").numpy().tolist()
   labels = predictions.get_field("labels").numpy().tolist()
-  labels = [CATEGORIES[i] for i in labels]
+  labels = [CATEGORIES[int(i)] for i in labels]
   boxes = predictions.bbox.numpy()
   image = np.asarray(image)
   template = "{}: {:.2f}"
@@ -270,14 +276,6 @@ def overlay_class_names(image, predictions):
   return image
 
 
-def select_top_predictions(predictions, confidence_threshold=0.9):
-  scores = predictions.get_field("scores").numpy()
-  keep = [idx for idx, score in enumerate(scores) if score > confidence_threshold]
-  predictions = predictions[keep]
-  scores = predictions.get_field("scores").numpy()
-  idx = np.argsort(scores)
-  return predictions[idx]
-
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Run MaskRCNN', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--image', type=str, help="Path of the image to run")
@@ -290,8 +288,7 @@ if __name__ == '__main__':
   model_tiny = MaskRCNN(resnet)
   model_tiny.load_from_pretrained()
   img = Image.open(args.image)
-  result = compute_prediction(img, model_tiny, args.size_scale)
-  top_result_tiny = select_top_predictions(result, confidence_threshold=args.threshold)
+  top_result_tiny = compute_prediction(img, model_tiny, confidence_threshold=args.threshold, size_scale=args.size_scale)
   bbox_image = overlay_boxes(img, top_result_tiny)
   mask_image = overlay_mask(bbox_image, top_result_tiny)
   final_image = overlay_class_names(mask_image, top_result_tiny)
