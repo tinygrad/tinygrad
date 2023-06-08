@@ -31,7 +31,8 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.8
-    - name: Install dependencies run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Install dependencies
+      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with flake8
