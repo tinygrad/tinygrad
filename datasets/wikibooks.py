@@ -16,13 +16,13 @@ num_proc = 13
 bookcorpus = load_dataset("bookcorpus", split='train', num_proc=num_proc)
 
 # prepare wiki
-wiki = load_dataset("wikipedia", "20220301.en", split='train',  num_proc=num_proc)
+wiki = load_dataset("wikipedia", "20220301.en", split='train', num_proc=num_proc)
 wiki = wiki.remove_columns([col for col in wiki.column_names if col != "text"])
 
 def normalize_whitespaces(example):
-    text = example['text']
-    text = re.sub('\s+', ' ', text)
-    return {'text': text}
+  text = example['text']
+  text = re.sub('\s+', ' ', text)
+  return {'text': text}
 
 wiki = wiki.map(normalize_whitespaces, num_proc=num_proc)
 
@@ -36,31 +36,31 @@ split_dataset['val'] = split_dataset.pop('test')  # rename the test split to val
 # we now want to tokenize the dataset.
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 def process(example):
-    ids = tokenizer(example['text'])['input_ids']
-    out = {'ids': ids, 'len': len(ids)}
-    return out
+  ids = tokenizer(example['text'])['input_ids']
+  out = {'ids': ids, 'len': len(ids)}
+  return out
 
 # tokenize the dataset
 tokenized = split_dataset.map(
-    process,
-    remove_columns=['text'],
-    desc="tokenizing the splits",
-    num_proc=num_proc,
+  process,
+  remove_columns=['text'],
+  desc="tokenizing the splits",
+  num_proc=num_proc,
 )
 
 # concatenate all the ids in each dataset into one large file we can use for training
 for split, dset in tokenized.items():
-    arr_len = np.sum(dset['len'])
-    filename = os.path.join(os.path.dirname(__file__), f'{split}.bin')
-    dtype = np.uint16  # (can do since enc.max_token_value == 50256 is < 2**16)
-    arr = np.memmap(filename, dtype=dtype, mode='w+', shape=(arr_len,))
+  arr_len = np.sum(dset['len'])
+  filename = os.path.join(os.path.dirname(__file__), f'{split}.bin')
+  dtype = np.uint16  # (can do since enc.max_token_value == 50256 is < 2**16)
+  arr = np.memmap(filename, dtype=dtype, mode='w+', shape=(arr_len,))
 
-    print(f"writing {filename}...")
-    idx = 0
-    for example in tqdm(dset):
-        arr[idx:idx + example['len']] = example['ids']
-        idx += example['len']
-    arr.flush()
+  print(f"writing {filename}...")
+  idx = 0
+  for example in tqdm(dset):
+    arr[idx:idx + example['len']] = example['ids']
+    idx += example['len']
+  arr.flush()
 
 # train.bin is ~10.3GB, val.bin ~5.5MB
 # train has ~11B tokens (11,037,086,592) 
