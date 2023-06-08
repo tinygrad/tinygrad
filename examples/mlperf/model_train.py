@@ -23,7 +23,7 @@ def train_rnnt():
 
 def train_bert():
   from models.bert import BertForPreTraining
-  from datasets.wikipedia import iterate, get_val_files
+  from datasets.wikipedia import iterate, get_val_files, get_train_files
   import wandb
 
   mdl = BertForPreTraining()
@@ -53,7 +53,7 @@ def train_bert():
   for i in range(1000):
     # train loop
     Tensor.training = True
-    for X, _ in (t := tqdm(iterate(), total=len(get_val_files()))):
+    for j, (X, _) in (t := tqdm(enumerate(iterate()), total=len(get_train_files()))):
       input_ids, input_mask, segment_ids = Tensor(X["input_ids"], requires_grad=False), Tensor(X["input_mask"], requires_grad=False), Tensor(X["segment_ids"], requires_grad=False)
       masked_lm_positions, masked_lm_ids, next_sentence_labels = Tensor(X["masked_lm_positions"], requires_grad=False), Tensor(X["masked_lm_ids"], requires_grad=False), Tensor(X["next_sentence_labels"], requires_grad=False)
       loss = train_step(input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, next_sentence_labels)
@@ -66,11 +66,12 @@ def train_bert():
         "loss": loss.numpy().item(),
         "time_remaining": (t.total - t.n) / t.format_dict["rate"] if t.format_dict["rate"] and t.total else 0,
       })
+
+      # save checkpoint every 10000 steps
+      if j % 10000 == 0:
+        safe_save(get_state_dict(mdl), f"weights/ckpt_{i}_{j}.bert.safetensors")
     train_step.jit_cache = []
     train_step.cnt = 0
-
-    # save checkpoint
-    safe_save(get_state_dict(mdl), f"weights/ckpt_{i}.bert.safetensors")
 
     # eval loop
     Tensor.training = False
