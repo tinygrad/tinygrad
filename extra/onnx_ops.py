@@ -177,7 +177,9 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 
-def _axes(axes, noop_with_empty_axes): return [int(x) for x in safe_numpy(axes)] if axes is not None else ([] if noop_with_empty_axes else None)
+def _axes(axes, noop_with_empty_axes):
+  ret = [int(x) for x in safe_numpy(axes)] if axes is not None else []
+  return ret if len(ret) or noop_with_empty_axes else None
 
 # ReduceProd would require a new llop
 def ReduceMax(data, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
@@ -203,7 +205,7 @@ def Tile(input, repeats):
   final_shape = [r*s for r,s in zip(repeats_, input.shape)]
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
+def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit).item(), safe_numpy(start).item(), safe_numpy(delta).item())
 def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)

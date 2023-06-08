@@ -99,8 +99,6 @@ def get_run_onnx(onnx_model: ModelProto):
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape
-        if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
-        assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items(): v.realize()
       else:
         raise Exception(f"no data for {inp.name} with shape {shape}")
