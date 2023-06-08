@@ -92,7 +92,7 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  assert ceil_mode == 0 and storage_order == 0
+  assert ceil_mode == 0 and storage_order == 0, f"WARNING: MaxPool ceil_mode {ceil_mode} and storage_order {storage_order} not implemented"
   return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -145,7 +145,7 @@ def HardSwish(input): return input * HardSigmoid(input, 1/6, 0.5)
 def Celu(X, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
 def Selu(X, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def Softplus(X): return X.softplus()
-def PRelu(X, slope): return X.leakyrelu(slope)
+def PRelu(X:Tensor, slope:Tensor): return X.clip(0, float("inf")) + X.clip(float("-inf"), 0) * slope
 def LeakyRelu(X, alpha=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X, alpha=1.0): return (X-alpha).relu() + (X-alpha).relu().sign() * alpha
 def Softmax_1(input, axis=1): return input.softmax(axis)
@@ -191,6 +191,8 @@ def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return
 
 def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
+def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
+def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
 
 def Tile(input, repeats):
   repeats_ = [int(x) for x in safe_numpy(repeats)]
@@ -200,7 +202,7 @@ def Tile(input, repeats):
   return input.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
 def Range(start, limit, delta): return Tensor.arange(safe_numpy(limit)[0], safe_numpy(start)[0], safe_numpy(delta)[0])
-def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y)
+def Where(condition:Tensor,X:Tensor,Y:Tensor): return condition.where(X, Y).cast(X.dtype)
 
 def And(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.zeros(*x.shape)).cast(dtypes.bool)
 def Or(x:Tensor, y:Tensor): return Where((x==y), x, Tensor.ones(*x.shape)).cast(dtypes.bool)
