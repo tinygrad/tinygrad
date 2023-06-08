@@ -289,92 +289,108 @@ def get_instances(rng, tokenizer, documents):
   rng.shuffle(instances)
   return instances
 
-def process_iterate(tokenizer, val=True):
+
+def instance_to_features(instance, tokenizer):
+  input_ids = tokenizer.convert_tokens_to_ids(instance["tokens"])
+  input_mask = [1] * len(input_ids)
+  segment_ids = instance["segment_ids"]
+
+  assert len(input_ids) <= 512
+  while len(input_ids) < 512:
+    input_ids.append(0)
+    input_mask.append(0)
+    segment_ids.append(0)
+  assert len(input_ids) == 512
+  assert len(input_mask) == 512
+  assert len(segment_ids) == 512
+
+  masked_lm_positions = instance["masked_lm_positions"]
+  masked_lm_ids = tokenizer.convert_tokens_to_ids(instance["masked_lm_labels"])
+
+  while len(masked_lm_positions) < 76:
+    masked_lm_positions.append(0)
+    masked_lm_ids.append(0)
+
+  next_sentence_label = 1 if instance["is_random_next"] else 0
+
+  return {
+    "input_ids": np.expand_dims(np.array(input_ids, dtype=np.float32), 0),
+    "input_mask": np.expand_dims(np.array(input_mask, dtype=np.float32), 0),
+    "segment_ids": np.expand_dims(np.array(segment_ids, dtype=np.float32), 0),
+    "masked_lm_positions": np.expand_dims(np.array(masked_lm_positions, dtype=np.float32), 0),
+    "masked_lm_ids": np.expand_dims(np.array(masked_lm_ids, dtype=np.float32), 0),
+    "next_sentence_labels": np.expand_dims(np.array([next_sentence_label], dtype=np.float32), 0),
+  }
+
+def process_iterate(tokenizer, val=False, part=0):
   rng = random.Random(12345)
 
   if val:
     documents = get_documents(rng, tokenizer, "eval.txt")
     instances = get_instances(rng, tokenizer, documents)
-
     print(f"there are {len(instances)} samples in the dataset")
-    print(f"picking 10000 samples")
 
+    print(f"picking 10000 samples")
     pick_ratio = len(instances) // 10000
     for i in range(10000):
       instance = instances[i * pick_ratio]
-      input_ids = tokenizer.convert_tokens_to_ids(instance["tokens"])
-      input_mask = [1] * len(input_ids)
-      segment_ids = instance["segment_ids"]
-
-      assert len(input_ids) <= 512
-      while len(input_ids) < 512:
-        input_ids.append(0)
-        input_mask.append(0)
-        segment_ids.append(0)
-      assert len(input_ids) == 512
-      assert len(input_mask) == 512
-      assert len(segment_ids) == 512
-
-      masked_lm_positions = instance["masked_lm_positions"]
-      masked_lm_ids = tokenizer.convert_tokens_to_ids(instance["masked_lm_labels"])
-
-      while len(masked_lm_positions) < 76:
-        masked_lm_positions.append(0)
-        masked_lm_ids.append(0)
-
-      next_sentence_label = 1 if instance["is_random_next"] else 0
-
-      features = {
-        "input_ids": np.expand_dims(np.array(input_ids, dtype=np.float32), 0),
-        "input_mask": np.expand_dims(np.array(input_mask, dtype=np.float32), 0),
-        "segment_ids": np.expand_dims(np.array(segment_ids, dtype=np.float32), 0),
-        "masked_lm_positions": np.expand_dims(np.array(masked_lm_positions, dtype=np.float32), 0),
-        "masked_lm_ids": np.expand_dims(np.array(masked_lm_ids, dtype=np.float32), 0),
-        "next_sentence_labels": np.expand_dims(np.array([next_sentence_label], dtype=np.float32), 0),
-      }
-
+      features = instance_to_features(instance, tokenizer)
       yield features, instances[i]
+  else:
+    # part padded to 3 digits
+    documents = get_documents(rng, tokenizer, f"results4/part-{part:05d}-of-00500")
+    instances = get_instances(rng, tokenizer, documents)
+    print(f"there are {len(instances)} samples in the dataset")
+
+    for instance in instances:
+      features = instance_to_features(instance, tokenizer)
+      yield features, instance
 
 def get_val_files():
   return sorted(list((BASEDIR / "eval").glob("*.pkl")))
 
-def iterate(bs=1, start=0, val=True):
-  if val:
-    # scan directory for files
-    files = get_val_files()
-    for i in range(start, len(files), bs):
-      input_ids = []
-      input_mask = []
-      segment_ids = []
-      masked_lm_positions = []
-      masked_lm_ids = []
-      next_sentence_labels = []
-      instances = []
-      for j in range(bs):
-        with open(files[i + j], "rb") as f:
-          features, instance = pickle.load(f)
-          input_ids.append(features["input_ids"])
-          input_mask.append(features["input_mask"])
-          segment_ids.append(features["segment_ids"])
-          masked_lm_positions.append(features["masked_lm_positions"])
-          masked_lm_ids.append(features["masked_lm_ids"])
-          next_sentence_labels.append(features["next_sentence_labels"])
-          instances.append(instance)
+def get_train_files():
+  return sorted(list((BASEDIR / "train").glob("*.pkl")))
 
-      yield {
-        "input_ids": np.concatenate(input_ids, axis=0),
-        "input_mask": np.concatenate(input_mask, axis=0),
-        "segment_ids": np.concatenate(segment_ids, axis=0),
-        "masked_lm_positions": np.concatenate(masked_lm_positions, axis=0),
-        "masked_lm_ids": np.concatenate(masked_lm_ids, axis=0),
-        "next_sentence_labels": np.concatenate(next_sentence_labels, axis=0),
-      }, instances
+def iterate(bs=1, start=0, val=False):
+  if val:
+    files = get_val_files()
+  else:
+    files = get_train_files()
+
+  for i in range(start, len(files), bs):
+    input_ids = []
+    input_mask = []
+    segment_ids = []
+    masked_lm_positions = []
+    masked_lm_ids = []
+    next_sentence_labels = []
+    instances = []
+    for j in range(bs):
+      with open(files[i + j], "rb") as f:
+        features, instance = pickle.load(f)
+        input_ids.append(features["input_ids"])
+        input_mask.append(features["input_mask"])
+        segment_ids.append(features["segment_ids"])
+        masked_lm_positions.append(features["masked_lm_positions"])
+        masked_lm_ids.append(features["masked_lm_ids"])
+        next_sentence_labels.append(features["next_sentence_labels"])
+        instances.append(instance)
+
+    yield {
+      "input_ids": np.concatenate(input_ids, axis=0),
+      "input_mask": np.concatenate(input_mask, axis=0),
+      "segment_ids": np.concatenate(segment_ids, axis=0),
+      "masked_lm_positions": np.concatenate(masked_lm_positions, axis=0),
+      "masked_lm_ids": np.concatenate(masked_lm_ids, axis=0),
+      "next_sentence_labels": np.concatenate(next_sentence_labels, axis=0),
+    }, instances
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent.parent / "weights/bert_vocab.txt")
 
   if len(sys.argv) <= 1:
-    X, Y = next(iterate())
+    X, Y = next(iterate(val=False))
     print(X["input_ids"])
     print(tokenizer.convert_ids_to_tokens(X["input_ids"][0]))
     print(X["masked_lm_ids"])
@@ -386,6 +402,11 @@ if __name__ == "__main__":
     print(" ".join(tokenizer.convert_ids_to_tokens(X["input_ids"][0])))
   else:
     if sys.argv[1] == "pre-eval":
-      for i, (X, Y) in tqdm(enumerate(process_iterate(tokenizer)), total=10000):
+      for i, (X, Y) in tqdm(enumerate(process_iterate(tokenizer, val=True)), total=10000):
         with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
+          pickle.dump((X, Y), f)
+    elif sys.argv[1] == "pre-train":
+      part = int(sys.argv[2])
+      for i, (X, Y) in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
+        with open(BASEDIR / f"train/{part}_{i}.pkl", "wb") as f:
           pickle.dump((X, Y), f)
