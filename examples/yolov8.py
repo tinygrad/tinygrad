@@ -74,45 +74,72 @@ def xywh2xyxy(x):
   return Tensor(result) if isinstance(x, Tensor) else result
 
 # right now this works for tensors only
-def box_iou(box1, box2, eps=1e-7):  
-  # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
-  a1, a2 =  box1.unsqueeze(1).chunk(2, 2)
-  b1, b2 =  box2.unsqueeze(0).chunk(2, 2)
-  a1, a2 = a1.cpu().numpy(), a2.cpu().numpy()
-  b1, b2 = b1.cpu().numpy(), b2.cpu().numpy()
-  inter = (np.minimum(a2, b2) - np.maximum(a1, b1))
-  inter = np.clip(inter, 0, None).prod(2)
-  # IoU = inter / (area1 + area2 - inter)
-  return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
+def box_area(box):
+  return (box[:, 2] - box[:, 0]) * (box[:, 3] - box[:, 1])
+
+def box_iou(box1, box2):
+  lt = np.maximum(box1[:, None, :2], box2[:, :2])  # [N, M, 2]
+  rb = np.minimum(box1[:, None, 2:], box2[:, 2:])  # [N, M, 2]
+  wh = np.clip(rb - lt, 0, None)  # [N, M, 2]
+  inter = wh[:, :, 0] * wh[:, :, 1]  # [N, M]
+  area1 = box_area(box1)[:, None]  # [N, 1]
+  area2 = box_area(box2)[None, :]  # [1, M]
+  iou = inter / (area1 + area2 - inter)
+  return iou
+
+def custom_nms(boxes, scores, iou_threshold):
+  boxes_np = boxes.cpu().numpy()
+  scores_np = scores.cpu().numpy()
+  order = scores_np.argsort()[::-1]
+  keep = []
+
+  while order.size > 0:
+    i = order[0]
+    keep.append(i)
+    if order.size == 1:
+      break
+    iou = box_iou(boxes_np[i][None, :], boxes_np[order[1:]])
+    inds = np.where(iou.squeeze() <= iou_threshold)[0]
+    order = order[inds + 1]
+  return torch.tensor(keep, dtype=torch.long, device=boxes.device)
     
 
-def prepare_boxes_scores_for_nms(prediction, conf_thres=0.25, agnostic=False, nc=0, max_wh=7680):
+def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False, labels=(), max_det=300, nc=0, max_time_img=0.05, max_nms=30000, max_wh=7680):
+  if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
+    prediction = prediction[0]
+        
   prediction_np = prediction.cpu().numpy()
-  nc = nc or (prediction_np.shape[1] - 4)  # number of classes
+  bs = prediction.shape[0]  # batch size
+  nc = nc or (prediction.shape[1] - 4)  # number of classes
+  nm = prediction.shape[1] - nc - 4
   mi = 4 + nc  # mask start index
   xc = np.amax(prediction_np[:, 4:mi], axis=1) > conf_thres    
-  output = []
+  output = [torch.zeros((0, 6 + nm), device=prediction.device)] * bs
   for xi, x in enumerate(prediction_np):
     x = x.swapaxes(0, -1)[xc[xi]]
     if not x.shape[0]:
       continue
 
-    box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
-    box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+  box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
+  box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
 
-    conf = np.max(cls, axis=1, keepdims=True)  # confidence
-    j = np.argmax(cls, axis=1, keepdims=True)  # index
-    x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
-    x = x[conf.ravel() > conf_thres]
-    n = x.shape[0]  # number of boxes    
-    if not n:  # no boxes
-      continue    
-    # a very small mismatch (1%) happening here in comparison to torch. 
-    x = x[np.argsort(-x[:, 4])]
-    
-    c = x[:, 5:6] * (0 if agnostic else max_wh) 
-    boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-    output.append((boxes,scores))
+  conf = np.max(cls, axis=1, keepdims=True)  # confidence
+  j = np.argmax(cls, axis=1, keepdims=True)  # index
+  x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
+  x = x[conf.ravel() > conf_thres]
+  n = x.shape[0]  # number of boxes    
+  if not n:  # no boxes
+    continue    
+
+  x = x[np.argsort(-x[:, 4])]
+
+  c = x[:, 5:6] * (0 if agnostic else max_wh) 
+  boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+  boxes = torch.from_numpy(boxes)
+  scores = torch.from_numpy(scores)
+  i = custom_nms(boxes, scores, iou_thres)  # NMS
+  i = i[:max_det]  # limit detections
+  output[xi] = torch.tensor(x[i])
   return output
   
 '''TAKEN FROM: https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/data/augment.py#L531'''
