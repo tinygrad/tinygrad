@@ -256,6 +256,7 @@ class Tensor:
   #          is possible.
   #        - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
   def __getitem__(self, val):
+    print(val)
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")

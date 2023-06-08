@@ -230,3 +230,13 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   data_mean = input.mean(axis=axis, keepdim=True)
   std = ((input**2).mean(axis=axis, keepdim=True) - data_mean**2).sqrt()
   return (input - data_mean) / (std + 1e-9)
+
+def NegativeLogLikelihoodLoss(input, target, weights=None, ignore_index=None, reduction="mean"):
+  # Create an index array that selects the correct class from the log_probs
+  # Index into the log_probs with the class indices in target
+  loss = -((target[:,None] == Tensor.arange(input.shape[1])) * input).T.sum(axis=0)
+  if reduction == "mean":
+    loss = loss.mean()
+  elif reduction == "sum":
+    loss = loss.sum(axis=0)
+  return self# loss 
