@@ -30,7 +30,7 @@ def train_bert():
   mdl.load_from_pretrained()
 
   params = optim.get_parameters(mdl)
-  optimizer = optim.SGD(params, lr=0.001)
+  optimizer = optim.LAMB(params, lr=1e-4, wd=0.01)
   optimizer.zero_grad()
 
   wandb.init(project="tinygrad-mlperf", settings=wandb.Settings(_disable_stats=True))
