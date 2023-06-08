@@ -229,9 +229,20 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   std = ((input**2).mean(axis=axis, keepdim=True) - data_mean**2).sqrt()
   return (input - data_mean) / (std + 1e-9)
 
-def _gather(input, indices):
-  reshape_arg = [1]*input.ndim + [input.shape[-1]]
-  return Tensor.where(indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1]) == Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1]), input, 0,).sum(indices.ndim)
+def _gather(input, indices, axis=0): # follow torch.gather behavior
+  import torch
+  print(f"answer: {torch.gather(input=torch.tensor(input.numpy()), index=torch.tensor(indices.numpy().astype('int')), dim=axis)}")
+  assert input.ndim == indices.ndim, f"input tensor ndim: {input.ndim} must equal indices tensor ndim: {indices.ndim}"
+  input = input.transpose(ax1=axis, ax2=input.ndim-1).realize()
+  slice_args = [(0,x) if i != input.ndim-1 else (0,input.shape[i]) for i, x in enumerate(indices.shape)]
+  input = input.slice(slice_args)
+  reshape_arg = [1]*indices.ndim + [input.shape[-1]]
+  cond_1 = indices.unsqueeze(indices.ndim).expand(*indices.shape, input.shape[-1])
+  cond_2 = Tensor.arange(input.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, input.shape[-1])
+  t = cond_1 == cond_2
+  ret = t*input
+  return ret.sum(ret.ndim-1)
+
 
 def Gather(input, indices, axis):
   if axis != 0: input, indices = input.transpose(ax1=0, ax2=axis), indices.transpose(ax1=0, ax2=axis)
