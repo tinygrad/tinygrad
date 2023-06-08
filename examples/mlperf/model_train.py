@@ -52,6 +52,7 @@ def train_bert():
     optimizer.zero_grad()
     return loss.realize()
 
+  done = False
   for i in range(1000):
     # train loop
     for j, (X, _) in (t := tqdm(enumerate(iterate()), total=len(get_train_files()))):
@@ -86,9 +87,13 @@ def train_bert():
           acc = eval_step(input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids).numpy().item()
           accuracies.append(acc)
           t.set_description(f"acc {acc:.5f} avg {sum(accuracies) / len(accuracies):.5f}")
+        if sum(accuracies) / len(accuracies) >= 0.72:
+          done = True
+          break
         eval_step.jit_cache = []
         eval_step.cnt = 0
         Tensor.training = True
+    if done: break
 
 def train_maskrcnn():
   # TODO: Mask RCNN
