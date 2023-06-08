@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 import numpy as np
 import coremltools as ct
-from coremltools.models.neural_network import datatypes, NeuralNetworkBuilder
+# NOTE not very nice, but the location of datatypes has changed. I've only checked for 6.3 and 7.0b1.
+# TODO check lower versions?
+if ct.version.__version__ <'6.3':
+    from coremltools.models.neural_network import datatypes, NeuralNetworkBuilder
+else:
+    from coremltools.models import datatypes
+    from coremltools.models.neural_network.builder import NeuralNetworkBuilder
 
 # KxK GEMM with bias
 K = 64
