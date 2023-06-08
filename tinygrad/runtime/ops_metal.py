@@ -4,7 +4,7 @@ import numpy as np
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
-from tinygrad.helpers import prod, getenv, DEBUG, DType
+from tinygrad.helpers import prod, getenv, DEBUG, DType, NPArray
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferMapped
 
@@ -72,6 +72,10 @@ class MetalProgram:
 
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
+    command_encoder = command_buffer.computeCommandEncoder()
+    if i, a in enumerate(bufs): command_encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
+    command_encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+    command_encoder.endEncoding(
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
