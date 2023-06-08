@@ -1,5 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib
+import numpy as np
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -77,12 +78,11 @@ class MetalProgram:
     encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()
-    if not wait:
-      METAL.mtl_buffers_in_flight.append(command_buffer)
-      return None
-    else:
+    if wait:
       command_buffer.waitUntilCompleted()
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+    else:
+      METAL.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalCodegen(CStyleCodegen):
   lang = CStyleLanguage(
