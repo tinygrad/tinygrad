@@ -90,7 +90,6 @@ def get_run_onnx(onnx_model: ModelProto):
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
-      print(inp.type)
       tmp=inp.type.optional_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
       shape = shape_to_tuple(tmp.shape)
       if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
@@ -100,7 +99,7 @@ def get_run_onnx(onnx_model: ModelProto):
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape
-        # if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
+        if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items(): v.realize()
       else:
@@ -184,7 +183,8 @@ def get_run_onnx(onnx_model: ModelProto):
         steps = safe_numpy(inp[4])[0] if len(inp) > 4 else 1
         starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
         for i,axis in enumerate(axes.tolist()):
-          arg[axis] = (starts[i], ends[i])
+          arg[axis] = (starts[i] if starts[i] >= 0 else inp[0].shape[axis]+starts[i], ends[i] if ends[i] >= 0 else inp[0].shape[axis]+ends[i])
+        print("ARGS", arg)
         ret = inp[0].slice(arg=arg)
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
