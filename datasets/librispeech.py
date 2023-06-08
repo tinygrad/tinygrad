@@ -104,10 +104,10 @@ def dataset_download(dataset, url, hash, num_threads=4):
         print("Directory already exists. Skipping extraction.")
 
 
-def dataset_processing(dataset):
+def dataset_convert(dataset):
   # Convert flac to wav
-  flac_files = list(BASEDIR.glob("**/*.flac"))
-  wav_files = list(BASEDIR.glob("**/*.wav"))
+  flac_files = list((BASEDIR / "LibriSpeech" / dataset).glob("**/*.flac"))
+  wav_files = list((BASEDIR / "LibriSpeech" / dataset).glob("**/*.wav"))
   if not flac_files:
     raise Exception("No flac files found. Did you download and extract the dataset?")
   elif len(wav_files) > 0:
@@ -120,9 +120,34 @@ def dataset_processing(dataset):
       for file in flac_files:
         relative_path = file.relative_to(BASEDIR / "LibriSpeech" / dataset).parent / file.name
         (wav_folder / relative_path).mkdir(parents=True, exist_ok=True)
+        print("relative:", relative_path)
+        print("wav:", wav_folder / relative_path)
         wav_file = (wav_folder / relative_path).with_suffix(".wav")
         soundfile.write(wav_file, soundfile.read(file)[0], 16000)
         progress_bar.update(1)
+
+
+def generate_json(dataset):
+    wav_files = list(BASEDIR.glob("**/*.wav"))
+    if not wav_files:
+        raise Exception("No wav files found. Did you convert the dataset to .wav?")
+    else:
+        json_data = []
+        with tqdm(total=len(wav_files), unit='file', desc='Generating JSON files') as progress_bar:
+            for file in wav_files:
+                relative_path = file.relative_to(BASEDIR / "LibriSpeech" / dataset).parent / file.name
+                json_data.append({
+                    "wav_path": str(file),
+                    "relative_path": str(relative_path),
+                    "transcript": ""
+                })
+                progress_bar.update(1)
+
+        json_output_file = BASEDIR / "LibriSpeech" / f"{dataset}.json"
+        with open(json_output_file, 'w') as f:
+            json.dump(json_data, f, indent=2)
+
+        print(f"JSON file generated: {json_output_file}")
 
 
 def feature_extract(x, x_lens):
@@ -200,8 +225,9 @@ def iterate(bs=1, start=0, val=True):
 
 if __name__ == "__main__":
   for dataset, info in DATASETS.items():
-    dataset_download(dataset, info["url"], info["md5"], NUM_THREADS)
-    dataset_processing(dataset)
+    # dataset_download(dataset, info["url"], info["md5"], NUM_THREADS)
+    dataset_convert(dataset)
+    generate_json(dataset)
 
 
   # with open(BASEDIR / "LibriSpeech" / "dev-clean-wav.json", encoding="utf-8") as f:
