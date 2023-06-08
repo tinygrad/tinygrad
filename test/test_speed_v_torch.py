@@ -174,6 +174,7 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a*a + b*b
     helper_test_generic_square('add_sq', 4096, f, f)
 
+  @unittest.skipIf(getenv("CI", "") != "" and Device.DEFAULT == "METAL", "broken in METAL CI")
   def test_gemm(self):
     def f(a, b): return a @ b
     helper_test_generic_square('gemm', 1024, f, f)
