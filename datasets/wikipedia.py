@@ -337,7 +337,7 @@ def process_iterate(tokenizer, val=False, part=0):
       features = instance_to_features(instance, tokenizer)
       yield features, instances[i]
   else:
-    # part padded to 3 digits
+    # part padded to 5 digits
     documents = get_documents(rng, tokenizer, f"results4/part-{part:05d}-of-00500")
     instances = get_instances(rng, tokenizer, documents)
     print(f"there are {len(instances)} samples in the dataset")
