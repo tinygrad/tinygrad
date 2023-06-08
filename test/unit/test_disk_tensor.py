@@ -2,8 +2,6 @@ import pathlib
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
-from tinygrad.lazy import Device
 from tinygrad.state import safe_load, safe_save, get_state_dict
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
