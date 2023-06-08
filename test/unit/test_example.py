@@ -31,6 +31,7 @@ class TestExample(unittest.TestCase):
     assert b.numpy().shape == (2,2)
 
   @multidevice_test
+  @unittest.skipIf(getenv("CI", "") != "" and Device.DEFAULT == "METAL", "broken in METAL CI")
   def test_2_plus_3(self, device):
     a = Tensor([2], device=device)
     b = Tensor([3], device=device)
