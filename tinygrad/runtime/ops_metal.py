@@ -1,6 +1,6 @@
 import os, subprocess, pathlib
 import Metal, Cocoa, libdispatch # type: ignore
-from typing import List, Any
+from typing import List, Any, Union, Optional
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
 from tinygrad.helpers import prod, getenv, DEBUG, DType
 from tinygrad.ops import Compiled
@@ -12,7 +12,7 @@ class _METAL:
   def __init__(self) -> None:
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = self.device.newCommandQueue()
+    self.mtl_queue = self.device.newCommandQueue() # newCommandQueue has a capacity of (64 uncompleted command buffers)
   # TODO: is there a better way to do this?
   def synchronize(self) -> None:
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
@@ -26,8 +26,9 @@ class RawMetalBuffer(RawBufferMapped):
     self.release()
     super().__del__()
   def release(self) -> None:
-    self._buf.setPurgeableState_(Metal.MTLPurgeableStateEmpty)
-    self._buf = None
+    if self._buf:
+      self._buf.setPurgeableState_(Metal.MTLPurgeableStateEmpty)
+      self._buf = None
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
@@ -62,18 +63,18 @@ class MetalProgram:
       os.system(f"cd {pathlib.Path(__file__).parent.parent.parent}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
-  def __call__(self, global_size:List[int], local_size:List[int], *bufs, wait=False):
+  def __call__(self, global_size:List[int], local_size:List[int], *bufs, wait=False) -> Union[Optional[Any], None]:
     if not local_size: local_size = [32]
     local_size += [1] * (3-len(local_size))
     global_size += [1] * (3-len(global_size))
 
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
-    encoder = command_buffer.computeCommandEncoder()
-    encoder.setComputePipelineState_(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
-    encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-    encoder.endEncoding()
+    command_encoder = command_buffer.computeCommandEncoder()
+    command_encoder.setComputePipelineState_(self.pipeline_state)
+    for i,a in enumerate(bufs): command_encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
+    command_encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+    command_encoder.endEncoding()
     command_buffer.commit()
     if wait:
       command_buffer.waitUntilCompleted()
