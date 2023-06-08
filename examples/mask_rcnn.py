@@ -13,67 +13,65 @@ import argparse
 import cv2
 
 
-class Resize(object):
-    def __init__(self, min_size, max_size):
-        if not isinstance(min_size, (list, tuple)):
-            min_size = (min_size,)
-        self.min_size = min_size
-        self.max_size = max_size
+class Resize:
+  def __init__(self, min_size, max_size):
+    if not isinstance(min_size, (list, tuple)):
+      min_size = (min_size,)
+    self.min_size = min_size
+    self.max_size = max_size
 
-    # modified from torchvision to add support for max size
-    def get_size(self, image_size):
-        w, h = image_size
-        size = random.choice(self.min_size)
-        max_size = self.max_size
-        if max_size is not None:
-            min_original_size = float(min((w, h)))
-            max_original_size = float(max((w, h)))
-            if max_original_size / min_original_size * size > max_size:
-                size = int(round(max_size * min_original_size / max_original_size))
+  # modified from torchvision to add support for max size
+  def get_size(self, image_size):
+    w, h = image_size
+    size = random.choice(self.min_size)
+    max_size = self.max_size
+    if max_size is not None:
+      min_original_size = float(min((w, h)))
+      max_original_size = float(max((w, h)))
+      if max_original_size / min_original_size * size > max_size:
+        size = int(round(max_size * min_original_size / max_original_size))
 
-        if (w <= h and w == size) or (h <= w and h == size):
-            return (h, w)
+      if (w <= h and w == size) or (h <= w and h == size):
+        return (h, w)
 
-        if w < h:
-            ow = size
-            oh = int(size * h / w)
-        else:
-            oh = size
-            ow = int(size * w / h)
+      if w < h:
+        ow = size
+        oh = int(size * h / w)
+      else:
+        oh = size
+        ow = int(size * w / h)
 
-        return (oh, ow)
+      return (oh, ow)
 
-    def __call__(self, image):
-        size = self.get_size(image.size)
-        image = Ft.resize(image, size)
-        return image
-
-
-class Normalize(object):
-    def __init__(self, mean, std, to_bgr255=True):
-        self.mean = mean
-        self.std = std
-        self.to_bgr255 = to_bgr255
-
-    def __call__(self, image):
-        if self.to_bgr255:
-            image = image[[2, 1, 0]] * 255
-        else:
-            image = image[[0, 1, 2]] * 255
-        image = Ft.normalize(image, mean=self.mean, std=self.std)
-        return image
+  def __call__(self, image):
+    size = self.get_size(image.size)
+    image = Ft.resize(image, size)
+    return image
 
 
-transforms = T.Compose(
-    [
-        Resize(800, 1333),
-        T.ToTensor(),
-        Normalize(
-          mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
-        ),
-    ]
+class Normalize:
+  def __init__(self, mean, std, to_bgr255=True):
+    self.mean = mean
+    self.std = std
+    self.to_bgr255 = to_bgr255
+
+  def __call__(self, image):
+    if self.to_bgr255:
+      image = image[[2, 1, 0]] * 255
+    else:
+      image = image[[0, 1, 2]] * 255
+    image = Ft.normalize(image, mean=self.mean, std=self.std)
+    return image
+
+transforms = lambda size_scale: T.Compose(
+  [
+    Resize(int(800*size_scale), int(1333*size_scale)),
+    T.ToTensor(),
+    Normalize(
+      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+    ),
+  ]
 )
-
 
 def expand_boxes(boxes, scale):
   w_half = (boxes[:, 2] - boxes[:, 0]) * .5
@@ -103,6 +101,7 @@ def expand_masks(mask, padding):
 
 
 def paste_mask_in_image(mask, box, im_h, im_w, thresh=0.5, padding=1):
+  # TODO: remove torch
   mask = torch.tensor(mask.numpy())
   box = torch.tensor(box.numpy())
   padded_mask, scale = expand_masks(mask[None], padding=padding)
@@ -116,10 +115,8 @@ def paste_mask_in_image(mask, box, im_h, im_w, thresh=0.5, padding=1):
   w = max(w, 1)
   h = max(h, 1)
 
-  # Set shape to [batchxCxHxW]
   mask = mask.expand((1, 1, -1, -1))
 
-  # Resize mask
   mask = mask.to(torch.float32)
   mask = F.interpolate(mask, size=(h, w), mode='bilinear', align_corners=False)
   mask = mask[0][0]
@@ -127,8 +124,6 @@ def paste_mask_in_image(mask, box, im_h, im_w, thresh=0.5, padding=1):
   if thresh >= 0:
     mask = mask > thresh
   else:
-    # for visualization and debugging, we also
-    # allow it to return an unmodified mask
     mask = (mask * 255).to(torch.uint8)
 
   im_mask = torch.zeros((im_h, im_w), dtype=torch.uint8)
@@ -143,12 +138,7 @@ def paste_mask_in_image(mask, box, im_h, im_w, thresh=0.5, padding=1):
   return im_mask
 
 
-class Masker(object):
-  """
-  Projects a set of masks in an image on the locations
-  specified by the bounding boxes
-  """
-
+class Masker:
   def __init__(self, threshold=0.5, padding=1):
     self.threshold = threshold
     self.padding = padding
@@ -170,12 +160,8 @@ class Masker(object):
     if isinstance(boxes, BoxList):
       boxes = [boxes]
 
-    # Make some sanity check
-    assert len(boxes) == len(masks), "Masks and boxes should have the same length."
-
     results = []
     for mask, box in zip(masks, boxes):
-      assert mask.shape[0] == len(box), "Number of objects should be the same."
       result = self.forward_single_image(mask, box)
       results.append(result)
     return results
@@ -183,166 +169,120 @@ class Masker(object):
 
 masker = Masker(threshold=0.5, padding=1)
 
-def compute_prediction(original_image, model):
-  # apply pre-processing to image
-  image = transforms(original_image).numpy()
+def compute_prediction(original_image, model, size_scale=1.0):
+  image = transforms(size_scale)(original_image).numpy()
   image = Tensor(image, requires_grad=False)
-  predictions = model_tiny(image)
-  # always single image is passed at a time
+  predictions = model(image)
   prediction = predictions[0]
-  # reshape prediction (a BoxList) into the original image size
   width, height = original_image.size
   prediction = prediction.resize((width, height))
 
   if prediction.has_field("mask"):
-    # if we have masks, paste the masks in the right position
-    # in the image, as defined by the bounding boxes
     masks = prediction.get_field("mask")
-    # always single image is passed at a time
     masks = masker([masks], [prediction])[0]
     prediction.add_field("mask", masks)
   return prediction
 
-def compute_prediction_batched(batch, model):
-  # apply pre-processing to image
+def compute_prediction_batched(batch, model, size_scale=1.0):
   imgs = []
   for img in batch:
-    imgs.append(transforms(img).numpy())
+    imgs.append(transforms(size_scale)(img).numpy())
   image = [Tensor(image, requires_grad=False) for image in imgs]
   predictions = model(image)
   del image
   return predictions
 
-palette = torch.tensor([2 ** 25 - 1, 2 ** 15 - 1, 2 ** 21 - 1])
+palette = np.array([2 ** 25 - 1, 2 ** 15 - 1, 2 ** 21 - 1])
 
 def findContours(*args, **kwargs):
-    """
-    Wraps cv2.findContours to maintain compatiblity between versions
-    3 and 4
-
-    Returns:
-        contours, hierarchy
-    """
-    if cv2.__version__.startswith('4'):
-        contours, hierarchy = cv2.findContours(*args, **kwargs)
-    elif cv2.__version__.startswith('3'):
-        _, contours, hierarchy = cv2.findContours(*args, **kwargs)
-    else:
-        raise AssertionError(
-            'cv2 must be either version 3 or 4 to call this method')
-
-    return contours, hierarchy
+  if cv2.__version__.startswith('4'):
+    contours, hierarchy = cv2.findContours(*args, **kwargs)
+  elif cv2.__version__.startswith('3'):
+    _, contours, hierarchy = cv2.findContours(*args, **kwargs)
+  return contours, hierarchy
 
 def compute_colors_for_labels(labels):
-    """
-    Simple function that adds fixed colors depending on the class
-    """
-    l = torch.tensor(labels[:, None].numpy())
-    colors = l * palette
-    colors = (colors % 255).numpy().astype("uint8")
-    return colors
+  l = labels[:, None]
+  colors = l * palette
+  colors = (colors % 255).astype("uint8")
+  return colors
 
 def overlay_mask(image, predictions):
-    """
-    Adds the instances contours for each predicted object.
-    Each label has a different color.
+  image = np.asarray(image)
+  masks = predictions.get_field("mask").numpy()
+  labels = predictions.get_field("labels").numpy()
 
-    Arguments:
-        image (np.ndarray): an image as returned by OpenCV
-        predictions (BoxList): the result of the computation by the model.
-            It should contain the field `mask` and `labels`.
-    """
-    image = np.asarray(image)
-    masks = predictions.get_field("mask").numpy()
-    labels = predictions.get_field("labels")
+  colors = compute_colors_for_labels(labels).tolist()
 
-    colors = compute_colors_for_labels(labels).tolist()
+  for mask, color in zip(masks, colors):
+    thresh = mask[0, :, :, None]
+    contours, hierarchy = findContours(
+        thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+    )
+    image = cv2.drawContours(image, contours, -1, color, 3)
 
-    for mask, color in zip(masks, colors):
-        thresh = mask[0, :, :, None]
-        contours, hierarchy = findContours(
-            thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-        )
-        image = cv2.drawContours(image, contours, -1, color, 3)
+  composite = image
 
-    composite = image
-
-    return composite
+  return composite
 
 CATEGORIES = [
-        "__background", "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-        "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
-        "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
-        "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
-        "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
-        "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table",
-        "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster",
-        "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
-    ]
+    "__background", "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
+    "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
+    "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
+    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+    "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
+    "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table",
+    "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster",
+    "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+]
 
 def overlay_boxes(image, predictions):
-    """
-    Adds the predicted boxes on top of the image
+  labels = predictions.get_field("labels").numpy()
+  boxes = predictions.bbox
+  image = np.asarray(image)
+  colors = compute_colors_for_labels(labels).tolist()
 
-    Arguments:
-        image (np.ndarray): an image as returned by OpenCV
-        predictions (BoxList): the result of the computation by the model.
-            It should contain the field `labels`.
-    """
-    labels = torch.tensor(predictions.get_field("labels").numpy())
-    boxes = predictions.bbox
-    image = np.asarray(image)
-    colors = compute_colors_for_labels(labels).tolist()
+  for box, color in zip(boxes, colors):
+    box = torch.tensor(box.numpy())
+    box = box.to(torch.int64)
+    top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
+    image = cv2.rectangle(
+        image, tuple(top_left), tuple(bottom_right), tuple(color), 1
+    )
 
-    for box, color in zip(boxes, colors):
-        box = torch.tensor(box.numpy())
-        box = box.to(torch.int64)
-        top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
-        image = cv2.rectangle(
-            image, tuple(top_left), tuple(bottom_right), tuple(color), 1
-        )
-
-    return image
+  return image
 
 def overlay_class_names(image, predictions):
-    """
-    Adds detected class names and scores in the positions defined by the
-    top-left corner of the predicted bounding box
+  scores = predictions.get_field("scores").numpy().tolist()
+  labels = predictions.get_field("labels").numpy().tolist()
+  labels = [CATEGORIES[i] for i in labels]
+  boxes = predictions.bbox.numpy()
+  image = np.asarray(image)
+  template = "{}: {:.2f}"
+  for box, score, label in zip(boxes, scores, labels):
+    x, y = box[:2]
+    s = template.format(label, score)
+    x, y = int(x), int(y)
+    cv2.putText(
+        image, s, (x, y), cv2.FONT_HERSHEY_SIMPLEX, .5, (255, 255, 255), 1
+    )
 
-    Arguments:
-        image (np.ndarray): an image as returned by OpenCV
-        predictions (BoxList): the result of the computation by the model.
-            It should contain the field `scores` and `labels`.
-    """
-    scores = predictions.get_field("scores").numpy().tolist()
-    labels = predictions.get_field("labels").numpy().tolist()
-    labels = [CATEGORIES[i] for i in labels]
-    boxes = predictions.bbox.numpy()
-    image = np.asarray(image)
-    template = "{}: {:.2f}"
-    for box, score, label in zip(boxes, scores, labels):
-        x, y = box[:2]
-        s = template.format(label, score)
-        x, y = int(x), int(y)
-        cv2.putText(
-            image, s, (x, y), cv2.FONT_HERSHEY_SIMPLEX, .5, (255, 255, 255), 1
-        )
-
-    return image
+  return image
 
 
 def select_top_predictions(predictions, confidence_threshold=0.9):
-  scores = torch.tensor(predictions.get_field("scores").numpy())
-  keep = torch.nonzero(scores > confidence_threshold).squeeze(1)
+  scores = predictions.get_field("scores").numpy()
+  keep = [idx for idx, score in enumerate(scores) if score > confidence_threshold]
   predictions = predictions[keep]
-  scores = torch.tensor(predictions.get_field("scores").numpy())
-  _, idx = scores.sort(0, descending=True)
+  scores = predictions.get_field("scores").numpy()
+  idx = np.argsort(scores)
   return predictions[idx]
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Run MaskRCNN', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--image', type=str, help="Path of the image to run")
   parser.add_argument('--threshold', type=float, default=0.7, help="Detector threshold")
+  parser.add_argument('--size_scale', type=float, default=1.0, help="Image resize multiplier")
   parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
   args = parser.parse_args()
 
@@ -350,7 +290,7 @@ if __name__ == '__main__':
   model_tiny = MaskRCNN(resnet)
   model_tiny.load_from_pretrained()
   img = Image.open(args.image)
-  result = compute_prediction(img, model_tiny)
+  result = compute_prediction(img, model_tiny, args.size_scale)
   top_result_tiny = select_top_predictions(result, confidence_threshold=args.threshold)
   bbox_image = overlay_boxes(img, top_result_tiny)
   mask_image = overlay_mask(bbox_image, top_result_tiny)
