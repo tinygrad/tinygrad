@@ -87,14 +87,18 @@ class BertForPreTraining:
     next_sentence_loss = sparse_categorical_crossentropy(seq_relationship_score, next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
 
-  def accuracy(self, prediction_scores:Tensor, masked_lm_positions:Tensor, masked_lm_ids:np.ndarray):
+  def accuracy(self, prediction_scores:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor):
+    def argmax(x:Tensor) -> Tensor:
+      m = x == x.max(axis=-1, keepdim=True)
+      return (Tensor.arange(x.shape[-1]) * m).sum(axis=-1)
+
     # gather only the masked_lm_positions we care about
     counter = Tensor.arange(prediction_scores.shape[1], requires_grad=False).reshape(1, 1, prediction_scores.shape[1]).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
     onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_scores.shape[1])
     prediction_scores = onehot @ prediction_scores
 
     valid = masked_lm_ids != 0
-    masked_lm_predictions = np.argmax(prediction_scores.numpy(), axis=-1)
+    masked_lm_predictions = argmax(prediction_scores)
     masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
 
     return masked_lm_accuracy.sum() / valid.sum()
