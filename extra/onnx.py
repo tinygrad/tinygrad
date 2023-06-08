@@ -184,7 +184,6 @@ def get_run_onnx(onnx_model: ModelProto):
         starts, ends = safe_numpy(starts.cast(dtypes.int32)).tolist(), safe_numpy(ends.cast(dtypes.int32)).tolist() # TODO: when indexing is added use that
         for i,axis in enumerate(axes.tolist()):
           arg[axis] = (starts[i] if starts[i] >= 0 else inp[0].shape[axis]+starts[i], ends[i] if ends[i] >= 0 else inp[0].shape[axis]+ends[i])
-        print("ARGS", arg)
         ret = inp[0].slice(arg=arg)
       elif n.op_type == "Shrink":
         bias = opt['bias'] if 'bias' in opt else 0
