@@ -22,15 +22,18 @@ class _METAL:
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType): super().__init__(size, dtype, METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared))
+  def __init__(self, size:int, dtype:DType):
+    super().__init__(size, dtype, METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(None, size * dtype.itemsize, Metal.MTLResourceStorageModeShared, None))
   def __del__(self):
-    #self._buf.release()
+    self.release()
     super().__del__()
+  def release(self):
+    if self._buf:
+      self._buf.setPurgeableState_(Metal.MTLPurgeableStateEmpty)
+      self._buf = None
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
-  def toCPU(self):
-    return NPArray(np.frombuffer(self._buffer(), dtype=self.dtype.np),buffer=self)
 
 def unwrap(x):
   ret, err = x
@@ -54,6 +57,8 @@ class MetalProgram:
       arc = unwrap(METAL.device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None))
       desc = Metal.MTLComputePipelineDescriptor.alloc().init()
       desc.setComputeFunction_(self.fxn)
+      arc = unwrap(METAL.device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None))
+      unwrap(x=arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None) or arc.newComputePipelineStateWithDescriptor_error_(desc, None))
       unwrap(arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None))
       unwrap(arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None))
       # clone https://github.com/dougallj/applegpu.git in tinygrad/disassemblers
@@ -67,6 +72,10 @@ class MetalProgram:
 
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
+    command_encoder = command_buffer.computeCommandEncoder()
+    if i, a in enumerate(bufs): command_encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
+    command_encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+    command_encoder.endEncoding(
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
@@ -84,6 +93,6 @@ class MetalCodegen(CStyleCodegen):
     kernel_prefix = "#include <metal_stdlib>\n#define int64 long\nusing namespace metal;\nkernel", buffer_prefix = "device ", smem_prefix = "threadgroup ",
     barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);", float4 = "float4",
     gid = [f"gid.{chr(120+i)}" for i in range(3)], lid = [f"lid.{chr(120+i)}" for i in range(3)],
-    extra_args = ['uint3 gid [[thread_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]'])
+    extra_args = ['uint3 gid [[thread_position_in_grid]]', 'ushort3 lid [[thread_position_in_threadgroup]]'])
 
 MetalBuffer = Compiled(RawMetalBuffer, MetalCodegen, MetalProgram, METAL.synchronize)
