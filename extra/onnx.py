@@ -4,7 +4,7 @@ import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
-from typing import List
+from typing import List,Dict
 from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
@@ -56,7 +56,7 @@ def get_run_onnx(onnx_model: ModelProto):
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
-  tensors = {}
+  tensors: Dict[str, Tensor] = {}
 
   # get weights and biases
   for inp in onnx_model.graph.initializer:
@@ -83,14 +83,16 @@ def get_run_onnx(onnx_model: ModelProto):
 
   def run_onnx(inputs={}, debug=False):
     if getenv("DEBUGONNX"): debug = True
-    input_tensors = {}
-    intermediate_tensors = {}
+    input_tensors: Dict[str,Tensor] = {}
+    intermediate_tensors: Dict[str,Tensor] = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
 
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
-      shape = shape_to_tuple(inp.type.tensor_type.shape)
+      print(inp.type)
+      tmp=inp.type.optional_type.elem_type.tensor_type if inp.type.HasField("optional_type") else (inp.type.sequence_type.elem_type.tensor_type if inp.type.HasField("sequence_type") else inp.type.tensor_type)
+      shape = shape_to_tuple(tmp.shape)
       if len(shape) >= 1 and shape[0] == 0: shape = tuple([1]+list(shape[1:]))   # 1 batch size
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
@@ -98,7 +100,7 @@ def get_run_onnx(onnx_model: ModelProto):
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         input_shape = input_tensors[inp.name].shape
-        if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
+        # if input_shape == (0,): raise NotImplementedError("empty tensors aren't supported in tinygrad")
         assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
         for _,v in input_tensors.items(): v.realize()
       else:

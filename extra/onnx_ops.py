@@ -92,7 +92,7 @@ def AveragePool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_p
     return padding_included / div
 
 def MaxPool(X, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  assert ceil_mode == 0 and storage_order == 0
+  assert ceil_mode == 0 and storage_order == 0, f"WARNING: MaxPool ceil_mode {ceil_mode} and storage_order {storage_order} not implemented"
   return _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-2:]).max_pool2d(kernel_shape, stride=strides, dilation=dilations)
 
 def Conv(X, W, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -191,6 +191,8 @@ def ReduceLogSumExp(data, axes=None, keepdims=1, noop_with_empty_axes=0): return
 
 def GlobalAveragePool(X): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
+def OptionalHasElement(x: Tensor=None): return Tensor(x is not None and x.numel() > 0, dtype=dtypes.bool)
+def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([], dtype=dtypes.float32)
 
 def Tile(input, repeats):
   repeats_ = [int(x) for x in safe_numpy(repeats)]
