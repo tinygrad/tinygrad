@@ -134,7 +134,7 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := tuple(map(int, argfix(shape))))).expand(new_shape).contiguous()
+  def full(shape:Tuple[int, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape).contiguous()
 
   @staticmethod
   def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs)
@@ -143,7 +143,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
 
   @staticmethod
-  def arange(stop, start=0, step=1, **kwargs): return Tensor.full(((stop-start)//step,), step, **kwargs).cumsum() + (start - step)
+  def arange(stop, start=0, step=1, **kwargs): return Tensor.full((int((stop-start)//step),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def full_like(tensor, fill_value, dtype:Optional[DType]=None, **kwargs):
