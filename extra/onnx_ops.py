@@ -75,7 +75,7 @@ def _padding(X, pads=None, auto_pad="NOTSET", axes=None, constant_value=0.):
   return zero_padded + constant_padder
 
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
-  assert mode == "constant"
+  assert mode == "constant", f"WARNING: Pad mode {mode} not implemented"
   constant_value = value if constant_value is None else constant_value.numpy()
   seq_pads = list(pads) if isinstance(pads, tuple) else pads.numpy().astype(np.int32).tolist()
   seq_axes = axes.numpy().astype(np.int32).tolist() if axes is not None else None
@@ -110,8 +110,8 @@ def Dropout(data, ratio=0.5, training_mode=False, seed=None):
   mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
-def Shape(data, end=None, start=0): return list(data.shape)[start:end]
-def Size(data): return prod(data.shape)
+def Shape(data, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
+def Size(data): return prod(data if isinstance(data, list) else data.shape)
 
 # TODO: this doesn't match Tensor.flatten behavior
 def Flatten(input, axis=1):
