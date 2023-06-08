@@ -76,11 +76,11 @@ class MetalProgram:
     command_encoder.dispatchThreads_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     command_encoder.endEncoding()
     command_buffer.commit()
-    if wait:
-      command_buffer.waitUntilCompleted()
-      return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
-    else:
+    if not wait:
       METAL.mtl_buffers_in_flight.append(command_buffer)
+      return None
+    command_buffer.waitUntilCompleted()
+    return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
 
 class MetalCodegen(CStyleCodegen):
   lang = CStyleLanguage(
