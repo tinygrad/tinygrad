@@ -14,10 +14,9 @@ import torchvision.ops
 
 
 def meshgrid(*tensors):
-  return [
-    Tensor(chunked).reshape(-1).unsqueeze(-1) for chunked in np.meshgrid(
-      *[t.numpy() for t in tensors], copy=True, indexing='ij'
-    )]
+    grid_x = Tensor.cat(*[tensors[0][idx:idx+1].expand(tensors[1].shape).unsqueeze(0) for idx in range(tensors[0].shape[0])])
+    grid_y = Tensor.cat(*[tensors[1].unsqueeze(0)]*tensors[0].shape[0])
+    return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
 
 
 class LastLevelMaxPool:
