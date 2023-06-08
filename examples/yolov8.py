@@ -120,27 +120,36 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     if not x.shape[0]:
       continue
 
-  box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
-  box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+    box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
+    box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
 
-  conf = np.max(cls, axis=1, keepdims=True)  # confidence
-  j = np.argmax(cls, axis=1, keepdims=True)  # index
-  x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
-  x = x[conf.ravel() > conf_thres]
-  n = x.shape[0]  # number of boxes    
-  if not n:  # no boxes
-    continue    
+    conf = np.max(cls, axis=1, keepdims=True)  # confidence
+    j = np.argmax(cls, axis=1, keepdims=True)  # index
+    x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
+    x = x[conf.ravel() > conf_thres]
+    n = x.shape[0]  # number of boxes    
+    if not n:  # no boxes
+      continue    
 
-  x = x[np.argsort(-x[:, 4])]
+    x = x[np.argsort(-x[:, 4])]
 
-  c = x[:, 5:6] * (0 if agnostic else max_wh) 
-  boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-  boxes = torch.from_numpy(boxes)
-  scores = torch.from_numpy(scores)
-  i = custom_nms(boxes, scores, iou_thres)  # NMS
-  i = i[:max_det]  # limit detections
-  output[xi] = torch.tensor(x[i])
+    c = x[:, 5:6] * (0 if agnostic else max_wh) 
+    boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+    boxes = torch.from_numpy(boxes)
+    scores = torch.from_numpy(scores)
+    i = custom_nms(boxes, scores, iou_thres)  # NMS
+    i = i[:max_det]  # limit detections
+    output[xi] = torch.tensor(x[i])
   return output
+
+def postprocess(preds, img, orig_imgs, path): #path will be the loaded image path
+  preds = non_max_suppression(preds, 0.25, 0.7, agnostic=False, max_det=300, classes=None)
+  for i, pred in enumerate(preds):
+    orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
+    if not isinstance(orig_imgs, torch.Tensor):
+      pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
+    img_path = path[i] if isinstance(path, list) else path
+  return (img_path, orig_img, pred)
   
 '''TAKEN FROM: https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/data/augment.py#L531'''
 def letterbox(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
