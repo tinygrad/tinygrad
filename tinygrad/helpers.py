@@ -1,8 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-import os, math, functools, time
+import os, math, functools, time, gc
 import numpy as np
 from typing import Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
+gc.disable()
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 
