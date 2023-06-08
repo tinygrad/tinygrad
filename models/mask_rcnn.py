@@ -21,8 +21,7 @@ def meshgrid(*tensors):
 
 
 class LastLevelMaxPool:
-  def __call__(self, x):
-    return [Tensor.max_pool2d(x, 1, 2)]
+  def __call__(self, x): return [Tensor.max_pool2d(x, 1, 2)]
 
 
 # transpose
@@ -73,9 +72,6 @@ class BoxList:
       area = (box[:, 2] - box[:, 0] + TO_REMOVE) * (box[:, 3] - box[:, 1] + TO_REMOVE)
     elif self.mode == "xywh":
       area = box[:, 2] * box[:, 3]
-    else:
-      raise RuntimeError("Should not be here")
-
     return area
 
   def add_field(self, field, field_data):
@@ -95,12 +91,8 @@ class BoxList:
       self.extra_fields[k] = v
 
   def convert(self, mode):
-    if mode not in ("xyxy", "xywh"):
-      raise ValueError("mode should be 'xyxy' or 'xywh'")
     if mode == self.mode:
       return self
-    # we only have two modes, so don't need to check
-    # self.mode
     xmin, ymin, xmax, ymax = self._split_into_xyxy()
     if mode == "xyxy":
       bbox = Tensor.cat(*(xmin, ymin, xmax, ymax), dim=-1)
@@ -127,8 +119,6 @@ class BoxList:
         xmin + (w - TO_REMOVE).clamp(min=0),
         ymin + (h - TO_REMOVE).clamp(min=0),
       )
-    else:
-      raise RuntimeError("Should not be here")
 
   def resize(self, size, *args, **kwargs):
     ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(size, self.size))
@@ -136,7 +126,6 @@ class BoxList:
       ratio = ratios[0]
       scaled_box = self.bbox * ratio
       bbox = BoxList(scaled_box, size, mode=self.mode)
-      # bbox._copy_extra_fields(self)
       for k, v in self.extra_fields.items():
         if not isinstance(v, Tensor):
           v = v.resize(size, *args, **kwargs)
@@ -153,7 +142,6 @@ class BoxList:
       *(scaled_xmin, scaled_ymin, scaled_xmax, scaled_ymax), dim=-1
     )
     bbox = BoxList(scaled_box, size, mode="xyxy")
-    # bbox._copy_extra_fields(self)
     for k, v in self.extra_fields.items():
       if not isinstance(v, Tensor):
         v = v.resize(size, *args, **kwargs)
@@ -162,11 +150,6 @@ class BoxList:
     return bbox.convert(self.mode)
 
   def transpose(self, method):
-    if method not in (FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM):
-      raise NotImplementedError(
-        "Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented"
-      )
-
     image_width, image_height = self.size
     xmin, ymin, xmax, ymax = self._split_into_xyxy()
     if method == FLIP_LEFT_RIGHT:
@@ -185,7 +168,6 @@ class BoxList:
       *(transposed_xmin, transposed_ymin, transposed_xmax, transposed_ymax), dim=-1
     )
     bbox = BoxList(transposed_boxes, self.size, mode="xyxy")
-    # bbox._copy_extra_fields(self)
     for k, v in self.extra_fields.items():
       if not isinstance(v, Tensor):
         v = v.transpose(method)
@@ -216,23 +198,14 @@ class BoxList:
 
 
 def cat_boxlist(bboxes):
-  assert isinstance(bboxes, (list, tuple))
-  assert all(isinstance(bbox, BoxList) for bbox in bboxes)
-
   size = bboxes[0].size
-  assert all(bbox.size == size for bbox in bboxes)
-
   mode = bboxes[0].mode
-  assert all(bbox.mode == mode for bbox in bboxes)
-
   fields = set(bboxes[0].fields())
-  assert all(set(bbox.fields()) == fields for bbox in bboxes)
   cat_box_list = [bbox.bbox for bbox in bboxes if bbox.bbox.shape[0] > 0]
 
   if len(cat_box_list) > 0:
     cat_boxes = BoxList(Tensor.cat(*cat_box_list, dim=0), size, mode)
   else:
-    # Empty tensor
     cat_boxes = BoxList(bboxes[0].bbox, size, mode)
   for field in fields:
     cat_field_list = [bbox.get_field(field) for bbox in bboxes if bbox.get_field(field).shape[0] > 0]
@@ -240,7 +213,6 @@ def cat_boxlist(bboxes):
     if len(cat_box_list) > 0:
       data = Tensor.cat(*cat_field_list, dim=0)
     else:
-      # Empty tensor
       data = bboxes[0].get_field(field)
 
     cat_boxes.add_field(field, data)
@@ -501,13 +473,9 @@ class BoxCoder(object):
     pred_w = np.exp(dw) * widths[:, None]
     pred_h = np.exp(dh) * heights[:, None]
     pred_boxes = np.zeros_like(rel_codes)
-    # x1
     pred_boxes[:, 0::4] += pred_ctr_x - 0.5 * pred_w
-    # y1
     pred_boxes[:, 1::4] += pred_ctr_y - 0.5 * pred_h
-    # x2 (note: "- 1" is correct; don't be fooled by the asymmetry)
     pred_boxes[:, 2::4] += pred_ctr_x + 0.5 * pred_w - 1
-    # y2 (note: "- 1" is correct; don't be fooled by the asymmetry)
     pred_boxes[:, 3::4] += pred_ctr_y + 0.5 * pred_h - 1
 
     return Tensor(pred_boxes)
@@ -562,7 +530,6 @@ class RPNPostProcessor:
   def forward_for_single_feature_map(self, anchors, objectness, box_regression):
     device = objectness.device
     N, A, H, W = objectness.shape
-    # put in the same format as anchors
     objectness = permute_and_flatten(objectness, N, A, 1, H, W).reshape(N, -1)
     objectness = objectness.sigmoid()
 
@@ -766,10 +733,7 @@ class LevelMapper:
     self.eps = eps
 
   def __call__(self, boxlists):
-    # Compute level ids
     s = Tensor.sqrt(Tensor.cat(*[boxlist.area() for boxlist in boxlists]))
-
-    # Eqn.(1) in FPN paper
     target_lvls = (self.lvl0 + Tensor.log2(s / self.s0 + self.eps)).numpy()
     target_lvls = np.floor(target_lvls)
     target_lvls = np.clip(target_lvls, a_min=self.k_min, a_max=self.k_max)
@@ -790,8 +754,6 @@ class Pooler:
       )
     self.poolers = poolers
     self.output_size = output_size
-    # get the levels in the feature map by leveraging the fact that the network always
-    # downsamples by a factor of 2 at each level.
     lvl_min = float(-Tensor.log2(Tensor([scales[0]], dtype=dtypes.float32)).numpy()[0])
     lvl_max = float(-Tensor.log2(Tensor([scales[-1]], dtype=dtypes.float32)).numpy()[0])
     self.map_levels = LevelMapper(lvl_min, lvl_max)
@@ -869,7 +831,6 @@ class PostProcessor:
   def __call__(self, x, boxes):
     class_logits, box_regression = x
     class_prob = Tensor.softmax(class_logits, -1)
-    # TODO think about a representation of batch of boxes
     image_shapes = [box.size for box in boxes]
     boxes_per_image = [len(box) for box in boxes]
     concat_boxes = Tensor.cat(*[a.bbox for a in boxes], dim=0)
@@ -907,8 +868,6 @@ class PostProcessor:
 
     device = scores.device
     result = []
-    # Apply threshold on detection probabilities and apply NMS
-    # Skip j = 0, because it's the background class
     scores = scores.numpy()
     boxes = boxes.numpy()
     inds_all = scores > self.score_thresh
@@ -933,7 +892,6 @@ class PostProcessor:
     result = cat_boxlist(result)
     number_of_detections = len(result)
 
-    # Limit to max_per_image detections **over all classes**
     if number_of_detections > self.detections_per_img > 0:
       cls_scores = result.get_field("scores")
       image_thresh, _ = cls_scores.topk(k=self.detections_per_img)
@@ -965,8 +923,6 @@ class RoIBoxHead:
 class MaskPostProcessor:
   def __call__(self, x, boxes):
     mask_prob = x.sigmoid().numpy()
-
-    # select masks coresponding to the predicted classes
     num_masks = x.shape[0]
     labels = [bbox.get_field("labels") for bbox in boxes]
     labels = Tensor.cat(*labels).numpy()
