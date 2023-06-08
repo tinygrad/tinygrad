@@ -1,7 +1,7 @@
 import json
 import numpy as np
 import librosa
-import soundfile
+import sox
 import requests
 import hashlib
 import tarfile
@@ -23,10 +23,6 @@ Additionally, the script generates the JSON files for the training and validatio
 3. train-other-500-wav.json
 4. dev-clean-wav.json
 
-
-TODO:
-1. Add code to generate JSON files
-
 File download url and md5 hash:
 http://www.openslr.org/resources/12/train-clean-100.tar.gz
 2a93770f6d5c6c964bc36631d331a522
@@ -41,7 +37,7 @@ http://www.openslr.org/resources/12/dev-clean.tar.gz
 42e2234ba48799c1f50f24a7926300a1
 """
 
-BASEDIR = Path(__file__).parent.parent / "datasets/"
+BASEDIR = Path(__file__).parent.parent / "datasets"
 
 DATASETS = {
   "train-clean-100": {"url": "http://www.openslr.org/resources/12/train-clean-100.tar.gz", "md5": "2a93770f6d5c6c964bc36631d331a522"},
@@ -105,49 +101,73 @@ def dataset_download(dataset, url, hash, num_threads=4):
 
 
 def dataset_convert(dataset):
-  # Convert flac to wav
-  flac_files = list((BASEDIR / "LibriSpeech" / dataset).glob("**/*.flac"))
-  wav_files = list((BASEDIR / "LibriSpeech" / dataset).glob("**/*.wav"))
-  if not flac_files:
-    raise Exception("No flac files found. Did you download and extract the dataset?")
-  elif len(wav_files) > 0:
-    print("Wav files already exist. Skipping conversion.")
-  else:
-    wav_folder = BASEDIR / "LibriSpeech" / f"{dataset}-wav"
-    wav_folder.mkdir(parents=True, exist_ok=True)
+    # Convert flac to wav
+    flac_files = list((BASEDIR / "LibriSpeech" / dataset).glob("**/*.flac"))
+    wav_files = list((BASEDIR / "LibriSpeech" / f"{dataset}-wav").glob("**/*.wav"))
+    if not flac_files:
+        raise Exception("No flac files found. Did you download and extract the dataset?")
+    elif len(wav_files) > 0:
+        print("Wav files already exist. Skipping conversion.")
+    else:
+        wav_folder = BASEDIR / "LibriSpeech" / f"{dataset}-wav"
+        wav_folder.mkdir(parents=True, exist_ok=True)
 
-    with tqdm(total=len(flac_files), unit='file', desc='Converting .flac to .wav') as progress_bar:
-      for file in flac_files:
-        relative_path = file.relative_to(BASEDIR / "LibriSpeech" / dataset).parent / file.name
-        (wav_folder / relative_path).mkdir(parents=True, exist_ok=True)
-        print("relative:", relative_path)
-        print("wav:", wav_folder / relative_path)
-        wav_file = (wav_folder / relative_path).with_suffix(".wav")
-        soundfile.write(wav_file, soundfile.read(file)[0], 16000)
-        progress_bar.update(1)
+        with tqdm(total=len(flac_files), unit='file', desc='Converting .flac to .wav') as progress_bar:
+            for file in flac_files:
+                relative_path = file.relative_to(BASEDIR / "LibriSpeech" / dataset).parent
+                relative_path = "\\".join(relative_path.parts[-2:])
+                (wav_folder / relative_path).mkdir(parents=True, exist_ok=True)
+                wav_file = (wav_folder / relative_path / file.name.replace(".flac", "")).with_suffix(".wav")
+                tfm = sox.Transformer()
+                tfm.build(str(file), str(wav_file))
+                progress_bar.update(1)
 
 
 def generate_json(dataset):
-    wav_files = list(BASEDIR.glob("**/*.wav"))
-    if not wav_files:
+    if not (
+        wav_files := list(
+            (BASEDIR / "LibriSpeech" / f"{dataset}-wav").rglob("*.wav")
+        )
+    ):
         raise Exception("No wav files found. Did you convert the dataset to .wav?")
-    else:
-        json_data = []
-        with tqdm(total=len(wav_files), unit='file', desc='Generating JSON files') as progress_bar:
-            for file in wav_files:
-                relative_path = file.relative_to(BASEDIR / "LibriSpeech" / dataset).parent / file.name
-                json_data.append({
-                    "wav_path": str(file),
-                    "relative_path": str(relative_path),
-                    "transcript": ""
-                })
-                progress_bar.update(1)
+    json_data = []
+    with tqdm(total=len(wav_files), unit='file', desc='Generating JSON files') as progress_bar:
+        for file in wav_files:
+            relative_path = file.relative_to(BASEDIR / "LibriSpeech" / f"{dataset}-wav")
 
-        json_output_file = BASEDIR / "LibriSpeech" / f"{dataset}.json"
-        with open(json_output_file, 'w') as f:
-            json.dump(json_data, f, indent=2)
+            transcript_file = file.with_suffix(".txt")
+            if transcript_file.exists():
+                with open(transcript_file, "r") as f:
+                    transcript = f.read().strip()
+            else:
+                transcript = ""
 
-        print(f"JSON file generated: {json_output_file}")
+            file_info = sox.file_info.info(str(file))
+            json_data.append({
+                "files": [
+                    {
+                        "channels": file_info['channels'],
+                        "sample_rate": file_info['sample_rate'],
+                        "bitrate": file_info['bitrate'],
+                        "duration": file_info['duration'],
+                        "num_samples": file_info['num_samples'],
+                        "encoding": file_info['encoding'],
+                        "silent": file_info['silent'],
+                        "fname": str(relative_path),
+                        "speed": 1
+                    }
+                ],
+                "original_duration": file_info['duration'],
+                "original_num_samples": file_info['num_samples'],
+                "transcript": transcript
+            })
+            progress_bar.update(1)
+
+    json_output_file = BASEDIR / "LibriSpeech" / f"{dataset}.json"
+    with open(json_output_file, 'w') as f:
+        json.dump(json_data, f, indent=2)
+
+    print(f"JSON file generated: {json_output_file}")
 
 
 def feature_extract(x, x_lens):
