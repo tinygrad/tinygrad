@@ -231,18 +231,20 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   std = ((input**2).mean(axis=axis, keepdim=True) - data_mean**2).sqrt()
   return (input - data_mean) / (std + 1e-9)
 
-def NegativeLogLikelihoodLoss(input, target, weights=None, ignore_index=None, reduction="mean"):
+def NegativeLogLikelihoodLoss(input, target, weight=None, ignore_index=None, reduction="mean"):
   N, C, i_shape = input.shape[0], input.shape[1], input.shape
   t_shape = target.shape
   if len(input.shape) != 3:
     input = input.reshape((N, C, -1))
     target = target.reshape((N, -1))
-  if weights is not None: weights = Tensor(np.take(weights.numpy(), np.array(target.numpy(), dtype=np.int32), mode="clip"))
+  if weight is not None:
+    mask = target.unsqueeze(-1) == Tensor.arange(C,dtype=dtypes.int64).repeat((N, 1, 1)) 
+    weight = (mask * weight).sum(axis=-1)
   if ignore_index is not None:
     cond = (target == ignore_index)
-    weights = cond.where(0, weights) if weights is not None else cond.where(Tensor.zeros(*target.shape), 1) 
+    weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1) 
   mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(input.shape) -2)) 
-  loss = (-mask * input).sum(axis=1) * (1 if weights is None else weights)  
-  if reduction == "mean": return loss.mean() if weights is None else loss.sum() / weights.sum()
+  loss = (-mask * input).sum(axis=1) * (1 if weight is None else weight)  
+  if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   elif reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
