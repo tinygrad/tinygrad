@@ -152,10 +152,10 @@ class RDNACodegen(AssemblyCodegen):
             for off in range(0,4,2): ins.append(f'v_dual_mul_f32 v{v1+off+0}, v{v2+off+0}, v{v3+off+0} :: v_dual_mul_f32 v{v1+off+1}, v{v2+off+1}, v{v3+off+1}')
           else:
             ins.append(f'v_mul_f32_e32 {get_v(newvar)}, {get_v(vin[0])}, {get_v(vin[1])}')
-        elif args == UnaryOps.LOG:
+        elif args == UnaryOps.LOG2:
           nv = get_v(newvar)
           ins.append(f'v_log_f32_e32 {nv}, {get_v(vin[0])}')      # this is log base 2!
-          ins.append(f'v_mul_f32_e32 {nv}, 0.69314718056, {nv}')  # log(2)/log(e)
+          #ins.append(f'v_mul_f32_e32 {nv}, 0.69314718056, {nv}')  # log(2)/log(e)
         else:
           raise NotImplementedError(f"missing imp for ALU op {args}")
       elif uop == UOps.STORE:

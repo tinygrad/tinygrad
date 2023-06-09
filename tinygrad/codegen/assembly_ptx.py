@@ -166,13 +166,10 @@ class PTXCodegen(AssemblyCodegen):
         if args == BinaryOps.CMPEQ:
           ins.append(f"setp.eq.f32 %p0, {reg[vin[0]]}, {reg[vin[1]]};")
           ins.append(f"selp.f32 {reg[newvar]}, 0f3F800000, 0f00000000, %p0;")
-        elif args == UnaryOps.LOG:
-          # TODO: push this up the stack? seems like all GPUs have this
+        elif args == UnaryOps.LOG2:
           ins.append(f"lg2.approx.f32 {reg[newvar]}, {reg[vin[0]]};")
-          ins.append(f"mul.f32 {reg[newvar]}, {reg[newvar]}, 0f3f317218;") # log(2)/log(e)
-        elif args == UnaryOps.EXP:
-          ins.append(f"mul.f32 {reg[newvar]}, {reg[vin[0]]}, 0f3fb8aa3b;") # log(e)/log(2)
-          ins.append(f"ex2.approx.ftz.f32 {reg[newvar]}, {reg[newvar]};")
+        elif args == UnaryOps.EXP2:
+          ins.append(f"ex2.approx.ftz.f32 {reg[newvar]}, {reg[vin[0]]};")
         #elif args == BinaryOps.POW:
           # pow(a,b) = exp(a*log(b))
           # actually...we might want to write it this way in tinygrad
