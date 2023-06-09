@@ -3,9 +3,8 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Ty
 import itertools, math
 from collections import defaultdict
 from enum import Enum, auto
-from math import prod
 
-from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, dtypes, mnum, DType, all_same
+from tinygrad.helpers import dedup, colored, ImageDType, DEBUG, prod, dtypes, mnum, DType, all_same
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import MovementOps, ReduceOps, BinaryOps, FusedOps

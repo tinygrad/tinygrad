@@ -5,6 +5,8 @@ from weakref import KeyedRef, ref
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any
 from _weakref import _remove_dead_weakref
+from math import prod
+
 ShapeType = Tuple[int, ...]
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 

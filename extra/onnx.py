@@ -3,7 +3,7 @@ from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
-from math import prod
+from tinygrad.helpers import prod
 from tinygrad.helpers import getenv, DEBUG
 from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto
 try:

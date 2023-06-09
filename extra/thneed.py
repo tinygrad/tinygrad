@@ -5,8 +5,7 @@ import json
 import traceback
 import numpy as np
 from tinygrad.runtime.ops_gpu import CLProgram
-from tinygrad.helpers import getenv
-from math import prod
+from tinygrad.helpers import prod, getenv
 from collections import defaultdict
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL, OSX_TIMING_RATIO

@@ -1,9 +1,8 @@
-from math import prod
 import os, json, pathlib, zipfile, pickle
 from tqdm import tqdm
 from typing import Dict, Union, List
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import DEBUG, GlobalCounters, Timing, dtypes, argsort
+from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters
 from tinygrad.shape.shapetracker import strides_for_shape
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}

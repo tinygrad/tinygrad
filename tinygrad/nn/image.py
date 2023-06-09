@@ -1,6 +1,5 @@
 import numpy as np
-from tinygrad.helpers import IMAGE, ImageDType, getenv, dtypes
-from math import prod
+from tinygrad.helpers import prod, IMAGE, ImageDType, getenv, dtypes
 from tinygrad.lazy import get_single_root
 
 FLOAT16 = getenv("FLOAT16", 0)

@@ -1,9 +1,8 @@
 from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, DefaultDict, Tuple, Set, Union
-import collections
-from math import inf, prod
+import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer, LocalTypes
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import getenv, partition, ImageDType, DEBUG, dtypes, colored
+from tinygrad.helpers import getenv, partition, ImageDType, DEBUG, dtypes, colored, prod
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 from tinygrad.lazy import LazyBuffer
@@ -105,7 +104,7 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
         kk("}"*len(args[0]) + f" /* {args[1]} */")
     elif uop == UOps.CONST:
       assert newvar is not None
-      if args == -inf:
+      if args == -math.inf:
         kk(f"{newvar.render(True)} = -INFINITY;")
       elif newvar.ltype == LocalTypes.float4:
         kk(f"{newvar.render(True)} = {{ {args}f, {args}f, {args}f, {args}f }};")

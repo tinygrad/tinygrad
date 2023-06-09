@@ -1,6 +1,6 @@
 # TODO: move the GRAPH and DEBUG stuff to here
 import gc
-from math import prod
+from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.ops_gpu import CLBuffer

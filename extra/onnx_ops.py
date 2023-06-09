@@ -1,6 +1,5 @@
-from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
-from math import prod
+from tinygrad.helpers import prod, dtypes
 from extra.onnx import safe_numpy
 import numpy as np
 import functools

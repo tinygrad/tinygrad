@@ -3,8 +3,7 @@ from __future__ import annotations
 import functools
 import operator
 from typing import Tuple, Union, List, Optional, Callable
-from tinygrad.helpers import DEBUG
-from math import prod
+from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, ModNode
 
 # these ops live here

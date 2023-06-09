@@ -1,8 +1,7 @@
 import ctypes
 import numpy as np
 from typing import TypeVar, Type, Any
-from tinygrad.helpers import DType, dtypes, GlobalCounters
-from math import prod
+from tinygrad.helpers import DType, dtypes, prod, GlobalCounters
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method

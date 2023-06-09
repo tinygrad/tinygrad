@@ -4,8 +4,7 @@ import sys, importlib, inspect, functools, pathlib
 from weakref import ref
 
 import numpy as np
-from tinygrad.helpers import LightWeakSet, LightWeakValueDictionary, getenv, DType, dtypes, flatten, ImageDType, DEBUG
-from math import prod
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, ImageDType, DEBUG, LightWeakSet, LightWeakValueDictionary
 from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.shape.shapetracker import MOVEMENT_OPS, ShapeTracker, get_contraction

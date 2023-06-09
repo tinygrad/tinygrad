@@ -1,8 +1,7 @@
 import os, mmap
 from typing import Optional
 from typing import Callable, Dict
-from math import prod
-from tinygrad.helpers import DType
+from tinygrad.helpers import prod, DType
 from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.helpers import all_same
-from math import prod
+from tinygrad.helpers import prod, all_same
 from tinygrad.shape.shapetracker import ShapeTracker, View, merge_views, get_contraction
 from tinygrad.codegen.cstyle import to_image_idx
 

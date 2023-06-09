@@ -4,8 +4,7 @@
 import unittest
 import numpy as np
 from typing import Optional, Tuple
-from tinygrad.helpers import dtypes
-from math import prod
+from tinygrad.helpers import prod, dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
