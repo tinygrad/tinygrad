@@ -112,7 +112,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -s -v -n=auto test/
     - name: Run ONNX
-      run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py || true
+      run: TORCH=1 python -m pytest test/external/external_test_onnx_backend.py --tb=no --disable-warnings || true
 
   testgpu:
     name: GPU Tests
