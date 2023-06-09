@@ -232,27 +232,20 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   return (input - data_mean) / (std + 1e-9)
 
 def NegativeLogLikelihoodLoss(input, target, weights=None, ignore_index=None, reduction="mean"):
-  N, C = input.shape[0], input.shape[1]
-  gather_weight = None
-  if weights is not None:
-    gather_weight = Tensor(np.take(weights.numpy(), np.array(target.numpy(), dtype=np.int32), mode="clip"))
-    if ignore_index is not None:
-      gather_weight = (target == ignore_index).where(0, gather_weight)
-  elif ignore_index is not None:
-    gather_weight = (target == ignore_index).where(Tensor.zeros(*target.shape), 1)
-  shape = input.shape
+  N, C, shape = input.shape[0], input.shape[1], input.shape
+  if weights is not None: weights = Tensor(np.take(weights.numpy(), np.array(target.numpy(), dtype=np.int32), mode="clip"))
+  if ignore_index is not None:
+    cond = (target == ignore_index)
+    weights = cond.where(0, weights) if weights is not None else cond.where(Tensor.zeros(*target.shape), 1) 
+
   if len(input.shape) != 3:
     input = input.reshape((N, C, -1))
     target = target.reshape((N, -1))
+
   mask = target[:, None, :] == Tensor.arange(C)[None, :, None]
-  loss = (-mask * input).sum(axis=1)  
-  if gather_weight is not None:
-        loss = gather_weight * loss
-        if reduction == "mean":
-            loss = loss.sum() / gather_weight.sum()
-            return loss
+  loss = (-mask * input).sum(axis=1) * (1 if weights is None else weights)  
   if reduction == "mean":
-    loss = loss.mean()
+    loss = loss.mean() if weights is None else loss.sum() / weights.sum() 
   elif reduction == "sum":
     loss = loss.sum(axis=0)
   return loss if len(shape) != 2 else loss.reshape(N,)
