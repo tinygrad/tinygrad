@@ -232,11 +232,27 @@ def MeanVarianceNormalization(input, axis=(0, 2, 3)):
   return (input - data_mean) / (std + 1e-9)
 
 def NegativeLogLikelihoodLoss(input, target, weights=None, ignore_index=None, reduction="mean"):
-  # Create an index array that selects the correct class from the log_probs
-  # Index into the log_probs with the class indices in target
-  loss = -((target[:,None] == Tensor.arange(input.shape[1])) * input).T.sum(axis=0)
+  N, C = input.shape[0], input.shape[1]
+  gather_weight = None
+  if weights is not None:
+    gather_weight = Tensor(np.take(weights.numpy(), np.array(target.numpy(), dtype=np.int32), mode="clip"))
+    if ignore_index is not None:
+      gather_weight = (target == ignore_index).where(0, gather_weight)
+  elif ignore_index is not None:
+    gather_weight = (target == ignore_index).where(Tensor.zeros(*target.shape), 1)
+  shape = input.shape
+  if len(input.shape) != 3:
+    input = input.reshape((N, C, -1))
+    target = target.reshape((N, -1))
+  mask = target[:, None, :] == Tensor.arange(C)[None, :, None]
+  loss = (-mask * input).sum(axis=1)  
+  if gather_weight is not None:
+        loss = gather_weight * loss
+        if reduction == "mean":
+            loss = loss.sum() / gather_weight.sum()
+            return loss
   if reduction == "mean":
     loss = loss.mean()
   elif reduction == "sum":
     loss = loss.sum(axis=0)
-  return self# loss 
+  return loss if len(shape) != 2 else loss.reshape(N,)
