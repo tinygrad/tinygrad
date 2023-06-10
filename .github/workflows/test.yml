@@ -219,17 +219,17 @@ jobs:
     - name: Patch gpuocelot
       run: |
         cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot
-        cp ../cudacpu.cpp ./ocelot
-        cp ../gpuocelot.patch .
+        cp $GITHUB_WORKSPACE/extra/cudacpu/cudacpu.cpp ./ocelot
+        cp $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot.patch .
         git apply gpuocelot.patch
     - name: Compile gpuocelot and libcudacpu
       run: |
-        cd ocelot
+        cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot/ocelot
         mkdir build
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
-        cp libcudacpu.so ../../../
+        cp libcudacpu.so $GITHUB_WORKSPACE/extra/cudacpu
     - name: Test gpuocelot
       run: |
         ctest
