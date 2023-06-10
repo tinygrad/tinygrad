@@ -128,7 +128,7 @@ jobs:
     - name: Install Dependencies
       run: pip install -e '.[metal,testing]'
     - name: Run Pytest
-      run: METAL=1 python -m pytest -s -v -n=auto test/
+      run: METAL=1 python -m pytest -s -v -n=auto --cache-clear test/
 
   testgpu:
     name: GPU Tests
