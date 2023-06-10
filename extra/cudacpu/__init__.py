@@ -1,6 +1,5 @@
 from typing import List, Tuple, Any
 from enum import Enum
-from tinygrad.runtime.lib import RawBuffer
 from tinygrad.helpers import getenv
 import cffi
 
@@ -13,7 +12,7 @@ int run_ptx(const char* source, int n_args, void* args[],
     int grid_x, int grid_y, int grid_z,
     int debug_lvl);
 """)
-lib = ffi.dlopen("./extra/cudacpu/libtinygrad.so")
+lib = ffi.dlopen("./extra/cudacpu/libcudacpu.so")
 
 DEBUGCUDACPU = getenv("DEBUGCUDACPU", 0)
 
@@ -24,6 +23,7 @@ class PTX_ERR(Enum):
 	ARGS_MISMATCH = 3
 
 def run_ptx(source:str, args:Tuple[Any,...], block:Tuple[int, ...], grid:Tuple[int, ...]) -> PTX_ERR:
+    # print(args)
     return PTX_ERR(lib.run_ptx(source.encode(),
         len(args),
         [ffi.cast("void*", ffi.from_buffer(x._buffer())) for x in args],
