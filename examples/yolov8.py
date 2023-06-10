@@ -52,7 +52,7 @@ def clip_boxes(boxes, shape):
   boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
   boxes_np[..., [0, 2]] = np.clip(boxes_np[..., [0, 2]], 0, shape[1])  # x1, x2
   boxes_np[..., [1, 3]] = np.clip(boxes_np[..., [1, 3]], 0, shape[0])  # y1, y2
-  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
+  return boxes_np
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
@@ -62,7 +62,7 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   boxes_np[..., [1, 3]] -= pad[1]
   boxes_np[..., :4] /= gain
   boxes_np = clip_boxes(boxes_np, img0_shape)
-  return Tensor(boxes_np) if isinstance(boxes, Tensor) else boxes_np
+  return boxes_np
 
 def xywh2xyxy(x):
   x_np = x.numpy() if isinstance(x, Tensor) else x
@@ -88,8 +88,6 @@ def box_iou(box1, box2):
   return iou
 
 def custom_nms(boxes, scores, iou_threshold):
-  boxes_np = boxes.cpu().numpy()
-  scores_np = scores.cpu().numpy()
   order = scores_np.argsort()[::-1]
   keep = []
 
@@ -101,7 +99,7 @@ def custom_nms(boxes, scores, iou_threshold):
     iou = box_iou(boxes_np[i][None, :], boxes_np[order[1:]])
     inds = np.where(iou.squeeze() <= iou_threshold)[0]
     order = order[inds + 1]
-  return torch.tensor(keep, dtype=torch.long, device=boxes.device)
+  return np.array(keep)
     
 
 def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False, labels=(), max_det=300, nc=0, max_time_img=0.05, max_nms=30000, max_wh=7680):
@@ -135,14 +133,13 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
 
     c = x[:, 5:6] * (0 if agnostic else max_wh) 
     boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-    boxes = torch.from_numpy(boxes)
-    scores = torch.from_numpy(scores)
     i = custom_nms(boxes, scores, iou_thres)  # NMS
     i = i[:max_det]  # limit detections
-    output[xi] = torch.tensor(x[i])
+    output[xi] = x[i]
   return output
 
 def postprocess(preds, img, orig_imgs, path): #path will be the loaded image path
+  preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(preds, 0.25, 0.7, agnostic=False, max_det=300, classes=None)
   for i, pred in enumerate(preds):
     orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
@@ -151,8 +148,8 @@ def postprocess(preds, img, orig_imgs, path): #path will be the loaded image pat
     img_path = path[i] if isinstance(path, list) else path
   return (img_path, orig_img, pred)
   
-'''TAKEN FROM: https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/data/augment.py#L531'''
-def letterbox(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
+
+def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
   shape = image.shape[:2]  # current shape [height, width]
   if isinstance(new_shape, int):
     new_shape = (new_shape, new_shape)
@@ -163,7 +160,6 @@ def letterbox(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=
     r = min(r, 1.0)
 
   # Compute padding
-  ratio = r, r  # width, height ratios
   new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
   dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
   if auto:  # minimum rectangle
@@ -171,7 +167,6 @@ def letterbox(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=
   elif scaleFill:  # stretch
     dw, dh = 0.0, 0.0
     new_unpad = (new_shape[1], new_shape[0])
-    ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
 
   dw /= 2  # divide padding into 2 sides
   dh /= 2
@@ -187,7 +182,7 @@ def pre_transform(im, imgsz=640, model_stride=32, model_pt=True):
   im = im.cpu().numpy() if isinstance(im, Tensor) else im
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
-  return [letterbox(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
+  return [compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
 
 def preprocess(im, device=None, model=None):
   im = np.stack(pre_transform(im))
@@ -195,7 +190,75 @@ def preprocess(im, device=None, model=None):
   im = np.ascontiguousarray(im)  # contiguous
   img = im.astype(np.float32)  # uint8 to float32
   img /= 255  # 0 - 255 to 0.0 - 1.0
-  return img
+  return 
+
+def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, iou_threshold=0.5):
+  preds_np = predictions.cpu().numpy()
+  orig_img = cv2.imread(orig_img_path)
+
+  def generate_color():
+    return np.random.randint(0, 200, size=3, dtype='uint8')
+
+  colors = [generate_color() for _ in range(len(class_labels))]
+  font = cv2.FONT_HERSHEY_SIMPLEX
+
+  grouped_preds = defaultdict(list)
+  for pred_np in preds_np:
+    class_id = int(pred_np[-1])
+    grouped_preds[class_id].append(pred_np)
+
+  for class_id, pred_list in grouped_preds.items():
+    pred_list = np.array(pred_list)
+    while len(pred_list) > 0:
+      max_conf_idx = np.argmax(pred_list[:, 4])
+      max_conf_pred = pred_list[max_conf_idx]
+      pred_list = np.delete(pred_list, max_conf_idx, axis=0)
+
+      x1, y1, x2, y2, conf, _ = max_conf_pred
+      x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+      color = tuple(map(int, colors[class_id]))
+      cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
+
+      label = f"{class_labels[class_id]} {conf:.2f}"
+      text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
+
+      if y1 - text_size[1] - 4 > 0:
+        label_y = y1 - 4
+        bg_y = y1 - text_size[1] - 4
+      else:
+        label_y = y1 + text_size[1]
+        bg_y = y1
+
+      cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
+      cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
+
+      iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
+      low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
+      pred_list = pred_list[low_iou_indices]
+
+      # Draw the remaining bounding boxes with lower confidence
+      for low_conf_pred in pred_list:
+        x1, y1, x2, y2, conf, _ = low_conf_pred
+        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+        cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
+
+        label = f"{class_labels[class_id]} {conf:.2f}"
+        text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
+
+        if y1 - text_size[1] - 4 > 0:
+          label_y = y1 - 4
+          bg_y = y1 - text_size[1] - 4
+        else:
+          label_y = y1 + text_size[1]
+          bg_y = y1
+
+        cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
+        cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
+
+  cv2.imwrite(output_img_path, orig_img)
+
   
 #this is taken from https://github.com/geohot/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
 class Upsample:
