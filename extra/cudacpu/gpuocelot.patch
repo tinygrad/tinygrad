@@ -1,5 +1,5 @@
 diff --git a/ocelot/CMakeLists.txt b/ocelot/CMakeLists.txt
-index fef7ee9b..9c33b45e 100644
+index fef7ee9b..5644ffc0 100644
 --- a/ocelot/CMakeLists.txt
 +++ b/ocelot/CMakeLists.txt
 @@ -8,11 +8,12 @@ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
@@ -104,3 +104,260 @@ index fef7ee9b..9c33b45e 100644
  res_embed(TARGET ${PROJECT_NAME}_executive_TestEmulator NAME "TestEmulator_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestEmulator.ptx KEYWORD)
  
+@@ -581,256 +564,3 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
+ 	
+ res_embed(TARGET ${PROJECT_NAME}_executive_TestLLVMKernels NAME "TestLLVMKernels_ptx"
+ 	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestLLVMKernels.ptx KEYWORD)
+-	
+-res_embed(TARGET ${PROJECT_NAME}_cuda_TestCudaGenericMemory NAME "generic_ptx"
+-	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/test/TestCudaGenericMemory.ptx KEYWORD)
+-
+-res_embed(TARGET ${PROJECT_NAME}_cuda_TestIndirectFunctionCallDriver NAME "IndirectCallDriver_ptx"
+-	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/test/TestIndirectFunctionCallDriver.ptx KEYWORD)
+-
+-res_embed(TARGET ${PROJECT_NAME}_cuda_TestIndirectFunctionCallOcelot NAME "IndirectCallDriver_ptx"
+-	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/test/TestIndirectFunctionCallDriver.ptx KEYWORD)
+-
+-#++ -o .release_build/ocelot/TestCudaGenericMemory
+-#++ -o .release_build/ocelot/TestCudaGlobals
+-#++ -o .release_build/ocelot/TestCudaMalloc
+-#++ -o .release_build/ocelot/TestCudaSequence
+-#++ -o .release_build/ocelot/TestCudaTexture2D
+-#++ -o .release_build/ocelot/TestCudaTexture3D
+-#++ -o .release_build/ocelot/TestCudaTextureArray
+-#++ -o .release_build/ocelot/TestCudaTextureCube
+-#++ -o .release_build/ocelot/TestDataflowGraph
+-#++ -o .release_build/ocelot/TestDeviceSwitching
+-#++ -o .release_build/ocelot/TestDriverAPISequence
+-#++ -o .release_build/ocelot/TestEmulator
+-#++ -o .release_build/ocelot/TestExternalFunctions
+-#++ -o .release_build/ocelot/TestFunctionCall
+-#++ -o .release_build/ocelot/TestIndirectFunctionCall
+-#++ -o .release_build/ocelot/TestIndirectFunctionCallOcelot
+-#++ -o .release_build/ocelot/TestInstructions
+-#++ -o .release_build/ocelot/TestKernels
+-#++ -o .release_build/ocelot/TestLLVMInstructions
+-#++ -o .release_build/ocelot/TestLLVMKernels
+-#++ -o .release_build/ocelot/TestLexer
+-#++ -o .release_build/ocelot/TestOptimizations
+-#++ -o .release_build/ocelot/TestPTXAssembly
+-#++ -o .release_build/ocelot/TestPTXToLLVMTranslator
+-#++ -o .release_build/ocelot/TestParser
+-#++ -o .release_build/ocelot/libocelot.so
+-#++ -o .release_build/tests/cuda2.2/AlignedTypes
+-#++ -o .release_build/tests/cuda2.2/AsyncAPI
+-#++ -o .release_build/tests/cuda2.2/BandwidthTest
+-#++ -o .release_build/tests/cuda2.2/BicubicTexture
+-#++ -o .release_build/tests/cuda2.2/BinomialOptions
+-#++ -o .release_build/tests/cuda2.2/Bitonic
+-#++ -o .release_build/tests/cuda2.2/BlackScholes
+-#++ -o .release_build/tests/cuda2.2/BoxFilter
+-#++ -o .release_build/tests/cuda2.2/Clock
+-#++ -o .release_build/tests/cuda2.2/ConvolutionFFT2D
+-#++ -o .release_build/tests/cuda2.2/ConvolutionSeparable
+-#++ -o .release_build/tests/cuda2.2/ConvolutionTexture
+-#++ -o .release_build/tests/cuda2.2/CppIntegration
+-#++ -o .release_build/tests/cuda2.2/Dct8x8
+-#++ -o .release_build/tests/cuda2.2/DeviceQuery
+-#++ -o .release_build/tests/cuda2.2/DwtHaar1D
+-#++ -o .release_build/tests/cuda2.2/Dxtc
+-#++ -o .release_build/tests/cuda2.2/Eigenvalues
+-#++ -o .release_build/tests/cuda2.2/FastWalshTransform
+-#++ -o .release_build/tests/cuda2.2/FluidsGL
+-#++ -o .release_build/tests/cuda2.2/Histogram256
+-#++ -o .release_build/tests/cuda2.2/Histogram64
+-#++ -o .release_build/tests/cuda2.2/ImageDenoising
+-#++ -o .release_build/tests/cuda2.2/Mandelbrot
+-#++ -o .release_build/tests/cuda2.2/MatrixMul
+-#++ -o .release_build/tests/cuda2.2/MersenneTwister
+-#++ -o .release_build/tests/cuda2.2/MonteCarlo
+-#++ -o .release_build/tests/cuda2.2/Nbody
+-#++ -o .release_build/tests/cuda2.2/OceanFFT
+-#++ -o .release_build/tests/cuda2.2/Particles
+-#++ -o .release_build/tests/cuda2.2/PostProcessGL
+-#++ -o .release_build/tests/cuda2.2/QuasirandomGenerator
+-#++ -o .release_build/tests/cuda2.2/RecursiveGaussian
+-#++ -o .release_build/tests/cuda2.2/Reduction
+-#++ -o .release_build/tests/cuda2.2/ScalarProd
+-#++ -o .release_build/tests/cuda2.2/Scan
+-#++ -o .release_build/tests/cuda2.2/ScanLargeArray
+-#++ -o .release_build/tests/cuda2.2/SimpleAtomicIntrinsics
+-#++ -o .release_build/tests/cuda2.2/SimpleCUFFT
+-#++ -o .release_build/tests/cuda2.2/SimpleGL
+-#++ -o .release_build/tests/cuda2.2/SimpleMultiGPU
+-#++ -o .release_build/tests/cuda2.2/SimpleStreams
+-#++ -o .release_build/tests/cuda2.2/SimpleTemplates
+-#++ -o .release_build/tests/cuda2.2/SimpleTexture
+-#++ -o .release_build/tests/cuda2.2/SimpleTexture3D
+-#++ -o .release_build/tests/cuda2.2/SimpleVoteIntrinsics
+-#++ -o .release_build/tests/cuda2.2/SimpleZeroCopy
+-#++ -o .release_build/tests/cuda2.2/SobolQRNG
+-#++ -o .release_build/tests/cuda2.2/Template
+-#++ -o .release_build/tests/cuda2.2/ThreadFenceReduction
+-#++ -o .release_build/tests/cuda2.2/Transpose
+-#++ -o .release_build/tests/cuda2.2/TransposeNew
+-#++ -o .release_build/tests/cuda2.2/UnstructuredMandelbrot
+-#++ -o .release_build/tests/cuda2.2/VolumeRender
+-#++ -o .release_build/tests/cuda2.3/3DFD
+-#++ -o .release_build/tests/cuda2.3/AtomicPerformance
+-#++ -o .release_build/tests/cuda2.3/SortingNetwork
+-#++ -o .release_build/tests/cuda2.3/TestBarriers
+-#++ -o .release_build/tests/cuda2.3/TestCallLatency
+-#++ -o .release_build/tests/cuda2.3/TestInstructionThroughput
+-#++ -o .release_build/tests/cuda2.3/TestMemoryAccesses
+-#++ -o .release_build/tests/cuda2.3/TestSpecialFunctions
+-#++ -o .release_build/tests/cuda2.3/TestThrustAOSSorting
+-#++ -o .release_build/tests/cuda2.3/TestThrustArbitraryTransform
+-#++ -o .release_build/tests/cuda2.3/TestThrustBasicVector
+-#++ -o .release_build/tests/cuda2.3/TestThrustBoundingBox
+-#++ -o .release_build/tests/cuda2.3/TestThrustBucketSort2D
+-#++ -o .release_build/tests/cuda2.3/TestThrustConstantIterator
+-#++ -o .release_build/tests/cuda2.3/TestThrustCountingIterator
+-#++ -o .release_build/tests/cuda2.3/TestThrustFillCopy
+-#++ -o .release_build/tests/cuda2.3/TestThrustHistogram
+-#++ -o .release_build/tests/cuda2.3/TestThrustMaxAbsDiff
+-#++ -o .release_build/tests/cuda2.3/TestThrustMinMax
+-#++ -o .release_build/tests/cuda2.3/TestThrustMode
+-#++ -o .release_build/tests/cuda2.3/TestThrustNorm
+-#++ -o .release_build/tests/cuda2.3/TestThrustPaddedGridReduction
+-#++ -o .release_build/tests/cuda2.3/TestThrustSaxpy
+-#++ -o .release_build/tests/cuda2.3/TestThrustSort
+-#++ -o .release_build/tests/cuda2.3/TestThrustStreamCompact
+-#++ -o .release_build/tests/cuda2.3/TestThrustSum
+-#++ -o .release_build/tests/cuda2.3/TestThrustTransformIterator
+-#++ -o .release_build/tests/cuda2.3/TestThrustUnwrapPointer
+-#++ -o .release_build/tests/cuda2.3/TestThrustWrapPointer
+-#++ -o .release_build/tests/cuda2.3/TestThrustZipDot
+-#++ -o .release_build/tests/cuda2.3/vectorAdd
+-#++ -o .release_build/tests/cuda2.3/worleyTestExternalSharedMemory
+-#++ -o .release_build/tests/cuda3.2/AlignedTypes
+-#++ -o .release_build/tests/cuda3.2/AsyncAPI
+-#++ -o .release_build/tests/cuda3.2/BandwidthTest
+-#++ -o .release_build/tests/cuda3.2/BicubicTexture
+-#++ -o .release_build/tests/cuda3.2/BinomialOptions
+-#++ -o .release_build/tests/cuda3.2/BlackScholes
+-#++ -o .release_build/tests/cuda3.2/BoxFilter
+-#++ -o .release_build/tests/cuda3.2/Clock
+-#++ -o .release_build/tests/cuda3.2/ConvolutionFFT2D
+-#++ -o .release_build/tests/cuda3.2/ConvolutionSeparable
+-#++ -o .release_build/tests/cuda3.2/ConvolutionTexture
+-#++ -o .release_build/tests/cuda3.2/CppIntegration
+-#++ -o .release_build/tests/cuda3.2/Dct8x8
+-#++ -o .release_build/tests/cuda3.2/DeviceQuery
+-#++ -o .release_build/tests/cuda3.2/DwtHaar1D
+-#++ -o .release_build/tests/cuda3.2/Dxtc
+-#++ -o .release_build/tests/cuda3.2/Eigenvalues
+-#++ -o .release_build/tests/cuda3.2/FastWalshTransform
+-#++ -o .release_build/tests/cuda3.2/FluidsGL
+-#++ -o .release_build/tests/cuda3.2/Histogram256
+-#++ -o .release_build/tests/cuda3.2/ImageDenoising
+-#++ -o .release_build/tests/cuda3.2/Mandelbrot
+-#++ -o .release_build/tests/cuda3.2/MatrixMul
+-#++ -o .release_build/tests/cuda3.2/MersenneTwister
+-#++ -o .release_build/tests/cuda3.2/MonteCarlo
+-#++ -o .release_build/tests/cuda3.2/Nbody
+-#++ -o .release_build/tests/cuda3.2/OceanFFT
+-#++ -o .release_build/tests/cuda3.2/PostProcessGL
+-#++ -o .release_build/tests/cuda3.2/QuasirandomGenerator
+-#++ -o .release_build/tests/cuda3.2/RecursiveGaussian
+-#++ -o .release_build/tests/cuda3.2/Reduction
+-#++ -o .release_build/tests/cuda3.2/ScalarProd
+-#++ -o .release_build/tests/cuda3.2/Scan
+-#++ -o .release_build/tests/cuda3.2/SimpleAtomicIntrinsics
+-#++ -o .release_build/tests/cuda3.2/SimpleCUFFT
+-#++ -o .release_build/tests/cuda3.2/SimpleGL
+-#++ -o .release_build/tests/cuda3.2/SimpleMultiGPU
+-#++ -o .release_build/tests/cuda3.2/SimpleStreams
+-#++ -o .release_build/tests/cuda3.2/SimpleTemplates
+-#++ -o .release_build/tests/cuda3.2/SimpleTexture
+-#++ -o .release_build/tests/cuda3.2/SimpleTexture3D
+-#++ -o .release_build/tests/cuda3.2/SimpleVoteIntrinsics
+-#++ -o .release_build/tests/cuda3.2/SimpleZeroCopy
+-#++ -o .release_build/tests/cuda3.2/SobelFilter
+-#++ -o .release_build/tests/cuda3.2/SobolQRNG
+-#++ -o .release_build/tests/cuda3.2/Template
+-#++ -o .release_build/tests/cuda3.2/ThreadFenceReduction
+-#++ -o .release_build/tests/cuda3.2/Transpose
+-#++ -o .release_build/tests/cuda3.2/VolumeRender
+-#++ -o .release_build/tests/cuda4.1sdk/AlignedTypes
+-#++ -o .release_build/tests/cuda4.1sdk/AsyncAPI
+-#++ -o .release_build/tests/cuda4.1sdk/BandwidthTest
+-#++ -o .release_build/tests/cuda4.1sdk/BilateralFilter
+-#++ -o .release_build/tests/cuda4.1sdk/BinomialOptions
+-#++ -o .release_build/tests/cuda4.1sdk/BlackScholes
+-#++ -o .release_build/tests/cuda4.1sdk/BoxFilter
+-#++ -o .release_build/tests/cuda4.1sdk/Clock
+-#++ -o .release_build/tests/cuda4.1sdk/ConvolutionSeparable
+-#++ -o .release_build/tests/cuda4.1sdk/ConvolutionTexture
+-#++ -o .release_build/tests/cuda4.1sdk/CppIntegration
+-#++ -o .release_build/tests/cuda4.1sdk/DwtHaar1D
+-#++ -o .release_build/tests/cuda4.1sdk/Eigenvalues
+-#++ -o .release_build/tests/cuda4.1sdk/FDTD3d
+-#++ -o .release_build/tests/cuda4.1sdk/FastWalshTransform
+-#++ -o .release_build/tests/cuda4.1sdk/Histogram
+-#++ -o .release_build/tests/cuda4.1sdk/ImageDenoising
+-#++ -o .release_build/tests/cuda4.1sdk/InlinePTX
+-#++ -o .release_build/tests/cuda4.1sdk/MergeSort
+-#++ -o .release_build/tests/cuda4.1sdk/MersenneTwister
+-#++ -o .release_build/tests/cuda4.1sdk/MonteCarlo
+-#++ -o .release_build/tests/cuda4.1sdk/Nbody
+-#++ -o .release_build/tests/cuda4.1sdk/QuasirandomGenerator
+-#++ -o .release_build/tests/cuda4.1sdk/ScalarProd
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleAtomicIntrinsics
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleGL
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleLayeredTexture
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleMultiCopy
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleMultiGPU
+-#++ -o .release_build/tests/cuda4.1sdk/SimplePitchLinearTexture
+-#++ -o .release_build/tests/cuda4.1sdk/SimplePrintf
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleStreams
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleTemplates
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleTexture
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleTexture3D
+-#++ -o .release_build/tests/cuda4.1sdk/SimpleZeroCopy
+-#++ -o .release_build/tests/cuda4.1sdk/SobelFilter
+-#++ -o .release_build/tests/cuda4.1sdk/SobolQRNG
+-#++ -o .release_build/tests/cuda4.1sdk/SortingNetworks
+-#++ -o .release_build/tests/cuda4.1sdk/Template
+-#++ -o .release_build/tests/cuda4.1sdk/Transpose
+-#++ -o .release_build/tests/cuda4.1sdk/VectorAdd
+-#++ -o .release_build/tests/cuda4.1sdk/VolumeRender
+-#++ -o .release_build/tests/parboil/bfs
+-#++ -o .release_build/tests/parboil/cutcp
+-#++ -o .release_build/tests/parboil/fft
+-#++ -o .release_build/tests/parboil/histo
+-#++ -o .release_build/tests/parboil/lbm
+-#++ -o .release_build/tests/parboil/mm
+-#++ -o .release_build/tests/parboil/mri-q
+-#++ -o .release_build/tests/parboil/sad
+-#++ -o .release_build/tests/parboil/spmv
+-#++ -o .release_build/tests/parboil/stencil
+-#++ -o .release_build/tests/parboil/tpacf
+-#++ -o libocelotTrace.so
+-
+-
+-#c++  -c -O2 -Wall -std=c++11 ocelot/tools/LoadPtx.cpp
+-
+-#flex -t src/parser/ptx.ll > .release_build/ocelot/ptx.cpp
+-#c++  -c -O2 -Wall -std=c++11 -pthread -DOCELOT_CXXFLAGS="\"-O2 -Wall -std=c++11 -pthread\"" -DPACKAGE="\"ocelot\"" -DVERSION="\"2.1.0\"" -DOCELOT_PREFIX_PATH="\"/usr/local\"" -DOCELOT_LDFLAGS="\"-locelot\"" -L"\"/usr/local/lib\"" -DOCELOT_INCLUDE_PATH="\"/usr/local/include\"" -DOCELOT_LIB_PATH="\"/usr/local/lib\"" -DOCELOT_BIN_PATH="\"/usr/local/bin\"" -Iocelot/hydrazine/include -Iocelot -I/usr/include -I/usr/include -I.release_build/ocelot -Iocelot tools/OcelotConfig.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/tools/KernelTestHarness.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/tools/OcelotLinker.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/tools/OcelotServer.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/tools/PTXOptimizer.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/cuda/test/memory/generic.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/analysis/test/TestDataflowGraph.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/api/test/TestDeviceSwitching.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/cuda/test/driver/sequence.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestEmulator.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/api/test/TestExternalFunctions.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/cuda/test/functions/indirectCallOcelot.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestInstructions.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestKernels.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/ir/test/TestLLVMInstructions.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/executive/test/TestLLVMKernels.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/parser/test/TestLexer.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/transforms/test/TestOptimizations.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/ir/test/TestPTXAssembly.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/translator/test/TestPTXToLLVMTranslator.cpp
+-#c++  -c -O2 -Wall -std=c++11 ocelot/parser/test/TestParser.cpp
+-
