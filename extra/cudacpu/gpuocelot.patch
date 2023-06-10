@@ -1,5 +1,5 @@
 diff --git a/ocelot/CMakeLists.txt b/ocelot/CMakeLists.txt
-index fef7ee9b..5644ffc0 100644
+index fef7ee9b..f8e734de 100644
 --- a/ocelot/CMakeLists.txt
 +++ b/ocelot/CMakeLists.txt
 @@ -8,11 +8,12 @@ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
@@ -25,30 +25,10 @@ index fef7ee9b..5644ffc0 100644
  
  if ("x${BUILD_LLVM}" STREQUAL "xOFF")
  find_package(LLVM REQUIRED CONFIG)
-@@ -518,50 +521,9 @@ target_include_directories(${PROJECT_NAME}_util PRIVATE ${${PROJECT_NAME}_INCLUD
- target_link_libraries(${PROJECT_NAME}_util PUBLIC ${${PROJECT_NAME}_LINK_LIBRARIES})
- target_link_directories(${PROJECT_NAME}_util PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
+@@ -538,30 +541,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LINK_LIBRARIES})
+ target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--gc-sections -Wl,--start-group ${LLVM_LIBRARIES} -Wl,--end-group)
+ target_link_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
  
--add_library(${PROJECT_NAME} SHARED src/ocelot.cpp)
--target_include_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_INCLUDE_DIRS})
--target_link_libraries(${PROJECT_NAME} PRIVATE
--	"-Wl,--whole-archive"
--	${PROJECT_NAME}_analysis
--	${PROJECT_NAME}_api
--	${PROJECT_NAME}_cal
--	${PROJECT_NAME}_cuda
--	${PROJECT_NAME}_executive
--	${PROJECT_NAME}_ir
--	${PROJECT_NAME}_parser
--	${PROJECT_NAME}_trace
--	${PROJECT_NAME}_transforms
--	${PROJECT_NAME}_translator
--	${PROJECT_NAME}_util
--	"-Wl,--no-whole-archive")
--target_link_libraries(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LINK_LIBRARIES})
--target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--gc-sections -Wl,--start-group ${LLVM_LIBRARIES} -Wl,--end-group)
--target_link_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
--
 -add_executable(LoadPtx src/tools/LoadPtx.cpp)
 -set_property(TARGET LoadPtx PROPERTY CXX_STANDARD 14)
 -target_link_libraries(LoadPtx ${PROJECT_NAME} hydrazine)
@@ -76,7 +56,7 @@ index fef7ee9b..5644ffc0 100644
  ocelot_add_tests(executive)
  ocelot_add_tests(ir)
  ocelot_add_tests(parser)
-@@ -570,6 +532,27 @@ ocelot_add_tests(transforms)
+@@ -570,6 +552,27 @@ ocelot_add_tests(transforms)
  ocelot_add_tests(translator)
  ocelot_add_tests(util)
  
@@ -104,7 +84,7 @@ index fef7ee9b..5644ffc0 100644
  res_embed(TARGET ${PROJECT_NAME}_executive_TestEmulator NAME "TestEmulator_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestEmulator.ptx KEYWORD)
  
-@@ -581,256 +564,3 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
+@@ -581,256 +584,3 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
  	
  res_embed(TARGET ${PROJECT_NAME}_executive_TestLLVMKernels NAME "TestLLVMKernels_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestLLVMKernels.ptx KEYWORD)
