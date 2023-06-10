@@ -45,13 +45,13 @@ def sparse_categorical_crossentropy(out, Y):
   y = Tensor(y, device=out.device)
   return out.mul(y).mean()
 
-devices = ["cpu", "gpu"]
+devices = ["cpu", "llvm", "cpu"]
 
 # create a copy of the network on each device
 nets = [net_to(TinyNet(), device) for device in devices]
 
 # create a copy of the optimizer on each device
-opts = [optim.Adam(optim.get_parameters(net), lr=3e-4) for net in nets]
+opts = [net_to(optim.Adam(optim.get_parameters(net), lr=3e-4), device) for net, device in zip(nets, devices)]
 
 # this is the command class that will be sent to the process
 class Command:
