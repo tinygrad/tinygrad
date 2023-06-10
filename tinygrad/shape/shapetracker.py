@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, ModNode
 
 # these ops live here
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
+class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 
 def check_no_mul(test, var):
   if test == var: return True
@@ -92,7 +92,7 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
 
 @functools.lru_cache(maxsize=None)
 def view_from_shape(shape:Tuple[int, ...]) -> View:
-  assert all([x.__class__ == int for x in shape])
+  assert all(isinstance(x, int) for x in shape)
   return View(tuple(shape), strides_for_shape(shape))
 
 @functools.lru_cache(maxsize=None)
@@ -218,8 +218,7 @@ class ShapeTracker:
     self.views[-1] = View(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]):
-    assert len(arg) == len(self.views[-1].shape)
-    assert all([(b>=0 and e>=0) for b,e in arg]) and len(arg) == len(self.shape)
+    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
     if any([b or e for b, e in arg]):
       zvarg, mask = get_pad_args(self.shape, arg)
       self.__unsafe_resize(zvarg, mask=mask)
@@ -227,8 +226,7 @@ class ShapeTracker:
     return self
 
   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
-    assert len(arg) == len(self.views[-1].shape)
-    assert all([(b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)]) and len(arg) == len(self.shape)
+    assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
     self.__unsafe_resize(arg)
     return self
 
@@ -242,23 +240,22 @@ class ShapeTracker:
 
   def reshape(self, new_shape: Tuple[int, ...]):
     if self.views[-1].shape == new_shape: return self
-    assert all([x.__class__ == int and x > 0 for x in set(new_shape)]), f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
-    assert prod(self.views[-1].shape) == prod(new_shape), f"can't reshape {self.views[-1].shape} -> {new_shape}"
+    assert all(isinstance(x, int) and x > 0 for x in new_shape), f"shape must be ints and can't contain 0 or negative numbers {new_shape}"
+    assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}"
     new_view, extra = _reshape(self.views[-1], new_shape)
     if extra: self.views.append(new_view)
     else: self.views[-1] = new_view
     return self
 
   def permute(self, axis: Tuple[int, ...]):
-    assert all([x.__class__ == int and x >= 0 and x < len(self.views[-1].shape) for x in axis]), f"invalid permute {axis} for {self.views[-1].shape}"
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.views[-1].shape), f"can't permute {self.views[-1].shape} with {axis}"
+    assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
+    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
     return self
 
   # except for the negative case, you can build this from the others. invertible in the negative case
   def stride(self, mul: Tuple[int, ...]):
-    assert len(mul) == len(self.views[-1].shape)
-    assert all([x.__class__ == int and x != 0 for x in mul]), f"invalid stride {mul} for {self.views[-1].shape}"
+    assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
     strides = tuple([z*m for z,m in zip(self.views[-1].strides, mul)])
     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
     offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
@@ -269,7 +266,7 @@ class ShapeTracker:
   # *** entry point for external ***
 
   def movement_op(self, op: MovementOps, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
-    assert op == MovementOps.RESHAPE or len(arg) == len(self.views[-1].shape), f"arg {arg} for {op} doesn't match dim of shape {self.views[-1].shape}"
+    assert isinstance(arg, tuple) and (len(arg) == len(self.shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.shape}"
     dispatch[op](self, arg)
     return self
 
