@@ -1,11 +1,9 @@
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
-
+import os
+import tempfile
 from pathlib import Path
-import gzip
-import argparse
-import math
-import re
+import gzip, argparse, math, re
 from functools import lru_cache
 from collections import namedtuple
 
@@ -14,7 +12,8 @@ from tqdm import tqdm
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm
-from extra.utils import fake_torch_load_zipped, get_child, download_file
+from extra.utils import download_file
+from tinygrad.state import torch_load, load_state_dict
 
 # TODO: refactor AttnBlock, CrossAttention, CLIPAttention to share code
 
@@ -461,6 +460,7 @@ class CLIPTextTransformer:
     x = self.embeddings(input_ids, list(range(len(input_ids))))
     causal_attention_mask = np.triu(np.ones((1,1,77,77), dtype=np.float32) * -np.inf, k=1)
     x = self.encoder(x, Tensor(causal_attention_mask, device=x.device))
+    # x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1)) # TODO: Pending(#942)
     return self.final_layer_norm(x)
 
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
@@ -606,31 +606,17 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
-  parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
+  parser.add_argument('--out', type=str, default=os.path.join(tempfile.gettempdir(), "rendered.png"), help="Output filename")
   args = parser.parse_args()
 
   Tensor.no_grad = True
   model = StableDiffusion()
 
   # load in weights
-  download_file(
-    'https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt',
-    FILENAME
-  )
-  dat = fake_torch_load_zipped(open(FILENAME, "rb"))
-  for k,v in dat['state_dict'].items():
-    try:
-      w = get_child(model, k)
-    except (AttributeError, KeyError, IndexError):
-      #traceback.print_exc()
-      w = None
-    #print(f"{str(v.shape):30s}" if v is not None else v, w.shape if w is not None else w, k)
-    if w is not None:
-      assert w.shape == v.shape and w.dtype == v.dtype, f"shape or dtype mismatch. {w.shape} != {v.shape} or {w.dtype} != {v.dtype}"
-      w.assign(v)
+  download_file('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', FILENAME)
+  load_state_dict(model, torch_load(FILENAME)['state_dict'], strict=False)
 
   # run through CLIP to get context
-
   tokenizer = ClipTokenizer()
   prompt = tokenizer.encode(args.prompt)
   context = model.cond_stage_model.transformer.text_model(prompt).realize()

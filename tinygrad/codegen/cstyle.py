@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, ClassVar, List, Optional, NamedTuple, 
 import math, collections
 from tinygrad.codegen.linearizer import Linearizer, UOps, UOp, LocalBuffer, LocalTypes
 from tinygrad.ops import ASTRunner, Op, UnaryOps, BinaryOps, FusedOps
-from tinygrad.helpers import getenv, partition, ImageDType, DEBUG, dtypes, colored
+from tinygrad.helpers import partition, ImageDType, DEBUG, dtypes, colored, prod
 from tinygrad.runtime.lib import RawConst
 from tinygrad.shape.symbolic import DivNode, AndNode, render_python, NumNode, Variable, Node, SumNode, MulNode
 from tinygrad.lazy import LazyBuffer
@@ -11,8 +11,6 @@ from tinygrad.lazy import LazyBuffer
 render_cl = render_python.copy()
 render_cl[DivNode] = lambda self,ops,ctx: f"({self.a.render(ops, ctx)}/{self.b})"
 render_cl[AndNode] = lambda self,ops,ctx: f"({'&&'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
-
-NATIVE_EXPLOG = getenv("NATIVE_EXPLOG", 0)  # this is needed as a switch for the tests to pass
 
 class CStyleLanguage(NamedTuple):
   kernel_prefix: str = ""
@@ -48,8 +46,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=F
   return idx, idy
 
 code_for_op: Final[Dict[Op, Callable]] = {
-  UnaryOps.EXP: lambda x: f"native_exp({x})" if NATIVE_EXPLOG else f"exp({x})",
-  UnaryOps.LOG: lambda x: f"native_log({x})" if NATIVE_EXPLOG else f"log({x})",
+  UnaryOps.EXP2: lambda x: f"exp2({x})",
+  UnaryOps.LOG2: lambda x: f"log2({x})",
   UnaryOps.SIN: lambda x: f"sin({x})",
   BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
   BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
@@ -71,7 +69,6 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
 
   for uop,newvar,vin,args in uops:
     if uop == UOps.LOOP:
-      root = None
       for i,var in enumerate(args[0]):
         if isinstance(var, NumNode):
           if args[1] == "global" and lang.gid: global_size.append(1)
@@ -80,19 +77,9 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
           kk("{")
         else:
           if args[1] == "global" and lang.gid:
-            if len(args[0]) >= 4 and len(args[0])-i > 2:
-              # sometimes, there's more dimensions. compact all the dimensions into the last CL dimension
-              # TODO: these compactions should be searchable (they sort of are with reshapes and permutes)
-              if i == 0:
-                kk(f"{{ int {var.expr} = {lang.gid[-1]};  /* {var.max+1} */")
-                root = var.expr
-                global_size.append(var.max+1)
-              else:
-                kk(f"{{ int {var.expr} = {root} % {var.max+1}; {root} /= {var.max+1};")
-                global_size[-1] *= var.max+1
-            else:
-              kk(f"{{ int {var.expr} = {lang.gid[len(args[0])-1-i]};  /* {var.max+1} */")
-              global_size.append(var.max+1)
+            assert len(args[0]) <= len(lang.gid), f"too many global dimensions, has {len(args[0])} and {len(lang.gid)} are supported"
+            kk(f"{{ int {var.expr} = {lang.gid[len(args[0])-1-i]};  /* {var.max+1} */")
+            global_size.append(var.max+1)
           elif args[1] == "local" and lang.lid:
             assert len(args[0]) <= len(lang.lid)
             kk(f"{{ int {var.expr} = {lang.lid[len(args[0])-1-i]};  /* {var.max+1} */")
@@ -131,8 +118,10 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
       # TODO: merge with CONST?
       if bufs[args.i] is not None and isinstance(bufs[args.i].realized, RawConst):
         assert newvar.ltype == LocalTypes.float, "const can't be float4"
-        # nan? inf?
-        val = f"{bufs[args.i].realized._buf}" + ("f" if bufs[args.i].dtype not in (dtypes.int8, dtypes.uint8) else "")
+        x = bufs[args.i].realized._buf
+        if math.isnan(x): val = "NAN"
+        elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
+        else: val = f"{x}" +  ("f" if not dtypes.is_int(bufs[args.i].dtype) else "")
       elif isinstance(bufs[args.i].dtype, ImageDType):
         assert newvar.ltype == LocalTypes.float4, "image must be float4"
         prekernel.add("const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n")
@@ -203,13 +192,10 @@ class CStyleCodegen(Linearizer):
     # sometimes, there's more dimensions than len(self.lang.gid).
     # compact all the dimensions into the first
     # NOTE: this might make multiview shapetrackers
-    # TODO: this exposes bugs in the optimizers assuming the strides are on a single view
-    """
     if len(self.lang.gid) and self.first_reduce > len(self.lang.gid):
       num_to_merge = (self.first_reduce - len(self.lang.gid))+1
       self.reshape_and_permute(lambda x: (prod(x[0:num_to_merge]),)+x[num_to_merge:], None)
       if DEBUG >= 4: print("reshaped to", self.full_shape, "due to too many global dimensions")
-    """
 
     self.linearize()
 

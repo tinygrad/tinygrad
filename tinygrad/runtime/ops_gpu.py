@@ -43,7 +43,7 @@ class CLBuffer(RawBufferCopyInOut):
     super().__init__(size, dtype, buf)
   def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
-    cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, x, is_blocking=False)
+    cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False)
   def _copyout(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
     cl.enqueue_copy(CL.cl_queue[self._buf.device], x, self._buf, is_blocking=True)
@@ -87,7 +87,7 @@ class CLProgram:
 
 class CLCodegen(CStyleCodegen):
   lang = CStyleLanguage(
-    kernel_prefix = "__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
+    kernel_prefix = "#define int64 long\n__kernel", buffer_prefix = "__global ", smem_prefix = "__local ",
     half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable",
     barrier = "barrier(CLK_LOCAL_MEM_FENCE);", float4 = "(float4)",
     gid = [f'get_global_id({i})' for i in range(3)], lid = [f'get_local_id({i})' for i in range(3)], uses_vload=True)
