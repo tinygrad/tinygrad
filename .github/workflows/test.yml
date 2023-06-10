@@ -208,7 +208,7 @@ jobs:
         sudo apt-get update -y
     - name: Install packages
       run: |
-        sudo apt-get install -y git g++ cmake ninja-build llvm-14-dev libz-dev libglew-dev flex bison libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+        sudo apt-get install -y git g++ cmake ninja-build llvm-14-dev libz-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
     - name: Clone gpuocelot repo
       uses: actions/checkout@v3
       with:
