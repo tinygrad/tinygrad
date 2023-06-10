@@ -477,6 +477,8 @@ class Tensor:
   def contiguous(self): return mlops.Contiguous.apply(self)
   def log(self): return mlops.Log.apply(self)
   def exp(self): return mlops.Exp.apply(self)
+  def log2(self): return mlops.Log2.apply(self)
+  def exp2(self): return mlops.Exp2.apply(self)
   def relu(self): return mlops.Relu.apply(self)
   def sin(self): return mlops.Sin.apply(self)
   def cos(self): return ((math.pi/2)-self).sin()
