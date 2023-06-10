@@ -207,21 +207,22 @@ jobs:
         sudo apt-get install -y nvidia-cuda-toolkit-gcc
     - name: Install and patch gpuocelot
       run: |
-        git clone https://github.com/gpuocelot/gpuocelot
-        cd gpuocelot
-        git checkout 98333b95cd9512514e947a4f9fd0caa7e1326dfc
+        git clone https://github.com/gpuocelot/gpuocelot extra/cudacpu/gpuocelot
+        cd extra/cudacpu/gpuocelot
+        git checkout -b master 98333b95cd9512514e947a4f9fd0caa7e1326dfc
         git submodule init
         git submodule update
-        cp /tinygrad/extra/cudacpu/cudacpu.cpp ./ocelot
-        cp /tinygrad/extra/cudacpu/gpuocelot.patch .
+        cp ../cudacpu.cpp ./ocelot
+        cp ../gpuocelot.patch .
         git apply gpuocelot.patch
     - name: Compile gpuocelot and libcudacpu
       run: |
+        cd ocelot
         mkdir build
         cd build
         cmake .. -Wno-dev -G Ninja
         ninja
-        cp libcudacpu.so /tinygrad/extra/cudacpu
+        cp libcudacpu.so ../../../
     - name: Test gpuocelot
       run: |
         ctest
