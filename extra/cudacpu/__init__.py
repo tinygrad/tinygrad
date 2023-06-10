@@ -15,7 +15,7 @@ int run_ptx(const char* source, int n_args, void* args[],
 """)
 lib = ffi.dlopen("./extra/cudacpu/libtinygrad.so")
 
-DEBUGCUDACPU = getenv("DEBUGCL", 0)
+DEBUGCUDACPU = getenv("DEBUGCUDACPU", 0)
 
 class PTX_ERR(Enum):
 	SUCCESS = 0
