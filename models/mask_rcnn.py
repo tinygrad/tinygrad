@@ -909,10 +909,9 @@ class LevelMapper:
   def __call__(self, boxlists):
     # TODO: remove numpy
     s = Tensor.sqrt(Tensor.cat(*[boxlist.area() for boxlist in boxlists]))
-    target_lvls = (self.lvl0 + Tensor.log2(s / self.s0 + self.eps)).numpy()
-    target_lvls = np.floor(target_lvls)
-    target_lvls = np.clip(target_lvls, a_min=self.k_min, a_max=self.k_max)
-    return Tensor(target_lvls, dtype=dtypes.float32) - self.k_min
+    target_lvls = (self.lvl0 + Tensor.log2(s / self.s0 + self.eps)).floor()
+    target_lvls = target_lvls.clip(min_=self.k_min, max_=self.k_max)
+    return target_lvls - self.k_min
 
 
 class Pooler:
