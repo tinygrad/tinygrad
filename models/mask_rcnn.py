@@ -11,7 +11,6 @@ from models.resnet import ResNet
 import torch
 from tinygrad.jit import TinyJit
 from models.retinanet import nms as _box_nms
-import torchvision.ops
 
 
 def meshgrid(x, y):
@@ -50,8 +49,7 @@ def tensor_gather(tensor, indices):
   return ret
 
 
-
-class LastLevelMaxPool:
+class LastLevelMaxPool: 
   def __call__(self, x): return [Tensor.max_pool2d(x, 1, 2)]
 
 
@@ -537,6 +535,7 @@ def remove_small_boxes(boxlist, min_size):
 
 
 class RPNPostProcessor:
+  # Not used in Loss calculation
   def __init__(
           self,
           pre_nms_top_n,
@@ -745,6 +744,147 @@ class FPN2MLPFeatureExtractor:
     return x
 
 
+def _bilinear_interpolate(
+    input,  # [N, C, H, W]
+    roi_batch_ind,  # [K]
+    y,  # [K, PH, IY]
+    x,  # [K, PW, IX]
+    ymask,  # [K, IY]
+    xmask,  # [K, IX]
+):
+    _, channels, height, width = input.size()
+
+    y = y.clamp(min=0)
+    x = x.clamp(min=0)
+    y_low = y.int()
+    x_low = x.int()
+    y_high = torch.where(y_low >= height - 1, height - 1, y_low + 1)
+    y_low = torch.where(y_low >= height - 1, height - 1, y_low)
+    y = torch.where(y_low >= height - 1, y.to(input.dtype), y)
+
+    x_high = torch.where(x_low >= width - 1, width - 1, x_low + 1)
+    x_low = torch.where(x_low >= width - 1, width - 1, x_low)
+    x = torch.where(x_low >= width - 1, x.to(input.dtype), x)
+
+    ly = y - y_low
+    lx = x - x_low
+    hy = 1.0 - ly
+    hx = 1.0 - lx
+
+    def masked_index(
+        y,  # [K, PH, IY]
+        x,  # [K, PW, IX]
+    ):
+        if ymask is not None:
+            assert xmask is not None
+            y = torch.where(ymask[:, None, :], y, 0)
+            x = torch.where(xmask[:, None, :], x, 0)
+        return input[
+            roi_batch_ind[:, None, None, None, None, None],
+            torch.arange(channels, device=input.device)[None, :, None, None, None, None],
+            y[:, None, :, None, :, None],  # prev [K, PH, IY]
+            x[:, None, None, :, None, :],  # prev [K, PW, IX]
+        ]  # [K, C, PH, PW, IY, IX]
+
+    v1 = masked_index(y_low, x_low)
+    v2 = masked_index(y_low, x_high)
+    v3 = masked_index(y_high, x_low)
+    v4 = masked_index(y_high, x_high)
+
+    # all ws preemptively [K, C, PH, PW, IY, IX]
+    def outer_prod(y, x):
+        return y[:, None, :, None, :, None] * x[:, None, None, :, None, :]
+
+    w1 = outer_prod(hy, hx)
+    w2 = outer_prod(hy, lx)
+    w3 = outer_prod(ly, hx)
+    w4 = outer_prod(ly, lx)
+
+    val = w1 * v1 + w2 * v2 + w3 * v3 + w4 * v4
+    return val
+
+#https://pytorch.org/vision/main/_modules/torchvision/ops/roi_align.html#roi_align
+def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned):
+  orig_dtype = input.dtype
+  _, _, height, width = input.shape
+
+  ph = Tensor.arange(pooled_height, device=input.device)  
+  pw = Tensor.arange(pooled_width, device=input.device) 
+
+  roi_batch_ind = rois[:, 0].cast(dtypes.int32) 
+  offset = 0.5 if aligned else 0.0
+  roi_start_w = rois[:, 1] * spatial_scale - offset
+  roi_start_h = rois[:, 2] * spatial_scale - offset
+  roi_end_w = rois[:, 3] * spatial_scale - offset 
+  roi_end_h = rois[:, 4] * spatial_scale - offset
+
+  roi_width = roi_end_w - roi_start_w 
+  roi_height = roi_end_h - roi_start_h 
+  if not aligned:
+    roi_width = roi_width.maximum(1.0) 
+    roi_height = roi_height.maximum(1.0) 
+
+  bin_size_h = roi_height / pooled_height  
+  bin_size_w = roi_width / pooled_width  
+
+  exact_sampling = sampling_ratio > 0
+
+  roi_bin_grid_h = sampling_ratio if exact_sampling else (roi_height / pooled_height).ceil() 
+  roi_bin_grid_w = sampling_ratio if exact_sampling else (roi_width / pooled_width).ceil()
+
+  if exact_sampling:
+    count = max(roi_bin_grid_h * roi_bin_grid_w, 1)  
+    iy = Tensor.arange(roi_bin_grid_h, device=input.device) 
+    ix = Tensor.arange(roi_bin_grid_w, device=input.device) 
+    ymask = None
+    xmask = None
+  else:
+    count = (roi_bin_grid_h * roi_bin_grid_w).maximum(1)
+    iy = Tensor.arange(height, device=input.device)  
+    ix = Tensor.arange(width, device=input.device)  
+    ymask = iy[None, :] < roi_bin_grid_h[:, None] 
+    xmask = ix[None, :] < roi_bin_grid_w[:, None] 
+
+  def from_K(t):
+    return t[:, None, None]
+
+  y = (
+    from_K(roi_start_h)
+    + ph[None, :, None] * from_K(bin_size_h)
+    + (iy[None, None, :] + 0.5) * from_K(bin_size_h / roi_bin_grid_h)
+  )
+  x = (
+    from_K(roi_start_w)
+    + pw[None, :, None] * from_K(bin_size_w)
+    + (ix[None, None, :] + 0.5) * from_K(bin_size_w / roi_bin_grid_w)
+  )
+
+  # TODO: remove torch
+  input = torch.tensor(input.numpy())
+  roi_batch_ind = torch.tensor(roi_batch_ind.numpy())
+  y = torch.tensor(y.numpy())
+  x = torch.tensor(x.numpy())
+  if ymask is not None:
+    ymask = torch.tensor(ymask.numpy())
+    xmask = torch.tensor(xmask.numpy())
+
+  val = _bilinear_interpolate(input, roi_batch_ind, y, x, ymask, xmask)
+
+  val = Tensor(val.numpy())
+
+  if not exact_sampling:
+    val = ymask[:, None, None, None, :, None].where(val, 0)
+    val = xmask[:, None, None, None, None, :].where(val, 0)
+
+  output = val.sum((-1, -2))
+  if isinstance(count, Tensor):
+    output /= count[:, None, None, None]
+  else:
+    output /= count
+
+  output = output.cast(orig_dtype).realize()
+  return output
+
 class ROIAlign:
   def __init__(self, output_size, spatial_scale, sampling_ratio):
     self.output_size = output_size
@@ -752,13 +892,10 @@ class ROIAlign:
     self.sampling_ratio = sampling_ratio
 
   def __call__(self, input, rois):
-    # TODO: remove torch
-    input = torch.tensor(input.numpy())
-    roi = torch.tensor(rois.numpy())
-    output = torchvision.ops.roi_align(
-      input, roi, spatial_scale=self.spatial_scale, output_size=(self.output_size[0], self.output_size[1]), sampling_ratio=self.sampling_ratio
+    output = _roi_align(
+      input, rois, self.spatial_scale, self.output_size[0], self.output_size[1], self.sampling_ratio, aligned=False
     )
-    return output.numpy()
+    return output
 
 
 class LevelMapper:
@@ -830,7 +967,7 @@ class Pooler:
         idx_in_level = [idx for idx, x in enumerate((levels.numpy() == level)) if x != 0]
         if len(idx_in_level) > 0:
           rois_per_level = tensor_gather(rois, idx_in_level)
-          result[idx_in_level] = pooler(per_level_feature, rois_per_level)
+          result[idx_in_level] = pooler(per_level_feature, rois_per_level).numpy()
 
       return Tensor(result, dtype=x[0].dtype, device=x[0].device)
 
@@ -955,11 +1092,13 @@ class RoIBoxHead:
   def __call__(self, features, proposals, targets=None):
     x = self.feature_extractor(features, proposals)
     class_logits, box_regression = self.predictor(x)
-    result = self.post_processor((class_logits, box_regression), proposals)
-    return x, result, {}
+    if not Tensor.training:
+      result = self.post_processor((class_logits, box_regression), proposals)
+      return x, result, {}
 
 
 class MaskPostProcessor:
+  # Not used in loss calculation
   def __call__(self, x, boxes):
     mask_prob = x.sigmoid().numpy()
     num_masks = x.shape[0]
@@ -994,8 +1133,9 @@ class Mask:
     x = self.feature_extractor(features, proposals)
     if x:
       mask_logits = self.predictor(x)
-      result = self.post_processor(mask_logits, proposals)
-      return x, result, {}
+      if not Tensor.training:
+        result = self.post_processor(mask_logits, proposals)
+        return x, result, {}
     return x, [], {}
 
 
@@ -1021,6 +1161,7 @@ class ImageList(object):
 
 
 def to_image_list(tensors, size_divisible=32):
+  # Preprocessing
   if isinstance(tensors, Tensor) and size_divisible > 0:
     tensors = [tensors]
 
