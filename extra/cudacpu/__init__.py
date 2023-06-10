@@ -1,11 +1,10 @@
 from typing import List, Tuple
-
+from enum import Enum
 from tinygrad.runtime.lib import RawBuffer
+from tinygrad.helpers import getenv
 import cffi
 
-from enum import Enum
-
-__all__ = ["run_ptx", "DEBUGCUCPU"]
+__all__ = ["run_ptx", "PTX_ERR", "DEBUGCUDACPU"]
 
 ffi = cffi.FFI()
 ffi.cdef("""
@@ -16,7 +15,7 @@ int run_ptx(const char* source, int n_args, void* args[],
 """)
 lib = ffi.dlopen("./extra/cudacpu/libtinygrad.so")
 
-DEBUGCUCPU = getenv("DEBUGCL", 0)
+DEBUGCUDACPU = getenv("DEBUGCL", 0)
 
 class PTX_ERR(Enum):
 	SUCCESS = 0
@@ -27,7 +26,7 @@ class PTX_ERR(Enum):
 def run_ptx(source:str, args:List[RawBuffer], block:Tuple[int, int, int], grid:Tuple[int, int, int]) -> PTX_ERR:
     return PTX_ERR(lib.run_ptx(source.encode(),
         [ffi.cast("void*", x._buf) for x in args],
-        *block, *grid, DEBUGCPU
+        *block, *grid, DEBUGCUDACPU
     ))
 
 
