@@ -76,7 +76,7 @@ class dtypes:
   def from_np(x) -> DType: return asdict(dtypes())[np.dtype(x).name]
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(0, 2, "half", np.float16)
-  float32: Final[DType] = DType(1, 4, "float", np.float32)
+  float32: Final[DType] = DType(4, 4, "float", np.float32)
   int8: Final[DType] = DType(0, 1, "char", np.int8)
   int32: Final[DType] = DType(1, 4, "int", np.int32)
   int64: Final[DType] = DType(2, 8, "int64", np.int64)

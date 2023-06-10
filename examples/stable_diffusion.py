@@ -1,6 +1,7 @@
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
-
+import os
+import tempfile
 from pathlib import Path
 import gzip, argparse, math, re
 from functools import lru_cache
@@ -459,6 +460,7 @@ class CLIPTextTransformer:
     x = self.embeddings(input_ids, list(range(len(input_ids))))
     causal_attention_mask = np.triu(np.ones((1,1,77,77), dtype=np.float32) * -np.inf, k=1)
     x = self.encoder(x, Tensor(causal_attention_mask, device=x.device))
+    # x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1)) # TODO: Pending(#942)
     return self.final_layer_norm(x)
 
 # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
@@ -604,7 +606,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
-  parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
+  parser.add_argument('--out', type=str, default=os.path.join(tempfile.gettempdir(), "rendered.png"), help="Output filename")
   args = parser.parse_args()
 
   Tensor.no_grad = True
