@@ -24,6 +24,7 @@ class CStyleLanguage(NamedTuple):
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
+  header: Optional[str] = None
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node, validhacks=False) -> Tuple[Node, Node]:
   idy = (idxy//(4*base_shape[1]))
@@ -171,6 +172,8 @@ def uops_to_cstyle(uops:List[UOp], bufs:List[Union[LocalBuffer,LazyBuffer]], lan
     [', '.join([f'{t} {bufnames[i]}' for i,t in buftypes] + lang.extra_args)] +
     [") {\n"] + list(prekernel) + ['\n'.join(kernel), "\n}"])
 
+  if lang.header:
+    prg =''.join([f"{lang.header}", "\n", prg])
   if lang.half_prekernel:
     prg =''.join([f"{lang.half_prekernel}", "\n", prg])
   return prg, global_size, local_size
