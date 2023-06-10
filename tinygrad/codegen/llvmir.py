@@ -6,22 +6,21 @@ from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, ASTRunner, UnaryOps, BinaryOps, FusedOps
 from tinygrad.lazy import LazyBuffer
 
-from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
+from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 def int_const(x): return ir.Constant(ir.IntType(64), x)
 render_llvm = {
   NumNode: lambda self,ops,ctx: int_const(self.b),
   MulNode: lambda self,ops,ctx: ctx.mul(self.a.render(ops,ctx), int_const(self.b)),
   DivNode: lambda self,ops,ctx: ctx.sdiv(self.a.render(ops,ctx), int_const(self.b)),
   ModNode: lambda self,ops,ctx: ctx.srem(self.a.render(ops,ctx), int_const(self.b)),
-  GeNode: lambda self,ops,ctx: ctx.icmp_signed(">=", self.a.render(ops,ctx), int_const(self.b)),
   LtNode: lambda self,ops,ctx: ctx.icmp_signed("<", self.a.render(ops,ctx), int_const(self.b)),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.add(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.and_(a,b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx))
 }
 
 code_for_op: Final[Dict[Op, Callable]] = {
-  UnaryOps.EXP: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x], fastmath=('fast',)),
-  UnaryOps.LOG: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x], fastmath=('fast',)),
+  UnaryOps.EXP2: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.exp2', [ir.FloatType()]), [x], fastmath=('fast',)),
+  UnaryOps.LOG2: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.log2', [ir.FloatType()]), [x], fastmath=('fast',)),
   UnaryOps.SIN: lambda builder,x: builder.call(builder._block.module.declare_intrinsic('llvm.sin', [ir.FloatType()]), [x], fastmath=('fast',)),
   BinaryOps.ADD: lambda builder,x,y: builder.fadd(x,y, flags=('fast',)),
   BinaryOps.SUB: lambda builder,x,y: builder.fsub(x,y, flags=('fast',)),
@@ -88,11 +87,11 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
         val = bb[-1].select(valid, bb[-1].load(bb[-1].gep(func.args[args.i], [aug_idx], inbounds=True)), ir.Constant(func_dtypes[args[0]], 0))
       else:
         val = bb[-1].load(bb[-1].gep(func.args[args.i], [idx], inbounds=True))
-      if func_dtypes[args.i] != ir.FloatType(): 
+      if func_dtypes[args.i] != ir.FloatType():
         if dtypes.is_int(bufs[args.i].dtype):
           val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].sitofp(val, ir.FloatType())
         else:
-          val = bb[-1].fpext(val, ir.FloatType()) 
+          val = bb[-1].fpext(val, ir.FloatType())
       lvars[newvar] = val
     if uop == UOps.STORE:
       assert args.valid.min == 1, "store must be valid"
@@ -101,7 +100,7 @@ def uops_to_llvm_ir(uops:List[UOp], bufs:List[LazyBuffer]) -> str:
       if func_dtypes[0] != ir.FloatType():
         if dtypes.is_int(bufs[args.i].dtype):
           element = bb[-1].fptoui(element, func_dtypes[0]) if dtypes.is_unsigned(bufs[args.i].dtype) else bb[-1].fptosi(element, func_dtypes[0])
-        else: 
+        else:
           element = bb[-1].fptrunc(element, func_dtypes[0])
       bb[-1].store(element, bb[-1].gep(func.args[args.i], [idx], inbounds=True))
     if uop == UOps.ALU:
