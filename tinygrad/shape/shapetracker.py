@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum, auto
 import functools
 import operator
-from typing import Dict, Tuple, Union, List, Optional, Callable
+from typing import Dict, Tuple, Union, List, Optional, Callable, cast
 from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, ModNode
 
@@ -108,7 +108,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
       new_strides.append(0)
     elif this_dim.__class__ == Variable:
       new_strides.append(1)
-    elif this_dim.__class__ == MulNode and this_dim.a.__class__ == Variable:
+    elif this_dim.__class__ == MulNode and cast(MulNode, this_dim).a.__class__ == Variable:
       new_strides.append(this_dim.b)
     else:
       if DEBUG >= 4: print("can't simplify", s, this_dim.render())
@@ -116,13 +116,13 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   return View(vm1.shape, tuple(new_strides), new_offset.b, vm1.mask) if len(new_strides) == len(vm1.strides) else None
 
 @functools.lru_cache(maxsize=None)
-def _reshape(view: View, new_shape) -> Tuple[View, bool]:
+def _reshape(view: View, new_shape: Tuple[int, ...]) -> Tuple[View, bool]:
   shape, mask, strides, offset = view.shape, view.mask, view.strides, view.offset
   # check if this is adding or removing 1s (only)
   # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
   if [x for x in shape if x != 1] == [x for x in new_shape if x != 1]:
-    strides = [y for x,y in zip(shape, strides) if x != 1]
-    new_strides_tuple = tuple([0 if x == 1 else strides.pop(0) for x in new_shape])
+    new_strides: List[int] = [y for x,y in zip(shape, strides) if x != 1]
+    new_strides_tuple: Tuple[int, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
     new_mask_tuple = None
     if mask:
       for x,y in zip(shape, mask):
@@ -130,8 +130,8 @@ def _reshape(view: View, new_shape) -> Tuple[View, bool]:
           new_mask_tuple = tuple([(0,0) for _ in new_shape])
           break
       else:
-        mask = [y for x,y in zip(shape, mask) if x != 1]
-        new_mask_tuple = tuple([(0,1) if x == 1 else mask.pop(0) for x in new_shape])
+        new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
+        new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
     return View(new_shape, new_strides_tuple, offset, new_mask_tuple), False
 
   new_view = View(new_shape, strides_for_shape(new_shape))
@@ -153,7 +153,7 @@ def get_unsafe_resize_offset(strides, arg):
 class ShapeTracker:
   __slots__ = "views"
   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
-    self.views: List[View] = views if views is not None else ([*shape.views] if shape.__class__ == ShapeTracker else [view_from_shape(shape)])
+    self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ == ShapeTracker else [view_from_shape(shape)])
   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
 
