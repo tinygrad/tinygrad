@@ -213,7 +213,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         repository: gpuocelot/gpuocelot
-        path: extra/cudacpu/
+        path: extra/cudacpu/gpuocelot
         ref: 98333b95cd9512514e947a4f9fd0caa7e1326dfc
         submodules: true
     - name: Patch gpuocelot
