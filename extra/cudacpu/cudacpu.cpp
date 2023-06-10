@@ -19,7 +19,8 @@ enum PTX_ERR
 
 enum PTX_ERR run_ptx(const char* source, int n_args, void* args[],
                      int blck_x, int blck_y, int blck_z,
-                     int grid_x, int grid_y, int grid_z)
+                     int grid_x, int grid_y, int grid_z,
+					 int log_level)
 {
 	std::stringstream ss;
 	ss << source;
@@ -50,4 +51,4 @@ enum PTX_ERR run_ptx(const char* source, int n_args, void* args[],
 	return PTX_ERR_SUCCESS;
 }
 
-}
+}	

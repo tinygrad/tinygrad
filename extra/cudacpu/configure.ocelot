@@ -1,0 +1,16 @@
+{
+	ocelot: "ocelot",
+	executive: {
+		devices: [ emulated ],
+		asynchronousKernelLaunch: true,
+		optimizationLevel: "all",
+		workerThreadLimit: 1,
+		warpSize: 1
+	},
+	optimizations: {
+		subkernelSize: 1000,
+		simplifyCFG: true,
+		hoistSpecialValues: false
+	}
+}
+

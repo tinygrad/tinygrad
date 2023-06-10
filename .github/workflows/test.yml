@@ -187,3 +187,45 @@ jobs:
       run: docker build -t tinygrad -f test/Dockerfile .
     - name: Test Docker
       run: docker run --rm tinygrad /usr/bin/env python3 -c "from tinygrad.tensor import Tensor; print(Tensor.eye(3).numpy())"
+
+  testcuda:
+    name: (emulated) cuda test
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Update packages
+      run: |
+        export DEBIAN_FRONTEND=noninteractive
+        sudo apt-get update -y
+    - name: Install packages
+      run: |
+        sudo apt-get install -y git g++ cmake ninja llvm-14-dev libz-dev libglew-dev flex bison libboost-thread-dev libboost-filesystem-dev
+    - name: Install cuda-toolkit
+      run: |
+        sudo apt-get install -y nvidia-cuda-toolkit-gcc
+    - name: Install and patch gpuocelot
+      run: |
+        git clone https://github.com/gpuocelot/gpuocelot
+        cd gpuocelot
+        git checkout 98333b95cd9512514e947a4f9fd0caa7e1326dfc
+        git submodule init
+        git submodule update
+        cp /tinygrad/extra/cudacpu/cudacpu.cpp ./ocelot
+        cp /tinygrad/extra/cudacpu/gpuocelot.patch .
+        git apply gpuocelot.patch
+    - name: Compile gpuocelot and libcudacpu
+        mkdir build
+        cd build
+        cmake .. -Wno-dev
+        ninja
+        cp libcudacpu.so /tinygrad/extra/cudacpu
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
+    - name: Install tinygrad dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Run Pytest (default)
+      run: CUDA=1 CUDACPU=1 python -m pytest -s -v -n=auto test/
