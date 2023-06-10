@@ -216,11 +216,15 @@ jobs:
         cp /tinygrad/extra/cudacpu/gpuocelot.patch .
         git apply gpuocelot.patch
     - name: Compile gpuocelot and libcudacpu
+      run: |
         mkdir build
         cd build
-        cmake .. -Wno-dev
+        cmake .. -Wno-dev -G Ninja
         ninja
         cp libcudacpu.so /tinygrad/extra/cudacpu
+    - name: Test gpuocelot
+      run: |
+        ctest
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
