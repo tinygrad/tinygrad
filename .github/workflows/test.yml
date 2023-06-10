@@ -209,13 +209,16 @@ jobs:
     - name: Install packages
       run: |
         sudo apt-get install -y git g++ cmake ninja-build llvm-14-dev libz-dev libglew-dev flex bison libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
-    - name: Install and patch gpuocelot
+    - name: Clone gpuocelot repo
+      uses: actions/checkout@v3
+      with:
+        repository: gpuocelot/gpuocelot
+        path: extra/cudacpu/
+        ref: 98333b95cd9512514e947a4f9fd0caa7e1326dfc
+        submodules: true
+    - name: Patch gpuocelot
       run: |
-        git clone https://github.com/gpuocelot/gpuocelot extra/cudacpu/gpuocelot
         cd extra/cudacpu/gpuocelot
-        git checkout 98333b95cd9512514e947a4f9fd0caa7e1326dfc
-        git submodule init
-        git submodule update
         cp ../cudacpu.cpp ./ocelot
         cp ../gpuocelot.patch .
         git apply gpuocelot.patch
