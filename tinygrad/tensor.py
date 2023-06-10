@@ -496,8 +496,7 @@ class Tensor:
 
   def pow(self,x,reverse=False):
     if reverse and type(x) is not Tensor: return self.mul( math.log(max(abs(x),1e-10)) ).exp().mul( self.mul( math.pi * (1-math.copysign(1,x))/2 ).cos() )
-    elif reverse: return self.mul( math.log(math.max(x.abs(),1e-10))).exp().mul( self.mul(x.sign().sub(1).div(2/math.pi) ).cos())
-    else: return self.abs().maximum(1e-10).log().mul(x).exp().mul((1-self.sign()).div(2).mul(x).mul(math.pi).cos())
+    else: return x.pow(self) if reverse else self.abs().maximum(1e-10).log().mul(x).exp().mul((1-self.sign()).div(2).mul(x).mul(math.pi).cos())
 
   # ***** activation functions (unary) *****
 
