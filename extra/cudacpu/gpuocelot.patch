@@ -1,22 +1,23 @@
 diff --git a/ocelot/CMakeLists.txt b/ocelot/CMakeLists.txt
-index fef7ee9b..f8e734de 100644
+index fef7ee9b..9f85902d 100644
 --- a/ocelot/CMakeLists.txt
 +++ b/ocelot/CMakeLists.txt
-@@ -8,11 +8,12 @@ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
+@@ -8,11 +8,13 @@ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
  set(CMAKE_BUILD_TYPE "Release")
  endif()
  
 -list(APPEND CMAKE_CXX_FLAGS -fexceptions)
-+list(APPEND CMAKE_CXX_FLAGS -fexceptions -Wno-return-type -Wno-terminate)
++list(APPEND CMAKE_CXX_FLAGS "-fexceptions -Wno-return-type -Wno-terminate")
++
  
  # in order to retain the PTX code in the text executables,
  # the target GPU architecture has to be virtual.
  set(CMAKE_CUDA_ARCHITECTURES 35-virtual)
-+list(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets -Wno-deprecated-declarations)
++list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets -Wno-deprecated-declarations")
  
  set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
  
-@@ -21,6 +22,8 @@ find_package(FLEX 2.5 REQUIRED)
+@@ -21,6 +23,8 @@ find_package(FLEX 2.5 REQUIRED)
  find_package(BISON 2.5 REQUIRED)
  find_package(GLEW REQUIRED)
  find_package(ZLIB REQUIRED)
@@ -25,7 +26,7 @@ index fef7ee9b..f8e734de 100644
  
  if ("x${BUILD_LLVM}" STREQUAL "xOFF")
  find_package(LLVM REQUIRED CONFIG)
-@@ -538,30 +541,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LINK_LIBRARIES})
+@@ -538,30 +542,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LINK_LIBRARIES})
  target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--gc-sections -Wl,--start-group ${LLVM_LIBRARIES} -Wl,--end-group)
  target_link_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
  
@@ -56,7 +57,7 @@ index fef7ee9b..f8e734de 100644
  ocelot_add_tests(executive)
  ocelot_add_tests(ir)
  ocelot_add_tests(parser)
-@@ -570,6 +552,27 @@ ocelot_add_tests(transforms)
+@@ -570,6 +553,27 @@ ocelot_add_tests(transforms)
  ocelot_add_tests(translator)
  ocelot_add_tests(util)
  
@@ -84,7 +85,7 @@ index fef7ee9b..f8e734de 100644
  res_embed(TARGET ${PROJECT_NAME}_executive_TestEmulator NAME "TestEmulator_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestEmulator.ptx KEYWORD)
  
-@@ -581,256 +584,3 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
+@@ -581,256 +585,3 @@ res_embed(TARGET ${PROJECT_NAME}_executive_TestKernels NAME "TestKernels_ptx"
  	
  res_embed(TARGET ${PROJECT_NAME}_executive_TestLLVMKernels NAME "TestLLVMKernels_ptx"
  	PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/executive/test/TestLLVMKernels.ptx KEYWORD)
