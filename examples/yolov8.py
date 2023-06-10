@@ -1,9 +1,8 @@
-from tinygrad.nn import Conv2d,BatchNorm2d
+from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Conv2d,BatchNorm2d
 import numpy as np
 from itertools import chain
-from extra.utils import get_child
+from extra.utils import get_child, fetch
 from pathlib import Path
 import torch
 import cv2
@@ -131,7 +130,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.7, agnostic=Fal
   return output
 
 def postprocess(preds, img, orig_imgs): #path will be the loaded image path
-  preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
+  preds = preds.detach().cpu().numpy() if isinstance(preds, Tensor) else preds
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
   for i, pred in enumerate(preds):
     orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
@@ -394,8 +393,9 @@ class YOLOv8():
     x = self.fpn.forward(*x)
     return self.head.forward(x)
 
-  def load_weights(self, path_to_weights):
-    weights_path = Path(__file__).parent.parent / "weights" / path_to_weights
+  def load_weights(self, weight_variant):
+    # this assumes your v8 weights are stored in ../weights. will add the code to download them like v3.  
+    weights_path = Path(__file__).parent.parent / "weights" / weight_variant
     state_dict = torch.load(weights_path)
     weights = state_dict['model'].state_dict().items()
     backbone_modules = [*range(10)]
@@ -409,31 +409,26 @@ class YOLOv8():
           child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
           get_child(i[1], child_key).assign(v.numpy().astype(np.float32))
     print('successfully loaded all weights')
-       
-class_labels = [
-    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 
-    'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 
-    'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 
-    'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 
-    'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 
-    'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 
-    'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 
-    'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 
-    'scissors', 'teddy bear', 'hair drier', 'toothbrush'
-]
+  
+  
+#v8 and v3 have same 80 class names for Object Detection
+class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+class_labels = class_labels.decode('utf-8').split('\n')
 
-# the inference 
+
 img_path = './bus.jpg'
 
 image = [np.array(Image.open(img_path))]
 processed_image = preprocess(image)
 
-Tensor.training = True
+# Tensor.training = False gives a runtime overflow warning when coverting Tensor to numpy for post processing. why? (training = True does not) 
+Tensor.training = False
 
-# Different YOLO variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml 
+# Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml 
 yolo_infer = YOLOv8(w=0.25, r=2, d=0.33, num_classes=80)  
 yolo_infer.load_weights("yolov8n.pt")
 
+# the inference 
 predictions = yolo_infer.forward(Tensor(processed_image.astype(np.float32)))
 
 # fix them to take batches of images too
