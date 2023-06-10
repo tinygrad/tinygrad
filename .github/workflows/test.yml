@@ -201,7 +201,7 @@ jobs:
         sudo apt-get update -y
     - name: Install packages
       run: |
-        sudo apt-get install -y git g++ cmake ninja llvm-14-dev libz-dev libglew-dev flex bison libboost-thread-dev libboost-filesystem-dev
+        sudo apt-get install -y git g++ cmake ninja-build llvm-14-dev libz-dev libglew-dev flex bison libboost-thread-dev libboost-filesystem-dev
     - name: Install cuda-toolkit
       run: |
         sudo apt-get install -y nvidia-cuda-toolkit-gcc
