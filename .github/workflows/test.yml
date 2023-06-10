@@ -126,7 +126,7 @@ jobs:
       with:
         python-version: 3.11
     - name: Install Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[metal,testing]'
     - name: Run Pytest
       run: JIT=1 METAL=1 python -m pytest -s -v test/
 
