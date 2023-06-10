@@ -1,16 +1,13 @@
 import numpy as np
 from tqdm import trange
 from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 
 def sparse_categorical_crossentropy(out, Y):
   num_classes = out.shape[-1]
-  YY = Y.flatten().astype(np.int32)
-  y = np.zeros((YY.shape[0], num_classes), np.float32)
-  # correct loss for NLL, torch NLL loss returns one per row
-  y[range(y.shape[0]),YY] = -1.0*num_classes
-  y = y.reshape(list(Y.shape)+[num_classes])
-  y = Tensor(y)
+  y_counter = Tensor.arange(num_classes, requires_grad=False, dtype=dtypes.uint8).unsqueeze(0).expand(Y.size, num_classes)
+  y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0 * num_classes, 0)
+  y = y.reshape(*Y.shape, num_classes)
   return out.mul(y).mean()
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=sparse_categorical_crossentropy, 
