@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Any
 from enum import Enum
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.helpers import getenv
@@ -23,9 +23,10 @@ class PTX_ERR(Enum):
 	KERNEL_NOT_FOUND = 2
 	ARGS_MISMATCH = 3
 
-def run_ptx(source:str, args:List[RawBuffer], block:Tuple[int, int, int], grid:Tuple[int, int, int]) -> PTX_ERR:
+def run_ptx(source:str, args:Tuple[Any,...], block:Tuple[int, ...], grid:Tuple[int, ...]) -> PTX_ERR:
     return PTX_ERR(lib.run_ptx(source.encode(),
-        [ffi.cast("void*", x._buf) for x in args],
+        len(args),
+        [ffi.cast("void*", ffi.from_buffer(x._buffer())) for x in args],
         *block, *grid, DEBUGCUDACPU
     ))
 

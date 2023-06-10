@@ -1,6 +1,5 @@
 import subprocess
-from typing import Optional
-from functools import partial
+from typing import Optional, Tuple, List
 import numpy as np
 import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
 import pycuda.driver as cuda # type: ignore
@@ -38,22 +37,23 @@ class CUDAProgram:
     # TODO: name is wrong, so we get it from the ptx using hacks
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
-  def __call__(self, global_size, local_size, *args, wait=False):
-    local_size = (local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
-    global_size = global_size + [1] * (3 - len(global_size))
+  def __call__(self, global_size:List[int], local_size:List[int], *args, wait=False):
+    block_size: Tuple[int,...]  = tuple(local_size + [1] * (3 - len(local_size))) if local_size is not None else (1,1,1)
+    grid_size: Tuple[int,...] = tuple(global_size + [1] * (3 - len(global_size)))
     assert all(x%y == 0 for x,y in zip(global_size, local_size)), f"local:{local_size} must divide global:{global_size}"
-    global_size = [x//y for x,y in zip(global_size, local_size)]
-    
-    if ISCUDA and wait:
-      start, end = cuda.Event(), cuda.Event()
-      start.record()
-    # kinda hacky
-    fn = self.prg if ISCUDA else partial(run_ptx, self.src)
-    fn(*[x._buf for x in args], block=tuple(local_size), grid=tuple(global_size))
-    if ISCUDA and wait:
-      end.record()
-      end.synchronize()
-      return start.time_till(end)*1e-3
+    grid_size = tuple([x//y for x,y in zip(global_size, local_size)])
+
+    if ISCUDA:
+      if wait:
+          start, end = cuda.Event(), cuda.Event()
+          start.record()
+      self.prg(*[x._buf for x in args], block=block_size, grid=grid_size)
+      if wait:
+        end.record()
+        end.synchronize()
+        return start.time_till(end)*1e-3
+    else:
+        run_ptx(self.src, args, block_size, grid_size)
 
 class CUDACodegen(CStyleCodegen):
   lang = CStyleLanguage(
