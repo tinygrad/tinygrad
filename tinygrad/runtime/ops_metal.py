@@ -1,6 +1,5 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib
-import numpy as np
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any
 from tinygrad.codegen.cstyle import CStyleCodegen, CStyleLanguage
@@ -29,8 +28,6 @@ class RawMetalBuffer(RawBufferMapped):
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
-  def toCPU(self):
-    return NPArray(np.frombuffer(self._buffer(), dtype=self.dtype.np),buffer=self)
 
 def unwrap(x):
   ret, err = x
