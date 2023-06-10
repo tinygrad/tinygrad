@@ -342,3 +342,162 @@ index fef7ee9b..9f85902d 100644
 -#c++  -c -O2 -Wall -std=c++11 ocelot/translator/test/TestPTXToLLVMTranslator.cpp
 -#c++  -c -O2 -Wall -std=c++11 ocelot/parser/test/TestParser.cpp
 -
+diff --git a/ocelot/src/executive/CooperativeThreadArray.cpp b/ocelot/src/executive/CooperativeThreadArray.cpp
+index e957204c..05158803 100644
+--- a/ocelot/src/executive/CooperativeThreadArray.cpp
++++ b/ocelot/src/executive/CooperativeThreadArray.cpp
+@@ -32,6 +32,7 @@
+ #include <climits>
+ #include <algorithm>
+ #include <sstream>
++#include <cstdio>
+ 
+ // Preprocessor Macros
+ #ifdef REPORT_BASE
+@@ -3021,7 +3022,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 1",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3071,7 +3073,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 2",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3138,7 +3141,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 3",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3204,7 +3208,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 4",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3286,7 +3291,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 5",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3366,7 +3372,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 6",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3461,7 +3468,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 7",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3558,7 +3566,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 8",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3743,7 +3752,8 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 9",
+ 							context.PC, instr);
+ 						break;
+ 				}
+@@ -3932,14 +3942,16 @@ void executive::CooperativeThreadArray::eval_Cvt(CTAContext &context,
+ 						}
+ 						break;
+ 					default:
+-						throw RuntimeException("conversion not implemented",
++						trace();
++						throw RuntimeException("conversion not implemented 10",
+ 							context.PC, instr);
+ 						break;
+ 				}
+ 			}
+ 			break;
+ 			default:
+-				throw RuntimeException("conversion not implemented",
++				trace();
++				throw RuntimeException("conversion not implemented 11",
+ 					context.PC, instr);
+ 				break;
+ 		}
+@@ -5088,7 +5100,7 @@ void executive::CooperativeThreadArray::eval_Lg2(CTAContext &context,
+ void executive::CooperativeThreadArray::eval_Mad24(CTAContext &context,
+ 	const ir::PTXInstruction &instr) {
+ 	trace();
+-	throw RuntimeException("instruction not implemented", context.PC, instr);
++	throw RuntimeException("instruction not implemented 12", context.PC, instr);
+ }
+ 
+ /*!
+@@ -6500,7 +6512,7 @@ void executive::CooperativeThreadArray::eval_Rcp(CTAContext &context,
+ */
+ void executive::CooperativeThreadArray::eval_Red(CTAContext &context, const ir::PTXInstruction &instr) {
+ 	trace();
+-	throw RuntimeException("instruction not implemented", context.PC, instr);
++	throw RuntimeException("instruction not implemented 13", context.PC, instr);
+ }
+ 
+ /*!
+diff --git a/ocelot/src/parser/PTXParser.cpp b/ocelot/src/parser/PTXParser.cpp
+index b392e8c7..690e8ddd 100644
+--- a/ocelot/src/parser/PTXParser.cpp
++++ b/ocelot/src/parser/PTXParser.cpp
+@@ -1284,13 +1284,13 @@ namespace parser
+ 	
+ 		std::string message = statements.back().instruction.valid();
+ 	
+-		if( message != "" )
++		/*if( message != "" )
+ 		{
+ 			throw_exception( toString( location, *this ) 
+ 				<< "Parsed invalid instruction " 
+ 				<< statements.back().instruction.toString() 
+ 				<< " : " << message, InvalidInstruction );
+-		}
++		}*/
+ 	
+ 		operandVector.clear();
+ 	}
