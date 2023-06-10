@@ -218,7 +218,7 @@ jobs:
         submodules: true
     - name: Patch gpuocelot
       run: |
-        cd extra/cudacpu/gpuocelot
+        cd $GITHUB_WORKSPACE/extra/cudacpu/gpuocelot
         cp ../cudacpu.cpp ./ocelot
         cp ../gpuocelot.patch .
         git apply gpuocelot.patch
