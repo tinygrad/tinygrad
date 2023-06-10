@@ -2,16 +2,16 @@ from tinygrad.nn import Conv2d,BatchNorm2d
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d,BatchNorm2d
 import numpy as np
-import math
 from itertools import chain
-from extra.utils import download_file, get_child
+from extra.utils import get_child
 from pathlib import Path
 import torch
 import cv2
+from PIL import Image
+from collections import defaultdict
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
-#the upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2 models use upsampling. (retinet and this)
-
+#The upsampling class has been taken from this pull request https://github.com/geohot/tinygrad/pull/784 by dc-dc-dc. Now 2 models use upsampling. (retinet and this)
 
 # UTIL FUNCTIONS
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
@@ -38,15 +38,13 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
 
 # this function is from the original implementation
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
+  # print(k, p, d)
   if d > 1:
     k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
   if p is None:
     p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
   return p
 
-# post processing functions for raw outputs from the head "https://github.com/ultralytics/ultralytics/blob/dada5b73c4340671ac67b99e8c813bf7b16c34ce/ultralytics/yolo/v8/detect/predict.py"
-#Saving --> plotting function - write results. 
-#pre_process --> image process
 
 def clip_boxes(boxes, shape):
   boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
@@ -73,7 +71,8 @@ def xywh2xyxy(x):
   result = np.concatenate((xy1, xy2), axis=-1)
   return Tensor(result) if isinstance(x, Tensor) else result
 
-# right now this works for tensors only
+
+# Post Processing functions
 def box_area(box):
   return (box[:, 2] - box[:, 0]) * (box[:, 3] - box[:, 1])
 
@@ -87,40 +86,35 @@ def box_iou(box1, box2):
   iou = inter / (area1 + area2 - inter)
   return iou
 
-def custom_nms(boxes, scores, iou_threshold):
-  order = scores_np.argsort()[::-1]
+def compute_nms(boxes, scores, iou_threshold):
+  order = scores.argsort()[::-1]
   keep = []
-
   while order.size > 0:
     i = order[0]
     keep.append(i)
     if order.size == 1:
       break
-    iou = box_iou(boxes_np[i][None, :], boxes_np[order[1:]])
+    iou = box_iou(boxes[i][None, :], boxes[order[1:]])
     inds = np.where(iou.squeeze() <= iou_threshold)[0]
     order = order[inds + 1]
   return np.array(keep)
     
-
-def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False, labels=(), max_det=300, nc=0, max_time_img=0.05, max_nms=30000, max_wh=7680):
-  if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
+def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300, nc=0, max_wh=7680):
+  if isinstance(prediction, (list, tuple)):
     prediction = prediction[0]
-        
-  prediction_np = prediction.cpu().numpy()
+  
   bs = prediction.shape[0]  # batch size
   nc = nc or (prediction.shape[1] - 4)  # number of classes
   nm = prediction.shape[1] - nc - 4
   mi = 4 + nc  # mask start index
-  xc = np.amax(prediction_np[:, 4:mi], axis=1) > conf_thres    
-  output = [torch.zeros((0, 6 + nm), device=prediction.device)] * bs
-  for xi, x in enumerate(prediction_np):
+  xc = np.amax(prediction[:, 4:mi], axis=1) > conf_thres    
+  output = [np.zeros((0, 6 + nm))] * bs
+  for xi, x in enumerate(prediction):
     x = x.swapaxes(0, -1)[xc[xi]]
     if not x.shape[0]:
       continue
-
     box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
     box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
-
     conf = np.max(cls, axis=1, keepdims=True)  # confidence
     j = np.argmax(cls, axis=1, keepdims=True)  # index
     x = np.concatenate((box, conf, j.astype(np.float32), mask), axis=1)
@@ -128,27 +122,23 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     n = x.shape[0]  # number of boxes    
     if not n:  # no boxes
       continue    
-
     x = x[np.argsort(-x[:, 4])]
-
     c = x[:, 5:6] * (0 if agnostic else max_wh) 
     boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-    i = custom_nms(boxes, scores, iou_thres)  # NMS
+    i = compute_nms(boxes, scores, iou_thres)  # NMS
     i = i[:max_det]  # limit detections
     output[xi] = x[i]
   return output
 
-def postprocess(preds, img, orig_imgs, path): #path will be the loaded image path
+def postprocess(preds, img, orig_imgs): #path will be the loaded image path
   preds = preds.cpu().numpy() if isinstance(preds, Tensor) else preds
-  preds = non_max_suppression(preds, 0.25, 0.7, agnostic=False, max_det=300, classes=None)
+  preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
   for i, pred in enumerate(preds):
     orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
-    if not isinstance(orig_imgs, torch.Tensor):
+    if not isinstance(orig_imgs, Tensor):
       pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-    img_path = path[i] if isinstance(path, list) else path
-  return (img_path, orig_img, pred)
+  return pred
   
-
 def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
   shape = image.shape[:2]  # current shape [height, width]
   if isinstance(new_shape, int):
@@ -158,8 +148,9 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
   r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
   if not scaleup:  # only scale down, do not scale up (for better val mAP)
     r = min(r, 1.0)
-
+    
   # Compute padding
+  ratio = r, r  # width, height ratios
   new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
   dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
   if auto:  # minimum rectangle
@@ -167,6 +158,7 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
   elif scaleFill:  # stretch
     dw, dh = 0.0, 0.0
     new_unpad = (new_shape[1], new_shape[0])
+    ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
 
   dw /= 2  # divide padding into 2 sides
   dh /= 2
@@ -184,16 +176,15 @@ def pre_transform(im, imgsz=640, model_stride=32, model_pt=True):
   auto = same_shapes and model_pt
   return [compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
 
-def preprocess(im, device=None, model=None):
+def preprocess(im):
   im = np.stack(pre_transform(im))
   im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW, (n, 3, h, w)
   im = np.ascontiguousarray(im)  # contiguous
   img = im.astype(np.float32)  # uint8 to float32
   img /= 255  # 0 - 255 to 0.0 - 1.0
-  return 
+  return img
 
 def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, iou_threshold=0.5):
-  preds_np = predictions.cpu().numpy()
   orig_img = cv2.imread(orig_img_path)
 
   def generate_color():
@@ -203,7 +194,7 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
   font = cv2.FONT_HERSHEY_SIMPLEX
 
   grouped_preds = defaultdict(list)
-  for pred_np in preds_np:
+  for pred_np in predictions:
     class_id = int(pred_np[-1])
     grouped_preds[class_id].append(pred_np)
 
@@ -216,7 +207,6 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
 
       x1, y1, x2, y2, conf, _ = max_conf_pred
       x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-
       color = tuple(map(int, colors[class_id]))
       cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
 
@@ -229,21 +219,17 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
       else:
         label_y = y1 + text_size[1]
         bg_y = y1
-
       cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
       cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
-
       iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
       low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
       pred_list = pred_list[low_iou_indices]
-
+      
       # Draw the remaining bounding boxes with lower confidence
       for low_conf_pred in pred_list:
         x1, y1, x2, y2, conf, _ = low_conf_pred
         x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-
         cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, 3)
-
         label = f"{class_labels[class_id]} {conf:.2f}"
         text_size, _ = cv2.getTextSize(label, font, 0.9, 1)
 
@@ -253,7 +239,6 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
         else:
           label_y = y1 + text_size[1]
           bg_y = y1
-
         cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
         cv2.putText(orig_img, label, (x1, label_y), font, 0.9, (255, 255, 255), 1, cv2.LINE_AA)
 
@@ -277,8 +262,8 @@ class Upsample:
 class SPPF:
   def __init__(self, c1, c2, k=5):
       c_ = c1 // 2  # hidden channels
-      self.cv1 = Conv_Block(c1, c_, k, 1, padding=None)
-      self.cv2 = Conv_Block(c_ * 4, c2, k, 1, padding=None)
+      self.cv1 = Conv_Block(c1, c_, 1, 1, padding=None)
+      self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
       self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
         
   def __call__(self, x):
@@ -291,7 +276,7 @@ class SPPF:
 class Conv_Block:
   def __init__(self, c1, c2, kernel_size=1, stride=1, groups=1, dilation=1, padding=None):
     self.conv = Conv2d(c1,c2, kernel_size, stride, padding= autopad(kernel_size, padding, dilation), bias=False, groups=groups, dilation=dilation)
-    self.bn = BatchNorm2d(c2)
+    self.bn = BatchNorm2d(c2, momentum=0.03, eps=0.001)
 
   def __call__(self, x):
     return self.bn(self.conv(x)).silu()
@@ -330,7 +315,6 @@ class DFL():
   def __call__(self, x):
     b, c, a = x.shape # batch, channels, anchors
     return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
-
 
 # stride = tensor([ 8., 16., 32.])
 class DetectionHead():
@@ -410,8 +394,8 @@ class YOLOv8():
     x = self.fpn.forward(*x)
     return self.head.forward(x)
 
-  def load_weights(self):
-    weights_path = Path(__file__).parent.parent / "weights" / "yolov8s.pt"
+  def load_weights(self, path_to_weights):
+    weights_path = Path(__file__).parent.parent / "weights" / path_to_weights
     state_dict = torch.load(weights_path)
     weights = state_dict['model'].state_dict().items()
     backbone_modules = [*range(10)]
@@ -423,11 +407,36 @@ class YOLOv8():
       for i in all_trainable_weights:
         if int(k[1]) in i and k[-1] != "num_batches_tracked":
           child_key = '.'.join(k[2:]) if k[2] != 'm' else 'bottleneck.' + '.'.join(k[3:])
-          get_child(i[1], child_key).assign(v.numpy())
+          get_child(i[1], child_key).assign(v.numpy().astype(np.float32))
     print('successfully loaded all weights')
        
-test_inferece = Tensor.rand(1 ,3 , 640 , 640)
-yolo_infer = YOLOv8(w=0.5, r=2, d=0.33, num_classes=80)  
-yolo_infer.load_weights()
+class_labels = [
+    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 
+    'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 
+    'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 
+    'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 
+    'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 
+    'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 
+    'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 
+    'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 
+    'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+]
 
+# the inference 
+img_path = './bus.jpg'
+
+image = [np.array(Image.open(img_path))]
+processed_image = preprocess(image)
+
+Tensor.training = True
+
+# Different YOLO variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml 
+yolo_infer = YOLOv8(w=0.25, r=2, d=0.33, num_classes=80)  
+yolo_infer.load_weights("yolov8n.pt")
+
+predictions = yolo_infer.forward(Tensor(processed_image.astype(np.float32)))
+
+# fix them to take batches of images too
+post_predictions = postprocess(predictions, processed_image, image)
+draw_bounding_boxes_and_save(img_path, './output.jpg', post_predictions, class_labels=class_labels)
 
