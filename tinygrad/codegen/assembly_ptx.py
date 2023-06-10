@@ -6,12 +6,46 @@ from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode
 from tinygrad.helpers import dtypes
 import functools, struct
 
-dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16"}
+dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "u16", dtypes.int64: "u64", dtypes.int32: "u32", dtypes.bool: "pred"}
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#
 class PTXCodegen(AssemblyCodegen):
   #supports_constant_folding: bool = True
+
+  def specialize(self, asm):
+    ins = [".version 7.8", ".target sm_86", ".address_size 64", f".visible .entry test({', '.join(f'.param .u64 buf{i}' for i in range(len(self.bufs)))}) {{"]
+
+    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div.rn", BinaryOps.MAX: "max",
+           UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
+           FusedOps.MULACC: "fma.rn"}
+
+    for uop, out, vin, arg in asm:
+      if uop == UOps.DEFINE_REGISTER:
+        ins.append(f".reg .{dtype_to_nvtype[arg[0]]} %{arg[1]}<{arg[2]}>;",)
+      elif uop == UOps.SPECIAL:
+        if arg.startswith('buf'):
+          ins.append(f"ld.param.u64 {out}, [{arg}];")
+          # TODO: is this needed?
+          #ins.append(f"cvta.to.global.u64 {out}, {out};")
+        elif arg.startswith('gid'):
+          ins.append(f"mov.u32 {out}, %ctaid.{'xyz'[int(arg[3:])]};")
+      elif uop == UOps.ALU:
+        ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}.{dtype_to_nvtype[out.dtype]} {out}, {', '.join(str(x) for x in vin)};")
+      elif uop == UOps.LOAD:
+        ins.append(f"ld.global.{dtype_to_nvtype[out.dtype]} {out}, [{vin[0]}{f'+{arg}' if arg is not None else ''}];")
+      elif uop == UOps.STORE:
+        ins.append(f"st.global.{dtype_to_nvtype[vin[1].dtype]} [{vin[0]}{f'+{arg}' if arg is not None else ''}], {vin[1]};")
+      elif uop == UOps.CAST:
+        ins.append(f"cvt.{dtype_to_nvtype[out.dtype]}.{dtype_to_nvtype[vin[0].dtype]} {out}, {vin[0]};")
+      elif uop == UOps.CONST:
+        if out.dtype == dtypes.float32:
+          ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, 0f{float_to_hex(arg)};")
+        else:
+          ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {arg};")
+
+    ins += ["ret;", "}"]
+    return "test", '\n'.join(ins),
 
   def generate(self):
     ins = [".version 7.8", ".target sm_86", ".address_size 64", f".visible .entry test({', '.join(f'.param .u64 buf_{i}' for i in range(len(self.bufs)))}) {{"]
