@@ -2,7 +2,7 @@ from typing import Dict
 from tinygrad.codegen.assembly import AssemblyCodegen
 from tinygrad.ops import BinaryOps, UnaryOps, FusedOps
 from tinygrad.codegen.linearizer import UOps, Token
-from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, GeNode, LtNode, SumNode, AndNode
+from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 from tinygrad.helpers import dtypes
 import functools, struct
 
@@ -90,8 +90,7 @@ class PTXCodegen(AssemblyCodegen):
         return p
 
       return idx.render({ Variable: render_variable, NumNode: render_numnode, MulNode: render_xnode("mul.lo.u32"),
-                          GeNode: render_xnode("setp.ge.s32", True), LtNode: render_xnode("setp.lt.s32", True),
-                          DivNode: render_xnode("div.u32"), ModNode: render_xnode("rem.u32"),
+                          LtNode: render_xnode("setp.lt.s32", True), DivNode: render_xnode("div.u32"), ModNode: render_xnode("rem.u32"),
         SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_add(a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
         AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: render_and(a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),}, ins)
 
